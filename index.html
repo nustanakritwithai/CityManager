@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#13262d" />
+    <meta name="description" content="CityManager — an original first playable city prototype built with PlayCanvas." />
+    <title>CityManager · First Playable</title>
+  </head>
+  <body>
+    <canvas id="city-canvas" aria-label="แผนที่เมืองสามมิติ — เลือกเครื่องมือแล้วแตะช่องบนแผนที่"></canvas>
+
+    <header class="top-hud">
+      <div class="wordmark" aria-label="CityManager">
+        <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div><h1>CITY <span>/</span> MANAGER</h1><p>FIRST PLAYABLE <span>·</span> PLAYCANVAS</p></div>
+      </div>
+      <dl class="city-stats" aria-label="สถิติเมือง">
+        <div><dt>ประชากร <span>PEOPLE</span></dt><dd id="population">0</dd></div>
+        <div><dt>งาน <span>JOBS</span></dt><dd id="jobs">0</dd></div>
+        <div class="money-stat"><dt>คลังเมือง <span>TREASURY</span></dt><dd id="treasury">—</dd></div>
+        <div class="balance-stat"><dt>สุทธิ <span>NET</span></dt><dd id="balance">—</dd></div>
+      </dl>
+      <button id="toggle-inspector" class="inspector-toggle" type="button" aria-controls="inspector" aria-label="เปิดหรือปิดข้อมูลเมือง"><span aria-hidden="true">▤</span><span>ข้อมูลเมือง</span></button>
+    </header>
+
+    <section class="time-hud panel" aria-label="เวลาและความเร็ว">
+      <div class="time-label"><span class="live-dot" aria-hidden="true"></span><span id="day">DAY 0</span><small>1 tick = 1 วัน</small></div>
+      <div class="time-buttons">
+        <button id="pause" type="button" title="หยุด / เล่นต่อ (Space)" aria-label="หยุดหรือเล่นต่อ">Ⅱ</button>
+        <button type="button" data-speed="1" class="active" aria-label="ความเร็ว1เท่า" aria-pressed="true">1×</button>
+        <button type="button" data-speed="3" aria-label="ความเร็ว3เท่า" aria-pressed="false">3×</button>
+        <button type="button" data-speed="10" aria-label="ความเร็ว10เท่า" aria-pressed="false">10×</button>
+      </div>
+    </section>
+
+    <section class="camera-hud" aria-label="ควบคุมมุมมอง">
+      <span class="eyebrow">VIEW / มุมมอง</span>
+      <button id="toggle-camera" class="mobile-camera-toggle panel" type="button" aria-expanded="false" aria-controls="camera-controls">⌖ กล้อง</button>
+      <div id="camera-controls" class="camera-grid panel">
+        <button type="button" data-camera="rotate-left" title="หมุนซ้าย" aria-label="หมุนกล้องซ้าย">↶</button>
+        <button type="button" data-camera="up" title="เลื่อนขึ้น" aria-label="เลื่อนกล้องขึ้น">↑</button>
+        <button type="button" data-camera="rotate-right" title="หมุนขวา" aria-label="หมุนกล้องขวา">↷</button>
+        <button type="button" data-camera="left" title="เลื่อนซ้าย" aria-label="เลื่อนกล้องซ้าย">←</button>
+        <button type="button" data-camera="reset" title="คืนมุมกล้องเริ่มต้น" aria-label="คืนมุมกล้องเริ่มต้น">⌂</button>
+        <button type="button" data-camera="right" title="เลื่อนขวา" aria-label="เลื่อนกล้องขวา">→</button>
+        <button type="button" data-camera="zoom-out" title="ซูมออก" aria-label="ซูมออก">−</button>
+        <button type="button" data-camera="down" title="เลื่อนลง" aria-label="เลื่อนกล้องลง">↓</button>
+        <button type="button" data-camera="zoom-in" title="ซูมเข้า" aria-label="ซูมเข้า">+</button>
+      </div>
+    </section>
+
+    <aside id="inspector" class="inspector panel" aria-label="ข้อมูลและบัญชีเมือง">
+      <div class="inspector-heading"><div><span class="eyebrow">CITY NOTES</span><h2 id="selection-title">เมืองเริ่มจากการเชื่อมต่อ</h2></div><button id="close-inspector" type="button" aria-label="ปิดข้อมูลเมือง">×</button></div>
+      <section class="explain-section"><h3>ทำไมจึงเติบโต / หยุดนิ่ง</h3><div id="explanation"><p>เลือกแปลงเพื่อดูเงื่อนไขการเติบโตและเหตุผลที่ยังไม่สร้างอาคาร</p></div></section>
+      <section class="growth-section"><h3>แรงขับการเติบโต</h3><div id="growth-summary">รอถนน ประชากร และกิจการแรก</div></section>
+      <details class="ledger-details" open><summary>บัญชีเงิน <span>MONEY FLOW</span></summary><div id="ledger" class="ledger-list"><p class="muted">รายการโอนเงินจริงจะแสดงที่นี่</p></div></details>
+      <details class="ledger-details"><summary>บัญชีสินค้า <span>GOODS FLOW</span></summary><div id="goods-ledger" class="ledger-list"></div></details>
+      <details class="ledger-details"><summary>กระเป๋าเงิน <span>ACCOUNTS</span></summary><div id="accounts" class="account-list"></div></details>
+      <details id="guide" class="guide-details"><summary>เริ่มเล่นอย่างไร <span>QUICK GUIDE</span></summary>
+        <ol><li>ต่อถนนจากประตูสีเหลืองฝั่งตะวันตก</li><li>กำหนดโซน <b class="zone-r-text">R บ้าน</b> / <b class="zone-c-text">C ร้านค้า</b> / <b class="zone-i-text">I โรงงาน</b> ข้างถนนที่เชื่อมถึงประตู</li><li>ปล่อยเวลา อาคารจะเกิดเองเมื่อมีความต้องการ แรงงาน และโอกาสทำกำไร</li></ol>
+        <p>ถนน: แตะจุดเริ่มและจุดจบเป็นเส้นรูป L หรือเริ่มลากตามเครื่องมือ • Cancel / Esc ยกเลิกจุดเริ่มก่อน แล้วกลับเครื่องมือเลือก</p>
+        <p>ลากในโหมด Pan เพื่อเลื่อน • ลากปุ่มขวาเพื่อหมุน • ล้อเมาส์ / บีบนิ้วเพื่อซูม หรือใช้ปุ่มมุมมอง</p>
+        <p>1 tick = 1 วัน • 30 วันต่อเดือน • ค่าจ้าง ค่าเช่า และภาษีชำระรายเดือน เงินในระบบเป็นจำนวนเต็มสตางค์</p>
+      </details>
+      <details id="simulation-rules" class="guide-details"><summary>ขอบเขตต้นแบบ <span>RULES</span></summary>
+        <p>ต้นแบบนี้สมมติว่ามีไฟฟ้าและน้ำจากภายนอกให้ทุกแปลง ยังไม่มีเครือข่ายและกำลังการผลิตสาธารณูปโภค</p>
+        <p>มีทุนเริ่มต้นและเงื่อนไขรับครัวเรือน/กิจการแรกอย่างชัดเจนเพื่อเริ่มเศรษฐกิจ ตรวจรายการต้นทาง–ปลายทางได้ในบัญชี</p>
+        <p>แผนที่กริดขนาดเล็กและรูปทรงสร้างขึ้นใหม่ทั้งหมด ได้แรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ยังไม่ครอบคลุมระบบทั้งหมดของเกมนั้น</p>
+      </details>
+      <div class="save-controls"><button id="save" type="button">Save <span>บันทึก</span></button><button id="load" type="button">Load <span>โหลด</span></button><button id="new-city" type="button">New <span>เริ่มใหม่</span></button></div>
+      <p class="save-note">บันทึกในเบราว์เซอร์นี้ · ไม่มีบัญชีออนไลน์</p>
+    </aside>
+
+    <div class="map-caption" aria-hidden="true"><span class="compass">N ↑</span><div>FOUNDATION MAP<small>24 × 24 · FLAT GRID</small></div></div>
+    <div class="bottom-hud">
+      <div id="status" class="status-chip" role="status" aria-live="polite">เลือกถนนหรือโซนเพื่อเริ่มสร้างเมือง</div>
+      <nav class="tool-dock panel" aria-label="เครื่องมือสร้างเมือง">
+        <div class="tool-buttons">
+          <button type="button" data-tool="select" class="tool active" aria-pressed="true" title="เลือกแปลง (1)"><span class="tool-icon" aria-hidden="true">↖</span><span>เลือก <small>1</small></span></button>
+          <button type="button" data-tool="road" class="tool" aria-pressed="false" title="ถนน (2)"><span class="tool-icon road-icon" aria-hidden="true">╋</span><span>ถนน <small>2</small></span></button>
+          <span class="dock-divider" aria-hidden="true"></span>
+          <button type="button" data-tool="R" class="tool zone-r" aria-pressed="false" title="ที่อยู่อาศัย (3)"><span class="zone-icon" aria-hidden="true">R</span><span>บ้าน <small>3</small></span></button>
+          <button type="button" data-tool="C" class="tool zone-c" aria-pressed="false" title="พาณิชยกรรม (4)"><span class="zone-icon" aria-hidden="true">C</span><span>ร้านค้า <small>4</small></span></button>
+          <button type="button" data-tool="I" class="tool zone-i" aria-pressed="false" title="อุตสาหกรรม (5)"><span class="zone-icon" aria-hidden="true">I</span><span>โรงงาน <small>5</small></span></button>
+          <span class="dock-divider" aria-hidden="true"></span>
+          <button type="button" data-tool="bulldoze" class="tool" aria-pressed="false" title="รื้อถอน (6)"><span class="tool-icon" aria-hidden="true">⌫</span><span>รื้อ <small>6</small></span></button>
+          <button type="button" data-tool="pan" class="tool" aria-pressed="false" title="เลื่อนแผนที่ (7)"><span class="tool-icon" aria-hidden="true">✥</span><span>Pan <small>7</small></span></button>
+        </div>
+        <button id="cancel-tool" type="button" class="cancel-button" title="ยกเลิก / กลับเครื่องมือเลือก (Esc)">Cancel<small>ESC</small></button>
+      </nav>
+      <p id="tool-help" class="tool-help">แตะแปลงเพื่อดูข้อมูล · ล้อเมาส์ซูม · ลากปุ่มขวาเพื่อหมุน</p>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
