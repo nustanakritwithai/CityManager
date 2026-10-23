@@ -44,7 +44,7 @@ npm ci
 npm run assets:verify
 ```
 
-The command runs `node scripts/admit-city-assets.mjs --verify`. It checks the closed file roster, file byte sizes/SHA-256 values, manifest-to-receipt hash, manifest-to-[asset-lock.json](../asset-lock.json) hash, GLB header/version/length, self-contained image/buffer declarations, license markers, package limits, declared bounds and model counts. The [receipt](../public/assets/kenney-city/receipt.json) records 12 payload files: eight models plus four licenses. Manifest and receipt themselves are additional package metadata.
+The command runs `node scripts/admit-city-assets.mjs --verify` and the separate [GUI package gate](GUI-ASSETS.md). The city gate checks the closed file roster, file byte sizes/SHA-256 values, manifest-to-receipt hash, manifest-to-[asset-lock.json](../asset-lock.json) hash, GLB header/version/length, self-contained image/buffer declarations, license markers, package limits, declared bounds and model counts. The [receipt](../public/assets/kenney-city/receipt.json) records 12 payload files: eight models plus four licenses. Manifest and receipt themselves are additional package metadata. Original runtime-generated ground textures are described in [Terrain](TERRAIN.md).
 
 `.gitattributes` preserves this package's bytes without newline conversion, including whitespace in the original license texts. The staged Git payload and manifest hashes were also checked, so Windows checkout normalization cannot invalidate the receipt.
 

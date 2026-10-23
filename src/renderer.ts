@@ -1,10 +1,11 @@
 import {
   AppBase, AppOptions, createGraphicsDevice, DEVICETYPE_WEBGL2,
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
-  Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler
+  Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, connectedRoads, type City } from './sim.ts';
 import { CityAssets } from './asset-models.ts';
+import { CityGround } from './terrain.ts';
 
 const UNIT = 2;
 export class CityView {
@@ -18,6 +19,9 @@ export class CityView {
   markers = new Entity('Tool previews');
   materials = new Map<string, StandardMaterial>();
   assets: CityAssets | null = null;
+  ground!: CityGround;
+  private edgeMesh?: Mesh;
+  private edgeSignature = '';
   private visualRevision = 0;
   private lastScene: { city: City; selected: number | null; preview: number[] } | null = null;
   private forest: { entity: Entity; x: number; z: number }[] = [];
@@ -65,9 +69,9 @@ export class CityView {
     this.materials.set(key, material);
     return material;
   }
-  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string) {
+  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial) {
     const entity = new Entity('Original primitive');
-    entity.addComponent('render', { type: 'box', material: this.material(color), castShadows: false });
+    entity.addComponent('render', { type: 'box', material: typeof color === 'string' ? this.material(color) : color, castShadows: false });
     entity.setLocalPosition(x, y, z);
     entity.setLocalScale(sx, sy, sz);
     parent.addChild(entity);
@@ -84,26 +88,23 @@ export class CityView {
     this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#365e6b');
     this.box(this.app.root, 0, -.45, 0, SIZE * UNIT + 5.1, .6, SIZE * UNIT + 5.1, '#b7b596');
     this.box(this.app.root, 0, -.24, 0, SIZE * UNIT + 4.5, .48, SIZE * UNIT + 4.5, '#7c9875');
-    // One ground and one grid mesh instead of 576 individual draw calls.
-    // Road graph and parcel occupancy still live only in sim.ts.
-    this.box(this.app.root, 0, 0.005, 0, SIZE * UNIT, 0.035, SIZE * UNIT, '#85a17d');
-    const positions: number[] = [], normals: number[] = [], indices: number[] = [];
-    const quad = (x0: number, z0: number, x1: number, z1: number) => {
-      const start = positions.length / 3;
-      positions.push(x0, .055, z0, x0, .055, z1, x1, .055, z1, x1, .055, z0);
-      normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-      indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
-    };
-    for (let n = 0; n <= SIZE; n++) {
-      const d = n * UNIT - SIZE;
-      quad(d - .022, -SIZE, d + .022, SIZE);
-      quad(-SIZE, d - .022, SIZE, d + .022);
-    }
-    const gridMesh = new Mesh(this.app.graphicsDevice);
-    gridMesh.setPositions(positions); gridMesh.setNormals(normals); gridMesh.setIndices(indices); gridMesh.update();
-    const grid = new Entity('Parcel grid');
-    grid.addComponent('render', { meshInstances: [new MeshInstance(gridMesh, this.material('#60775e'))], castShadows: false });
-    this.app.root.addChild(grid);
+    // One original textured ground, a tool-only grid and one batched edge mesh.
+    // These visual surfaces never change the flat simulation/picking plane.
+    this.ground = new CityGround(this.app, SIZE, UNIT);
+    this.app.root.addChild(this.ground.root);
+    const edgeMaterial = new StandardMaterial();
+    edgeMaterial.diffuse = new Color(1, 1, 1); edgeMaterial.diffuseVertexColor = true;
+    edgeMaterial.opacityVertexColor = true; edgeMaterial.opacityVertexColorChannel = 'a';
+    edgeMaterial.blendType = BLEND_NORMAL; edgeMaterial.depthWrite = false; edgeMaterial.update();
+    this.edgeMesh = new Mesh(this.app.graphicsDevice);
+    // Establish the vertex-color format before MeshInstance caches shader flags.
+    this.edgeMesh.setPositions([0, .041, 0, 0, .041, 0, 0, .041, 0]);
+    this.edgeMesh.setNormals([0, 1, 0, 0, 1, 0, 0, 1, 0]);
+    this.edgeMesh.setColors32([147, 137, 104, 0, 147, 137, 104, 0, 147, 137, 104, 0]);
+    this.edgeMesh.setIndices([0, 1, 2]); this.edgeMesh.update();
+    const edges = new Entity('Soft road and plot transitions');
+    edges.addComponent('render', { meshInstances: [new MeshInstance(this.edgeMesh, edgeMaterial)], castShadows: false });
+    this.app.root.addChild(edges);
     // Outside gateway across the western map edge.
     const gate = this.position(Math.floor(SIZE / 2) * SIZE);
     this.box(this.app.root, gate.x - 4, 0.04, gate.z, 8, 0.12, 1.4, '#d6b45c');
@@ -125,7 +126,7 @@ export class CityView {
     window.addEventListener('resize', () => this.resize());
     this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
   }
-  fitRadius() { return Math.max(42, Math.min(100, 42 * .95 / (innerWidth / innerHeight))); }
+  fitRadius() { return Math.max(42, Math.min(100, 42 * .86 / (innerWidth / innerHeight))); }
   resize() {
     const aspect = innerWidth / innerHeight;
     this.app.resizeCanvas(innerWidth, innerHeight);
@@ -219,7 +220,9 @@ export class CityView {
   }
   render(city: City, selected: number | null, preview: number[]) {
     this.app.renderNextFrame = true;
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'bulldoze'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
+    this.updateGroundEdges(city);
     const connected = connectedRoads(city);
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
@@ -243,6 +246,7 @@ export class CityView {
         const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053' }[cell.zone];
         this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, color);
         if (b) {
+          this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
           const model = this.assets?.building(b.zone, b.level, i);
           if (model) { model.setLocalPosition(0, .1, 0); tile.addChild(model); continue; }
           const h = 0.9 + b.level * 0.75 + (i % 3) * 0.22;
@@ -262,5 +266,31 @@ export class CityView {
       for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, color);
       for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, color);
     }
+  }
+  private updateGroundEdges(city: City) {
+    const signature = city.cells.map(cell => cell.road ? '1' : '0').join('') + ':' + city.buildings.map(b => b.cell).join(',');
+    if (!this.edgeMesh || signature === this.edgeSignature) return;
+    this.edgeSignature = signature;
+    const positions: number[] = [], normals: number[] = [], colors: number[] = [], indices: number[] = [];
+    const band = (x: number, z: number, dx: number, dz: number, inner: number, outer: number, opacity: number) => {
+      const start = positions.length / 3, tx = -dz * .99, tz = dx * .99;
+      for (const [distance, tangent, alpha] of [[inner, -1, opacity], [outer, -1, 0], [outer, 1, 0], [inner, 1, opacity]]) {
+        positions.push(x + dx * distance + tx * tangent, .041, z + dz * distance + tz * tangent);
+        normals.push(0, 1, 0); colors.push(147, 137, 104, alpha);
+      }
+      indices.push(start, start + 2, start + 1, start, start + 3, start + 2);
+    };
+    for (let i = 0; i < city.cells.length; i++) if (city.cells[i].road) {
+      const { x, z } = this.position(i);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const cx = i % SIZE + dx, cz = Math.floor(i / SIZE) + dz;
+        if (cx >= 0 && cz >= 0 && cx < SIZE && cz < SIZE && !city.cells[cz * SIZE + cx].road) band(x, z, dx, dz, .98, 1.34, 100);
+      }
+    }
+    for (const building of city.buildings) {
+      const { x, z } = this.position(building.cell);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) band(x, z, dx, dz, .87, 1.18, 55);
+    }
+    this.edgeMesh.setPositions(positions); this.edgeMesh.setNormals(normals); this.edgeMesh.setColors32(colors); this.edgeMesh.setIndices(indices); this.edgeMesh.update();
   }
 }

@@ -85,6 +85,16 @@ try {
   assert.equal(await evaluate('window.cityManager.engine'), 'PlayCanvas 2.23.3');
   await button('#pause'); assert.equal(await paused(), true);
   checks.push('Real Edge WebGL2 startup and pause');
+  const groundState = await evaluate('window.cityManager.ground()');
+  assert.equal(groundState.buildGrid, false, 'Observation starts without the construction grid');
+  assert.equal(groundState.textureSize, 512); assert.equal(groundState.textureCount, 3);
+  const beforeGridTools = await state();
+  for (const tool of ['road', 'R', 'C', 'I', 'bulldoze', 'pan', 'select']) {
+    await button(`[data-tool="${tool}"]`);
+    assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, !['select', 'pan'].includes(tool), `Grid follows ${tool} mode`);
+  }
+  assert.deepEqual(await state(), beforeGridTools, 'Ground and grid modes never mutate the city');
+  checks.push('Original bounded ground textures and construction-only grid do not mutate simulation');
   // Preserve a deterministic, paused baseline through the public Save control.
   await button('#save'); const saved = await state();
   assert.match(await text('#status'), /Saved day/);
@@ -146,6 +156,14 @@ try {
   if (process.env.CITYMANAGER_VISUAL_PREVIEW === '1') {
     await button('#close-inspector'); await button('[data-camera="zoom-in"]'); await button('[data-camera="zoom-in"]');
     await screenshot('desktop-closeup.png'); await button('[data-camera="reset"]');
+    const beforePlacement = await state();
+    await button('[data-tool="road"]'); await cell(12 * 24 + 11);
+    const hoverPoint = await cellPoint(12 * 24 + 14);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverPoint.x, y: hoverPoint.y });
+    assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, true);
+    await screenshot('desktop-build-grid.png'); await key('Escape'); await key('Escape');
+    assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, false);
+    assert.deepEqual(await state(), beforePlacement, 'Grid preview and cancel never build a road');
   }
   // Camera controls must move the projection, then return to the reset state.
   const cameraBefore = await cellPoint(12 * 24 + 6);
@@ -153,8 +171,13 @@ try {
   assert.notDeepEqual(await cellPoint(12 * 24 + 6), cameraBefore); await button('[data-camera="reset"]');
   checks.push('Pan/rotate/zoom/reset controls');
   // Summary Space is handled natively and must not resume the simulation.
+  if (await evaluate('document.querySelector("#inspector").dataset.open!=="true"')) await button('#toggle-inspector');
+  const guideWasOpen = await evaluate('document.querySelector("#guide").open');
   await evaluate('document.querySelector("#guide summary").focus()');
-  await key(' ', 'Space'); assert.equal(await paused(), true); checks.push('Summary Space does not toggle simulation');
+  assert.equal(await evaluate('document.activeElement===document.querySelector("#guide summary")'), true, 'Help summary actually receives keyboard focus');
+  await key(' ', 'Space'); assert.equal(await paused(), true);
+  assert.notEqual(await evaluate('document.querySelector("#guide").open'), guideWasOpen, 'Space expands/collapses the focused help');
+  checks.push('Summary Space expands help without toggling simulation');
   // Emulated mobile/DPR2 viewport: layout, touch targets and multi-touch cancel.
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
@@ -174,11 +197,68 @@ try {
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   assert.deepEqual(await state(), beforeTouch);
   await button('#toggle-camera'); await button('[data-camera="reset"]'); await button('#toggle-camera');
+  await button('[data-tool="select"]');
+  const beforeMobileSelection = await state();
+  const homeBuilding = beforeMobileSelection.buildings.find(b => b.zone === 'R');
+  const household = beforeMobileSelection.households.find(h => h.home === homeBuilding.id);
+  const homePoint = await cellPoint(homeBuilding.cell);
+  assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`), 'city-canvas', 'Town remains visible above mobile controls');
+  await cell(homeBuilding.cell);
+  assert.ok((await text('#selection-title')).replaceAll(' ', '').includes(`${homeBuilding.cell % 24 + 1},${Math.floor(homeBuilding.cell / 24) + 1}`));
+  assert.equal(await evaluate('Number(document.querySelector("[data-metric=cash]").dataset.value)'), beforeMobileSelection.accounts[household.wallet], 'Home info binds to the actual household wallet');
+  const inspectorLayout = await evaluate(`(()=>{const p=document.querySelector('#inspector'),r=p.getBoundingClientRect(),c=document.querySelector('#close-inspector').getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height,closeHit:!!document.elementFromPoint(c.x+c.width/2,c.y+c.height/2)?.closest('#close-inspector'),z:Number(getComputedStyle(p).zIndex),watermarkZ:Number(getComputedStyle(document.querySelector('.map-caption')).zIndex)}})()`);
+  assert.ok(inspectorLayout.left >= 0 && inspectorLayout.right <= 390 && inspectorLayout.top >= 0 && inspectorLayout.bottom <= 844);
+  assert.ok(inspectorLayout.height <= 844 * .39, 'Context panel leaves most of the mobile view available');
+  assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`), 'city-canvas', 'Selected home stays visible above the docked context panel');
+  assert.equal(inspectorLayout.closeHit, true, 'Context panel close is unobstructed');
+  assert.ok(inspectorLayout.z > inspectorLayout.watermarkZ, 'Map watermark stays behind the context panel');
+  await until('[...document.querySelectorAll("img[src*=kenney-ui]")].every(i=>i.complete)');
+  const guiImages = await evaluate('[...document.querySelectorAll("img[src*=kenney-ui]")].map(i=>({src:i.getAttribute("src"),width:i.naturalWidth}))');
+  assert.ok(guiImages.length > 0, 'Licensed GUI artwork is used');
+  assert.ok(guiImages.every(i => i.width > 0), 'GUI images load from the Pages base path');
+  await screenshot('mobile-inspector.png');
+  await button('details.ledger-details:has(#ledger) > summary');
+  assert.ok(await evaluate('document.querySelectorAll("#ledger .flow-row").length>0'));
+  const scrollPoint = await evaluate('(()=>{const r=document.querySelector("#inspector-body").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()');
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: scrollPoint.x, y: scrollPoint.y, deltaX: 0, deltaY: 300 });
+  await until('(()=>{const r=document.querySelector("#inspector-body").getBoundingClientRect();return[...document.querySelectorAll("#ledger .flow-row")].filter(e=>{const b=e.getBoundingClientRect();return b.top<r.bottom&&b.bottom>r.top}).length>=2})()');
+  await screenshot('mobile-ledger.png');
+  const scroll = await evaluate('({x:document.querySelector("#inspector-body").scrollWidth,width:document.querySelector("#inspector-body").clientWidth})');
+  assert.ok(scroll.x <= scroll.width, 'Inspector content does not overflow horizontally');
+  await button('#save');
+  const savedMessage = await text('#inspector-status'); assert.match(savedMessage, /Saved day/);
+  assert.equal(await evaluate('document.querySelector("#inspector-status").getBoundingClientRect().height>0'), true, 'Save feedback remains visible while the toolbar is hidden');
+  await evaluate('window.__restoreStorage=Storage.prototype.setItem;Storage.prototype.setItem=function(){throw new DOMException("Acceptance quota failure", "QuotaExceededError")}');
+  try {
+    await button('#save');
+    assert.notEqual(await text('#inspector-status'), savedMessage, 'Storage rejection reports a different visible result');
+    assert.match(await text('#inspector-status'), /บันทึกไม่ได้/);
+    assert.equal(await text('#inspector-status'), await text('#status'));
+  } finally { await evaluate('Storage.prototype.setItem=window.__restoreStorage;delete window.__restoreStorage'); }
+  await button('#load');
+  assert.equal(await text('#inspector-status'), await text('#status'));
+  assert.deepEqual(await state(), beforeMobileSelection, 'Mobile footer save/load preserves the exact city');
+  checks.push('Mobile inspector exposes save success, quota rejection and load feedback while tools are hidden');
+  await button('#close-inspector');
+  const firm = beforeMobileSelection.firms[0];
+  const firmBuilding = beforeMobileSelection.buildings.find(b => b.id === firm.building);
+  await cell(firmBuilding.cell);
+  assert.equal(await evaluate('document.querySelector("#inspector-body").scrollTop'), 0, 'Selecting another place starts its card at the top');
+  for (const [key, value] of [['cash', beforeMobileSelection.accounts[firm.wallet]], ['workers', firm.employees.length], ['stock', firm.inventory], ['profit', firm.lastMonthProfit]]) {
+    assert.equal(await evaluate(`Number(document.querySelector('[data-metric="${key}"]').dataset.value)`), value, `${key} shows actual firm state`);
+  }
+  const reserve = Object.values(firm.workDays).reduce((n, days) => n + days * (firm.zone === 'I' ? 60000 : 42000) / 30, 0);
+  assert.equal(await evaluate('Number(document.querySelector("[data-metric=reserved]").dataset.value)'), reserve);
+  await screenshot('mobile-firm.png');
+  assert.deepEqual(await state(), beforeMobileSelection, 'Information selection, ledgers and scrolling never change the city');
+  checks.push('Thai home/firm cards show actual values, licensed GUI images, scrollable ledger, accessible close and watermark layering');
+  await button('#close-inspector');
+  assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, false);
   await screenshot('mobile-city.png'); checks.push('390x844 DPR2 layout, unobstructed gateway, >=44px buttons and pinch without construction (emulated)');
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 8, 'Only the eight deliberately blocked model requests failed');
   const version = await send('Browser.getVersion');
-  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, checks, errors, expectedAssetErrors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png'] : []), 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
+  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, ground: groundState, checks, errors, expectedAssetErrors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png', 'desktop-build-grid.png'] : []), 'mobile-inspector.png', 'mobile-ledger.png', 'mobile-firm.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
   await writeFile(resolve(output, 'browser-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {
