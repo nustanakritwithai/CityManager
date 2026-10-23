@@ -1,7 +1,52 @@
-# CityManager
+# CityManager · First playable
 
-โครงการต้นแบบเกมสร้างเมืองใหม่ด้วย PlayCanvas โดยได้รับแรงบันดาลใจด้านการเล่นจาก Cities: Skylines II
+ต้นแบบเกมสร้างเมือง 3D บนเว็บด้วย **PlayCanvas Engine + TypeScript** เขียนใหม่จากศูนย์ ได้แรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ผู้เล่นสร้างถนนและกำหนดโซน ส่วนครัวเรือนและบริษัทเติบโตตามเงื่อนไขของ simulation พร้อมเหตุผลที่ตรวจสอบได้
 
-This repository is being initialized for a first playable prototype. Implementation will be reviewed on a feature branch and draft pull request. No gameplay release is published by this bootstrap.
+นี่คือ vertical slice ขนาดเล็ก ไม่ใช่เกมที่มีความสามารถเทียบเท่า CSII ไม่มีโค้ดจาก Living City Lab หรือ novel engine และใช้เพียงรูปทรง/สีที่สร้างในโครงการนี้
 
-Original implementation and simple original geometry; no Living City Lab or novel-engine code, and no proprietary game assets.
+## รันในเครื่อง
+
+ใช้ Node.js 24 และ npm:
+
+```sh
+npm ci
+npm run dev
+```
+
+เปิด URL ที่ Vite แสดงและใช้ path `/CityManager/` ตรวจสอบและสร้างไฟล์พร้อมเสิร์ฟได้ด้วย:
+
+```sh
+npm test
+npm run build
+npm run preview
+```
+
+`dist/` ใช้ base `/CityManager/` สำหรับ GitHub Pages การ build ในเครื่องยังไม่ใช่การเผยแพร่เกม
+
+## ลองเล่น
+
+1. เริ่มจากถนนและโซนตัวอย่าง หรือขยายถนนจากประตูสีทองด้านตะวันตก โซนต้องติดถนนที่เชื่อมกลับถึงประตู
+2. เลือก **Road** แล้วแตะจุดต้นและจุดปลาย หรือลากระหว่างจุด เพื่อสร้างเส้นทางรูปตัว L เลือก **R / C / I** เพื่อทาโซนที่อยู่อาศัย ร้านค้า และอุตสาหกรรม
+3. ปล่อยเวลาเดิน อาคารจะเกิดเองเมื่อมีทางเข้า สาธารณูปโภคตามสมมติฐาน ความต้องการ และความคุ้มค่า ไม่ได้วางบ้านหรือร้านค้าโดยตรง
+4. เลือกช่องแล้วเปิดแผงข้อมูลเพื่อดูเหตุผลการหยุดเติบโต งาน กระเป๋าเงิน และรายการโอนเงิน/สินค้า
+5. ทดสอบความล้มเหลวโดยสร้างถนนแยกที่ไม่ต่อประตูแล้วทาโซนข้างถนนนั้น แผงอธิบายจะแสดงข้อจำกัดเรื่องการเชื่อมต่อ
+
+**Select / Bulldoze** เลือกหรือลบช่อง; **Cancel / Esc** ยกเลิกจุดเริ่มถนนก่อน แล้วกลับ Select; เลือกเครื่องมือเดิมซ้ำได้ ใช้ **Pan** ลากเพื่อเลื่อนกล้อง คลิกขวาลากเพื่อหมุน ล้อเมาส์หรือสองนิ้ว pinch เพื่อซูม และมีปุ่มกล้องสำหรับจอสัมผัส ปุ่ม **Pause / 1× / 3× / 10×** ควบคุมเวลา **Save / Load** เก็บเมืองใน browser นี้เท่านั้น
+
+## สิ่งที่จำลอง
+
+- แผนที่ราบ 24×24 ช่อง ถนนแบบกริดและ graph การเชื่อมต่อแยกจาก mesh
+- 1 tick = 1 วัน; 30 วันต่อเดือน; ผลิต/ซื้อสินค้ารายวัน และจ่ายค่าจ้าง/ค่าเช่า/ภาษีรายเดือน
+- เงินจำนวนเต็มหน่วยสตางค์ ครัวเรือนและบริษัทมีบัญชีจริง เงินออกจากผู้จ่ายก่อนเข้าผู้รับ มี money ledger และ goods ledger
+- seed, fixed ticks และ save schema รุ่น 1; renderer ไม่เป็นเจ้าของกฎเศรษฐกิจ
+- อาคารเรียบง่ายความสูงต่างกันและแผงอธิบายเงื่อนไขการเกิด/โต
+
+ต้นแบบใช้สินค้านามธรรมชนิดเดียว ตลาดภายนอก และน้ำ/ไฟจากภายนอกแบบพร้อมใช้ ยังไม่มีระบบจราจรเป็นรายคัน A* ถนนโค้ง เครือข่าย/กำลังผลิตสาธารณูปโภค หรือเมืองขนาดใหญ่ ขอบเขตและสมมติฐานเต็มอยู่ใน [Design](docs/DESIGN.md) และ [แผนภาษาไทย](docs/PLAN.th.md)
+
+## สถานะการเผยแพร่และหลักฐาน
+
+งาน gameplay อยู่บน feature branch เพื่อ review ใน draft PR ไม่ได้ merge หรือ deploy อัตโนมัติ การตรวจแบบอ่านอย่างเดียวพบ Pages เป็น `build_type: workflow` และระบุ `main` ที่ `/`; repository เริ่มต้นว่างและไม่มี workflow จึงไม่มีตัวเผยแพร่ bootstrap README การตั้งค่า Pages/security ไม่ได้ถูกแก้ไข
+
+ผลทดสอบจริงและภาพ browser smoke test ให้ดูรายงานการส่งมอบใน PR การทดสอบ viewport ขนาดมือถือไม่ใช่การทดสอบบนโทรศัพท์จริง
+
+อ้างอิง API: [PlayCanvas standalone](https://developer.playcanvas.com/user-manual/engine/standalone/), [AppBase](https://api.playcanvas.com/engine/classes/AppBase.html), [CameraComponent](https://api.playcanvas.com/engine/classes/CameraComponent.html) (ตรวจประกอบการพัฒนา 23 ต.ค. 2026)
