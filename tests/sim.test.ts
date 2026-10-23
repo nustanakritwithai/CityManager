@@ -120,3 +120,14 @@ test('goods journals must reconcile every counter and each surviving or departed
   assert.doesNotThrow(() => deserialize(serialize(c)));
   assert.equal(c.accounts[factory.wallet], 0);
 });
+test('UI seed 61025 and varied seeds leave workers for shops and create actual household purchases', () => {
+  for (const seed of [61025, 42, 1, 2, 3, 8, 17, 91, 20261023]) {
+    const c = advance(createCity(seed), 65);
+    assert.ok(c.firms.some(f => f.zone === 'C' && f.employees.length > 0), `seed ${seed}: staffed shop by day65`);
+    assert.ok(c.ledger.some(e => e.reason.includes('purchase') && e.from.startsWith('household:')), `seed ${seed}: real purchases by day65`);
+    assert.ok(c.ledger.some(e => e.reason === 'Monthly wages'), `seed ${seed}: real monthly wages by day65`);
+    advance(c, 115);
+    assert.ok(c.ledger.some(e => e.tick > 150 && e.reason.includes('purchase')), `seed ${seed}: purchases continue at day180`);
+    assert.doesNotThrow(() => deserialize(serialize(c)));
+  }
+});

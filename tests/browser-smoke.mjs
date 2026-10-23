@@ -77,7 +77,12 @@ try {
   await button('#save'); const saved = await state();
   assert.match(await text('#status'), /Saved day/);
   await button('#new-city'); await button('dialog button:first-of-type');
-  assert.deepEqual(await state(), saved); checks.push('New-city cancel keeps state');
+  await button('#new-city'); await key('Escape');
+  assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), false);
+  assert.deepEqual(await state(), saved); checks.push('New-city cancel and Escape keep state');
+  await button('[data-speed="3"]');
+  assert.equal(await evaluate(`document.querySelector('[data-speed="3"]').getAttribute('aria-pressed')`), 'true');
+  await button('[data-speed="1"]');
   await button('[data-tool="road"]'); await cell(12 * 24 + 11); await button('#cancel-tool');
   assert.match(await text('#status'), /start cancelled/i);
   await button('#cancel-tool'); assert.equal(await evaluate('document.querySelector("[data-tool=select]").getAttribute("aria-pressed")'), 'true');
@@ -87,6 +92,13 @@ try {
   assert.match(await text('#status'), /already exists/); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   await cell(12 * 24 + 3); await cell(12 * 24 + 5); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   checks.push('Repeated road use does not duplicate cost');
+  await cell(12 * 24 + 11); const beforeEscapeDrag = await state();
+  const escA = await cellPoint(16 * 24 + 12), escB = await cellPoint(16 * 24 + 15);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: escA.x, y: escA.y, button: 'left', clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: escB.x, y: escB.y, button: 'left', buttons: 1 });
+  await key('Escape');
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: escB.x, y: escB.y, button: 'left', clickCount: 1 });
+  assert.deepEqual(await state(), beforeEscapeDrag); checks.push('Escape during anchored road drag prevents construction on release');
   // Drag an isolated road away from HUD overlays, then zone next to it.
   const a = await cellPoint(16 * 24 + 12), b = await cellPoint(16 * 24 + 15);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: a.x, y: a.y, button: 'left', clickCount: 1 });
@@ -94,6 +106,13 @@ try {
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1 });
   assert.equal((await state()).cells[16 * 24 + 14].road, true);
   await button('[data-tool="R"]'); await cell(15 * 24 + 14);
+  await button('[data-tool="C"]'); await cell(15 * 24 + 13);
+  await button('[data-tool="I"]'); await cell(15 * 24 + 12);
+  assert.equal((await state()).cells[15 * 24 + 13].zone, 'C');
+  assert.equal((await state()).cells[15 * 24 + 12].zone, 'I');
+  await button('[data-tool="bulldoze"]'); await cell(15 * 24 + 12); await cell(15 * 24 + 12);
+  assert.equal((await state()).cells[15 * 24 + 12].zone, null);
+  checks.push('R/C/I zoning and repeat-safe bulldoze');
   await button('[data-tool="select"]'); await cell(15 * 24 + 14);
   assert.match(await text('#explanation'), /No connected road frontage/);
   await screenshot('desktop-disconnected.png'); checks.push('Drag road, zoning, picking and disconnected explanation');
@@ -116,7 +135,13 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
   await button('#close-inspector');
+  await until('document.querySelector("#city-canvas").clientWidth===390');
+  await button('#toggle-camera');
   await button('[data-camera="reset"]');
+  await button('#toggle-camera');
+  const gateway = await cellPoint(12 * 24);
+  assert.ok(gateway.x > 0 && gateway.x < 390 && gateway.y > 0 && gateway.y < 844);
+  assert.equal(await evaluate(`document.elementFromPoint(${gateway.x},${gateway.y}).id`), 'city-canvas', 'Mobile gateway is visible and unobstructed');
   const small = await evaluate('({width:innerWidth,scroll:document.documentElement.scrollWidth,bad:[...document.querySelectorAll("button")].filter(e=>{const r=e.getBoundingClientRect();return r.width&&r.height&&(r.width<44||r.height<44)}).map(e=>e.id||e.dataset.tool)})');
   assert.equal(small.width, 390); assert.ok(small.scroll <= 390); assert.deepEqual(small.bad, []);
   await button('[data-tool="road"]'); const beforeTouch = await state();
@@ -124,7 +149,8 @@ try {
   await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 210, y: 460, id: 1 }, { x: 310, y: 460, id: 2 }] });
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   assert.deepEqual(await state(), beforeTouch);
-  await screenshot('mobile-city.png'); checks.push('390x844 DPR2 layout, >=44px buttons and pinch without construction (emulated)');
+  await button('#toggle-camera'); await button('[data-camera="reset"]'); await button('#toggle-camera');
+  await screenshot('mobile-city.png'); checks.push('390x844 DPR2 layout, unobstructed gateway, >=44px buttons and pinch without construction (emulated)');
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
   const version = await send('Browser.getVersion');
   const report = { date: new Date().toISOString(), browser: version.product, engine: 'PlayCanvas 2.23.3', checks, errors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };

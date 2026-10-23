@@ -85,6 +85,10 @@ async function boot() {
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { speed = Number(b.dataset.speed); accumulator = 0; render(); }));
   $('#pause').addEventListener('click', () => { paused = !paused; accumulator = 0; render(); });
   $('#cancel-tool').addEventListener('click', cancel);
+  $('#toggle-camera').addEventListener('click', () => {
+    const open = $('.camera-hud').dataset.open !== 'true';
+    $('.camera-hud').dataset.open = String(open); $('#toggle-camera').setAttribute('aria-expanded', String(open));
+  });
   $('#toggle-inspector').addEventListener('click', () => inspector($('#inspector').dataset.open !== 'true'));
   $('#close-inspector').addEventListener('click', () => inspector(false));
   $('#save').addEventListener('click', () => {

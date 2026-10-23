@@ -18,6 +18,7 @@ export class CityView {
   materials = new Map<string, StandardMaterial>();
   pointers = new Map<number, { x: number; y: number }>();
   dragStart: number | null = null;
+  private aspect = 0;
   private down: { x: number; y: number; button: number; moved: boolean; multi: boolean; cell: number | null } | null = null;
   constructor(public canvas: HTMLCanvasElement, app: AppBase, public onCell: (i: number) => void, public onHover: (i: number | null) => void, public onRoad: (a: number, b: number) => void) {
     this.app = app;
@@ -60,7 +61,7 @@ export class CityView {
   }
   setup() {
     this.app.scene.ambientLight = new Color(0.65, 0.72, 0.78);
-    this.camera.addComponent('camera', { clearColor: new Color(0.1, 0.19, 0.25), fov: 48, nearClip: 0.1, farClip: 260 });
+    this.camera.addComponent('camera', { clearColor: new Color(0.1, 0.19, 0.25), fov: 48, nearClip: 0.5, farClip: 260 });
     this.app.root.addChild(this.camera);
     const sun = new Entity('Afternoon sun');
     sun.addComponent('light', { type: 'directional', color: new Color(1, 0.9, 0.72), intensity: 1.7, castShadows: false });
@@ -74,7 +75,7 @@ export class CityView {
     const positions: number[] = [], normals: number[] = [], indices: number[] = [];
     const quad = (x0: number, z0: number, x1: number, z1: number) => {
       const start = positions.length / 3;
-      positions.push(x0, .027, z0, x0, .027, z1, x1, .027, z1, x1, .027, z0);
+      positions.push(x0, .055, z0, x0, .055, z1, x1, .055, z1, x1, .055, z0);
       normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
       indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
     };
@@ -104,10 +105,16 @@ export class CityView {
     }
     this.app.root.addChild(this.markers);
     new ResizeObserver(() => this.resize()).observe(this.canvas);
+    window.addEventListener('resize', () => this.resize());
     this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
   }
-  fitRadius() { return Math.max(65, Math.min(150, 65 * .95 / (this.canvas.clientWidth / this.canvas.clientHeight))); }
-  resize() { this.app.resizeCanvas(this.canvas.clientWidth, this.canvas.clientHeight); this.app.renderNextFrame = true; }
+  fitRadius() { return Math.max(65, Math.min(150, 65 * .95 / (innerWidth / innerHeight))); }
+  resize() {
+    const aspect = innerWidth / innerHeight;
+    this.app.resizeCanvas(innerWidth, innerHeight);
+    if (this.aspect && Math.abs(aspect - this.aspect) > .01) { this.radius = this.fitRadius(); this.updateCamera(); }
+    this.aspect = aspect; this.app.renderNextFrame = true;
+  }
   abortGesture() {
     this.down = null; this.dragStart = null;
     for (const id of this.pointers.keys()) if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);

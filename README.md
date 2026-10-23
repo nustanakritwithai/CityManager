@@ -21,6 +21,8 @@ npm run build
 npm run preview
 ```
 
+Browser acceptance ใช้ Microsoft Edge ที่ติดตั้งอยู่แล้ว: เปิด `npm run preview` ที่ port 4173 แล้วรัน `npm run test:browser` ในอีก terminal (กำหนด path ผ่าน `CITYMANAGER_BROWSER` ได้) สคริปต์ใช้ profile แยกใน `.test-output/` และไม่ดาวน์โหลด browser บนมือถือเปิดปุ่ม **กล้อง** เพื่อแสดง/ซ่อนชุดควบคุม
+
 `dist/` ใช้ base `/CityManager/` สำหรับ GitHub Pages การ build ในเครื่องยังไม่ใช่การเผยแพร่เกม
 
 ## ลองเล่น

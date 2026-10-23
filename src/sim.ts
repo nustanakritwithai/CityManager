@@ -123,11 +123,12 @@ export function bulldoze(c: City, i: number): Result {
 export function summary(c: City) {
   const jobs = c.firms.filter(f => access(c, building(c, f.building).cell)).reduce((n, f) => n + capacity(building(c, f.building)), 0);
   const employed = c.households.filter(h => h.employer !== null).length;
+  const availableWorkers = c.households.filter(h => h.employer === null && access(c, building(c, h.home).cell)).length;
   const shops = c.firms.filter(f => f.zone === 'C').length;
   const recent = c.ledger.filter(e => e.tick > Math.max(0, c.tick - MONTH) && !e.reason.includes('grant'));
   const net = recent.reduce((n, e) => n + (e.to === 'treasury' ? e.amount : 0) - (e.from === 'treasury' ? e.amount : 0), 0);
   return { population: c.households.length, jobs, employed, treasury: balance(c, 'treasury'), net,
-    demand: { R: Math.max(0, jobs - employed, 2 - c.households.length), C: Math.max(0, Math.floor(c.households.length / 4) - shops), I: c.firms.some(f => f.zone === 'I') ? (c.households.length >= 3 && jobs - employed < 2 ? 1 : 0) : 1 } };
+    demand: { R: Math.max(0, jobs - employed, 2 - c.households.length), C: Math.max(0, Math.floor(c.households.length / 4) - shops), I: c.firms.some(f => f.zone === 'I') ? (availableWorkers > 0 && jobs - employed < 2 ? 1 : 0) : 1 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
 function blockers(c: City, i: number): string[] {
@@ -151,7 +152,7 @@ function blockers(c: City, i: number): string[] {
       const needed = Math.ceil((WAGES.C + 10_000) / ((800 - wholesale) * MONTH));
       if (residents < needed * (shops + 1)) reasons.push(`Viability: need ${needed * (shops + 1)} connected funded households for ${shops + 1} shop(s); have ${residents}. Expected margin must cover 420 credits wages + 100 rent/month.`);
     }
-    if (s.demand[cell.zone] <= 0) reasons.push(cell.zone === 'I' ? 'No industry demand: fill existing jobs before new investment.' : 'No retail demand: existing shops cover the household market.');
+    if (s.demand[cell.zone] <= 0) reasons.push(cell.zone === 'I' ? 'No industry demand: another factory needs an actual connected unemployed resident and fewer than 2 existing job vacancies. Only the first factory has a workforce bootstrap exemption.' : 'No retail demand: existing shops cover the household market.');
   }
   return reasons;
 }

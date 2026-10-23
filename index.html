@@ -36,7 +36,8 @@
 
     <section class="camera-hud" aria-label="ควบคุมมุมมอง">
       <span class="eyebrow">VIEW / มุมมอง</span>
-      <div class="camera-grid panel">
+      <button id="toggle-camera" class="mobile-camera-toggle panel" type="button" aria-expanded="false" aria-controls="camera-controls">⌖ กล้อง</button>
+      <div id="camera-controls" class="camera-grid panel">
         <button type="button" data-camera="rotate-left" title="หมุนซ้าย" aria-label="หมุนกล้องซ้าย">↶</button>
         <button type="button" data-camera="up" title="เลื่อนขึ้น" aria-label="เลื่อนกล้องขึ้น">↑</button>
         <button type="button" data-camera="rotate-right" title="หมุนขวา" aria-label="หมุนกล้องขวา">↷</button>
