@@ -1,7 +1,7 @@
 import {
   AppBase, AppOptions, createGraphicsDevice, DEVICETYPE_WEBGL2,
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
-  Entity, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO
+  Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO
 } from 'playcanvas';
 import { SIZE, connectedRoads, type City } from './sim.ts';
 
@@ -32,6 +32,7 @@ export class CityView {
     app.init(options);
     app.setCanvasFillMode(FILLMODE_NONE);
     app.setCanvasResolution(RESOLUTION_AUTO);
+    app.autoRender = false;
     const view = new CityView(canvas, app, onCell, onHover, onRoad);
     view.setup();
     app.start();
@@ -67,11 +68,26 @@ export class CityView {
     this.app.root.addChild(sun);
     this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#264858');
     this.box(this.app.root, 0, -0.4, 0, SIZE * UNIT + 1.1, 0.8, SIZE * UNIT + 1.1, '#4b6357');
-    // Fixed parcel grid; road graph and occupancy live only in sim.ts.
-    for (let i = 0; i < SIZE * SIZE; i++) {
-      const { x, z } = this.position(i);
-      this.box(this.app.root, x, 0.005, z, 1.94, 0.035, 1.94, (Math.floor(i / SIZE) + i) % 2 ? '#799375' : '#759071');
+    // One ground and one grid mesh instead of 576 individual draw calls.
+    // Road graph and parcel occupancy still live only in sim.ts.
+    this.box(this.app.root, 0, 0.005, 0, SIZE * UNIT, 0.035, SIZE * UNIT, '#799375');
+    const positions: number[] = [], normals: number[] = [], indices: number[] = [];
+    const quad = (x0: number, z0: number, x1: number, z1: number) => {
+      const start = positions.length / 3;
+      positions.push(x0, .027, z0, x0, .027, z1, x1, .027, z1, x1, .027, z0);
+      normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
+      indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
+    };
+    for (let n = 0; n <= SIZE; n++) {
+      const d = n * UNIT - SIZE;
+      quad(d - .022, -SIZE, d + .022, SIZE);
+      quad(-SIZE, d - .022, SIZE, d + .022);
     }
+    const gridMesh = new Mesh(this.app.graphicsDevice);
+    gridMesh.setPositions(positions); gridMesh.setNormals(normals); gridMesh.setIndices(indices); gridMesh.update();
+    const grid = new Entity('Parcel grid');
+    grid.addComponent('render', { meshInstances: [new MeshInstance(gridMesh, this.material('#60775e'))], castShadows: false });
+    this.app.root.addChild(grid);
     // Outside gateway across the western map edge.
     const gate = this.position(Math.floor(SIZE / 2) * SIZE);
     this.box(this.app.root, gate.x - 4, 0.04, gate.z, 8, 0.12, 1.4, '#d6b45c');
@@ -88,9 +104,15 @@ export class CityView {
     }
     this.app.root.addChild(this.markers);
     new ResizeObserver(() => this.resize()).observe(this.canvas);
-    this.resize(); this.updateCamera(); this.input();
+    this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
   }
-  resize() { this.app.resizeCanvas(this.canvas.clientWidth, this.canvas.clientHeight); }
+  fitRadius() { return Math.max(65, Math.min(150, 65 * .95 / (this.canvas.clientWidth / this.canvas.clientHeight))); }
+  resize() { this.app.resizeCanvas(this.canvas.clientWidth, this.canvas.clientHeight); this.app.renderNextFrame = true; }
+  abortGesture() {
+    this.down = null; this.dragStart = null;
+    for (const id of this.pointers.keys()) if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);
+    this.pointers.clear();
+  }
   position(i: number) { return { x: ((i % SIZE) - (SIZE - 1) / 2) * UNIT, z: (Math.floor(i / SIZE) - (SIZE - 1) / 2) * UNIT }; }
   project(i: number) {
     const p = this.position(i); const v = this.camera.camera!.worldToScreen(new Vec3(p.x, 0.1, p.z));
@@ -109,6 +131,7 @@ export class CityView {
     const elevation = 0.88;
     this.camera.setPosition(this.target.x + Math.sin(this.yaw) * this.radius * Math.cos(elevation), this.radius * Math.sin(elevation), this.target.z + Math.cos(this.yaw) * this.radius * Math.cos(elevation));
     this.camera.lookAt(this.target);
+    this.app.renderNextFrame = true;
   }
   pan(dx: number, dy: number) {
     const scale = this.radius / 700;
@@ -118,9 +141,9 @@ export class CityView {
     this.target.z = Math.max(-22, Math.min(22, this.target.z)); this.updateCamera();
   }
   control(action: string) {
-    if (action === 'reset') { this.target.set(0, 0, 0); this.yaw = Math.PI / 4; this.radius = 65; }
+    if (action === 'reset') { this.target.set(0, 0, 0); this.yaw = Math.PI / 4; this.radius = this.fitRadius(); }
     if (action === 'zoom-in') this.radius = Math.max(19, this.radius * 0.86);
-    if (action === 'zoom-out') this.radius = Math.min(105, this.radius / 0.86);
+    if (action === 'zoom-out') this.radius = Math.min(180, this.radius / 0.86);
     if (action === 'rotate-left') this.yaw -= Math.PI / 8;
     if (action === 'rotate-right') this.yaw += Math.PI / 8;
     if (action === 'left') this.pan(55, 0);
@@ -132,7 +155,7 @@ export class CityView {
   input() {
     const c = this.canvas;
     c.addEventListener('contextmenu', e => e.preventDefault());
-    c.addEventListener('wheel', e => { e.preventDefault(); this.radius = Math.max(19, Math.min(105, this.radius * Math.exp(e.deltaY * 0.001))); this.updateCamera(); }, { passive: false });
+    c.addEventListener('wheel', e => { e.preventDefault(); this.radius = Math.max(19, Math.min(180, this.radius * Math.exp(e.deltaY * 0.001))); this.updateCamera(); }, { passive: false });
     c.addEventListener('pointerdown', e => {
       c.setPointerCapture(e.pointerId); this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.pointers.size === 1) {
@@ -150,7 +173,7 @@ export class CityView {
         const other = [...this.pointers.entries()].find(([id]) => id !== e.pointerId)![1];
         const oldDistance = Math.hypot(previous.x - other.x, previous.y - other.y);
         const newDistance = Math.hypot(e.clientX - other.x, e.clientY - other.y);
-        if (newDistance > 1) this.radius = Math.max(19, Math.min(105, this.radius * oldDistance / newDistance));
+        if (newDistance > 1) this.radius = Math.max(19, Math.min(180, this.radius * oldDistance / newDistance));
         this.pan(dx / 2, dy / 2); this.updateCamera();
       } else if (this.down?.button === 2 || e.altKey) {
         this.yaw -= dx * 0.007; this.updateCamera();
@@ -171,6 +194,7 @@ export class CityView {
     c.addEventListener('pointercancel', e => { this.pointers.delete(e.pointerId); this.down = null; this.dragStart = null; this.onHover(null); });
   }
   render(city: City, selected: number | null, preview: number[]) {
+    this.app.renderNextFrame = true;
     const connected = connectedRoads(city);
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SIZE, GATEWAY, createCity, step, summary, connectedRoads, access, roadPath, buildRoad, zoneCell, bulldoze, explainCell, serialize, deserialize } from '../src/sim.ts';
+import { SIZE, GATEWAY, WAGES, MONTH, createCity, step, summary, connectedRoads, access, roadPath, buildRoad, zoneCell, bulldoze, explainCell, serialize, deserialize } from '../src/sim.ts';
 
 const advance = (c: ReturnType<typeof createCity>, n: number) => { for (let i = 0; i < n; i++) step(c); return c; };
 test('seeded daily ticks and save continuation are deterministic', () => {
@@ -67,4 +67,56 @@ test('corrupt/incompatible saves reject without mutating the current city', () =
     (x: any) => x.households[0].wallet = 'treasury',
   ]) { const bad = JSON.parse(original); mutate(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
   assert.throws(() => deserialize('{oops')); assert.equal(serialize(c), original);
+});
+test('monthly wages pay actual days worked and a cash-starved shop protects earned payroll', () => {
+  const c = advance(createCity(42), 29);
+  assert.equal(c.ledger.filter(e => e.reason === 'Monthly wages').length, 0);
+  const expected = new Map<string, number>();
+  for (const f of c.firms) {
+    const days = { ...f.workDays };
+    for (const id of f.employees) { const h = c.households.find(h => h.id === id)!; days[h.wallet] = (days[h.wallet] ?? 0) + 1; }
+    for (const [wallet, n] of Object.entries(days)) expected.set(`${f.wallet}->${wallet}`, n * WAGES[f.zone] / MONTH);
+  }
+  assert.doesNotThrow(() => deserialize(serialize(c)));
+  step(c);
+  const payments = c.ledger.filter(e => e.tick === 30 && e.reason === 'Monthly wages');
+  assert.equal(payments.length, expected.size);
+  for (const e of payments) assert.equal(e.amount, expected.get(`${e.from}->${e.to}`));
+  assert.ok(payments.some(e => e.amount < WAGES.I));
+  assert.ok(c.firms.every(f => Object.keys(f.workDays).length === 0));
+
+  const stressed = advance(createCity(42), 80), shop = stressed.firms.find(f => f.zone === 'C')!;
+  const owed = () => Object.values(shop.workDays).reduce((n, days) => n + days * WAGES.C / MONTH, 0);
+  assert.ok(shop.employees.length > 0);
+  // A controlled liquidity shock: no purchasing household can replenish the shop's cash.
+  for (const h of stressed.households) stressed.accounts[h.wallet] = 0;
+  stressed.accounts[shop.wallet] = owed() + WAGES.C / MONTH;
+  step(stressed); assert.equal(stressed.accounts[shop.wallet], owed());
+  step(stressed); assert.equal(shop.employees.length, 0); assert.equal(stressed.accounts[shop.wallet], owed());
+});
+test('forged work-day claims reject invalid shapes, creditors, days and unfunded reserves', () => {
+  const c = advance(createCity(42), 29), original = serialize(c);
+  for (const mutate of [
+    (x: any) => x.firms[0].workDays = [],
+    (x: any) => x.firms[0].workDays = null,
+    (x: any) => x.firms[0].workDays = { 'household:999999': 1 },
+    (x: any) => x.firms[0].workDays = { [x.households[0].wallet]: 30 },
+    (x: any) => x.firms[0].workDays = { [x.households[0].wallet]: -1 },
+    (x: any) => { const f = x.firms[0]; f.workDays = { [x.households[0].wallet]: 29 }; x.accounts.outside += x.accounts[f.wallet]; x.accounts[f.wallet] = 0; },
+  ]) { const bad = JSON.parse(original); mutate(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
+  assert.equal(serialize(c), original);
+});
+test('goods journals must reconcile every counter and each surviving or departed firm stock', () => {
+  const c = advance(createCity(42), 90), original = serialize(c);
+  assert.ok(c.goodsLedger.length > 0);
+  for (const mutate of [
+    (x: any) => x.goodsLedger[0].quantity++,
+    (x: any) => x.goodsLedger[0].to = 'firm:999999',
+    (x: any) => x.goods.produced++,
+    (x: any) => { const e = x.goodsLedger.find((e: any) => e.to.startsWith('firm:')); e.to = x.households[0].wallet; },
+  ]) { const bad = JSON.parse(original); mutate(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
+  const factory = c.firms.find(f => f.zone === 'I')!, cell = c.buildings.find(b => b.id === factory.building)!.cell;
+  assert.equal(bulldoze(c, cell).ok, true);
+  assert.doesNotThrow(() => deserialize(serialize(c)));
+  assert.equal(c.accounts[factory.wallet], 0);
 });

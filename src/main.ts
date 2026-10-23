@@ -21,7 +21,7 @@ const help: Record<string, string> = {
 function status(message: string) { $('#status').textContent = message; }
 function setTool(next: string) {
   tool = next; roadStart = null; hover = null;
-  if (view) view.mode = next;
+  if (view) { view.abortGesture(); view.mode = next; }
   if (view) view.dragStart = null;
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(button => {
     const active = button.dataset.tool === next; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
@@ -34,6 +34,7 @@ function inspector(open: boolean) {
   $('#toggle-inspector').setAttribute('aria-expanded', String(open));
 }
 function cancel() {
+  view?.abortGesture();
   if (roadStart !== null) { roadStart = null; status('Road start cancelled. Road tool is still ready.'); render(); return; }
   if (tool !== 'select') { setTool('select'); return; }
   inspector(false); status('Returned to city view.');
@@ -59,7 +60,9 @@ function render() {
   $('#treasury').textContent = money(s.treasury);
   $('#day').textContent = `DAY ${city.tick} · M${Math.floor(city.tick / 30) + 1}`;
   $('#balance').textContent = `${money(s.net)} / month`;
-  $('#pause').textContent = paused ? '▶ Resume' : 'Ⅱ Pause';
+  $('#pause').textContent = paused ? '▶' : 'Ⅱ';
+  $('#pause').setAttribute('aria-label', paused ? 'Resume simulation' : 'Pause simulation');
+  $('#pause').title = paused ? 'Resume (Space)' : 'Pause (Space)';
   $('#pause').setAttribute('aria-pressed', String(paused));
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => { b.classList.toggle('active', Number(b.dataset.speed) === speed); b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)); });
   $('#growth-summary').textContent = `Demand R ${s.demand.R} · C ${s.demand.C} · I ${s.demand.I} | ${city.households.length} households · ${city.firms.length} firms. Tick = 1 day; wages, rent and tax settle every 30 days.`;

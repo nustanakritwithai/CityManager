@@ -324,6 +324,7 @@ export function deserialize(json: string): City {
   }
   for (const f of c.firms) {
     if (!f || !int(f.id, 1) || ids.has(f.id) || !['C', 'I'].includes(f.zone) || !c.buildings.some(b => b.id === f.building && b.zone === f.zone) || f.wallet !== `firm:${f.id}` || !int(c.accounts[f.wallet]) || !Array.isArray(f.employees) || new Set(f.employees).size !== f.employees.length || !int(f.inventory) || !int(f.profit, Number.MIN_SAFE_INTEGER) || !int(f.lastMonthProfit, Number.MIN_SAFE_INTEGER) || !int(f.monthlyRevenue) || !int(f.monthlyExpense)) fail();
+    if (!f.workDays || typeof f.workDays !== 'object' || Array.isArray(f.workDays) || !Object.entries(f.workDays).every(([wallet, days]) => c.households.some(h => h.wallet === wallet) && int(days, 1) && days <= c.tick % MONTH) || !int(payroll(f)) || payroll(f) > balance(c, f.wallet)) fail();
     ids.add(f.id);
   }
   if (Math.max(0, ...ids) >= c.nextId || new Set(c.households.map(h => h.home)).size !== c.households.length || new Set(c.firms.map(f => f.building)).size !== c.firms.length) fail();
@@ -333,7 +334,18 @@ export function deserialize(json: string): City {
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();
   if (!Array.isArray(c.ledger) || !Array.isArray(c.goodsLedger)) fail();
   for (const e of c.ledger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || !(e.from in c.accounts) || !(e.to in c.accounts) || e.from === e.to) fail();
-  for (const e of c.goodsLedger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.quantity, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || e.from === e.to) fail();
+  const goodsBalances: Record<string, number> = {};
+  let produced = 0, imported = 0, consumed = 0, exported = 0;
+  for (const e of c.goodsLedger) {
+    if (!e || !int(e.tick) || e.tick > c.tick || !int(e.quantity, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || e.from === e.to || !/^(production|outside|firm:\d+)$/.test(e.from) || !/^(outside|firm:\d+|household:\d+)$/.test(e.to) || (e.from !== 'production' && !(e.from in c.accounts)) || !(e.to in c.accounts)) fail();
+    goodsBalances[e.from] = (goodsBalances[e.from] ?? 0) - e.quantity;
+    goodsBalances[e.to] = (goodsBalances[e.to] ?? 0) + e.quantity;
+    if (e.from === 'production') produced += e.quantity;
+    if (e.from === 'outside') imported += e.quantity;
+    if (e.to.startsWith('household:')) consumed += e.quantity;
+    if (e.to === 'outside') exported += e.quantity;
+  }
+  if (produced !== c.goods.produced || imported !== c.goods.imported || consumed !== c.goods.consumed || exported !== c.goods.exported || c.firms.some(f => (goodsBalances[f.wallet] ?? 0) !== f.inventory) || Object.entries(goodsBalances).some(([wallet, amount]) => wallet.startsWith('firm:') && !c.firms.some(f => f.wallet === wallet) && amount !== 0)) fail();
   const reconciled: Record<string, number> = Object.fromEntries(Object.keys(c.accounts).map(k => [k, 0]));
   for (const e of c.ledger) { reconciled[e.from] -= e.amount; reconciled[e.to] += e.amount; }
   if (Object.entries(c.accounts).some(([key, value]) => reconciled[key] !== value)) fail();
