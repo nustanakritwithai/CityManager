@@ -1,0 +1,469 @@
+{
+  "schemaVersion": 1,
+  "id": "kenney-city-small",
+  "version": "1.0.0",
+  "author": "Kenney",
+  "license": "CC0-1.0",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "retrievedAt": "2026-10-23T22:24:42.410Z",
+  "sources": {
+    "suburban": {
+      "version": "2.0",
+      "url": "https://kenney.nl/assets/city-kit-suburban",
+      "download": "https://kenney.nl/media/pages/assets/city-kit-suburban/2c871b7af2-1745479373/kenney_city-kit-suburban_20.zip",
+      "archiveSha256": "5869c35cf30b1c87bdb2d197b6d325eebadd2ef08ea27f04797e8e08d77a9a39",
+      "licensePath": "licenses/suburban.txt"
+    },
+    "commercial": {
+      "version": "2.1",
+      "url": "https://kenney.nl/assets/city-kit-commercial",
+      "download": "https://kenney.nl/media/pages/assets/city-kit-commercial/a742d900eb-1753115042/kenney_city-kit-commercial_2.1.zip",
+      "archiveSha256": "f8b09b081c2bb88bcc126e2dec1cb40fd0dad7e7e591b6c26aaefe96fb35276b",
+      "licensePath": "licenses/commercial.txt"
+    },
+    "industrial": {
+      "version": "2.0",
+      "url": "https://kenney.nl/assets/city-kit-industrial",
+      "download": "https://kenney.nl/media/pages/assets/city-kit-industrial/0ec35b139d-1788171848/kenney_city-kit-industrial_2.0.zip",
+      "archiveSha256": "5b381164e5760f3830a2dbee43b972deee38b2a695d091b56e238ab2910c96d2",
+      "licensePath": "licenses/industrial.txt"
+    },
+    "roads": {
+      "version": "2.2",
+      "url": "https://kenney.nl/assets/city-kit-roads",
+      "download": "https://kenney.nl/media/pages/assets/city-kit-roads/74288c9459-1791628607/kenney_city-kit-roads.zip",
+      "archiveSha256": "374a4552115cbd11b4ec5c930ee31a533562dc78a09af249a655d03f7ea3b959",
+      "licensePath": "licenses/roads.txt"
+    }
+  },
+  "models": [
+    {
+      "name": "house-a",
+      "path": "models/house-a.glb",
+      "pack": "suburban",
+      "originalPath": "Models/GLB format/building-type-a.glb",
+      "sourceSha256": "49f32e20b9dcd24b1c8f6d6488807b8c8cb684cbb595bfb0bb36ad903e470faa",
+      "before": {
+        "bytes": 98604,
+        "triangles": 1174,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 76296,
+        "triangles": 1174,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.5,
+          0,
+          -0.3954376310729112
+        ],
+        "max": [
+          0.5,
+          0.6411853897089368,
+          0.3954376310729112
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    },
+    {
+      "name": "house-b",
+      "path": "models/house-b.glb",
+      "pack": "suburban",
+      "originalPath": "Models/GLB format/building-type-e.glb",
+      "sourceSha256": "9ec43994c8c332b1ae5b058d8b9646255831fd91047c1a35b1fc1ecae4c082fc",
+      "before": {
+        "bytes": 145512,
+        "triangles": 1731,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 104240,
+        "triangles": 1731,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.5,
+          0,
+          -0.3953846287868437
+        ],
+        "max": [
+          0.5,
+          0.8750000687745925,
+          0.3953846287868437
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    },
+    {
+      "name": "shop-a",
+      "path": "models/shop-a.glb",
+      "pack": "commercial",
+      "originalPath": "Models/GLB format/building-a.glb",
+      "sourceSha256": "5cf220f90ee3f21e7abe38055ca409a48aa8ef1d5ffab6e2deb99e5a5e1ed5e0",
+      "before": {
+        "bytes": 108936,
+        "triangles": 1252,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 80336,
+        "triangles": 1252,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.46999356333243986,
+          0,
+          -0.5
+        ],
+        "max": [
+          0.46999356333243986,
+          1.3755319001206232,
+          0.4999999999999999
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    },
+    {
+      "name": "shop-b",
+      "path": "models/shop-b.glb",
+      "pack": "commercial",
+      "originalPath": "Models/GLB format/building-d.glb",
+      "sourceSha256": "40605608e9aca0c98e294acff4af0f74afa417a51d589be490ca98f33ce4c2f5",
+      "before": {
+        "bytes": 95160,
+        "triangles": 1100,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 73660,
+        "triangles": 1100,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.46666675938501767,
+          0,
+          -0.49999999999999994
+        ],
+        "max": [
+          0.4666667593850177,
+          1.4366668759452303,
+          0.49999999999999994
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    },
+    {
+      "name": "factory-a",
+      "path": "models/factory-a.glb",
+      "pack": "industrial",
+      "originalPath": "Models/GLB format/building-a.glb",
+      "sourceSha256": "0e6ef8eb1e1bdbb9d06b5496b5daf3066e00eaf74b3fcd61b74072116a1c86cf",
+      "before": {
+        "bytes": 177316,
+        "triangles": 2046,
+        "meshes": 1,
+        "materials": 2,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 124696,
+        "triangles": 2046,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.5,
+          0,
+          -0.29804354287476464
+        ],
+        "max": [
+          0.5,
+          0.7055136896072611,
+          0.2980435428747646
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    },
+    {
+      "name": "factory-b",
+      "path": "models/factory-b.glb",
+      "pack": "industrial",
+      "originalPath": "Models/GLB format/building-d.glb",
+      "sourceSha256": "72b9e9e29986df0778ffa7c56e2f92fcfadfaa0f89bf167603877db4f38a789e",
+      "before": {
+        "bytes": 100768,
+        "triangles": 1158,
+        "meshes": 1,
+        "materials": 2,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 77096,
+        "triangles": 1158,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.31112244555305335,
+          0,
+          -0.5
+        ],
+        "max": [
+          0.3111224455530534,
+          0.9961633922593726,
+          0.5
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    },
+    {
+      "name": "tree",
+      "path": "models/tree.glb",
+      "pack": "suburban",
+      "originalPath": "Models/GLB format/tree-small.glb",
+      "sourceSha256": "5f63359e5f392609d7617cc98070855ca1ffd4f4b4bc3978a5ff56ece88a58d6",
+      "before": {
+        "bytes": 5812,
+        "triangles": 42,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 16132,
+        "triangles": 42,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.4330127457672268,
+          0,
+          -0.5
+        ],
+        "max": [
+          0.4330127457672268,
+          2.333333599060503,
+          0.5
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    },
+    {
+      "name": "streetlight",
+      "path": "models/streetlight.glb",
+      "pack": "roads",
+      "originalPath": "Models/GLB format/light-square.glb",
+      "sourceSha256": "6230d136c8883d7f9bc1b86f0309077e452e26e5e1e587ef1b77abef3c5f047c",
+      "before": {
+        "bytes": 6996,
+        "triangles": 60,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": [
+          "Textures/colormap.png"
+        ]
+      },
+      "after": {
+        "bytes": 16240,
+        "triangles": 60,
+        "meshes": 1,
+        "materials": 1,
+        "textures": 1,
+        "externalUris": []
+      },
+      "bounds": {
+        "min": [
+          -0.10526315005202112,
+          0,
+          -0.5
+        ],
+        "max": [
+          0.10526315005202112,
+          2.5263156639902324,
+          0.5
+        ]
+      },
+      "modifications": [
+        "weld",
+        "dedup",
+        "prune",
+        "embed palette PNG",
+        "uniform footprint normalization and ground-centred pivot"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "licenses/suburban.txt",
+      "bytes": 706,
+      "sha256": "d778fa769a89a7d9f167bc337fdf8fc2144e47d9abb0c35eb6ad897c0ee24d0a"
+    },
+    {
+      "path": "licenses/commercial.txt",
+      "bytes": 708,
+      "sha256": "c38cee408d022e57e44e49f1cd655c2fe0dc881a07b881276b795215cdc0de69"
+    },
+    {
+      "path": "licenses/industrial.txt",
+      "bytes": 708,
+      "sha256": "60a8c5c31191256ec9779dc18745dea6d69c46f4b29703459ce064c1765a59ea"
+    },
+    {
+      "path": "licenses/roads.txt",
+      "bytes": 703,
+      "sha256": "d23f51360ca2cd81711bc5b09ddfb28ac94da96d7ca2dbdef12c50f33f35c353"
+    },
+    {
+      "path": "models/house-a.glb",
+      "bytes": 76296,
+      "sha256": "e1d43e8fd4969fe5f433e179ef7481db22fdf895d8ff8e45b9169d23d9433891"
+    },
+    {
+      "path": "models/house-b.glb",
+      "bytes": 104240,
+      "sha256": "32445f1cc63a660f44290137402e51a799181381f46985de8165d0e088342dca"
+    },
+    {
+      "path": "models/shop-a.glb",
+      "bytes": 80336,
+      "sha256": "eadf1a92c3347dba9cf1789634d00e127bf35cf42f4bb1168057e0252186fe78"
+    },
+    {
+      "path": "models/shop-b.glb",
+      "bytes": 73660,
+      "sha256": "7374269a1d5f304c21f728c0bce51dd8576445a713d47ea41c6c8401bfdfa0a2"
+    },
+    {
+      "path": "models/factory-a.glb",
+      "bytes": 124696,
+      "sha256": "dc48c28cfee126d20db06a5b62aab9bf63d2346eaf99e9a26f10da77b4359230"
+    },
+    {
+      "path": "models/factory-b.glb",
+      "bytes": 77096,
+      "sha256": "120b54e9b933d96759c709d5978a0f880f3bfe303ed9586405757c1e26d77c92"
+    },
+    {
+      "path": "models/tree.glb",
+      "bytes": 16132,
+      "sha256": "8c71fb477d4d13c160b68b81c6b376ea2e6cfa9bf4e2289120647d2ff2aa0020"
+    },
+    {
+      "path": "models/streetlight.glb",
+      "bytes": 16240,
+      "sha256": "89a1c2332fd0033013a2082bbeb37c6d273f1ae72bee380900011824b5686ad6"
+    }
+  ],
+  "validation": {
+    "passed": true,
+    "tool": "glTF Transform 4.5.1 + project validation",
+    "gameDevCli": "unavailable; not claimed",
+    "policy": {
+      "maxFileBytes": 300000,
+      "maxTriangles": 3000,
+      "maxMaterials": 2,
+      "noExternalUris": true,
+      "groundPivot": true
+    },
+    "totalRuntimeBytes": 568696,
+    "totalTriangles": 8563
+  }
+}

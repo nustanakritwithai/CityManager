@@ -8,8 +8,17 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:browser": "node tests/browser-smoke.mjs"
+    "test:browser": "node tests/browser-smoke.mjs",
+    "assets:verify": "node scripts/admit-city-assets.mjs --verify"
   },
-  "dependencies": { "playcanvas": "2.23.3" },
-  "devDependencies": { "typescript": "5.9.3", "vite": "8.3.5" }
+  "dependencies": {
+    "playcanvas": "2.23.3"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  }
 }

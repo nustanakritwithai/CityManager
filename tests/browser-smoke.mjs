@@ -11,7 +11,7 @@ const targetUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityMana
 await mkdir(output, { recursive: true }); await mkdir(screenshots, { recursive: true });
 const edge = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${resolve(output, 'edge-profile')}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-let ws, sequence = 0; const pending = new Map(); const errors = []; const checks = [];
+let ws, sequence = 0; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
@@ -65,12 +65,23 @@ try {
     const message = JSON.parse(event.data);
     if (message.id && pending.has(message.id)) { const p = pending.get(message.id); pending.delete(message.id); message.error ? p.reject(new Error(JSON.stringify(message.error))) : p.resolve(message.result); }
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails);
-    if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') errors.push(message.params.args);
+    if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
+      const args = message.params.args;
+      const deliberatelyBlocked = process.env.CITYMANAGER_BLOCK_MODELS === '1' && args.length === 2 &&
+        /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/(house-[ab]|shop-[ab]|factory-[ab]|tree|streetlight)\.glb-container\]: Network error$/.test(args[0]?.value) && args[1]?.value === 'Network error';
+      (deliberatelyBlocked ? expectedAssetErrors : errors).push(args);
+    }
+    if (message.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'Failed' });
   };
   await send('Runtime.enable'); await send('Page.enable');
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: targetUrl });
   await until('!!window.cityManager');
+  await until('window.cityManager.visuals().ready');
+  const visualStatus = await evaluate('window.cityManager.visuals()');
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(visualStatus.failed.length, 8);
+  else assert.equal(visualStatus.loaded.length, 8);
   assert.equal(await evaluate('window.cityManager.engine'), 'PlayCanvas 2.23.3');
   await button('#pause'); assert.equal(await paused(), true);
   checks.push('Real Edge WebGL2 startup and pause');
@@ -93,8 +104,14 @@ try {
   assert.match(await text('#status'), /already exists/); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   await cell(12 * 24 + 3); await cell(12 * 24 + 5); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   checks.push('Repeated road use does not duplicate cost');
+  // The visual preview opens on the starter district. Back out for construction
+  // on the far side, as a player would, and keep the inspector off the gesture.
+  await button('#close-inspector');
+  await button('[data-camera="zoom-out"]'); await button('[data-camera="zoom-out"]');
   await cell(12 * 24 + 11); const beforeEscapeDrag = await state();
+  await button('#close-inspector');
   const escA = await cellPoint(16 * 24 + 12), escB = await cellPoint(16 * 24 + 15);
+  for (const p of [escA, escB]) assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', 'Road gesture endpoints are visible on the canvas');
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: escA.x, y: escA.y, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: escB.x, y: escB.y, button: 'left', buttons: 1 });
   await key('Escape');
@@ -119,11 +136,17 @@ try {
   await screenshot('desktop-disconnected.png'); checks.push('Drag road, zoning, picking and disconnected explanation');
   await button('#load'); assert.deepEqual(await state(), saved); assert.equal(await paused(), true);
   checks.push('Save/load round trip restores exact paused simulation');
+  await button('[data-camera="reset"]');
   await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=65', 15000);
   await button('#pause'); const grown = await state();
   assert.ok(grown.buildings.length > 0); assert.ok(grown.ledger.some(e => e.reason.includes('purchase'))); assert.ok(grown.ledger.some(e => e.reason === 'Monthly wages'));
+  if (process.env.CITYMANAGER_BLOCK_MODELS !== '1') assert.equal((await evaluate('window.cityManager.visuals()')).failed.length, 0, 'Models instantiate successfully after growth');
   await screenshot('desktop-city.png'); checks.push('10x growth, actual household purchases and monthly wages');
+  if (process.env.CITYMANAGER_VISUAL_PREVIEW === '1') {
+    await button('#close-inspector'); await button('[data-camera="zoom-in"]'); await button('[data-camera="zoom-in"]');
+    await screenshot('desktop-closeup.png'); await button('[data-camera="reset"]');
+  }
   // Camera controls must move the projection, then return to the reset state.
   const cameraBefore = await cellPoint(12 * 24 + 6);
   await button('[data-camera="rotate-left"]'); await button('[data-camera="zoom-in"]'); await button('[data-camera="left"]');
@@ -153,8 +176,9 @@ try {
   await button('#toggle-camera'); await button('[data-camera="reset"]'); await button('#toggle-camera');
   await screenshot('mobile-city.png'); checks.push('390x844 DPR2 layout, unobstructed gateway, >=44px buttons and pinch without construction (emulated)');
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 8, 'Only the eight deliberately blocked model requests failed');
   const version = await send('Browser.getVersion');
-  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', checks, errors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
+  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, checks, errors, expectedAssetErrors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png'] : []), 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
   await writeFile(resolve(output, 'browser-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {

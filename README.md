@@ -2,7 +2,7 @@
 
 ต้นแบบเกมสร้างเมือง 3D บนเว็บด้วย **PlayCanvas Engine + TypeScript** เขียนใหม่จากศูนย์ ได้แรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ผู้เล่นสร้างถนนและกำหนดโซน ส่วนครัวเรือนและบริษัทเติบโตตามเงื่อนไขของ simulation พร้อมเหตุผลที่ตรวจสอบได้
 
-นี่คือ vertical slice ขนาดเล็ก ไม่ใช่เกมที่มีความสามารถเทียบเท่า CSII ไม่มีโค้ดจาก Living City Lab หรือ novel engine และใช้เพียงรูปทรง/สีที่สร้างในโครงการนี้
+นี่คือ vertical slice ขนาดเล็ก ไม่ใช่เกมที่มีความสามารถเทียบเท่า CSII โค้ดเขียนใหม่ ไม่มีโค้ดจาก Living City Lab หรือ novel engine รุ่นภาพบน branch นี้ใช้โมเดลเมือง **Kenney แบบ CC0** ร่วมกับรูปทรงที่สร้างเอง ดูแหล่งที่มา ใบอนุญาต และขั้นตอนตรวจไฟล์ใน [Assets](docs/ASSETS.md)
 
 ## รันในเครื่อง
 
@@ -17,6 +17,7 @@ npm run dev
 
 ```sh
 npm test
+npm run assets:verify
 npm run build
 npm run preview
 ```
@@ -24,6 +25,8 @@ npm run preview
 Browser acceptance ใช้ Microsoft Edge ที่ติดตั้งอยู่แล้ว: เปิด `npm run preview` ที่ port 4173 แล้วรัน `npm run test:browser` ในอีก terminal (กำหนด path ผ่าน `CITYMANAGER_BROWSER` ได้) สคริปต์ใช้ profile แยกใน `.test-output/` และไม่ดาวน์โหลด browser บนมือถือเปิดปุ่ม **กล้อง** เพื่อแสดง/ซ่อนชุดควบคุม
 
 `dist/` ใช้ base `/CityManager/` สำหรับ GitHub Pages การ build ในเครื่องยังไม่ใช่การเผยแพร่เกม
+
+การปรับภาพใช้โมเดล 8 ชิ้น รวม 568,696 ไบต์ โดยไม่เปลี่ยนกฎ simulation หรือ save schema หากโหลดโมเดลไม่ได้ เกมยังใช้รูปทรงสำรองเดิม ดู [ภาพเปรียบเทียบ/หลักฐาน visual preview](docs/visual-preview/) และ [รายละเอียด asset](docs/ASSETS.md) branch ภาพนี้ยังไม่ merge หรือ deploy; เกมจาก `main` เดิมยังเป็นรุ่นสาธารณะ
 
 ## ลองเล่น
 
