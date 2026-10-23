@@ -1,6 +1,6 @@
 # First playable verification
 
-Verified locally on 23 October 2026. This bounded prototype is submitted as a draft PR, with no gameplay deployment or merge.
+Verified locally on 23 October 2026. This bounded prototype also has exact-head PR CI and a gated Pages publication workflow. Public availability must be confirmed from the deployment run and public game readback.
 
 ## Commands and outcomes
 
@@ -25,4 +25,6 @@ Screenshots were opened and visually inspected. The playfield, original building
 
 ## Remaining limits
 
-24x24 flat grid, one abstract good, outside market, universally available outside power/water flags, no lane traffic, congestion, curved roads, utility-capacity networks, autonomous closures or full CSII parity. Complete ledgers are bounded by the 12,000,000-character save limit and the browser's lower storage quota. Larger cities and long-duration soak/performance testing remain future stages. No release/deployment workflow is included.
+24x24 flat grid, one abstract good, outside market, universally available outside power/water flags, no lane traffic, congestion, curved roads, utility-capacity networks, autonomous closures or full CSII parity. Complete ledgers are bounded by the 12,000,000-character save limit and the browser's lower storage quota. Larger cities and long-duration soak/performance testing remain future stages.
+
+For public readback, set `CITYMANAGER_URL` to the Pages URL and `CITYMANAGER_SCREENSHOT_DIR` to a separate evidence folder before `npm run test:browser`. The script performs the same acceptance actions against the deployed game and records its actual URL.

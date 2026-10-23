@@ -6,7 +6,8 @@ import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
-const screenshots = resolve(root, 'docs/screenshots');
+const screenshots = resolve(root, process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/screenshots');
+const targetUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 await mkdir(output, { recursive: true }); await mkdir(screenshots, { recursive: true });
 const edge = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${resolve(output, 'edge-profile')}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
@@ -68,7 +69,7 @@ try {
   };
   await send('Runtime.enable'); await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: 'http://127.0.0.1:4173/CityManager/' });
+  await send('Page.navigate', { url: targetUrl });
   await until('!!window.cityManager');
   assert.equal(await evaluate('window.cityManager.engine'), 'PlayCanvas 2.23.3');
   await button('#pause'); assert.equal(await paused(), true);
@@ -153,7 +154,7 @@ try {
   await screenshot('mobile-city.png'); checks.push('390x844 DPR2 layout, unobstructed gateway, >=44px buttons and pinch without construction (emulated)');
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
   const version = await send('Browser.getVersion');
-  const report = { date: new Date().toISOString(), browser: version.product, engine: 'PlayCanvas 2.23.3', checks, errors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
+  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', checks, errors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
   await writeFile(resolve(output, 'browser-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {

@@ -47,7 +47,7 @@ Browser acceptance ใช้ Microsoft Edge ที่ติดตั้งอย
 
 ## สถานะการเผยแพร่และหลักฐาน
 
-งาน gameplay อยู่บน feature branch เพื่อ review ใน draft PR ไม่ได้ merge หรือ deploy อัตโนมัติ การตรวจแบบอ่านอย่างเดียวพบ Pages เป็น `build_type: workflow` และระบุ `main` ที่ `/`; repository เริ่มต้นว่างและไม่มี workflow จึงไม่มีตัวเผยแพร่ bootstrap README การตั้งค่า Pages/security ไม่ได้ถูกแก้ไข
+Pull request ต้องผ่าน simulation tests, TypeScript/build และ Edge browser acceptance บน source commit ของ PR ก่อน merge จากนั้น workflow บน `main` จึงเผยแพร่ build ที่ผ่านการตรวจไปยัง GitHub Pages เดิม URL เป้าหมายคือ https://nustanakritwithai.github.io/CityManager/ ตรวจสถานะ publication จาก Actions และรายงานการส่งมอบ การตั้งค่า Pages/security ไม่ได้ถูกเปลี่ยน
 
 ผลทดสอบจริงและภาพ browser smoke test ให้ดูรายงานการส่งมอบใน PR การทดสอบ viewport ขนาดมือถือไม่ใช่การทดสอบบนโทรศัพท์จริง
 
