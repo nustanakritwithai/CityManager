@@ -1,4 +1,7 @@
 import './style.css';
+import { setupSubmenus, renderSubmenus } from './submenus.ts';
+import { setupSubmenuNavigation, closeSubmenus, hasOpenSubmenu } from './submenu-navigation.ts';
+import './submenu-layout.css';
 import { CityView } from './renderer.ts';
 import { SIZE, MONTH, WAGES, access, connectedRoads, createCity, step, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, type City, type Zone } from './sim.ts';
 
@@ -29,9 +32,10 @@ function setTool(next: string) {
   });
   $('#tool-help').textContent = help[next]; status(`${toolNames[next]}พร้อมใช้งาน`); render();
 }
-function inspector(open: boolean) { $('#inspector').dataset.open = String(open); $('#toggle-inspector').setAttribute('aria-expanded', String(open)); }
+function inspector(open: boolean) { if (!open) closeSubmenus(); $('#inspector').dataset.open = String(open); $('#toggle-inspector').setAttribute('aria-expanded', String(open)); }
 function cancel() {
   view?.abortGesture();
+  if (tool === 'select' && hasOpenSubmenu()) { closeSubmenus(); status('กลับข้อมูลสถานที่'); return; }
   if (roadStart !== null) { roadStart = null; status('ยกเลิกจุดเริ่มแล้ว · Road start cancelled'); render(); return; }
   if (tool !== 'select') { setTool('select'); return; }
   inspector(false); status('กลับสู่แผนที่เมือง');
@@ -43,7 +47,7 @@ function activate(index: number) {
     else { const result = buildRoad(city, roadStart, index); roadStart = null; status(result.message); }
   } else if (['R', 'C', 'I'].includes(tool)) status(zoneCell(city, index, tool as Zone).message);
   else if (tool === 'bulldoze') status(bulldoze(city, index).message);
-  else if (tool === 'select') { inspector(true); if (selectionChanged) $('#inspector-body').scrollTop = 0; }
+  else if (tool === 'select') { inspector(true); if (selectionChanged) { closeSubmenus(); $('#inspector-body').scrollTop = 0; } }
   render();
 }
 function node(tag: string, className = '', content?: string): HTMLElement {
@@ -59,31 +63,6 @@ function metric(label: string, value: string, isMoney = false, note?: string, ra
   const card = node('dl', `metric${isMoney ? ' money' : ''}`); card.dataset.metric = keys[label] ?? label;
   if (rawValue !== undefined) card.dataset.value = String(rawValue);
   card.append(node('dt', '', label), node('dd', '', value)); if (note) card.append(node('small', '', note)); return card;
-}
-function accountName(name: string): string {
-  const known: Record<string, string> = { outside: 'ตลาดภายนอก', treasury: 'คลังเมือง', construction: 'งานก่อสร้าง', roadworks: 'งานถนน', upkeep: 'บำรุงถนน', landlord: 'เจ้าของที่ดิน', production: 'การผลิต' };
-  if (known[name]) return known[name];
-  if (name.startsWith('household:')) return `ครัวเรือน #${name.split(':')[1]}`;
-  if (name.startsWith('firm:')) return `กิจการ #${name.split(':')[1]}`;
-  return name;
-}
-function reasonName(reason: string): string {
-  const names: Record<string, string> = {
-    'Initial municipal grant': 'เงินทุนตั้งเมือง', 'Daily road upkeep': 'ค่าบำรุงถนน', 'Monthly wages': 'จ่ายค่าจ้างรายเดือน',
-    'Monthly household wage tax': 'ภาษีจากค่าจ้าง', 'Monthly firm profit tax': 'ภาษีกำไรธุรกิจ', 'Monthly firm rent': 'ค่าเช่ากิจการ', 'Monthly household rent': 'ค่าเช่าครัวเรือน',
-    'Local wholesale goods': 'ซื้อสินค้าขายส่งในเมือง', 'Outside goods import': 'นำเข้าสินค้า', 'Outside market goods export': 'รายได้ส่งออกสินค้า',
-    'Outside residential developer investment': 'ทุนสร้างบ้านจากภายนอก', 'New household arrival savings': 'เงินออมผู้ย้ายเข้า', 'Outside firm equity investment': 'ทุนตั้งกิจการจากภายนอก', 'Firm building investment': 'ลงทุนสร้างกิจการ',
-    'Outside residential height investment': 'ทุนขยายบ้านจากภายนอก', 'Profitable firm height investment': 'ลงทุนขยายกิจการ', Demolition: 'ค่ารื้อถอน', 'Emigration savings': 'เงินออมผู้ย้ายออก', 'Firm liquidation': 'คืนทุนเมื่อปิดกิจการ',
-    'Daily worker production': 'ผลิตสินค้าจากแรงงาน', 'Wholesale stock delivery': 'ส่งสินค้าขายส่ง', 'Imported shop stock': 'รับสินค้านำเข้า', 'Household final consumption': 'ครัวเรือนใช้สินค้า', 'Exported goods': 'ส่งออกสินค้า', 'Demolition stock write-off to outside': 'นำสินค้าคงเหลือออกเมื่อรื้อ'
-  };
-  const roads = reason.match(/^Build (\d+) road cells$/); if (roads) return `สร้างถนน ${roads[1]} ช่อง`;
-  const purchase = reason.match(/^Household #(\d+) purchase$/); if (purchase) return `ครัวเรือน #${purchase[1]} ซื้อสินค้า`;
-  return names[reason] ?? reason;
-}
-function ledgerRow(tick: number, reason: string, from: string, to: string, value: string, direction?: string) {
-  const row = node('div', 'flow-row'), body = node('div'), amount = node('span', 'amount');
-  body.append(node('b', '', reasonName(reason)), node('small', '', `วัน ${tick} · ${accountName(from)} → ${accountName(to)}`));
-  if (direction) amount.append(icon(direction)); amount.append(document.createTextNode(value)); row.append(body, amount); return row;
 }
 function symbol(zone: Zone, road: boolean) {
   const color = zone === 'R' ? '#87c99b' : zone === 'C' ? '#80b9db' : zone === 'I' ? '#e3a572' : '#f3c46b';
@@ -161,14 +140,13 @@ function render() {
   const demand = node('div', 'demand-grid');
   for (const [zone, label] of [['R', 'บ้าน'], ['C', 'ร้านค้า'], ['I', 'โรงงาน']] as const) { const item = node('div', `demand-item ${zone.toLowerCase()}`); item.append(node('span', '', label), node('b', '', String(s.demand[zone]))); demand.append(item); }
   $('#growth-summary').replaceChildren(demand); renderPlace();
-  $('#ledger').replaceChildren(...city.ledger.slice(-12).reverse().map(e => ledgerRow(e.tick, e.reason, e.from, e.to, money(e.amount), e.to === 'treasury' ? 'arrow-up' : e.from === 'treasury' ? 'arrow-down' : undefined)));
-  $('#goods-ledger').replaceChildren(...city.goodsLedger.slice(-10).reverse().map(e => ledgerRow(e.tick, e.reason, e.from, e.to, `${e.quantity} หน่วย`)));
-  $('#accounts').replaceChildren(...Object.entries(city.accounts).map(([name, value]) => { const row = node('div', 'account-row'); row.append(node('span', '', accountName(name)), node('span', '', money(value))); return row; }));
+  renderSubmenus(city, selected);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   view.render(city, selected, preview);
 }
 
 async function boot() {
+  setupSubmenus(); setupSubmenuNavigation();
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; render(); } }, (a, b) => {
     selected = b; roadStart = null; status(buildRoad(city, a, b).message); render();
   });
@@ -211,7 +189,7 @@ async function boot() {
     if (e.key === 'q') view.control('rotate-left'); if (e.key === 'e') view.control('rotate-right');
   });
   document.addEventListener('visibilitychange', () => { accumulator = 0; });
-  inspector(innerWidth >= 800);
+  inspector(innerWidth >= 1100 && !matchMedia('(any-pointer: coarse)').matches);
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
   view.app.on('update', (dt: number) => {
     if (paused || document.hidden) return;
