@@ -12,39 +12,47 @@ export type ResolvedPlace = {
 };
 
 export const WORKER_SKILL_LABELS: Readonly<Record<WorkerSkill, string>> = Object.freeze({ general: 'ทั่วไป', manufacturing: 'การผลิต', retail: 'ค้าปลีก' });
-export const WORKER_SKILL_ROLES: Readonly<Record<WorkerSkill, string>> = Object.freeze({ general: 'งานผลิต / งานค้าปลีก', manufacturing: 'งานผลิต', retail: 'งานค้าปลีก' });
+export const WORKER_SKILL_ROLES: Readonly<Record<WorkerSkill, string>> = Object.freeze({ general: 'ผลิต / เกษตร / ค้าปลีก / ทำตลาดเอง', manufacturing: 'งานผลิต / เกษตร', retail: 'งานค้าปลีก / ทำตลาดเอง' });
 export type SkillWorkforce = { skill: WorkerSkill; total: number; employed: number; unemployed: number };
 
 /** Disjoint worker pools; neither dependents nor whole-family counts are jobs. */
 export function householdLabor(city: City, id: number): {
   householdId: number; workforce: number; employed: number; unemployed: number;
-  employers: number; skillSource: Household['skillSource'];
-  skills: SkillWorkforce[]; allocations: EmploymentAllocation[];
+  employers: number; employeeWorkers: number; selfEmployedWorkers: number; skillSource: Household['skillSource'];
+  skills: SkillWorkforce[]; allocations: EmploymentAllocation[]; ownerAllocations: City['ownerLabor'];
 } | null {
   const household = city.households.find(value => value.id === id);
   if (!household) return null;
   const allocations = city.employment.filter(value => value.householdId === id).map(value => ({ ...value }));
+  const ownerAllocations = city.ownerLabor.filter(value => value.householdId === id).map(value => ({ ...value }));
   const skills = (['general', 'manufacturing', 'retail'] as const).map(skill => {
-    const total = household.workerSkills[skill], employed = allocations.filter(value => value.skill === skill).reduce((sum, value) => sum + value.workers, 0);
+    const total = household.workerSkills[skill], employed = [...allocations, ...ownerAllocations].filter(value => value.skill === skill).reduce((sum, value) => sum + value.workers, 0);
     return { skill, total, employed, unemployed: total - employed };
   });
-  const employed = allocations.reduce((sum, value) => sum + value.workers, 0);
+  const employeeWorkers = allocations.reduce((sum, value) => sum + value.workers, 0), selfEmployedWorkers = ownerAllocations.reduce((sum, value) => sum + value.workers, 0), employed = employeeWorkers + selfEmployedWorkers;
   return { householdId: id, workforce: household.workforce, employed, unemployed: household.workforce - employed,
-    employers: new Set(allocations.map(value => value.firmId)).size, skillSource: household.skillSource, skills, allocations };
+    employers: new Set([...allocations, ...ownerAllocations].map(value => value.firmId)).size, employeeWorkers, selfEmployedWorkers, skillSource: household.skillSource, skills, allocations, ownerAllocations };
 }
 
 /** Group this establishment's workers by their shared household account once. */
 export function firmLabor(city: City, id: number): {
   firmId: number; workers: number; householdCount: number;
-  households: { householdId: number; workers: number; allocations: EmploymentAllocation[] }[];
+  employeeWorkers: number; ownerWorkers: number;
+  households: { householdId: number; workers: number; allocations: EmploymentAllocation[]; ownerAllocations: City['ownerLabor'] }[];
 } | null {
   if (!city.firms.some(value => value.id === id)) return null;
   const own = city.employment.filter(value => value.firmId === id), groups = new Map<number, EmploymentAllocation[]>();
   for (const allocation of own) {
     const rows = groups.get(allocation.householdId) ?? []; rows.push({ ...allocation }); groups.set(allocation.householdId, rows);
   }
-  const households = [...groups].map(([householdId, allocations]) => ({ householdId, workers: allocations.reduce((sum, value) => sum + value.workers, 0), allocations }));
-  return { firmId: id, workers: own.reduce((sum, value) => sum + value.workers, 0), householdCount: households.length, households };
+  const owners = city.ownerLabor.filter(value => value.firmId === id);
+  for (const owner of owners) if (!groups.has(owner.householdId)) groups.set(owner.householdId, []);
+  const households = [...groups].map(([householdId, allocations]) => {
+    const ownerAllocations = owners.filter(value => value.householdId === householdId).map(value => ({ ...value }));
+    return { householdId, workers: [...allocations, ...ownerAllocations].reduce((sum, value) => sum + value.workers, 0), allocations, ownerAllocations };
+  });
+  const employeeWorkers = own.reduce((sum, value) => sum + value.workers, 0), ownerWorkers = owners.reduce((sum, value) => sum + value.workers, 0);
+  return { firmId: id, workers: employeeWorkers + ownerWorkers, employeeWorkers, ownerWorkers, householdCount: households.length, households };
 }
 
 /** Same-tick pool/role edits and moves invalidate an entity view without a fake tick. */
@@ -52,8 +60,18 @@ export function contextRevision(city: City): string {
   return JSON.stringify([city.version, city.rulesVersion, city.tick, city.ledger.length, city.goodsLedger.length, city.utilities, city.migration,
     city.households.map(h => [h.id, h.home, h.members, h.workforce, h.dependents, h.profile, h.origin, h.skillSource, h.workerSkills, h.needs, h.lastPurchaseTick, city.accounts[h.wallet]]),
     city.employment.map(a => [a.householdId, a.firmId, a.occupation, a.rank, a.skill, a.workers]),
+    city.ownerLabor, city.resources, city.crops, city.cropLedger.length, city.cropLedger.at(-1),
     city.buildings.map(b => [b.id, b.cell, b.zone, b.level, b.age, 'housingType' in b ? b.housingType : null]),
-    city.firms.map(f => [f.id, f.building, f.inventory, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
+    city.firms.map(f => [f.id, f.building, f.inventory, f.cropInventory, f.cropCost, f.productionTick, f.owner, f.profit, f.monthlyRevenue, f.monthlyExpense, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
+}
+
+/** Latest recorded basket, not a guessed commodity from a household timestamp. */
+export function householdConsumption(city: City, id: number): { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null {
+  const household = city.households.find(value => value.id === id); if (!household) return null;
+  let latest: { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null = null;
+  for (const entry of city.goodsLedger) if (entry.to === household.wallet && entry.reason === 'Household final consumption' && (!latest || entry.tick > latest.tick)) latest = { commodity: 'goods', tick: entry.tick, quantity: entry.quantity };
+  for (const entry of city.cropLedger) if (entry.to === household.wallet && entry.kind === 'consumption' && (!latest || entry.tick > latest.tick)) latest = { commodity: 'crops', tick: entry.tick, quantity: entry.quantity };
+  return latest;
 }
 
 export type CityOverview = {
@@ -82,6 +100,14 @@ export type CityOverview = {
   jobs: number;
   firms: number;
   inventory: number;
+  cropInventory: number;
+  cropCost: number;
+  cropHarvested: number;
+  cropProcessed: number;
+  cropConsumed: number;
+  cropWrittenOff: number;
+  employeeWorkers: number;
+  selfEmployedWorkers: number;
   produced: number;
   imported: number;
   consumed: number;
@@ -125,9 +151,18 @@ export function cityOverview(city: City): CityOverview {
       case 'Imported shop stock': imported += entry.quantity; break;
       case 'Household final consumption': consumed += entry.quantity; break;
       case 'Exported goods': exported += entry.quantity; break;
+      default: if (/^Crop recipe #\d+$/.test(entry.reason)) produced += entry.quantity;
     }
   }
   const current = summary(city), warnings: string[] = [];
+  let cropHarvested = 0, cropProcessed = 0, cropConsumed = 0, cropWrittenOff = 0;
+  for (const entry of city.cropLedger) {
+    if (!inPeriod(entry.tick)) continue;
+    if (entry.kind === 'harvest') cropHarvested += entry.quantity;
+    else if (entry.kind === 'process') cropProcessed += entry.quantity;
+    else if (entry.kind === 'consumption') cropConsumed += entry.quantity;
+    else if (entry.kind === 'writeoff') cropWrittenOff += entry.quantity;
+  }
   let homeSlots = 0, personCapacity = 0, occupiedHomeSlots = 0, occupiedPersons = 0;
   for (const building of city.buildings.filter(building => building.zone === 'R')) {
     const capacity = housingCapacity(building), occupied = homeOccupancy(city, building.id);
@@ -166,6 +201,11 @@ export function cityOverview(city: City): CityOverview {
     jobs: current.jobs,
     firms: city.firms.length,
     inventory: city.firms.reduce((total, firm) => total + firm.inventory, 0),
+    cropInventory: city.firms.reduce((total, firm) => total + firm.cropInventory, 0),
+    cropCost: city.firms.reduce((total, firm) => total + firm.cropCost, 0),
+    cropHarvested, cropProcessed, cropConsumed, cropWrittenOff,
+    employeeWorkers: city.employment.reduce((sum, allocation) => sum + allocation.workers, 0),
+    selfEmployedWorkers: city.ownerLabor.reduce((sum, allocation) => sum + allocation.workers, 0),
     produced, imported, consumed, exported,
     warnings,
     power: city.utilities.power,

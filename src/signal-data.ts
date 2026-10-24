@@ -1,4 +1,4 @@
-import { housingCapacity, type City } from './sim.ts';
+import { housingCapacity, householdWorkerCount, type City } from './sim.ts';
 
 /** Wire contract shared with the isolated city-advisor.rules.v1 backend. */
 export const METRIC_DEFINITIONS = {
@@ -108,7 +108,7 @@ export function captureCitySignals(city: City): SignalCapture {
   }
   const population = city.households.reduce((total, household) => total + household.members, 0);
   const workforce = city.households.reduce((total, household) => total + household.workforce, 0);
-  const employed = city.employment.reduce((total, allocation) => total + allocation.workers, 0);
+  const employed = city.households.reduce((total, household) => total + householdWorkerCount(city, household.id), 0);
   const personCapacity = city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0);
   const metric = (id: MetricId, value: number): SignalMetric => ({ id, value, unit: METRIC_DEFINITIONS[id][0], source: SOURCE });
   const metrics = [

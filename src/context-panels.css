@@ -223,3 +223,10 @@
 .cx-content .cx-skill-heading strong{font-weight:600;color:#dce8df}
 .cx-content .cx-skill-row>span{font-size:calc(12 * var(--reader-unit,1px));line-height:1.45;color:#b5cec1;overflow-wrap:anywhere}
 .cx-content .cx-skill-list+.cx-legacy-assumption{margin-top:calc(5 * var(--reader-unit,1px));margin-bottom:0}
+.cx-content .cx-owner-labor-row{display:grid;gap:calc(2 * var(--reader-unit,1px));padding:calc(6 * var(--reader-unit,1px));border-left:calc(2 * var(--reader-unit,1px)) solid #e1be7477;background:#e1be7408;border-radius:calc(4 * var(--reader-unit,1px))}
+.cx-content .cx-owner-labor-row strong{font-size:calc(13 * var(--reader-unit,1px));line-height:1.4;font-weight:600}
+.cx-content .cx-owner-labor-row span{font-size:calc(12 * var(--reader-unit,1px));line-height:1.45;color:#d4ccb1}
+.cx-content .cx-owner-controls{display:grid;gap:calc(6 * var(--reader-unit,1px));margin-top:calc(6 * var(--reader-unit,1px))}
+.cx-content .cx-owner-controls .cx-button{width:100%}
+.cx-content .cx-owner-controls .cx-button:disabled{opacity:.65;cursor:default}
+.cx-content .cx-crop-card .cx-flow-details>p{font-size:calc(12 * var(--reader-unit,1px));line-height:1.5;margin:calc(4 * var(--reader-unit,1px)) 0 0}

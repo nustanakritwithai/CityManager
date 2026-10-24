@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createCity, deserialize, bulldoze, householdWorkerCount, housingCapacity, homeOccupancy, moveHousehold } from '../src/sim.ts';
+import { createCity, deserialize, bulldoze, householdWorkerCount, housingCapacity, homeOccupancy, moveHousehold, type CropEntry } from '../src/sim.ts';
 import { flowRows } from '../src/inspector-data.ts';
-import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from '../src/context-data.ts';
+import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from '../src/context-data.ts';
 
 const legacyJson = readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 const populated = () => deserialize(legacyJson);
@@ -127,7 +127,7 @@ test('context presenters leave frozen source data and RNG unchanged and report a
 
 test('migrated legacy people are explicitly assumed without rewriting financial or goods history', () => {
   const legacy = JSON.parse(legacyJson), city = populated(), overview = cityOverview(city);
-  assert.equal(city.version, 3);
+  assert.equal(city.version, 4);
   assert.ok(city.households.every(household => household.origin === 'legacy-v1' && household.profile === 'legacy-worker' && household.members === 1 && household.workforce === 1 && household.dependents === 0));
   assert.equal(overview.population, legacy.households.length);
   assert.equal(overview.households, legacy.households.length);
@@ -232,8 +232,8 @@ test('household labor presents eligible member counts by disjoint skill without 
   assert.ok(data.allocations.every(value => value.householdId === household.id && value.householdId !== other.id));
   assert.equal(data.skills.reduce((sum, value) => sum + value.total, 0), household.members - household.dependents);
   assert.deepEqual(WORKER_SKILL_LABELS, { general: 'ทั่วไป', manufacturing: 'การผลิต', retail: 'ค้าปลีก' });
-  assert.equal(WORKER_SKILL_ROLES.general, 'งานผลิต / งานค้าปลีก');
-  assert.equal(WORKER_SKILL_ROLES.manufacturing, 'งานผลิต'); assert.equal(WORKER_SKILL_ROLES.retail, 'งานค้าปลีก');
+  assert.equal(WORKER_SKILL_ROLES.general, 'ผลิต / เกษตร / ค้าปลีก / ทำตลาดเอง');
+  assert.equal(WORKER_SKILL_ROLES.manufacturing, 'งานผลิต / เกษตร'); assert.equal(WORKER_SKILL_ROLES.retail, 'งานค้าปลีก / ทำตลาดเอง');
   assert.equal(householdLabor(city, city.nextId + 100), null);
 });
 
@@ -248,7 +248,7 @@ test('firm labor groups two skill allocations from one household once without le
   assert.equal(updated.workers, 3); assert.equal(updated.householdCount, 2); assert.equal(owner.workers, 2); assert.equal(owner.allocations.length, 2);
   assert.deepEqual(owner.allocations.map(value => value.skill), ['manufacturing', 'general']);
   assert.ok(updated.households.every(group => group.allocations.every(value => value.firmId === factory.id)));
-  assert.deepEqual(firmLabor(city, shop.id), { firmId: shop.id, workers: 0, householdCount: 0, households: [] });
+  assert.deepEqual(firmLabor(city, shop.id), { firmId: shop.id, workers: 0, employeeWorkers: 0, ownerWorkers: 0, householdCount: 0, households: [] });
   assert.equal(firmLabor(city, city.nextId + 100), null);
 });
 
@@ -277,4 +277,63 @@ test('labor views and cache revision leave frozen finances, claims, inventory, R
   firmLabor(city, factory.id); firmLabor(city, shop.id); contextRevision(city);
   own.allocations[0].workers = 99;
   assert.equal(JSON.stringify(city), before);
+});
+
+test('self-employed owner labor shares the same household skill limits and is never presented as salary employment', () => {
+  const { city, household, factory, shop } = workerViewFixture();
+  // Presentation fixture for the newly stored role. The authoritative simulation
+  // tests own startup financing; no fictitious wage or transfer is added here.
+  const marketId = city.nextId + 10;
+  city.firms.push({ ...shop, id: marketId, zone: 'T', wallet: `firm:${marketId}`, workDays: {}, inventory: 0, cropInventory: 3, cropCost: 450, owner: { householdId: household.id, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } });
+  city.employment = city.employment.filter(value => value.householdId !== household.id || value.firmId === factory.id);
+  city.ownerLabor = [{ householdId: household.id, firmId: marketId, skill: 'general', workers: 1 }];
+  const before = JSON.stringify(city), data = householdLabor(city, household.id)!;
+  assert.equal(data.employeeWorkers, 1); assert.equal(data.selfEmployedWorkers, 1); assert.equal(data.employed, 2); assert.equal(data.unemployed, 0); assert.equal(data.employers, 2);
+  assert.equal(data.allocations.length, 1); assert.equal(data.ownerAllocations.length, 1); assert.equal(data.skills.find(value => value.skill === 'general')!.employed, 1);
+  const market = firmLabor(city, marketId)!;
+  assert.equal(market.workers, 1); assert.equal(market.ownerWorkers, 1); assert.equal(market.employeeWorkers, 0); assert.equal(market.householdCount, 1);
+  assert.deepEqual(market.households[0].allocations, []); assert.equal(market.households[0].ownerAllocations[0].workers, 1);
+  assert.equal(JSON.stringify(city), before);
+  city.ownerLabor = [];
+  const inactive = householdLabor(city, household.id)!;
+  assert.equal(inactive.employed, 1); assert.equal(inactive.selfEmployedWorkers, 0); assert.equal(inactive.unemployed, 1);
+  assert.equal(firmLabor(city, marketId)!.workers, 0); assert.equal(city.firms.find(value => value.id === marketId)!.owner!.householdId, household.id);
+});
+
+test('crop overview derives lot stocks/book cost and inclusive period flows separately from finished goods', () => {
+  const city = populated(); city.tick = 40;
+  const factory = city.firms.find(value => value.zone === 'I')!; factory.cropInventory = 4; factory.cropCost = 600;
+  city.crops = { harvested: 999, processed: 999, consumed: 999, writtenOff: 999 };
+  const event = (id: number, tick: number, kind: CropEntry['kind'], quantity: number): CropEntry => ({ id, tick, kind, from: 'firm:1', to: 'firm:2', quantity, fromValue: 0, toValue: 0, cash: 0, workers: 0, batches: 0, outputQuantity: 0, reason: `crop-${id}` });
+  city.cropLedger = [event(1, 10, 'harvest', 100), event(2, 11, 'harvest', 6), event(3, 40, 'process', 2), event(4, 12, 'trade', 3), event(5, 40, 'consumption', 1), event(6, 40, 'writeoff', 1), event(7, 41, 'harvest', 200)];
+  city.goodsLedger = [{ tick: 11, from: 'production', to: factory.wallet, quantity: 8, reason: 'Crop recipe #3' }, { tick: 40, from: 'outside', to: 'firm:2', quantity: 3, reason: 'Imported shop stock' }];
+  const data = cityOverview(city);
+  assert.deepEqual([data.fromTick, data.toTick], [11, 40]);
+  assert.deepEqual([data.cropHarvested, data.cropProcessed, data.cropConsumed, data.cropWrittenOff], [6, 2, 1, 1]);
+  assert.deepEqual([data.cropInventory, data.cropCost], [4, 600]);
+  assert.equal(data.produced, 8); assert.equal(data.imported, 3); assert.equal(data.consumed, 0);
+  assert.equal(data.inventory, city.firms.reduce((sum, value) => sum + value.inventory, 0));
+});
+
+test('last basket commodity comes only from the household real journals and not a guessed purchase timestamp', () => {
+  const city = populated(), household = city.households[0], other = city.households[1];
+  city.goodsLedger = [{ tick: 11, from: 'firm:2', to: household.wallet, quantity: 1, reason: 'Household final consumption' }];
+  city.cropLedger = [{ id: 1, tick: 12, kind: 'consumption', from: 'firm:9', to: household.wallet, quantity: 1, fromValue: 150, toValue: 0, cash: 800, workers: 0, batches: 0, outputQuantity: 0, reason: 'Fresh crop purchase #1' }];
+  household.lastPurchaseTick = 40;
+  assert.deepEqual(householdConsumption(city, household.id), { commodity: 'crops', tick: 12, quantity: 1 });
+  assert.equal(householdConsumption(city, other.id), null); assert.equal(householdConsumption(city, city.nextId + 100), null);
+  city.goodsLedger.push({ tick: 13, from: 'firm:2', to: household.wallet, quantity: 1, reason: 'Household final consumption' });
+  assert.deepEqual(householdConsumption(city, household.id), { commodity: 'goods', tick: 13, quantity: 1 });
+});
+
+test('same-tick crop costs, processing markers, owner finances and canonical resource changes invalidate entity details', () => {
+  const { city, household, shop } = workerViewFixture(), revisions = [contextRevision(city)], tick = city.tick;
+  shop.cropInventory = 3; shop.cropCost = 450; revisions.push(contextRevision(city));
+  shop.productionTick = city.tick - 1; revisions.push(contextRevision(city));
+  shop.owner = { householdId: household.id, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 }; revisions.push(contextRevision(city));
+  shop.owner.withdrawn = 10000; revisions.push(contextRevision(city));
+  city.ownerLabor.push({ householdId: household.id, firmId: shop.id, skill: 'general', workers: 1 }); revisions.push(contextRevision(city));
+  city.resources.fertility[0] = (city.resources.fertility[0] + 1) % 101; revisions.push(contextRevision(city));
+  city.cropLedger.push({ id: 1, tick, kind: 'trade', from: 'firm:1', to: shop.wallet, quantity: 1, fromValue: 0, toValue: 150, cash: 150, workers: 0, batches: 0, outputQuantity: 0, reason: 'Crop exchange #1' }); revisions.push(contextRevision(city));
+  assert.equal(revisions.length, new Set(revisions).size); assert.equal(city.tick, tick);
 });

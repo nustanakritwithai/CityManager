@@ -15,6 +15,11 @@ export type FlowRow = {
   fromLabel: string;
   toLabel: string;
 };
+/** Separate crop journal: lot quantities never share an ordering with generic goods. */
+export type CropFlowRow = Omit<FlowRow, 'kind'> & {
+  kind: 'crops'; id: number; cropKind: City['cropLedger'][number]['kind'];
+  fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number;
+};
 export type WalletAccount = { id: string; label: string; balance: number };
 export type WalletGroupKey = 'city' | 'households' | 'firms' | 'outside' | 'system';
 export type WalletGroup = {
@@ -34,6 +39,8 @@ const accountLabels: Record<string, string> = {
   upkeep: 'บัญชีบำรุงรักษา',
   landlord: 'บัญชีผู้ให้เช่า',
   production: 'แหล่งผลิตสินค้า',
+  'environment:crops': 'ผลผลิตธรรมชาติจากพื้นที่',
+  processing: 'พืชผลที่ใช้แปรรูป',
 };
 
 function accountLabel(id: string): string {
@@ -69,6 +76,8 @@ const reasonLabels: Record<string, string> = {
   'Household final consumption': 'สินค้าที่ครัวเรือนซื้อไปบริโภค',
   'Exported goods': 'สินค้าที่ส่งออกไปภายนอก',
   'Demolition stock write-off to outside': 'ตัดสต็อกออกเมื่อรื้อถอน (ไม่มีรายรับ)',
+  'Owner capital contribution': 'เจ้าของเติมทุนจากเงินครัวเรือน (ไม่ใช่ยอดขาย)',
+  'Owner profit distribution': 'เจ้าของถอนกำไรเข้าครัวเรือน (ไม่ใช่ค่าใช้จ่ายซ้ำ)',
 };
 
 function reasonLabel(reason: string): string {
@@ -77,7 +86,24 @@ function reasonLabel(reason: string): string {
   if (road) return `สร้างถนน ${road[1]} ช่อง`;
   const purchase = /^Household #(\d+) purchase$/.exec(reason);
   if (purchase) return `ครัวเรือน #${purchase[1]} ซื้อสินค้า`;
+  const cropPurchase = /^Fresh crop purchase #(\d+)$/.exec(reason);
+  if (cropPurchase) return `ครัวเรือนซื้อพืชผล · รายการ #${cropPurchase[1]}`;
+  const cropExchange = /^Crop exchange #(\d+)$/.exec(reason);
+  if (cropExchange) return `ซื้อขายพืชผล · รายการ #${cropExchange[1]}`;
+  const cropRecipe = /^Crop recipe #(\d+)$/.exec(reason);
+  if (cropRecipe) return `สินค้าจากการแปรรูปพืชผล #${cropRecipe[1]}`;
   return `รายการอื่น: ${reason}`;
+}
+
+export function cropFlowRows(city: City): CropFlowRow[] {
+  const labels: Record<City['cropLedger'][number]['kind'], string> = {
+    harvest: 'เก็บเกี่ยวพืชผล', trade: 'ซื้อขายพืชผล', process: 'ใช้พืชผลแปรรูป', writeoff: 'ตัดพืชผลออกจากบัญชี', consumption: 'ครัวเรือนบริโภคพืชผล',
+  };
+  return city.cropLedger.map((entry, index): CropFlowRow => ({
+    index, kind: 'crops', id: entry.id, cropKind: entry.kind, tick: entry.tick, reason: entry.reason, from: entry.from, to: entry.to,
+    value: entry.quantity, label: labels[entry.kind], fromLabel: accountLabel(entry.from), toLabel: accountLabel(entry.to),
+    fromValue: entry.fromValue, toValue: entry.toValue, cash: entry.cash, workers: entry.workers, batches: entry.batches, outputQuantity: entry.outputQuantity,
+  })).reverse();
 }
 
 /** Presentation only: no filtering, truncation, journal sorting or simulation mutation. */
