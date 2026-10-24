@@ -1,5 +1,5 @@
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
-import type { City, CropEntry, Firm } from './sim.ts';
+import { isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
 import { CROP_STOCK_CAPS, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 
 const invalid = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture state.'); };
@@ -19,16 +19,16 @@ export function validateAgriculture(c: City): void {
   const households = new Map(c.households.map(h => [h.id, h]));
   const ownerIds = new Set<number>();
   for (const f of c.firms) {
-    const capacity = f.zone === 'C' ? 0 : CROP_STOCK_CAPS[f.zone];
+    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
     requireThat(isSafeCount(f.cropInventory) && f.cropInventory <= capacity && isSafeCount(f.cropCost) && (f.cropInventory > 0 || f.cropCost === 0));
     requireThat(isSafeCount(f.productionTick) && f.productionTick >= c.agricultureStartTick && f.productionTick <= c.tick);
-    if (f.zone === 'C') requireThat(f.cropCost === 0);
-    if (f.zone === 'F' || f.zone === 'T') requireThat(f.inventory === 0 && c.buildings.find(b => b.id === f.building)?.level === 1);
+    if (isRetail(f)) requireThat(f.cropCost === 0);
+    if (f.zone === 'F' || isMarket(f)) requireThat(f.inventory === 0 && c.buildings.find(b => b.id === f.building)?.level === 1);
     if (f.zone === 'F') {
       const b = c.buildings.find(b => b.id === f.building);
       requireThat(b && isViableFarmland(c.resources.fertility[b.cell]) && f.cropCost === 0);
     }
-    if (f.zone !== 'T') { requireThat(f.owner === null); continue; }
+    if (!isMarket(f)) { requireThat(f.owner === null); continue; }
     const owner = f.owner;
     requireThat(object(owner) && isSafeCount(owner.householdId, 1) && households.has(owner.householdId) && !ownerIds.has(owner.householdId));
     requireThat(['capitalContributed', 'capitalReturned', 'withdrawn', 'taxPaid'].every(key => isSafeCount(owner[key as keyof typeof owner])));
@@ -39,7 +39,7 @@ export function validateAgriculture(c: City): void {
   for (const e of c.ownerLabor) {
     requireThat(object(e) && isSafeCount(e.householdId, 1) && isSafeCount(e.firmId, 1) && e.workers === 1 && (e.skill === 'general' || e.skill === 'retail') && !ownerFirms.has(e.firmId));
     const h = households.get(e.householdId), f = c.firms.find(f => f.id === e.firmId);
-    requireThat(h && h.home !== null && f?.zone === 'T' && f.owner?.householdId === h.id);
+    requireThat(h && h.home !== null && f && isMarket(f) && f.owner?.householdId === h.id);
     ownerFirms.add(e.firmId);
   }
   for (const h of c.households) {
@@ -57,9 +57,10 @@ export function validateAgriculture(c: City): void {
   const role = (wallet: string, expected?: Role): Role | undefined => {
     requireThat(/^firm:[1-9][0-9]*$/.test(wallet) && Object.hasOwn(c.accounts, wallet));
     const current = firms.get(wallet), known = roles.get(wallet);
-    if (current) requireThat(current.zone !== 'C' && (!expected || current.zone === expected));
+    const currentRole = current && (isMarket(current) ? 'T' : isRetail(current) ? undefined : current.zone);
+    if (current) requireThat(currentRole !== undefined && (!expected || currentRole === expected));
     if (known && expected) requireThat(known === expected);
-    const result = expected ?? known ?? (current?.zone as Role | undefined);
+    const result = expected ?? known ?? (currentRole as Role | undefined);
     if (result) roles.set(wallet, result);
     return result;
   };
@@ -142,7 +143,7 @@ export function validateAgriculture(c: City): void {
   c.goodsLedger.forEach((e, i) => { if ((e.tick > c.agricultureStartTick && e.from === 'production') || /^Crop recipe #/.test(e.reason)) requireThat(matchedGoods.has(i)); });
   for (const h of c.households) { const tick = latestPurchase.get(h.wallet); if (tick !== undefined || h.lastPurchaseTick > c.agricultureStartTick) requireThat(h.lastPurchaseTick === tick); }
 
-  for (const f of c.firms.filter(f => f.zone === 'T')) validateOwnerFinance(c, f, operating.get(f.wallet) ?? []);
+  for (const f of c.firms.filter(f => isMarket(f))) validateOwnerFinance(c, f, operating.get(f.wallet) ?? []);
 }
 
 /** Capital/earnings movements are distinct from the stall's operating result. */

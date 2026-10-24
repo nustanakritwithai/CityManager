@@ -84,7 +84,7 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let n = 0; n < 65; n++) step(fixture);
   await button('#toggle-game-menu');
-  await evaluate(`localStorage.removeItem('citymanager.save.v4');localStorage.setItem('citymanager.save.v4',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
+  await evaluate(`localStorage.removeItem('citymanager.save.v5');localStorage.setItem('citymanager.save.v5',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
   const before = await state(); assert.deepEqual(before, fixture);
   await openSignals();
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'offline');
@@ -103,7 +103,7 @@ try {
   assert.deepEqual(await state(), before, 'Opening report is read-only');
   await button('#signal-refresh'); assert.deepEqual(await state(), before, 'Manual capture is read-only');
   await shot('desktop-signals.png');
-  checks.push('Actual people, household, employment, housing-capacity and credit units match save-v4 simulation with missing first history and no mutation');
+  checks.push('Actual people, household, employment, housing-capacity and credit units match save-v5 simulation with missing first history and no mutation');
 
   await button('#close-inspector'); await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=68'); await button('#pause');

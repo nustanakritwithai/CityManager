@@ -62,7 +62,7 @@ export function contextRevision(city: City): string {
     city.employment.map(a => [a.householdId, a.firmId, a.occupation, a.rank, a.skill, a.workers]),
     city.ownerLabor, city.resources, city.crops, city.cropLedger.length, city.cropLedger.at(-1),
     city.buildings.map(b => [b.id, b.cell, b.zone, b.level, b.age, 'housingType' in b ? b.housingType : null]),
-    city.firms.map(f => [f.id, f.building, f.inventory, f.cropInventory, f.cropCost, f.productionTick, f.owner, f.profit, f.monthlyRevenue, f.monthlyExpense, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
+    city.firms.map(f => [f.id, f.building, f.zone, f.commercialKind, f.inventory, f.cropInventory, f.cropCost, f.productionTick, f.owner, f.profit, f.monthlyRevenue, f.monthlyExpense, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
 }
 
 /** Latest recorded basket, not a guessed commodity from a household timestamp. */

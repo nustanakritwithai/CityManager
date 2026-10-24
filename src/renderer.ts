@@ -261,7 +261,7 @@ export class CityView {
   }
   render(city: City, selected: number | null, preview: number[]) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'T', 'bulldoze'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'bulldoze'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city);
@@ -285,19 +285,21 @@ export class CityView {
           if (lamp) { lamp.setLocalPosition(0, .13, -.84); tile.addChild(lamp); }
         }
       } else if (cell.zone) {
-        const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053', F: '#93af58', T: '#69b6a6' }[cell.zone];
+        const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053', F: '#93af58' }[cell.zone];
         this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, color);
         if (b) {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
-          if (b.zone === 'T') { this.cropMarket(tile, i); continue; }
+          if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
-          const model = this.assets?.building(b.zone, b.level, i);
+          // Retained shops move up one commercial tier; their geometry stays unchanged.
+          const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
+          const model = this.assets?.building(b.zone, visualLevel, i);
           if (model) { model.setLocalPosition(0, .1, 0); tile.addChild(model); continue; }
-          const h = 0.9 + b.level * 0.75 + (i % 3) * 0.22;
+          const h = 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;
           const tower = b.zone === 'I' ? h * 0.65 : h;
           this.box(tile, -0.1, tower / 2 + 0.1, 0, 1.25, tower, 1.2, { R: '#d7e5d1', C: '#b6d4df', I: '#d9c09a' }[b.zone]);
           this.box(tile, -0.1, tower + 0.17, 0, 1.34, 0.16, 1.3, { R: '#386454', C: '#38677f', I: '#8c6340' }[b.zone]);
-          for (let level = 0; level < Math.min(b.level + 1, 5); level++) {
+          for (let level = 0; level < Math.min(visualLevel + 1, 5); level++) {
             for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, '#f9df9a');
           }
           if (b.zone === 'I') this.box(tile, 0.52, h * 0.65, -0.38, 0.2, h * 1.1, 0.22, '#786b60');

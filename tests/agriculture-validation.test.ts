@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createCity, step, deserialize, serialize, ownerFinance, contributeOwnerCapital, withdrawOwnerProfit, type City } from '../src/sim.ts';
+import { createCity, step, deserialize, serialize, ownerFinance, contributeOwnerCapital, withdrawOwnerProfit, isMarket, isRetail, type City } from '../src/sim.ts';
 import { validateAgriculture } from '../src/agriculture-validation.ts';
 
-const natural = createCity(61025);
-for (let day = 0; day < 360; day++) { step(natural); validateAgriculture(natural); }
+import { createCity as createV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
+const previous = createV4(61025);
+for (let day = 0; day < 180; day++) stepV4(previous);
+const natural = deserialize(serializeV4(previous));
+for (let day = 0; day < 180; day++) { step(natural); validateAgriculture(natural); }
 const snapshot = serialize(natural);
 const fresh = (): City => JSON.parse(snapshot);
-const market = (c: City) => c.firms.find(f => f.zone === 'T')!;
+const market = (c: City) => c.firms.find(f => isMarket(f))!;
 function rejects(mutate: (c: City) => void): void {
   const city = fresh(); mutate(city); const before = JSON.stringify(city);
   assert.throws(() => validateAgriculture(city)); assert.equal(JSON.stringify(city), before);
@@ -18,7 +21,7 @@ function freeze(value: unknown): void {
 }
 
 test('actual 360-day agriculture replay reconciles all channels, stock, costs, ownership and household baskets without mutation', () => {
-  assert.ok(natural.firms.some(f => f.zone === 'F') && natural.firms.some(f => f.zone === 'T'));
+  assert.ok(natural.firms.some(f => f.zone === 'F') && natural.firms.some(f => isMarket(f)));
   for (const kind of ['harvest', 'trade', 'process', 'consumption']) assert.ok(natural.cropLedger.some(e => e.kind === kind));
   assert.ok(natural.crops.harvested > 0 && natural.crops.processed > 0 && natural.crops.consumed > 0);
   const city = fresh(); freeze(city); assert.doesNotThrow(() => validateAgriculture(city)); assert.equal(JSON.stringify(city), snapshot);
@@ -45,7 +48,7 @@ test('canonical resources, transition boundary, stock/value bounds and attempted
     (c: City) => { market(c).cropInventory = 49; },
     (c: City) => { market(c).cropCost++; },
     (c: City) => { market(c).productionTick = c.tick + 1; },
-    (c: City) => { c.firms.find(f => f.zone === 'C')!.cropInventory = 1; },
+    (c: City) => { c.firms.find(isRetail)!.cropInventory = 1; },
     (c: City) => { c.firms.find(f => f.zone === 'F')!.inventory = 1; },
     (c: City) => { c.firms.find(f => f.zone === 'F')!.cropCost = 1; },
   ]) rejects(mutate);
@@ -61,7 +64,7 @@ test('owner labour reserves actual eligible household capacity and does not requ
     (c: City) => { c.households.find(h => h.id === c.ownerLabor[0].householdId)!.home = null; },
     (c: City) => { const owner = c.ownerLabor[0]; c.employment.push({ householdId: owner.householdId, firmId: market(c).id, skill: owner.skill, workers: 1, rank: 'entry', occupation: 'retail' }); },
     (c: City) => { market(c).workDays[c.households[0].wallet] = 1; },
-    (c: City) => { const own = c.ownerLabor[0], h = c.households.find(h => h.id === own.householdId)!; c.employment.push({ householdId: h.id, firmId: c.firms.find(f => f.zone === 'C')!.id, skill: own.skill, workers: h.workerSkills[own.skill], rank: 'entry', occupation: 'retail' }); },
+    (c: City) => { const own = c.ownerLabor[0], h = c.households.find(h => h.id === own.householdId)!; c.employment.push({ householdId: h.id, firmId: c.firms.find(isRetail)!.id, skill: own.skill, workers: h.workerSkills[own.skill], rank: 'entry', occupation: 'retail' }); },
   ]) rejects(mutate);
 });
 
@@ -84,7 +87,7 @@ test('real owner contributions and profit draws remain valid through subsequent 
   assert.ok(ownerFinance(city, trader.id)!.withdrawAvailable >= 10_000);
   assert.equal(withdrawOwnerProfit(city, trader.id, 10_000).ok, true); validateAgriculture(city);
   for (let day = 0; day < 35; day++) { step(city); validateAgriculture(city); }
-  const startup = createCity(61025); while (!startup.firms.some(f => f.zone === 'T') && startup.tick < 360) step(startup);
+  const startup = createCity(61025); while (!startup.firms.some(f => isMarket(f)) && startup.tick < 360) step(startup);
   const stall = market(startup), h = startup.households.find(h => h.id === stall.owner!.householdId)!;
   assert.equal(ownerFinance(startup, stall.id)!.distributable, 0); assert.equal(withdrawOwnerProfit(startup, stall.id, 10_000).ok, false);
   startup.accounts[stall.wallet] -= 10_000; startup.accounts[h.wallet] += 10_000; stall.owner!.withdrawn += 10_000;
@@ -108,7 +111,7 @@ test('crop journal IDs, chronology, weighted book costs, exact money links and r
 });
 
 test('one household basket cannot be duplicated across crops and finished goods on the same day', () => {
-  rejects(c => { const e = c.cropLedger.find(e => e.kind === 'consumption')!; c.goodsLedger.push({ tick: e.tick, from: c.firms.find(f => f.zone === 'C')!.wallet, to: e.to, quantity: 1, reason: 'Household final consumption' }); });
+  rejects(c => { const e = c.cropLedger.find(e => e.kind === 'consumption')!; c.goodsLedger.push({ tick: e.tick, from: c.firms.find(isRetail)!.wallet, to: e.to, quantity: 1, reason: 'Household final consumption' }); });
   rejects(c => { const h = c.households.find(h => h.lastPurchaseTick > c.agricultureStartTick)!; h.lastPurchaseTick--; });
 });
 

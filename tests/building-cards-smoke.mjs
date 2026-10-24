@@ -4,25 +4,29 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
+import { isMarket, isRetail, createCity, step, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
+
+import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/cards-normal');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
 const hash = value => createHash('sha256').update(value).digest('hex');
-const fixture = createCity(61025); for (let day = 0; day < 29; day++) step(fixture);
+// Genuine published v4 replay retains a real retailer beside the merged commercial-L1 market.
+const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
+const fixture = deserialize(serializeV4(prior));
 const baseline = serialize(fixture); assert.deepEqual(deserialize(baseline), fixture);
 const later = deserialize(baseline); for (let day = 0; day < 30; day++) step(later);
 assert.equal(later.tick, 59); assert.deepEqual(deserialize(serialize(later)), later);
-const kinds = { R: 'house', C: 'shop', T: 'market', I: 'factory', F: 'farm' };
-const places = Object.fromEntries(Object.entries(kinds).map(([zone, kind]) => [kind, fixture.buildings.find(b => b.zone === zone)]));
+const kinds = ['house', 'shop', 'market', 'factory', 'farm'];
+const places = Object.fromEntries(kinds.map(kind => [kind, fixture.buildings.find(b => kind === 'house' ? b.zone === 'R' : fixture.firms.some(f => f.building === b.id && (kind === 'market' ? isMarket(f) : kind === 'shop' ? isRetail(f) : f.zone === (kind === 'farm' ? 'F' : 'I'))))]));
 assert.ok(Object.values(places).every(Boolean), 'Real day29 replay must contain all five building types');
-const marketFirm = fixture.firms.find(f => f.zone === 'T'), family = fixture.households.find(h => h.id === marketFirm.owner.householdId);
+const marketFirm = fixture.firms.find(f => isMarket(f)), family = fixture.households.find(h => h.id === marketFirm.owner.householdId);
 const sourceHome = fixture.buildings.find(b => b.id === family.home), otherHome = fixture.buildings.find(b => b.zone === 'R' && b.id !== sourceHome.id && fixture.households.some(h => h.home === b.id));
 assert.ok(sourceHome && otherHome && family.members > 1);
 const contributed = deserialize(baseline); assert.equal(contributeOwnerCapital(contributed, marketFirm.id, 10000).ok, true);
 const withdrawn = deserialize(serialize(contributed)); assert.equal(withdrawOwnerProfit(withdrawn, marketFirm.id, 10000).ok, true);
-const preview = { seed: 61025, tick: fixture.tick, hash: hash(baseline), laterTick: later.tick, laterHash: hash(serialize(later)), places: Object.fromEntries(Object.entries(places).map(([kind, b]) => [kind, { buildingId: b.id, cell: b.cell }])), householdId: family.id, householdSourceBuildingId: sourceHome.id, cardKinds: [...Object.values(kinds), 'household'] };
+const preview = { seed: 61025, tick: fixture.tick, hash: hash(baseline), laterTick: later.tick, laterHash: hash(serialize(later)), places: Object.fromEntries(Object.entries(places).map(([kind, b]) => [kind, { buildingId: b.id, cell: b.cell }])), householdId: family.id, householdSourceBuildingId: sourceHome.id, cardKinds: [...kinds, 'household'] };
 if (process.argv.includes('--preflight')) { console.log(JSON.stringify(preview, null, 2)); process.exit(0); }
 
 const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [], signatures = {}, providerRequests = [];
@@ -58,7 +62,7 @@ async function button(selector) {
   assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actual hit ${selector}`); await click(p.x, p.y);
 }
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
-async function load(city) { await close(); await button('#toggle-game-menu'); await until('document.querySelector("#inspector").dataset.page==="game"'); await evaluate(`localStorage.setItem('citymanager.save.v4',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
+async function load(city) { await close(); await button('#toggle-game-menu'); await until('document.querySelector("#inspector").dataset.page==="game"'); await evaluate(`localStorage.setItem('citymanager.save.v5',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
 async function cell(index, expect = true) { await close(); await button('[data-tool="select"]'); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${index})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); if (expect) await until('document.querySelector("#inspector").dataset.open==="true"'); await paints(); }
 async function place(city, b) { await cell(b.cell); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${b.id}'`); }
 async function household(city, h, source = city.buildings.find(b => b.id === h.home)) { await place(city, source); await button(`#entity-content [data-household-id="${h.id}"]`); await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${h.id}'`); }
@@ -96,12 +100,12 @@ async function card(city, kind, target) {
     await metrics({ cash: city.accounts[f.wallet], reserved, spendable: city.accounts[f.wallet] - reserved, stock: f.inventory, workers: firmWorkerCount(city, f.id), profit: f.lastMonthProfit });
     assert.equal(await evaluate('document.querySelector("#entity-content").dataset.wallet'), f.wallet);
     assert.equal(await evaluate('Number(document.querySelector("#entity-content [data-context-metric=workers]").dataset.capacity)'), firmCapacity(target));
-    if (f.zone !== 'C') await metrics({ 'crop-stock': f.cropInventory, 'crop-cost': f.cropCost });
+    if (!isRetail(f)) await metrics({ 'crop-stock': f.cropInventory, 'crop-cost': f.cropCost });
     if (f.zone === 'F') await metrics({ fertility: city.resources.fertility[target.cell], 'harvest-today': city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'harvest' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0) });
     if (f.zone === 'I') await metrics({ 'recipe-input': 2, 'recipe-output': 8 });
-    if (f.zone === 'T') await metrics({ 'owner-household': f.owner.householdId, 'owner-capital-contributed': f.owner.capitalContributed, 'owner-withdrawn': f.owner.withdrawn, 'owner-tax': f.owner.taxPaid });
-    if (f.zone === 'C' || f.zone === 'T') for (const direction of ['buy', 'sell']) {
-      const trade = observedTrade(city, f.wallet, f.zone === 'T', direction), prefix = direction === 'buy' ? 'purchase' : 'sales', qty = `${f.zone === 'T' ? 'crops' : 'goods'}-${direction === 'buy' ? 'purchased' : 'sold'}`;
+    if (isMarket(f)) await metrics({ 'owner-household': f.owner.householdId, 'owner-capital-contributed': f.owner.capitalContributed, 'owner-withdrawn': f.owner.withdrawn, 'owner-tax': f.owner.taxPaid });
+    if (f.zone === 'C') for (const direction of ['buy', 'sell']) {
+      const trade = observedTrade(city, f.wallet, isMarket(f), direction), prefix = direction === 'buy' ? 'purchase' : 'sales', qty = `${isMarket(f) ? 'crops' : 'goods'}-${direction === 'buy' ? 'purchased' : 'sold'}`;
       assert.equal(dom.stats[qty]?.value, String(trade.quantity), `${kind} actual ${qty}`); assert.equal(dom.stats[`${prefix}-cash`]?.value, String(trade.cash), `${kind} paired ${prefix} cash`);
       assert.deepEqual(dom.stats[`${prefix}-price`], { value: String(trade.unit), status: trade.status }, `${kind} paired-journal unit price; missing/fractional values are not invented`);
     }

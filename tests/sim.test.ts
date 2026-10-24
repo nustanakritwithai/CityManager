@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SIZE, GATEWAY, WAGES, MONTH, createCity, step, summary, connectedRoads, access, roadPath, buildRoad, zoneCell, bulldoze, explainCell, serialize, deserialize, employmentForHousehold, firmWorkerCount } from '../src/sim.ts';
+import { SIZE, GATEWAY, WAGES, MONTH, createCity, step, summary, connectedRoads, access, roadPath, buildRoad, zoneCell, bulldoze, explainCell, serialize, deserialize, employmentForHousehold, firmWorkerCount, isMarket, isRetail } from '../src/sim.ts';
 
+import { createCity as createV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
+const importedRetailCity = (seed: number, days: number) => { const old = createV4(seed); for (let day = 0; day < days; day++) stepV4(old); return deserialize(serializeV4(old)); };
 const advance = (c: ReturnType<typeof createCity>, n: number) => { for (let i = 0; i < n; i++) step(c); return c; };
 test('seeded daily ticks and save continuation are deterministic', () => {
   const a = advance(createCity(42), 90), b = advance(createCity(42), 90);
@@ -32,10 +34,10 @@ test('individual employment, stock, purchases and monthly settlements reconcile'
   const c = advance(createCity(42), 180), s = summary(c);
   assert.ok(s.population >= 2); assert.ok(s.employed > 0);
   assert.ok(c.ledger.some(e => e.reason === 'Monthly wages'));
-  assert.ok(c.ledger.some(e => e.reason.includes('purchase') && e.from.startsWith('household:') && e.to.startsWith('firm:')));
+  assert.ok(c.ledger.some(e => (e.reason.includes('purchase') || e.reason.startsWith('Fresh crop basket #')) && e.from.startsWith('household:') && e.to.startsWith('firm:')));
   assert.ok(c.ledger.some(e => e.reason === 'Monthly household rent'));
   assert.ok(c.ledger.some(e => e.reason === 'Monthly household wage tax'));
-  assert.ok(c.goodsLedger.some(e => e.reason === 'Household final consumption'));
+  assert.ok(c.goodsLedger.some(e => e.reason === 'Household final consumption') || c.cropLedger.some(e => e.kind === 'consumption'));
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
   assert.ok(Object.entries(c.accounts).every(([k, v]) => Number.isSafeInteger(v) && (k === 'outside' || v >= 0)));
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((a, f) => a + f.inventory, 0));
@@ -85,7 +87,7 @@ test('monthly wages pay actual days worked and a cash-starved shop protects earn
   assert.ok(payments.some(e => e.amount < WAGES.I));
   assert.ok(c.firms.every(f => Object.keys(f.workDays).length === 0));
 
-  const stressed = advance(createCity(42), 140), shop = stressed.firms.find(f => f.zone === 'C')!;
+  const stressed = importedRetailCity(42, 140), shop = stressed.firms.find(isRetail)!;
   const owed = () => Object.values(shop.workDays).reduce((n, days) => n + days * WAGES.C / MONTH, 0);
   assert.ok(firmWorkerCount(stressed, shop.id) > 0);
   // A controlled liquidity shock: no purchasing household can replenish the shop's cash.
@@ -124,9 +126,9 @@ test('UI seed 61025 and varied household profiles reach staffed shops and actual
   for (const seed of [61025, 42, 1, 2, 3, 8, 17, 91, 20261023]) {
     const c = advance(createCity(seed), 180);
     assert.ok(c.firms.some(f => f.zone === 'C' && firmWorkerCount(c, f.id) > 0), `seed ${seed}: staffed shop by day180`);
-    assert.ok(c.ledger.some(e => e.reason.includes('purchase') && e.from.startsWith('household:')), `seed ${seed}: real purchases by day180`);
+    assert.ok(c.ledger.some(e => (e.reason.includes('purchase') || e.reason.startsWith('Fresh crop basket #')) && e.from.startsWith('household:')), `seed ${seed}: real purchases by day180`);
     assert.ok(c.ledger.some(e => e.reason === 'Monthly wages'), `seed ${seed}: real monthly wages by day180`);
-    assert.ok(c.ledger.some(e => e.tick > 150 && e.reason.includes('purchase')), `seed ${seed}: purchases continue at day180`);
+    assert.ok(c.ledger.some(e => e.tick > 150 && (e.reason.includes('purchase') || e.reason.startsWith('Fresh crop basket #'))), `seed ${seed}: purchases continue at day180`);
     assert.doesNotThrow(() => deserialize(serialize(c)));
   }
 });
