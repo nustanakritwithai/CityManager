@@ -216,3 +216,10 @@
 .cx-content .cx-employment-row span{font-size:calc(12 * var(--reader-unit,1px));line-height:1.4;color:#b5cec1}
 .inspector .cx-content .cx-legacy-assumption{font-size:calc(12 * var(--reader-unit,1px));line-height:1.45;padding:calc(6 * var(--reader-unit,1px));margin:0 0 calc(6 * var(--reader-unit,1px));border-left:calc(2 * var(--reader-unit,1px)) solid #e1be74;color:#e8cf9f;background:#e1be740c}
 .cx-content .cx-link-copy .cx-legacy-tag{font-size:calc(11 * var(--reader-unit,1px));line-height:1.35;color:#e8cf9f}
+.cx-content .cx-link-copy .cx-assigned-role{font-size:calc(12 * var(--reader-unit,1px));line-height:1.4;color:#c1d8cd}
+.cx-content .cx-skill-list{display:grid;gap:calc(3 * var(--reader-unit,1px))}
+.cx-content .cx-skill-row{display:grid;gap:calc(1 * var(--reader-unit,1px));padding:calc(5 * var(--reader-unit,1px)) calc(6 * var(--reader-unit,1px));border-bottom:1px solid #c1dbca1a;min-width:0}
+.cx-content .cx-skill-heading{display:flex;align-items:baseline;justify-content:space-between;gap:calc(6 * var(--reader-unit,1px));font-size:calc(13 * var(--reader-unit,1px));line-height:1.4}
+.cx-content .cx-skill-heading strong{font-weight:600;color:#dce8df}
+.cx-content .cx-skill-row>span{font-size:calc(12 * var(--reader-unit,1px));line-height:1.45;color:#b5cec1;overflow-wrap:anywhere}
+.cx-content .cx-skill-list+.cx-legacy-assumption{margin-top:calc(5 * var(--reader-unit,1px));margin-bottom:0}

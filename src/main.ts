@@ -202,19 +202,20 @@ async function boot() {
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
   $('#save').addEventListener('click', () => {
-    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); status(`บันทึกรุ่น 2 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
+    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); status(`บันทึกรุ่น 3 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
   });
   const loadStored = (source: SaveSource) => {
     try {
-      const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืน v1' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
-      const loaded = deserialize(saved.raw), legacy = JSON.parse(saved.raw).version === 1;
+      const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
+      const loaded = deserialize(saved.raw), oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion === 1 || oldVersion === 2;
       city = loaded; importedLegacyRaw = legacy ? saved.raw : null;
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
-      status(legacy ? `นำเข้า v1 วันที่ ${city.tick} แล้ว · สมาชิกเป็นสมมติฐานขั้นต่ำจากเซฟเดิม · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
+      status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ทักษะเดิมสมมติเป็นแรงงานทั่วไป${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
     } catch (error) { status(`โหลดไม่สำเร็จ เมืองปัจจุบันยังอยู่ · ${error instanceof Error ? error.message : 'ข้อมูลบันทึกไม่ถูกต้อง'}`); }
   };
   $('#load').addEventListener('click', () => loadStored('current'));
   $('#load-legacy').addEventListener('click', () => loadStored('legacy'));
+  $('#load-v2').addEventListener('click', () => loadStored('household'));
   $('#load-backup').addEventListener('click', () => loadStored('backup'));
   $('#new-city').addEventListener('click', () => {
     const dialog = document.createElement('dialog');

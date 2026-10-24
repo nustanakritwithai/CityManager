@@ -1,6 +1,6 @@
 import './context-panels.css';
-import { MONTH, WAGES, access, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy, explainMigration, type City, type Household, type Firm, type Building } from './sim.ts';
-import { resolvePlace, relatedFlows, cityOverview } from './context-data.ts';
+import { MONTH, WAGES, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, type City, type Household, type Firm, type Building } from './sim.ts';
+import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, type FlowKind, type FlowRow } from './inspector-data.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
@@ -56,15 +56,6 @@ function scopeOf(city: City, selection: ContextSelection): string {
   const household = city.households.find(value => value.id === selection.id), source = city.buildings.find(value => value.id === selection.sourceBuildingId && value.cell === selection.sourceCell);
   return `household:${selection.id}:${household ? household.home ?? 'homeless' : 'missing'}:${selection.sourceBuildingId}:${selection.sourceCell}:${source ? 'source' : 'missing-source'}`;
 }
-function contextRevision(city: City): string {
-  // Moves, composition edits and labor reallocations may happen without a tick.
-  // Canonical aggregate records, rather than person agents, invalidate the view.
-  return JSON.stringify([city.tick, city.ledger.length, city.goodsLedger.length, city.utilities, city.migration,
-    city.households.map(h => [h.id, h.home, h.members, h.workforce, h.dependents, h.profile, h.origin, h.needs, h.lastPurchaseTick, city.accounts[h.wallet]]),
-    city.employment.map(a => [a.householdId, a.firmId, a.occupation, a.rank, a.workers]),
-    city.buildings.map(b => [b.id, b.cell, b.zone, b.level, b.age, 'housingType' in b ? b.housingType : null]),
-    city.firms.map(f => [f.id, f.building, f.inventory, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
-}
 function heldTargetsExist(city: City): boolean {
   return [...heldPointers.values(), ...heldKeys.values()].every(target => {
     if (!target.isConnected) return false;
@@ -111,12 +102,17 @@ function empty(title: string, description: string): HTMLElement {
 function purchaseText(city: City, household: Household): string {
   return household.lastPurchaseTick < 0 ? 'ยังไม่เคยซื้อ' : household.lastPurchaseTick === city.tick ? 'วันนี้' : `${city.tick - household.lastPurchaseTick} วันก่อน`;
 }
-function householdButton(city: City, household: Household, source: Building, onHousehold: HouseholdAction, assignedWorkers?: number): HTMLButtonElement {
+function householdButton(city: City, household: Household, source: Building, onHousehold: HouseholdAction, assignedWorkers?: number, assignments: ReturnType<typeof employmentForHousehold> = []): HTMLButtonElement {
   const button = el('button', 'cx-household-link'); button.type = 'button'; Object.assign(button.dataset, { householdId: String(household.id), sourceBuildingId: String(source.id), sourceCell: String(source.cell), contextFocus: `household:${household.id}` });
   Object.assign(button.dataset, { members: String(household.members), workforce: String(household.workforce), dependents: String(household.dependents), employedWorkers: String(householdWorkerCount(city, household.id)) });
   if (assignedWorkers !== undefined) button.dataset.assignedWorkers = String(assignedWorkers);
-  const labor = assignedWorkers === undefined ? `ทำงาน ${householdWorkerCount(city, household.id)}/${household.workforce}` : `จัดสรรที่นี่ ${assignedWorkers} ตำแหน่ง`;
-  const art = el('span', 'cx-person-symbol'), copy = el('span', 'cx-link-copy'); art.append(symbol('household')); copy.append(el('strong', '', `ครัวเรือน #${household.id} · ${household.members} คน`), el('span', '', `${labor} · เงิน ${cash(city.accounts[household.wallet] ?? 0)}`));
+  const labor = assignedWorkers === undefined ? `ทำงาน ${householdWorkerCount(city, household.id)}/${household.workforce} คน` : `จากแรงงานในบ้าน ${household.workforce} คน`;
+  const art = el('span', 'cx-person-symbol'), copy = el('span', 'cx-link-copy'); art.append(symbol('household'));
+  copy.append(el('strong', '', assignedWorkers === undefined ? `ครัวเรือน #${household.id} · ${household.members} คน` : `รับแรงงาน ${assignedWorkers} คน · ครัวเรือน #${household.id}`), el('span', '', `${labor} · เงินร่วม ${cash(city.accounts[household.wallet] ?? 0)}`));
+  for (const allocation of assignments) {
+    const role = el('span', 'cx-assigned-role', `${allocation.occupation === 'manufacturing' ? 'งานผลิต' : 'งานค้าปลีก'} · ${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน`);
+    Object.assign(role.dataset, { skill: allocation.skill, occupation: allocation.occupation, workers: String(allocation.workers) }); copy.append(role);
+  }
   if (household.origin === 'legacy-v1') copy.append(el('small', 'cx-legacy-tag', 'สมาชิกจาก v1: สมมติขั้นต่ำ'));
   button.append(art, copy, el('span', 'cx-link-arrow', '→')); button.setAttribute('aria-label', `ดูข้อมูลครัวเรือน #${household.id}`); button.addEventListener('click', () => onHousehold(household.id, source.id, source.cell)); return button;
 }
@@ -170,29 +166,39 @@ function renderHouse(city: City, building: Building, households: Household[], on
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
   const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * WAGES[firm.zone] / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firm.zone === 'I' ? building.level + 3 : building.level;
-  const allocations = employmentForFirm(city, firm.id), workers = firmWorkerCount(city, firm.id), householdIds = [...new Set(allocations.map(allocation => allocation.householdId))];
+  const labor = firmLabor(city, firm.id)!, workers = labor.workers;
   const lastSettlement = city.tick - city.tick % MONTH, hasClosedMonth = lastSettlement > 0 && city.tick - building.age < lastSettlement;
-  const employees = section('ครัวเรือนที่ส่งแรงงาน', `${workers} ตำแหน่ง · ${householdIds.length} ครัวเรือน`), list = el('div', 'cx-household-list');
-  for (const id of householdIds) {
-    const household = city.households.find(value => value.id === id), assigned = allocations.filter(allocation => allocation.householdId === id).reduce((sum, allocation) => sum + allocation.workers, 0);
-    if (household) list.append(householdButton(city, household, building, onHousehold, assigned));
-    else list.append(el('p', 'cx-detail-note', `ไม่พบครัวเรือน #${id} ในการจัดสรรแรงงาน`));
+  const employees = section('แรงงานที่รับจากแต่ละครัวเรือน', `${workers} คน · ${labor.householdCount} บัญชีครัวเรือน`), list = el('div', 'cx-household-list');
+  for (const group of labor.households) {
+    const household = city.households.find(value => value.id === group.householdId);
+    if (household) list.append(householdButton(city, household, building, onHousehold, group.workers, group.allocations));
+    else list.append(el('p', 'cx-detail-note', `ไม่พบครัวเรือน #${group.householdId} ในการจัดสรรแรงงาน`));
   }
-  if (!householdIds.length) list.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานจัดสรรให้กิจการนี้'));
+  if (!labor.householdCount) list.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานที่มีความสามารถตรงกับงานและสำรองค่าจ้างได้'));
   employees.append(list);
   const meanings = facts(`firm:${firm.id}`, 'เงินสำรอง แรงงาน และกำไรรอบบัญชี',
-    el('p', '', 'เงินในกระเป๋ารวมค่าจ้างที่ต้องสำรองไว้แล้ว ยอดใช้จ่ายได้จึงหักเงินสำรองออกก่อน ค่าจ้างสะสมตามวัน-แรงงานจริง หนึ่งครัวเรือนอาจส่งแรงงานมากกว่าหนึ่งตำแหน่ง'),
+    el('p', '', 'เงินในกระเป๋ารวมค่าจ้างที่ต้องสำรองไว้แล้ว ยอดใช้จ่ายได้จึงหักเงินสำรองออกก่อน จ้างเป็นจำนวนแรงงานที่มีความสามารถตรงกับงาน ไม่ได้รับครัวเรือนทั้งบ้าน ผู้พึ่งพิงไม่ถูกนับเป็นแรงงาน ค่าจ้างสะสมตามวัน-แรงงานจริงและจ่ายเข้าบัญชีร่วมของครัวเรือน'),
     el('p', '', hasClosedMonth ? `กำไรก่อนภาษีของรอบบัญชีวันที่ ${Math.max(1, lastSettlement - MONTH + 1)}–${lastSettlement} รวมเฉพาะวันที่บริษัทดำเนินงาน ไม่ใช่กำไรที่เพิ่งรับในเดือนนี้` : 'ยังไม่มีเดือนที่ปิดบัญชี จึงยังไม่มีกำไรของรอบบัญชีก่อนหน้า'),
     el('p', '', `บริษัท #${firm.id} · อาคาร #${building.id} · บัญชี ${firm.wallet}`));
-  const workerMetric = capacityMetric('workers', 'แรงงาน / ตำแหน่ง', workers, capacity, 'ตำแหน่ง');
+  const workerMetric = capacityMetric('workers', 'แรงงานทำงาน / รับได้', workers, capacity, 'คน');
   return [el('p', 'cx-context-meta', `บริษัท #${firm.id} · ${firm.wallet}`), status(city, building.cell), metrics([
-    metric('cash', 'เงินในกระเป๋า', cash(wallet), wallet, true), metric('reserved', 'สำรองค่าจ้าง', cash(reserved), reserved, true), metric('spendable', 'ใช้จ่ายได้', cash(spendable), spendable, true), metric('stock', 'สินค้าคงคลัง', `${count(firm.inventory)} หน่วย`, firm.inventory), workerMetric, metric('household-count', 'ครัวเรือนที่ส่งแรงงาน', count(householdIds.length), householdIds.length), metric('profit', 'กำไรรอบก่อนภาษี', cash(firm.lastMonthProfit, true), firm.lastMonthProfit, true)
+    metric('cash', 'เงินในกระเป๋า', cash(wallet), wallet, true), metric('reserved', 'สำรองค่าจ้าง', cash(reserved), reserved, true), metric('spendable', 'ใช้จ่ายได้', cash(spendable), spendable, true), metric('stock', 'สินค้าคงคลัง', `${count(firm.inventory)} หน่วย`, firm.inventory), workerMetric, metric('household-count', 'บัญชีครัวเรือนของแรงงาน', count(labor.householdCount), labor.householdCount), metric('profit', 'กำไรรอบก่อนภาษี', cash(firm.lastMonthProfit, true), firm.lastMonthProfit, true)
   ]), employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)];
 }
 function employmentRow(city: City, allocation: ReturnType<typeof employmentForHousehold>[number]): HTMLElement {
-  const row = el('div', 'cx-employment-row'); Object.assign(row.dataset, { householdId: String(allocation.householdId), firmId: String(allocation.firmId), workers: String(allocation.workers), occupation: allocation.occupation, rank: allocation.rank });
+  const row = el('div', 'cx-employment-row'); Object.assign(row.dataset, { householdId: String(allocation.householdId), firmId: String(allocation.firmId), workers: String(allocation.workers), occupation: allocation.occupation, rank: allocation.rank, skill: allocation.skill });
   const firm = city.firms.find(value => value.id === allocation.firmId), occupation = allocation.occupation === 'manufacturing' ? 'งานผลิต' : allocation.occupation === 'retail' ? 'งานค้าปลีก' : allocation.occupation;
-  row.append(el('strong', '', `${firm?.zone === 'I' ? 'โรงงาน' : firm?.zone === 'C' ? 'ร้านค้า' : 'กิจการ'} · บริษัท #${allocation.firmId}`), el('span', '', `${allocation.workers} ตำแหน่ง · ${occupation} · ${allocation.rank === 'entry' ? 'ระดับเริ่มต้น' : allocation.rank}`)); return row;
+  row.append(el('strong', '', `${allocation.workers} คน → ${firm?.zone === 'I' ? 'โรงงาน' : firm?.zone === 'C' ? 'ร้านค้า' : 'กิจการ'} #${allocation.firmId}`), el('span', '', `${occupation} · ทักษะ${WORKER_SKILL_LABELS[allocation.skill]} · ${allocation.rank === 'entry' ? 'ระดับเริ่มต้น' : allocation.rank}`)); return row;
+}
+function renderWorkerSkills(city: City, household: Household): HTMLElement {
+  const data = householdLabor(city, household.id)!, body = section('กลุ่มความสามารถของแรงงาน', `${data.workforce} คน · ไม่รวมผู้พึ่งพิง`), list = el('div', 'cx-skill-list');
+  for (const skill of data.skills) {
+    const row = el('div', 'cx-skill-row'); Object.assign(row.dataset, { skill: skill.skill, total: String(skill.total), employed: String(skill.employed), unemployed: String(skill.unemployed) });
+    const heading = el('div', 'cx-skill-heading'); heading.append(el('strong', '', WORKER_SKILL_LABELS[skill.skill]), el('span', '', `${skill.total} คน`));
+    row.append(heading, el('span', '', `ทำงาน ${skill.employed} · ว่าง ${skill.unemployed} · ${WORKER_SKILL_ROLES[skill.skill]}`)); list.append(row);
+  }
+  const note = el('p', data.skillSource === 'legacy-assumed' ? 'cx-legacy-assumption' : 'cx-detail-note', data.skillSource === 'legacy-assumed' ? 'เซฟเดิมไม่มีทักษะ จึงสมมติให้แรงงานเดิมเป็นกลุ่มทั่วไป ไม่ใช่ประวัติความสามารถที่เคยเก็บไว้' : 'กลุ่มความสามารถเป็นพารามิเตอร์รับผู้ย้ายเข้าในเกม ไม่ใช่ข้อมูลการศึกษาหรือรายชื่อบุคคล');
+  note.dataset.skillSource = data.skillSource; body.append(list, note); return body;
 }
 function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind: 'place' } | null>): HTMLElement[] {
   const household = city.households.find(value => value.id === selected.id);
@@ -203,17 +209,18 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
   const output: HTMLElement[] = [el('p', 'cx-context-meta', `ครัวเรือน #${household.id} · ${household.wallet}`)];
   const assumed = legacyAssumption(household); if (assumed) output.push(assumed);
   output.push(metrics([
-    metric('cash', 'เงินในกระเป๋า', cash(wallet), wallet, true), metric('members', 'สมาชิกครัวเรือน', `${household.members} คน`, household.members),
-    metric('workforce', 'กำลังแรงงาน', `${household.workforce} คน`, household.workforce), metric('dependents', 'ผู้พึ่งพิง', `${household.dependents} คน`, household.dependents),
-    metric('employed', 'แรงงานที่จัดสรร', `${employed} ตำแหน่ง`, employed), metric('unemployed', 'แรงงานว่าง', `${Math.max(0, household.workforce - employed)} คน`, Math.max(0, household.workforce - employed)),
+    metric('cash', 'เงินร่วมครัวเรือน', cash(wallet), wallet, true), metric('members', 'สมาชิกครัวเรือน', `${household.members} คน`, household.members),
+    metric('workforce', 'แรงงานที่ทำงานได้', `${household.workforce} คน`, household.workforce), metric('dependents', 'ผู้พึ่งพิง', `${household.dependents} คน`, household.dependents),
+    metric('employed', 'แรงงานที่ทำงาน', `${employed} คน`, employed), metric('unemployed', 'แรงงานว่าง', `${Math.max(0, household.workforce - employed)} คน`, Math.max(0, household.workforce - employed)),
     metric('employers', 'สถานประกอบการ', `${employers} แห่ง`, employers), metric('home', 'บ้านพักปัจจุบัน', household.home === null ? 'ยังไม่มีที่พัก' : home ? `อาคาร #${home.id}` : 'ไม่พบอาคาร', household.home === null ? 'null' : household.home),
     metric('needs', 'ยังไม่ได้ซื้อสินค้า', `${household.needs} วัน`, household.needs), metric('last-purchase', 'ซื้อครั้งล่าสุด', purchaseText(city, household), household.lastPurchaseTick)
   ]));
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
-  const jobs = section('การจัดสรรแรงงาน', `${employed} / ${household.workforce} ตำแหน่ง · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
-  rows.append(...(allocations.length ? allocations.map(allocation => employmentRow(city, allocation)) : [el('p', 'cx-detail-note', 'ยังไม่มีการจัดสรรแรงงานให้กิจการ')])); jobs.append(rows); output.push(jobs);
+  const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
+  rows.append(...(allocations.length ? allocations.map(allocation => employmentRow(city, allocation)) : [el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง')])); jobs.append(rows); output.push(jobs, renderWorkerSkills(city, household));
   output.push(facts(`household:${household.id}`, 'องค์ประกอบครัวเรือน บ้าน และการซื้อ', origin,
     el('p', '', `สมาชิก ${household.members} = กำลังแรงงาน ${household.workforce} + ผู้พึ่งพิง ${household.dependents} คน เป็นจำนวนรวมระดับครัวเรือน ไม่มีรายชื่อหรือตัวแทนรายบุคคล`),
+    el('p', '', 'แต่ละกลุ่มความสามารถนับแรงงานคนละชุด ไม่ซ้ำกัน สมาชิกที่ทำงานได้อาจแยกกันไปหลายกิจการ ผู้พึ่งพิงไม่เข้าตลาดแรงงาน และรายได้จากทุกกิจการเข้าบัญชีร่วมของครัวเรือน งานต้นแบบยังมีเพียงระดับเริ่มต้น ไม่มีการจำลองการศึกษา เลื่อนตำแหน่ง หรือการฝึกทักษะ'),
     el('p', '', household.home === null ? 'การรื้อบ้านทำให้รอที่พักใหม่ ครัวเรือนและเงินออมยังอยู่ ระบบจัดหาที่พักให้ผู้ถูกย้ายออกจากบ้านก่อนรับผู้ย้ายเข้าใหม่' : 'การย้ายที่พักคง ID กระเป๋าเงิน สมาชิก และค่าจ้างที่มีสิทธิ์รับเดิม ไม่ใช่การรับครัวเรือนใหม่'),
     el('p', '', household.lastPurchaseTick === city.tick ? 'วันนี้ครัวเรือนนี้ซื้อสินค้า 1 หน่วยแล้ว ตะกร้าสินค้าต้นแบบยังเป็น 1 หน่วยต่อครัวเรือนต่อวัน ไม่ได้คูณตามจำนวนสมาชิก' : 'ตะกร้าสินค้าต้นแบบยังเป็น 1 หน่วยต่อครัวเรือนต่อวัน ต้องมีเงินและเข้าถึงร้านค้าที่มีแรงงานกับสินค้า จำนวนสมาชิกไม่ได้เพิ่มยอดซื้อย้อนหลัง')),
     activity(city, 'money', household.wallet, `ครัวเรือน #${household.id}`), activity(city, 'goods', household.wallet, `ครัวเรือน #${household.id}`)); return output;
@@ -258,7 +265,7 @@ export function renderCityOverview(city: City): void {
   stocks.append(metrics([
     metric('population', 'ประชากร (สมาชิก)', `${count(data.population)} คน`, data.population), metric('households', 'ครัวเรือน', count(data.households), data.households),
     metric('workforce', 'กำลังแรงงาน', `${count(data.workforce)} คน`, data.workforce), metric('dependents', 'ผู้พึ่งพิง', `${count(data.dependents)} คน`, data.dependents),
-    metric('employed', 'แรงงานที่จัดสรร', `${count(data.employed)} ตำแหน่ง`, data.employed), metric('unemployed', 'แรงงานว่าง', `${count(data.unemployed)} คน`, data.unemployed),
+    metric('employed', 'แรงงานที่ทำงาน', `${count(data.employed)} คน`, data.employed), metric('unemployed', 'แรงงานว่าง', `${count(data.unemployed)} คน`, data.unemployed),
     metric('homeless', 'ครัวเรือนรอที่พัก', count(data.homeless), data.homeless), metric('homeless-persons', 'สมาชิกที่รอที่พัก', `${count(data.homelessPersons)} คน`, data.homelessPersons),
     metric('jobs', 'ตำแหน่งงาน', count(data.jobs), data.jobs), metric('firms', 'สถานประกอบการ', count(data.firms), data.firms),
     metric('treasury', 'คลังเมืองตอนนี้', cash(data.treasury), data.treasury, true), metric('inventory', 'สินค้าคงคลังตอนนี้', `${count(data.inventory)} หน่วย`, data.inventory)

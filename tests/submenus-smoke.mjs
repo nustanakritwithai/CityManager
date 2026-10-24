@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {deserialize,serialize} from '../src/sim.ts';
 const legacyRaw=await readFile(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),legacy=JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const fixture=deserialize(legacyRaw),fixtureJson=serialize(fixture);assert.equal(fixture.version,2);
+const fixture=deserialize(legacyRaw),fixtureJson=serialize(fixture);assert.equal(fixture.version,3);
 for(const key of ['accounts','ledger','goodsLedger','goods'])assert.deepEqual(fixture[key],legacy[key]);
 for(const key of ['seed','rng','tick','nextId'])assert.equal(fixture[key],legacy[key]);
 const output=resolve('.test-output'), shots=resolve(process.env.CITYMANAGER_SCREENSHOT_DIR||'docs/submenu-preview');
@@ -44,7 +44,7 @@ try{
  if(process.env.CITYMANAGER_BLOCK_MODELS==='1')await send('Fetch.enable',{patterns:[{urlPattern:'*kenney-city/models/*.glb',requestStage:'Request'}]});
  await send('Page.navigate',{url});await until('!!window.cityManager');await until('window.cityManager.visuals().ready');await button('#pause');
  const initial=await state();assert.equal(initial.goodsLedger.length,0);await open('#goods-section');assert.equal(await evaluate('!!document.querySelector("#goods-ledger .sm-empty")'),true);await assertLayout();await screenshot('phone-goods-empty.png');assert.deepEqual(await state(),initial);checks.push('Empty goods state is explicit and does not mutate the city');
- await button('#close-inspector');await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(fixtureJson)})`);await button('#load');assert.deepEqual(await state(),fixture);await button('#close-inspector');const baseline=await state();
+ await button('#close-inspector');await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v3',${JSON.stringify(fixtureJson)})`);await button('#load');assert.deepEqual(await state(),fixture);await button('#close-inspector');const baseline=await state();
  const home=baseline.buildings.find(b=>b.zone==='R'),homePoint=await evaluate(`window.cityManager.cellScreen(${home.cell})`);assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`),'city-canvas');await click(homePoint.x,homePoint.y);
  for(const [kind,section,root,journal,initialCount]of[['money','#money-section','#ledger',baseline.ledger,12],['goods','#goods-section','#goods-ledger',baseline.goodsLedger,10]]){
   await open(section);await assertLayout();let actual=await rows(kind);assert.equal(actual.length,Math.min(initialCount,journal.length));assertRows(actual,journal,kind);assert.match(await evaluate(`document.querySelector('${root} .sm-scope').textContent`),/ข้อมูลทั้งเมือง.*เรียงจากรายการล่าสุด/);await screenshot(`phone-${kind}.png`);

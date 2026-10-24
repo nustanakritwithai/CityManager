@@ -43,6 +43,9 @@ jobs:
       - name: Test deterministic simulation
         run: npm test
 
+      - name: Verify preserved advisor contract offline
+        run: npm run test:advisor
+
       - name: Verify admitted asset integrity
         run: npm run assets:verify
 
@@ -73,6 +76,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI acceptance failed with exit code $LASTEXITCODE." }
             npm run test:population
             if ($LASTEXITCODE -ne 0) { throw "Household and housing acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:worker
+            if ($LASTEXITCODE -ne 0) { throw "Worker capability acceptance failed with exit code $LASTEXITCODE." }
             $env:CITYMANAGER_BLOCK_MODELS = '1'
             $env:CITYMANAGER_SCREENSHOT_DIR = '.test-output/fallback'
             npm run test:browser
@@ -85,8 +90,32 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI fallback acceptance failed with exit code $LASTEXITCODE." }
             npm run test:population
             if ($LASTEXITCODE -ne 0) { throw "Household and housing fallback acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:worker
+            if ($LASTEXITCODE -ne 0) { throw "Worker capability fallback acceptance failed with exit code $LASTEXITCODE." }
           } finally {
             Stop-Process -Id $previewProcess.Id -ErrorAction SilentlyContinue
+          }
+
+      - name: Verify preserved signal GUI without provider calls
+        run: |
+          $env:VITE_CITY_SIGNALS = 'false'
+          $env:VITE_CITY_ADVISOR_ONLINE = 'false'
+          node node_modules/vite/bin/vite.js build --outDir .test-output/signals-offline-dist
+          if ($LASTEXITCODE -ne 0) { throw 'Offline signal build failed.' }
+          $env:CITYMANAGER_SIGNALS_URL = 'http://127.0.0.1:4187/CityManager/'
+          $env:CITYMANAGER_SIGNALS_SCREENSHOT_DIR = '.test-output/signals'
+          $signalsPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--outDir', '.test-output/signals-offline-dist', '--host', '127.0.0.1', '--port', '4187', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/signals-preview.log -RedirectStandardError .test-output/signals-preview-error.log
+          try {
+            $signalsReady = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri $env:CITYMANAGER_SIGNALS_URL -TimeoutSec 2).StatusCode -eq 200) { $signalsReady = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $signalsReady) { throw 'Offline signal preview did not start.' }
+            npm run test:signals
+            if ($LASTEXITCODE -ne 0) { throw 'Preserved signal GUI acceptance failed.' }
+          } finally {
+            Stop-Process -Id $signalsPreview.Id -ErrorAction SilentlyContinue
           }
 
       - name: Read existing Pages metadata

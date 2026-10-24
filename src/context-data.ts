@@ -1,5 +1,6 @@
 import { access, MONTH, summary, housingCapacity, homeOccupancy } from './sim.ts';
 import type { Building, City, Firm, Household } from './sim.ts';
+import type { EmploymentAllocation, WorkerSkill } from './labor.ts';
 import { flowRows } from './inspector-data.ts';
 import type { FlowKind, FlowRow } from './inspector-data.ts';
 
@@ -9,6 +10,51 @@ export type ResolvedPlace = {
   households: Household[];
   firm: Firm | null;
 };
+
+export const WORKER_SKILL_LABELS: Readonly<Record<WorkerSkill, string>> = Object.freeze({ general: 'ทั่วไป', manufacturing: 'การผลิต', retail: 'ค้าปลีก' });
+export const WORKER_SKILL_ROLES: Readonly<Record<WorkerSkill, string>> = Object.freeze({ general: 'งานผลิต / งานค้าปลีก', manufacturing: 'งานผลิต', retail: 'งานค้าปลีก' });
+export type SkillWorkforce = { skill: WorkerSkill; total: number; employed: number; unemployed: number };
+
+/** Disjoint worker pools; neither dependents nor whole-family counts are jobs. */
+export function householdLabor(city: City, id: number): {
+  householdId: number; workforce: number; employed: number; unemployed: number;
+  employers: number; skillSource: Household['skillSource'];
+  skills: SkillWorkforce[]; allocations: EmploymentAllocation[];
+} | null {
+  const household = city.households.find(value => value.id === id);
+  if (!household) return null;
+  const allocations = city.employment.filter(value => value.householdId === id).map(value => ({ ...value }));
+  const skills = (['general', 'manufacturing', 'retail'] as const).map(skill => {
+    const total = household.workerSkills[skill], employed = allocations.filter(value => value.skill === skill).reduce((sum, value) => sum + value.workers, 0);
+    return { skill, total, employed, unemployed: total - employed };
+  });
+  const employed = allocations.reduce((sum, value) => sum + value.workers, 0);
+  return { householdId: id, workforce: household.workforce, employed, unemployed: household.workforce - employed,
+    employers: new Set(allocations.map(value => value.firmId)).size, skillSource: household.skillSource, skills, allocations };
+}
+
+/** Group this establishment's workers by their shared household account once. */
+export function firmLabor(city: City, id: number): {
+  firmId: number; workers: number; householdCount: number;
+  households: { householdId: number; workers: number; allocations: EmploymentAllocation[] }[];
+} | null {
+  if (!city.firms.some(value => value.id === id)) return null;
+  const own = city.employment.filter(value => value.firmId === id), groups = new Map<number, EmploymentAllocation[]>();
+  for (const allocation of own) {
+    const rows = groups.get(allocation.householdId) ?? []; rows.push({ ...allocation }); groups.set(allocation.householdId, rows);
+  }
+  const households = [...groups].map(([householdId, allocations]) => ({ householdId, workers: allocations.reduce((sum, value) => sum + value.workers, 0), allocations }));
+  return { firmId: id, workers: own.reduce((sum, value) => sum + value.workers, 0), householdCount: households.length, households };
+}
+
+/** Same-tick pool/role edits and moves invalidate an entity view without a fake tick. */
+export function contextRevision(city: City): string {
+  return JSON.stringify([city.version, city.rulesVersion, city.tick, city.ledger.length, city.goodsLedger.length, city.utilities, city.migration,
+    city.households.map(h => [h.id, h.home, h.members, h.workforce, h.dependents, h.profile, h.origin, h.skillSource, h.workerSkills, h.needs, h.lastPurchaseTick, city.accounts[h.wallet]]),
+    city.employment.map(a => [a.householdId, a.firmId, a.occupation, a.rank, a.skill, a.workers]),
+    city.buildings.map(b => [b.id, b.cell, b.zone, b.level, b.age, 'housingType' in b ? b.housingType : null]),
+    city.firms.map(f => [f.id, f.building, f.inventory, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
+}
 
 export type CityOverview = {
   fromTick: number;
