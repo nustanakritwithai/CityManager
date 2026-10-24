@@ -1,4 +1,4 @@
-import { housingCapacity, type City } from './sim.ts';
+import { housingCapacity, householdWorkerCount, firmWorkerCount, type City } from './sim.ts';
 
 /** Local read-only questions. This contract is not sent to the Typhoon report endpoint. */
 export const CITY_FACT_QUESTIONS = [
@@ -22,6 +22,7 @@ const limitations = [
   'คำนวณในเครื่อง ไม่ส่งข้อมูลเพิ่มไปยัง API',
 ];
 const entityIntents = new Set<CityFactIntent>(['house.detail', 'business.detail']);
+const businessKinds = { C: 'พาณิชย์ (C)', I: 'อุตสาหกรรม (I)', F: 'ฟาร์ม (F)', T: 'ตลาดวัตถุดิบ (T)' } as const;
 const validNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Number.isSafeInteger(value) && value >= 0;
 
 export function validateCityFactQuestion(value: unknown): CityFactQuestion | null {
@@ -53,7 +54,7 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
   const sum = <T>(items: T[], get: (item: T) => number): number => items.reduce((total, item) => total + get(item), 0);
   const countPeople = () => sum(city.households, item => item.members);
   const countWorkforce = () => sum(city.households, item => item.workforce);
-  const countEmployed = () => sum(city.employment, item => item.workers);
+  const countEmployed = () => sum(city.households, item => householdWorkerCount(city, item.id));
   if (question.intent === 'city.housing') {
     const homes = city.buildings.filter(item => item.zone === 'R');
     const unhoused = city.households.filter(item => item.home === null);
@@ -72,8 +73,8 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
     fact('city.workforce.population', 'ประชากรทั้งหมด', countPeople(), 'คน', 'sum(households.members)');
     fact('city.workforce.total', 'แรงงานทั้งหมด', workforce, 'คน', 'sum(households.workforce)');
     fact('city.workforce.dependents', 'ผู้พึ่งพิง', sum(city.households, item => item.dependents), 'คน', 'sum(households.dependents)');
-    fact('city.workforce.employed', 'แรงงานที่ได้รับจัดสรรงาน', employed, 'คน', 'sum(employment.workers)');
-    fact('city.workforce.unemployed', 'แรงงานที่ยังไม่ได้รับจัดสรรงาน', workforce - employed, 'คน', 'sum(households.workforce)-sum(employment.workers)');
+    fact('city.workforce.employed', 'แรงงานที่ได้รับจัดสรรงาน', employed, 'คน', 'sum(householdWorkerCount(city,households.id)) [employment + ownerLabor]');
+    fact('city.workforce.unemployed', 'แรงงานที่ยังไม่ได้รับจัดสรรงาน', workforce - employed, 'คน', 'sum(households.workforce)-sum(householdWorkerCount(city,households.id)) [employment + ownerLabor]');
     for (const [skill, name] of [['general', 'งานทั่วไป'], ['manufacturing', 'การผลิต'], ['retail', 'การค้าปลีก']] as const) {
       fact(`city.workforce.skill.${skill}`, `แรงงานกลุ่มความสามารถ${name}`, sum(city.households, item => item.workerSkills[skill]), 'คน', `sum(households.workerSkills.${skill})`);
     }
@@ -85,7 +86,9 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
     fact('city.businesses.total', 'สถานประกอบการทั้งหมด', city.firms.length, 'แห่ง', 'firms.length');
     fact('city.businesses.commercial', 'สถานประกอบการพาณิชย์', city.firms.filter(item => item.zone === 'C').length, 'แห่ง', 'firms[zone=C].length');
     fact('city.businesses.industrial', 'สถานประกอบการอุตสาหกรรม', city.firms.filter(item => item.zone === 'I').length, 'แห่ง', 'firms[zone=I].length');
-    fact('city.businesses.workers', 'แรงงานที่ได้รับจัดสรรงาน', countEmployed(), 'คน', 'sum(employment.workers)');
+    fact('city.businesses.farms', 'ฟาร์ม', city.firms.filter(item => item.zone === 'F').length, 'แห่ง', 'firms[zone=F].length');
+    fact('city.businesses.raw-markets', 'ตลาดวัตถุดิบ', city.firms.filter(item => item.zone === 'T').length, 'แห่ง', 'firms[zone=T].length');
+    fact('city.businesses.workers', 'แรงงานที่ได้รับจัดสรรงาน', countEmployed(), 'คน', 'sum(householdWorkerCount(city,households.id)) [employment + ownerLabor]');
     missing('missing.city.businesses.history', 'คำตอบนี้ไม่มีข้อมูลเปรียบเทียบก่อนหน้า จึงยังสรุปการเปิดเพิ่ม ปิดกิจการ หรือแนวโน้มไม่ได้');
   } else if (question.intent === 'house.detail') {
     const home = city.buildings.find(item => item.id === question.entityId && item.zone === 'R');
@@ -114,9 +117,16 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
     answer.summary = `สถานประกอบการรหัส ${firm.id}: ข้อมูลปัจจุบันจากกิจการและอาคารที่อ้างอิง`;
     fact('business.id', 'รหัสสถานประกอบการ', firm.id, 'รหัส', 'firms.id', refs);
     fact('business.building', 'รหัสอาคารที่อ้างอิง', firm.building, 'รหัส', 'firms.building', refs);
-    fact('business.zone', 'ประเภทสถานประกอบการ', firm.zone === 'C' ? 'พาณิชย์ (C)' : 'อุตสาหกรรม (I)', '', 'firms.zone', refs);
-    fact('business.workers', 'แรงงานที่ได้รับจัดสรรงาน', sum(city.employment.filter(item => item.firmId === firm.id), item => item.workers), 'คน', 'sum(employment[firmId=firm.id].workers)', refs);
+    fact('business.zone', 'ประเภทสถานประกอบการ', businessKinds[firm.zone], '', 'firms.zone', refs);
+    fact('business.workers', 'แรงงานที่ได้รับจัดสรรงาน', firmWorkerCount(city, firm.id), 'คน', 'firmWorkerCount(city,firm.id) [employment + ownerLabor]', refs);
     fact('business.inventory', 'สินค้าคงคลังปัจจุบัน', firm.inventory, 'หน่วยสินค้า', 'firms.inventory', refs);
+    if (firm.zone !== 'C') {
+      fact('business.crop-inventory', 'พืชผลคงคลัง', firm.cropInventory, 'ล็อตพืชผล', 'firms.cropInventory', refs);
+      fact('business.crop-cost', 'ต้นทุนบัญชีพืชผลคงคลัง', firm.cropCost, 'สตางค์', 'firms.cropCost', refs);
+    }
+    if (firm.zone === 'T' && firm.owner !== null) {
+      fact('business.owner-workers', 'แรงงานเจ้าของที่ลงมือทำงาน', sum(city.ownerLabor.filter(item => item.firmId === firm.id), item => item.workers), 'คน', 'sum(ownerLabor[firmId=firm.id].workers)', refs);
+    }
     if (building) {
       fact('business.level', 'ระดับอาคาร', building.level, 'ระดับ', 'buildings.level', refs);
       fact('business.cell', 'ช่องแผนที่', building.cell, 'ช่อง (เริ่มที่ 0)', 'buildings.cell', refs);

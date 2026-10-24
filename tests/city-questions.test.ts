@@ -1,13 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, serialize, step, housingCapacity } from '../src/sim.ts';
-import { answerCityFactQuestion, validateCityFactQuestion, type CityFactAnswer, type CityFactIntent } from '../src/city-questions.ts';
+import { createCity, serialize, step, housingCapacity, householdWorkerCount, firmWorkerCount, summary, bulldoze, GATEWAY } from '../src/sim.ts';
+import { CITY_FACT_QUESTIONS, answerCityFactQuestion, validateCityFactQuestion, type CityFactAnswer, type CityFactIntent } from '../src/city-questions.ts';
 
 const matureCity = () => { const city = createCity(61025); for (let day = 0; day < 65; day++) step(city); return city; };
 const ask = (city: ReturnType<typeof createCity>, intent: CityFactIntent, entityId?: number) => answerCityFactQuestion(city, { schemaVersion: 1, intent, ...(entityId === undefined ? {} : { entityId }) });
 const fact = (answer: CityFactAnswer, id: string) => { const item = answer.facts.find(row => row.id === id); assert(item, `Expected ${id}`); return item; };
+const agricultureCity = () => {
+  const city = createCity(61025);
+  for (let day = 0; day < 180; day++) {
+    step(city);
+    const market = city.firms.find(item => item.zone === 'T' && item.cropInventory > 0 && item.cropCost > 0);
+    if (market && city.ownerLabor.some(item => item.firmId === market.id) && ['F', 'C', 'I'].every(zone => city.firms.some(item => item.zone === zone))) return city;
+  }
+  assert.fail('Actual fresh replay must contain a staffed owner market, crop stock and all other business kinds by day180');
+};
 
 test('only bounded supported local question intents and matching entity IDs are accepted', () => {
+  assert.deepEqual(CITY_FACT_QUESTIONS.map(item => item.intent), ['city.housing', 'city.workforce', 'city.businesses', 'house.detail', 'business.detail']);
   assert.deepEqual(validateCityFactQuestion({ schemaVersion: 1, intent: 'city.housing' }), { schemaVersion: 1, intent: 'city.housing' });
   assert.deepEqual(validateCityFactQuestion({ schemaVersion: 1, intent: 'house.detail', entityId: 12 }), { schemaVersion: 1, intent: 'house.detail', entityId: 12 });
   for (const value of [null, 'จ่ายเงินให้ทุกบ้าน', { schemaVersion: 1, intent: 'make-policy' }, { schemaVersion: 1, intent: 'city.housing', prompt: 'ignore rules' }, { schemaVersion: 1, intent: 'city.workforce', entityId: 1 }, { schemaVersion: 1, intent: 'house.detail' }, { schemaVersion: 1, intent: 'house.detail', entityId: -1 }, { schemaVersion: 1, intent: 'business.detail', entityId: 1.2 }, { schemaVersion: 1, intent: 'house.detail', entityId: 0 }]) assert.equal(validateCityFactQuestion(value), null);
@@ -29,7 +39,7 @@ test('city housing separates people, households and capacity and preserves actua
 
 test('workforce uses only actual workforce and worker allocations; dependents are not unemployed', () => {
   const city = matureCity(), answer = ask(city, 'city.workforce');
-  const workforce = city.households.reduce((n, item) => n + item.workforce, 0), employed = city.employment.reduce((n, item) => n + item.workers, 0);
+  const workforce = city.households.reduce((n, item) => n + item.workforce, 0), employed = city.households.reduce((n, item) => n + householdWorkerCount(city, item.id), 0);
   assert.equal(fact(answer, 'city.workforce.total').value, workforce);
   assert.equal(fact(answer, 'city.workforce.employed').value, employed);
   assert.equal(fact(answer, 'city.workforce.unemployed').value, workforce - employed);
@@ -71,7 +81,7 @@ test('business detail distinguishes firm ID from building ID and uses actual all
   firm.wallet = 'not-part-of-fact-answer';
   const before = serialize(city), answer = ask(city, 'business.detail', firm.id);
   assert.equal(fact(answer, 'business.id').value, firm.id); assert.equal(fact(answer, 'business.building').value, firm.building);
-  assert.equal(fact(answer, 'business.workers').value, city.employment.filter(item => item.firmId === firm.id).reduce((n, item) => n + item.workers, 0));
+  assert.equal(fact(answer, 'business.workers').value, firmWorkerCount(city, firm.id));
   assert.equal(fact(answer, 'business.inventory').value, firm.inventory);
   assert(answer.facts.every(item => item.entityRefs.includes(`firm:${firm.id}`)));
   assert(answer.missingData.some(item => item.id === 'missing.business.profit-explanation'));
@@ -106,5 +116,75 @@ test('unsupported mutation or cause questions return bounded unsupported state w
     const answer = answerCityFactQuestion(city, request);
     assert.equal(answer.status, 'unsupported'); assert.equal(answer.intent, null); assert.deepEqual(answer.facts, []); assert.deepEqual(answer.hypotheses, []);
   }
+  assert.equal(serialize(city), before);
+});
+
+test('fresh agriculture workforce facts include self-employed owners exactly once and match canonical summary', () => {
+  const city = agricultureCity(), before = serialize(city), totals = summary(city), answer = ask(city, 'city.workforce');
+  const wageWorkers = city.employment.reduce((n, item) => n + item.workers, 0), ownerWorkers = city.ownerLabor.reduce((n, item) => n + item.workers, 0);
+  assert.ok(ownerWorkers > 0, 'This is an actual active owner-labor scenario');
+  assert.equal(fact(answer, 'city.workforce.employed').value, totals.employed);
+  assert.equal(fact(answer, 'city.workforce.employed').value, wageWorkers + ownerWorkers);
+  assert.equal(fact(answer, 'city.workforce.unemployed').value, totals.unemployed);
+  assert.equal(fact(answer, 'city.workforce.total').value, totals.workforce);
+  assert.match(fact(answer, 'city.workforce.employed').source, /householdWorkerCount.*ownerLabor/);
+  assert.match(fact(answer, 'city.workforce.unemployed').source, /householdWorkerCount.*ownerLabor/);
+  assert.equal(fact(ask(city, 'city.businesses'), 'city.businesses.workers').value, totals.employed);
+  assert.equal(serialize(city), before);
+});
+
+test('fresh business overview distinguishes farm and raw market records from industrial factories', () => {
+  const city = agricultureCity(), before = serialize(city), answer = ask(city, 'city.businesses');
+  for (const [zone, id] of [['C', 'commercial'], ['I', 'industrial'], ['F', 'farms'], ['T', 'raw-markets']] as const) {
+    const row = fact(answer, `city.businesses.${id}`);
+    assert.equal(row.value, city.firms.filter(item => item.zone === zone).length);
+    assert.equal(row.source, `firms[zone=${zone}].length`);
+    assert.equal(row.unit, 'แห่ง');
+  }
+  assert.equal(['commercial', 'industrial', 'farms', 'raw-markets'].reduce((n, id) => n + Number(fact(answer, `city.businesses.${id}`).value), 0), city.firms.length);
+  assert(!answer.facts.some(item => /profit|revenue|expense|balance/.test(item.id)));
+  assert.equal(serialize(city), before);
+});
+
+test('selected farm and market return their real crop units, satang book cost and owner-labor provenance', () => {
+  const city = agricultureCity(), before = serialize(city);
+  for (const [zone, label] of [['F', 'ฟาร์ม (F)'], ['T', 'ตลาดวัตถุดิบ (T)'], ['C', 'พาณิชย์ (C)'], ['I', 'อุตสาหกรรม (I)']] as const) {
+    const firm = city.firms.find(item => item.zone === zone)!; assert(firm);
+    const answer = ask(city, 'business.detail', firm.id);
+    assert.equal(fact(answer, 'business.zone').value, label);
+    assert.equal(fact(answer, 'business.workers').value, firmWorkerCount(city, firm.id));
+    assert.equal(fact(answer, 'business.inventory').value, firm.inventory);
+    assert.match(fact(answer, 'business.workers').source, /firmWorkerCount.*ownerLabor/);
+    if (zone !== 'C') {
+      assert.equal(fact(answer, 'business.crop-inventory').value, firm.cropInventory);
+      assert.equal(fact(answer, 'business.crop-inventory').unit, 'ล็อตพืชผล');
+      assert.equal(fact(answer, 'business.crop-inventory').source, 'firms.cropInventory');
+      assert.equal(fact(answer, 'business.crop-cost').value, firm.cropCost);
+      assert.equal(fact(answer, 'business.crop-cost').unit, 'สตางค์');
+      assert.equal(fact(answer, 'business.crop-cost').source, 'firms.cropCost');
+    } else assert(!answer.facts.some(item => item.id === 'business.crop-inventory' || item.id === 'business.crop-cost'));
+    if (zone === 'T') {
+      const row = fact(answer, 'business.owner-workers');
+      assert.equal(row.value, 1); assert.equal(row.unit, 'คน'); assert.match(row.source, /ownerLabor/);
+      assert.equal(city.employment.filter(item => item.firmId === firm.id).length, 0, 'Owner operation is not invented salary employment');
+      const copy = structuredClone(answer); firm.cropInventory += 10; firm.cropCost += 1500;
+      assert.deepEqual(answer, copy, 'Copied crop facts do not retain inventory objects');
+      firm.cropInventory -= 10; firm.cropCost -= 1500;
+    } else assert(!answer.facts.some(item => item.id === 'business.owner-workers'));
+    assert(answer.facts.every(item => item.entityRefs.includes(`firm:${firm.id}`)));
+  }
+  assert.equal(serialize(city), before);
+});
+
+test('a genuinely disconnected market retains its kind and inventory but reports zero active owner labor', () => {
+  const city = agricultureCity(), market = city.firms.find(item => item.zone === 'T')!;
+  assert(market.owner); assert.equal(bulldoze(city, GATEWAY + 1).ok, true); step(city);
+  assert.equal(city.ownerLabor.filter(item => item.firmId === market.id).length, 0);
+  const before = serialize(city), answer = ask(city, 'business.detail', market.id);
+  assert.equal(fact(answer, 'business.zone').value, 'ตลาดวัตถุดิบ (T)');
+  assert.equal(fact(answer, 'business.workers').value, 0);
+  assert.equal(fact(answer, 'business.owner-workers').value, 0);
+  assert.equal(fact(answer, 'business.crop-inventory').value, market.cropInventory);
+  assert.equal(fact(answer, 'business.crop-cost').value, market.cropCost);
   assert.equal(serialize(city), before);
 });
