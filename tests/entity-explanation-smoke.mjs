@@ -17,17 +17,27 @@ assert.equal(new URL(url).hostname, '127.0.0.1', 'Mock suite targets this taskâ€
 const candidateCommit = process.env.CITYMANAGER_ENTITY_COMMIT || execFileSync('git', ['-c', `safe.directory=${repo.replaceAll('\\', '/')}`, '-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 assert.match(candidateCommit, /^[a-f0-9]{40}$/);
 const port = 9364, checks = [], errors = [], interceptionErrors = [], requests = [], cityRequests = [], held = [], screenshots = [], captures = [], layouts = [];
-let behavior = 'ai', directProviderAttempts = 0, ws, sequence = 0;
+let behavior = 'ai', directProviderAttempts = 0, ws, sequence = 0, currentStage = 'setup', lastCommand = null;
 const pending = new Map(), sleep = ms => new Promise(r => setTimeout(r, ms));
+const safePrefix = expression => /localStorage\.setItem|localStorage\.removeItem/.test(String(expression))
+  ? 'localStorage fixture setup (<payload omitted>)'
+  : String(expression).replace(/\s+/g, ' ').slice(0, 180);
+function stage(name) { currentStage = name; console.log(`[entity QA] ${name}`); }
 await mkdir(output, { recursive: true });
 let occupied = false; try { occupied = (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Never reuse another browser or test profile');
 const browser = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--disable-gpu-shader-disk-cache', '--disk-cache-size=1048576', '--media-cache-size=1048576', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-async function send(method, params = {}) {
+async function send(method, params = {}, timeoutMs = 30000) {
   const id = ++sequence;
+  const metadata = { method, startedAt: new Date().toISOString(), ...(method === 'Runtime.evaluate' ? { expressionPrefix: safePrefix(params.expression) } : {}) };
+  lastCommand = metadata;
   const promise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 30000);
-    pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } });
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      const error = Error(`CDP timeout ${method}${metadata.expressionPrefix ? `: ${metadata.expressionPrefix}` : ''}`);
+      error.cdp = metadata; reject(error);
+    }, timeoutMs);
+    pending.set(id, { metadata, resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } });
   });
   ws.send(JSON.stringify({ id, method, params })); return promise;
 }
@@ -151,6 +161,7 @@ async function layout(viewport) {
 }
 
 try {
+  stage('1 browser startup and fixture');
   let targets; for (let n = 0; n < 100; n++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); break; } catch { await sleep(100); } }
   assert(targets?.some(target => target.type === 'page'));
   ws = new WebSocket(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
@@ -171,6 +182,7 @@ try {
   const factory = fixture.buildings.find(b => b.zone === 'I'), house = fixture.buildings.find(b => b.zone === 'R'); assert(factory && house);
   const owner = fixture.firms.find(f => f.owner), household = fixture.households.find(h => h.id === owner?.owner?.householdId) || fixture.households.find(h => h.home !== null); assert(household);
   const buildingSelection = { kind: 'building', buildingId: factory.id };
+  stage('2 normal building and household');
   await load(fixture); await selectBuilding(factory);
   assert.equal(requests.length, 0, 'Selecting a building never calls the model');
   const first = await capture(fixture, buildingSelection);
@@ -188,6 +200,7 @@ try {
   assert.deepEqual(await state(), fixture);
   checks.push('Native building and household inspectors capture only actual bounded identity/facts/periods; Thai explanations are read-only and requests are manual');
 
+  stage('3 invalid response and stale-clock retry');
   await selectBuilding(factory);
   const invalid = await capture(fixture, buildingSelection, 'invalid-reference');
   assert(await evaluate('!document.querySelector("#entity-explain-retry").hidden'));
@@ -202,6 +215,7 @@ try {
   assert.equal(await mode(), 'fallback'); assert.deepEqual(await state(), advanced);
   checks.push('Unknown references and forged snapshot identities fall back; daily clock changes mark stale without calls, and manual retry keeps the exact prior snapshot');
 
+  stage('4 cancellation and stale selection');
   const current = await capture(advanced, buildingSelection, 'delay'); assert.equal(await mode(), 'pending');
   await button('#entity-explain-cancel'); await lateResponses(); assert.notEqual(await mode(), 'ai'); assert.notEqual(await mode(), 'pending'); assert.deepEqual(await state(), advanced);
   behavior = 'ai'; const countBeforeRetry = requests.length; await button('#entity-explain-retry'); await waitRequests(countBeforeRetry + 1); await until('document.querySelector("#entity-explain-mode").dataset.mode==="ai"');
@@ -213,6 +227,7 @@ try {
   assert.deepEqual(await state(), advanced);
   checks.push('Cancel ignores late replies and permits explicit same-snapshot retry; changing entity cancels and clears the old identity instead of applying its response');
 
+  stage('5 city replacement and deletion');
   await selectBuilding(factory); await capture(advanced, buildingSelection, 'delay');
   await load(fixture); await selectBuilding(factory); await lateResponses();
   assert.equal(await evaluate('document.querySelector("#entity-explanation-host").dataset.snapshotKey'), '', 'Loading another city object clears even matching entity IDs');
@@ -223,6 +238,7 @@ try {
   await lateResponses(); assert.equal(await evaluate('document.querySelector("#entity-explanation-host").dataset.snapshotKey'), '');
   checks.push('City replacement and deletion discard pending entity replies; only a deliberate native test demolition changes the fixture');
 
+  stage('6 same-day changed evidence');
   await load(fixture);
   const market = fixture.firms.find(f => f.owner), marketBuilding = fixture.buildings.find(b => b.id === market?.building); assert(market && marketBuilding);
   await selectBuilding(marketBuilding); const marketSelection = { kind: 'building', buildingId: marketBuilding.id };
@@ -236,6 +252,7 @@ try {
   assert.deepEqual(await state(), contributed);
   checks.push('Same-tick owner-capital changes mark captured evidence stale; later response keeps its captured identity and network failure retains local facts');
 
+  stage('7 insufficient evidence');
   let insufficient;
   const young = createCity(61025);
   for (let n = 0; n < 35 && !insufficient; n++) {
@@ -253,6 +270,7 @@ try {
   await shot('entity-insufficient-evidence.png'); assert.deepEqual(await state(), insufficient.city);
   checks.push('Real early-game missing evidence is preserved in the exact request and displayed honestly instead of transmitting a fabricated full save or zero-filled values');
 
+  stage('8 mobile layouts and preserved signal/facts');
   await load(fixture); const selection = await selectHousehold(fixture, household); await capture(fixture, selection);
   for (const viewport of [{ width: 360, height: 780, screenWidth: 360, screenHeight: 780 }, { width: 980, height: 2120, screenWidth: 360, screenHeight: 780 }]) {
     await layout(viewport); await shot(viewport.width === 980 ? 'entity-s22-wide.png' : 'entity-s22.png'); assert.deepEqual(await state(), fixture);
@@ -269,8 +287,31 @@ try {
   const qa = { candidateCommit, testedAt: new Date().toISOString(), url, browser: 'installed Microsoft Edge headless', checks, layouts, entityRequests: requests.map(item => ({ kind: item.input.snapshot.entity.kind, id: item.input.snapshot.entity.id, tick: item.input.snapshot.tick, facts: item.input.snapshot.facts.length, missing: item.input.snapshot.missing.length, behavior: item.behavior })), cityReports: cityRequests.length, realApiRequests: 0, directProviderAttempts, browserErrors: errors.length, screenshots, note: 'Synthetic local game fixtures, all reports intercepted; S22 viewport/touch/screen-ratio emulation, not a physical handset test. Timeout behavior is covered by the transport unit tests.' };
   await writeFile(resolve(output, 'qa.json'), JSON.stringify(qa, null, 2) + '\n');
   console.log(JSON.stringify({ passed: checks.length, entityRequests: requests.length, realApiRequests: 0, browserErrors: errors.length, screenshots, output }));
+} catch (error) {
+  const diagnostic = {
+    candidateCommit, failedAt: new Date().toISOString(), stage: currentStage,
+    safeFailure: error.code || error.name || 'Error', message: safePrefix(String(error.message).split('\n')[0]),
+    command: error.cdp || lastCommand,
+    pendingCommands: [...pending.values()].slice(0, 12).map(item => item.metadata),
+    entityRequestCount: requests.length, cityReportCount: cityRequests.length,
+    realApiRequests: 0, directProviderAttempts, browserErrors: errors.slice(0, 8).map(safePrefix),
+    interceptionErrors: interceptionErrors.slice(0, 8).map(safePrefix),
+    screenshot: 'not attempted',
+  };
+  await writeFile(resolve(output, 'failure-diagnostic.json'), JSON.stringify(diagnostic, null, 2) + '\n');
+  if (ws?.readyState === WebSocket.OPEN) {
+    try {
+      const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }, 3000);
+      await writeFile(resolve(output, 'failure.png'), Buffer.from(image.data, 'base64')); diagnostic.screenshot = 'failure.png';
+    } catch (captureError) { diagnostic.screenshot = `unavailable: ${safePrefix(captureError.message)}`; }
+  }
+  await writeFile(resolve(output, 'failure-diagnostic.json'), JSON.stringify(diagnostic, null, 2) + '\n');
+  console.error(JSON.stringify({ stage: currentStage, failure: diagnostic.message, command: diagnostic.command, entityRequests: requests.length, cityReports: cityRequests.length, screenshot: diagnostic.screenshot }));
+  // Keep CLI output bounded too: assertion actual/expected may contain a whole synthetic save.
+  const reported = new Error(`[${currentStage}] ${diagnostic.message}`);
+  reported.code = error.code || 'ENTITY_BROWSER_QA_FAILED'; throw reported;
 } finally {
-  if (ws?.readyState === WebSocket.OPEN) { try { await send('Browser.close'); } catch {} ws.close(); }
+  if (ws?.readyState === WebSocket.OPEN) { try { await send('Browser.close', {}, 3000); } catch {} ws.close(); }
   browser.kill(); await Promise.race([new Promise(resolve => browser.once('exit', resolve)), sleep(2000)]);
   // Retain this taskâ€™s bounded evidence/profile; never clean shared data.
 }
