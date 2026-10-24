@@ -18,7 +18,10 @@
     "test:agriculture": "node tests/agriculture-smoke.mjs",
     "test:building-cards": "node tests/building-cards-smoke.mjs",
     "test:signals": "node --experimental-strip-types tests/signals-smoke.mjs",
-    "test:advisor": "node --test server/city-advisor/test/*.test.mjs"
+    "test:advisor": "node --test server/city-advisor/test/*.test.mjs",
+    "test:owner": "node --experimental-strip-types --test tests/owner-decision.test.ts tests/owner-decision-session.test.ts tests/owner-decision-benchmark.test.ts",
+    "test:owner:browser": "node --experimental-strip-types tests/owner-decision-smoke.mjs --run",
+    "benchmark:owner": "node --experimental-strip-types scripts/owner-decision-benchmark.mjs"
   },
   "dependencies": {
     "playcanvas": "2.23.3"
