@@ -218,10 +218,11 @@ try {
   assert.ok(guiImages.every(i => i.width > 0), 'GUI images load from the Pages base path');
   await screenshot('mobile-inspector.png');
   await button('details.ledger-details:has(#ledger) > summary');
-  assert.ok(await evaluate('document.querySelectorAll("#ledger .flow-row").length>0'));
+  await until('document.querySelector("#inspector").dataset.submenu==="money-section"');
+  assert.ok(await evaluate('document.querySelectorAll("#ledger .sm-flow-card").length>0'));
   const scrollPoint = await evaluate('(()=>{const r=document.querySelector("#inspector-body").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()');
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: scrollPoint.x, y: scrollPoint.y, deltaX: 0, deltaY: 300 });
-  await until('(()=>{const r=document.querySelector("#inspector-body").getBoundingClientRect();return[...document.querySelectorAll("#ledger .flow-row")].filter(e=>{const b=e.getBoundingClientRect();return b.top<r.bottom&&b.bottom>r.top}).length>=2})()');
+  await until('(()=>{const r=document.querySelector("#inspector-body").getBoundingClientRect();return[...document.querySelectorAll("#ledger .sm-flow-card")].filter(e=>{const b=e.getBoundingClientRect();return b.top<r.bottom&&b.bottom>r.top}).length>=2})()');
   await screenshot('mobile-ledger.png');
   const scroll = await evaluate('({x:document.querySelector("#inspector-body").scrollWidth,width:document.querySelector("#inspector-body").clientWidth})');
   assert.ok(scroll.x <= scroll.width, 'Inspector content does not overflow horizontally');
