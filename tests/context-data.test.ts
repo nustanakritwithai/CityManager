@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createCity, deserialize, bulldoze, householdWorkerCount, housingCapacity, homeOccupancy, moveHousehold } from '../src/sim.ts';
 import { flowRows } from '../src/inspector-data.ts';
-import { resolvePlace, relatedFlows, cityOverview } from '../src/context-data.ts';
+import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from '../src/context-data.ts';
 
 const legacyJson = readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 const populated = () => deserialize(legacyJson);
@@ -127,7 +127,7 @@ test('context presenters leave frozen source data and RNG unchanged and report a
 
 test('migrated legacy people are explicitly assumed without rewriting financial or goods history', () => {
   const legacy = JSON.parse(legacyJson), city = populated(), overview = cityOverview(city);
-  assert.equal(city.version, 2);
+  assert.equal(city.version, 3);
   assert.ok(city.households.every(household => household.origin === 'legacy-v1' && household.profile === 'legacy-worker' && household.members === 1 && household.workforce === 1 && household.dependents === 0));
   assert.equal(overview.population, legacy.households.length);
   assert.equal(overview.households, legacy.households.length);
@@ -148,11 +148,11 @@ test('people, workforce and multiple employers are counted separately from house
   const historical = JSON.stringify({ accounts: city.accounts, ledger: city.ledger, goodsLedger: city.goodsLedger, goods: city.goods, claims: city.firms.map(firm => firm.workDays) });
   // A synthetic current view state exercises family composition without inventing
   // a historical arrival event or retroactively multiplying its old goods basket.
-  Object.assign(household, { members: 3, workforce: 2, dependents: 1, profile: 'family', origin: 'arrival' });
+  Object.assign(household, { members: 3, workforce: 2, dependents: 1, profile: 'family', origin: 'arrival', workerSkills: { general: 2, manufacturing: 0, retail: 0 }, skillSource: 'arrival-profile' });
   city.employment = city.employment.filter(allocation => allocation.householdId !== household.id);
   city.employment.push(
-    { householdId: household.id, firmId: factory.id, occupation: 'manufacturing', rank: 'entry', workers: 1 },
-    { householdId: household.id, firmId: shop.id, occupation: 'retail', rank: 'entry', workers: 1 },
+    { householdId: household.id, firmId: factory.id, occupation: 'manufacturing', rank: 'entry', skill: 'general', workers: 1 },
+    { householdId: household.id, firmId: shop.id, occupation: 'retail', rank: 'entry', skill: 'general', workers: 1 },
   );
   const overview = cityOverview(city);
   assert.equal(overview.population, original.population + 2);
@@ -202,4 +202,79 @@ test('displaced families remain in population but not housing occupancy or emplo
   assert.equal(overview.personCapacity, before.personCapacity - removedCapacity.persons);
   assert.ok(occupants.every(household => household.home === null && householdWorkerCount(city, household.id) === 0));
   assert.ok(overview.warnings.some(warning => warning.includes('ไม่มีบ้านพัก')));
+});
+
+function workerViewFixture() {
+  const city = populated(), household = city.households[0], other = city.households[1];
+  const factory = city.firms.find(firm => firm.zone === 'I')!, shop = city.firms.find(firm => firm.zone === 'C')!;
+  // Current-view fixture only: two disjoint worker pools, one dependent and one
+  // shared wallet. No historical transaction or earned-wage claim is rewritten.
+  Object.assign(household, { members: 3, workforce: 2, dependents: 1, profile: 'family', origin: 'arrival', workerSkills: { general: 1, manufacturing: 1, retail: 0 }, skillSource: 'arrival-profile' });
+  city.employment = [
+    { householdId: household.id, firmId: factory.id, workers: 1, occupation: 'manufacturing', rank: 'entry', skill: 'manufacturing' },
+    { householdId: household.id, firmId: shop.id, workers: 1, occupation: 'retail', rank: 'entry', skill: 'general' },
+    { householdId: other.id, firmId: factory.id, workers: 1, occupation: 'manufacturing', rank: 'entry', skill: 'general' },
+  ];
+  return { city, household, other, factory, shop };
+}
+
+test('household labor presents eligible member counts by disjoint skill without counting dependents or another family', () => {
+  const { city, household, other, factory, shop } = workerViewFixture();
+  const data = householdLabor(city, household.id)!;
+  assert.deepEqual(data.skills, [
+    { skill: 'general', total: 1, employed: 1, unemployed: 0 },
+    { skill: 'manufacturing', total: 1, employed: 1, unemployed: 0 },
+    { skill: 'retail', total: 0, employed: 0, unemployed: 0 },
+  ]);
+  assert.equal(data.workforce, 2); assert.equal(data.employed, 2); assert.equal(data.unemployed, 0); assert.equal(data.employers, 2);
+  assert.equal(data.skillSource, 'arrival-profile');
+  assert.deepEqual(data.allocations.map(value => [value.firmId, value.skill]), [[factory.id, 'manufacturing'], [shop.id, 'general']]);
+  assert.ok(data.allocations.every(value => value.householdId === household.id && value.householdId !== other.id));
+  assert.equal(data.skills.reduce((sum, value) => sum + value.total, 0), household.members - household.dependents);
+  assert.deepEqual(WORKER_SKILL_LABELS, { general: 'ทั่วไป', manufacturing: 'การผลิต', retail: 'ค้าปลีก' });
+  assert.equal(WORKER_SKILL_ROLES.general, 'งานผลิต / งานค้าปลีก');
+  assert.equal(WORKER_SKILL_ROLES.manufacturing, 'งานผลิต'); assert.equal(WORKER_SKILL_ROLES.retail, 'งานค้าปลีก');
+  assert.equal(householdLabor(city, city.nextId + 100), null);
+});
+
+test('firm labor groups two skill allocations from one household once without leaking the other employer', () => {
+  const { city, household, other, factory, shop } = workerViewFixture();
+  const original = firmLabor(city, factory.id)!;
+  assert.equal(original.workers, 2); assert.equal(original.householdCount, 2);
+  assert.deepEqual(original.households.map(group => [group.householdId, group.workers]), [[household.id, 1], [other.id, 1]]);
+  const second = city.employment.find(value => value.firmId === shop.id)!;
+  second.firmId = factory.id; second.occupation = 'manufacturing';
+  const updated = firmLabor(city, factory.id)!, owner = updated.households.find(value => value.householdId === household.id)!;
+  assert.equal(updated.workers, 3); assert.equal(updated.householdCount, 2); assert.equal(owner.workers, 2); assert.equal(owner.allocations.length, 2);
+  assert.deepEqual(owner.allocations.map(value => value.skill), ['manufacturing', 'general']);
+  assert.ok(updated.households.every(group => group.allocations.every(value => value.firmId === factory.id)));
+  assert.deepEqual(firmLabor(city, shop.id), { firmId: shop.id, workers: 0, householdCount: 0, households: [] });
+  assert.equal(firmLabor(city, city.nextId + 100), null);
+});
+
+test('same-tick capability, assumption and role changes invalidate cached details and derive current unemployment', () => {
+  const { city, household, factory, shop } = workerViewFixture(), tick = city.tick;
+  const snapshots = [contextRevision(city)];
+  household.workerSkills = { general: 0, manufacturing: 1, retail: 1 };
+  const general = city.employment.find(value => value.householdId === household.id && value.skill === 'general')!; general.skill = 'retail';
+  snapshots.push(contextRevision(city));
+  household.skillSource = 'legacy-assumed'; snapshots.push(contextRevision(city));
+  city.employment = city.employment.filter(value => value !== general); snapshots.push(contextRevision(city));
+  const data = householdLabor(city, household.id)!;
+  assert.equal(data.employed, 1); assert.equal(data.unemployed, 1); assert.equal(data.employers, 1);
+  assert.deepEqual(data.skills.find(value => value.skill === 'retail'), { skill: 'retail', total: 1, employed: 0, unemployed: 1 });
+  assert.equal(firmLabor(city, shop.id)!.workers, 0); assert.equal(firmLabor(city, factory.id)!.householdCount, 2);
+  assert.equal(snapshots.length, new Set(snapshots).size); assert.equal(city.tick, tick);
+  city.employment = city.employment.filter(value => value.householdId !== household.id);
+  assert.equal(householdLabor(city, household.id)!.employed, 0); assert.equal(householdLabor(city, household.id)!.unemployed, 2);
+});
+
+test('labor views and cache revision leave frozen finances, claims, inventory, RNG and input allocations unchanged', () => {
+  const { city, household, factory, shop } = workerViewFixture(), before = JSON.stringify(city);
+  const freeze = (value: unknown): void => { if (value && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); } };
+  freeze(city);
+  const own = householdLabor(city, household.id)!;
+  firmLabor(city, factory.id); firmLabor(city, shop.id); contextRevision(city);
+  own.allocations[0].workers = 99;
+  assert.equal(JSON.stringify(city), before);
 });

@@ -1,4 +1,4 @@
-// Household/housing v2 acceptance. Installed Edge; root runs suites sequentially.
+// Household/housing acceptance on worker schema v3. Root runs suites sequentially.
 // The browser receives only strict-valid public-simulation fixtures via real Load.
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -12,8 +12,11 @@ const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
 const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [];
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
+const householdV2Raw = await readFile(new URL('./fixtures/legacy-v2-day180.json', import.meta.url), 'utf8');
 const hash = raw => createHash('sha256').update(raw).digest('hex');
 assert.equal(hash(legacyRaw), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
+assert.equal(hash(householdV2Raw), '0c33c983c1e71063496f4a95b935c22647b972c0084d2ce98449b7e7b8c13475');
+const householdV2Migrated = deserialize(householdV2Raw);
 const migrated = deserialize(legacyRaw), migratedRaw = serialize(migrated);
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
@@ -54,12 +57,16 @@ assert.ok(fixture.firms.every(f => Object.keys(f.workDays).length === 0), 'Split
 // No economic history, people or wallet balance is edited.
 const financialBeforeSplit = JSON.stringify([fixture.accounts, fixture.ledger, fixture.goodsLedger, fixture.goods, fixture.firms.map(f => [f.inventory, f.workDays])]);
 fixture.employment = fixture.employment.filter(e => e.householdId !== family.id && e.firmId !== shop.id);
-fixture.employment.push({ householdId: family.id, firmId: factory.id, occupation: 'manufacturing', rank: 'entry', workers: 1 }, { householdId: family.id, firmId: shop.id, occupation: 'retail', rank: 'entry', workers: 1 });
+// This is a scoped GUI allocation fixture, not proof of the automatic matcher.
+// The dedicated worker suite exercises matching through an actual daily tick.
+const productionSkill = family.workerSkills.manufacturing > 0 ? 'manufacturing' : 'general';
+const retailSkill = family.workerSkills.retail > 0 ? 'retail' : 'general';
+fixture.employment.push({ householdId: family.id, firmId: factory.id, occupation: 'manufacturing', rank: 'entry', skill: productionSkill, workers: 1 }, { householdId: family.id, firmId: shop.id, occupation: 'retail', rank: 'entry', skill: retailSkill, workers: 1 });
 assert.equal(JSON.stringify([fixture.accounts, fixture.ledger, fixture.goodsLedger, fixture.goods, fixture.firms.map(f => [f.inventory, f.workDays])]), financialBeforeSplit);
 deserialize(serialize(fixture));
 const fixtureRaw = serialize(fixture), sharedHome = fixture.buildings.find(b => b.zone === 'R' && homeOccupancy(fixture, b.id).households > 1);
 assert.ok(sharedHome, 'Natural fixture contains a shared home');
-const keys = ['citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.v1', ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v1.${i + 1}`)];
+const keys = ['citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Run browser suites sequentially; CDP 9349 is occupied');
@@ -91,14 +98,15 @@ async function button(selector) {
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : name === 'help' ? '#toggle-help' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(raw) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(raw)})`); await button('#load'); assert.deepEqual(await state(), deserialize(raw)); await close(); }
+async function load(raw) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v3',${JSON.stringify(raw)})`); await button('#load'); assert.deepEqual(await state(), deserialize(raw)); await close(); }
 async function place(building) { await close(); await button('[data-tool="select"]'); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${building.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', `Actual canvas cell ${building.cell}`); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
 async function metrics(expected, root = '#entity-content') { const actual = await evaluate(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(root + ' [data-context-metric]')})].map(e=>[e.dataset.contextMetric,e.dataset.value]))`); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact ${root} metric ${key}`); }
 async function household(h, source, city = fixture) {
   await place(source); await button(`#entity-content [data-household-id="${h.id}"]`); await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${h.id}'`);
   const rows = employmentForHousehold(city, h.id), employed = householdWorkerCount(city, h.id);
   await metrics({ cash: city.accounts[h.wallet], members: h.members, workforce: h.workforce, dependents: h.dependents, employed, unemployed: h.workforce - employed, employers: new Set(rows.map(e => e.firmId)).size, home: h.home === null ? 'null' : h.home, needs: h.needs, 'last-purchase': h.lastPurchaseTick });
-  assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-employment-row")].map(e=>({householdId:Number(e.dataset.householdId),firmId:Number(e.dataset.firmId),workers:Number(e.dataset.workers),occupation:e.dataset.occupation,rank:e.dataset.rank}))'), rows);
+  assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-employment-row")].map(e=>({householdId:Number(e.dataset.householdId),firmId:Number(e.dataset.firmId),workers:Number(e.dataset.workers),occupation:e.dataset.occupation,rank:e.dataset.rank,skill:e.dataset.skill}))'), rows);
+  assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-skill-row")].map(e=>({skill:e.dataset.skill,total:Number(e.dataset.total),employed:Number(e.dataset.employed),unemployed:Number(e.dataset.unemployed)}))'), ['general', 'manufacturing', 'retail'].map(skill => { const employed = rows.filter(a => a.skill === skill).reduce((n, a) => n + a.workers, 0); return { skill, total: h.workerSkills[skill], employed, unemployed: h.workerSkills[skill] - employed }; }));
   assert.equal(await evaluate('!!document.querySelector("#entity-content .cx-legacy-assumption")'), h.origin === 'legacy-v1');
 }
 async function home(city, b) {
@@ -137,26 +145,26 @@ try {
   // Only test-owned keys in this isolated QA profile are reset. Loading is never
   // allowed to write a migration, advance the clock or duplicate arrival savings.
   const sentinel = serialize(createCity(91));
-  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(legacyRaw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(sentinel)})`);
+  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(legacyRaw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(householdV2Raw)});localStorage.setItem('citymanager.save.v3',${JSON.stringify(sentinel)})`);
   await page('game'); const beforeImport = await storage(); await button('#load-legacy'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), beforeImport);
   await button('#load-legacy'); await button('#load-legacy'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), beforeImport);
   checks.push('Explicit strict v1 import is idempotent: exact frozen money/goods/claims/tick/RNG; loading never writes or repeats grants');
 
-  // A failed backup must abort BEFORE replacing a different valid v2 save.
+  // A failed backup must abort BEFORE replacing a different valid v3 save.
   await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v1"))throw new DOMException("Acceptance backup quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), beforeImport); assert.deepEqual(await state(), migrated); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
   finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }
-  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], legacyRaw); assert.equal(backed['citymanager.backup.v1'], legacyRaw); assert.equal(backed['citymanager.save.v2'], migratedRaw);
+  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], legacyRaw); assert.equal(backed['citymanager.backup.v1'], legacyRaw); assert.equal(backed['citymanager.save.v3'], migratedRaw);
   assert.equal(Object.entries(backed).filter(([key, raw]) => key.startsWith('citymanager.backup.v1') && raw !== null).length, 1);
-  await button('#save'); assert.deepEqual(await storage(), backed); checks.push('Actual Save backs original v1 bytes immutably before v2; backup quota preserves old primary and repeated Save creates no duplicate backups');
+  await button('#save'); assert.deepEqual(await storage(), backed); checks.push('Actual Save backs original v1 bytes immutably before v3; backup quota preserves old primary and repeated Save creates no duplicate backups');
 
-  await evaluate('localStorage.setItem("citymanager.save.v2","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt);
+  await evaluate('localStorage.setItem("citymanager.save.v3","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt);
   await button('#load-backup'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);
-  await load(fixtureRaw); await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(sentinel)})`); const beforeQuota = await storage(), stateBeforeQuota = await state();
-  await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==="citymanager.save.v2")throw new DOMException("Acceptance primary quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
+  await load(fixtureRaw); await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v3',${JSON.stringify(sentinel)})`); const beforeQuota = await storage(), stateBeforeQuota = await state();
+  await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==="citymanager.save.v3")throw new DOMException("Acceptance primary quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), beforeQuota); assert.deepEqual(await state(), stateBeforeQuota); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
   finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }
-  checks.push('Corrupt preferred v2 rejects without fallback or mutation; explicit backup recovers; primary quota preserves all current and stored state');
+  checks.push('Corrupt preferred v3 rejects without fallback or mutation; explicit backup recovers; primary quota preserves all current and stored state');
 
   const vacant = deserialize(vacantDay), vacantHome = vacant.buildings.find(b => b.zone === 'R' && b.age === 0);
   await load(vacantDay); await home(vacant, vacantHome); await metrics({ households: 0, persons: 0 }); await screenshot('vacant-new-home.png');
@@ -190,21 +198,22 @@ try {
   await close(); await button('[data-speed="1"]'); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}`); await button('#pause'); assert.deepEqual(await state(), expectedRehoused);
   for (const old of displaced) { const h = expectedRehoused.households.find(h => h.id === old.id); assert.notEqual(h.home, null); assert.equal(h.members, old.members); assert.equal(h.wallet, old.wallet); assert.equal(expectedRehoused.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1); }
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
-  await page('game'); await button('#save'); const savedV2 = await evaluate('localStorage.getItem("citymanager.save.v2")'); assert.equal(savedV2, serialize(expectedRehoused)); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw);
-  checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact v2 Save/Load retains original v1 and backup');
+  await page('game'); await button('#save'); const savedV3 = await evaluate('localStorage.getItem("citymanager.save.v3")'); assert.equal(savedV3, serialize(expectedRehoused)); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
+  checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact v3 Save/Load retains original v1 and backup');
 
   await load(fixtureRaw);
   for (const metric of [{ width: 360, height: 740, screenWidth: 360, screenHeight: 780, mobile: true }, { width: 844, height: 390, screenWidth: 844, screenHeight: 390, mobile: true }, { width: 980, height: 2120, screenWidth: 390, screenHeight: 844, mobile: true }]) {
     await viewport(metric); await home(fixture, sharedHome); await layout(); await household(family, fixture.buildings.find(b => b.id === family.home)); await layout(); if (metric.width === 360) await screenshot('phone-family.png'); await cityMetrics(fixture); await layout(); await page('game'); await layout();
-    for (const id of ['save', 'load', 'load-legacy', 'load-backup', 'new-city']) {
+    for (const id of ['save', 'load', 'load-v2', 'load-legacy', 'load-backup', 'new-city']) {
       await button(`#${id}`);
       if (id === 'new-city') { await key('Escape'); assert.deepEqual(await state(), fixture); continue; }
-      if (id === 'load-legacy' || id === 'load-backup') { assert.deepEqual(await state(), migrated); await load(fixtureRaw); await page('game'); }
+      if (id === 'load-v2') { assert.deepEqual(await state(), householdV2Migrated); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw); await load(fixtureRaw); await page('game'); }
+      else if (id === 'load-legacy' || id === 'load-backup') { assert.deepEqual(await state(), migrated); await load(fixtureRaw); await page('game'); }
       else assert.deepEqual(await state(), fixture);
     }
     await key('Escape'); assert.notEqual((await route()).open, 'true');
   }
-  // Restore the intended v2 test city after recovery-button layout exercises.
+  // Restore the intended v3 test city after recovery-button layout exercises.
   await load(fixtureRaw); assert.deepEqual(await state(), fixture); assert.deepEqual(errors, []);
   const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 8); assert.equal(visuals.failed.length, 8); } else { assert.equal(visuals.loaded.length, 8); assert.equal(visuals.failed.length, 0); }
   checks.push('360 phone, landscape and 980-layout/screen390 keep new contexts and recovery controls contained with real 44px Back/close; no unexpected runtime errors');

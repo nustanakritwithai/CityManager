@@ -1,7 +1,8 @@
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
-import { allocateEmployment, type EmploymentAllocation } from './labor.ts';
+import { allocateEmployment, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
 import { deserializeV1, type City as LegacyCityV1 } from './legacy-v1.ts';
+import { deserializeV2, type CityV2 } from './legacy-v2.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
 export const GATEWAY = 12 * SIZE;
@@ -11,12 +12,12 @@ export const WAGES = { I: 60_000, C: 42_000 } as const;
 export type Zone = 'R' | 'C' | 'I' | null;
 export type Cell = { road: boolean; zone: Zone; building: number | null };
 export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; level: number; age: number; housingType?: HousingType };
-export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
+export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Firm = { id: number; building: number; zone: 'C' | 'I'; wallet: string; workDays: Record<string, number>; inventory: number; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
 export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string };
 export type City = {
-  version: 2; rulesVersion: 'household-1'; migration: { arrivals: number; legacyHouseholds: number }; employment: EmploymentAllocation[];
+  version: 3; rulesVersion: 'worker-1'; migration: { arrivals: number; legacyHouseholds: number }; employment: EmploymentAllocation[];
   seed: number; rng: number; tick: number; nextId: number;
   cells: Cell[]; buildings: Building[]; households: Household[]; firms: Firm[];
   accounts: Record<string, number>; ledger: Entry[]; goodsLedger: GoodsEntry[];
@@ -218,7 +219,7 @@ function createBuilding(c: City, i: number) {
   c.lastEvent = `${zone} building #${id} grew: road + utilities + demand + viable expected rent. Initial investment is recorded in the ledger.`;
 }
 function employ(c: City) {
-  c.employment = allocateEmployment(c.households.map(h => ({ id: h.id, workforce: h.workforce, accessible: householdAccess(c, h) })), c.firms.map(f => ({
+  c.employment = allocateEmployment(c.households.map(h => ({ id: h.id, workforce: h.workforce, workerSkills: h.workerSkills, accessible: householdAccess(c, h) })), c.firms.map(f => ({
     id: f.id, zone: f.zone, slots: access(c, building(c, f.building).cell) ? capacity(building(c, f.building)) : 0,
     budgetWorkers: Math.floor(spendable(c, f) / (WAGES[f.zone] / MONTH)),
   })), c.employment);
@@ -307,10 +308,11 @@ function rehouse(c: City) {
   }
 }
 function admissionFacts(c: City) {
-  let vacancies = 0;
-  for (const f of c.firms) if (access(c, building(c, f.building).cell)) vacancies += Math.min(Math.max(0, capacity(building(c, f.building)) - firmWorkerCount(c, f.id)), Math.floor(spendable(c, f) / (WAGES[f.zone] / MONTH)));
+  const vacanciesByZone = { I: 0, C: 0 };
+  for (const f of c.firms) if (access(c, building(c, f.building).cell)) vacanciesByZone[f.zone] += Math.min(Math.max(0, capacity(building(c, f.building)) - firmWorkerCount(c, f.id)), Math.floor(spendable(c, f) / (WAGES[f.zone] / MONTH)));
+  const vacancies = vacanciesByZone.I + vacanciesByZone.C;
   const existingUnemployed = c.households.filter(h => householdAccess(c, h)).reduce((n, h) => n + h.workforce - householdWorkerCount(c, h.id), 0);
-  return { vacancies, existingUnemployed, bootstrap: c.migration.arrivals < 2 };
+  return { vacancies, vacanciesByZone, existingUnemployed, bootstrap: c.migration.arrivals < 2 };
 }
 export function explainMigration(c: City, buildingId: number): string[] {
   const b = c.buildings.find(b => b.id === buildingId && b.zone === 'R');
@@ -343,7 +345,10 @@ function admitHousehold(c: City) {
   // Outside is an explicit source. No existing family wallet or earned claim is duplicated.
   if (transfer(c, 'outside', wallet, 150_000, 'New household arrival savings') !== 150_000) return;
   c.nextId++;
-  c.households.push({ id, home: home.id, members, workforce, dependents: family ? 1 : 0, profile: family ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
+  // Proposed entry capability profile: one flexible worker plus one specialist
+  // in a currently funded role. Counts are disjoint; no per-person agents exist.
+  const workerSkills: WorkerSkills = { general: 1, manufacturing: family && facts.vacanciesByZone.I > 0 ? 1 : 0, retail: family && facts.vacanciesByZone.I === 0 ? 1 : 0 };
+  c.households.push({ id, home: home.id, members, workforce, dependents: family ? 1 : 0, workerSkills, skillSource: 'arrival-profile', profile: family ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
   c.migration.arrivals++;
   c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}`;
 }
@@ -370,7 +375,7 @@ export function step(c: City): void {
 }
 export function createCity(seed = 20261023): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { version: 2, rulesVersion: 'household-1', migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
+  const c: City = { version: 3, rulesVersion: 'worker-1', migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
     buildings: [], households: [], firms: [], accounts: { outside: 0, treasury: 0, construction: 0, roadworks: 0, upkeep: 0, landlord: 0 }, ledger: [], goodsLedger: [],
     goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { power: true, water: true }, lastEvent: '' };
@@ -391,19 +396,27 @@ export function serialize(c: City): string {
 /** Strict v1 validation has already completed; migration changes no economic or clock history. */
 function migrateV1(old: LegacyCityV1): City {
   const { version: _version, households, firms, buildings, ...preserved } = old;
-  return { ...preserved, version: 2, rulesVersion: 'household-1',
+  return { ...preserved, version: 3, rulesVersion: 'worker-1',
     migration: { arrivals: Math.max(households.length, old.ledger.filter(e => e.reason === 'New household arrival savings').length), legacyHouseholds: households.length },
-    employment: households.filter(h => h.employer !== null).map(h => ({ householdId: h.id, firmId: h.employer!, workers: 1, rank: 'entry' as const, occupation: firms.find(f => f.id === h.employer)!.zone === 'I' ? 'manufacturing' as const : 'retail' as const })),
+    employment: households.filter(h => h.employer !== null).map(h => ({ householdId: h.id, firmId: h.employer!, workers: 1, skill: 'general' as const, rank: 'entry' as const, occupation: firms.find(f => f.id === h.employer)!.zone === 'I' ? 'manufacturing' as const : 'retail' as const })),
     buildings: buildings.map(b => ({ ...b, ...(b.zone === 'R' ? { housingType: 'cottage' as const } : {}) })),
-    households: households.map(({ employer: _employer, ...h }) => ({ ...h, members: 1, workforce: 1, dependents: 0, profile: 'legacy-worker', origin: 'legacy-v1' })),
+    households: households.map(({ employer: _employer, ...h }) => ({ ...h, members: 1, workforce: 1, dependents: 0, workerSkills: { general: 1, manufacturing: 0, retail: 0 }, skillSource: 'legacy-assumed', profile: 'legacy-worker', origin: 'legacy-v1' })),
     firms: firms.map(({ employees: _employees, ...f }) => f),
   };
 }
 
-function validateV2(c: City): City {
-  const fail = (): never => { throw new Error('Unsupported or corrupt CityManager household save (expected version 2 / household-1).'); };
+/** Published v2 has no capability records; retain every job and earned claim on load. */
+function migrateV2(old: CityV2): City {
+  return { ...old, version: 3, rulesVersion: 'worker-1',
+    households: old.households.map(h => ({ ...h, workerSkills: { general: h.workforce, manufacturing: 0, retail: 0 }, skillSource: 'legacy-assumed' })),
+    employment: old.employment.map(e => ({ ...e, skill: 'general' })),
+  };
+}
+
+function validateV3(c: City): City {
+  const fail = (): never => { throw new Error('Unsupported or corrupt CityManager worker save (expected version 3 / worker-1).'); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
-  if (!c || c.version !== 2 || c.rulesVersion !== 'household-1' || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
+  if (!c || c.version !== 3 || c.rulesVersion !== 'worker-1' || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
   if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > 192 || !Array.isArray(c.households) || c.households.length > 128 || !Array.isArray(c.firms) || c.firms.length > 64) fail();
   if (!c.migration || !int(c.migration.arrivals) || !int(c.migration.legacyHouseholds) || !Array.isArray(c.employment) || c.employment.length > 256) fail();
   if (!c.utilities || typeof c.utilities.power !== 'boolean' || typeof c.utilities.water !== 'boolean' || !c.goods || !['produced', 'imported', 'consumed', 'exported'].every(k => int(c.goods[k as keyof typeof c.goods]))) fail();
@@ -419,6 +432,8 @@ function validateV2(c: City): City {
   for (const h of c.households) {
     if (!h || !int(h.id, 1) || ids.has(h.id) || !(h.home === null || c.buildings.some(b => b.id === h.home && b.zone === 'R')) || h.wallet !== `household:${h.id}` || !int(c.accounts[h.wallet]) || Object.hasOwn(h, 'employer') || !int(h.members, 1) || !int(h.workforce) || !int(h.dependents) || h.members !== h.workforce + h.dependents || !int(h.lastPurchaseTick, -1) || h.lastPurchaseTick > c.tick || !int(h.needs)) fail();
     if (h.origin === 'legacy-v1' ? h.profile !== 'legacy-worker' || h.members !== 1 || h.workforce !== 1 || h.dependents !== 0 : h.origin !== 'arrival' || (h.profile === 'family' ? h.members !== 3 || h.workforce !== 2 || h.dependents !== 1 : h.profile !== 'single-worker' || h.members !== 1 || h.workforce !== 1 || h.dependents !== 0)) fail();
+    if (!h.workerSkills || typeof h.workerSkills !== 'object' || Array.isArray(h.workerSkills) || Object.keys(h.workerSkills).length !== 3 || !['general', 'manufacturing', 'retail'].every(k => int(h.workerSkills[k as keyof WorkerSkills])) || h.workerSkills.general + h.workerSkills.manufacturing + h.workerSkills.retail !== h.workforce) fail();
+    if (h.skillSource === 'legacy-assumed' ? h.workerSkills.general !== h.workforce : h.skillSource !== 'arrival-profile' || h.origin !== 'arrival') fail();
     ids.add(h.id);
   }
   for (const f of c.firms) {
@@ -441,12 +456,15 @@ function validateV2(c: City): City {
   }
   const pairs = new Set<string>();
   for (const e of c.employment) {
-    if (!e || !int(e.householdId, 1) || !int(e.firmId, 1) || !int(e.workers, 1) || e.rank !== 'entry') fail();
-    const h = c.households.find(h => h.id === e.householdId), f = c.firms.find(f => f.id === e.firmId), pair = `${e.householdId}:${e.firmId}`;
-    if (!h || h.home === null || !f || e.occupation !== (f.zone === 'I' ? 'manufacturing' : 'retail') || pairs.has(pair)) fail();
+    if (!e || !int(e.householdId, 1) || !int(e.firmId, 1) || !int(e.workers, 1) || e.rank !== 'entry' || !['general', 'manufacturing', 'retail'].includes(e.skill)) fail();
+    const h = c.households.find(h => h.id === e.householdId), f = c.firms.find(f => f.id === e.firmId), pair = `${e.householdId}:${e.firmId}:${e.skill}`;
+    if (!h || h.home === null || !f || e.occupation !== (f.zone === 'I' ? 'manufacturing' : 'retail') || (e.skill !== 'general' && e.skill !== e.occupation) || pairs.has(pair)) fail();
     pairs.add(pair);
   }
-  for (const h of c.households) if (householdWorkerCount(c, h.id) > h.workforce || c.firms.reduce((n, f) => n + (f.workDays[h.wallet] ?? 0), 0) > h.workforce * (c.tick % MONTH)) fail();
+  for (const h of c.households) {
+    if (householdWorkerCount(c, h.id) > h.workforce || c.firms.reduce((n, f) => n + (f.workDays[h.wallet] ?? 0), 0) > h.workforce * (c.tick % MONTH)) fail();
+    for (const skill of ['general', 'manufacturing', 'retail'] as const) if (employmentForHousehold(c, h.id).filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) > h.workerSkills[skill]) fail();
+  }
   for (const f of c.firms) if (firmWorkerCount(c, f.id) > capacity(building(c, f.building)) || Object.values(f.workDays).reduce((n, days) => n + days, 0) > capacity(building(c, f.building)) * (c.tick % MONTH)) fail();
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();
   if (!Array.isArray(c.ledger) || !Array.isArray(c.goodsLedger)) fail();
@@ -483,6 +501,7 @@ export function deserialize(json: string): City {
   if (typeof json !== 'string' || json.length > 12_000_000) throw new Error('Save is too large or invalid.');
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
-  if (parsed && typeof parsed === 'object' && (parsed as { version?: unknown }).version === 1) return validateV2(migrateV1(deserializeV1(json)));
-  return validateV2(parsed as City);
+  if (parsed && typeof parsed === 'object' && (parsed as { version?: unknown }).version === 1) return validateV3(migrateV1(deserializeV1(json)));
+  if (parsed && typeof parsed === 'object' && (parsed as { version?: unknown }).version === 2) return validateV3(migrateV2(deserializeV2(json)));
+  return validateV3(parsed as City);
 }

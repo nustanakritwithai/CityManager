@@ -73,6 +73,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI acceptance failed with exit code $LASTEXITCODE." }
             npm run test:population
             if ($LASTEXITCODE -ne 0) { throw "Household and housing acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:worker
+            if ($LASTEXITCODE -ne 0) { throw "Worker capability acceptance failed with exit code $LASTEXITCODE." }
             $env:CITYMANAGER_BLOCK_MODELS = '1'
             $env:CITYMANAGER_SCREENSHOT_DIR = '.test-output/fallback'
             npm run test:browser
@@ -85,6 +87,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI fallback acceptance failed with exit code $LASTEXITCODE." }
             npm run test:population
             if ($LASTEXITCODE -ne 0) { throw "Household and housing fallback acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:worker
+            if ($LASTEXITCODE -ne 0) { throw "Worker capability fallback acceptance failed with exit code $LASTEXITCODE." }
           } finally {
             Stop-Process -Id $previewProcess.Id -ErrorAction SilentlyContinue
           }

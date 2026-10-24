@@ -14,7 +14,7 @@ const checks = [], screenshots = [], errors = [], expectedErrors = [], layouts =
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 const legacySha256 = createHash('sha256').update(legacyRaw).digest('hex');
 assert.equal(legacySha256, '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const fixture = deserialize(legacyRaw); assert.equal(fixture.version, 2);
+const fixture = deserialize(legacyRaw); assert.equal(fixture.version, 3);
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(fixture[key], legacy[key], `Migration preserves ${key}`);
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], legacy[key], `Migration preserves ${key}`);
 for (const old of legacy.firms) { const firm = fixture.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
@@ -70,7 +70,7 @@ async function openPage(page) {
 async function load(json) {
   await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
-  await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(json)})`); await button('#load');
+  await evaluate(`localStorage.setItem('citymanager.save.v3',${JSON.stringify(json)})`); await button('#load');
   const expected = JSON.parse(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
 }
@@ -112,7 +112,8 @@ async function household(household, source) {
   await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${household.id}'`);
   const allocations = employmentForHousehold(fixture, household.id), employed = householdWorkerCount(fixture, household.id);
   await metrics('#entity-content', { cash: fixture.accounts[household.wallet], home: household.home === null ? 'null' : household.home, members: household.members, workforce: household.workforce, dependents: household.dependents, employed, unemployed: household.workforce - employed, employers: new Set(allocations.map(a => a.firmId)).size, needs: household.needs, 'last-purchase': household.lastPurchaseTick });
-  assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-employment-row")].map(e=>({householdId:Number(e.dataset.householdId),firmId:Number(e.dataset.firmId),workers:Number(e.dataset.workers),occupation:e.dataset.occupation,rank:e.dataset.rank}))'), allocations);
+  assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-employment-row")].map(e=>({householdId:Number(e.dataset.householdId),firmId:Number(e.dataset.firmId),workers:Number(e.dataset.workers),occupation:e.dataset.occupation,rank:e.dataset.rank,skill:e.dataset.skill}))'), allocations);
+  assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-skill-row")].map(e=>({skill:e.dataset.skill,total:Number(e.dataset.total),employed:Number(e.dataset.employed),unemployed:Number(e.dataset.unemployed)}))'), ['general', 'manufacturing', 'retail'].map(skill => { const employed = allocations.filter(a => a.skill === skill).reduce((n, a) => n + a.workers, 0); return { skill, total: household.workerSkills[skill], employed, unemployed: household.workerSkills[skill] - employed }; }));
   assert.equal(await visible('#entity-content .cx-legacy-assumption'), household.origin === 'legacy-v1');
   assert.equal(await evaluate('document.querySelector("#entity-content").dataset.wallet'), household.wallet); await ownFlows(household.wallet);
   await button('#submenu-back'); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${source.id}'`);
@@ -213,7 +214,7 @@ try {
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: projection.x, y: projection.y, deltaX: 0, deltaY: -180 }); assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await closePanel(); await key('ArrowRight'); await until(`JSON.stringify(window.cityManager.cellScreen(${homes[0].cell}))!==${JSON.stringify(JSON.stringify(projection))}`); assert.notDeepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await button('[data-camera="reset"]'); assert.deepEqual(await state(), fixture); checks.push('Open inspector disables camera buttons and ignores wheel/arrows/q/e; closing restores camera input without model changes');
 
   await place(homes[0]); await button('[data-tool="bulldoze"]'); await cell(homes[0].cell, false); const demolished = await state(); assert.equal(demolished.buildings.some(b => b.id === homes[0].id), false); assert.notEqual((await route()).id, String(homes[0].id)); assert.deepEqual(deserialize(JSON.stringify(demolished)), demolished);
-  await openPage('game'); await button('#save'); assert.deepEqual(JSON.parse(await evaluate('localStorage.getItem("citymanager.save.v2")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
+  await openPage('game'); await button('#save'); assert.deepEqual(JSON.parse(await evaluate('localStorage.getItem("citymanager.save.v3")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
 
   await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
   await place(homes[0]); await assertLayout(); await screenshot('phone-house.png'); await evaluate('document.querySelector("#entity-content .cx-household-list").scrollIntoView({block:"start"})'); await screenshot('phone-house-members.png',false); await button(`#entity-content [data-household-id="${homeHousehold.id}"]`); await assertLayout(); await screenshot('phone-household.png');
