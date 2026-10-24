@@ -1,0 +1,60 @@
+name: Entity explanation (mock API)
+
+on:
+  pull_request:
+    paths:
+      - 'src/entity-explanation*'
+      - 'src/main.ts'
+      - 'server/city-advisor/**'
+      - 'tests/entity-explanation*'
+      - '.github/workflows/entity-explanation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  entity:
+    name: Verify selected snapshot explanations
+    runs-on: windows-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run test:advisor
+      - name: Check default-disabled production build
+        run: npm run build
+      - name: Build mock-enabled inspector
+        env:
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
+        run: node node_modules/vite/bin/vite.js build --outDir .test-output/entity-build
+      - name: Exercise inspector without provider calls
+        run: |
+          New-Item -ItemType Directory -Force .test-output | Out-Null
+          $entityPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4189', '--strictPort', '--outDir', '.test-output/entity-build') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/entity-preview.log -RedirectStandardError .test-output/entity-preview-error.log
+          try {
+            $entityReady = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try {
+                if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4189/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $entityReady = $true; break }
+              } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $entityReady) { throw 'Entity preview did not start.' }
+            $env:CITYMANAGER_ENTITY_COMMIT = (git rev-parse HEAD).Trim()
+            node --experimental-strip-types tests/entity-explanation-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Entity explanation acceptance failed.' }
+          } finally {
+            Stop-Process -Id $entityPreview.Id -ErrorAction SilentlyContinue
+          }
