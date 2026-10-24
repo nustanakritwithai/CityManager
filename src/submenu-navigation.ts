@@ -33,13 +33,13 @@ export function closeSubmenus() {
 }
 export function hasOpenSubmenu() { return active !== null; }
 
-export function setupSubmenuNavigation() {
+export function setupSubmenuNavigation(backAction: () => void = () => {}) {
   if (ready) return; ready = true;
   const inspector = document.querySelector<HTMLElement>('#inspector')!;
   const heading = inspector.querySelector<HTMLElement>('.place-heading')!;
   const back = document.createElement('button'); back.id = 'submenu-back'; back.type = 'button';
   back.textContent = '←'; back.setAttribute('aria-label', 'กลับข้อมูลสถานที่');
-  back.title = 'กลับข้อมูลสถานที่ (Esc)'; back.addEventListener('click', closeSubmenus);
+  back.title = 'กลับข้อมูลสถานที่ (Esc)'; back.addEventListener('click', () => active ? closeSubmenus() : backAction());
   inspector.querySelector('.inspector-heading')!.prepend(back);
   const scope = document.createElement('span'); scope.id = 'submenu-scope'; scope.className = 'eyebrow';
   const title = document.createElement('h2'); title.id = 'submenu-title';

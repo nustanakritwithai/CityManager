@@ -15,6 +15,7 @@ export class CityView {
   yaw = Math.PI / 4;
   radius = 65;
   mode = 'select';
+  cameraBlocked = false;
   tiles = new Map<number, { entity: Entity; signature: string }>();
   markers = new Entity('Tool previews');
   materials = new Map<string, StandardMaterial>();
@@ -166,6 +167,7 @@ export class CityView {
     this.target.z = Math.max(-22, Math.min(22, this.target.z)); this.updateCamera();
   }
   control(action: string) {
+    if (this.cameraBlocked) return;
     if (action === 'reset') { this.target.set(-10, 0, 0); this.yaw = Math.PI / 4; this.radius = this.fitRadius(); }
     if (action === 'zoom-in') this.radius = Math.max(19, this.radius * 0.86);
     if (action === 'zoom-out') this.radius = Math.min(180, this.radius / 0.86);
@@ -180,7 +182,7 @@ export class CityView {
   input() {
     const c = this.canvas;
     c.addEventListener('contextmenu', e => e.preventDefault());
-    c.addEventListener('wheel', e => { e.preventDefault(); this.radius = Math.max(19, Math.min(180, this.radius * Math.exp(e.deltaY * 0.001))); this.updateCamera(); }, { passive: false });
+    c.addEventListener('wheel', e => { e.preventDefault(); if (this.cameraBlocked) return; this.radius = Math.max(19, Math.min(180, this.radius * Math.exp(e.deltaY * 0.001))); this.updateCamera(); }, { passive: false });
     c.addEventListener('pointerdown', e => {
       c.setPointerCapture(e.pointerId); this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.pointers.size === 1) {
@@ -194,15 +196,15 @@ export class CityView {
       if (!previous) { this.onHover(this.pick(e.clientX, e.clientY)); return; }
       const dx = e.clientX - previous.x, dy = e.clientY - previous.y;
       if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 7) this.down.moved = true;
-      if (this.pointers.size === 2) {
+      if (!this.cameraBlocked && this.pointers.size === 2) {
         const other = [...this.pointers.entries()].find(([id]) => id !== e.pointerId)![1];
         const oldDistance = Math.hypot(previous.x - other.x, previous.y - other.y);
         const newDistance = Math.hypot(e.clientX - other.x, e.clientY - other.y);
         if (newDistance > 1) this.radius = Math.max(19, Math.min(180, this.radius * oldDistance / newDistance));
         this.pan(dx / 2, dy / 2); this.updateCamera();
-      } else if (this.down?.button === 2 || e.altKey) {
+      } else if (!this.cameraBlocked && (this.down?.button === 2 || e.altKey)) {
         this.yaw -= dx * 0.007; this.updateCamera();
-      } else if (this.mode === 'pan' || this.down?.button === 1) this.pan(dx, dy);
+      } else if (!this.cameraBlocked && (this.mode === 'pan' || this.down?.button === 1)) this.pan(dx, dy);
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.onHover(this.pick(e.clientX, e.clientY));
     });
