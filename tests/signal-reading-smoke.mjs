@@ -4,12 +4,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize } from '../src/sim.ts';
+import { SAVE_KEY } from '../src/save-storage.ts';
 import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
 const profile = resolve(output, 'edge-signal-reading');
 assert(profile.startsWith(output + sep));
-const shots = resolve(root, 'docs/signal-reading-preview');
+const shots = resolve(root, process.env.CITYMANAGER_SIGNAL_READING_SCREENSHOT_DIR || process.env.CITYMANAGER_SIGNAL_READING_OUTPUT_DIR || '.test-output/signal-reading');
+assert(shots.startsWith(output + sep), 'Reading screenshots and QA must stay under this task .test-output');
 const url = process.env.CITYMANAGER_SIGNAL_READING_URL || 'http://127.0.0.1:4187/CityManager/';
 assert.equal(new URL(url).hostname, '127.0.0.1', 'Test only this task\'s loopback preview');
 const debugPort = 9359;
@@ -152,7 +154,7 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let day = 0; day < 65; day++) step(fixture);
   await button('#toggle-game-menu');
-  await evaluate(`localStorage.setItem('citymanager.save.v3',${JSON.stringify(serialize(fixture))})`);
+  await evaluate(`localStorage.removeItem(${JSON.stringify(SAVE_KEY)});localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(serialize(fixture))})`);
   await button('#load'); await button('#close-inspector');
   const before = await state(); assert.deepEqual(before, fixture);
 

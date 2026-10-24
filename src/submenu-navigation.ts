@@ -1,6 +1,7 @@
 const definitions = [
   ['ledger', 'money-section', 'รายการเงินล่าสุด', 'บัญชีทั้งเมือง'],
-  ['goods-ledger', 'goods-section', 'การเคลื่อนย้ายสินค้า', 'สินค้าทั้งเมือง'],
+  ['goods-ledger', 'goods-section', 'การเคลื่อนย้ายสินค้าสำเร็จรูป', 'สินค้าสำเร็จรูปทั้งเมือง'],
+  ['crop-ledger', 'crop-section', 'บัญชีพืชผล', 'ล็อตพืชผลทั้งเมือง'],
   ['accounts', 'accounts-section', 'ยอดกระเป๋าเงิน', 'ทุกบัญชีในแบบจำลอง'],
   ['guide', 'guide', 'วิธีเล่น', 'คู่มือการควบคุม'],
   ['simulation-rules', 'simulation-rules', 'สมมติฐานต้นแบบ', 'กติกาและขอบเขต']
@@ -50,7 +51,7 @@ export function setupSubmenuNavigation(backAction: () => void = () => {}) {
     section.id = id; section.classList.add('submenu-section');
     const summary = section.querySelector('summary')!;
     summary.classList.add('submenu-entry');
-    const symbol = document.createElement('span'); symbol.className = 'submenu-entry-icon'; symbol.textContent = ['฿', '▦', '▤', '1–4', 'i'][index]; symbol.setAttribute('aria-hidden', 'true');
+    const symbol = document.createElement('span'); symbol.className = 'submenu-entry-icon'; symbol.textContent = ['฿', '▦', 'F', '▤', '1–5', 'i'][index]; symbol.setAttribute('aria-hidden', 'true');
     const copy = document.createElement('div'), title = document.createElement('strong'), hint = document.createElement('small');
     title.className = 'submenu-entry-label'; title.textContent = label; hint.textContent = scopeLabel; copy.append(title, hint); summary.replaceChildren(symbol, copy);
     section.addEventListener('toggle', () => {

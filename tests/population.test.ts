@@ -6,13 +6,14 @@ import { createCity, step, deserialize, serialize, summary, bulldoze, moveHouseh
 import { deserializeV1 } from '../src/legacy-v1.ts';
 
 const frozen = readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
+const frozenV3 = (day: number) => readFileSync(new URL(`./fixtures/legacy-v3-day${day}.json`, import.meta.url), 'utf8');
 const advance = (c: City, days: number) => { for (let i = 0; i < days; i++) step(c); return c; };
 const populated = (day = 180) => advance(createCity(61025), day);
 
 test('frozen v1 migration preserves history, clocks, claims and IDs with explicit minimum legacy composition', () => {
   assert.equal(createHash('sha256').update(frozen).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
   const old = deserializeV1(frozen), migrated = deserialize(frozen);
-  assert.equal(migrated.version, 3); assert.equal(migrated.rulesVersion, 'worker-1');
+  assert.equal(migrated.version, 4); assert.equal(migrated.rulesVersion, 'agriculture-1');
   for (const key of ['seed', 'rng', 'tick', 'nextId', 'accounts', 'ledger', 'goodsLedger', 'goods', 'lastEvent'] as const) assert.deepEqual(migrated[key], old[key]);
   assert.equal(migrated.households.length, old.households.length);
   assert.equal(migrated.migration.legacyHouseholds, 6); assert.equal(migrated.migration.arrivals, 6);
@@ -93,17 +94,24 @@ test('home demolition displaces families without deleting savings or earned clai
   assert.equal(c.migration.arrivals, arrivals); assert.doesNotThrow(() => deserialize(serialize(c)));
 });
 
-test('one family can split two workers across establishments and receives exact reserved wages for both', () => {
-  const c = populated(120), h = c.households.find(h => h.workforce === 2)!, factory = c.firms.find(f => f.zone === 'I')!, shop = c.firms.find(f => f.zone === 'C')!;
-  c.employment = c.employment.filter(e => e.householdId !== h.id && e.firmId !== shop.id);
-  c.employment.push({ householdId: h.id, firmId: factory.id, occupation: 'manufacturing', rank: 'entry', skill: 'manufacturing', workers: 1 }, { householdId: h.id, firmId: shop.id, occupation: 'retail', rank: 'entry', skill: 'general', workers: 1 });
-  assert.doesNotThrow(() => deserialize(serialize(c)));
-  step(c);
-  assert.equal(householdWorkerCount(c, h.id), 2); assert.equal(employmentForHousehold(c, h.id).length, 2);
-  assert.equal(factory.workDays[h.wallet], 1); assert.equal(shop.workDays[h.wallet], 1);
-  assert.equal(c.ledger.filter(e => e.tick === c.tick && e.reason.includes('purchase') && e.from === h.wallet).length, 1);
-  advance(c, 29);
-  const wages = c.ledger.filter(e => e.tick === 150 && e.reason === 'Monthly wages' && e.to === h.wallet);
+test('a funded imported family keeps two actual employers and receives their full reserved monthly wages', () => {
+  // Real published v3 day180 already has two-employer families and settled claims.
+  // Migration adds no farms, crop inputs or money; the factory must fund wages from its real cash.
+  const c = deserialize(frozenV3(180)), h = c.households.find(h => h.workforce === 2)!, factory = c.firms.find(f => f.zone === 'I')!, shop = c.firms.find(f => f.zone === 'C')!;
+  assert.equal(c.tick, 180); assert.equal(c.accounts[factory.wallet], 719000); assert.equal(c.accounts[shop.wallet], 264820);
+  assert.ok(c.accounts[factory.wallet] >= firmWorkerCount(c, factory.id) * WAGES.I + 10000);
+  assert.ok(c.accounts[shop.wallet] >= firmWorkerCount(c, shop.id) * WAGES.C + 10000);
+  assert.ok(c.firms.every(f => Object.keys(f.workDays).length === 0));
+  const produced = c.goods.produced;
+  for (let day = 1; day <= 30; day++) {
+    step(c);
+    assert.equal(householdWorkerCount(c, h.id), 2); assert.equal(new Set(employmentForHousehold(c, h.id).map(e => e.firmId)).size, 2);
+    if (day < 30) { assert.equal(factory.workDays[h.wallet], day); assert.equal(shop.workDays[h.wallet], day); }
+    assert.equal(c.ledger.filter(e => e.tick === c.tick && e.reason.includes('purchase') && e.from === h.wallet).length, 1);
+    assert.doesNotThrow(() => deserialize(serialize(c)));
+  }
+  assert.equal(c.goods.produced, produced, 'No crop input means no new factory output despite retained funded jobs');
+  const wages = c.ledger.filter(e => e.tick === 210 && e.reason === 'Monthly wages' && e.to === h.wallet);
   assert.deepEqual(wages.map(e => [e.from, e.amount]).sort(), [[factory.wallet, 60000], [shop.wallet, 42000]].sort());
   assert.ok(c.firms.every(f => Object.keys(f.workDays).length === 0)); assert.doesNotThrow(() => deserialize(serialize(c)));
 });

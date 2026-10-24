@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step } from '../src/sim.ts';
-import { flowRows, walletGroups, formatMoney } from '../src/inspector-data.ts';
+import { readFileSync } from 'node:fs';
+import { createCity, deserialize, type CropEntry } from '../src/sim.ts';
+import { flowRows, cropFlowRows, walletGroups, formatMoney } from '../src/inspector-data.ts';
 
 test('money and goods rows preserve raw journal data and original indices newest first', () => {
   const city = createCity(61025);
@@ -57,8 +58,7 @@ test('wallet groups retain every signed and zero account exactly once with truth
 });
 
 test('presenters leave frozen simulation arrays, accounts and RNG unchanged and return independent rows', () => {
-  const city = createCity(61025);
-  for (let day = 0; day < 65; day++) step(city);
+  const city = deserialize(readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'));
   const before = JSON.stringify(city), rng = city.rng;
   const deepFreeze = (value: unknown): void => {
     if (value && typeof value === 'object') { for (const nested of Object.values(value)) deepFreeze(nested); Object.freeze(value); }
@@ -82,4 +82,43 @@ test('integer satang formatting preserves cents, signs and large amounts exactly
   assert.equal(formatMoney(Number.MAX_SAFE_INTEGER), '90,071,992,547,409.91');
   assert.equal(formatMoney(-Number.MAX_SAFE_INTEGER, true), '-90,071,992,547,409.91');
   for (const invalid of [0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => formatMoney(invalid), RangeError);
+});
+
+test('crop rows retain their own immutable IDs, lot units, book values and cash without merging generic history', () => {
+  const city = createCity(61025);
+  const entry = (id: number, kind: CropEntry['kind'], overrides: Partial<CropEntry> = {}): CropEntry => ({ id, tick: id + 2, kind, from: 'firm:1', to: 'firm:2', quantity: 2, fromValue: 100, toValue: 300, cash: 300, workers: 0, batches: 0, outputQuantity: 0, reason: `Crop event ${id}`, ...overrides });
+  city.cropLedger = [
+    entry(1, 'harvest', { from: 'environment:crops', to: 'firm:1', fromValue: 0, toValue: 0, cash: 0, workers: 1 }),
+    entry(2, 'trade'),
+    entry(3, 'process', { to: 'processing', toValue: 0, cash: 0, workers: 1, batches: 1, outputQuantity: 8 }),
+    entry(4, 'writeoff', { to: 'outside', toValue: 0, cash: 0 }),
+    entry(5, 'consumption', { to: 'household:8', quantity: 1, toValue: 0, cash: 800 }),
+  ];
+  city.goodsLedger = [{ tick: 1, from: 'production', to: 'firm:2', quantity: 8, reason: 'Crop recipe #3' }];
+  const before = JSON.stringify(city), rows = cropFlowRows(city);
+  assert.deepEqual(rows.map(row => [row.id, row.index]), [[5, 4], [4, 3], [3, 2], [2, 1], [1, 0]]);
+  for (const row of rows) {
+    const source = city.cropLedger[row.index];
+    assert.equal(row.kind, 'crops'); assert.equal(row.cropKind, source.kind); assert.equal(row.value, source.quantity);
+    for (const field of ['id', 'tick', 'from', 'to', 'reason', 'fromValue', 'toValue', 'cash', 'workers', 'batches', 'outputQuantity'] as const) assert.equal(row[field], source[field]);
+    assert.ok(/[ก-๙]/.test(row.label));
+  }
+  assert.equal(rows.at(-1)!.fromLabel, 'ผลผลิตธรรมชาติจากพื้นที่');
+  assert.equal(rows[2].toLabel, 'พืชผลที่ใช้แปรรูป'); assert.equal(rows[0].toLabel, 'ครัวเรือน #8');
+  assert.deepEqual(flowRows(city, 'goods').map(row => [row.kind, row.index, row.value]), [['goods', 0, 8]]);
+  rows[0].cash = 0; rows[1].value = -99; assert.equal(JSON.stringify(city), before);
+});
+
+test('crop and owner money labels describe actual transaction classes without counting capital as sales', () => {
+  const city = createCity();
+  city.ledger = [
+    { tick: 1, from: 'household:2', to: 'firm:3', amount: 10000, reason: 'Owner capital contribution' },
+    { tick: 2, from: 'firm:3', to: 'household:2', amount: 10000, reason: 'Owner profit distribution' },
+    { tick: 3, from: 'firm:3', to: 'firm:4', amount: 300, reason: 'Crop exchange #7' },
+    { tick: 3, from: 'household:2', to: 'firm:3', amount: 800, reason: 'Fresh crop purchase #8' },
+  ];
+  const rows = flowRows(city, 'money');
+  assert.match(rows[3].label, /ทุน.*ไม่ใช่ยอดขาย/); assert.match(rows[2].label, /ถอนกำไร.*ไม่ใช่ค่าใช้จ่ายซ้ำ/);
+  assert.match(rows[1].label, /พืชผล.*#7/); assert.match(rows[0].label, /ครัวเรือนซื้อพืชผล.*#8/);
+  assert.equal(rows[0].value, 800); assert.equal(rows[3].value, 10000);
 });

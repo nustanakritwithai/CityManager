@@ -1,67 +1,70 @@
-# CityManager · First playable
+# CityManager
 
-ต้นแบบเกมสร้างเมือง 3D บนเว็บด้วย **PlayCanvas Engine + TypeScript** เขียนใหม่จากศูนย์ ได้แรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ผู้เล่นสร้างถนนและกำหนดโซน ส่วนครัวเรือนและบริษัทเติบโตตามเงื่อนไขของ simulation พร้อมเหตุผลที่ตรวจสอบได้
+ต้นแบบเกมสร้างเมือง 3D บนเว็บด้วย **PlayCanvas Engine + TypeScript** เขียนขึ้นใหม่ ได้แรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ผู้เล่นสร้างถนนและกำหนดโซน ส่วนครัวเรือนและกิจการมีสถานะ เงิน และเงื่อนไขเติบโตที่ตรวจสอบได้ ไม่ใช้โค้ด Living City Lab หรือ novel engine และไม่อ้างว่าครบทุกระบบของ CSII
 
-นี่คือ vertical slice ขนาดเล็ก ไม่ใช่เกมที่มีความสามารถเทียบเท่า CSII โค้ดเขียนใหม่ ไม่มีโค้ดจาก Living City Lab หรือ novel engine รุ่นภาพบน branch นี้ใช้โมเดลเมือง **Kenney แบบ CC0** ร่วมกับรูปทรงที่สร้างเอง ดูแหล่งที่มา ใบอนุญาต และขั้นตอนตรวจไฟล์ใน [Assets](docs/ASSETS.md)
+เว็บรุ่นที่เผยแพร่: [เล่น CityManager](https://nustanakritwithai.github.io/CityManager/)
 
-## รันในเครื่อง
+## รุ่นที่เผยแพร่กับงานในสาขานี้
 
-ใช้ Node.js 24 และ npm:
+- GUI แยกบ้าน กิจการ ครัวเรือน และภาพรวมเมือง: [PR #4](https://github.com/nustanakritwithai/CityManager/pull/4); แผงมือถือกระชับและเปิดได้สูงขึ้น: [PR #5](https://github.com/nustanakritwithai/CityManager/pull/5)
+- สมาชิกครัวเรือน ความจุบ้าน และการย้ายเข้า: [PR #7](https://github.com/nustanakritwithai/CityManager/pull/7), [กติกาครัวเรือน](docs/HOUSEHOLDS.md)
+- แบ่งแรงงานตามความสามารถและกระจายไปหลายกิจการ: [PR #9](https://github.com/nustanakritwithai/CityManager/pull/9), [กติกาแรงงานและเซฟ v3](docs/LABOR.md)
+
+**งานเกษตรในสาขานี้ยังเป็น candidate ที่ไม่ Merge/เผยแพร่** ใช้ schema `4 / agriculture-1` แยกจากรุ่นแรงงาน v3 ที่เผยแพร่แล้ว เพิ่มโซนฟาร์ม **F** และตลาดพืชผล **T** พืชผลใช้ได้ทั้งแปรรูปในโรงงานและบริโภคผ่านตลาด โดยครัวเรือนซื้อรวมเพียงหนึ่งตะกร้าต่อวัน ตลาดใช้ทุนและแรงงานของครัวเรือนเจ้าของ บัญชีครัวเรือนกับกิจการแยกกัน ดู [กติกาเกษตร/ตลาด](docs/AGRICULTURE.md) และ [การย้ายเซฟ v1–v3](docs/AGRICULTURE-SAVES.md) อย่าใช้เว็บรุ่นปัจจุบันเป็นหลักฐานว่างาน candidate นี้เผยแพร่แล้ว
+
+## รันและตรวจสอบ
+
+ใช้ Node.js 24 และ npm โดย dependency ถูกล็อกใน `package-lock.json`:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-เปิด URL ที่ Vite แสดงและใช้ path `/CityManager/` ตรวจสอบและสร้างไฟล์พร้อมเสิร์ฟได้ด้วย:
+เปิด URL ที่ Vite แสดงภายใต้ `/CityManager/` ตรวจหน่วยจำลอง ไฟล์ asset และ production build:
 
 ```sh
 npm test
+npm run test:advisor
 npm run assets:verify
 npm run build
 npm run preview
 ```
 
-Browser acceptance ใช้ Microsoft Edge ที่ติดตั้งอยู่แล้ว: เปิด `npm run preview` ที่ port 4173 แล้วรัน `npm run test:browser` ในอีก terminal (กำหนด path ผ่าน `CITYMANAGER_BROWSER` ได้) สคริปต์ใช้ profile แยกใน `.test-output/` และไม่ดาวน์โหลด browser บนมือถือเปิดปุ่ม **กล้อง** เพื่อแสดง/ซ่อนชุดควบคุม
+เปิด preview ที่ port 4173 แล้วรัน browser suites ในอีก terminal โดยใช้ Microsoft Edge ที่ติดตั้งอยู่ สคริปต์แยก profile และรายงานไว้ใน `.test-output/` ไม่ดาวน์โหลด browser:
 
-`dist/` ใช้ base `/CityManager/` สำหรับ GitHub Pages การ build ในเครื่องยังไม่ใช่การเผยแพร่เกม
+```sh
+npm run test:browser
+npm run test:submenus
+npm run test:context
+npm run test:compact
+npm run test:population
+npm run test:worker
+npm run test:agriculture
+```
 
-การปรับภาพใช้โมเดล 8 ชิ้น รวม 568,696 ไบต์ โดยไม่เปลี่ยนกฎ simulation หรือ save schema หากโหลดโมเดลไม่ได้ เกมยังใช้รูปทรงสำรองเดิม ดู [ภาพเปรียบเทียบ/หลักฐาน visual preview](docs/visual-preview/) และ [รายละเอียด asset](docs/ASSETS.md) งานภาพจาก [PR #2](https://github.com/nustanakritwithai/CityManager/pull/2) เผยแพร่แล้วใน `main` ปัจจุบัน
-
-พื้นดินใช้ลายหญ้า/ดินที่สร้างเองแบบเบา กริดปรากฏเฉพาะเครื่องมือก่อสร้าง แผงสถานที่ภาษาไทยแสดงเงิน คนงาน สต็อก และค่าจ้างสำรองจากข้อมูลจริง บัญชีละเอียดพับเก็บได้ แผงมือถือแนบด้านล่างและคืนเครื่องมือเมื่อปิด ดู [พื้นดิน](docs/TERRAIN.md) และ [ไอคอน GUI Kenney CC0](docs/GUI-ASSETS.md) ขนาดรวม 1,254 ไบต์
-
-GUI เมนูย่อยแยกเป็น 5 ส่วน: เงิน สินค้า กระเป๋าเงิน วิธีเล่น และสมมติฐาน อ่านยอด/รายการจริงของทั้งเมืองพร้อมปุ่มดูเพิ่ม/ทั้งหมด/ล่าสุด และ Back/Esc โดยไม่แก้ simulation, save, dependencies หรือเพิ่มไฟล์ภาพ ดู [ตัวอย่างและหลักฐานเมนูย่อย](docs/submenu-preview/) และ [แผน GUI ระยะถัดไป](docs/CityManager-GUI-Plan-TH.md) หลักฐาน preview บันทึกก่อน Merge; ตรวจสถานะเผยแพร่ล่าสุดได้ที่ GitHub Actions ของ `main` การตรวจจอสัมผัสเป็น viewport จำลอง ไม่ใช่เครื่องมือถือจริง
-
-งาน preview ถัดไปแยกข้อมูลตามสิ่งที่เลือก: บ้าน → ครัวเรือนของบ้านนั้น → รายละเอียดครัวเรือน; โรงงาน/ร้านค้า → บริษัทและบัญชีของตัวเอง ข้อมูลรวมและเศรษฐกิจพื้นฐานอยู่ที่ปุ่ม **ภาพรวมเมือง** ส่วนวิธีเล่น/สมมติฐานอยู่ที่ **คู่มือ** ดู [ขอบเขตและการตรวจ contextual GUI](docs/CONTEXTUAL-GUI.md) งานนี้อยู่บน branch `feat/contextual-inspectors` ยังไม่ได้ Merge หรือเผยแพร่
-
-การปรับแผงมือถือรอบ S22 ใช้แถวกระชับที่ขยายรายละเอียดได้ แผงอ่านสูง และเมนู **เกม** สำหรับ Save/Load/New ดู [ขอบเขตและ baseline Compact mobile GUI](docs/COMPACT-MOBILE-GUI.md) งานบน `feat/compact-mobile-gui` ยังเป็น draft ไม่ merge/deploy และรอผล candidate QA
-
-รุ่นครัวเรือน/สถานประกอบการ v2 เผยแพร่แล้วใน [PR #7](https://github.com/nustanakritwithai/CityManager/pull/7) แยกสมาชิก แรงงาน ผู้พึ่งพิง และความจุบ้าน ดู [ขอบเขตรุ่นครัวเรือนเดิม](docs/HOUSEHOLDS.md) ส่วน branch นี้เพิ่มการจัดสรรแรงงานตามกลุ่มทักษะ พร้อมเซฟ v3 และการรักษาเซฟ v1/v2 อ่าน [กติกาแรงงานและความเข้ากันได้](docs/LABOR.md) งานแรงงานยังรอตรวจ draft PR ไม่ได้เผยแพร่
+กำหนด `CITYMANAGER_BROWSER` ได้หากต้องระบุ executable เอง และตั้ง `CITYMANAGER_BLOCK_MODELS=1` เพื่อทวนชุดเดิมในกรณีโมเดลโหลดไม่ได้ การตรวจหน้าสัญญาณใช้ build แยกและ mock/offline ตาม [Signals](docs/SIGNALS.md) โดยไม่เปลี่ยน production `dist/` หรือเรียกผู้ให้บริการระหว่าง QA ผลผ่านต้องอ้างถึง source commit และ CI ของ PR จริง การจำลอง viewport/touch ไม่ใช่การทดสอบ Galaxy S22 เครื่องจริง
 
 ## ลองเล่น
 
-1. เริ่มจากถนนและโซนตัวอย่าง หรือขยายถนนจากประตูสีทองด้านตะวันตก โซนต้องติดถนนที่เชื่อมกลับถึงประตู
-2. เลือก **Road** แล้วแตะจุดต้นและจุดปลาย หรือลากระหว่างจุด เพื่อสร้างเส้นทางรูปตัว L เลือก **R / C / I** เพื่อทาโซนที่อยู่อาศัย ร้านค้า และอุตสาหกรรม
-3. ปล่อยเวลาเดิน อาคารจะเกิดเองเมื่อมีทางเข้า สาธารณูปโภคตามสมมติฐาน ความต้องการ และความคุ้มค่า ไม่ได้วางบ้านหรือร้านค้าโดยตรง
-4. เลือกช่องแล้วเปิดแผงข้อมูลเพื่อดูเหตุผลการหยุดเติบโต งาน กระเป๋าเงิน และรายการโอนเงิน/สินค้า
-5. ทดสอบความล้มเหลวโดยสร้างถนนแยกที่ไม่ต่อประตูแล้วทาโซนข้างถนนนั้น แผงอธิบายจะแสดงข้อจำกัดเรื่องการเชื่อมต่อ
+1. ต่อถนนจากประตูสีทองด้านตะวันตก โซนต้องมีถนนข้างแปลงที่เชื่อมถึงประตู
+2. วาง **R / C / I** สำหรับบ้าน ร้านค้า และโรงงาน ใน candidate นี้มี **F / T** เพิ่มด้วย ฟาร์มต้องมี fertility อย่างน้อย 50% อาคารเกิดเองเมื่อผ่านเงื่อนไข ไม่ใช่การวางบ้านหรือกิจการโดยตรง
+3. แตะอาคารเพื่อดูเฉพาะข้อมูลของอาคารนั้น แตะครัวเรือนเพื่อเปิดข้อมูลครอบครัว ส่วนยอดรวมและบัญชีทั้งเมืองอยู่ที่ **ภาพรวมเมือง** วิธีเล่นอยู่ใน **คู่มือ**
+4. **กลับ / Esc** ยกเลิกจุดเริ่มถนนก่อน แล้วกลับเครื่องมือเลือก ใช้ **Pan** เพื่อลากกล้อง คลิกขวาลากเพื่อหมุน ล้อเมาส์หรือ pinch เพื่อซูม หรือใช้ปุ่มกล้อง
+5. **Pause / 1× / 3× / 10×** ควบคุมเวลา เมนู **เกม** รวมบันทึก โหลด นำเข้าเซฟเดิม และเริ่มใหม่ เซฟอยู่เฉพาะ browser นั้น การโหลดไม่เขียนทับเซฟโดยอัตโนมัติ
 
-**Select / Bulldoze** เลือกหรือลบช่อง; **Cancel / Esc** ยกเลิกจุดเริ่มถนนก่อน แล้วกลับ Select; เลือกเครื่องมือเดิมซ้ำได้ ใช้ **Pan** ลากเพื่อเลื่อนกล้อง คลิกขวาลากเพื่อหมุน ล้อเมาส์หรือสองนิ้ว pinch เพื่อซูม และมีปุ่มกล้องสำหรับจอสัมผัส ปุ่ม **Pause / 1× / 3× / 10×** ควบคุมเวลา **Save / Load** เก็บเมืองใน browser นี้เท่านั้น
+## ขอบเขตและข้อมูล
 
-## สิ่งที่จำลอง
+แผนที่ราบ 24×24 ช่อง ใช้ถนนกริด โดย road graph และ parcels แยกจาก mesh ตัวจำลองไม่ขึ้นกับ renderer หนึ่ง tick เท่ากับหนึ่งวัน; 30 วันต่อเดือน เงินเป็นสตางค์จำนวนเต็ม การผลิตและซื้อสินค้าเกิดรายวัน ส่วนค่าจ้าง ค่าเช่า และภาษีจ่ายรายเดือน มี money/goods/crop journals ให้กระทบยอด ครัวเรือนเป็นหน่วยเศรษฐกิจร่วมของสมาชิกหลายคน ไม่จำลองคนทุกคนเป็นตัวละครแยก
 
-- แผนที่ราบ 24×24 ช่อง ถนนแบบกริดและ graph การเชื่อมต่อแยกจาก mesh
-- 1 tick = 1 วัน; 30 วันต่อเดือน; ผลิต/ซื้อสินค้ารายวัน และจ่ายค่าจ้าง/ค่าเช่า/ภาษีรายเดือน
-- เงินจำนวนเต็มหน่วยสตางค์ ครัวเรือนและบริษัทมีบัญชีจริง เงินออกจากผู้จ่ายก่อนเข้าผู้รับ มี money ledger และ goods ledger
-- seed, fixed ticks และ save schema รุ่น 3 พร้อมนำเข้า v1/v2; renderer ไม่เป็นเจ้าของกฎเศรษฐกิจ
-- อาคารเรียบง่ายความสูงต่างกันและแผงอธิบายเงื่อนไขการเกิด/โต
+candidate v4 ใช้ `citymanager.save.v4` และเก็บช่อง v1/v2/v3 เดิมไว้ การบันทึกหลังนำเข้าจะสำรอง bytes ต้นฉบับก่อน ไม่แจกวัตถุดิบหรือสร้างฟาร์มให้เซฟเก่า โรงงานเก่าอาจหยุดเมื่อขาด input จนผู้เล่นจัดหาแหล่งผลิตจริง
 
-ต้นแบบใช้สินค้านามธรรมชนิดเดียว ตลาดภายนอก และน้ำ/ไฟจากภายนอกแบบพร้อมใช้ ยังไม่มีระบบจราจรเป็นรายคัน A* ถนนโค้ง เครือข่าย/กำลังผลิตสาธารณูปโภค หรือเมืองขนาดใหญ่ ขอบเขตและสมมติฐานเต็มอยู่ใน [Design](docs/DESIGN.md) และ [แผนภาษาไทย](docs/PLAN.th.md)
+ยังไม่มีรถรายคัน เส้นทาง A* บนเลน ถนนโค้ง เครือข่ายกำลังผลิตน้ำ/ไฟ วงจรชีวิตรายบุคคล หรือหลักฐานรองรับประชากรแสน–ล้านคน การซื้อขายใช้เครือข่ายที่เชื่อมถึงประตูร่วมกันและตลาดภายนอกแบบนามธรรม พารามิเตอร์เศรษฐกิจเป็นข้อเสนอของเกม ไม่ใช่สูตร CSII หรือแบบจำลองเศรษฐกิจที่สอบเทียบกับโลกจริง
 
-## สถานะการเผยแพร่และหลักฐาน
+โมเดลเมืองและไอคอนใช้ Kenney CC0 พร้อมรูปทรงและพื้นดินที่สร้างเอง มี procedural fallback เมื่อโหลดโมเดลไม่ได้: [Assets](docs/ASSETS.md), [GUI assets](docs/GUI-ASSETS.md), [Terrain](docs/TERRAIN.md) ขอบเขตเดิมอ่านได้ที่ [Design](docs/DESIGN.md) และ [แผนภาษาไทย](docs/PLAN.th.md); สถานะเฉพาะรุ่นให้ยึดเอกสารรุ่นและ PR ล่าสุด
 
-Pull request ต้องผ่าน simulation tests, TypeScript/build และ Edge browser acceptance บน source commit ของ PR ก่อน merge จากนั้น workflow บน `main` จึงเผยแพร่ build ที่ผ่านการตรวจไปยัง GitHub Pages เดิม URL เป้าหมายคือ https://nustanakritwithai.github.io/CityManager/ ตรวจสถานะ publication จาก Actions และรายงานการส่งมอบ การตั้งค่า Pages/security ไม่ได้ถูกเปลี่ยน
+## เผยแพร่
 
-ผลทดสอบจริงและภาพ browser smoke test ให้ดูรายงานการส่งมอบใน PR การทดสอบ viewport ขนาดมือถือไม่ใช่การทดสอบบนโทรศัพท์จริง
+`dist/` ใช้ base `/CityManager/` สำหรับ GitHub Pages การ build ในเครื่องยังไม่ใช่การเผยแพร่ PR ต้องผ่าน simulation tests, TypeScript/build และ Edge acceptance ของ source commit นั้นก่อน Merge จากนั้น workflow บน `main` ตรวจและเผยแพร่ tested artifact ตรวจผลล่าสุดได้จาก [GitHub Actions](https://github.com/nustanakritwithai/CityManager/actions) และต้องตรวจเว็บจริงก่อนรายงานว่าเผยแพร่สำเร็จ
 
-อ้างอิง API: [PlayCanvas standalone](https://developer.playcanvas.com/user-manual/engine/standalone/), [AppBase](https://api.playcanvas.com/engine/classes/AppBase.html), [CameraComponent](https://api.playcanvas.com/engine/classes/CameraComponent.html) (ตรวจประกอบการพัฒนา 23 ต.ค. 2026)
+อ้างอิง API: [PlayCanvas standalone](https://developer.playcanvas.com/user-manual/engine/standalone/), [AppBase](https://api.playcanvas.com/engine/classes/AppBase.html), [CameraComponent](https://api.playcanvas.com/engine/classes/CameraComponent.html)

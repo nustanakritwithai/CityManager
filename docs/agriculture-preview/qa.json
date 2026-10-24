@@ -1,0 +1,191 @@
+{
+  "recordedAt": "2026-10-24T12:43:28.853Z",
+  "status": "LOCAL_QA_PASS_NOT_PUBLISHED",
+  "sourceRuntimeCommit": "fb64f5799a83ade7470e8c0701122732e018778f",
+  "publishedBase": "3085659b9ce6a2b396d68ea28a4236eddaabf505",
+  "finalHeadNote": "Only test selector/expectation corrections, documentation and these screenshots followed the runtime commit. The draft PR checks the complete final head independently.",
+  "unitTests": 171,
+  "advisorOfflineTests": 16,
+  "assetVerification": "PASS",
+  "strictTypecheckAndProductionBuild": "PASS",
+  "browserGroups": 141,
+  "realApiRequests": 0,
+  "reports": [
+    {
+      "variant": "normal",
+      "suite": "browser",
+      "groups": 15,
+      "errors": 0,
+      "date": "2026-10-24T12:22:59.700Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-normal/browser/browser-report.json"
+    },
+    {
+      "variant": "normal",
+      "suite": "submenus",
+      "groups": 7,
+      "errors": 0,
+      "date": "2026-10-24T12:23:14.385Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-normal/submenus/submenus-report.json"
+    },
+    {
+      "variant": "normal",
+      "suite": "context",
+      "groups": 11,
+      "errors": 0,
+      "date": "2026-10-24T12:23:41.692Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-normal/context/context-report.json"
+    },
+    {
+      "variant": "normal",
+      "suite": "compact",
+      "groups": 5,
+      "errors": 0,
+      "date": "2026-10-24T12:24:24.055Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-normal/compact/compact-report.json"
+    },
+    {
+      "variant": "normal",
+      "suite": "population",
+      "groups": 9,
+      "errors": 0,
+      "date": "2026-10-24T12:25:02.709Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-normal/population/population-report.json"
+    },
+    {
+      "variant": "normal",
+      "suite": "worker",
+      "groups": 7,
+      "errors": 0,
+      "date": "2026-10-24T12:25:22.951Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-normal/worker/worker-report.json"
+    },
+    {
+      "variant": "normal",
+      "suite": "agriculture",
+      "groups": 8,
+      "errors": 0,
+      "date": "2026-10-24T12:34:34.654Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-normal/agriculture/agriculture-report.json"
+    },
+    {
+      "variant": "fallback",
+      "suite": "browser",
+      "groups": 15,
+      "errors": 0,
+      "date": "2026-10-24T12:34:55.706Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-fallback/browser/browser-report.json"
+    },
+    {
+      "variant": "fallback",
+      "suite": "submenus",
+      "groups": 7,
+      "errors": 0,
+      "date": "2026-10-24T12:35:17.078Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-fallback/submenus/submenus-report.json"
+    },
+    {
+      "variant": "fallback",
+      "suite": "context",
+      "groups": 11,
+      "errors": 0,
+      "date": "2026-10-24T12:35:48.556Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-fallback/context/context-report.json"
+    },
+    {
+      "variant": "fallback",
+      "suite": "compact",
+      "groups": 5,
+      "errors": 0,
+      "date": "2026-10-24T12:36:39.580Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-fallback/compact/compact-report.json"
+    },
+    {
+      "variant": "fallback",
+      "suite": "population",
+      "groups": 9,
+      "errors": 0,
+      "date": "2026-10-24T12:37:17.154Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-fallback/population/population-report.json"
+    },
+    {
+      "variant": "fallback",
+      "suite": "worker",
+      "groups": 7,
+      "errors": 0,
+      "date": "2026-10-24T12:37:41.901Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-fallback/worker/worker-report.json"
+    },
+    {
+      "variant": "fallback",
+      "suite": "agriculture",
+      "groups": 8,
+      "errors": 0,
+      "date": "2026-10-24T12:38:18.736Z",
+      "browser": "Edg/155.0.4283.62",
+      "report": ".test-output/agriculture-fallback/agriculture/agriculture-report.json"
+    },
+    {
+      "variant": "mock/offline",
+      "suite": "signal-reading",
+      "groups": 6,
+      "errors": 0,
+      "realApiRequests": 0,
+      "date": "2026-10-24T12:39:15.152Z",
+      "report": ".test-output/agriculture-normal/signal-reading/qa.json"
+    },
+    {
+      "variant": "mock/offline",
+      "suite": "city-questions",
+      "groups": 6,
+      "errors": 0,
+      "realApiRequests": 0,
+      "date": "2026-10-24T12:42:13.417Z",
+      "report": ".test-output/agriculture-normal/city-questions/qa.json"
+    },
+    {
+      "variant": "mock/offline",
+      "suite": "signals",
+      "groups": 5,
+      "errors": 0,
+      "realApiRequests": 0,
+      "date": "2026-10-24T12:42:29.028Z",
+      "report": ".test-output/agriculture-normal/signals/qa.json"
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "farm-desktop.png",
+      "bytes": 605129,
+      "sha256": "15694868cb909fd318d71c08ef37e4dc1b351d7f6ab04c9634b241eca7a20cce"
+    },
+    {
+      "file": "market-desktop.png",
+      "bytes": 590280,
+      "sha256": "9253a25268c77ac0eee98ee6a63b56cf80f8f85716d175c095b8f92454fd02fb"
+    },
+    {
+      "file": "market-phone.png",
+      "bytes": 84258,
+      "sha256": "5f3797545dbd67a05cf26eaa32abe701e41466f95e8e516e424e2dff4693a730"
+    }
+  ],
+  "libraryPhone": "libfile_a4583be2f8d48191810ce8827fad8be2",
+  "limits": [
+    "Installed Microsoft Edge headless; viewport/touch emulation, not physical Galaxy S22 QA.",
+    "One crop, fixed game prices, instantaneous gateway-connected exchange; no trucks/mines/financial markets/full asset accounting.",
+    "No merge or deployment authorization used for this agriculture candidate."
+  ]
+}

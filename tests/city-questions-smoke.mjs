@@ -4,17 +4,20 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, housingCapacity, bulldoze } from '../src/sim.ts';
+import { createCity, step, serialize, housingCapacity, bulldoze, summary, firmWorkerCount } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { buildLocalSignalReport } from '../src/signal-data.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const output = resolve(root, '../verification/question-staged');
+const workspaceOutput = resolve(root, '.test-output');
+const output = resolve(root, process.env.CITYMANAGER_QUESTIONS_OUTPUT_DIR || process.env.CITYMANAGER_QUESTIONS_SCREENSHOT_DIR || '.test-output/city-questions');
+assert(output.startsWith(workspaceOutput + sep), 'Question evidence must stay under this task .test-output');
 const profile = resolve(output, 'edge-questions');
 assert(profile.startsWith(output + sep));
 const candidateCommit = process.env.CITYMANAGER_SIGNALS_COMMIT;
 assert.match(candidateCommit || '', /^[a-f0-9]{40}$/, 'Set CITYMANAGER_SIGNALS_COMMIT to the exact tested source head');
-const url = 'http://127.0.0.1:4188/CityManager/';
+const url = process.env.CITYMANAGER_QUESTIONS_URL || process.env.CITYMANAGER_CITY_QUESTIONS_URL || 'http://127.0.0.1:4188/CityManager/';
+assert.equal(new URL(url).hostname, '127.0.0.1', 'Use only this task loopback preview with intercepted report mocks');
 const debugPort = 9360;
 const browser = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 await mkdir(output, { recursive: true });
@@ -68,7 +71,7 @@ async function openQuestions() {
 async function loadCity(city) {
   if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
   await button('#toggle-game-menu');
-  await evaluate(`localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(serialize(city))})`);
+  await evaluate(`localStorage.removeItem(${JSON.stringify(SAVE_KEY)});localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(serialize(city))})`);
   await button('#load'); await button('#close-inspector'); await openSignals(); await openQuestions();
   assert.deepEqual(await state(), city, 'Loading preserves exact current-schema fixture');
 }
@@ -160,14 +163,33 @@ try {
   await expectFact('city.housing.households', mature.households.length, 'ครัวเรือน');
   await expectFact('city.housing.buildings', mature.buildings.filter(item => item.zone === 'R').length, 'อาคาร');
   await ask('city.workforce');
-  const workforce = mature.households.reduce((n, item) => n + item.workforce, 0), employed = mature.employment.reduce((n, item) => n + item.workers, 0);
+  const workforce = summary(mature).workforce, employed = summary(mature).employed;
   await expectFact('city.workforce.total', workforce, 'คน'); await expectFact('city.workforce.employed', employed, 'คน'); await expectFact('city.workforce.unemployed', workforce - employed, 'คน');
   for (const skill of ['general', 'manufacturing', 'retail']) await expectFact(`city.workforce.skill.${skill}`, mature.households.reduce((n, item) => n + item.workerSkills[skill], 0), 'คน');
   await expectFact('city.workforce.legacy-assumed', mature.households.filter(item => item.skillSource === 'legacy-assumed').reduce((n, item) => n + item.workforce, 0), 'คน');
   assert(await evaluate('!!document.querySelector("[data-missing-id=\\"missing.city.workforce.education\\"]")'), 'Missing education is explicit rather than inferred from worker pools');
-  await ask('city.businesses'); await expectFact('city.businesses.total', mature.firms.length, 'แห่ง');
+  await ask('city.businesses'); await expectFact('city.businesses.total', mature.firms.length, 'แห่ง'); await expectFact('city.businesses.workers', employed, 'คน');
+  for (const [zone, fact] of [['C', 'commercial'], ['I', 'industrial'], ['F', 'farms'], ['T', 'raw-markets']]) await expectFact(`city.businesses.${fact}`, mature.firms.filter(item => item.zone === zone).length, 'แห่ง');
   await ask('house.detail', house.id); await expectFact('house.occupied-people', mature.households.filter(item => item.home === house.id).reduce((n, item) => n + item.members, 0), 'คน');
-  await ask('business.detail', firm.id); await expectFact('business.building', firm.building, 'รหัส'); await expectFact('business.workers', mature.employment.filter(item => item.firmId === firm.id).reduce((n, item) => n + item.workers, 0), 'คน'); await expectFact('business.inventory', firm.inventory, 'หน่วยสินค้า');
+  assert(mature.firms.some(item => item.zone === 'F') && mature.firms.some(item => item.zone === 'T'), 'The actual fixture includes agricultural and owner-operated market facts');
+  for (const business of mature.firms) {
+    await ask('business.detail', business.id);
+    await expectFact('business.building', business.building, 'รหัส');
+    await expectFact('business.zone', { C: 'พาณิชย์ (C)', I: 'อุตสาหกรรม (I)', F: 'ฟาร์ม (F)', T: 'ตลาดวัตถุดิบ (T)' }[business.zone], '');
+    await expectFact('business.workers', firmWorkerCount(mature, business.id), 'คน');
+    await expectFact('business.inventory', business.inventory, 'หน่วยสินค้า');
+    if (business.zone === 'C') {
+      // Finished-goods retailers never hold crops; their answer intentionally omits crop facts.
+      assert.equal(business.cropInventory, 0); assert.equal(business.cropCost, 0);
+      const selector = '[data-fact-id="business.crop-inventory"],[data-fact-id="business.crop-cost"]';
+      assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 0, 'Retail answer has no irrelevant or leaked crop facts');
+    } else {
+      await expectFact('business.crop-inventory', business.cropInventory, 'ล็อตพืชผล');
+      await expectFact('business.crop-cost', business.cropCost, 'สตางค์');
+    }
+    if (business.zone === 'T' && business.owner !== null) await expectFact('business.owner-workers', mature.ownerLabor.filter(item => item.firmId === business.id).reduce((n, item) => n + item.workers, 0), 'คน');
+  }
+  await ask('business.detail', firm.id);
   await button('[data-fact-id="business.id"] .city-question-evidence>summary');
   assert(await evaluate(`document.querySelector('[data-fact-id="business.id"]').textContent.includes(${JSON.stringify(`firm:${firm.id}`)})`));
   checks.push('All5 supported local queries display actual current numeric facts, distinct firm/building IDs and evidence; no extra report request');

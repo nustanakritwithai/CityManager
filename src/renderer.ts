@@ -78,6 +78,45 @@ export class CityView {
     parent.addChild(entity);
     return entity;
   }
+  private farm(tile: Entity, fertility: number) {
+    const plot = new Entity('Original farm plot'); tile.addChild(plot);
+    this.box(plot, 0, .09, 0, 1.68, .035, 1.68, this.ground.soilMaterial);
+    this.box(plot, -.17, .12, .12, 1.2, .035, 1.24, '#725b3e');
+    const cropHeight = .12 + Math.max(0, Math.min(100, fertility)) * .0007;
+    for (const [row, x] of [-.62, -.36, -.1, .16].entries()) {
+      const crop = this.box(plot, x, .15 + cropHeight / 2, .12, .17, cropHeight, 1.14, row % 2 ? '#86ad58' : '#b0bc61');
+      crop.name = 'Renewable crop row';
+    }
+    const shed = this.box(plot, .55, .32, -.46, .5, .43, .48, '#d7dec9'); shed.name = 'Original farm shed';
+    this.box(plot, .55, .58, -.46, .6, .13, .57, '#4c7056');
+    this.box(plot, .55, .29, -.208, .14, .27, .025, '#536754');
+    this.box(plot, -.03, .28, .8, 1.5, .065, .045, '#b9ae87');
+  }
+  private cropMarket(tile: Entity, cell: number) {
+    const stall = new Entity('Crop market'); tile.addChild(stall);
+    this.box(stall, 0, .09, 0, 1.65, .025, 1.65, '#b6b9a3');
+    const model = this.assets?.building('C', 1, cell);
+    if (model) {
+      const scale = model.getLocalScale(); model.setLocalScale(scale.x * .76, scale.y * .76, scale.z * .76);
+      model.setLocalPosition(0, .1, -.12); model.name = 'Crop market model'; stall.addChild(model);
+    } else {
+      this.box(stall, 0, .34, -.1, 1.1, .45, .68, '#d4ddd1');
+      this.box(stall, 0, .7, -.1, 1.34, .14, .98, '#538f83');
+      for (const x of [-.53, .53]) this.box(stall, x, .35, .34, .065, .5, .065, '#6f7862');
+      this.box(stall, 0, .27, .36, 1.16, .27, .25, '#8f7957');
+    }
+    // Empty wooden market furniture; stock quantities are shown by the inspector.
+    for (const x of [-.45, .04]) {
+      this.box(stall, x, .18, .63, .36, .17, .27, '#967954');
+      this.box(stall, x, .275, .63, .39, .035, .3, '#b49b6a');
+    }
+  }
+  agricultureDiagnostics() {
+    const tiles = [...this.tiles.values()];
+    return { farmPlots: tiles.filter(tile => tile.entity.findByName('Original farm plot')).length,
+      marketStalls: tiles.filter(tile => tile.entity.findByName('Crop market')).length,
+      buildGrid: this.ground.diagnostics.buildGrid };
+  }
   setup() {
     this.app.scene.ambientLight = new Color(0.52, 0.58, 0.63);
     this.camera.addComponent('camera', { clearColor: new Color(0.16, 0.27, 0.32), fov: 48, nearClip: 0.5, farClip: 260 });
@@ -222,14 +261,15 @@ export class CityView {
   }
   render(city: City, selected: number | null, preview: number[]) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'bulldoze'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'T', 'bulldoze'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city);
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
       const links = cell.road ? [i % SIZE > 0 && city.cells[i - 1].road, i % SIZE < SIZE - 1 && city.cells[i + 1].road, i >= SIZE && city.cells[i - SIZE].road, i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road].map(Number).join('') : '';
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}`;
+      const fertility = cell.zone === 'F' ? city.resources.fertility[i] : '';
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -245,9 +285,11 @@ export class CityView {
           if (lamp) { lamp.setLocalPosition(0, .13, -.84); tile.addChild(lamp); }
         }
       } else if (cell.zone) {
-        const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053' }[cell.zone];
+        const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053', F: '#93af58', T: '#69b6a6' }[cell.zone];
         this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, color);
         if (b) {
+          if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
+          if (b.zone === 'T') { this.cropMarket(tile, i); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
           const model = this.assets?.building(b.zone, b.level, i);
           if (model) { model.setLocalPosition(0, .1, 0); tile.addChild(model); continue; }

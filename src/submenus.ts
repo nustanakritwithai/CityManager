@@ -1,15 +1,17 @@
 import './submenus.css';
 import { MONTH, SIZE, ROAD_COST, type City } from './sim.ts';
-import { flowRows, walletGroups, formatMoney, type FlowKind, type FlowRow } from './inspector-data.ts';
+import { flowRows, cropFlowRows, walletGroups, formatMoney, type FlowKind, type FlowRow, type CropFlowRow } from './inspector-data.ts';
 
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
+type JournalKind = FlowKind | 'crops';
+type JournalRow = FlowRow | CropFlowRow;
 type Journal = {
-  kind: FlowKind; initial: number; limit: number; count: HTMLElement; scope: HTMLElement; list: HTMLElement;
+  kind: JournalKind; initial: number; limit: number; count: HTMLElement; scope: HTMLElement; list: HTMLElement;
   more: HTMLButtonElement; all: HTMLButtonElement; recent: HTMLButtonElement; revision: string;
   expanded: Map<number, string>; heldPointers: Set<number>; heldKeys: Set<string>;
   releaseBarrier: boolean; pending: boolean; flushTimer: ReturnType<typeof setTimeout> | null;
 };
-const journals = new Map<FlowKind, Journal>();
+const journals = new Map<JournalKind, Journal>();
 let ready = false, current: City | null = null, selection: number | null = null, walletRevision = '';
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string): HTMLElementTagNameMap[K] {
@@ -78,37 +80,42 @@ function installJournalInputGuard(state: Journal) {
     if (state.heldPointers.size || state.heldKeys.size || state.releaseBarrier) { state.heldPointers.clear(); state.heldKeys.clear(); flushJournalAfterActivation(state); }
   });
 }
-function action(label: string, kind: FlowKind, name: string): HTMLButtonElement {
+function action(label: string, kind: JournalKind, name: string): HTMLButtonElement {
   const button = element('button', `sm-button${name === 'more' ? ' primary' : ''}`, label); button.type = 'button'; button.dataset.journalAction = name; button.dataset.kind = kind; return button;
 }
-function setupJournal(kind: FlowKind, id: string, initial: number) {
+function setupJournal(kind: JournalKind, id: string, initial: number) {
   const host = root(id); host.classList.add('sm-content', 'sm-journal'); host.dataset.scope = 'city';
   const scope = element('p', 'sm-scope', scopeText()), count = element('span', 'sm-count'), order = element('span', 'sm-order', 'ใหม่ → เก่า');
   const countbar = element('div', 'sm-countbar'); countbar.append(count, order);
   const list = element('div', 'sm-journal-list'); list.dataset.journal = kind;
   const more = action(`ดูเพิ่ม ${initial} รายการ`, kind, 'more'), all = action('ดูทั้งหมด', kind, 'all'), recent = action('กลับรายการล่าสุด', kind, 'recent');
   const buttons = element('div', 'sm-pagination'); buttons.append(more, all, recent);
-  const note = element('p', 'sm-footnote', kind === 'money' ? 'แต่ละรายการหักต้นทางและเพิ่มปลายทางด้วยจำนวนเงินเดียวกัน ยอดเป็นบาทและสตางค์' : 'หน่วยสินค้าเป็นหน่วยนามธรรมของต้นแบบ การตัดสต็อกจากการรื้อถอนไม่ใช่รายได้ขายสินค้า');
+  const note = element('p', 'sm-footnote', kind === 'money' ? 'แต่ละรายการหักต้นทางและเพิ่มปลายทางด้วยจำนวนเงินเดียวกัน ยอดเป็นบาทและสตางค์' : kind === 'crops' ? 'บัญชีนี้ใช้หน่วยล็อตพืชผล แยกจากสินค้าสำเร็จรูป แสดงมูลค่าที่ตัด/เพิ่มสต็อกและเงินจริงตามแต่ละเหตุการณ์' : 'หน่วยสินค้าสำเร็จรูปเป็นหน่วยนามธรรมของต้นแบบ การตัดสต็อกจากการรื้อถอนไม่ใช่รายได้ขายสินค้า');
   host.replaceChildren(scope, countbar, list, buttons, note);
   const state: Journal = { kind, initial, limit: initial, count, scope, list, more, all, recent, revision: '', expanded: new Map(), heldPointers: new Set(), heldKeys: new Set(), releaseBarrier: false, pending: false, flushTimer: null }; journals.set(kind, state); installJournalInputGuard(state);
   more.addEventListener('click', () => { state.limit += initial; updateJournal(state); if (more.hidden) recent.focus(); });
   all.addEventListener('click', () => { state.limit = Infinity; updateJournal(state); recent.focus(); });
   recent.addEventListener('click', () => { state.limit = initial; updateJournal(state); if (!more.hidden) more.focus(); });
 }
-function eventCard(row: FlowRow, state: Journal): HTMLElement {
+function eventCard(row: JournalRow, state: Journal): HTMLElement {
   const card = element('details', `sm-flow-card${row.kind === 'money' && row.to === 'treasury' ? ' income' : row.kind === 'money' && row.from === 'treasury' ? ' outgoing' : ''}`);
   Object.assign(card.dataset, { kind: row.kind, index: String(row.index), tick: String(row.tick), from: row.from, to: row.to, value: String(row.value), reason: row.reason });
-  const top = element('summary', 'sm-flow-top sm-flow-toggle'), value = element('strong', 'sm-flow-value', row.kind === 'money' ? `${formatMoney(row.value)} ฿` : `${row.value.toLocaleString('th-TH')} หน่วย`);
+  if (row.kind === 'crops') Object.assign(card.dataset, { id: String(row.id), cropKind: row.cropKind, fromValue: String(row.fromValue), toValue: String(row.toValue), cash: String(row.cash), workers: String(row.workers), batches: String(row.batches), outputQuantity: String(row.outputQuantity) });
+  const top = element('summary', 'sm-flow-top sm-flow-toggle'), value = element('strong', 'sm-flow-value', row.kind === 'money' ? `${formatMoney(row.value)} ฿` : `${row.value.toLocaleString('th-TH')} ${row.kind === 'crops' ? 'ล็อตพืชผล' : 'หน่วย'}`);
   Object.assign(top.dataset, { journalRowToggle: '', kind: row.kind, index: String(row.index) });
   if (row.kind === 'money' && (row.to === 'treasury' || row.from === 'treasury')) value.prepend(image(row.to === 'treasury' ? 'arrow-up' : 'arrow-down'));
-  const direction = row.kind === 'goods' ? 'ย้ายสินค้า' : row.to === 'treasury' ? 'เข้าคลังเมือง' : row.from === 'treasury' ? 'ออกจากคลังเมือง' : 'โอนระหว่างบัญชี';
-  const title = element('span', 'sm-event-title', row.label), badge = element('span', 'sm-flow-direction', row.kind === 'goods' ? 'ย้าย' : row.to === 'treasury' ? 'เข้า' : row.from === 'treasury' ? 'ออก' : 'โอน');
+  const direction = row.kind === 'crops' ? `บัญชีล็อตพืชผล #${row.id}` : row.kind === 'goods' ? 'ย้ายสินค้าสำเร็จรูป' : row.to === 'treasury' ? 'เข้าคลังเมือง' : row.from === 'treasury' ? 'ออกจากคลังเมือง' : 'โอนระหว่างบัญชี';
+  const title = element('span', 'sm-event-title', row.label), badge = element('span', 'sm-flow-direction', row.kind === 'crops' ? 'ล็อต' : row.kind === 'goods' ? 'ย้าย' : row.to === 'treasury' ? 'เข้า' : row.from === 'treasury' ? 'ออก' : 'โอน');
   title.title = row.label; badge.title = direction; badge.setAttribute('aria-label', direction); top.append(title, value, badge);
   const body = element('div', 'sm-flow-details'); body.id = `sm-${row.kind}-entry-${row.index}`; top.setAttribute('aria-controls', body.id);
   const meta = element('p', 'sm-flow-meta', `วัน ${row.tick} · เดือน ${Math.floor(row.tick / MONTH) + 1} · รายการ #${row.index + 1} · ${direction}`), route = element('div', 'sm-flow-route');
   const from = element('div', 'sm-party'), to = element('div', 'sm-party'), arrow = element('span', 'sm-route-arrow'); arrow.append(svg('arrow')); arrow.setAttribute('aria-label', 'ไปยัง');
   from.append(element('small', '', 'ต้นทาง'), element('strong', '', row.fromLabel), element('code', '', row.from)); to.append(element('small', '', 'ปลายทาง'), element('strong', '', row.toLabel), element('code', '', row.to)); route.append(from, arrow, to);
   const reason = element('p', 'sm-flow-reason'); reason.append(element('span', '', 'เหตุผล: '), element('code', '', row.reason)); body.append(meta, route, reason); card.append(top, body);
+  if (row.kind === 'crops') {
+    body.append(element('p', 'sm-flow-meta', `มูลค่าตัดต้นทาง ${formatMoney(row.fromValue)} ฿ · มูลค่าเข้าสินค้าคงคลัง ${formatMoney(row.toValue)} ฿ · เงินโอน ${formatMoney(row.cash)} ฿`));
+    if (row.cropKind === 'process') body.append(element('p', 'sm-flow-meta', `แปรรูป ${row.batches} ชุด → สินค้าสำเร็จรูป ${row.outputQuantity} หน่วย · แรงงาน ${row.workers} คน`));
+  }
   const identity = rowIdentity(row), renderedCity = current;
   card.open = state.expanded.get(row.index) === identity; top.setAttribute('aria-expanded', String(card.open));
   card.addEventListener('toggle', () => {
@@ -125,13 +132,13 @@ function updateJournal(state: Journal) {
   if (!current) return;
   state.scope.textContent = scopeText();
   if (state.heldPointers.size || state.heldKeys.size || state.releaseBarrier) { state.pending = true; return; }
-  const rows = flowRows(current, state.kind), shown = Math.min(rows.length, state.limit), revision = `${rows.length}:${shown}:${rows[0]?.index}:${rows[0]?.tick}:${rows[0]?.value}`;
+  const rows: JournalRow[] = state.kind === 'crops' ? cropFlowRows(current) : flowRows(current, state.kind), shown = Math.min(rows.length, state.limit), revision = `${rows.length}:${shown}:${JSON.stringify(rows[0] ?? null)}`;
   if (revision === state.revision) return; state.revision = revision;
   rememberExpanded(state);
   const focused = document.activeElement instanceof HTMLElement && state.list.contains(document.activeElement) ? document.activeElement.closest<HTMLElement>('.sm-flow-toggle')?.dataset.index : undefined;
   state.count.textContent = `แสดง ${shown.toLocaleString('th-TH')} จาก ${rows.length.toLocaleString('th-TH')} รายการ`;
   state.count.dataset.shown = String(shown); state.count.dataset.total = String(rows.length);
-  state.list.replaceChildren(...(rows.length ? rows.slice(0, shown).map(row => eventCard(row, state)) : [empty('ยังไม่มีรายการ', state.kind === 'money' ? 'รายการโอนเงินจริงจะแสดงเมื่อเมืองเริ่มดำเนินการ' : 'สินค้าเริ่มเคลื่อนย้ายเมื่อมีการผลิต นำเข้า ซื้อ หรือส่งออก', state.kind)]));
+  state.list.replaceChildren(...(rows.length ? rows.slice(0, shown).map(row => eventCard(row, state)) : [empty('ยังไม่มีรายการ', state.kind === 'money' ? 'รายการโอนเงินจริงจะแสดงเมื่อเมืองเริ่มดำเนินการ' : state.kind === 'crops' ? 'พืชผลเริ่มมีบัญชีเมื่อเก็บเกี่ยว ซื้อขาย แปรรูป หรือบริโภคจริง เซฟเดิมเริ่มพืชผลที่ศูนย์' : 'สินค้าเริ่มเคลื่อนย้ายเมื่อมีการผลิต นำเข้า ซื้อ หรือส่งออก', state.kind === 'crops' ? 'goods' : state.kind)]));
   if (focused !== undefined) state.list.querySelector<HTMLElement>(`.sm-flow-toggle[data-index="${focused}"]`)?.focus({ preventScroll: true });
   state.more.hidden = shown >= rows.length; state.all.hidden = shown >= rows.length; state.recent.hidden = shown <= state.initial;
   state.all.textContent = `ดูทั้งหมด ${rows.length.toLocaleString('th-TH')} รายการ`;
@@ -168,7 +175,7 @@ function setupGuide() {
   content.append(intro('road', 'สร้างเมืองทีละขั้น', 'วางถนนและโซน แล้วให้ครัวเรือนกับบริษัทตัดสินใจภายใต้กติกาจำลอง'));
   const definitions = [
     { art: 'road', title: 'เชื่อมถนนกับโลกภายนอก', text: `เลือกถนนแล้วลาก หรือแตะจุดเริ่มและจุดจบเป็นรูป L ต่อจากประตูสีเหลืองฝั่งตะวันตก ค่าสร้าง ${formatMoney(ROAD_COST)} บาทต่อช่อง`, keys: ['R · ถนน', 'Esc · ยกเลิกจุดเริ่ม'] },
-    { art: 'zones', title: 'กำหนดโซนข้างถนน', text: 'เลือก R บ้าน / C ร้านค้า / I โรงงาน แล้วแตะแปลงข้างถนนที่เชื่อมถึงประตู อาคารไม่ได้วางด้วยมือ ระบบทบทวนการพัฒนาทุก 3 วัน', keys: ['1 · บ้าน', '2 · ร้านค้า', '3 · โรงงาน'] },
+    { art: 'zones', title: 'กำหนดโซนข้างถนน', text: 'เลือก R บ้าน / C ร้านค้า / I โรงงาน / F ฟาร์ม / T ตลาดพืชผล แล้วแตะแปลงข้างถนนที่เชื่อมถึงประตู ฟาร์มต้องมีความอุดมสมบูรณ์อย่างน้อย 50% อาคารเกิดเองเมื่อผ่านเงื่อนไขทุก 3 วัน', keys: ['1 · บ้าน', '2 · ร้านค้า', '3 · โรงงาน', '4 · ฟาร์ม', '5 · ตลาด'] },
     { art: 'growth', title: 'ดูเงื่อนไขก่อนขยายเมือง', text: 'กดเล่นต่อและเลือกความเร็ว แตะอาคารเพื่อดูแรงงาน เงินสด สินค้า และเหตุผลที่หยุดนิ่ง ถนน น้ำ ไฟ ความต้องการ และรายได้ที่คุ้มค่าเช่าต้องผ่านเงื่อนไข', keys: ['Space · หยุด/เล่นต่อ', 'V · เลือกข้อมูล'] },
     { art: 'view', title: 'ปรับมุมมองและเก็บเมืองไว้', text: 'ใช้โหมดเลื่อนหรือลากสองนิ้วเพื่อเลื่อน บีบนิ้วหรือล้อเมาส์เพื่อซูม ลากปุ่มขวาเพื่อหมุน เปิดเมนูเกมเพื่อบันทึก/โหลดเมืองในเบราว์เซอร์นี้ เริ่มใหม่มีปุ่มกลับเพื่อยกเลิก', keys: ['P · เลื่อน', 'Q / E · หมุน', 'ปุ่มกล้อง · จอสัมผัส'] },
   ];
@@ -188,8 +195,10 @@ function setupRules() {
   grid.append(
     ruleCard('calendar', 'วันและเงินเป็นจำนวนแน่นอน', `1 tick เท่ากับ 1 วัน มี ${MONTH} วันต่อเดือน ค่าจ้างสะสมตามวันที่ทำงานและจ่ายรายเดือน เช่นเดียวกับค่าเช่าและภาษี เงินคำนวณเป็นสตางค์จำนวนเต็ม`),
     ruleCard('utilities', 'น้ำและไฟจากภายนอก', 'ต้นแบบให้บริการภายนอกกับทุกแปลง ยังไม่มีเครือข่ายหรือข้อจำกัดกำลังผลิต หากสถานะไม่พร้อม การผลิตและการเติบโตจะหยุดตามกฎ', 'utilities'),
-    ruleCard('outside', 'ทุนเริ่มต้นมีต้นทาง', 'โรงงานแรกเปิดได้ก่อนมีคนงาน สองครัวเรือนแรกตลอดประวัติเมืองยกเว้นเงื่อนไขงานเท่านั้น แต่ยังต้องมีบ้านว่าง ถนน น้ำ และไฟ เงินทุนกิจการ เงินออมย้ายเข้า และค่าพัฒนาบ้านมีคู่บัญชีภายนอก รื้อบ้านแล้วไม่คืนสิทธิเริ่มต้น', 'bootstrap'),
-    ruleCard('goods', 'สินค้าและตลาดแบบย่อ', 'สินค้านามธรรมหนึ่งหน่วยเป็นตะกร้าต่อครัวเรือนต่อวัน ยังไม่ปรับตามสมาชิก มีการผลิต ซื้อขาย นำเข้า ส่งออก และบริโภคจริงจากกระเป๋าเงินและสต็อก การเพิ่มจำนวนสมาชิกไม่คูณประวัติสินค้าหรือเงิน คู่บัญชีภายนอกติดตามเงินเข้าออก ไม่ใช่หนี้เมือง'),
+    ruleCard('outside', 'ทุนเริ่มต้นมีต้นทาง', 'โรงงานแรกเปิดได้ก่อนมีคนงาน สองครัวเรือนแรกยกเว้นเงื่อนไขงาน แต่ยังต้องมีบ้าน ถนน น้ำ และไฟ บ้าน/โรงงาน/ร้านค้า/ฟาร์มใช้ทุนภายนอกที่มีบัญชีคู่ ส่วนตลาดพืชผลใช้เงินครัวเรือนเจ้าของ 600 บาท จ่ายก่อสร้าง 100 บาท เหลือเงินหมุนเวียน 500 บาท ไม่มีทุนตลาดแจกจากภายนอก รื้อบ้านไม่คืนสิทธิเริ่มต้น', 'bootstrap'),
+    ruleCard('goods', 'หนึ่งตะกร้ารวมต่อครัวเรือนต่อวัน', 'ซื้อพืชผล 1 ล็อตจากตลาด หรือสินค้าสำเร็จรูป 1 หน่วยจากร้านค้า จ่ายจากกระเป๋าจริงและตัดสต็อกเดียวกับผู้ซื้ออื่น ไม่ซื้อทั้งสองซ้ำวันเดียว จำนวนสมาชิกไม่คูณตะกร้าหรือประวัติเงิน คู่บัญชีภายนอกติดตามเงินเข้าออก ไม่ใช่หนี้เมือง'),
+    ruleCard('growth', 'พืชผลและวัตถุดิบมีต้นทาง', 'ฟาร์มเก็บเกี่ยวพืชผลหมุนเวียนตามความอุดมสมบูรณ์และแรงงาน โรงงานใช้พืชผลจริง 2 ล็อตเป็นสำเร็จรูป 8 หน่วยต่อชุด ตลาดไม่ผลิตเอง สต็อกที่เพิ่งซื้อเริ่มขายได้วันถัดไป บัญชีพืชผลแยกล็อตและต้นทุนจากสินค้าสำเร็จรูป เซฟเดิมไม่มีวัตถุดิบแจก ต้องสร้างห่วงโซ่เกษตรก่อน', 'agriculture'),
+    ruleCard('wallets', 'ลูกจ้างและผู้ทำกิจการเอง', 'แรงงานรับจ้างรับค่าจ้างเข้ากระเป๋าครัวเรือน ตลาดขนาดเล็กใช้แรงงานเจ้าของ 1 คน ไม่มีเงินเดือนเจ้าของ ยอดขายอยู่บัญชีกิจการ ถอนเฉพาะกำไรที่มีสิทธิ์และเหลือเงินหมุนเวียน 200 บาท การเติมทุน/ถอนกำไรไม่ใช่ยอดขายหรือค่าใช้จ่ายซ้ำ บทบาทบริหารหลายกิจการและนักลงทุนยังเป็นระยะถัดไป', 'income-roles'),
     ruleCard('limits', `แผนที่กริดราบ ${SIZE} × ${SIZE}`, 'ขอบเขตสูงสุด 192 อาคาร 128 ครัวเรือน และ 64 บริษัท ถนนโค้ง การจราจรรายช่องจราจร สาธารณูปโภคแบบมีความจุ และเมืองขนาดใหญ่ยังเป็นงานระยะถัดไป'),
     ruleCard('growth', 'ต้นแบบแรกที่ตรวจสอบได้', 'ได้รับแรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ยังไม่ครอบคลุมระบบทั้งหมด โค้ดจำลองและถนนเขียนใหม่ ไม่ใช้โค้ด Living City Lab หรือ novel engine', 'version'),
   );
@@ -212,7 +221,7 @@ function updateRules() {
 
 /** Installs presentation only; preserves native outer details/summary behavior. */
 export function setupSubmenus(): void {
-  if (ready) return; setupJournal('money', 'ledger', 12); setupJournal('goods', 'goods-ledger', 10); setupWallets(); setupGuide(); setupRules(); ready = true;
+  if (ready) return; setupJournal('money', 'ledger', 12); setupJournal('goods', 'goods-ledger', 10); setupJournal('crops', 'crop-ledger', 10); setupWallets(); setupGuide(); setupRules(); ready = true;
 }
 /** Reads the actual simulation. Pagination and disclosure state belong only to the UI. */
 export function renderSubmenus(city: City, selected: number | null): void {

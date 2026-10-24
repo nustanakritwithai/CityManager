@@ -1,7 +1,7 @@
 {
   "name": "citymanager",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -15,6 +15,7 @@
     "test:compact": "node tests/compact-smoke.mjs",
     "test:population": "node tests/population-smoke.mjs",
     "test:worker": "node tests/worker-smoke.mjs",
+    "test:agriculture": "node tests/agriculture-smoke.mjs",
     "test:signals": "node --experimental-strip-types tests/signals-smoke.mjs",
     "test:advisor": "node --test server/city-advisor/test/*.test.mjs"
   },
