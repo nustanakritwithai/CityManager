@@ -43,6 +43,7 @@ export function createCityQuestionsPanel(host: HTMLElement, { getCity }: { getCi
     const signature = JSON.stringify([intent, entities]);
     if (entitySignature === signature) return;
     entitySignature = signature;
+    const selectionRemoved = selected !== '' && !entityGroup.hidden && !entities.some(item => String(item.id) === selected);
     entity.replaceChildren();
     for (const item of entities) { const option = node('option', '', item.label); option.value = String(item.id); entity.append(option); }
     if (entities.some(item => String(item.id) === selected)) entity.value = selected;
@@ -50,6 +51,10 @@ export function createCityQuestionsPanel(host: HTMLElement, { getCity }: { getCi
       const option = node('option', '', intent === 'house.detail' ? 'ยังไม่มีบ้านในเมืองนี้' : 'ยังไม่มีสถานประกอบการในเมืองนี้'); option.value = ''; entity.append(option);
     }
     ask.disabled = !entityGroup.hidden && entity.value === '';
+    if (selectionRemoved && captured) {
+      captured = null; content.dataset.status = 'empty'; content.dataset.snapshotTick = '';
+      content.replaceChildren(node('p', 'city-question-note', 'รายการที่เลือกไม่อยู่ในเมืองแล้ว เลือกรายการปัจจุบันแล้วกดอ่านข้อเท็จจริงใหม่'));
+    }
   }
   function render(answer: CityFactAnswer) {
     content.dataset.status = answer.status; content.dataset.snapshotTick = String(answer.snapshotTick);

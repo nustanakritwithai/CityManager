@@ -173,6 +173,29 @@ try {
   checks.push('All5 supported local queries display actual current numeric facts, distinct firm/building IDs and evidence; no extra report request');
   await screenshot('desktop-city-facts.png');
 
+  await ask('house.detail', house.id);
+  await button('#close-inspector'); await openSignals(); await openQuestions();
+  assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'observed', 'Navigation alone does not clear a same-city captured answer');
+  await expectFact('house.id', house.id, 'รหัส');
+  await button('#close-inspector'); await button('[data-tool="bulldoze"]'); await paints();
+  const mapPoint = await evaluate(`window.cityManager.cellScreen(${house.cell})`);
+  assert.equal(await evaluate(`document.elementFromPoint(${mapPoint.x},${mapPoint.y})?.id`), 'city-canvas', 'Native input genuinely hits the selected house parcel');
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: mapPoint.x, y: mapPoint.y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
+  await paints();
+  const removed = await state(), expectedRemoved = structuredClone(mature);
+  assert.equal(bulldoze(expectedRemoved, house.cell).ok, true);
+  assert.deepEqual(removed, expectedRemoved, 'Only the actual native demolition changes the same city, without a reload or clock advance');
+  assert.equal(removed.tick, mature.tick, 'Entity removal occurs in the same paused day');
+  assert(!removed.buildings.some(item => item.id === house.id));
+  await openSignals(); await openQuestions();
+  assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'empty', 'Removing selected entity clears its captured answer');
+  assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.snapshotTick'), '', 'Removed entity leaves no old answer stamp');
+  assert.notEqual(await evaluate('document.querySelector("#city-question-entity").value'), String(house.id), 'Selector no longer offers the removed selected entity');
+  assert.equal(await evaluate('document.querySelectorAll("#city-question-answer [data-fact-id]").length'), 0, 'Old entity facts are removed from the DOM, including hidden disclosures');
+  assert.deepEqual(await state(), removed, 'Opening questions after removal is read-only');
+  checks.push('Same-day native demolition clears a captured house answer and removed ID without city replacement; ordinary navigation preserves it');
+  await button('[data-tool="select"]'); await loadCity(mature); await ask('business.detail', firm.id);
+
   const oldTick = mature.tick; await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>${oldTick}`); await button('#pause');
   await until('document.querySelector("#city-fact-question-content").dataset.stale==="true"');
   assert.equal(await evaluate('Number(document.querySelector("#city-question-answer").dataset.snapshotTick)'), oldTick, 'Clock does not rewrite a captured answer');
