@@ -84,3 +84,19 @@ test('closing a pending public fetch cancels with deterministic fallback and no 
   const result = await pending;
   assert.equal(result.reason, 'cancelled'); assert.equal(result.report, local); assert.equal(calls, 1);
 });
+
+test('the request deadline has a distinct reason and never automatically retries', async context => {
+  const deadline = new AbortController();
+  context.mock.method(AbortSignal, 'timeout', (milliseconds: number) => {
+    assert.equal(milliseconds, 20_000);
+    return deadline.signal;
+  });
+  const { request, local } = fixture(); let calls = 0;
+  const pending = requestSignalReport(request, local, connection(), (async () => {
+    calls++; return new Promise<Response>(() => {});
+  }) as typeof fetch);
+  deadline.abort();
+  const result = await pending;
+  assert.equal(result.reason, 'timeout'); assert.equal(result.report, local);
+  assert.equal(result.transport, 'fallback'); assert.equal(calls, 1);
+});

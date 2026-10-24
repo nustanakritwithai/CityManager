@@ -15,3 +15,13 @@ The browser sends aggregate JSON only. It omits cookies/authorization, rejects r
 The isolated backend source is in `server/city-advisor/`, disabled unless its server environment enables the provider. It loads no credential file itself. Approved deployment will inherit only the existing named server key in process memory; no shared env copy or generic WebAi proxy is used. The approved single synthetic live test is complete; frontend/public-access development made no further provider requests.
 
 Verification: `npm test`, `npm run build`, `npm run assets:verify`, `npm run test:advisor`. Start a preview at127.0.0.1:4187, then `npm run test:signals` for installed-Edge desktop/mobile acceptance. Emulated mobile viewports are not physical handset tests.
+
+## Captured-signal reading draft
+
+The follow-up draft leads with plain Thai observations and a link to each signal's numeric explanation. Technical IDs, formulas and provenance remain available inside a second disclosure. Snapshot comparisons show the actual before/current values and their difference; missing earlier values remain unavailable. Income/expense comparisons are differences between two captured single-day totals, never a cumulative period total. Housing headroom describes aggregate person capacity, without asserting that every household can be allocated a home.
+
+The S22 label bug came from the global `summary span { font-size:9px }` rule: it overrode inherited summary sizing and did not use the phone reader scale. Signal title and explanation styles now explicitly use the same 14-unit typography. The mock browser suite measures computed and reader-normalized font sizes, visible summary rows, 44px controls and overflow at ordinary phone and wide-layout/narrow-screen sizes.
+
+Loading preserves the immediately available local report. Cancel aborts the current request and ignores late replies. Retry is explicit and resends the exact captured snapshot, even if the city clock advances; capture-new creates the next comparison. Timeout, network/provider failure and invalid references retain deterministic fallback and expose retry without login or automatic repeat requests. Loading another city clears history and pending state.
+
+Run `node --experimental-strip-types tests/signal-reading-smoke.mjs` against a loopback preview. The suite intercepts every report request and blocks direct provider requests; it does not call the public API. The separate Signal reading workflow verifies the exact PR head. This draft changes neither the wire contract nor production adapter/service configuration.
