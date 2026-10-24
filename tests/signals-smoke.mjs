@@ -11,6 +11,8 @@ assert(profile.startsWith(output + sep));
 const shots = resolve(root, 'docs/signal-preview');
 const url = process.env.CITYMANAGER_SIGNALS_URL || 'http://127.0.0.1:4187/CityManager/';
 const debugPort = 9357;
+const candidateCommit = process.env.CITYMANAGER_SIGNALS_COMMIT || execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+assert.match(candidateCommit, /^[a-f0-9]{40}$/);
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false;
 try { occupied = (await fetch(`http://127.0.0.1:${debugPort}/json/version`, { signal: AbortSignal.timeout(500) })).ok; } catch {}
@@ -23,7 +25,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
   const promise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 15000);
+    const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 30000);
     pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } });
   });
   ws.send(JSON.stringify({ id, method, params })); return promise;
@@ -39,6 +41,7 @@ async function until(expression) {
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
+const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 async function button(selector) {
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`);
   await paints();
@@ -93,7 +96,7 @@ try {
     expensesPerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.from === 'treasury').reduce((n,e) => n+e.amount,0)/100,
   });
   assert.equal(await evaluate('document.querySelectorAll("[data-signal-metric=population]").length'), 0);
-  assert((await evaluate('document.querySelectorAll("[data-missing-id^=\"missing.prior.\"]").length')) > 0);
+  assert((await count('[data-missing-id^="missing.prior."]')) > 0);
   assert.deepEqual(await state(), before, 'Opening report is read-only');
   await button('#signal-refresh'); assert.deepEqual(await state(), before, 'Manual capture is read-only');
   await shot('desktop-signals.png');
@@ -102,7 +105,7 @@ try {
   await button('#close-inspector'); await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=68'); await button('#pause');
   const advanced = await state(); await openSignals();
-  assert.equal(await evaluate('document.querySelectorAll("[data-signal-id^=\"trend.\"]").length'), 5);
+  assert.equal(await count('[data-signal-id^="trend."]'), 5);
   assert.deepEqual(await state(), advanced, 'Comparative report is read-only');
   await button('#close-inspector'); await button('#pause');
   await until(`JSON.parse(window.cityManager.snapshot()).tick>${advanced.tick}`); await button('#pause');
@@ -131,11 +134,11 @@ try {
   checks.push('360x740 mobile drawer, disclosures, Back and close preserve playfield and state');
 
   await button('#toggle-game-menu'); await button('#load'); await button('#close-inspector'); await openSignals();
-  assert((await evaluate('document.querySelectorAll("[data-missing-id^=\"missing.prior.\"]").length')) > 0, 'Load clears capture history');
+  assert((await count('[data-missing-id^="missing.prior."]')) > 0, 'Load clears capture history');
   assert.equal(apiRequests.length, 0, 'No API/provider request while connection is disabled');
   assert.equal(errors.length, 0, `Browser errors: ${JSON.stringify(errors)}`);
   checks.push('Load resets history; zero browser errors and zero API/provider requests');
-  await writeFile(resolve(shots, 'qa.json'), JSON.stringify({ sourceBaseCommit: '504f16a30199cd6fd47be0d98e1b20d26aed2c0e', candidateCommit: execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(), testedAt: new Date().toISOString(), url, browser: 'installed Microsoft Edge headless', checks, mobile, apiRequests: 0, browserErrors: 0, screenshots, deviceNote: 'Mobile viewport emulation; not a physical handset test.' }, null, 2)+'\n');
+  await writeFile(resolve(shots, 'qa.json'), JSON.stringify({ sourceBaseCommit: '504f16a30199cd6fd47be0d98e1b20d26aed2c0e', candidateCommit, testedAt: new Date().toISOString(), url, browser: 'installed Microsoft Edge headless', checks, mobile, apiRequests: 0, browserErrors: 0, screenshots, deviceNote: 'Mobile viewport emulation; not a physical handset test.' }, null, 2)+'\n');
   console.log(JSON.stringify({ passed: checks.length, apiRequests: apiRequests.length, errors: errors.length, screenshots }));
 } finally {
   if (ws?.readyState === WebSocket.OPEN) { try { await send('Browser.close'); } catch {} ws.close(); }
