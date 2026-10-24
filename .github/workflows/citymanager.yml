@@ -69,6 +69,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Submenu acceptance failed with exit code $LASTEXITCODE." }
             npm run test:context
             if ($LASTEXITCODE -ne 0) { throw "Contextual GUI acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:compact
+            if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI acceptance failed with exit code $LASTEXITCODE." }
             $env:CITYMANAGER_BLOCK_MODELS = '1'
             $env:CITYMANAGER_SCREENSHOT_DIR = '.test-output/fallback'
             npm run test:browser
@@ -77,6 +79,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Submenu fallback acceptance failed with exit code $LASTEXITCODE." }
             npm run test:context
             if ($LASTEXITCODE -ne 0) { throw "Contextual GUI fallback acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:compact
+            if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI fallback acceptance failed with exit code $LASTEXITCODE." }
           } finally {
             Stop-Process -Id $previewProcess.Id -ErrorAction SilentlyContinue
           }

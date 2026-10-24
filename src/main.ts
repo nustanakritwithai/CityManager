@@ -6,6 +6,7 @@ import './context-layout.css';
 import { renderContext, renderCityOverview } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { SIZE, access, createCity, step, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, type City, type Zone } from './sim.ts';
+import './compact-layout.css';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -15,7 +16,7 @@ let city: City = createCity(61025);
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1, accumulator = 0;
-type Route = { page: 'city' | 'help' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
+type Route = { page: 'city' | 'help' | 'game' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
 let route: Route | null = null;
 const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนร้านค้า', I: 'โซนโรงงาน', bulldoze: 'รื้อถอน', pan: 'เลื่อนแผนที่' };
 const help: Record<string, string> = {
@@ -42,6 +43,7 @@ function inspector(open: boolean) {
   $('#inspector').dataset.open = String(open);
   $('#toggle-inspector').setAttribute('aria-expanded', String(open && route?.page === 'city'));
   $('#toggle-help').setAttribute('aria-expanded', String(open && route?.page === 'help'));
+  $('#toggle-game-menu').setAttribute('aria-expanded', String(open && route?.page === 'game'));
   if (view) { view.abortGesture(); view.cameraBlocked = open; }
   document.querySelectorAll<HTMLButtonElement>('[data-camera], #toggle-camera').forEach(b => b.disabled = open);
   if (!open) { $('#inspector').dataset.page = 'none'; for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = true; }
@@ -112,7 +114,7 @@ function renderPlace() {
   const building = cell?.building == null ? null : city.buildings.find(b => b.id === cell.building);
   const householdId = route?.page === 'household' ? route.id : null;
   const household = city.households.find(h => h.id === householdId);
-  const page = route?.page === 'city' || route?.page === 'help' ? route.page : route ? 'entity' : 'none';
+  const page = route?.page === 'city' || route?.page === 'help' || route?.page === 'game' ? route.page : route ? 'entity' : 'none';
   $('#inspector').dataset.page = page; $('#inspector').dataset.back = String(route !== null);
   $('#inspector').dataset.household = String(route?.page === 'household');
   $('#submenu-back').setAttribute('aria-label', route?.page === 'household' ? 'กลับอาคารต้นทาง' : 'ย้อนกลับ');
@@ -121,6 +123,8 @@ function renderPlace() {
     $('#selection-title').textContent = 'ภาพรวมเมือง'; $('#place-subtitle').textContent = 'ข้อมูลทั้งเมือง · เศรษฐกิจพื้นฐาน'; symbol(null, false);
   } else if (route?.page === 'help') {
     $('#selection-title').textContent = 'คู่มือและสมมติฐาน'; $('#place-subtitle').textContent = 'วิธีเล่น · ขอบเขตต้นแบบ'; symbol(null, false);
+  } else if (route?.page === 'game') {
+    $('#selection-title').textContent = 'เมนูเกม'; $('#place-subtitle').textContent = 'บันทึกในเบราว์เซอร์นี้'; symbol(null, false);
   } else if (household) {
     $('#selection-title').textContent = 'ครัวเรือน #' + household.id;
     $('#place-subtitle').textContent = 'ข้อมูลเฉพาะครัวเรือน · ไม่ใช่บุคคลรายคน'; symbol('R', false);
@@ -178,6 +182,7 @@ async function boot() {
   });
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
+  $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
   $('#save').addEventListener('click', () => {
     try { localStorage.setItem(SAVE_KEY, serialize(city)); status(`บันทึกในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่เบราว์เซอร์ไม่พร้อมหรือเต็ม'); }

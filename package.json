@@ -11,7 +11,8 @@
     "test:browser": "node tests/browser-smoke.mjs",
     "test:submenus": "node tests/submenus-smoke.mjs",
     "assets:verify": "node scripts/admit-city-assets.mjs --verify && node scripts/admit-ui-assets.mjs --verify",
-    "test:context": "node tests/context-smoke.mjs"
+    "test:context": "node tests/context-smoke.mjs",
+    "test:compact": "node tests/compact-smoke.mjs"
   },
   "dependencies": {
     "playcanvas": "2.23.3"
