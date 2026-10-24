@@ -15,7 +15,7 @@ This is expanded data transmission and requires review before activation. The pr
 ## Exact proposed deployment changes, after approval only
 
 1. Copy reviewed server.mjs, entity-report.mjs and entity-contract.mjs into C:\ProgramData\CityManagerAdvisor\app\src, preserving the existing bootstrap/key source and all other services.
-2. Explicitly enable CITY_ADVISOR_ENABLE_ENTITY_EXPLANATION=true in the isolated adapter process configuration. The proposed server defaults this capability to disabled even when the existing city upstream is enabled.
+2. Add the non-secret setting CITY_ADVISOR_ENABLE_ENTITY_EXPLANATION=true to the configuration passed to configFromEnv by the existing isolated Node bootstrap at C:\ProgramData\CityManagerAdvisor\app\bootstrap.mjs. Preserve its key-loading code and source unchanged. The proposed server defaults this capability to disabled even when the existing city upstream is enabled. This is a proposed bootstrap configuration change; the production bootstrap has not been edited for this draft.
 3. Restart only the CityManagerSignalReport task/process after reviewing the source/runtime file hashes. Existing official upstream https://api.opentyphoon.ai/v1/chat/completions and model typhoon-v2.5-30b-a3b-instruct remain fixed.
 4. Publish the reviewed frontend with VITE_CITY_ENTITY_ADVISOR_ONLINE=true only after the adapter contract is active and validated.
 
