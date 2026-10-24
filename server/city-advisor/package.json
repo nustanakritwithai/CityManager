@@ -1,0 +1,13 @@
+{
+  "name": "citymanager-signal-advisor-pilot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/server.mjs",
+    "example": "node src/offline.mjs examples/request.json"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
