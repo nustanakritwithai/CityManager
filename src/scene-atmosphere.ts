@@ -134,7 +134,7 @@ export class SceneAtmosphere {
     for (const direction of this.skyDirections) {
       const t = Math.pow(Math.max(0, direction.y), .55);
       const glow = Math.pow(Math.max(0, direction.dot(sunPos)), 10) * (1 - Math.max(0, direction.y) * .6);
-      for (let c = 0; c < 3; c++) colors.push(Math.round(Math.min(1, a.skyHorizon[c] + (a.skyZenith[c] - a.skyHorizon[c]) * t + a.sunGlow[c] * glow) * 255));
+      for (let c = 0; c < 3; c++) colors.push(Math.round(Math.pow(Math.min(1, a.skyHorizon[c] + (a.skyZenith[c] - a.skyHorizon[c]) * t + a.sunGlow[c] * glow), 2.2) * 255));
       colors.push(255);
     }
     this.skyMesh.setColors32(colors); this.skyMesh.update();

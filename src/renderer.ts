@@ -7,6 +7,7 @@ import { SIZE, connectedRoads, firmWorkerCount, type City } from './sim.ts';
 import { CityAssets } from './asset-models.ts';
 import { CityGround } from './terrain.ts';
 import { SceneAtmosphere } from './scene-atmosphere.ts';
+import { CityWorld } from './scene-world.ts';
 import type { Atmosphere, Quality } from './atmosphere.ts';
 
 const UNIT = 2;
@@ -24,12 +25,13 @@ export class CityView {
   assets: CityAssets | null = null;
   ground!: CityGround;
   atmosphere!: SceneAtmosphere;
+  world!: CityWorld;
   private windowLit!: StandardMaterial;
   private edgeMesh?: Mesh;
   private edgeSignature = '';
   private visualRevision = 0;
   private lastScene: { city: City; selected: number | null; preview: number[] } | null = null;
-  private forest: { entity: Entity; x: number; z: number }[] = [];
+  private forest: { entity: Entity; x: number; y: number; z: number; scale: number }[] = [];
   pointers = new Map<number, { x: number; y: number }>();
   dragStart: number | null = null;
   private aspect = 0;
@@ -57,7 +59,11 @@ export class CityView {
       view.assets = assets; view.visualRevision++;
       for (const tree of view.forest) {
         const model = assets.tree();
-        if (model) { tree.entity.destroy(); model.setLocalPosition(tree.x, .04, tree.z); app.root.addChild(model); tree.entity = model; }
+        if (model) {
+          tree.entity.destroy(); model.setLocalPosition(tree.x, tree.y, tree.z);
+          const scale = model.getLocalScale(); model.setLocalScale(scale.x * tree.scale, scale.y * tree.scale, scale.z * tree.scale);
+          app.root.addChild(model); tree.entity = model;
+        }
       }
       if (view.lastScene) view.render(view.lastScene.city, view.lastScene.selected, view.lastScene.preview);
     });
@@ -76,6 +82,15 @@ export class CityView {
     return material;
   }
   /** Tall parts cast shadows; flat pads, roads and the world base never do. */
+  /** Translucent zone fill: strong on vacant parcels, faint under buildings. */
+  private zoneFill(hex: string, built: boolean) {
+    const key = `zone:${hex}:${built}`;
+    if (this.materials.has(key)) return this.materials.get(key)!;
+    const material = new StandardMaterial();
+    material.diffuse = new Color().fromString(hex); material.gloss = .2;
+    material.opacity = built ? .28 : .55; material.blendType = BLEND_NORMAL; material.depthWrite = false; material.update();
+    this.materials.set(key, material); return material;
+  }
   box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial, castShadows = sy > .12) {
     const entity = new Entity('Original primitive');
     entity.addComponent('render', { type: 'box', material: typeof color === 'string' ? this.material(color) : color, castShadows });
@@ -132,9 +147,8 @@ export class CityView {
     this.windowLit = this.material('#f9df9a').clone() as StandardMaterial;
     this.windowLit.emissive = new Color(1, .82, .52); this.windowLit.update();
     this.atmosphere.registerGlow(this.windowLit, 1.6);
-    this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#365e6b', false);
-    this.box(this.app.root, 0, -.45, 0, SIZE * UNIT + 5.1, .6, SIZE * UNIT + 5.1, '#b7b596', false);
-    this.box(this.app.root, 0, -.24, 0, SIZE * UNIT + 4.5, .48, SIZE * UNIT + 4.5, '#7c9875', false);
+    const gateZ = this.position(Math.floor(SIZE / 2) * SIZE).z;
+    this.world = new CityWorld(this.app, SIZE * UNIT / 2, gateZ);
     // One original textured ground, a tool-only grid and one batched edge mesh.
     // These visual surfaces never change the flat simulation/picking plane.
     this.ground = new CityGround(this.app, SIZE, UNIT);
@@ -157,23 +171,33 @@ export class CityView {
     this.box(this.app.root, gate.x - 4, 0.04, gate.z, 8, 0.12, 1.4, '#d6b45c');
     this.box(this.app.root, gate.x - 1.1, 1.1, gate.z - 0.85, 0.18, 2.2, 0.18, '#f5cd71');
     this.box(this.app.root, gate.x - 1.1, 1.1, gate.z + 0.85, 0.18, 2.2, 0.18, '#f5cd71');
+    // Decorative highway to the outside market; it is not part of the road graph.
+    const highwayEnd = -92, highwayStart = gate.x - 8, highwayLength = highwayStart - highwayEnd, highwayMid = (highwayStart + highwayEnd) / 2;
+    this.box(this.app.root, highwayMid, .05, gate.z, highwayLength, .1, 2.4, '#bcc4b8', false);
+    this.box(this.app.root, highwayMid, .085, gate.z, highwayLength, .05, 1.9, '#46535b', false);
+    for (let x = highwayStart - 1.5; x > highwayEnd + 1; x -= 3) this.box(this.app.root, x, .115, gate.z, 1.1, .012, .09, '#eee5bd', false);
     for (let n = 0; n < 34; n++) {
       const angle = n * 2.39996;
       const x = Math.cos(angle) * (SIZE + 1.7), z = Math.sin(angle) * (SIZE + 1.7);
       if (Math.abs(x) < SIZE - 1 && Math.abs(z) < SIZE - 1 || x < -SIZE && Math.abs(z - gate.z) < 3) continue;
-      const tree = new Entity('Procedural fallback tree'); tree.setLocalPosition(x, 0, z); this.app.root.addChild(tree);
-      this.box(tree, 0, 0.65, 0, 0.22, 1.1, 0.22, '#755f43');
-      const crown = new Entity('Original tree');
-      crown.addComponent('render', { type: 'cone', material: this.material('#3e6955') });
-      crown.setLocalPosition(0, 1.55, 0); crown.setLocalScale(1.4, 2, 1.4); tree.addChild(crown);
-      this.forest.push({ entity: tree, x, z });
+      this.plantTree(x, Math.max(.04, this.world.height(x, z)), z, 1);
     }
+    for (const spot of this.world.treeSpots) this.plantTree(spot.x, spot.y, spot.z, spot.scale);
     this.app.root.addChild(this.markers);
     this.setQuality('high');
     new ResizeObserver(() => this.resize()).observe(this.canvas);
     window.addEventListener('resize', () => this.resize());
     this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
   }
+  private plantTree(x: number, y: number, z: number, scale: number) {
+    const tree = new Entity('Procedural fallback tree'); tree.setLocalPosition(x, y, z); tree.setLocalScale(scale, scale, scale); this.app.root.addChild(tree);
+    this.box(tree, 0, 0.65, 0, 0.22, 1.1, 0.22, '#755f43');
+    const crown = new Entity('Original tree');
+    crown.addComponent('render', { type: 'cone', material: this.material('#3e6955') });
+    crown.setLocalPosition(0, 1.55, 0); crown.setLocalScale(1.4, 2, 1.4); tree.addChild(crown);
+    this.forest.push({ entity: tree, x, y, z, scale });
+  }
+
   fitRadius() { return Math.max(42, Math.min(100, 42 * .86 / (innerWidth / innerHeight))); }
   resize() {
     const aspect = innerWidth / innerHeight;
@@ -302,7 +326,10 @@ export class CityView {
         }
       } else if (cell.zone) {
         const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053', F: '#93af58' }[cell.zone];
-        this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, color);
+        this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, this.zoneFill(color, !!b), false);
+        // Solid zone outline keeps R/C/I/F readable at every time of day.
+        for (const dz of [-.86, .86]) this.box(tile, 0, .075, dz, 1.8, .03, .08, color, false);
+        for (const dx of [-.86, .86]) this.box(tile, dx, .075, 0, .08, .03, 1.8, color, false);
         if (b) {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
           if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
@@ -329,7 +356,7 @@ export class CityView {
       for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, this.material(color, true));
     }
   }
-  setAtmosphere(atmosphere: Atmosphere) { this.atmosphere.apply(atmosphere); }
+  setAtmosphere(atmosphere: Atmosphere) { this.atmosphere.apply(atmosphere); this.world.apply(atmosphere); }
   setQuality(quality: Quality) { this.atmosphere.setQuality(quality); }
 
   private updateGroundEdges(city: City) {

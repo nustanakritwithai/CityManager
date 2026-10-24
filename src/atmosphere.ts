@@ -91,7 +91,7 @@ const KEYS: readonly [number, string, string, string][] = [
   [10, '#4b93e2', '#c3e2f6', '#bcc8d0'],
   [13, '#3f8ee8', '#cbe7f8', '#c2ccd3'],
   [16, '#4d90dc', '#e8ddc2', '#bdbeb8'],
-  [17.4, '#5878b6', '#f6ac6c', '#b99d8f'],
+  [17.4, '#5878b6', '#f6ac6c', '#c3b1a8'],
   [18.5, '#323f70', '#ec7c5c', '#a08a98'],
   [19.6, '#18224a', '#5d4a6e', '#7a7fa6'],
   [21, '#0e1938', '#243258', '#6c7aa6'],
@@ -148,6 +148,6 @@ export function atmosphereAt(hour: number, weights: SeasonWeights = { hot: 0, ra
     saturation: 1.06 + weights.cool * .05 - warm * .04 - overcast * .2 - night * .2,
     contrast: 1.04 + golden * .05 - overcast * .06,
     brightness: night * .02,
-    tint: mixRgb(mixRgb([1, 1, 1], [1.05, .99, .92], golden * .8 + warm * .25), [.95, .97, 1.04], night * .8),
+    tint: mixRgb(mixRgb([1, 1, 1], [1.04, .995, .94], golden * .5 + warm * .25), [.95, .97, 1.04], night * .8),
   };
 }
