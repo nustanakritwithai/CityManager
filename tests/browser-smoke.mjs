@@ -122,6 +122,13 @@ try {
   assert.match(await text('#status'), /already exists/); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   await cell(12 * 24 + 3); await cell(12 * 24 + 5); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   checks.push('Repeated road use does not duplicate cost');
+  // End-to-end check: the user-selected road reports actual gateway hops, not
+  // Manhattan distance, traffic time, or a hard-coded number from the HUD.
+  await button('[data-tool="select"]'); await cell(12 * 24 + 4);
+  assert.match(await text('#explanation'), /ระยะจากประตูภายนอกผ่านถนน 4 ช่อง/);
+  await closeInspector();
+  await button('[data-tool="road"]');
+  checks.push('Selected road reports calculated gateway steps in the inspector');
   // The visual preview opens on the starter district. Back out for construction
   // on the far side, as a player would, and keep the inspector off the gesture.
   if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
