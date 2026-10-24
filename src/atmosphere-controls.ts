@@ -30,7 +30,10 @@ export function loadVisualSettings(): VisualSettings {
 function saveVisualSettings(settings: VisualSettings) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch { /* private mode: keep in memory */ }
 }
-const autoQuality = (): Quality => matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600 ? 'medium' : 'high';
+/** Software rasterisers (no GPU) start low; touch or small screens start medium. */
+export const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|basic render|warp|software/i;
+const autoQuality = (renderer: string): Quality => SOFTWARE_RENDERER.test(renderer) ? 'low'
+  : matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600 ? 'medium' : 'high';
 
 type Host = { view: CityView; getCity: () => City; isPaused: () => boolean; getSpeed: () => number; tickFraction: () => number };
 
@@ -44,6 +47,7 @@ export class AtmosphereController {
   private quality: Quality = 'high';
   private slowFrames: number[] = [];
   private rendered = false;
+  private renderer = '';
   private readonly weather: WeatherOverlay;
   private readonly button = document.querySelector<HTMLButtonElement>('#atmosphere-toggle')!;
   private readonly menu = document.querySelector<HTMLElement>('#atmosphere-menu')!;
@@ -53,7 +57,8 @@ export class AtmosphereController {
   constructor(private readonly host: Host) {
     this.weather = new WeatherOverlay(document.querySelector('#city-canvas')!);
     this.buildMenu();
-    this.setQuality(this.settings.quality === 'auto' ? autoQuality() : this.settings.quality);
+    this.renderer = (host.view.app.graphicsDevice as unknown as { unmaskedRenderer?: string }).unmaskedRenderer ?? '';
+    this.setQuality(this.settings.quality === 'auto' ? autoQuality(this.renderer) : this.settings.quality);
     host.view.app.on('postrender', () => { this.rendered = true; });
     this.button.addEventListener('click', () => this.open(this.menu.hidden));
     document.addEventListener('keydown', event => {
@@ -90,7 +95,7 @@ export class AtmosphereController {
     };
     const time = group('เวลาในวัน', 'atmosphere-time', TIME_MODES, TIME_LABELS, this.settings.timeMode, value => this.change({ timeMode: value }));
     const quality = group('คุณภาพภาพ', 'atmosphere-quality', ['auto', ...QUALITIES] as const, QUALITY_LABELS, this.settings.quality, value => {
-      this.change({ quality: value }); this.slowFrames = []; this.setQuality(value === 'auto' ? autoQuality() : value);
+      this.change({ quality: value }); this.slowFrames = []; this.setQuality(value === 'auto' ? autoQuality(this.renderer) : value);
     });
     this.qualityNote.className = 'atmosphere-note'; quality.append(this.qualityNote);
     const note = document.createElement('p'); note.className = 'atmosphere-note';
@@ -145,6 +150,6 @@ export class AtmosphereController {
   }
 
   get diagnostics() {
-    return { ...this.host.view.atmosphere.diagnostics, settings: { ...this.settings }, overcast: this.overcast, raining: this.weather.raining };
+    return { ...this.host.view.atmosphere.diagnostics, renderer: this.renderer, settings: { ...this.settings }, overcast: this.overcast, raining: this.weather.raining };
   }
 }

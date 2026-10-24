@@ -56,7 +56,8 @@ export class SceneAtmosphere {
 
     this.lampPool = new StandardMaterial();
     this.lampPool.name = 'Street lamp light pool';
-    this.lampPool.diffuse = new Color(0, 0, 0); this.lampPool.useLighting = false; this.lampPool.emissive = new Color(1, .78, .45);
+    // Additive: fog would add its colour across the whole quad and show a square by day.
+    this.lampPool.diffuse = new Color(0, 0, 0); this.lampPool.useLighting = false; this.lampPool.useFog = false; this.lampPool.emissive = new Color(1, .78, .45);
     this.lampPool.emissiveMap = this.radialTexture(); this.lampPool.blendType = BLEND_ADDITIVE; this.lampPool.depthWrite = false;
     this.lampPool.update();
     this.registerGlow(this.lampPool, .9);

@@ -3,14 +3,16 @@ import {
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
-import { SIZE, connectedRoads, firmWorkerCount, type City } from './sim.ts';
+import { SIZE, GATEWAY, connectedRoads, firmWorkerCount, type City } from './sim.ts';
 import { CityAssets } from './asset-models.ts';
+import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
 import { SceneAtmosphere } from './scene-atmosphere.ts';
 import { CityWorld } from './scene-world.ts';
 import type { Atmosphere, Quality } from './atmosphere.ts';
 
 const UNIT = 2;
+const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
 export class CityView {
   app: AppBase;
   camera = new Entity('City camera');
@@ -21,6 +23,7 @@ export class CityView {
   cameraBlocked = false;
   tiles = new Map<number, { entity: Entity; signature: string }>();
   markers = new Entity('Tool previews');
+  private highway = new Entity('Decorative highway');
   materials = new Map<string, StandardMaterial>();
   assets: CityAssets | null = null;
   ground!: CityGround;
@@ -57,8 +60,9 @@ export class CityView {
     void CityAssets.load(app).then(assets => {
       assets.glowRegistrar = (material, strength) => view.atmosphere.registerGlow(material, strength);
       view.assets = assets; view.visualRevision++;
+      view.tileHighway();
       for (const tree of view.forest) {
-        const model = assets.tree();
+        const model = assets.tree(hashCell(Math.round(tree.x * 13 + tree.z * 7)) % 10 < 3);
         if (model) {
           tree.entity.destroy(); model.setLocalPosition(tree.x, tree.y, tree.z);
           const scale = model.getLocalScale(); model.setLocalScale(scale.x * tree.scale, scale.y * tree.scale, scale.z * tree.scale);
@@ -68,6 +72,16 @@ export class CityView {
       if (view.lastScene) view.render(view.lastScene.city, view.lastScene.selected, view.lastScene.preview);
     });
     return view;
+  }
+  /** Replace the primitive highway with Kenney road tiles once models are available. */
+  private tileHighway() {
+    const gate = this.position(GATEWAY), tiles = new Entity('Decorative highway tiles');
+    for (let x = gate.x - 9; x > -92; x -= UNIT) {
+      const tile = this.assets?.road('road-straight', true);
+      if (!tile) return;
+      tile.setLocalPosition(x, .03, gate.z); tiles.addChild(tile);
+    }
+    this.highway.enabled = false; this.app.root.addChild(tiles); this.app.renderNextFrame = true;
   }
   material(hex: string, emissive = false) {
     const key = hex + emissive;
@@ -116,15 +130,18 @@ export class CityView {
   private cropMarket(tile: Entity, cell: number, lit: boolean) {
     const stall = new Entity('Crop market'); tile.addChild(stall);
     this.box(stall, 0, .09, 0, 1.65, .025, 1.65, '#b6b9a3');
-    const model = this.assets?.building('C', 1, cell, lit);
-    if (model) {
-      const scale = model.getLocalScale(); model.setLocalScale(scale.x * .76, scale.y * .76, scale.z * .76);
-      model.setLocalPosition(0, .1, -.12); model.name = 'Crop market model'; stall.addChild(model);
-    } else {
-      this.box(stall, 0, .34, -.1, 1.1, .45, .68, '#d4ddd1');
+    // Level-one market: an open stall under an awning with parasols, not a shop building.
+    this.box(stall, 0, .34, -.25, 1.1, .45, .5, '#d4ddd1');
+    this.box(stall, 0, .27, .2, 1.16, .27, .25, lit ? this.windowLit : '#8f7957');
+    const awning = this.assets?.detail('awning', 1.3);
+    if (awning) { awning.setLocalPosition(0, .1, -.05); awning.name = 'Crop market model'; stall.addChild(awning); }
+    else {
       this.box(stall, 0, .7, -.1, 1.34, .14, .98, '#538f83');
       for (const x of [-.53, .53]) this.box(stall, x, .35, .34, .065, .5, .065, '#6f7862');
-      this.box(stall, 0, .27, .36, 1.16, .27, .25, '#8f7957');
+    }
+    for (const [name, x, z] of [['parasol-a', -.55, .62], ['parasol-b', .6, .55]] as const) {
+      const parasol = this.assets?.detail(name, .55);
+      if (parasol) { parasol.setLocalPosition(x, .1, z); stall.addChild(parasol); }
     }
     // Empty wooden market furniture; stock quantities are shown by the inspector.
     for (const x of [-.45, .04]) {
@@ -173,9 +190,10 @@ export class CityView {
     this.box(this.app.root, gate.x - 1.1, 1.1, gate.z + 0.85, 0.18, 2.2, 0.18, '#f5cd71');
     // Decorative highway to the outside market; it is not part of the road graph.
     const highwayEnd = -92, highwayStart = gate.x - 8, highwayLength = highwayStart - highwayEnd, highwayMid = (highwayStart + highwayEnd) / 2;
-    this.box(this.app.root, highwayMid, .05, gate.z, highwayLength, .1, 2.4, '#bcc4b8', false);
-    this.box(this.app.root, highwayMid, .085, gate.z, highwayLength, .05, 1.9, '#46535b', false);
-    for (let x = highwayStart - 1.5; x > highwayEnd + 1; x -= 3) this.box(this.app.root, x, .115, gate.z, 1.1, .012, .09, '#eee5bd', false);
+    this.app.root.addChild(this.highway);
+    this.box(this.highway, highwayMid, .05, gate.z, highwayLength, .1, 2.4, '#bcc4b8', false);
+    this.box(this.highway, highwayMid, .085, gate.z, highwayLength, .05, 1.9, '#46535b', false);
+    for (let x = highwayStart - 1.5; x > highwayEnd + 1; x -= 3) this.box(this.highway, x, .115, gate.z, 1.1, .012, .09, '#eee5bd', false);
     for (let n = 0; n < 34; n++) {
       const angle = n * 2.39996;
       const x = Math.cos(angle) * (SIZE + 1.7), z = Math.sin(angle) * (SIZE + 1.7);
@@ -312,16 +330,28 @@ export class CityView {
       if (cell.road) {
         const horizontal = (i % SIZE > 0 && city.cells[i - 1].road) || (i % SIZE < SIZE - 1 && city.cells[i + 1].road);
         const vertical = (i >= SIZE && city.cells[i - SIZE].road) || (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road);
-        this.box(tile, 0, .065, 0, 1.98, .1, 1.98, '#bcc4b8');
-        this.box(tile, 0, .12, 0, vertical && !horizontal ? 1.48 : 1.98, .035, horizontal && !vertical ? 1.48 : 1.98, connected.has(i) ? '#46535b' : '#a86155');
-        if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
-        if (connected.has(i) && i % 4 === 0 && horizontal && !vertical) {
+        const open = new Set<Side>();
+        if (i % SIZE > 0 && city.cells[i - 1].road || i === GATEWAY) open.add('-x');
+        if (i % SIZE < SIZE - 1 && city.cells[i + 1].road) open.add('+x');
+        if (i >= SIZE && city.cells[i - SIZE].road) open.add('-z');
+        if (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road) open.add('+z');
+        const choice = roadTileFor(open, i), model = this.assets?.road(choice.tile, connected.has(i));
+        if (model) { model.setLocalEulerAngles(0, choice.rotation, 0); model.setLocalPosition(0, .03, 0); tile.addChild(model); }
+        else {
+          this.box(tile, 0, .065, 0, 1.98, .1, 1.98, '#bcc4b8');
+          this.box(tile, 0, .12, 0, vertical && !horizontal ? 1.48 : 1.98, .035, horizontal && !vertical ? 1.48 : 1.98, connected.has(i) ? '#46535b' : '#a86155');
+          if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
+        }
+        // Lamps stand on the sidewalk of straight streets, every fourth parcel along the street.
+        const along = horizontal && !vertical ? i % SIZE : vertical && !horizontal ? Math.floor(i / SIZE) : -1;
+        if (connected.has(i) && along >= 0 && along % 4 === 0) {
           const lamp = this.assets?.streetlight();
           if (lamp) {
-            lamp.setLocalPosition(0, .13, -.84); tile.addChild(lamp);
+            const [lx, lz, px, pz] = horizontal ? [0, -.84, 0, -.45] : [-.84, 0, -.45, 0];
+            lamp.setLocalPosition(lx, .13, lz); if (!horizontal) lamp.setLocalEulerAngles(0, -90, 0); tile.addChild(lamp);
             const pool = new Entity('Street lamp light pool');
             pool.addComponent('render', { type: 'plane', material: this.atmosphere.lampPool, castShadows: false, receiveShadows: false });
-            pool.setLocalPosition(0, .16, -.45); pool.setLocalScale(1.7, 1, 1.7); tile.addChild(pool);
+            pool.setLocalPosition(px, .16, pz); pool.setLocalScale(1.7, 1, 1.7); tile.addChild(pool);
           }
         }
       } else if (cell.zone) {
@@ -337,7 +367,14 @@ export class CityView {
           // Retained shops move up one commercial tier; their geometry stays unchanged.
           const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
           const model = this.assets?.building(b.zone, visualLevel, i, lit);
-          if (model) { model.setLocalPosition(0, .1, 0); tile.addChild(model); continue; }
+          if (model) {
+            model.setLocalPosition(0, .1, 0); tile.addChild(model);
+            // Bigger factories show their scale with a chimney and an input tank.
+            if (b.zone === 'I' && b.level >= 2) { const chimney = this.assets?.detail('chimney', .32); if (chimney) { chimney.setLocalPosition(.68, .1, -.62); tile.addChild(chimney); } }
+            if (b.zone === 'I' && b.level >= 3) { const tank = this.assets?.detail('tank', .6); if (tank) { tank.setLocalPosition(-.6, .1, .66); tile.addChild(tank); } }
+            if (b.zone === 'R' && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
+            continue;
+          }
           const h = 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;
           const tower = b.zone === 'I' ? h * 0.65 : h;
           this.box(tile, -0.1, tower / 2 + 0.1, 0, 1.25, tower, 1.2, { R: '#d7e5d1', C: '#b6d4df', I: '#d9c09a' }[b.zone]);

@@ -16,12 +16,29 @@ const sources = {
   industrial: { version: '2.0', url: 'https://kenney.nl/assets/city-kit-industrial', download: 'https://kenney.nl/media/pages/assets/city-kit-industrial/0ec35b139d-1788171848/kenney_city-kit-industrial_2.0.zip' },
   roads: { version: '2.2', url: 'https://kenney.nl/assets/city-kit-roads', download: 'https://kenney.nl/media/pages/assets/city-kit-roads/74288c9459-1791628607/kenney_city-kit-roads.zip' }
 };
+// Runtime names are stable; levels/variants are chosen in src/asset-models.ts.
 const choices = [
   ['house-a', 'suburban', 'building-type-a.glb'], ['house-b', 'suburban', 'building-type-e.glb'],
+  ['house-c', 'suburban', 'building-type-h.glb'], ['house-d', 'suburban', 'building-type-m.glb'],
+  ['house-e', 'suburban', 'building-type-c.glb'], ['house-f', 'suburban', 'building-type-u.glb'],
+  ['house-g', 'suburban', 'building-type-k.glb'], ['house-h', 'suburban', 'building-type-r.glb'], ['house-i', 'suburban', 'building-type-l.glb'],
   ['shop-a', 'commercial', 'building-a.glb'], ['shop-b', 'commercial', 'building-d.glb'],
+  ['shop-c', 'commercial', 'building-b.glb'], ['shop-d', 'commercial', 'building-c.glb'],
+  ['shop-e', 'commercial', 'building-f.glb'], ['shop-f', 'commercial', 'building-g.glb'], ['shop-g', 'commercial', 'building-h.glb'],
+  ['tower-a', 'commercial', 'building-skyscraper-a.glb'], ['tower-b', 'commercial', 'building-skyscraper-e.glb'], ['tower-c', 'commercial', 'building-skyscraper-c.glb'],
+  ['parasol-a', 'commercial', 'detail-parasol-a.glb'], ['parasol-b', 'commercial', 'detail-parasol-b.glb'], ['awning', 'commercial', 'detail-awning.glb'],
   ['factory-a', 'industrial', 'building-a.glb'], ['factory-b', 'industrial', 'building-d.glb'],
-  ['tree', 'suburban', 'tree-small.glb'], ['streetlight', 'roads', 'light-square.glb']
+  ['factory-c', 'industrial', 'building-h.glb'], ['factory-d', 'industrial', 'building-g.glb'],
+  ['factory-e', 'industrial', 'building-l.glb'], ['factory-f', 'industrial', 'building-f.glb'],
+  ['chimney', 'industrial', 'chimney-medium.glb'], ['tank', 'industrial', 'detail-tank.glb'],
+  ['tree', 'suburban', 'tree-small.glb'], ['tree-large', 'suburban', 'tree-large.glb'], ['planter', 'suburban', 'planter.glb'],
+  ['streetlight', 'roads', 'light-square.glb'],
+  ['road-straight', 'roads', 'road-straight.glb'], ['road-end', 'roads', 'road-end.glb'], ['road-corner', 'roads', 'road-bend-sidewalk.glb'],
+  ['road-tee', 'roads', 'road-intersection-path.glb'], ['road-cross', 'roads', 'road-crossroad-path.glb'],
+  ['road-crossing', 'roads', 'road-crossing.glb'], ['road-square', 'roads', 'road-square.glb']
 ];
+// Version 2 adds per-level buildings, market details and road tiles (41 models).
+export const RUNTIME_BUDGET = 4_500_000;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const parse = bytes => JSON.parse(bytes.toString('utf8',20,20+bytes.readUInt32LE(12)).trim());
 const stats = bytes => {
@@ -58,8 +75,8 @@ for (const [name,pack,file] of choices) {
   models.push({name,path,pack,originalPath:`Models/GLB format/${file}`,sourceSha256:hash(original),before:stats(original),after:metrics,bounds:getBounds(scene),modifications:['weld','dedup','prune','embed palette PNG','uniform footprint normalization and ground-centred pivot']});
   roster.push({path,bytes:bytes.length,sha256:hash(bytes)});
 }
-const manifest={schemaVersion:1,id:'kenney-city-small',version:'1.0.0',author:'Kenney',license:'CC0-1.0',licenseUrl:'https://creativecommons.org/publicdomain/zero/1.0/',retrievedAt:new Date().toISOString(),sources,models,files:roster,validation:{passed:true,tool:'glTF Transform 4.5.1 + project validation',gameDevCli:'unavailable; not claimed',policy:{maxFileBytes:300000,maxTriangles:3000,maxMaterials:2,noExternalUris:true,groundPivot:true},totalRuntimeBytes:models.reduce((n,m)=>n+m.after.bytes,0),totalTriangles:models.reduce((n,m)=>n+m.after.triangles,0)}};
-assert.ok(manifest.validation.totalRuntimeBytes<1200000);
+const manifest={schemaVersion:1,id:'kenney-city-small',version:'2.0.0',author:'Kenney',license:'CC0-1.0',licenseUrl:'https://creativecommons.org/publicdomain/zero/1.0/',retrievedAt:new Date().toISOString(),sources,models,files:roster,validation:{passed:true,tool:'glTF Transform 4.5.1 + project validation',gameDevCli:'unavailable; not claimed',policy:{maxFileBytes:300000,maxTriangles:3000,maxMaterials:2,noExternalUris:true,groundPivot:true},totalRuntimeBytes:models.reduce((n,m)=>n+m.after.bytes,0),totalTriangles:models.reduce((n,m)=>n+m.after.triangles,0)}};
+assert.ok(manifest.validation.totalRuntimeBytes<RUNTIME_BUDGET);
 await writeFile(join(output,'manifest.json'),JSON.stringify(manifest,null,2));
 await writeFile(join(output,'receipt.json'),JSON.stringify({schemaVersion:1,packageId:manifest.id,manifestSha256:hash(await readFile(join(output,'manifest.json'))),fileCount:roster.length,validatedAt:manifest.retrievedAt},null,2));
 console.log(JSON.stringify(manifest.validation,null,2));

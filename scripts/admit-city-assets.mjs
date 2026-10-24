@@ -30,7 +30,8 @@ for (const file of manifest.files) {
     assert.ok([...(json.images||[]),...(json.buffers||[])].every(x=>!x.uri),'Self-contained GLBs only');
   } else assert.match(bytes.toString('utf8'),/Creative Commons Zero, CC0/);
 }
-assert.equal(manifest.models.length,8); assert.ok(manifest.validation.totalRuntimeBytes<1200000);
+// Package 2.0.0: 41 models (buildings per visual level, market details, road tiles).
+assert.equal(manifest.models.length,41); assert.ok(manifest.validation.totalRuntimeBytes<4500000);
 for (const model of manifest.models) {
   assert.ok(model.after.triangles<3000 && model.after.materials<=2);
   assert.ok(Math.abs(model.bounds.min[1])<.001);
