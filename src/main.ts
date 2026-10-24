@@ -9,6 +9,7 @@ import { SIZE, access, createCity, step, buildRoad, zoneCell, bulldoze, explainC
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
+import { growthStatusText } from './context-data.ts';
 import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
 import type { EntitySelection } from './entity-explanation-data.ts';
@@ -33,7 +34,7 @@ const help: Record<string, string> = {
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
   R: 'โซนบ้านสร้างที่ว่างก่อน · ครัวเรือนย้ายเข้าเมื่อผ่านความจุ ถนน บริการ และงาน',
   C: 'วางโซนพาณิชย์ · เริ่มเป็นตลาดระดับ 1 · ครัวเรือนลงเงินและแรงงานเอง ซื้อขายพืชผลจริง',
-  I: 'วางโรงงานข้างถนนเชื่อมเมือง · ต้องมีแรงงานและพืชผลเพื่อแปรรูป',
+  I: 'วางโรงงานข้างถนนเชื่อมเมือง · โรงงานเพิ่มต้องมีทุนกิจการจริงและพืชผล · ดูเงื่อนไขในภาพรวมเมือง',
   F: 'วางฟาร์มข้างถนน · ความอุดมสมบูรณ์อย่างน้อย 50% · ต้องมีแรงงานและผู้ซื้อพืชผล',
   bulldoze: 'แตะถนนหรืออาคารเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้',
   pan: 'ลากเพื่อเลื่อน · สองนิ้วเลื่อน/ซูม · ลากปุ่มขวาเพื่อหมุน'
@@ -132,8 +133,8 @@ function shortReason(reason: string): string | null {
   if (reason.startsWith('No connected road frontage')) return 'ยังไม่มีถนนข้างแปลงที่เชื่อมถึงประตูภายนอก';
   if (reason.startsWith('No power')) return 'ไฟฟ้าภายนอกไม่พร้อมใช้งาน';
   if (reason.startsWith('No water')) return 'น้ำภายนอกไม่พร้อมใช้งาน';
-  if (reason.startsWith('No housing demand')) return 'ยังไม่มีตำแหน่งงานว่างให้ครัวเรือนใหม่';
-  if (reason.startsWith('No industry demand')) return 'โรงงานเพิ่มต้องมีคนว่างงาน และงานว่างเดิมน้อยกว่า 2 ตำแหน่ง';
+  if (reason.startsWith('No housing demand')) return 'ความจุบ้านว่างที่ใช้ได้ยังรองรับผู้ย้ายเข้าและครัวเรือนไร้บ้านตามเงื่อนไขปัจจุบัน';
+  if (reason.startsWith('No industry demand')) return null;
   if (reason.startsWith('No retail demand')) return 'ร้านค้าที่มีอยู่รองรับความต้องการปัจจุบันแล้ว';
   if (reason.startsWith('Viability:')) { const n = reason.match(/need (\d+).*have (\d+)/); return n ? `ร้านค้าต้องมีครัวเรือนที่มีเงินและเชื่อมถนน ${n[1]} ครัวเรือน (ขณะนี้ ${n[2]})` : 'ลูกค้ายังไม่พอให้รายได้คุ้มค่าจ้างและค่าเช่า'; }
   if (reason.includes('limit (')) return 'ถึงจำนวนสูงสุดที่ต้นแบบรองรับแล้ว';
@@ -187,7 +188,18 @@ function renderPlace() {
     if (!connected) reasons.push('ต้องเชื่อมถนนข้างแปลงกับประตูภายนอกฝั่งตะวันตก');
     if (!city.utilities.power || !city.utilities.water) reasons.push('บริการน้ำหรือไฟภายนอกไม่พร้อม การผลิตและเติบโตหยุดชั่วคราว');
     if (cell.road) { metrics.push(metric('สร้างต่อช่อง', money(5000), true), metric('บำรุงรักษาต่อวัน', money(10), true)); reasons.push(connected ? 'ถนนนี้เชื่อมกับตลาดภายนอก' : 'ถนนนี้ยังแยกจากตลาดภายนอก'); }
-    else if (!building && cell.zone) reasons.push(...explainCell(city, cellIndex).map(reason => shortReason(reason) ?? (cell.zone === 'F' || cell.zone === 'C' ? reason : null)).filter((s):s is string => s !== null));
+    else if (!building && cell.zone) {
+      reasons.push(...explainCell(city, cellIndex).map(reason => shortReason(reason) ?? (cell.zone === 'F' || cell.zone === 'C' ? reason : null)).filter((s):s is string => s !== null));
+      if (cell.zone === 'I' && connected && city.utilities.power && city.utilities.water) {
+        const growth = growthStatusText(city); reasons.push(`โอกาสลงทุนเมือง: ${growth.message}`);
+        if (!growth.status.bootstrap && growth.status.sponsorFirmId !== null) {
+          const available = metric('ทุนที่ใช้ขยายได้', money(growth.status.availableCapital), true, 'โอกาสลงทุนเมือง · หลังกันเงินเดือน ภาษี ค่าเช่า และเงินหมุนเวียน', growth.status.availableCapital);
+          available.dataset.growthMetric = 'capital-available';
+          const required = metric('ทุนเปิดโรงงานเพิ่ม', money(growth.status.requiredCapital), true, 'โอกาสลงทุนเมือง · โอนจากกิจการผู้ลงทุนจริง', growth.status.requiredCapital);
+          required.dataset.growthMetric = 'capital-required'; metrics.push(available, required);
+        }
+      }
+    }
     else if (!cell.zone) reasons.push('แปลงนี้ยังไม่มีโซน');
   } else { $('#selection-title').textContent = 'เลือกสถานที่บนแผนที่'; $('#place-subtitle').textContent = 'บ้าน · บริษัท · ครัวเรือน'; symbol(null, false); }
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
@@ -251,15 +263,15 @@ async function boot() {
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
   $('#save').addEventListener('click', () => {
-    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); status(`บันทึกรุ่น 5 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
+    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); status(`บันทึกรุ่น 6 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
   });
   const loadStored = (source: SaveSource) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
-      const loaded = deserialize(saved.raw), oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion === 1 || oldVersion === 2 || oldVersion === 3 || oldVersion === 4;
+      const loaded = deserialize(saved.raw), oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 5;
       city = loaded; importedLegacyRaw = legacy ? saved.raw : null;
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
-      status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion === 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · รวมตลาดเป็นพาณิชย์ระดับ 1' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
+      status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
     } catch (error) { status(`โหลดไม่สำเร็จ เมืองปัจจุบันยังอยู่ · ${error instanceof Error ? error.message : 'ข้อมูลบันทึกไม่ถูกต้อง'}`); }
   };
   $('#load').addEventListener('click', () => loadStored('current'));
@@ -267,6 +279,7 @@ async function boot() {
   $('#load-v2').addEventListener('click', () => loadStored('household'));
   $('#load-v3').addEventListener('click', () => loadStored('worker'));
   $('#load-v4').addEventListener('click', () => loadStored('agriculture'));
+  $('#load-v5').addEventListener('click', () => loadStored('commercial'));
   $('#load-backup').addEventListener('click', () => loadStored('backup'));
   $('#new-city').addEventListener('click', () => {
     const dialog = document.createElement('dialog');

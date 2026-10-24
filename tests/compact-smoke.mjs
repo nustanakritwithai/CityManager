@@ -16,7 +16,7 @@ const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 const hash = text => createHash('sha256').update(text).digest('hex');
 assert.equal(hash(legacyRaw), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 5);
+const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 6);
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
@@ -40,7 +40,7 @@ async function key(value) { for (const type of ['keyDown', 'keyUp']) await send(
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu})');
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : name === 'help' ? '#toggle-help' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}`); }
-async function loadFixture() { await page(mode === 'baseline' ? 'city' : 'game'); if ((await route()).submenu) await button('#submenu-back'); await evaluate(`localStorage.setItem(${JSON.stringify(mode === 'baseline' ? 'citymanager.save.v1' : 'citymanager.save.v5')},${JSON.stringify(fixture)})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
+async function loadFixture() { await page(mode === 'baseline' ? 'city' : 'game'); if ((await route()).submenu) await button('#submenu-back'); await evaluate(`localStorage.setItem(${JSON.stringify(mode === 'baseline' ? 'citymanager.save.v1' : 'citymanager.save.v6')},${JSON.stringify(fixture)})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
 async function place(building) { await close(); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${building.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
 async function viewport(metric) { const { name, ...dimensions } = metric; await close(); await send('Emulation.setDeviceMetricsOverride', { ...dimensions, deviceScaleFactor: 1, mobile: true }); await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&innerHeight===${metric.height}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`); await paints(); }
 async function shot(name) { await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(r.data, 'base64')); screenshots.push(name); }
@@ -153,7 +153,7 @@ async function linkedHouseholds(source, expected) {
 }
 async function candidateAssertions() {
   const baseline = JSON.parse(await readFile(baselinePath, 'utf8'));
-  assert.equal(baseline.schema, 1); assert.equal(baseline.mode, 'baseline'); assert.equal(baseline.fixture.sha256, hash(legacyRaw), 'Historical density baseline uses the frozen v1 bytes, never the migrated v5 hash');
+  assert.equal(baseline.schema, 1); assert.equal(baseline.mode, 'baseline'); assert.equal(baseline.fixture.sha256, hash(legacyRaw), 'Historical density baseline uses the frozen v1 bytes, never the migrated v6 hash');
   assert.equal(baseline.provenance.requestedSourceCommit, referenceCommit); assert.equal(baseline.provenance.admittedAgainst?.commit, referenceCommit, 'Frozen public baseline must have artifact admission');
   assert.ok(baseline.provenance.assets.length >= 2 && /^[a-f0-9]{64}$/.test(baseline.provenance.htmlSha256));
   const metric = name => measures.find(m => m.name === name), before = name => baseline.measures.find(m => m.name === name);
@@ -179,7 +179,7 @@ async function candidateAssertions() {
   await liveRow(); assert.deepEqual(await state(), city); checks.push('Actual trusted mouse and touch ledger presses survive 200ms live refreshes with the same DOM, exact journal identity and preserved native expansion');
   await page('game');
   for (const id of ['save', 'load', 'new-city', 'inspector-status']) assert.equal(await evaluate(`!!document.querySelector('#${id}')?.closest('#game-content')`), true, `${id} belongs only to explicit Game page`);
-  await tall('s22-game'); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v5")'), fixture); await shot('game-menu.png');
+  await tall('s22-game'); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v6")'), fixture); await shot('game-menu.png');
   await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
   await key('Escape'); assert.notEqual((await route()).open, 'true'); await mapRestored(); checks.push('Game menu owns persistence/status; actual Save, confirmation Cancel and Back/Escape preserve state and restore the map');
   for (const item of [

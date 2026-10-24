@@ -15,7 +15,7 @@ test('actual published v2 import preserves every economic and temporal field, jo
  assert.equal(createHash('sha256').update(raw180).digest('hex'),'0c33c983c1e71063496f4a95b935c22647b972c0084d2ce98449b7e7b8c13475');
  for(const raw of [raw65,raw180]){
   const old=deserializeV2(raw),c=deserialize(raw);
-  assert.equal(c.version,5);assert.equal(c.rulesVersion,'commercial-1');
+  assert.equal(c.version,6);assert.equal(c.rulesVersion,'growth-1');
   for(const key of ['seed','rng','tick','nextId','migration','accounts','ledger','goodsLedger','goods','cells','lastEvent'] as const)assert.deepEqual(c[key],old[key]);
   assert.deepEqual(c.buildings,old.buildings.map(b=>({...b,level:b.zone==='C'?b.level+1:b.level})));
   for(const b of c.buildings.filter(b=>b.zone==='C')) assert.equal(firmCapacity(b),old.buildings.find(previous=>previous.id===b.id)!.level,'Commercial level renumbering preserves the actual old worker capacity');
@@ -87,7 +87,7 @@ test('closing an establishment settles its old claims without erasing a family o
  assert.equal(c.ledger.filter(e=>e.tick===98&&e.from===factory.wallet&&e.to===h.wallet&&e.reason==='Monthly wages').at(-1)?.amount,due);assert.doesNotThrow(()=>deserialize(serialize(c)));
 });
 
-test('v5 rejects duplicated capability counts, incompatible assignments and unverified legacy skill claims',()=>{
+test('v6 rejects duplicated capability counts, incompatible assignments and unverified legacy skill claims',()=>{
  const c=advance(createCity(61025),98),raw=serialize(c);
  for(const mutate of [
   (x:any)=>x.households[0].workerSkills.general++,

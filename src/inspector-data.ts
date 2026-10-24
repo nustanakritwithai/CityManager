@@ -82,6 +82,14 @@ const reasonLabels: Record<string, string> = {
 
 function reasonLabel(reason: string): string {
   if (Object.hasOwn(reasonLabels, reason)) return reasonLabels[reason];
+  const industryCapital = /^Industry expansion capital #(\d+)$/.exec(reason);
+  if (industryCapital) return `ทุนขยายโรงงาน #${industryCapital[1]} (ไม่ใช่ยอดขาย)`;
+  const industryReturn = /^Industry expansion residual return #(\d+)$/.exec(reason);
+  if (industryReturn) return `คืนเงินคงเหลือโรงงาน #${industryReturn[1]} หลังสะสางภาระ`;
+  const industryBootstrap = /^Outside industry bootstrap equity #(\d+)$/.exec(reason);
+  if (industryBootstrap) return `ทุนเริ่มอุตสาหกรรม #${industryBootstrap[1]} จากภายนอก`;
+  const fundedDemolition = /^Funded industry demolition #(\d+)$/.exec(reason);
+  if (fundedDemolition) return `ค่ารื้อโรงงานที่รับทุน #${fundedDemolition[1]}`;
   const road = /^Build (\d+) road cells$/.exec(reason);
   if (road) return `สร้างถนน ${road[1]} ช่อง`;
   const purchase = /^Household #(\d+) purchase$/.exec(reason);

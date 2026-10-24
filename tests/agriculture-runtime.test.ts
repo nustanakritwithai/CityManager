@@ -9,7 +9,7 @@ function fixture() {
   const seed = 61025, resources = createResourceMap(seed), farmCell = resources.fertility.findIndex((n, i) => n === 100 && i > 10);
   assert.ok(farmCell > 10);
   const c: City = {
-    version: 5, rulesVersion: 'commercial-1', seed, rng: seed, tick: 1, nextId: 103,
+    version: 6, rulesVersion: 'growth-1', growthStartTick: 0, seed, rng: seed, tick: 1, nextId: 103,
     migration: { arrivals: 2, legacyHouseholds: 0 }, agricultureStartTick: 0, resources,
     cells: Array.from({ length: 576 }, () => ({ road: false, zone: null, building: null })),
     buildings: [

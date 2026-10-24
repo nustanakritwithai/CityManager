@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { deserialize, serialize, type City } from '../src/sim.ts';
+import { deserialize, serialize, step, type City } from '../src/sim.ts';
+import { createCity as createCityV5, step as stepV5, serialize as serializeV5 } from '../src/legacy-v5.ts';
 import { buildingCardData } from '../src/building-card-data.ts';
 import { captureEntityExplanation, makeEntitySnapshot, validateEntitySnapshot, validateEntityRequest, buildLocalEntityExplanation, acceptEntityExplanation, entityExplanationRows, entityExplanationCandidates, entityFactEvidence } from '../src/entity-explanation-data.ts';
 import type { EntitySnapshot } from '../src/entity-explanation-data.ts';
@@ -13,6 +14,28 @@ const city = (): City => deserialize(fixture);
 const capture = (c: City, buildingId = c.buildings[0].id) => { const s = captureEntityExplanation(c, { kind: 'building', buildingId }); assert(s); return s; };
 const fact = (s: EntitySnapshot, id: string) => s.facts.find(row => row.id === id);
 function freeze(value: unknown): void { if (value && typeof value === 'object') { Object.freeze(value); for (const child of Object.values(value)) freeze(child); } }
+
+test('a funded v6 factory keeps entity wire scope and classifies actual capital as cash flow, never profit', () => {
+  const old = createCityV5(61025);
+  for (let day = 0; day < 388; day++) stepV5(old);
+  const c = deserialize(serializeV5(old));
+  while (!c.firms.some(f => f.fundedBy) && c.tick < 395) step(c);
+  const firm = c.firms.find(f => f.fundedBy)!;
+  assert(firm?.fundedBy);
+  const before = serialize(c), snapshot = capture(c, firm.building);
+  assert.equal(snapshot.schemaVersion, 1);
+  assert.equal(snapshot.entity.firmId, firm.id);
+  assert.equal(fact(snapshot, 'cash.current')!.value, 260_000);
+  assert.equal(fact(snapshot, 'cash.inflow')!.value, 300_000);
+  assert.equal(fact(snapshot, 'cash.outflow')!.value, 40_000);
+  assert.equal(fact(snapshot, 'workforce.employed')!.value, 0);
+  assert(!snapshot.facts.some(f => /profit|fundedBy|sponsor/i.test(f.id)));
+  const request = { schemaVersion: 2, operation: 'entity-explanation', locale: 'th', snapshot };
+  assert.deepEqual(validateEntityRequest(request).snapshot, snapshot);
+  const encoded = JSON.stringify(request);
+  for (const forbidden of ['"fundedBy"', '"accounts"', '"ledger"', '"growthStartTick"', `firm:${firm.fundedBy.firmId}`, firm.wallet]) assert(!encoded.includes(forbidden));
+  assert.equal(serialize(c), before);
+});
 
 test('all six card kinds retain exact selected identity and bounded copied evidence without a full save', () => {
   const c = city(), before = serialize(c), kinds = new Set<string>();
