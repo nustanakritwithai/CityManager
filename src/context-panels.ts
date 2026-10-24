@@ -1,8 +1,10 @@
 import './context-panels.css';
+import './building-cards.css';
 import { MONTH, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
+import { buildingCardData, householdCardData } from './building-card-data.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
 type HouseholdAction = (id: number, sourceBuildingId: number, sourceCell: number) => void;
@@ -195,6 +197,7 @@ function legacyAssumption(household: Household): HTMLElement | null {
 function renderHouse(city: City, building: Building, households: Household[], onHousehold: HouseholdAction): HTMLElement[] {
   const occupied = homeOccupancy(city, building.id), capacity = housingCapacity(building);
   const residents = section('ครัวเรือนที่พักอาศัย', `${households.length} ครัวเรือน · ${occupied.persons} คน`), list = el('div', 'cx-household-list');
+  residents.classList.add('bc-residents-source');
   for (const household of households) list.append(householdButton(city, household, building, onHousehold));
   if (!households.length) list.append(empty('บ้านว่าง', 'ยังไม่มีครัวเรือนพักอาศัย การรับผู้ย้ายเข้าแยกจากการสร้างอาคารและเริ่มได้ในวันถัดไปเมื่อผ่านเงื่อนไข'));
   residents.append(list);
@@ -212,6 +215,7 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
   const labor = firmLabor(city, firm.id)!, workers = labor.workers;
   const lastSettlement = city.tick - city.tick % MONTH, hasClosedMonth = lastSettlement > 0 && city.tick - building.age < lastSettlement;
   const employees = section('แรงงานที่รับจากแต่ละครัวเรือน', `${workers} คน · ${labor.householdCount} บัญชีครัวเรือน`), list = el('div', 'cx-household-list');
+  employees.classList.add('bc-employment-source');
   for (const group of labor.households) {
     const household = city.households.find(value => value.id === group.householdId);
     if (household) list.append(householdButton(city, household, building, onHousehold, group.workers, group.allocations, group.ownerAllocations));
@@ -245,6 +249,7 @@ function renderAgriculture(city: City, building: Building, firm: Firm, workers: 
 }
 function renderOwnerFinance(city: City, firm: Firm): HTMLElement {
   const body = section('เจ้าของที่ทำกิจการเอง'), data = ownerFinance(city, firm.id);
+  body.classList.add('bc-owner-source');
   if (!data) { body.append(el('p', 'cx-detail-note', 'ไม่พบเจ้าของที่เชื่อมกับกิจการนี้')); return body; }
   body.dataset.ownerHouseholdId = String(data.ownerHouseholdId);
   body.append(metrics([
@@ -278,6 +283,7 @@ function ownerLaborRow(allocation: City['ownerLabor'][number]): HTMLElement {
 }
 function renderWorkerSkills(city: City, household: Household): HTMLElement {
   const data = householdLabor(city, household.id)!, body = section('กลุ่มความสามารถของแรงงาน', `${data.workforce} คน · ไม่รวมผู้พึ่งพิง`), list = el('div', 'cx-skill-list');
+  body.classList.add('bc-skills-source');
   for (const skill of data.skills) {
     const row = el('div', 'cx-skill-row'); Object.assign(row.dataset, { skill: skill.skill, total: String(skill.total), employed: String(skill.employed), unemployed: String(skill.unemployed) });
     const heading = el('div', 'cx-skill-heading'); heading.append(el('strong', '', WORKER_SKILL_LABELS[skill.skill]), el('span', '', `${skill.total} คน`));
@@ -303,6 +309,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
   ]));
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
   const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
+  jobs.classList.add('bc-employment-source');
   rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow));
   if (!employed) rows.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง หรือทำตลาดของตนเอง'));
   jobs.append(rows); output.push(jobs, renderWorkerSkills(city, household));
@@ -314,6 +321,131 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     el('p', '', household.home === null ? 'การรื้อบ้านทำให้รอที่พักใหม่ ครัวเรือนและเงินออมยังอยู่ ระบบจัดหาที่พักให้ผู้ถูกย้ายออกจากบ้านก่อนรับผู้ย้ายเข้าใหม่' : 'การย้ายที่พักคง ID กระเป๋าเงิน สมาชิก และค่าจ้างที่มีสิทธิ์รับเดิม ไม่ใช่การรับครัวเรือนใหม่'),
     el('p', '', 'หนึ่งครัวเรือนต้องการหนึ่งตะกร้ารวมต่อวัน: พืชผล 1 ล็อตจากตลาด หรือสินค้าสำเร็จรูป 1 หน่วยจากร้านค้า ไม่ซื้อทั้งสองซ้ำในวันเดียว และไม่คูณตามจำนวนสมาชิก')),
     activity(city, 'money', household.wallet, `ครัวเรือน #${household.id}`), activity(city, 'goods', household.wallet, `ครัวเรือน #${household.id}`), cropActivity(city, household.wallet, `ครัวเรือน #${household.id}`)); return output;
+}
+
+type CardData = NonNullable<ReturnType<typeof buildingCardData> | ReturnType<typeof householdCardData>>;
+type CardKind = CardData['kind'];
+type CardParts = {
+  values: Map<string, HTMLElement>; statuses: HTMLElement[]; assumptions: HTMLElement[];
+  journals: HTMLElement[]; notes: HTMLElement[]; residents: HTMLElement | null;
+  employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null;
+};
+function cardIcon(kind: CardKind): SVGElement {
+  const paths: Record<CardKind, string> = {
+    house: '<path d="m6 28 26-20 26 20M13 24v32h38V24M26 56V38h12v18M20 28h5m14 0h5"/>',
+    household: '<circle cx="23" cy="22" r="8"/><circle cx="45" cy="26" r="6"/><path d="M8 54V43c0-15 30-15 30 0v11M41 39c10-4 17 0 17 9v6"/>',
+    shop: '<path d="M9 27h46l-6-15H15zM12 27v29h40V27M23 56V39h18v17M9 27c0 9 12 9 12 0 0 9 11 9 11 0 0 9 11 9 11 0 0 9 12 9 12 0"/>',
+    market: '<path d="m9 23 6-13h34l6 13M8 23h48M13 23v33m38-33v33M8 56h48M20 36h24l-3 15H23zM27 36v15m10-15v15M25 31h14"/>',
+    factory: '<path d="M7 56V30l16-10v10l16-10v10h18v26H7M44 30V9h9v21M16 40h6m9 0h6m9 0h4M16 49h6m9 0h6m9 0h4"/>',
+    farm: '<circle cx="48" cy="15" r="7"/><path d="M8 55h48M8 45h48M8 35h48M21 35V18M21 27C8 27 9 12 9 12c10 0 15 7 12 15M22 21C22 9 34 8 34 8c1 10-5 14-12 13"/>',
+  };
+  const host = el('div'); host.innerHTML = `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">${paths[kind]}</svg>`; return host.firstElementChild as SVGElement;
+}
+function cardHero(data: CardData): HTMLElement {
+  const labels: Record<CardKind, string> = { house: 'บ้านพัก · การอยู่อาศัย', household: 'ครัวเรือน · สมาชิกและเงินร่วม', shop: 'ร้านค้า · สินค้าสำเร็จรูป', market: 'ตลาดพืชผล · กิจการทำเอง', factory: 'โรงงาน · การแปรรูป', farm: 'ฟาร์ม · พื้นที่และการเก็บเกี่ยว' };
+  const hero = el('div', 'bc-hero'), icon = el('span', 'bc-type-icon'), copy = el('div', 'bc-hero-copy'); icon.append(cardIcon(data.kind));
+  const period = el('p', 'bc-period', data.kind === 'house' ? `สถานะที่พัก ณ วัน ${data.window.toTick}` : data.window.empty ? `ช่วงเริ่มต้น · วัน ${data.window.toTick}` : `เงินสดวันที่ ${data.window.fromTick}–${data.window.toTick} · รวมวันต้นและปลาย`);
+  Object.assign(period.dataset, { fromTick: String(data.window.fromTick), toTick: String(data.window.toTick), inclusive: String(data.window.inclusive), empty: String(data.window.empty) });
+  copy.append(el('span', 'bc-type-label', labels[data.kind]), period); hero.append(icon, copy); return hero;
+}
+/** Move existing metric nodes, retaining each raw key once and every live handler. */
+function cardParts(nodes: HTMLElement[]): CardParts {
+  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], residents: null, employment: null, skills: null, owner: null };
+  for (const node of nodes) {
+    const cards = [...(node.matches('[data-context-metric]') ? [node] : []), ...node.querySelectorAll<HTMLElement>('[data-context-metric]')];
+    for (const card of cards) { parts.values.set(card.dataset.contextMetric!, card); card.remove(); }
+    for (const grid of node.querySelectorAll<HTMLElement>('.cx-metrics')) if (!grid.children.length) grid.remove();
+    if (node.classList.contains('cx-metrics')) continue;
+    if (node.classList.contains('cx-status')) parts.statuses.push(node);
+    else if (node.classList.contains('cx-legacy-assumption')) parts.assumptions.push(node);
+    else if (node.classList.contains('cx-activity')) parts.journals.push(node);
+    else if (node.classList.contains('bc-residents-source')) parts.residents = node;
+    else if (node.classList.contains('bc-employment-source')) parts.employment = node;
+    else if (node.classList.contains('bc-skills-source')) parts.skills = node;
+    else if (node.classList.contains('bc-owner-source')) parts.owner = node;
+    else parts.notes.push(node);
+  }
+  return parts;
+}
+function takeCards(parts: CardParts, keys: string[]): HTMLElement[] {
+  return keys.flatMap(key => { const card = parts.values.get(key); if (!card) return []; parts.values.delete(key); return [card]; });
+}
+function cardKpis(cards: HTMLElement[]): HTMLElement { const grid = metrics(cards); grid.classList.add('bc-kpis'); return grid; }
+function cardSection(node: HTMLElement, name: string, extra = ''): HTMLElement {
+  node.classList.add('bc-section'); if (extra) node.classList.add(extra); node.dataset.cardSection = name; return node;
+}
+function cardGroup(title: string, name: string, cards: HTMLElement[], extra = ''): HTMLElement {
+  const node = section(title); node.append(cardKpis(cards)); return cardSection(node, name, extra);
+}
+function cardStat(key: string, title: string, value: number | null, unit = '', money = false, signed = false): HTMLElement {
+  const card = el('dl', `cx-metric bc-stat${money ? ' money' : ''}`); Object.assign(card.dataset, { cardMetric: key, value: value === null ? 'null' : String(value), available: String(value !== null) });
+  card.append(el('dt', '', title), el('dd', '', value === null ? 'ยังไม่มีข้อมูล' : money ? cash(value, signed) : `${count(value)}${unit ? ` ${unit}` : ''}`)); return card;
+}
+function cardCash(data: CardData, parts: CardParts): HTMLElement {
+  const node = cardGroup(data.kind === 'household' ? 'เงินร่วมและการโอนจริง' : 'เงินสดกิจการและการโอนจริง', 'finance', [
+    ...takeCards(parts, ['cash']), cardStat('cash-inflow', 'เงินโอนเข้า', data.cash.inflow, '', true), cardStat('cash-outflow', 'เงินโอนออก', data.cash.outflow, '', true), cardStat('cash-net', 'โอนสุทธิ', data.cash.net, '', true, true),
+  ]);
+  Object.assign(node.dataset, { fromTick: String(data.window.fromTick), toTick: String(data.window.toTick), basis: data.cash.basis });
+  node.append(el('p', 'cx-detail-note', `วันที่ ${data.window.fromTick}–${data.window.toTick} · เงินผ่านบัญชีจริง รวมทุนและการถอนที่เกิดขึ้น ไม่ใช่กำไรขาดทุน`)); return node;
+}
+function cardTrade(data: CardData): HTMLElement {
+  const crops = data.kind === 'market', buy = crops ? data.prices.cropsBuy : data.prices.goodsBuy, sell = crops ? data.prices.cropsSell : data.prices.goodsSell, unit = crops ? 'ล็อตพืชผล' : 'หน่วยสำเร็จรูป';
+  const outer = section(crops ? 'การซื้อและขายพืชผลจริง' : 'รับสินค้าและขายจริง', `วันที่ ${data.window.fromTick}–${data.window.toTick}`), flow = el('div', 'bc-retail-flow');
+  Object.assign(outer.dataset, { fromTick: String(data.window.fromTick), toTick: String(data.window.toTick) });
+  for (const [direction, values] of [['buy', buy], ['sell', sell]] as const) {
+    const side = el('section', 'bc-trade-side'); side.dataset.direction = direction;
+    const quantityKey = `${crops ? 'crops' : 'goods'}-${direction === 'buy' ? 'purchased' : 'sold'}`, price = cardStat(direction === 'buy' ? 'purchase-price' : 'sales-price', 'ราคาเฉลี่ยจากรายการจับคู่', values.unitSatang, '', true);
+    price.dataset.status = values.status;
+    side.append(el('h4', '', direction === 'buy' ? 'ซื้อเข้าสินค้าคงคลัง' : 'ขายออกจากสินค้าคงคลัง'), cardKpis([cardStat(quantityKey, direction === 'buy' ? 'ซื้อจริง' : 'ขายจริง', values.quantity, unit), cardStat(direction === 'buy' ? 'purchase-cash' : 'sales-cash', direction === 'buy' ? 'เงินซื้อจริง' : 'เงินขายจริง', values.cashSatang, '', true), price]));
+    if (values.status !== 'observed') side.append(el('p', 'cx-detail-note', values.status === 'missing' ? 'ยังไม่มีรายการสินค้าและเงินที่จับคู่กันในช่วงนี้' : values.status === 'non-integer' ? 'ราคาเฉลี่ยมีเศษสตางค์ จึงแสดงยอดเงินจริงและปริมาณโดยไม่ปัดราคา' : 'ยังไม่แสดงราคา เพราะข้อมูลจับคู่ไม่ชัดเจนหรือเกินขอบเขตที่แสดงได้'));
+    flow.append(side);
+  }
+  outer.append(flow); return cardSection(outer, 'trade');
+}
+function cardEmployment(parts: CardParts): HTMLElement | null {
+  if (!parts.employment) return null;
+  const cards = takeCards(parts, ['workers', 'household-count', 'employers']);
+  if (cards.length) parts.employment.firstElementChild?.after(cardKpis(cards));
+  return cardSection(parts.employment, 'employment');
+}
+function cardDetails(data: CardData, parts: CardParts): HTMLElement {
+  const contents: HTMLElement[] = [], remaining = [...parts.values.values()]; parts.values.clear();
+  if (remaining.length) contents.push(metrics(remaining)); contents.push(...parts.notes);
+  const node = facts(`card:${data.kind}:${data.identity.householdId ?? data.identity.buildingId}`, 'ข้อมูลบัญชีและรายละเอียด', ...contents); node.classList.add('bc-secondary'); return cardSection(node, 'details');
+}
+function cardInterior(data: CardData, nodes: HTMLElement[]): HTMLElement[] {
+  const parts = cardParts(nodes), output = [cardHero(data), ...parts.statuses, ...parts.assumptions];
+  if (data.kind === 'house') {
+    output.push(cardGroup('พักอยู่จริง / ความจุ', 'occupancy', takeCards(parts, ['households', 'persons', 'vacant-households', 'vacant-persons']), 'bc-occupancy'));
+    if (parts.residents) output.push(cardSection(parts.residents, 'residents'));
+  } else if (data.kind === 'household') {
+    output.push(cardGroup('สมาชิกและกำลังแรงงาน', 'members', takeCards(parts, ['members', 'workforce', 'dependents', 'employed', 'unemployed'])), cardCash(data, parts));
+    const jobs = cardEmployment(parts); if (jobs) output.push(jobs); if (parts.skills) output.push(cardSection(parts.skills, 'skills'));
+  } else if (data.kind === 'shop') {
+    output.push(cardGroup('สินค้าสำเร็จรูปพร้อมขาย', 'stock', takeCards(parts, ['stock'])), cardTrade(data), cardCash(data, parts));
+    const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
+  } else if (data.kind === 'market') {
+    output.push(cardGroup('ล็อตพืชผลและมูลค่าตามบัญชี', 'stock', takeCards(parts, ['crop-stock', 'crop-cost']), 'bc-market-stock'), cardTrade(data));
+    if (parts.owner) { parts.owner.firstElementChild?.after(cardKpis(takeCards(parts, ['realised-profit', 'drawable', 'owner-household']))); output.push(cardSection(parts.owner, 'owner')); }
+    output.push(cardCash(data, parts)); const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
+  } else if (data.kind === 'factory') {
+    const production = section('วัตถุดิบ → สูตรแปรรูป → ผลผลิต'), chain = el('div', 'bc-chain');
+    for (const [stage, title, keys] of [['input', 'วัตถุดิบพืชผล', ['crop-stock', 'crop-cost']], ['recipe', 'สูตรและกำลังแปรรูป', ['recipe-input', 'recipe-output', 'available-batches']], ['output', 'สินค้าสำเร็จรูป', ['stock']]] as const) {
+      const step = el('div', 'bc-chain-step'); step.dataset.stage = stage;
+      const cards = takeCards(parts, [...keys]); if (stage === 'output') cards.push(cardStat('goods-produced-today', 'ผลิตจริงวันนี้', data.today.goodsProduced, 'หน่วย'));
+      step.append(el('span', 'bc-chain-label', title), cardKpis(cards)); chain.append(step);
+    }
+    production.append(chain); output.push(cardSection(production, 'production'));
+    const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
+  } else {
+    output.push(cardGroup('พื้นที่เพาะปลูก', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง'), ...takeCards(parts, ['fertility'])], 'bc-plot'));
+    output.push(cardGroup('การเก็บเกี่ยววันนี้', 'harvest', takeCards(parts, ['harvest-today', 'yield-per-worker', 'workers']), 'bc-yield'));
+    output.push(cardGroup('พืชผลที่เก็บไว้', 'stock', takeCards(parts, ['crop-stock', 'crop-cost'])));
+    const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
+  }
+  output.push(cardDetails(data, parts));
+  for (const journal of parts.journals) output.push(cardSection(journal, `journal-${journal.dataset.kind}`));
+  return output;
 }
 
 /** Entity-only content. Parent owns modes, headings, parcel explanations and navigation. */
@@ -332,17 +464,21 @@ export function renderContext(city: City, selection: ContextSelection, onHouseho
   queuedRequest = null; renderedCity = city; renderedScope = scope; renderedRevision = revision;
   if (latestCity && latestCity !== city) { activityLimits.clear(); expandedActivity.clear(); expandedFacts.clear(); } latestCity = city;
   const focused = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement.dataset.contextFocus : undefined;
-  delete host.dataset.wallet; delete host.dataset.buildingId; delete host.dataset.cell; delete host.dataset.entityId;
+  delete host.dataset.wallet; delete host.dataset.buildingId; delete host.dataset.cell; delete host.dataset.entityId; delete host.dataset.cardKind;
   if (selection === null) { host.dataset.scope = 'none'; host.replaceChildren(); return; }
   host.dataset.scope = selection.kind;
   if (selection.kind === 'household') {
-    host.dataset.entityId = String(selection.id); const household = city.households.find(value => value.id === selection.id); if (household) host.dataset.wallet = household.wallet; host.replaceChildren(...renderHousehold(city, selection));
+    host.dataset.entityId = String(selection.id); const household = city.households.find(value => value.id === selection.id); if (household) host.dataset.wallet = household.wallet;
+    const data = householdCardData(city, selection.id), nodes = renderHousehold(city, selection); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes) : nodes));
   } else {
     const place = resolvePlace(city, selection.cell); host.dataset.cell = String(selection.cell);
     if (!place.building) { host.replaceChildren(); return; }
     host.dataset.entityId = String(place.building.id); host.dataset.buildingId = String(place.building.id);
-    if (place.building.zone === 'R') host.replaceChildren(...renderHouse(city, place.building, place.households, navigateHousehold));
-    else if (place.firm) { host.dataset.wallet = place.firm.wallet; host.replaceChildren(...renderFirm(city, place.building, place.firm, navigateHousehold)); }
+    if (place.building.zone === 'R') {
+      const data = buildingCardData(city, place.building.id), nodes = renderHouse(city, place.building, place.households, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes) : nodes));
+    } else if (place.firm) {
+      host.dataset.wallet = place.firm.wallet; const data = buildingCardData(city, place.building.id), nodes = renderFirm(city, place.building, place.firm, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes) : nodes));
+    }
     else host.replaceChildren(empty('ไม่พบข้อมูลบริษัท', 'อาคารนี้ไม่มีบริษัทที่อ้างอิงอยู่ในข้อมูลเมืองปัจจุบัน'));
   }
   if (focused) [...host.querySelectorAll<HTMLElement>('[data-context-focus]')].find(node => node.dataset.contextFocus === focused)?.focus({ preventScroll: true });

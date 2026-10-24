@@ -80,6 +80,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Worker capability acceptance failed with exit code $LASTEXITCODE." }
             npm run test:agriculture
             if ($LASTEXITCODE -ne 0) { throw "Agriculture acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:building-cards
+            if ($LASTEXITCODE -ne 0) { throw "Building card acceptance failed with exit code $LASTEXITCODE." }
             $env:CITYMANAGER_BLOCK_MODELS = '1'
             $env:CITYMANAGER_SCREENSHOT_DIR = '.test-output/fallback'
             npm run test:browser
@@ -96,6 +98,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Worker capability fallback acceptance failed with exit code $LASTEXITCODE." }
             npm run test:agriculture
             if ($LASTEXITCODE -ne 0) { throw "Agriculture fallback acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:building-cards
+            if ($LASTEXITCODE -ne 0) { throw "Building card fallback acceptance failed with exit code $LASTEXITCODE." }
           } finally {
             Stop-Process -Id $previewProcess.Id -ErrorAction SilentlyContinue
           }
