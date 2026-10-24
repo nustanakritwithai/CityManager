@@ -69,12 +69,16 @@ async function load(json) {
 }
 async function cell(index, close = true) {
   if (close) await closePanel();
+  // Camera controls request an on-demand PlayCanvas frame. Read the ground
+  // projection after that frame, rather than racing cached camera matrices.
+  await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
   const point = await evaluate(`window.cityManager.cellScreen(${index})`);
   assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`), 'city-canvas', `Map cell ${index} is genuinely hit`); await click(point.x, point.y);
 }
 async function place(building, close = true) {
   await cell(building.cell, close);
-  await until(`document.querySelector('#inspector').dataset.page==='entity'&&document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${building.id}'`);
+  try { await until(`document.querySelector('#inspector').dataset.page==='entity'&&document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
+  catch(error){throw Error(`Expected building ${building.id} at cell ${building.cell}; actual ${JSON.stringify(await evaluate('({cell:document.querySelector("#entity-content").dataset.cell,id:document.querySelector("#entity-content").dataset.entityId,title:document.querySelector("#selection-title").textContent,width:innerWidth,height:innerHeight})'))}; ${error.message}`);}
   assert.equal(await visible('#city-content'), false); assert.equal(await visible('#help-content'), false);
   assert.equal(await evaluate('document.querySelector("#entity-content #ledger")===null&&document.querySelector("#entity-content #accounts")===null'), true);
 }
