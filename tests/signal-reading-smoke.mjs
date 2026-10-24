@@ -152,7 +152,7 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let day = 0; day < 65; day++) step(fixture);
   await button('#toggle-game-menu');
-  await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(serialize(fixture))})`);
+  await evaluate(`localStorage.setItem('citymanager.save.v3',${JSON.stringify(serialize(fixture))})`);
   await button('#load'); await button('#close-inspector');
   const before = await state(); assert.deepEqual(before, fixture);
 
