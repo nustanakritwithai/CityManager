@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'src/signal-*'
+      - 'src/context-panels*'
+      - 'src/building-card*'
       - 'tests/signal-*'
       - '.github/workflows/signal-reading.yml'
   workflow_dispatch:

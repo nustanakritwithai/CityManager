@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'src/city-questions*'
+      - 'src/context-panels*'
+      - 'src/building-card*'
       - 'src/signal-panel.ts'
       - 'tests/city-questions*'
       - '.github/workflows/city-questions.yml'

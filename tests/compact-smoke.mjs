@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
-import { deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+import { deserialize, serialize, firmWorkerCount, householdWorkerCount, homeOccupancy, housingCapacity, firmWage, MONTH } from '../src/sim.ts';
 
 const mode = process.env.CITYMANAGER_COMPACT_MODE || 'candidate';
 const referenceCommit = 'd40cd6982ce644ed1e555565d48cf2c1efbdc047';
@@ -46,7 +46,7 @@ async function viewport(metric) { const { name, ...dimensions } = metric; await 
 async function shot(name) { await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(r.data, 'base64')); screenshots.push(name); }
 async function measure(name) {
   await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints();
-  const result = await evaluate(`(()=>{const panel=document.querySelector('#inspector'),body=document.querySelector('#inspector-body'),p=panel.getBoundingClientRect(),b=body.getBoundingClientRect(),ratio=Math.min(1,screen.width/innerWidth),clip={top:Math.max(0,b.top),bottom:Math.min(innerHeight,b.bottom),left:Math.max(0,b.left),right:Math.min(innerWidth,b.right)};const coverage=selector=>{const rows=[...document.querySelectorAll(selector)].map(e=>{const r=e.getBoundingClientRect(),height=Math.max(0,Math.min(r.bottom,clip.bottom)-Math.max(r.top,clip.top)),width=Math.max(0,Math.min(r.right,clip.right)-Math.max(r.left,clip.left));return{index:e.dataset.index??e.dataset.contextMetric??e.dataset.householdId,height:r.height,visible:height>0&&width>0,full:r.height>0&&r.width>0&&height>=r.height-1&&width>=r.width-1,visibleHeight:height}});return{total:rows.length,visible:rows.filter(r=>r.visible).length,full:rows.filter(r=>r.full).length,rows}};return{name:${JSON.stringify(name)},width:innerWidth,height:innerHeight,screenWidth:screen.width,screenHeight:screen.height,ratio,panel:{top:p.top,bottom:p.bottom,left:p.left,right:p.right,height:p.height},body:{top:b.top,bottom:b.bottom,height:b.height,scrollHeight:body.scrollHeight,clientWidth:body.clientWidth,scrollWidth:body.scrollWidth},ledger:coverage('#ledger .sm-flow-card'),kpi:coverage('#entity-content [data-context-metric]'),requiredFirmKpi:coverage('#entity-content [data-context-metric=cash],#entity-content [data-context-metric=reserved],#entity-content [data-context-metric=spendable],#entity-content [data-context-metric=stock],#entity-content [data-context-metric=workers],#entity-content [data-context-metric=household-count],#entity-content [data-context-metric=profit]'),households:coverage('#entity-content .cx-household-link'),controls:['#close-inspector','#submenu-back'].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width*ratio,height:r.height*ratio,hit:!!document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(s)}})}})()`);
+  const result = await evaluate(`(()=>{const panel=document.querySelector('#inspector'),body=document.querySelector('#inspector-body'),p=panel.getBoundingClientRect(),b=body.getBoundingClientRect(),ratio=Math.min(1,screen.width/innerWidth),clip={top:Math.max(0,b.top),bottom:Math.min(innerHeight,b.bottom),left:Math.max(0,b.left),right:Math.min(innerWidth,b.right)},cardKind=document.querySelector('#entity-content').dataset.cardKind??null;const coverage=selector=>{const rows=[...document.querySelectorAll(selector)].map(e=>{const r=e.getBoundingClientRect(),height=Math.max(0,Math.min(r.bottom,clip.bottom)-Math.max(r.top,clip.top)),width=Math.max(0,Math.min(r.right,clip.right)-Math.max(r.left,clip.left));return{index:e.dataset.index??e.dataset.contextMetric??e.dataset.cardMetric??e.dataset.householdId,height:r.height,visible:height>0&&width>0,full:r.height>0&&r.width>0&&height>=r.height-1&&width>=r.width-1,visibleHeight:height}});return{total:rows.length,visible:rows.filter(r=>r.visible).length,full:rows.filter(r=>r.full).length,rows}};const primary={factory:['crop-stock','recipe-input','recipe-output','stock'],house:['households','persons','vacant-households','vacant-persons'],household:['members','workforce','dependents','employed','unemployed'],shop:['stock'],market:['crop-stock','crop-cost','realised-profit','workers','cash'],farm:['fertility','harvest-today']}[cardKind]??[],primarySelector=primary.map(key=>'#entity-content .bc-kpis [data-context-metric="'+key+'"]').join(',');return{name:${JSON.stringify(name)},cardKind,primaryKeyMetrics:primarySelector?coverage(primarySelector):null,width:innerWidth,height:innerHeight,screenWidth:screen.width,screenHeight:screen.height,ratio,panel:{top:p.top,bottom:p.bottom,left:p.left,right:p.right,height:p.height},body:{top:b.top,bottom:b.bottom,height:b.height,scrollHeight:body.scrollHeight,clientWidth:body.clientWidth,scrollWidth:body.scrollWidth},ledger:coverage('#ledger .sm-flow-card'),kpi:coverage('#entity-content [data-context-metric]'),requiredFirmKpi:coverage('#entity-content [data-context-metric=cash],#entity-content [data-context-metric=reserved],#entity-content [data-context-metric=spendable],#entity-content [data-context-metric=stock],#entity-content [data-context-metric=workers],#entity-content [data-context-metric=household-count],#entity-content [data-context-metric=profit]'),households:coverage('#entity-content .cx-household-link'),controls:['#close-inspector','#submenu-back'].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width*ratio,height:r.height*ratio,hit:!!document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(s)}})}})()`);
   measures.push(result); return result;
 }
 async function ledger() { await page('city'); if ((await route()).submenu) await button('#submenu-back'); await button('#money-section>summary'); await until('document.querySelector("#inspector").dataset.submenu==="money-section"'); }
@@ -125,6 +125,32 @@ async function liveRow() {
     await evaluate('delete window.__compactHeldInput'); await close(); await button('#pause'); await loadFixture(); await button('[data-speed="1"]');
   }
 }
+function householdMetrics(h) {
+  const jobs = [...city.employment.filter(e => e.householdId === h.id), ...city.ownerLabor.filter(e => e.householdId === h.id)], employed = householdWorkerCount(city, h.id);
+  return { cash: city.accounts[h.wallet], members: h.members, workforce: h.workforce, dependents: h.dependents, employed, unemployed: h.workforce - employed, employers: new Set(jobs.map(e => e.firmId)).size, home: h.home === null ? 'null' : h.home, needs: h.needs, 'last-purchase': h.lastPurchaseTick };
+}
+async function preservedMetrics(expected, identity) {
+  const summary = '#entity-content .bc-secondary>summary';
+  assert.equal(await evaluate('document.querySelector("#entity-content .bc-secondary").open'), false, 'Secondary accounting starts progressively disclosed');
+  await evaluate(`document.querySelector(${JSON.stringify(summary)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
+  const size = await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(summary)}).getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{w:r.width*k,h:r.height*k}})()`); assert.ok(size.w >= 43.5 && size.h >= 43.5, 'Secondary summary is a genuine44px physical hit target');
+  await button(summary); await until('document.querySelector("#entity-content .bc-secondary").open===true');
+  const actual = await evaluate('(()=>{const h=document.querySelector("#entity-content");return{id:h.dataset.entityId,metrics:[...h.querySelectorAll("[data-context-metric]")].map(e=>({key:e.dataset.contextMetric,value:e.dataset.value,rendered:e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0}))}})()');
+  assert.equal(actual.id, String(identity));
+  for (const [key, value] of Object.entries(expected)) { const rows = actual.metrics.filter(row => row.key === key); assert.equal(rows.length, 1, `Preserved metric ${key} appears exactly once`); assert.equal(rows[0].value, String(value), `Preserved metric ${key} matches actual city state`); assert.equal(rows[0].rendered, true, `Preserved metric ${key} is available after native disclosure`); }
+  await button(summary); await until('document.querySelector("#entity-content .bc-secondary").open===false'); assert.deepEqual(await state(), city, 'Progressive metric disclosure never changes city/accounting state');
+}
+async function linkedHouseholds(source, expected) {
+  const rows = await evaluate('[...document.querySelectorAll("#entity-content button[data-household-id]")].map(e=>({id:Number(e.dataset.householdId),source:Number(e.dataset.sourceBuildingId),cell:Number(e.dataset.sourceCell),workers:e.dataset.assignedWorkers===undefined?null:Number(e.dataset.assignedWorkers)}))');
+  assert.deepEqual(rows, expected.map(row => ({ ...row, source: source.id, cell: source.cell })), 'Actual resident/employer rows remain scoped with conserved worker counts');
+  if (rows.length) {
+    const selector = `#entity-content button[data-household-id="${rows[0].id}"]`; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
+    const size = await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{w:r.width*k,h:r.height*k}})()`); assert.ok(size.w >= 43.5 && size.h >= 43.5, 'Reachable household row retains44px hit area');
+    await button(selector); await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${rows[0].id}'`);
+    await preservedMetrics(householdMetrics(city.households.find(h => h.id === rows[0].id)), rows[0].id);
+    await button('#submenu-back'); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${source.id}'`);
+  }
+}
 async function candidateAssertions() {
   const baseline = JSON.parse(await readFile(baselinePath, 'utf8'));
   assert.equal(baseline.schema, 1); assert.equal(baseline.mode, 'baseline'); assert.equal(baseline.fixture.sha256, hash(legacyRaw), 'Historical density baseline uses the frozen v1 bytes, never the migrated v4 hash');
@@ -133,11 +159,18 @@ async function candidateAssertions() {
   const metric = name => measures.find(m => m.name === name), before = name => baseline.measures.find(m => m.name === name);
   for (const name of ['s22-ledger', 's22-firm', 's22-house', 's22-household']) assertTall(metric(name), name);
   assert.ok(metric('s22-ledger').ledger.full > before('s22-ledger').ledger.full, 'More full ledger events fit than the measured released baseline');
-  assert.equal(metric('s22-firm').requiredFirmKpi.full, 7, 'All seven preserved firm KPIs fit initially alongside agriculture detail'); assert.ok(metric('s22-firm').households.full >= 1, 'An actual employee household row fits with the KPIs');
-  assert.equal(metric('s22-house').kpi.full, 6); assert.ok(metric('s22-house').households.full >= 1, 'Actual resident row is initially visible');
-  assert.equal(metric('s22-household').kpi.full, 10);
-  for (const name of ['s22-firm', 's22-house', 's22-household']) { assert.ok(metric(name).kpi.full >= before(name).kpi.full); assert.ok(metric(name).households.full >= before(name).households.full); }
-  checks.push('Frozen artifact-admitted d40 comparison uses exact v1 bytes; v4 migration preserves all money/goods/tick/RNG and exposes expanded capacity/composition KPIs with actual household rows');
+  const firmKind = { I: 'factory', C: 'shop', F: 'farm', T: 'market' }[company.zone];
+  for (const [name, kind] of [['s22-firm', firmKind], ['s22-house', 'house'], ['s22-household', 'household']]) { const current = metric(name); assert.equal(current.cardKind, kind); assert.ok(current.primaryKeyMetrics?.total >= 1); assert.equal(current.primaryKeyMetrics.full, current.primaryKeyMetrics.total, 'Meaningful type-specific key metrics fit initially: ' + name); }
+  assert.ok(metric('s22-house').households.full >= 1, 'An actual resident row is initially visible with house occupancy');
+  await place(firmBuilding);
+  const reserved = Object.values(company.workDays).reduce((sum, days) => sum + days * firmWage(company) / MONTH, 0), companyJobs = [...city.employment.filter(e => e.firmId === company.id), ...city.ownerLabor.filter(e => e.firmId === company.id)], employerRows = new Map();
+  for (const job of companyJobs) employerRows.set(job.householdId, (employerRows.get(job.householdId) ?? 0) + job.workers);
+  await preservedMetrics({ cash: city.accounts[company.wallet], reserved, spendable: city.accounts[company.wallet] - reserved, stock: company.inventory, workers: firmWorkerCount(city, company.id), 'household-count': employerRows.size, profit: company.lastMonthProfit }, firmBuilding.id);
+  await linkedHouseholds(firmBuilding, [...employerRows].map(([id, workers]) => ({ id, workers })));
+  await place(home); const used = homeOccupancy(city, home.id), capacity = housingCapacity(home);
+  await preservedMetrics({ households: used.households, persons: used.persons, 'vacant-households': capacity.households - used.households, 'vacant-persons': capacity.persons - used.persons, level: home.level, age: home.age }, home.id);
+  await linkedHouseholds(home, city.households.filter(h => h.home === home.id).map(h => ({ id: h.id, workers: null })));
+  checks.push('Frozen artifact-admitted d40 baseline and v1 bytes remain intact with increased global ledger rows; approved type-specific first screens replace generic all-KPI density while native44px secondary disclosures preserve exact original7 firm/6 house/10 household values once and actual resident/employer navigation');
   await page('city'); await tall('s22-city'); await page('help'); await tall('s22-help');
   await ledger(); await tall('s22-ledger-controls'); await disclosure('global money', '#ledger .sm-flow-card', '.sm-flow-details', 'global-row');
   await place(firmBuilding); await tall('s22-firm-controls'); await disclosure('firm money', '#entity-content .cx-activity[data-kind="money"] .cx-flow-card', '.cx-flow-details', 'firm-row');
