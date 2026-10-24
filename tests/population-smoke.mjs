@@ -138,7 +138,7 @@ try {
   ws.onmessage = event => {
     const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); }
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails);
-    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/(house-[ab]|shop-[ab]|factory-[ab]|tree|streetlight)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); }
+    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); }
     if (m.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'Failed' });
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
@@ -221,7 +221,7 @@ try {
   }
   // Restore the intended v4 test city after recovery-button layout exercises.
   await load(fixtureRaw); assert.deepEqual(await state(), fixture); assert.deepEqual(errors, []);
-  const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 8); assert.equal(visuals.failed.length, 8); } else { assert.equal(visuals.loaded.length, 8); assert.equal(visuals.failed.length, 0); }
+  const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 41); assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
   checks.push('360 phone, landscape and 980-layout/screen390 keep new contexts and recovery controls contained with real 44px Back/close; no unexpected runtime errors');
   const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, checks, errors, expectedModelErrors: expectedErrors.length, fixture: { seed: fixture.seed, tick: fixture.tick, hash: hash(fixtureRaw), legacySha256: hash(legacyRaw), naturalHash: hash(serialize(natural)), employmentScenario: 'Two real family workers split across existing I/C firms; no accounts/journals/people edited' }, milestones, layouts, screenshots, note: 'Installed headless Edge; touch/viewport and physical-screen ratio emulated. No real-phone QA or performance claim.' };
   await writeFile(resolve(output, 'population-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));

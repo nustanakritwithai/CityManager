@@ -2,12 +2,12 @@
   "packageId": "kenney-city-small",
   "license": "CC0-1.0",
   "destination": "public/assets/kenney-city",
-  "runtimeBytes": 568696,
-  "triangles": 8563,
-  "files": 12,
-  "manifestSha256": "efe7316656aa26a4748f8af56983d47deeac24f79ea517f4c7de2c6fec160c36",
+  "runtimeBytes": 2472488,
+  "triangles": 35558,
+  "files": 45,
+  "manifestSha256": "31aa6602d46e51643a1dd1ffc0f134fc9a1619329f6a3782382b76ec2b01acdb",
   "blockers": [],
   "exceptions": [],
   "tool": "project integrity gate; game-dev CLI unavailable",
-  "admittedAt": "2026-10-23T22:28:03.978Z"
+  "admittedAt": "2026-10-24T18:56:39.885Z"
 }

@@ -13,6 +13,8 @@ import { growthStatusText } from './context-data.ts';
 import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
 import type { EntitySelection } from './entity-explanation-data.ts';
+import { AtmosphereController } from './atmosphere-controls.ts';
+import './atmosphere.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -319,7 +321,9 @@ async function boot() {
   document.addEventListener('visibilitychange', () => { accumulator = 0; });
   inspector(false);
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
+  const atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator });
   view.app.on('update', (dt: number) => {
+    atmosphere.update(dt);
     if (paused || document.hidden) return;
     accumulator += Math.min(dt, 0.25) * speed;
     let changed = false;
@@ -327,7 +331,7 @@ async function boot() {
     if (changed) render();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics() } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => atmosphere.diagnostics } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

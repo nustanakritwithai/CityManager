@@ -3,11 +3,16 @@ import {
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
-import { SIZE, connectedRoads, type City } from './sim.ts';
+import { SIZE, GATEWAY, connectedRoads, firmWorkerCount, type City } from './sim.ts';
 import { CityAssets } from './asset-models.ts';
+import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
+import { SceneAtmosphere } from './scene-atmosphere.ts';
+import { CityWorld } from './scene-world.ts';
+import type { Atmosphere, Quality } from './atmosphere.ts';
 
 const UNIT = 2;
+const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
 export class CityView {
   app: AppBase;
   camera = new Entity('City camera');
@@ -18,14 +23,18 @@ export class CityView {
   cameraBlocked = false;
   tiles = new Map<number, { entity: Entity; signature: string }>();
   markers = new Entity('Tool previews');
+  private highway = new Entity('Decorative highway');
   materials = new Map<string, StandardMaterial>();
   assets: CityAssets | null = null;
   ground!: CityGround;
+  atmosphere!: SceneAtmosphere;
+  world!: CityWorld;
+  private windowLit!: StandardMaterial;
   private edgeMesh?: Mesh;
   private edgeSignature = '';
   private visualRevision = 0;
   private lastScene: { city: City; selected: number | null; preview: number[] } | null = null;
-  private forest: { entity: Entity; x: number; z: number }[] = [];
+  private forest: { entity: Entity; x: number; y: number; z: number; scale: number }[] = [];
   pointers = new Map<number, { x: number; y: number }>();
   dragStart: number | null = null;
   private aspect = 0;
@@ -49,14 +58,30 @@ export class CityView {
     view.setup();
     app.start();
     void CityAssets.load(app).then(assets => {
+      assets.glowRegistrar = (material, strength) => view.atmosphere.registerGlow(material, strength);
       view.assets = assets; view.visualRevision++;
+      view.tileHighway();
       for (const tree of view.forest) {
-        const model = assets.tree();
-        if (model) { tree.entity.destroy(); model.setLocalPosition(tree.x, .04, tree.z); app.root.addChild(model); tree.entity = model; }
+        const model = assets.tree(hashCell(Math.round(tree.x * 13 + tree.z * 7)) % 10 < 3);
+        if (model) {
+          tree.entity.destroy(); model.setLocalPosition(tree.x, tree.y, tree.z);
+          const scale = model.getLocalScale(); model.setLocalScale(scale.x * tree.scale, scale.y * tree.scale, scale.z * tree.scale);
+          app.root.addChild(model); tree.entity = model;
+        }
       }
       if (view.lastScene) view.render(view.lastScene.city, view.lastScene.selected, view.lastScene.preview);
     });
     return view;
+  }
+  /** Replace the primitive highway with Kenney road tiles once models are available. */
+  private tileHighway() {
+    const gate = this.position(GATEWAY), tiles = new Entity('Decorative highway tiles');
+    for (let x = gate.x - 9; x > -92; x -= UNIT) {
+      const tile = this.assets?.road('road-straight', true);
+      if (!tile) return;
+      tile.setLocalPosition(x, .03, gate.z); tiles.addChild(tile);
+    }
+    this.highway.enabled = false; this.app.root.addChild(tiles); this.app.renderNextFrame = true;
   }
   material(hex: string, emissive = false) {
     const key = hex + emissive;
@@ -70,9 +95,19 @@ export class CityView {
     this.materials.set(key, material);
     return material;
   }
-  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial) {
+  /** Tall parts cast shadows; flat pads, roads and the world base never do. */
+  /** Translucent zone fill: strong on vacant parcels, faint under buildings. */
+  private zoneFill(hex: string, built: boolean) {
+    const key = `zone:${hex}:${built}`;
+    if (this.materials.has(key)) return this.materials.get(key)!;
+    const material = new StandardMaterial();
+    material.diffuse = new Color().fromString(hex); material.gloss = .2;
+    material.opacity = built ? .28 : .55; material.blendType = BLEND_NORMAL; material.depthWrite = false; material.update();
+    this.materials.set(key, material); return material;
+  }
+  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial, castShadows = sy > .12) {
     const entity = new Entity('Original primitive');
-    entity.addComponent('render', { type: 'box', material: typeof color === 'string' ? this.material(color) : color, castShadows: false });
+    entity.addComponent('render', { type: 'box', material: typeof color === 'string' ? this.material(color) : color, castShadows });
     entity.setLocalPosition(x, y, z);
     entity.setLocalScale(sx, sy, sz);
     parent.addChild(entity);
@@ -92,18 +127,21 @@ export class CityView {
     this.box(plot, .55, .29, -.208, .14, .27, .025, '#536754');
     this.box(plot, -.03, .28, .8, 1.5, .065, .045, '#b9ae87');
   }
-  private cropMarket(tile: Entity, cell: number) {
+  private cropMarket(tile: Entity, cell: number, lit: boolean) {
     const stall = new Entity('Crop market'); tile.addChild(stall);
     this.box(stall, 0, .09, 0, 1.65, .025, 1.65, '#b6b9a3');
-    const model = this.assets?.building('C', 1, cell);
-    if (model) {
-      const scale = model.getLocalScale(); model.setLocalScale(scale.x * .76, scale.y * .76, scale.z * .76);
-      model.setLocalPosition(0, .1, -.12); model.name = 'Crop market model'; stall.addChild(model);
-    } else {
-      this.box(stall, 0, .34, -.1, 1.1, .45, .68, '#d4ddd1');
+    // Level-one market: an open stall under an awning with parasols, not a shop building.
+    this.box(stall, 0, .34, -.25, 1.1, .45, .5, '#d4ddd1');
+    this.box(stall, 0, .27, .2, 1.16, .27, .25, lit ? this.windowLit : '#8f7957');
+    const awning = this.assets?.detail('awning', 1.3);
+    if (awning) { awning.setLocalPosition(0, .1, -.05); awning.name = 'Crop market model'; stall.addChild(awning); }
+    else {
       this.box(stall, 0, .7, -.1, 1.34, .14, .98, '#538f83');
       for (const x of [-.53, .53]) this.box(stall, x, .35, .34, .065, .5, .065, '#6f7862');
-      this.box(stall, 0, .27, .36, 1.16, .27, .25, '#8f7957');
+    }
+    for (const [name, x, z] of [['parasol-a', -.55, .62], ['parasol-b', .6, .55]] as const) {
+      const parasol = this.assets?.detail(name, .55);
+      if (parasol) { parasol.setLocalPosition(x, .1, z); stall.addChild(parasol); }
     }
     // Empty wooden market furniture; stock quantities are shown by the inspector.
     for (const x of [-.45, .04]) {
@@ -121,13 +159,13 @@ export class CityView {
     this.app.scene.ambientLight = new Color(0.52, 0.58, 0.63);
     this.camera.addComponent('camera', { clearColor: new Color(0.16, 0.27, 0.32), fov: 48, nearClip: 0.5, farClip: 260 });
     this.app.root.addChild(this.camera);
-    const sun = new Entity('Afternoon sun');
-    sun.addComponent('light', { type: 'directional', color: new Color(1, 0.93, 0.81), intensity: 1.25, castShadows: false });
-    sun.setLocalEulerAngles(48, 25, 0);
-    this.app.root.addChild(sun);
-    this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#365e6b');
-    this.box(this.app.root, 0, -.45, 0, SIZE * UNIT + 5.1, .6, SIZE * UNIT + 5.1, '#b7b596');
-    this.box(this.app.root, 0, -.24, 0, SIZE * UNIT + 4.5, .48, SIZE * UNIT + 4.5, '#7c9875');
+    // Sun/moon, sky dome, fog and post effects follow the visual-only time of day.
+    this.atmosphere = new SceneAtmosphere(this.app, this.camera);
+    this.windowLit = this.material('#f9df9a').clone() as StandardMaterial;
+    this.windowLit.emissive = new Color(1, .82, .52); this.windowLit.update();
+    this.atmosphere.registerGlow(this.windowLit, 1.6);
+    const gateZ = this.position(Math.floor(SIZE / 2) * SIZE).z;
+    this.world = new CityWorld(this.app, SIZE * UNIT / 2, gateZ);
     // One original textured ground, a tool-only grid and one batched edge mesh.
     // These visual surfaces never change the flat simulation/picking plane.
     this.ground = new CityGround(this.app, SIZE, UNIT);
@@ -150,22 +188,34 @@ export class CityView {
     this.box(this.app.root, gate.x - 4, 0.04, gate.z, 8, 0.12, 1.4, '#d6b45c');
     this.box(this.app.root, gate.x - 1.1, 1.1, gate.z - 0.85, 0.18, 2.2, 0.18, '#f5cd71');
     this.box(this.app.root, gate.x - 1.1, 1.1, gate.z + 0.85, 0.18, 2.2, 0.18, '#f5cd71');
+    // Decorative highway to the outside market; it is not part of the road graph.
+    const highwayEnd = -92, highwayStart = gate.x - 8, highwayLength = highwayStart - highwayEnd, highwayMid = (highwayStart + highwayEnd) / 2;
+    this.app.root.addChild(this.highway);
+    this.box(this.highway, highwayMid, .05, gate.z, highwayLength, .1, 2.4, '#bcc4b8', false);
+    this.box(this.highway, highwayMid, .085, gate.z, highwayLength, .05, 1.9, '#46535b', false);
+    for (let x = highwayStart - 1.5; x > highwayEnd + 1; x -= 3) this.box(this.highway, x, .115, gate.z, 1.1, .012, .09, '#eee5bd', false);
     for (let n = 0; n < 34; n++) {
       const angle = n * 2.39996;
       const x = Math.cos(angle) * (SIZE + 1.7), z = Math.sin(angle) * (SIZE + 1.7);
       if (Math.abs(x) < SIZE - 1 && Math.abs(z) < SIZE - 1 || x < -SIZE && Math.abs(z - gate.z) < 3) continue;
-      const tree = new Entity('Procedural fallback tree'); tree.setLocalPosition(x, 0, z); this.app.root.addChild(tree);
-      this.box(tree, 0, 0.65, 0, 0.22, 1.1, 0.22, '#755f43');
-      const crown = new Entity('Original tree');
-      crown.addComponent('render', { type: 'cone', material: this.material('#3e6955') });
-      crown.setLocalPosition(0, 1.55, 0); crown.setLocalScale(1.4, 2, 1.4); tree.addChild(crown);
-      this.forest.push({ entity: tree, x, z });
+      this.plantTree(x, Math.max(.04, this.world.height(x, z)), z, 1);
     }
+    for (const spot of this.world.treeSpots) this.plantTree(spot.x, spot.y, spot.z, spot.scale);
     this.app.root.addChild(this.markers);
+    this.setQuality('high');
     new ResizeObserver(() => this.resize()).observe(this.canvas);
     window.addEventListener('resize', () => this.resize());
     this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
   }
+  private plantTree(x: number, y: number, z: number, scale: number) {
+    const tree = new Entity('Procedural fallback tree'); tree.setLocalPosition(x, y, z); tree.setLocalScale(scale, scale, scale); this.app.root.addChild(tree);
+    this.box(tree, 0, 0.65, 0, 0.22, 1.1, 0.22, '#755f43');
+    const crown = new Entity('Original tree');
+    crown.addComponent('render', { type: 'cone', material: this.material('#3e6955') });
+    crown.setLocalPosition(0, 1.55, 0); crown.setLocalScale(1.4, 2, 1.4); tree.addChild(crown);
+    this.forest.push({ entity: tree, x, y, z, scale });
+  }
+
   fitRadius() { return Math.max(42, Math.min(100, 42 * .86 / (innerWidth / innerHeight))); }
   resize() {
     const aspect = innerWidth / innerHeight;
@@ -196,6 +246,7 @@ export class CityView {
     const elevation = 0.88;
     this.camera.setPosition(this.target.x + Math.sin(this.yaw) * this.radius * Math.cos(elevation), this.radius * Math.sin(elevation), this.target.z + Math.cos(this.yaw) * this.radius * Math.cos(elevation));
     this.camera.lookAt(this.target);
+    this.atmosphere?.follow(this.radius);
     this.app.renderNextFrame = true;
   }
   pan(dx: number, dy: number) {
@@ -269,7 +320,9 @@ export class CityView {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
       const links = cell.road ? [i % SIZE > 0 && city.cells[i - 1].road, i % SIZE < SIZE - 1 && city.cells[i + 1].road, i >= SIZE && city.cells[i - SIZE].road, i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road].map(Number).join('') : '';
       const fertility = cell.zone === 'F' ? city.resources.fertility[i] : '';
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}`;
+      // Night lights only for real occupancy: residents at home or allocated workers on site.
+      const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -277,30 +330,57 @@ export class CityView {
       if (cell.road) {
         const horizontal = (i % SIZE > 0 && city.cells[i - 1].road) || (i % SIZE < SIZE - 1 && city.cells[i + 1].road);
         const vertical = (i >= SIZE && city.cells[i - SIZE].road) || (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road);
-        this.box(tile, 0, .065, 0, 1.98, .1, 1.98, '#bcc4b8');
-        this.box(tile, 0, .12, 0, vertical && !horizontal ? 1.48 : 1.98, .035, horizontal && !vertical ? 1.48 : 1.98, connected.has(i) ? '#46535b' : '#a86155');
-        if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
-        if (connected.has(i) && i % 4 === 0 && horizontal && !vertical) {
+        const open = new Set<Side>();
+        if (i % SIZE > 0 && city.cells[i - 1].road || i === GATEWAY) open.add('-x');
+        if (i % SIZE < SIZE - 1 && city.cells[i + 1].road) open.add('+x');
+        if (i >= SIZE && city.cells[i - SIZE].road) open.add('-z');
+        if (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road) open.add('+z');
+        const choice = roadTileFor(open, i), model = this.assets?.road(choice.tile, connected.has(i));
+        if (model) { model.setLocalEulerAngles(0, choice.rotation, 0); model.setLocalPosition(0, .03, 0); tile.addChild(model); }
+        else {
+          this.box(tile, 0, .065, 0, 1.98, .1, 1.98, '#bcc4b8');
+          this.box(tile, 0, .12, 0, vertical && !horizontal ? 1.48 : 1.98, .035, horizontal && !vertical ? 1.48 : 1.98, connected.has(i) ? '#46535b' : '#a86155');
+          if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
+        }
+        // Lamps stand on the sidewalk of straight streets, every fourth parcel along the street.
+        const along = horizontal && !vertical ? i % SIZE : vertical && !horizontal ? Math.floor(i / SIZE) : -1;
+        if (connected.has(i) && along >= 0 && along % 4 === 0) {
           const lamp = this.assets?.streetlight();
-          if (lamp) { lamp.setLocalPosition(0, .13, -.84); tile.addChild(lamp); }
+          if (lamp) {
+            const [lx, lz, px, pz] = horizontal ? [0, -.84, 0, -.45] : [-.84, 0, -.45, 0];
+            lamp.setLocalPosition(lx, .13, lz); if (!horizontal) lamp.setLocalEulerAngles(0, -90, 0); tile.addChild(lamp);
+            const pool = new Entity('Street lamp light pool');
+            pool.addComponent('render', { type: 'plane', material: this.atmosphere.lampPool, castShadows: false, receiveShadows: false });
+            pool.setLocalPosition(px, .16, pz); pool.setLocalScale(1.7, 1, 1.7); tile.addChild(pool);
+          }
         }
       } else if (cell.zone) {
         const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053', F: '#93af58' }[cell.zone];
-        this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, color);
+        this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, this.zoneFill(color, !!b), false);
+        // Solid zone outline keeps R/C/I/F readable at every time of day.
+        for (const dz of [-.86, .86]) this.box(tile, 0, .075, dz, 1.8, .03, .08, color, false);
+        for (const dx of [-.86, .86]) this.box(tile, dx, .075, 0, .08, .03, 1.8, color, false);
         if (b) {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
-          if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i); continue; }
+          if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
           // Retained shops move up one commercial tier; their geometry stays unchanged.
           const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
-          const model = this.assets?.building(b.zone, visualLevel, i);
-          if (model) { model.setLocalPosition(0, .1, 0); tile.addChild(model); continue; }
+          const model = this.assets?.building(b.zone, visualLevel, i, lit);
+          if (model) {
+            model.setLocalPosition(0, .1, 0); tile.addChild(model);
+            // Bigger factories show their scale with a chimney and an input tank.
+            if (b.zone === 'I' && b.level >= 2) { const chimney = this.assets?.detail('chimney', .32); if (chimney) { chimney.setLocalPosition(.68, .1, -.62); tile.addChild(chimney); } }
+            if (b.zone === 'I' && b.level >= 3) { const tank = this.assets?.detail('tank', .6); if (tank) { tank.setLocalPosition(-.6, .1, .66); tile.addChild(tank); } }
+            if (b.zone === 'R' && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
+            continue;
+          }
           const h = 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;
           const tower = b.zone === 'I' ? h * 0.65 : h;
           this.box(tile, -0.1, tower / 2 + 0.1, 0, 1.25, tower, 1.2, { R: '#d7e5d1', C: '#b6d4df', I: '#d9c09a' }[b.zone]);
           this.box(tile, -0.1, tower + 0.17, 0, 1.34, 0.16, 1.3, { R: '#386454', C: '#38677f', I: '#8c6340' }[b.zone]);
           for (let level = 0; level < Math.min(visualLevel + 1, 5); level++) {
-            for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, '#f9df9a');
+            for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, lit ? this.windowLit : '#f9df9a', false);
           }
           if (b.zone === 'I') this.box(tile, 0.52, h * 0.65, -0.38, 0.2, h * 1.1, 0.22, '#786b60');
         }
@@ -309,10 +389,13 @@ export class CityView {
     for (const child of [...this.markers.children]) child.destroy();
     for (const i of new Set([...preview, ...(selected === null ? [] : [selected])])) {
       const p = this.position(i); const color = i === selected ? '#fff1bb' : '#f7bf60';
-      for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, color);
-      for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, color);
+      for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, this.material(color, true));
+      for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, this.material(color, true));
     }
   }
+  setAtmosphere(atmosphere: Atmosphere) { this.atmosphere.apply(atmosphere); this.world.apply(atmosphere); }
+  setQuality(quality: Quality) { this.atmosphere.setQuality(quality); }
+
   private updateGroundEdges(city: City) {
     const signature = city.cells.map(cell => cell.road ? '1' : '0').join('') + ':' + city.buildings.map(b => b.cell).join(',');
     if (!this.edgeMesh || signature === this.edgeSignature) return;
