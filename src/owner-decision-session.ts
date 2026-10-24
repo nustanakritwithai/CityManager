@@ -1,8 +1,8 @@
 /** Local, replayable market-owner decisions. No provider, renderer, storage or save-v6 changes. */
 import { deserialize, isMarket, MONTH, serialize, step, type City } from './sim.ts';
-import { captureOwnerSnapshot, executeOwnerProposal, OWNER_POLICY_VERSION, ownerStateHash, proposeOwnerDecision, type OwnerExecutionOutcome, type OwnerProposal } from './owner-decision.ts';
+import { captureOwnerSnapshot, executeOwnerProposal, OWNER_POLICY_VERSION, ownerStateHash, proposeOwnerDecision, validateOwnerProposal, type OwnerExecutionOutcome, type OwnerProposal } from './owner-decision.ts';
 
-export type OwnerDecisionMode = 'off' | 'proposal' | 'auto';
+export type OwnerDecisionMode = 'off' | 'proposal' | 'auto' | 'typhoon-auto';
 export type OwnerDecisionStats = {
   evaluated: number; applied: number; held: number; rejected: number;
   contributedSatang: number; withdrawnSatang: number; monthlyEvaluations: number;
@@ -16,8 +16,8 @@ export type OwnerJournalEvent = EventBase & (
   | { kind: 'step'; fromTick: number }
   | { kind: 'mode'; mode: OwnerDecisionMode }
   | { kind: 'cycle'; mode: OwnerDecisionMode }
-  | { kind: 'evaluation'; trigger: 'monthly' | 'manual'; proposal: OwnerProposal }
-  | { kind: 'command'; source: 'monthly-auto' | 'manual'; proposal: OwnerProposal; outcome: OwnerExecutionOutcome }
+  | { kind: 'evaluation'; trigger: 'monthly' | 'manual' | 'typhoon'; proposal: OwnerProposal }
+  | { kind: 'command'; source: 'monthly-auto' | 'manual' | 'typhoon-auto' | 'typhoon-fallback-auto'; proposal: OwnerProposal; outcome: OwnerExecutionOutcome }
   | { kind: 'rejection'; proposalId: string | null; code: 'unknown-proposal' | 'mode-off'; outcome: OwnerExecutionOutcome }
 );
 type EventInput<T = OwnerJournalEvent> = T extends OwnerJournalEvent ? Omit<T, 'sequence'> : never;
@@ -36,7 +36,7 @@ export type OwnerReplayResult = { ok: boolean; city: City | null; code: string; 
 
 const MAX_JOURNAL_BYTES = 32 * 1024 * 1024;
 const MAX_EVENT_BYTES = 64 * 1024;
-const modes = ['off', 'proposal', 'auto'];
+const modes = ['off', 'proposal', 'auto', 'typhoon-auto'];
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 const emptyStats = (): OwnerDecisionStats => ({ evaluated: 0, applied: 0, held: 0, rejected: 0, contributedSatang: 0, withdrawnSatang: 0, monthlyEvaluations: 0, retiredEvents: 0, checkpointRotations: 0 });
@@ -71,6 +71,7 @@ export class OwnerDecisionSession {
   private retired: RetiredCoverage[] = [];
   private stats = emptyStats();
   private pending = new Map<number, OwnerProposal>();
+  private proposalSources = new Map<number, 'rules' | 'typhoon'>();
   private processed = new Set<string>();
   private nextSequence = 1;
   private expectedHash = '';
@@ -91,6 +92,7 @@ export class OwnerDecisionSession {
   }
   get mode(): OwnerDecisionMode { return this.selectedMode; }
   getProposals(): OwnerProposal[] { return [...this.pending.values()].sort((a, b) => a.snapshot.firmId - b.snapshot.firmId).map(clone); }
+  getProposalSource(proposalId: string): 'rules' | 'typhoon' | null { const proposal = [...this.pending.values()].find(p => p.proposalId === proposalId); return proposal ? this.proposalSources.get(proposal.snapshot.firmId) ?? 'rules' : null; }
   getStats(): OwnerSessionStats { return { ...this.stats, activeEvents: this.events.length, coverageStartTick: this.checkpoint?.tick ?? this.expectedTick, checkpointTick: this.checkpoint?.tick ?? this.expectedTick, pendingTicks: this.pendingTicks ? this.pendingTicks.toTick - this.pendingTicks.fromTick : 0, recording: this.issue === null, issue: this.issue }; }
 
   private fail(code: string) { this.issue = code; this.selectedMode = 'proposal'; this.tickStart = null; }
@@ -157,7 +159,7 @@ export class OwnerDecisionSession {
   }
   reset(city: City): void {
     this.city = city; this.selectedMode = 'proposal'; this.events = []; this.retired = []; this.stats = emptyStats();
-    this.pending.clear(); this.processed.clear(); this.nextSequence = 1; this.issue = null; this.checkpoint = null;
+    this.pending.clear(); this.proposalSources.clear(); this.processed.clear(); this.nextSequence = 1; this.issue = null; this.checkpoint = null;
     this.expectedTick = city.tick; this.expectedHash = 'unavailable'; this.pendingTicks = null; this.boundaryState = '';
     this.monthlyTick = Math.floor(city.tick / MONTH) * MONTH;
     try { this.anchor(city, 'new-or-loaded-city', false); } catch { this.fail('checkpoint-unavailable'); }
@@ -169,7 +171,7 @@ export class OwnerDecisionSession {
       const hash = ownerStateHash(city);
       if (!this.pendingTicks && !this.issue && hash === this.expectedHash && city.tick === this.expectedTick) return;
       if (this.issue) this.selectedMode = 'proposal';
-      this.issue = null; this.pending.clear(); this.processed.clear(); this.monthlyTick = Math.floor(city.tick / MONTH) * MONTH;
+      this.issue = null; this.pending.clear(); this.proposalSources.clear(); this.processed.clear(); this.monthlyTick = Math.floor(city.tick / MONTH) * MONTH;
       this.anchor(city, reason, true);
     } catch { this.fail('checkpoint-unavailable'); }
   }
@@ -204,6 +206,7 @@ export class OwnerDecisionSession {
       if (this.selectedMode !== 'off') this.stats.monthlyEvaluations++;
       this.append({ kind: 'cycle', mode: this.selectedMode, tick: city.tick, beforeHash: this.expectedHash, afterHash: this.expectedHash });
       if (this.selectedMode === 'off') return [];
+      if (this.selectedMode === 'typhoon-auto') return [];
       const outcomes: OwnerExecutionOutcome[] = [];
       for (const firm of [...city.firms].filter(isMarket).sort((a, b) => a.id - b.id)) {
         const proposals = this.evaluateInternal(city, firm.id, 'monthly');
@@ -220,19 +223,35 @@ export class OwnerDecisionSession {
   private evaluateInternal(city: City, firmId: number, trigger: 'monthly' | 'manual'): OwnerProposal[] {
     if (!this.reserve(city, this.selectedMode === 'auto' ? 2 : 1)) return [];
     const snapshot = captureOwnerSnapshot(city, firmId);
-    if (!snapshot) { this.pending.delete(firmId); return []; }
+    if (!snapshot) { this.pending.delete(firmId); this.proposalSources.delete(firmId); return []; }
     const proposal = proposeOwnerDecision(snapshot);
     if (bytes(proposal) + 8192 > MAX_EVENT_BYTES) { this.fail('proposal-recording-capacity'); return []; }
-    this.pending.set(firmId, clone(proposal)); this.stats.evaluated++;
+    this.pending.set(firmId, clone(proposal)); this.proposalSources.set(firmId, 'rules'); this.stats.evaluated++;
     this.append({ kind: 'evaluation', trigger, proposal: clone(proposal), tick: city.tick, beforeHash: this.expectedHash, afterHash: this.expectedHash });
     return [clone(proposal)];
+  }
+  /** Record a manually requested Typhoon choice or a choice made in explicit Typhoon-auto mode. */
+  registerTyphoonProposal(city: City, proposal: OwnerProposal): boolean {
+    if (!['proposal', 'typhoon-auto'].includes(this.selectedMode) || !this.prepare(city)) return false;
+    const valid = validateOwnerProposal(city, proposal);
+    if (!valid.ok || !valid.proposal || this.processed.has(valid.proposal.proposalId)) return false;
+    if (!this.reserve(city)) return false;
+    if (bytes(valid.proposal) + 8192 > MAX_EVENT_BYTES) { this.fail('proposal-recording-capacity'); return false; }
+    this.pending.set(valid.proposal.snapshot.firmId, clone(valid.proposal)); this.proposalSources.set(valid.proposal.snapshot.firmId, 'typhoon'); this.stats.evaluated++;
+    this.append({ kind: 'evaluation', trigger: 'typhoon', proposal: clone(valid.proposal), tick: city.tick, beforeHash: this.expectedHash, afterHash: this.expectedHash });
+    return true;
   }
   evaluate(city: City, firmId?: number): OwnerProposal[] {
     if (!this.prepare(city) || this.selectedMode === 'off') return [];
     const ids = firmId === undefined ? city.firms.filter(isMarket).map(f => f.id).sort((a, b) => a - b) : [firmId];
     return ids.flatMap(id => this.evaluateInternal(city, id, 'manual'));
   }
-  private applyInternal(city: City, proposalId: string, source: 'monthly-auto' | 'manual'): OwnerExecutionOutcome {
+  /** Evaluate one fresh firm snapshot within the monthly Typhoon-auto boundary. */
+  evaluateTyphoonAutoMonthly(city: City, firmId: number): OwnerProposal[] {
+    if (this.selectedMode !== 'typhoon-auto' || city.tick % MONTH !== 0 || this.monthlyTick !== city.tick || !this.prepare(city)) return [];
+    return this.evaluateInternal(city, firmId, 'monthly');
+  }
+  private applyInternal(city: City, proposalId: string, source: 'monthly-auto' | 'manual' | 'typhoon-auto' | 'typhoon-fallback-auto'): OwnerExecutionOutcome {
     const proposal = [...this.pending.values()].find(p => p.proposalId === proposalId) ?? null;
     if (!this.reserve(city)) return rejected(city, 'journal-unavailable', proposal);
     if (this.selectedMode === 'off' || !proposal) {
@@ -251,6 +270,13 @@ export class OwnerDecisionSession {
   apply(city: City, proposalId: string): OwnerExecutionOutcome {
     if (!this.prepare(city)) return rejected(city, 'journal-unavailable');
     return this.applyInternal(city, proposalId, 'manual');
+  }
+  applyTyphoonAuto(city: City, proposalId: string, source: 'typhoon-auto' | 'typhoon-fallback-auto'): OwnerExecutionOutcome {
+    if (this.selectedMode !== 'typhoon-auto' || city.tick % MONTH !== 0 || this.monthlyTick !== city.tick || !this.prepare(city)) return rejected(city, 'journal-unavailable');
+    const proposal = [...this.pending.values()].find(item => item.proposalId === proposalId);
+    const expectedSource = source === 'typhoon-auto' ? 'typhoon' : 'rules';
+    if (!proposal || proposal.snapshot.tick !== city.tick || this.proposalSources.get(proposal.snapshot.firmId) !== expectedSource || !this.processed.has(proposalId) && !validateOwnerProposal(city, proposal).ok) return rejected(city, 'stale-snapshot', proposal ?? null);
+    return this.applyInternal(city, proposalId, source);
   }
   exportJournal(): OwnerJournal {
     if (!this.prepare(this.city, 'export-boundary') || !this.checkpoint) throw new Error('Owner journal checkpoint unavailable.');
@@ -282,6 +308,7 @@ export function replayOwnerJournal(input: unknown): OwnerReplayResult {
     if (city.tick !== cp.tick || ownerStateHash(city) !== cp.stateHash) throw new Error();
     let expected = cp.stateHash, sequence = cp.sequence, mode = cp.mode, monthlyTick = cp.lastMonthlyTick;
     const stats = { ...cp.stats }, processed = new Set(cp.processedIds);
+    const monthlyEvaluated = new Set<string>(), typhoonEvaluated = new Set<string>();
     const common = ['sequence', 'tick', 'beforeHash', 'afterHash', 'kind'];
     for (const event of journal.events) {
       if (!integer(event.sequence) || event.sequence !== ++sequence || !integer(event.tick) || event.beforeHash !== expected || ownerStateHash(city) !== expected || bytes(event) > MAX_EVENT_BYTES) throw new Error();
@@ -292,13 +319,21 @@ export function replayOwnerJournal(input: unknown): OwnerReplayResult {
         if (!exact(event, [...common, 'mode']) || event.tick !== city.tick || !modes.includes(event.mode)) throw new Error(); mode = event.mode;
       } else if (event.kind === 'cycle') {
         if (!exact(event, [...common, 'mode']) || event.tick !== city.tick || !event.tick || event.tick % MONTH || event.tick <= monthlyTick || event.mode !== mode) throw new Error();
-        monthlyTick = event.tick; if (mode !== 'off') stats.monthlyEvaluations++;
+        monthlyTick = event.tick; monthlyEvaluated.clear(); typhoonEvaluated.clear(); if (mode !== 'off') stats.monthlyEvaluations++;
       } else if (event.kind === 'evaluation') {
-        if (!exact(event, [...common, 'trigger', 'proposal']) || event.tick !== city.tick || mode === 'off' || !['monthly', 'manual'].includes(event.trigger) || event.trigger === 'monthly' && monthlyTick !== event.tick) throw new Error();
-        const snapshot = captureOwnerSnapshot(city, event.proposal?.snapshot?.firmId);
-        if (!snapshot || JSON.stringify(proposeOwnerDecision(snapshot)) !== JSON.stringify(event.proposal)) throw new Error(); stats.evaluated++;
+        if (!exact(event, [...common, 'trigger', 'proposal']) || event.tick !== city.tick || mode === 'off' || !['monthly', 'manual', 'typhoon'].includes(event.trigger) || event.trigger === 'monthly' && monthlyTick !== event.tick || event.trigger === 'typhoon' && !(mode === 'proposal' || mode === 'typhoon-auto' && monthlyTick === event.tick)) throw new Error();
+        if (event.trigger === 'typhoon') {
+          const validation = validateOwnerProposal(city, event.proposal);
+          if (!validation.ok || !validation.proposal) throw new Error();
+        } else {
+          const snapshot = captureOwnerSnapshot(city, event.proposal?.snapshot?.firmId);
+          if (!snapshot || JSON.stringify(proposeOwnerDecision(snapshot)) !== JSON.stringify(event.proposal)) throw new Error();
+        }
+        if (event.trigger === 'monthly') monthlyEvaluated.add(event.proposal.proposalId);
+        if (event.trigger === 'typhoon') typhoonEvaluated.add(event.proposal.proposalId);
+        stats.evaluated++;
       } else if (event.kind === 'command') {
-        if (!exact(event, [...common, 'source', 'proposal', 'outcome']) || event.tick !== city.tick || mode === 'off' || !['monthly-auto', 'manual'].includes(event.source) || event.source === 'monthly-auto' && (mode !== 'auto' || monthlyTick !== event.tick)) throw new Error();
+        if (!exact(event, [...common, 'source', 'proposal', 'outcome']) || event.tick !== city.tick || mode === 'off' || !['monthly-auto', 'manual', 'typhoon-auto', 'typhoon-fallback-auto'].includes(event.source) || event.source === 'monthly-auto' && (mode !== 'auto' || monthlyTick !== event.tick) || event.source === 'typhoon-auto' && (mode !== 'typhoon-auto' || monthlyTick !== event.tick || !typhoonEvaluated.has(event.proposal?.proposalId)) || event.source === 'typhoon-fallback-auto' && (mode !== 'typhoon-auto' || monthlyTick !== event.tick || !monthlyEvaluated.has(event.proposal?.proposalId))) throw new Error();
         const result = processed.has(event.proposal?.proposalId) ? rejected(city, 'duplicate-proposal', event.proposal) : executeOwnerProposal(city, event.proposal);
         if (JSON.stringify(result) !== JSON.stringify(event.outcome)) throw new Error();
         if (result.status === 'applied' || result.status === 'held') processed.add(event.proposal.proposalId); countOutcome(stats, result);

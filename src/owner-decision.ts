@@ -1,5 +1,6 @@
 /** Local rule proposals only. These are game actors, not authenticated website users. */
 import { access, contributeOwnerCapital, firmRent, firmWage, isMarket, MONTH, ownerFinance, serialize, withdrawOwnerProfit, type City } from './sim.ts';
+import { validateOwnerDecisionSelection, type OwnerCandidateId } from '../server/city-advisor/src/owner-contract.mjs';
 
 export const OWNER_POLICY_VERSION = 'owner-rule-1' as const;
 export const OWNER_MAX_TRANSFER = 10_000;
@@ -141,6 +142,17 @@ export function proposeOwnerDecision(snapshot: OwnerSnapshot): OwnerProposal {
   if ((snapshot.facts.safeContribute ?? 0) > 0) return makeProposal(snapshot, { type: 'contributeOwnerCapital', amountSatang: snapshot.facts.safeContribute! }, 'firm-shortfall');
   if ((snapshot.facts.safeWithdraw ?? 0) > 0) return makeProposal(snapshot, { type: 'withdrawOwnerProfit', amountSatang: snapshot.facts.safeWithdraw! }, 'realized-profit');
   return makeProposal(snapshot, { type: 'hold', amountSatang: 0 }, 'reserves-protected');
+}
+
+/** Convert a provider choice into the same canonical proposal that the game revalidates. */
+export function ownerProposalForCandidate(snapshot: OwnerSnapshot, candidateId: OwnerCandidateId): OwnerProposal {
+  const selected = validateOwnerDecisionSelection({ candidateId }, snapshot);
+  if (selected.candidateId === 'safe-transfer') {
+    const proposal = proposeOwnerDecision(snapshot);
+    if (proposal.command.type === 'hold') throw new Error('No safe transfer candidate exists.');
+    return proposal;
+  }
+  return makeProposal(snapshot, { type: 'hold', amountSatang: 0 }, snapshot.budgetKnown ? 'reserves-protected' : 'budget-unavailable');
 }
 
 function validSnapshotShape(v: unknown): v is OwnerSnapshot {
