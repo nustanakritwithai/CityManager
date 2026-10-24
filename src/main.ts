@@ -14,7 +14,7 @@ const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximum
 const SAVE_KEY = 'citymanager.save.v1';
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
 const SIGNAL_ENV = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
-const SIGNALS_ENABLED = SIGNAL_ENV.VITE_CITY_SIGNALS === 'true' || new URLSearchParams(location.search).get('signals') === '1';
+const SIGNALS_ENABLED = SIGNAL_ENV.VITE_CITY_SIGNALS !== 'false' || new URLSearchParams(location.search).get('signals') === '1';
 let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
 let city: City = createCity(61025);
 let view: CityView;
@@ -181,7 +181,7 @@ async function boot() {
   setupSubmenus(); setupSubmenuNavigation(cancel);
   $('#signal-entry').hidden = !SIGNALS_ENABLED;
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
-    enabled: SIGNAL_ENV.VITE_CITY_ADVISOR_ONLINE === 'true', endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || ''
+    enabled: SIGNAL_ENV.VITE_CITY_ADVISOR_ONLINE !== 'false', endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
   } });
   $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; render(); } }, (a, b) => {
