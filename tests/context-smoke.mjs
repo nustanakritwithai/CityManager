@@ -181,7 +181,7 @@ try {
     await evaluate('document.removeEventListener("pointerdown",window.__contextHeldDown,true);document.removeEventListener("click",window.__contextHeldClick,true);delete window.__contextHeld;delete window.__contextHeldDown;delete window.__contextHeldClick');
     await button('#submenu-back'); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${homes[0].id}'`); await closePanel();
     await button('#pause'); assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
-    await load(fixtureJson); await button('[data-speed="1"]');
+    await load(fixtureJson); await closePanel(); await button('[data-speed="1"]');
   }
   await viewport({ width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, mobile: false });
   checks.push('Two mouse and one trusted touch 200ms household-link holds preserve the same DOM through native activation during live 10x refreshes; Back returns to source home and frozen fixture is restored');

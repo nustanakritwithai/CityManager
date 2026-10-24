@@ -48,7 +48,7 @@
 
 อ่านกฎจริงได้ที่ [housing.ts](../src/housing.ts), [labor.ts](../src/labor.ts), [save-storage.ts](../src/save-storage.ts) และ [simulation](../src/sim.ts) มี tests เฉพาะส่วนที่ [housing](../tests/housing.test.ts), [labor](../tests/labor.test.ts), [storage](../tests/save-storage.test.ts)
 
-ผล module tests ที่รายงานระหว่างรวมงาน: housing **8 ผ่าน**, labor **11 ผ่าน**, storage **5 ผ่าน** ส่วน full simulation/integration tests, browser ปกติ/fallback และ CI ของ commit สุดท้าย **ยังรอการยืนยันจากผู้รวมงาน** ไม่ถือว่า module tests แทนผลทั้งเกม การตรวจ viewport/touch ใน browser ไม่ใช่การทดสอบบน S22 จริง
+ผลชุดรวมก่อนส่ง browser: **61 unit tests ผ่าน**, ตรวจ asset และ build ผ่าน ชุด browser ใหม่ด้านประชากร/กู้เซฟ **9 กลุ่มผ่านในเครื่อง** และ native touch ที่เคยเปิดผิดแถวผ่านหลังแก้ guard แล้ว ส่วนการทวน browser ทั้งห้าชุด normal/fallback และ exact-head CI เป็นเงื่อนไขก่อนส่งงาน ไม่ใช้ unit tests แทนหลักฐาน browser การจำลอง viewport/touch ไม่ใช่ QA บน S22 จริง
 
 ```sh
 npm test
@@ -58,3 +58,10 @@ npm run preview
 ```
 
 งาน macro และ AI จะออกแบบ/ทดสอบแยกในระยะถัดไปจากข้อมูลครัวเรือนและสถานประกอบการนี้ ไม่มีการรวมงานเหล่านั้น หรือเปลี่ยนการผลิต/ขนส่งเข้ามาใน release นี้
+
+
+## ภาพและสถานการณ์ตรวจสอบ
+
+ภาพจาก installed Edge ใน branch นี้: [บ้านที่เพิ่งสร้างยังว่าง](household-preview/vacant-new-home.png), [บ้านสองครัวเรือน](household-preview/shared-home.png), [ครอบครัวส่งแรงงานสองกิจการ](household-preview/family-split-employers.png) และ [จอโทรศัพท์จำลอง](household-preview/phone-family.png) ภาพสองกิจการใช้ fixture ที่ผ่าน validator เพื่อแสดงกรณีขอบเขต ไม่ใช่การอ้างว่าทุกครอบครัวในเกมเริ่มต้นมีสองนายจ้าง
+
+เมื่อคงตะกร้าสินค้าต่อครัวเรือน ราคาและค่าจ้างเดิมไว้ seed 61025 สร้างบ้านแรกวันที่ 6 รับครัวเรือนวันที่ 7 สร้างร้านวันที่ 96 และซื้อครั้งแรกวันที่ 101 ส่วน seed 1 และ 20261023 ซื้อครั้งแรกวันที่ 71 จำนวนแรงงานต่อครัวเรือนทำให้ตลาดค้าปลีกเริ่มช้ากว่ารุ่นเดิม นี่เป็นผล calibration ของต้นแบบ ไม่ใช่สูตรจาก CSII หรือการวัดเศรษฐกิจจริง
