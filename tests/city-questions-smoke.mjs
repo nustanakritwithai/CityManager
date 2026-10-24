@@ -172,7 +172,23 @@ try {
   for (const [zone, fact] of [['C', 'commercial'], ['I', 'industrial'], ['F', 'farms'], ['T', 'raw-markets']]) await expectFact(`city.businesses.${fact}`, mature.firms.filter(item => item.zone === zone).length, 'แห่ง');
   await ask('house.detail', house.id); await expectFact('house.occupied-people', mature.households.filter(item => item.home === house.id).reduce((n, item) => n + item.members, 0), 'คน');
   assert(mature.firms.some(item => item.zone === 'F') && mature.firms.some(item => item.zone === 'T'), 'The actual fixture includes agricultural and owner-operated market facts');
-  for (const business of mature.firms) { await ask('business.detail', business.id); await expectFact('business.building', business.building, 'รหัส'); await expectFact('business.zone', { C: 'พาณิชย์ (C)', I: 'อุตสาหกรรม (I)', F: 'ฟาร์ม (F)', T: 'ตลาดวัตถุดิบ (T)' }[business.zone], ''); await expectFact('business.workers', firmWorkerCount(mature, business.id), 'คน'); await expectFact('business.inventory', business.inventory, 'หน่วยสินค้า'); await expectFact('business.crop-inventory', business.cropInventory, 'ล็อตพืชผล'); await expectFact('business.crop-cost', business.cropCost, 'สตางค์'); }
+  for (const business of mature.firms) {
+    await ask('business.detail', business.id);
+    await expectFact('business.building', business.building, 'รหัส');
+    await expectFact('business.zone', { C: 'พาณิชย์ (C)', I: 'อุตสาหกรรม (I)', F: 'ฟาร์ม (F)', T: 'ตลาดวัตถุดิบ (T)' }[business.zone], '');
+    await expectFact('business.workers', firmWorkerCount(mature, business.id), 'คน');
+    await expectFact('business.inventory', business.inventory, 'หน่วยสินค้า');
+    if (business.zone === 'C') {
+      // Finished-goods retailers never hold crops; their answer intentionally omits crop facts.
+      assert.equal(business.cropInventory, 0); assert.equal(business.cropCost, 0);
+      const selector = '[data-fact-id="business.crop-inventory"],[data-fact-id="business.crop-cost"]';
+      assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 0, 'Retail answer has no irrelevant or leaked crop facts');
+    } else {
+      await expectFact('business.crop-inventory', business.cropInventory, 'ล็อตพืชผล');
+      await expectFact('business.crop-cost', business.cropCost, 'สตางค์');
+    }
+    if (business.zone === 'T' && business.owner !== null) await expectFact('business.owner-workers', mature.ownerLabor.filter(item => item.firmId === business.id).reduce((n, item) => n + item.workers, 0), 'คน');
+  }
   await ask('business.detail', firm.id);
   await button('[data-fact-id="business.id"] .city-question-evidence>summary');
   assert(await evaluate(`document.querySelector('[data-fact-id="business.id"]').textContent.includes(${JSON.stringify(`firm:${firm.id}`)})`));
