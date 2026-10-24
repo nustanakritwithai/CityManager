@@ -14,7 +14,7 @@ const expected = () => JSON.parse(readFileSync(new URL('./fixtures/signal-respon
 test('initial actual aggregates preserve household semantics and include actual grant without mutating the city', () => {
   const city = createCity(61025), before = serialize(city), capture = captureCitySignals(city);
   assert.deepEqual(capture.metrics.map(value => value.id), ['population', 'households', 'businesses', 'employed', 'unemployed', 'treasury', 'incomePerTick', 'expensesPerTick', 'housingCapacity']);
-  assert.equal(city.version, 2);
+  assert.equal(city.version, 3);
   assert.equal(metric(capture, 'population').value, 0, 'no households means an observed zero population');
   assert.equal(metric(capture, 'population').unit, 'people');
   assert.equal(metric(capture, 'households').value, city.households.length);
@@ -33,7 +33,7 @@ test('initial actual aggregates preserve household semantics and include actual 
   assert.equal(serialize(city), before);
 });
 
-test('version-two mapping distinguishes people, household records, workforce and actual person capacity', () => {
+test('version-three mapping distinguishes people, household records, workforce and actual person capacity', () => {
   const city = createCity(61025);
   for (let day = 0; day < 180; day++) step(city);
   const before = serialize(city), capture = captureCitySignals(city), actual = summary(city);
@@ -51,7 +51,7 @@ test('version-two mapping distinguishes people, household records, workforce and
   const report = buildLocalSignalReport(requestForCapture(capture));
   assert.deepEqual(report.data.missingData.filter(value => value.reason === 'current_metric_unavailable').map(value => value.metricRefs[0]), ['averageHappiness', 'pollution', 'trafficPressure']);
   assert(report.data.signals.some(value => value.id === 'threshold.housing-capacity-exceeded'));
-  assert.equal(serialize(city), before, 'capture/report preserve the complete version-two save and RNG');
+  assert.equal(serialize(city), before, 'capture/report preserve the complete version-three save and RNG');
 });
 
 test('ledger flows use only current-day treasury endpoints and convert integer satang to credits', () => {
