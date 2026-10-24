@@ -1,6 +1,6 @@
 import './context-panels.css';
 import './building-cards.css';
-import { MONTH, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -115,7 +115,7 @@ function empty(title: string, description: string): HTMLElement {
 function purchaseText(city: City, household: Household): string {
   return household.lastPurchaseTick < 0 ? 'ยังไม่เคยซื้อ' : household.lastPurchaseTick === city.tick ? 'วันนี้' : `${city.tick - household.lastPurchaseTick} วันก่อน`;
 }
-const businessName = (zone: Firm['zone']) => zone === 'F' ? 'ฟาร์ม' : zone === 'T' ? 'ตลาดพืชผล' : zone === 'I' ? 'โรงงาน' : 'ร้านค้า';
+const businessName = (firm: Firm) => firm.zone === 'F' ? 'ฟาร์ม' : isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาดพืชผล' : firm.zone === 'I' ? 'โรงงาน' : 'พาณิชย์ · ร้านค้าสำเร็จรูป';
 function householdButton(city: City, household: Household, source: Building, onHousehold: HouseholdAction, assignedWorkers?: number, assignments: ReturnType<typeof employmentForHousehold> = [], ownerAssignments: City['ownerLabor'] = []): HTMLButtonElement {
   const button = el('button', 'cx-household-link'); button.type = 'button'; Object.assign(button.dataset, { householdId: String(household.id), sourceBuildingId: String(source.id), sourceCell: String(source.cell), contextFocus: `household:${household.id}` });
   Object.assign(button.dataset, { members: String(household.members), workforce: String(household.workforce), dependents: String(household.dependents), employedWorkers: String(householdWorkerCount(city, household.id)) });
@@ -221,20 +221,21 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
     if (household) list.append(householdButton(city, household, building, onHousehold, group.workers, group.allocations, group.ownerAllocations));
     else list.append(el('p', 'cx-detail-note', `ไม่พบครัวเรือน #${group.householdId} ในการจัดสรรแรงงาน`));
   }
-  if (!labor.householdCount) list.append(el('p', 'cx-detail-note', firm.zone === 'T' ? 'เจ้าของยังไม่ได้ใช้แรงงานทำตลาดในวันนี้ กิจการและเงินยังคงแยกจากบ้านพัก' : 'ยังไม่มีแรงงานที่มีความสามารถตรงกับงานและสำรองค่าจ้างได้'));
+  if (!labor.householdCount) list.append(el('p', 'cx-detail-note', isMarket(firm) ? 'เจ้าของยังไม่ได้ใช้แรงงานทำตลาดในวันนี้ กิจการและเงินยังคงแยกจากบ้านพัก' : 'ยังไม่มีแรงงานที่มีความสามารถตรงกับงานและสำรองค่าจ้างได้'));
   employees.append(list);
+  if (isRetail(firm)) employees.append(el('p', 'cx-detail-note', `ร้านค้าสำเร็จรูปจากเซฟเดิม · พาณิชย์ระดับ ${building.level} · คงเงิน สินค้า และตำแหน่งงานเดิม ยังไม่มีการอัปเกรดตลาดเป็นร้านค้าประเภทนี้`));
   const meanings = facts(`firm:${firm.id}`, 'เงินสำรอง แรงงาน และกำไรรอบบัญชี',
-    el('p', '', firm.zone === 'T' ? 'ตลาดนี้เป็นกิจการทำเองของครัวเรือน ใช้แรงงานเจ้าของ 1 คน ไม่จ้างลูกจ้างและไม่มีเงินเดือนเจ้าของ เงินกิจการและเงินครัวเรือนเป็นคนละบัญชี การเติมทุนและถอนกำไรไม่ใช่รายได้หรือค่าใช้จ่ายดำเนินงานรอบใหม่' : 'เงินในกระเป๋ารวมค่าจ้างที่ต้องสำรองไว้แล้ว ยอดใช้จ่ายได้จึงหักเงินสำรองออกก่อน จ้างเป็นจำนวนแรงงานที่มีความสามารถตรงกับงาน ไม่ได้รับครัวเรือนทั้งบ้าน ผู้พึ่งพิงไม่ถูกนับเป็นแรงงาน ค่าจ้างสะสมตามวัน-แรงงานจริงและจ่ายเข้าบัญชีร่วมของครัวเรือน'),
+    el('p', '', isMarket(firm) ? 'ตลาดนี้เป็นกิจการทำเองของครัวเรือน ใช้แรงงานเจ้าของ 1 คน ไม่จ้างลูกจ้างและไม่มีเงินเดือนเจ้าของ เงินกิจการและเงินครัวเรือนเป็นคนละบัญชี การเติมทุนและถอนกำไรไม่ใช่รายได้หรือค่าใช้จ่ายดำเนินงานรอบใหม่' : 'เงินในกระเป๋ารวมค่าจ้างที่ต้องสำรองไว้แล้ว ยอดใช้จ่ายได้จึงหักเงินสำรองออกก่อน จ้างเป็นจำนวนแรงงานที่มีความสามารถตรงกับงาน ไม่ได้รับครัวเรือนทั้งบ้าน ผู้พึ่งพิงไม่ถูกนับเป็นแรงงาน ค่าจ้างสะสมตามวัน-แรงงานจริงและจ่ายเข้าบัญชีร่วมของครัวเรือน'),
     el('p', '', hasClosedMonth ? `กำไรก่อนภาษีของรอบบัญชีวันที่ ${Math.max(1, lastSettlement - MONTH + 1)}–${lastSettlement} รวมเฉพาะวันที่บริษัทดำเนินงาน ไม่ใช่กำไรที่เพิ่งรับในเดือนนี้` : 'ยังไม่มีเดือนที่ปิดบัญชี จึงยังไม่มีกำไรของรอบบัญชีก่อนหน้า'),
     el('p', '', `บริษัท #${firm.id} · อาคาร #${building.id} · บัญชี ${firm.wallet}`));
   const workerMetric = capacityMetric('workers', 'แรงงานทำงาน / รับได้', workers, capacity, 'คน');
   return [el('p', 'cx-context-meta', `บริษัท #${firm.id} · ${firm.wallet}`), status(city, building.cell), metrics([
     metric('cash', 'เงินกิจการ', cash(wallet), wallet, true), metric('reserved', 'สำรองค่าจ้าง', cash(reserved), reserved, true), metric('spendable', 'เงินพ้นสำรองค่าจ้าง', cash(spendable), spendable, true), metric('stock', 'สำเร็จรูปคงคลัง', `${count(firm.inventory)} หน่วย`, firm.inventory), workerMetric, metric('household-count', 'บัญชีครัวเรือนของผู้ทำงาน', count(labor.householdCount), labor.householdCount), metric('profit', 'กำไรรอบก่อนภาษี', cash(firm.lastMonthProfit, true), firm.lastMonthProfit, true)
-  ]), ...renderAgriculture(city, building, firm, labor.workers), employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), ...(firm.zone === 'I' || firm.zone === 'C' ? [activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)] : []), ...(firm.zone !== 'C' ? [cropActivity(city, firm.wallet, `${businessName(firm.zone)} #${firm.id}`)] : [])];
+  ]), ...renderAgriculture(city, building, firm, labor.workers), employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), ...(firm.zone === 'I' || isRetail(firm) ? [activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)] : []), ...(!isRetail(firm) ? [cropActivity(city, firm.wallet, `${businessName(firm)} #${firm.id}`)] : [])];
 }
 function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
-  if (firm.zone === 'C') return [];
-  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : firm.zone === 'T' ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = CROP_STOCK_CAPS[firm.zone];
+  if (isRetail(firm)) return [];
+  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : isMarket(firm) ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = CROP_STOCK_CAPS[isMarket(firm) ? 'T' : firm.zone === 'F' ? 'F' : 'I'];
   body.classList.add('cx-agriculture'); body.dataset.firmId = String(firm.id);
   const cards = [capacityMetric('crop-stock', 'พืชผลคงคลัง / เก็บได้', firm.cropInventory, cap, 'ล็อต'), metric('crop-cost', 'มูลค่าพืชผลตามบัญชี', cash(firm.cropCost), firm.cropCost, true), metric('production-tick', 'วันประมวลผลล่าสุด', String(firm.productionTick), firm.productionTick)];
   if (firm.zone === 'F') {
@@ -245,7 +246,7 @@ function renderAgriculture(city: City, building: Building, firm: Firm, workers: 
   body.append(metrics(cards), el('p', 'cx-detail-note', firm.zone === 'F' ? 'พืชผลเก็บเกี่ยวตั้งมูลค่าคงคลังเริ่มต้นเป็นศูนย์ ค่าจ้างและค่าเช่ายังเป็นค่าใช้จ่ายงวด ไม่ได้เป็นผลตอบแทนรับประกัน' : firm.zone === 'I' ? `แต่ละวันใช้ ${CROP_RECIPE.crop} ล็อตจริงต่อ ${CROP_RECIPE.goods} หน่วยสำเร็จรูป ขาดวัตถุดิบผลิตไม่ได้ และไม่ประมวลผลซ้ำวันเดิม` : 'ตลาดไม่ผลิตหรือแปรรูป ซื้อพืชผลเข้าสต็อกก่อน ขายล็อตที่มีตั้งแต่ต้นวันเท่านั้น สต็อกที่โรงงานและครัวเรือนซื้อเป็นกองเดียวกัน'));
   if (firm.zone === 'I' && firm.cropInventory < CROP_RECIPE.crop) body.append(chip('ขาดพืชผลสำหรับแปรรูป', false));
   const output = [body];
-  if (firm.zone === 'T') output.push(renderOwnerFinance(city, firm)); return output;
+  if (isMarket(firm)) output.push(renderOwnerFinance(city, firm)); return output;
 }
 function renderOwnerFinance(city: City, firm: Firm): HTMLElement {
   const body = section('เจ้าของที่ทำกิจการเอง'), data = ownerFinance(city, firm.id);
@@ -274,7 +275,7 @@ function renderOwnerFinance(city: City, firm: Firm): HTMLElement {
 function employmentRow(city: City, allocation: ReturnType<typeof employmentForHousehold>[number]): HTMLElement {
   const row = el('div', 'cx-employment-row'); Object.assign(row.dataset, { householdId: String(allocation.householdId), firmId: String(allocation.firmId), workers: String(allocation.workers), occupation: allocation.occupation, rank: allocation.rank, skill: allocation.skill });
   const firm = city.firms.find(value => value.id === allocation.firmId), occupation = allocation.occupation === 'manufacturing' ? 'งานผลิต' : allocation.occupation === 'retail' ? 'งานค้าปลีก' : allocation.occupation;
-  row.dataset.incomeRole = 'employee'; row.append(el('strong', '', `${allocation.workers} คน → ${firm ? businessName(firm.zone) : 'กิจการ'} #${allocation.firmId}`), el('span', '', `ลูกจ้าง · ${occupation} · ทักษะ${WORKER_SKILL_LABELS[allocation.skill]} · ${allocation.rank === 'entry' ? 'ระดับเริ่มต้น' : allocation.rank}`)); return row;
+  row.dataset.incomeRole = 'employee'; row.append(el('strong', '', `${allocation.workers} คน → ${firm ? businessName(firm) : 'กิจการ'} #${allocation.firmId}`), el('span', '', `ลูกจ้าง · ${occupation} · ทักษะ${WORKER_SKILL_LABELS[allocation.skill]} · ${allocation.rank === 'entry' ? 'ระดับเริ่มต้น' : allocation.rank}`)); return row;
 }
 function ownerLaborRow(allocation: City['ownerLabor'][number]): HTMLElement {
   const row = el('div', 'cx-owner-labor-row');
@@ -342,7 +343,7 @@ function cardIcon(kind: CardKind): SVGElement {
   const host = el('div'); host.innerHTML = `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">${paths[kind]}</svg>`; return host.firstElementChild as SVGElement;
 }
 function cardHero(data: CardData): HTMLElement {
-  const labels: Record<CardKind, string> = { house: 'บ้านพัก · การอยู่อาศัย', household: 'ครัวเรือน · สมาชิกและเงินร่วม', shop: 'ร้านค้า · สินค้าสำเร็จรูป', market: 'ตลาดพืชผล · กิจการทำเอง', factory: 'โรงงาน · การแปรรูป', farm: 'ฟาร์ม · พื้นที่และการเก็บเกี่ยว' };
+  const labels: Record<CardKind, string> = { house: 'บ้านพัก · การอยู่อาศัย', household: 'ครัวเรือน · สมาชิกและเงินร่วม', shop: 'พาณิชย์ · ร้านค้าสำเร็จรูป', market: 'พาณิชย์ระดับ 1 · ตลาดพืชผล', factory: 'โรงงาน · การแปรรูป', farm: 'ฟาร์ม · พื้นที่และการเก็บเกี่ยว' };
   const hero = el('div', 'bc-hero'), icon = el('span', 'bc-type-icon'), copy = el('div', 'bc-hero-copy'); icon.append(cardIcon(data.kind));
   const identity = data.kind === 'household'
     ? `${data.identity.householdId === null ? 'ยังไม่พบรหัสครัวเรือน' : `ครัวเรือน #${data.identity.householdId}`} · ${data.identity.buildingId === null ? 'ยังไม่มีบ้านพัก' : `บ้านพัก: อาคาร #${data.identity.buildingId}`}`

@@ -1,11 +1,11 @@
-// Household/housing acceptance on worker schema v4. Root runs suites sequentially.
+// Household/housing acceptance on worker schema v5. Root runs suites sequentially.
 // The browser receives only strict-valid public-simulation fixtures via real Load.
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, WAGES, MONTH } from '../src/sim.ts';
+import { firmWage, createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, WAGES, MONTH } from '../src/sim.ts';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/population-preview');
@@ -71,7 +71,7 @@ assert.equal(JSON.stringify([fixture.accounts, fixture.ledger, fixture.goodsLedg
 deserialize(serialize(fixture));
 const fixtureRaw = serialize(fixture), sharedHome = fixture.buildings.find(b => b.zone === 'R' && homeOccupancy(fixture, b.id).households > 1);
 assert.ok(sharedHome, 'Natural fixture contains a shared home');
-const keys = ['citymanager.save.v4', 'citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2, 3].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
+const keys = ['citymanager.save.v5', 'citymanager.save.v4', 'citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2, 3, 4].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Run browser suites sequentially; CDP 9349 is occupied');
@@ -103,7 +103,7 @@ async function button(selector) {
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : name === 'help' ? '#toggle-help' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(raw) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v4',${JSON.stringify(raw)})`); await button('#load'); assert.deepEqual(await state(), deserialize(raw)); await close(); }
+async function load(raw) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v5',${JSON.stringify(raw)})`); await button('#load'); assert.deepEqual(await state(), deserialize(raw)); await close(); }
 async function place(building) { await close(); await button('[data-tool="select"]'); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${building.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', `Actual canvas cell ${building.cell}`); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
 async function metrics(expected, root = '#entity-content') { const actual = await evaluate(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(root + ' [data-context-metric]')})].map(e=>[e.dataset.contextMetric,e.dataset.value]))`); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact ${root} metric ${key}`); }
 async function household(h, source, city = fixture) {
@@ -150,26 +150,26 @@ try {
   // Only test-owned keys in this isolated QA profile are reset. Loading is never
   // allowed to write a migration, advance the clock or duplicate arrival savings.
   const sentinel = serialize(createCity(91));
-  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(legacyRaw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(householdV2Raw)});localStorage.setItem('citymanager.save.v3',${JSON.stringify(workerV3Raw)});localStorage.setItem('citymanager.save.v4',${JSON.stringify(sentinel)})`);
+  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(legacyRaw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(householdV2Raw)});localStorage.setItem('citymanager.save.v3',${JSON.stringify(workerV3Raw)});localStorage.setItem('citymanager.save.v5',${JSON.stringify(sentinel)})`);
   await page('game'); const beforeImport = await storage(); await button('#load-legacy'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), beforeImport);
   await button('#load-legacy'); await button('#load-legacy'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), beforeImport);
   checks.push('Explicit strict v1 import is idempotent: exact frozen money/goods/claims/tick/RNG; loading never writes or repeats grants');
 
-  // A failed backup must abort BEFORE replacing a different valid v4 save.
+  // A failed backup must abort BEFORE replacing a different valid v5 save.
   await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v1"))throw new DOMException("Acceptance backup quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), beforeImport); assert.deepEqual(await state(), migrated); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
   finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }
-  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], legacyRaw); assert.equal(backed['citymanager.backup.v1'], legacyRaw); assert.equal(backed['citymanager.save.v4'], migratedRaw);
+  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], legacyRaw); assert.equal(backed['citymanager.backup.v1'], legacyRaw); assert.equal(backed['citymanager.save.v5'], migratedRaw);
   assert.equal(Object.entries(backed).filter(([key, raw]) => key.startsWith('citymanager.backup.v1') && raw !== null).length, 1);
-  await button('#save'); assert.deepEqual(await storage(), backed); checks.push('Actual Save backs original v1 bytes immutably before v4; backup quota preserves old primary and repeated Save creates no duplicate backups');
+  await button('#save'); assert.deepEqual(await storage(), backed); checks.push('Actual Save backs original v1 bytes immutably before v5; backup quota preserves old primary and repeated Save creates no duplicate backups');
 
-  await evaluate('localStorage.setItem("citymanager.save.v4","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt);
+  await evaluate('localStorage.setItem("citymanager.save.v5","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt);
   await button('#load-backup'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);
-  await load(fixtureRaw); await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v4',${JSON.stringify(sentinel)})`); const beforeQuota = await storage(), stateBeforeQuota = await state();
-  await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==="citymanager.save.v4")throw new DOMException("Acceptance primary quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
+  await load(fixtureRaw); await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v5',${JSON.stringify(sentinel)})`); const beforeQuota = await storage(), stateBeforeQuota = await state();
+  await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==="citymanager.save.v5")throw new DOMException("Acceptance primary quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), beforeQuota); assert.deepEqual(await state(), stateBeforeQuota); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
   finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }
-  checks.push('Corrupt preferred v4 rejects without fallback or mutation; explicit backup recovers; primary quota preserves all current and stored state');
+  checks.push('Corrupt preferred v5 rejects without fallback or mutation; explicit backup recovers; primary quota preserves all current and stored state');
 
   const vacant = deserialize(vacantDay), vacantHome = vacant.buildings.find(b => b.zone === 'R' && b.age === 0);
   await load(vacantDay); await home(vacant, vacantHome); await metrics({ households: 0, persons: 0 }); await screenshot('vacant-new-home.png');
@@ -183,7 +183,7 @@ try {
   checks.push('Actual shared-home capacities and family composition distinguish members, workforce, dependents and two canonical employers; Back/Escape return to source home');
 
   for (const firm of [factory, shop]) {
-    const b = fixture.buildings.find(b => b.id === firm.building), allocations = employmentForFirm(fixture, firm.id), ids = [...new Set(allocations.map(e => e.householdId))], reserve = Object.values(firm.workDays).reduce((n, days) => n + days * WAGES[firm.zone] / MONTH, 0);
+    const b = fixture.buildings.find(b => b.id === firm.building), allocations = employmentForFirm(fixture, firm.id), ids = [...new Set(allocations.map(e => e.householdId))], reserve = Object.values(firm.workDays).reduce((n, days) => n + days * firmWage(firm) / MONTH, 0);
     await place(b); await metrics({ workers: firmWorkerCount(fixture, firm.id), 'household-count': ids.length, cash: fixture.accounts[firm.wallet], reserved: reserve, stock: firm.inventory });
     assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>({id:Number(e.dataset.householdId),workers:Number(e.dataset.assignedWorkers)}))'), ids.map(id => ({ id, workers: allocations.filter(e => e.householdId === id).reduce((n, e) => n + e.workers, 0) })));
     await button(`#entity-content [data-household-id="${family.id}"]`); await until(`document.querySelector('#entity-content').dataset.entityId==='${family.id}'&&document.querySelector('#entity-content').dataset.scope==='household'`); await button('#submenu-back'); assert.equal((await route()).id, String(b.id));
@@ -203,8 +203,8 @@ try {
   await close(); await button('[data-speed="1"]'); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}`); await button('#pause'); assert.deepEqual(await state(), expectedRehoused);
   for (const old of displaced) { const h = expectedRehoused.households.find(h => h.id === old.id); assert.notEqual(h.home, null); assert.equal(h.members, old.members); assert.equal(h.wallet, old.wallet); assert.equal(expectedRehoused.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1); }
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
-  await page('game'); await button('#save'); const savedV3 = await evaluate('localStorage.getItem("citymanager.save.v4")'); assert.equal(savedV3, serialize(expectedRehoused)); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
-  checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact v4 Save/Load retains original v1 and backup');
+  await page('game'); await button('#save'); const savedV3 = await evaluate('localStorage.getItem("citymanager.save.v5")'); assert.equal(savedV3, serialize(expectedRehoused)); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
+  checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact v5 Save/Load retains original v1 and backup');
 
   await load(fixtureRaw);
   for (const metric of [{ width: 360, height: 740, screenWidth: 360, screenHeight: 780, mobile: true }, { width: 844, height: 390, screenWidth: 844, screenHeight: 390, mobile: true }, { width: 980, height: 2120, screenWidth: 390, screenHeight: 844, mobile: true }]) {

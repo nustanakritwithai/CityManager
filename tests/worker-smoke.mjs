@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, bulldoze, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, WAGES, MONTH } from '../src/sim.ts';
+import { firmCapacity, createCity, step, serialize, deserialize, bulldoze, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, WAGES, MONTH } from '../src/sim.ts';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/worker-preview');
@@ -15,7 +15,7 @@ const oldRaw = await readFile(new URL('./fixtures/legacy-v2-day65.json', import.
 const v1Raw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 assert.equal(hash(oldRaw), '7062ffb3c6628b1a62ae7d9c548e497ab87e70d3b57bb715d34e0a9194eba3a5');
 const imported = deserialize(oldRaw), importedRaw = serialize(imported);
-assert.equal(imported.version, 4); assert.equal(imported.rulesVersion, 'agriculture-1');
+assert.equal(imported.version, 5); assert.equal(imported.rulesVersion, 'commercial-1');
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods', 'seed', 'rng', 'tick', 'nextId', 'migration']) assert.deepEqual(imported[key], old[key], `Strict v2 import preserves ${key}`);
 assert.deepEqual(imported.employment, old.employment.map(e => ({ ...e, skill: 'general' })));
 for (const h of imported.households) { assert.deepEqual(h.workerSkills, { general: h.workforce, manufacturing: 0, retail: 0 }); assert.equal(h.skillSource, 'legacy-assumed'); }
@@ -42,7 +42,7 @@ const jobs = employmentForHousehold(after, familyId); assert.equal(jobs.reduce((
 assert.equal(new Set(jobs.map(e => e.firmId)).size, 2); assert.equal(new Set(jobs.map(e => e.occupation)).size, 2);
 const shop = after.firms.find(f => jobs.some(e => e.firmId === f.id) && f.zone === 'C'); assert.ok(shop);
 const oldShop = before.firms.find(f => f.id === shop.id), oldShopBuilding = before.buildings.find(b => b.id === shop.building);
-assert.ok(oldShop && oldShopBuilding.level > firmWorkerCount(before, shop.id), 'A genuine unoccupied shop position exists before matching');
+assert.ok(oldShop && firmCapacity(oldShopBuilding) > firmWorkerCount(before, shop.id), 'A genuine unoccupied shop position exists before matching');
 assert.ok(before.accounts[shop.wallet] - Object.values(oldShop.workDays).reduce((n, days) => n + days * WAGES.C / MONTH, 0) >= WAGES.C / MONTH, 'The vacant role can reserve its next daily wage');
 
 const dismissed = deserialize(serialize(after)); assert.equal(bulldoze(dismissed, after.buildings.find(b => b.id === shop.building).cell).ok, true);
@@ -56,7 +56,7 @@ const fixture = { seed: before.seed, beforeTick: before.tick, afterTick: after.t
 if (process.argv.includes('--preflight')) { console.log(JSON.stringify({ fixture, payrollTick: payrollAfter.tick, wageCounterparties: wageEntries.map(e => e.from) }, null, 2)); process.exit(0); }
 
 const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [];
-const keys = ['citymanager.save.v4', 'citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2, 3].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
+const keys = ['citymanager.save.v5', 'citymanager.save.v4', 'citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2, 3, 4].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Worker browser suite must run sequentially; CDP9349 is occupied');
@@ -73,7 +73,7 @@ async function button(selector) { await evaluate(`document.querySelector(${JSON.
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(city) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v4',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
+async function load(city) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v5',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
 async function oneTick(city) { await close(); await button('[data-speed="1"]'); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${city.tick}`); await button('#pause'); assert.deepEqual(await state(), city); }
 async function place(city, id) { await close(); await button('[data-tool="select"]'); await paints(); const b = city.buildings.find(b => b.id === id), p = await evaluate(`window.cityManager.cellScreen(${b.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${id}'`); }
 async function metrics(expected) { const actual = await evaluate('Object.fromEntries([...document.querySelectorAll("#entity-content [data-context-metric]")].map(e=>[e.dataset.contextMetric,e.dataset.value]))'); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact metric ${key}`); }
@@ -93,7 +93,7 @@ try {
   await send('Page.navigate', { url }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready');
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
   const sentinel = serialize(createCity(91));
-  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(v1Raw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(oldRaw)});localStorage.setItem('citymanager.save.v4',${JSON.stringify(sentinel)})`);
+  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(v1Raw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(oldRaw)});localStorage.setItem('citymanager.save.v5',${JSON.stringify(sentinel)})`);
   await page('game'); const originalStorage = await storage(); await button('#load-v2'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), originalStorage);
   await button('#load-v2'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), originalStorage);
   await household(imported, imported.households[0].id); assert.equal(await evaluate('document.querySelector("#entity-content [data-skill-source]")?.dataset.skillSource'), 'legacy-assumed'); await page('game'); assert.deepEqual(await storage(), originalStorage);
@@ -102,10 +102,10 @@ try {
   await evaluate('window.__workerStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v2"))throw new DOMException("Worker backup quota", "QuotaExceededError");return window.__workerStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), originalStorage); assert.deepEqual(await state(), imported); }
   finally { await evaluate('Storage.prototype.setItem=window.__workerStorageSet;delete window.__workerStorageSet'); }
-  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], v1Raw); assert.equal(backed['citymanager.save.v2'], oldRaw); assert.equal(backed['citymanager.backup.v2'], oldRaw); assert.equal(backed['citymanager.backup.latest'], 'citymanager.backup.v2'); assert.equal(backed['citymanager.save.v4'], importedRaw);
+  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], v1Raw); assert.equal(backed['citymanager.save.v2'], oldRaw); assert.equal(backed['citymanager.backup.v2'], oldRaw); assert.equal(backed['citymanager.backup.latest'], 'citymanager.backup.v2'); assert.equal(backed['citymanager.save.v5'], importedRaw);
   await button('#save'); assert.deepEqual(await storage(), backed);
-  await evaluate('localStorage.setItem("citymanager.save.v4","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#load-backup'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);
-  checks.push('Real Save preserves exact v1/v2 slots, immutably backs v2 before v4, aborts on backup quota, deduplicates backups and explicitly recovers corrupt preferred v4 without silent fallback');
+  await evaluate('localStorage.setItem("citymanager.save.v5","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#load-backup'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);
+  checks.push('Real Save preserves exact v1/v2 slots, immutably backs v2 before v5, aborts on backup quota, deduplicates backups and explicitly recovers corrupt preferred v5 without silent fallback');
 
   await load(before); await oneTick(after); assert.deepEqual(await state(), after); await household(after, familyId); await screenshot('worker-household.png');
   checks.push('One actual daily tick equals unedited deterministic replay: a funded retail vacancy takes only the general worker while manufacturing worker and dependent remain correctly counted in the same family');
@@ -130,7 +130,7 @@ try {
     await viewport(metric); await household(after, familyId); await layout(); if (metric.width === 360) await screenshot('worker-phone.png');
     const b = after.buildings.find(b => b.id === family.home), camera = await evaluate(`window.cityManager.cellScreen(${b.cell})`); await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: camera.x, y: camera.y, deltaX: 0, deltaY: -180 }); assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${b.cell})`), camera);
     await key('Escape'); assert.equal((await route()).scope, 'place'); assert.equal((await route()).id, String(family.home)); await key('Escape'); assert.notEqual((await route()).open, 'true');
-    await page('game'); await layout(); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v4")'), serialize(after)); await button('#load'); assert.deepEqual(await state(), after); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), oldRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), v1Raw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v2")'), oldRaw); await close();
+    await page('game'); await layout(); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v5")'), serialize(after)); await button('#load'); assert.deepEqual(await state(), after); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), oldRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), v1Raw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v2")'), oldRaw); await close();
   }
   assert.deepEqual(errors, []); const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 8); assert.equal(visuals.failed.length, 8); } else { assert.equal(visuals.loaded.length, 8); assert.equal(visuals.failed.length, 0); }
   checks.push('360 phone, landscape and 980-layout/screen390 keep exact capability rows and 44px navigation contained; open-panel camera isolation, Back/Escape, v4 roundtrip and old-save preservation pass without unexpected errors');

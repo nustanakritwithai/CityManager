@@ -4,22 +4,24 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { deserializeV2 } from '../src/legacy-v2.ts';
 import { deserializeV3 } from '../src/legacy-v3.ts';
-import { readStoredCity, saveStoredCity, SAVE_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY, LEGACY_BACKUP_KEY, HOUSEHOLD_BACKUP_KEY, WORKER_BACKUP_KEY, LATEST_BACKUP_KEY } from '../src/save-storage.ts';
+import { readStoredCity, saveStoredCity, SAVE_KEY, AGRICULTURE_SAVE_KEY, AGRICULTURE_BACKUP_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY, LEGACY_BACKUP_KEY, HOUSEHOLD_BACKUP_KEY, WORKER_BACKUP_KEY, LATEST_BACKUP_KEY } from '../src/save-storage.ts';
 function memory(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial)), writes: string[] = [];
   return { data, writes, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { writes.push(key); data.set(key, value); } };
 }
-const old = JSON.stringify({ version: 1, tick: 65 }), household = JSON.stringify({ version: 2, tick: 180 }), worker = JSON.stringify({ version: 3, tick: 180 }), current = JSON.stringify({ version: 4, tick: 180 });
-test('read v4, then v3, then v2, then v1 and explicit old sources without changing storage', () => {
+const old = JSON.stringify({ version: 1, tick: 65 }), household = JSON.stringify({ version: 2, tick: 180 }), worker = JSON.stringify({ version: 3, tick: 180 }), agriculture = JSON.stringify({ version: 4, tick: 180 }), current = JSON.stringify({ version: 5, tick: 180 });
+test('read v5, then v4, then v3, then v2, then v1 and explicit old sources without changing storage', () => {
   const s = memory({ [LEGACY_SAVE_KEY]: old }); assert.deepEqual(readStoredCity(s), { raw: old, key: LEGACY_SAVE_KEY });
   s.data.set(HOUSEHOLD_SAVE_KEY, household); assert.deepEqual(readStoredCity(s), { raw: household, key: HOUSEHOLD_SAVE_KEY });
   s.data.set(WORKER_SAVE_KEY, worker); assert.deepEqual(readStoredCity(s), { raw: worker, key: WORKER_SAVE_KEY });
+  s.data.set(AGRICULTURE_SAVE_KEY, agriculture); assert.deepEqual(readStoredCity(s), { raw: agriculture, key: AGRICULTURE_SAVE_KEY });
+  assert.deepEqual(readStoredCity(s, 'agriculture'), { raw: agriculture, key: AGRICULTURE_SAVE_KEY });
   s.data.set(SAVE_KEY, current); assert.equal(readStoredCity(s)?.raw, current); assert.equal(readStoredCity(s, 'legacy')?.raw, old);
   assert.deepEqual(readStoredCity(s, 'household'), { raw: household, key: HOUSEHOLD_SAVE_KEY });
   assert.deepEqual(readStoredCity(s, 'worker'), { raw: worker, key: WORKER_SAVE_KEY });
   assert.equal(readStoredCity(s, 'backup'), null); assert.deepEqual(s.writes, []);
 });
-test('back up exact imported v1 once before saving v4 and preserve all original slots', () => {
+test('back up exact imported v1 once before saving v5 and preserve all original slots', () => {
   const s = memory({ [LEGACY_SAVE_KEY]: old, [HOUSEHOLD_SAVE_KEY]: household, [WORKER_SAVE_KEY]: worker }); assert.deepEqual(saveStoredCity(s, current, old), { backup: LEGACY_BACKUP_KEY });
   assert.equal(s.data.get(LEGACY_SAVE_KEY), old); assert.equal(s.data.get(LEGACY_BACKUP_KEY), old);
   assert.equal(s.data.get(HOUSEHOLD_SAVE_KEY), household);
@@ -46,7 +48,7 @@ test('backup quota failure prevents primary overwrite; failed primary retains a 
 });
 test('fresh saves add no legacy data; bad versions and full backups preserve all bytes', () => {
   const s = memory(); saveStoredCity(s, current, null); assert.deepEqual(s.writes, [SAVE_KEY]);
-  for (const raw of [old, household, worker, '{broken', JSON.stringify({ version: 5 })]) assert.throws(() => saveStoredCity(s, raw, null));
+  for (const raw of [old, household, worker, agriculture, '{broken', JSON.stringify({ version: 6 })]) assert.throws(() => saveStoredCity(s, raw, null));
   for (const raw of [current, '{broken', JSON.stringify({ version: 0 })]) assert.throws(() => saveStoredCity(s, current, raw));
   for (let i = 0; i < 8; i++) s.data.set(i ? `${LEGACY_BACKUP_KEY}.${i}` : LEGACY_BACKUP_KEY, JSON.stringify({ version: 1, tick: i }));
   const before = [...s.data]; assert.throws(() => saveStoredCity(s, current, old), /full/); assert.deepEqual([...s.data], before);
@@ -72,7 +74,7 @@ test('old backups without metadata recover; corrupt pointers cannot select the p
   assert.deepEqual(s.writes, []);
 });
 
-test('backup, metadata and primary quotas preserve the previous v4 and original v2 bytes', () => {
+test('backup, metadata and primary quotas preserve the previous v5 and original v2 bytes', () => {
   const s = memory({ [SAVE_KEY]: 'previous', [HOUSEHOLD_SAVE_KEY]: household });
   assert.throws(() => saveStoredCity({ getItem: s.getItem, setItem: () => { throw Error('backup quota'); } }, current, household), /backup quota/);
   assert.equal(s.data.get(SAVE_KEY), 'previous'); assert.equal(s.data.has(HOUSEHOLD_BACKUP_KEY), false);
@@ -109,7 +111,7 @@ test('frozen published v2 reader returns exact valid state and rejects corrupt o
   for (const invalid of ['{broken', JSON.stringify({ version: 1 }), current, ' '.repeat(12_000_001)]) assert.throws(() => deserializeV2(invalid));
 });
 
-test('v3 original and immutable backup survive repeated v4 saves; latest recovery follows all old versions', () => {
+test('v3 original and immutable backup survive repeated v5 saves; latest recovery follows all old versions', () => {
   const key = `${WORKER_BACKUP_KEY}.4`, s = memory({ [LEGACY_SAVE_KEY]: old, [HOUSEHOLD_SAVE_KEY]: household, [WORKER_SAVE_KEY]: worker, [key]: worker });
   assert.deepEqual(saveStoredCity(s, current, worker), { backup: key });
   assert.equal(s.data.has(WORKER_BACKUP_KEY), false); assert.deepEqual(s.writes, [LATEST_BACKUP_KEY, SAVE_KEY]);
@@ -120,7 +122,7 @@ test('v3 original and immutable backup survive repeated v4 saves; latest recover
   assert.equal(s.data.get(WORKER_SAVE_KEY), worker); assert.equal(s.data.get(key), worker);
 });
 
-test('v3 backup, metadata and primary quota failures preserve original slots and previous v4', () => {
+test('v3 backup, metadata and primary quota failures preserve original slots and previous v5', () => {
   for (const blocked of [WORKER_BACKUP_KEY, LATEST_BACKUP_KEY, SAVE_KEY]) {
     const s = memory({ [SAVE_KEY]: 'previous', [WORKER_SAVE_KEY]: worker, [HOUSEHOLD_SAVE_KEY]: household, [LEGACY_SAVE_KEY]: old });
     assert.throws(() => saveStoredCity({ getItem: s.getItem, setItem: (key, value) => { if (key === blocked) throw Error('quota'); s.setItem(key, value); } }, current, worker), /quota/);
@@ -177,4 +179,29 @@ test('frozen v3 reader rejects corrupt old skills, claims, journals, capacities 
   ];
   for (const corrupt of corruptions) { const copy = JSON.parse(raw); corrupt(copy); assert.throws(() => deserializeV3(JSON.stringify(copy))); }
   for (const invalid of ['{broken', old.version.toString(), JSON.stringify({ version: 1 }), household, current, ' '.repeat(12_000_001)]) assert.throws(() => deserializeV3(invalid));
+});
+
+
+test('v4 agriculture originals, bounded immutable backups and v5 primary remain distinct through repeated saves', () => {
+  assert.equal(SAVE_KEY, 'citymanager.save.v5'); assert.equal(AGRICULTURE_SAVE_KEY, 'citymanager.save.v4');
+  const s = memory({ [AGRICULTURE_SAVE_KEY]: agriculture, [WORKER_SAVE_KEY]: worker });
+  assert.deepEqual(saveStoredCity(s, current, agriculture), { backup: AGRICULTURE_BACKUP_KEY });
+  assert.equal(s.data.get(AGRICULTURE_SAVE_KEY), agriculture); assert.equal(s.data.get(AGRICULTURE_BACKUP_KEY), agriculture);
+  assert.equal(s.data.get(SAVE_KEY), current); assert.deepEqual(readStoredCity(s, 'backup'), { raw: agriculture, key: AGRICULTURE_BACKUP_KEY });
+  assert.deepEqual(s.writes, [AGRICULTURE_BACKUP_KEY, LATEST_BACKUP_KEY, SAVE_KEY]);
+  saveStoredCity(s, current, agriculture); assert.deepEqual(s.writes, [AGRICULTURE_BACKUP_KEY, LATEST_BACKUP_KEY, SAVE_KEY, SAVE_KEY]);
+  assert.equal(s.data.get(WORKER_SAVE_KEY), worker);
+});
+
+test('v4 backup quota and full-slot failure retain original bytes and the previous v5 city', () => {
+  for (const blocked of [AGRICULTURE_BACKUP_KEY, LATEST_BACKUP_KEY, SAVE_KEY]) {
+    const s = memory({ [SAVE_KEY]: 'previous-v5', [AGRICULTURE_SAVE_KEY]: agriculture });
+    assert.throws(() => saveStoredCity({ getItem: s.getItem, setItem: (key, value) => { if (key === blocked) throw Error('quota'); s.setItem(key, value); } }, current, agriculture), /quota/);
+    assert.equal(s.data.get(SAVE_KEY), 'previous-v5'); assert.equal(s.data.get(AGRICULTURE_SAVE_KEY), agriculture);
+  }
+  const s = memory({ [SAVE_KEY]: 'previous-v5', [AGRICULTURE_SAVE_KEY]: agriculture });
+  for (let i = 0; i < 8; i++) s.data.set(i ? `${AGRICULTURE_BACKUP_KEY}.${i}` : AGRICULTURE_BACKUP_KEY, JSON.stringify({ version: 4, tick: i }));
+  const before = [...s.data]; assert.throws(() => saveStoredCity(s, current, agriculture), /full/); assert.deepEqual([...s.data], before);
+  const exact = `${AGRICULTURE_BACKUP_KEY}.5`; s.data.set(exact, agriculture);
+  assert.deepEqual(saveStoredCity(s, current, agriculture), { backup: exact }); assert.equal(s.data.get(AGRICULTURE_SAVE_KEY), agriculture);
 });

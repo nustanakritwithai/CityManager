@@ -1,6 +1,4 @@
-/* Two additional land-use tools keep the existing 44px touch dock and scrolling. */
+/* Agriculture is a land-use tool; markets use the existing commercial tool. */
 .zone-f,.demand-item.f{color:#badb78}
-.zone-t,.demand-item.t{color:#8fd8cd}
 button.zone-f.active{color:#badb78;border-color:#badb7899;background:#badb7818}
-button.zone-t.active{color:#8fd8cd;border-color:#8fd8cd99;background:#8fd8cd18}
 #growth-summary .demand-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,96px),1fr))}

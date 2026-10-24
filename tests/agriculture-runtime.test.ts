@@ -9,7 +9,7 @@ function fixture() {
   const seed = 61025, resources = createResourceMap(seed), farmCell = resources.fertility.findIndex((n, i) => n === 100 && i > 10);
   assert.ok(farmCell > 10);
   const c: City = {
-    version: 4, rulesVersion: 'agriculture-1', seed, rng: seed, tick: 1, nextId: 103,
+    version: 5, rulesVersion: 'commercial-1', seed, rng: seed, tick: 1, nextId: 103,
     migration: { arrivals: 2, legacyHouseholds: 0 }, agricultureStartTick: 0, resources,
     cells: Array.from({ length: 576 }, () => ({ road: false, zone: null, building: null })),
     buildings: [
@@ -17,13 +17,13 @@ function fixture() {
       { id: 2, cell: 2, zone: 'R', housingType: 'cottage', level: 1, age: 1 },
       { id: 3, cell: farmCell, zone: 'F', level: 1, age: 1 },
       { id: 4, cell: 4, zone: 'I', level: 1, age: 1 },
-      { id: 5, cell: 5, zone: 'T', level: 1, age: 1 },
+      { id: 5, cell: 5, zone: 'C', level: 1, age: 1 },
     ],
     households: [
       { id: 101, home: 1, members: 3, workforce: 2, dependents: 1, workerSkills: { general: 1, manufacturing: 1, retail: 0 }, skillSource: 'arrival-profile', profile: 'family', origin: 'arrival', wallet: 'household:101', lastPurchaseTick: -1, needs: 2 },
       { id: 102, home: 2, members: 1, workforce: 1, dependents: 0, workerSkills: { general: 1, manufacturing: 0, retail: 0 }, skillSource: 'arrival-profile', profile: 'single-worker', origin: 'arrival', wallet: 'household:102', lastPurchaseTick: -1, needs: 3 },
     ],
-    firms: (['F', 'I', 'T'] as const).map((zone, i) => ({ id: 11 + i, building: 3 + i, zone, wallet: `firm:${11 + i}`, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: 0, owner: zone === 'T' ? { householdId: 102, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null, profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 })),
+    firms: (['F', 'I', 'C'] as const).map((zone, i) => ({ ...(zone === 'C' ? { commercialKind: 'market' as const } : {}), id: 11 + i, building: 3 + i, zone, wallet: `firm:${11 + i}`, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: 0, owner: zone === 'C' ? { householdId: 102, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null, profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 })),
     employment: [
       { householdId: 101, firmId: 11, occupation: 'manufacturing', rank: 'entry', skill: 'manufacturing', workers: 1 },
       { householdId: 101, firmId: 12, occupation: 'manufacturing', rank: 'entry', skill: 'general', workers: 1 },
@@ -37,7 +37,7 @@ function fixture() {
   const hooks: AgricultureHooks = {
     connected: cell => !disconnected.has(cell),
     workers: f => c.employment.filter(e => e.firmId === f.id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.firmId === f.id).length,
-    spendable: f => Math.max(0, c.accounts[f.wallet] - Object.values(f.workDays).reduce((n, days) => n + days * salaries[f.zone] / 30, 0)),
+    spendable: f => Math.max(0, c.accounts[f.wallet] - Object.values(f.workDays).reduce((n, days) => n + days * (f.commercialKind === 'market' ? 0 : salaries[f.zone]) / 30, 0)),
     transfer: (from, to, amount, reason, book = false) => {
       assert.equal(book, false, 'Runtime capitalizes crop purchases and books seller only');
       const source = c.firms.find(f => f.wallet === from), available = from === 'outside' ? amount : source ? hooks.spendable(source) : c.accounts[from];
@@ -46,7 +46,7 @@ function fixture() {
     },
     goodsTransfer: (from, to, quantity, reason) => { c.goodsLedger.push({ tick: c.tick, from, to, quantity, reason }); },
   };
-  for (const f of c.firms.filter(f => f.zone !== 'T')) { hooks.transfer('outside', f.wallet, 300000, 'Test outside equity'); hooks.transfer(f.wallet, 'construction', 40000, 'Test construction'); }
+  for (const f of c.firms.filter(f => f.commercialKind !== 'market')) { hooks.transfer('outside', f.wallet, 300000, 'Test outside equity'); hooks.transfer(f.wallet, 'construction', 40000, 'Test construction'); }
   for (const h of c.households) hooks.transfer('outside', h.wallet, 150000, 'Test household opening funding');
   hooks.transfer('household:102', 'firm:13', 60000, 'Test real owner capital'); hooks.transfer('firm:13', 'construction', 10000, 'Test market construction');
   return { c, hooks, disconnected, farm: c.firms[0], factory: c.firms[1], trader: c.firms[2], h: c.households[0], owner: c.households[1] };

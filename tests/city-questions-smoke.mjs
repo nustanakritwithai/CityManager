@@ -4,7 +4,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, housingCapacity, bulldoze, summary, firmWorkerCount } from '../src/sim.ts';
+import { isMarket, isRetail, createCity, step, serialize, housingCapacity, bulldoze, summary, firmWorkerCount } from '../src/sim.ts';
+import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
+import { deserialize } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { buildLocalSignalReport } from '../src/signal-data.ts';
 
@@ -153,7 +155,9 @@ try {
   await expectFact('house.id', home.id, 'รหัส'); await expectFact('house.capacity-people', housingCapacity(home).persons, 'คน');
   checks.push('Empty entity selector becomes usable when actual houses grow on the same city object; no phantom entity or mutation');
 
-  const mature = createCity(61025); for (let n = 0; n < 90; n++) step(mature);
+  // Preserve real legacy-retail and market fact coverage beside the merged C taxonomy.
+  const priorMature = createCityV4(61025); for (let n = 0; n < 90; n++) stepV4(priorMature);
+  const mature = deserialize(serializeV4(priorMature));
   assert(mature.households.length > 0 && mature.firms.length > 0, 'Current deterministic fixture has actual households and establishments');
   await loadCity(mature);
   assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'empty', 'City replacement clears previous answer');
@@ -169,16 +173,17 @@ try {
   await expectFact('city.workforce.legacy-assumed', mature.households.filter(item => item.skillSource === 'legacy-assumed').reduce((n, item) => n + item.workforce, 0), 'คน');
   assert(await evaluate('!!document.querySelector("[data-missing-id=\\"missing.city.workforce.education\\"]")'), 'Missing education is explicit rather than inferred from worker pools');
   await ask('city.businesses'); await expectFact('city.businesses.total', mature.firms.length, 'แห่ง'); await expectFact('city.businesses.workers', employed, 'คน');
-  for (const [zone, fact] of [['C', 'commercial'], ['I', 'industrial'], ['F', 'farms'], ['T', 'raw-markets']]) await expectFact(`city.businesses.${fact}`, mature.firms.filter(item => item.zone === zone).length, 'แห่ง');
+  for (const [zone, fact] of [['C', 'commercial'], ['I', 'industrial'], ['F', 'farms']]) await expectFact(`city.businesses.${fact}`, mature.firms.filter(item => item.zone === zone).length, 'แห่ง');
+  await expectFact('city.businesses.raw-markets', mature.firms.filter(isMarket).length, 'แห่ง');
   await ask('house.detail', house.id); await expectFact('house.occupied-people', mature.households.filter(item => item.home === house.id).reduce((n, item) => n + item.members, 0), 'คน');
-  assert(mature.firms.some(item => item.zone === 'F') && mature.firms.some(item => item.zone === 'T'), 'The actual fixture includes agricultural and owner-operated market facts');
+  assert(mature.firms.some(item => item.zone === 'F') && mature.firms.some(item => isMarket(item)), 'The actual fixture includes agricultural and owner-operated market facts');
   for (const business of mature.firms) {
     await ask('business.detail', business.id);
     await expectFact('business.building', business.building, 'รหัส');
-    await expectFact('business.zone', { C: 'พาณิชย์ (C)', I: 'อุตสาหกรรม (I)', F: 'ฟาร์ม (F)', T: 'ตลาดวัตถุดิบ (T)' }[business.zone], '');
+    await expectFact('business.zone', { C: 'พาณิชย์ (C)', I: 'อุตสาหกรรม (I)', F: 'ฟาร์ม (F)' }[business.zone], '');
     await expectFact('business.workers', firmWorkerCount(mature, business.id), 'คน');
     await expectFact('business.inventory', business.inventory, 'หน่วยสินค้า');
-    if (business.zone === 'C') {
+    if (isRetail(business)) {
       // Finished-goods retailers never hold crops; their answer intentionally omits crop facts.
       assert.equal(business.cropInventory, 0); assert.equal(business.cropCost, 0);
       const selector = '[data-fact-id="business.crop-inventory"],[data-fact-id="business.crop-cost"]';
@@ -187,7 +192,7 @@ try {
       await expectFact('business.crop-inventory', business.cropInventory, 'ล็อตพืชผล');
       await expectFact('business.crop-cost', business.cropCost, 'สตางค์');
     }
-    if (business.zone === 'T' && business.owner !== null) await expectFact('business.owner-workers', mature.ownerLabor.filter(item => item.firmId === business.id).reduce((n, item) => n + item.workers, 0), 'คน');
+    if (isMarket(business) && business.owner !== null) await expectFact('business.owner-workers', mature.ownerLabor.filter(item => item.firmId === business.id).reduce((n, item) => n + item.workers, 0), 'คน');
   }
   await ask('business.detail', firm.id);
   await button('[data-fact-id="business.id"] .city-question-evidence>summary');

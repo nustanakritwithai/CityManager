@@ -127,7 +127,7 @@ test('context presenters leave frozen source data and RNG unchanged and report a
 
 test('migrated legacy people are explicitly assumed without rewriting financial or goods history', () => {
   const legacy = JSON.parse(legacyJson), city = populated(), overview = cityOverview(city);
-  assert.equal(city.version, 4);
+  assert.equal(city.version, 5);
   assert.ok(city.households.every(household => household.origin === 'legacy-v1' && household.profile === 'legacy-worker' && household.members === 1 && household.workforce === 1 && household.dependents === 0));
   assert.equal(overview.population, legacy.households.length);
   assert.equal(overview.households, legacy.households.length);
@@ -284,7 +284,7 @@ test('self-employed owner labor shares the same household skill limits and is ne
   // Presentation fixture for the newly stored role. The authoritative simulation
   // tests own startup financing; no fictitious wage or transfer is added here.
   const marketId = city.nextId + 10;
-  city.firms.push({ ...shop, id: marketId, zone: 'T', wallet: `firm:${marketId}`, workDays: {}, inventory: 0, cropInventory: 3, cropCost: 450, owner: { householdId: household.id, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } });
+  city.firms.push({ ...shop, id: marketId, zone: 'C', commercialKind: 'market', wallet: `firm:${marketId}`, workDays: {}, inventory: 0, cropInventory: 3, cropCost: 450, owner: { householdId: household.id, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } });
   city.employment = city.employment.filter(value => value.householdId !== household.id || value.firmId === factory.id);
   city.ownerLabor = [{ householdId: household.id, firmId: marketId, skill: 'general', workers: 1 }];
   const before = JSON.stringify(city), data = householdLabor(city, household.id)!;

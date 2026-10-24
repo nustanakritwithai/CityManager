@@ -1,5 +1,5 @@
 /** Read-only card projections. Wallet flows are cash movements, never a profit-and-loss claim. */
-import { MONTH, housingCapacity, type City, type Building, type Household, type Firm } from './sim.ts';
+import { MONTH, housingCapacity, isMarket, type City, type Building, type Household, type Firm } from './sim.ts';
 
 export type BuildingCardKind = 'house' | 'shop' | 'market' | 'factory' | 'farm';
 export type CardKind = BuildingCardKind | 'household';
@@ -143,8 +143,9 @@ export function buildingCardData(city: City, buildingId: number): BuildingCardDa
     try { const capacity = housingCapacity(building); householdCapacity = currentCount(capacity.households); personCapacity = currentCount(capacity.persons); } catch { data.missing.push('occupancy.capacity'); }
     return { ...data, kind: 'house', scope: 'current-linked-household-wallets', households: children, occupancy: { households: residents.length, persons: total(residents.map(h => h.members)), householdCapacity, personCapacity } };
   }
-  const kinds = { C: 'shop', T: 'market', I: 'factory', F: 'farm' } as const, firm = city.firms.find(f => f.building === building.id && f.zone === building.zone) ?? null;
-  const kind = kinds[building.zone], data = common(context, kind, { buildingId: building.id, firmId: firm?.id ?? null, householdId: null, cell: building.cell }, firm ? [firm.wallet] : null, null, firm);
+  const firm = city.firms.find(f => f.building === building.id && f.zone === building.zone) ?? null;
+  const kind = building.zone === 'C' ? firm && isMarket(firm) ? 'market' : 'shop' : building.zone === 'I' ? 'factory' : 'farm';
+  const data = common(context, kind, { buildingId: building.id, firmId: firm?.id ?? null, householdId: null, cell: building.cell }, firm ? [firm.wallet] : null, null, firm);
   if (!firm) data.missing.push('firm');
   return { ...data, kind, scope: 'establishment-wallet' };
 }

@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, type City } from '../src/sim.ts';
+import { createCity, step, serialize, deserialize, isMarket, isRetail, type City } from '../src/sim.ts';
 import { buildingCardData, householdCardData, cardWindow } from '../src/building-card-data.ts';
 
-const actual = createCity(61025);
-for (let day = 0; day < 180; day++) step(actual);
+import { createCity as createV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
+const previous = createV4(61025);
+for (let day = 0; day < 180; day++) stepV4(previous);
+const actual = deserialize(serializeV4(previous));
 const snapshot = serialize(actual), city = (): City => JSON.parse(snapshot);
 function freeze(value: unknown): void {
   if (value && typeof value === 'object') { Object.freeze(value); for (const child of Object.values(value)) freeze(child); }
@@ -67,8 +69,8 @@ test('house combined wallet boundary excludes internal family transfers while ea
 
 test('owner capital is real cash flow rather than operating profit or property value', () => {
   const c = createCity(61025);
-  while (!c.firms.some(f => f.zone === 'T') && c.tick < 180) step(c);
-  const f = c.firms.find(f => f.zone === 'T')!, card = buildingCardData(c, f.building)!;
+  while (!c.firms.some(f => isMarket(f)) && c.tick < 180) step(c);
+  const f = c.firms.find(f => isMarket(f))!, card = buildingCardData(c, f.building)!;
   assert.equal(card.kind, 'market'); assert.equal(card.cash.basis, 'wallet-boundary');
   assert.equal(card.cash.inflow, 60000); assert.equal(card.cash.outflow, 10000); assert.equal(card.cash.current, 50000);
   assert.equal(f.profit, 0); assert.equal(f.monthlyRevenue, 0); assert.equal(f.monthlyExpense, 0);
@@ -90,7 +92,7 @@ test('today output comes from actual physical journals, while stock and workforc
 });
 
 test('prices require actual unambiguous paired cash and goods/crop journals, not constants or guessed history', () => {
-  const c = city(), shop = c.firms.find(f => f.zone === 'C')!, farm = c.firms.find(f => f.zone === 'F')!, trader = c.firms.find(f => f.zone === 'T')!;
+  const c = city(), shop = c.firms.find(isRetail)!, farm = c.firms.find(f => f.zone === 'F')!, trader = c.firms.find(f => isMarket(f))!;
   assert.equal(buildingCardData(c, shop.building)!.prices.goodsSell.unitSatang, 800);
   assert.equal(buildingCardData(c, farm.building)!.prices.cropsSell.unitSatang, 150);
   assert.equal(buildingCardData(c, trader.building)!.prices.cropsBuy.unitSatang, 150);
