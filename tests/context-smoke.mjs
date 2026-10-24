@@ -1,16 +1,23 @@
 // Contextual-inspector acceptance using installed Edge, real input and valid saves.
 // Run sequentially with other browser scripts: this test owns CDP port 9349.
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, summary, MONTH, WAGES } from '../src/sim.ts';
+import { createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/context-preview');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
 const checks = [], screenshots = [], errors = [], expectedErrors = [], layouts = [];
-const fixture = createCity(61025); for (let day = 0; day < 65; day++) step(fixture);
+const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
+const legacySha256 = createHash('sha256').update(legacyRaw).digest('hex');
+assert.equal(legacySha256, '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
+const fixture = deserialize(legacyRaw); assert.equal(fixture.version, 2);
+for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(fixture[key], legacy[key], `Migration preserves ${key}`);
+for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], legacy[key], `Migration preserves ${key}`);
+for (const old of legacy.firms) { const firm = fixture.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
 const fixtureJson = serialize(fixture), emptyJson = serialize(createCity(91));
 assert.deepEqual(deserialize(fixtureJson), fixture);
 const homes = fixture.buildings.filter(b => b.zone === 'R').slice(0, 2), firms = fixture.firms.slice(0, 2);
@@ -63,7 +70,7 @@ async function openPage(page) {
 async function load(json) {
   await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
-  await evaluate(`localStorage.setItem('citymanager.save.v1',${JSON.stringify(json)})`); await button('#load');
+  await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(json)})`); await button('#load');
   const expected = JSON.parse(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
 }
@@ -103,15 +110,19 @@ async function ownFlows(wallet) {
 async function household(household, source) {
   await button(`#entity-content [data-household-id="${household.id}"]`);
   await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${household.id}'`);
-  await metrics('#entity-content', { cash: fixture.accounts[household.wallet], home: household.home, employer: household.employer === null ? 'null' : household.employer, needs: household.needs, 'last-purchase': household.lastPurchaseTick });
+  const allocations = employmentForHousehold(fixture, household.id), employed = householdWorkerCount(fixture, household.id);
+  await metrics('#entity-content', { cash: fixture.accounts[household.wallet], home: household.home === null ? 'null' : household.home, members: household.members, workforce: household.workforce, dependents: household.dependents, employed, unemployed: household.workforce - employed, employers: new Set(allocations.map(a => a.firmId)).size, needs: household.needs, 'last-purchase': household.lastPurchaseTick });
+  assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-employment-row")].map(e=>({householdId:Number(e.dataset.householdId),firmId:Number(e.dataset.firmId),workers:Number(e.dataset.workers),occupation:e.dataset.occupation,rank:e.dataset.rank}))'), allocations);
+  assert.equal(await visible('#entity-content .cx-legacy-assumption'), household.origin === 'legacy-v1');
   assert.equal(await evaluate('document.querySelector("#entity-content").dataset.wallet'), household.wallet); await ownFlows(household.wallet);
   await button('#submenu-back'); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${source.id}'`);
 }
 async function firm(firm, close = true) {
   const building = fixture.buildings.find(b => b.id === firm.building); await place(building, close);
   const reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * WAGES[firm.zone] / MONTH, 0);
-  await metrics('#entity-content', { cash: fixture.accounts[firm.wallet], reserved, spendable: Math.max(0, fixture.accounts[firm.wallet] - reserved), stock: firm.inventory, workers: firm.employees.length, profit: firm.lastMonthProfit });
-  const employees = await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'); assert.deepEqual(employees, firm.employees); await ownFlows(firm.wallet); return building;
+  const allocations = employmentForFirm(fixture, firm.id), householdIds = [...new Set(allocations.map(a => a.householdId))];
+  await metrics('#entity-content', { cash: fixture.accounts[firm.wallet], reserved, spendable: Math.max(0, fixture.accounts[firm.wallet] - reserved), stock: firm.inventory, workers: firmWorkerCount(fixture, firm.id), 'household-count': householdIds.length, profit: firm.lastMonthProfit });
+  const employees = await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'); assert.deepEqual(employees, householdIds); await ownFlows(firm.wallet); return building;
 }
 async function submenu(selector, page) { await openPage(page); if ((await route()).submenu) await button('#submenu-back'); await button(`${selector}>summary`); await until(`document.querySelector('#inspector').dataset.submenu===${JSON.stringify(selector.slice(1))}`); }
 async function assertLayout() {
@@ -163,16 +174,23 @@ try {
   }
   checks.push('Two real 200ms household-link presses survive live 10x refreshes; fixture restored before paused data assertions');
 
-  for (const home of homes) { await place(home); await metrics('#entity-content', { level: home.level, age: home.age, households: fixture.households.filter(h => h.home === home.id).length }); assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'), fixture.households.filter(h => h.home === home.id).map(h => h.id)); }
+  for (const home of homes) {
+    await place(home); const occupied = homeOccupancy(fixture, home.id), capacity = housingCapacity(home);
+    await metrics('#entity-content', { level: home.level, age: home.age, households: occupied.households, persons: occupied.persons, 'vacant-households': capacity.households - occupied.households, 'vacant-persons': capacity.persons - occupied.persons });
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'), fixture.households.filter(h => h.home === home.id).map(h => h.id));
+    assert.equal(await evaluate('Number(document.querySelector("#entity-content [data-context-metric=households]").dataset.capacity)'), capacity.households);
+    assert.equal(await evaluate('Number(document.querySelector("#entity-content [data-context-metric=persons]").dataset.capacity)'), capacity.persons);
+  }
   await place(homes[0]); await place(homes[1], false); checks.push('House A/B isolate actual occupants; another map selection replaces the open entity scope');
   await place(homes[0]); await household(homeHousehold, homes[0]); await button(`#entity-content [data-household-id="${homeHousehold.id}"]`); await key('Escape'); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${homes[0].id}'`); await button(`#entity-content [data-household-id="${homeHousehold.id}"]`); await place(homes[1], false); await button('#submenu-back'); assert.notEqual((await route()).open, 'true'); checks.push('Household cash/job/home/needs and every scoped journal row match state; Back/Escape return to source home and map selection clears household scope');
-  for (const company of firms) { const building = await firm(company); if (company.employees.length) await household(fixture.households.find(h => h.id === company.employees[0]), building); }
+  for (const company of firms) { const building = await firm(company), allocation = employmentForFirm(fixture, company.id)[0]; if (allocation) await household(fixture.households.find(h => h.id === allocation.householdId), building); }
   checks.push('Firm A/B cash, payroll reserve, stock, workers, profit and scoped money/goods are exact; employee Back returns to source firm');
 
   await openPage('city'); const fromTick = Math.max(0, fixture.tick - MONTH + 1), period = e => e.tick >= fromTick && e.tick <= fixture.tick;
   const income = fixture.ledger.filter(e => period(e) && e.to === 'treasury').reduce((n, e) => n + e.amount, 0), expense = fixture.ledger.filter(e => period(e) && e.from === 'treasury').reduce((n, e) => n + e.amount, 0);
   const goods = reason => fixture.goodsLedger.filter(e => period(e) && e.reason === reason).reduce((n, e) => n + e.quantity, 0);
-  await metrics('#city-overview', { treasury: fixture.accounts.treasury, households: fixture.households.length, employed: fixture.households.filter(h => h.employer !== null).length, jobs: summary(fixture).jobs, firms: fixture.firms.length, inventory: fixture.firms.reduce((n, f) => n + f.inventory, 0), income, expense, net: income - expense, produced: goods('Daily worker production'), imported: goods('Imported shop stock'), consumed: goods('Household final consumption'), exported: goods('Exported goods') });
+  const totals = summary(fixture), occupiedHomes = fixture.households.filter(h => h.home !== null);
+  await metrics('#city-overview', { treasury: fixture.accounts.treasury, population: totals.population, households: totals.households, workforce: totals.workforce, dependents: totals.dependents, employed: totals.employed, unemployed: totals.unemployed, homeless: totals.homeless, 'homeless-persons': fixture.households.filter(h => h.home === null).reduce((n, h) => n + h.members, 0), 'home-slots': totals.homeSlots, 'person-capacity': totals.personCapacity, 'occupied-home-slots': occupiedHomes.length, 'occupied-persons': occupiedHomes.reduce((n, h) => n + h.members, 0), 'housing-vacancy': totals.homeSlots - occupiedHomes.length, 'person-vacancy': totals.personCapacity - occupiedHomes.reduce((n, h) => n + h.members, 0), jobs: totals.jobs, firms: fixture.firms.length, inventory: fixture.firms.reduce((n, f) => n + f.inventory, 0), income, expense, net: income - expense, produced: goods('Daily worker production'), imported: goods('Imported shop stock'), consumed: goods('Household final consumption'), exported: goods('Exported goods') });
   assert.deepEqual(await evaluate('({from:Number(document.querySelector("#city-overview").dataset.fromTick),to:Number(document.querySelector("#city-overview").dataset.toTick)})'), { from: fromTick, to: fixture.tick });
   for (const [kind, section, root, count] of [['money', '#money-section', '#ledger', 12], ['goods', '#goods-section', '#goods-ledger', 10]]) { await submenu(section, 'city'); assert.deepEqual(await rows(`${root} .sm-flow-card`), expectedRows(kind).slice(0, count)); await button('#submenu-back'); assert.equal((await route()).page, 'city'); assert.equal((await route()).open, 'true'); }
   await submenu('#accounts-section', 'city'); const wallets = await evaluate('Object.fromEntries([...document.querySelectorAll("#accounts .sm-wallet-card")].map(e=>[e.dataset.id,Number(e.dataset.balance)]))'); assert.deepEqual(wallets, fixture.accounts); await button('#submenu-back'); checks.push('Only city dashboard exposes exact whole-city journals/wallets and current stocks versus inclusive 30-day flows');
@@ -183,7 +201,7 @@ try {
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: projection.x, y: projection.y, deltaX: 0, deltaY: -180 }); assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await closePanel(); await key('ArrowRight'); await until(`JSON.stringify(window.cityManager.cellScreen(${homes[0].cell}))!==${JSON.stringify(JSON.stringify(projection))}`); assert.notDeepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await button('[data-camera="reset"]'); assert.deepEqual(await state(), fixture); checks.push('Open inspector disables camera buttons and ignores wheel/arrows/q/e; closing restores camera input without model changes');
 
   await place(homes[0]); await button('[data-tool="bulldoze"]'); await cell(homes[0].cell, false); const demolished = await state(); assert.equal(demolished.buildings.some(b => b.id === homes[0].id), false); assert.notEqual((await route()).id, String(homes[0].id)); assert.deepEqual(deserialize(JSON.stringify(demolished)), demolished);
-  await openPage('game'); await button('#save'); assert.deepEqual(JSON.parse(await evaluate('localStorage.getItem("citymanager.save.v1")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
+  await openPage('game'); await button('#save'); assert.deepEqual(JSON.parse(await evaluate('localStorage.getItem("citymanager.save.v2")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
 
   await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
   await place(homes[0]); await assertLayout(); await screenshot('phone-house.png'); await evaluate('document.querySelector("#entity-content .cx-household-list").scrollIntoView({block:"start"})'); await screenshot('phone-house-members.png',false); await button(`#entity-content [data-household-id="${homeHousehold.id}"]`); await assertLayout(); await screenshot('phone-household.png');

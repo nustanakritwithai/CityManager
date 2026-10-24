@@ -1,9 +1,18 @@
 // Small dependency-free CDP smoke test against the installed Microsoft Edge.
 // Runs real browser/WebGL; emulated mobile metrics do not establish device QA.
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
+import { deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+
+const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
+assert.equal(createHash('sha256').update(legacyRaw).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
+const fixture = deserialize(legacyRaw), fixtureJson = serialize(fixture);
+assert.equal(fixture.version, 2);
+for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(fixture[key], legacy[key]);
+for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], legacy[key]);
 
 const root = process.cwd(), output = resolve(root, '.test-output');
 const screenshots = resolve(root, process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/screenshots');
@@ -155,12 +164,14 @@ try {
   await game(); await button('#load'); assert.deepEqual(await state(), saved); assert.equal(await paused(), true); await closeInspector();
   checks.push('Save/load round trip restores exact paused simulation');
   await button('[data-camera="reset"]');
+  await game(); await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
   await button('[data-speed="10"]'); await button('#pause');
-  await until('JSON.parse(window.cityManager.snapshot()).tick>=65', 15000);
+  await until('JSON.parse(window.cityManager.snapshot()).tick>=90', 15000);
   await button('#pause'); const grown = await state();
-  assert.ok(grown.buildings.length > 0); assert.ok(grown.ledger.some(e => e.reason.includes('purchase'))); assert.ok(grown.ledger.some(e => e.reason === 'Monthly wages'));
+  assert.ok(grown.buildings.length > 0); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason.includes('purchase'))); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason === 'Monthly wages'));
+  await game(); await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
   if (process.env.CITYMANAGER_BLOCK_MODELS !== '1') assert.equal((await evaluate('window.cityManager.visuals()')).failed.length, 0, 'Models instantiate successfully after growth');
-  await screenshot('desktop-city.png'); checks.push('10x growth, actual household purchases and monthly wages');
+  await screenshot('desktop-city.png'); checks.push('10x real purchases and monthly wages after frozen legacy migration; identical paused financial/spatial fixture restored for GUI checks');
   if (process.env.CITYMANAGER_VISUAL_PREVIEW === '1') {
     if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector'); await button('[data-camera="zoom-in"]'); await button('[data-camera="zoom-in"]');
     await screenshot('desktop-closeup.png'); await button('[data-camera="reset"]');
@@ -257,7 +268,7 @@ try {
   const firmBuilding = beforeMobileSelection.buildings.find(b => b.id === firm.building);
   await cell(firmBuilding.cell);
   assert.equal(await evaluate('document.querySelector("#inspector-body").scrollTop'), 0, 'Selecting another place starts its card at the top');
-  for (const [key, value] of [['cash', beforeMobileSelection.accounts[firm.wallet]], ['workers', firm.employees.length], ['stock', firm.inventory], ['profit', firm.lastMonthProfit]]) {
+  for (const [key, value] of [['cash', beforeMobileSelection.accounts[firm.wallet]], ['workers', firmWorkerCount(beforeMobileSelection, firm.id)], ['stock', firm.inventory], ['profit', firm.lastMonthProfit]]) {
     assert.equal(await evaluate(`Number(document.querySelector('[data-context-metric="${key}"]').dataset.value)`), value, `${key} shows actual firm state`);
   }
   const reserve = Object.values(firm.workDays).reduce((n, days) => n + days * (firm.zone === 'I' ? 60000 : 42000) / 30, 0);
