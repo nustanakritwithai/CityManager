@@ -27,6 +27,7 @@ const selection = snapshot => {
   return { observationIds: c.observations.slice(0, 3).map(row => row.id), hypothesisIds: c.hypotheses.slice(0, 2).map(row => row.id), checkIds: c.checks.slice(0, 3).map(row => row.id) };
 };
 const upstream = value => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(value) } }] }));
+const upstreamContent = content => new Response(JSON.stringify({ choices: [{ message: { content } }] }));
 const enabled = extra => ({ entityEnabled: true, upstreamEnabled: true, apiKey: 'non-deployable-entity-test-placeholder', ...extra });
 const freeze = value => { if (value && typeof value === 'object') { Object.freeze(value); Object.values(value).forEach(freeze); } return value; };
 
@@ -51,6 +52,7 @@ test('the fixed provider receives a minimal grounded catalog and never local ide
     assert.equal(options.headers.Authorization, 'Bearer non-deployable-entity-test-placeholder'); assert(options.signal instanceof AbortSignal);
     const body = JSON.parse(options.body);
     assert.equal(body.model, ENTITY_MODEL); assert.equal(body.max_tokens, 900); assert.equal(body.temperature, 0); assert.equal(body.stream, false); assert.equal(body.tools, undefined);
+    assert.equal(body.response_format, undefined);
     const payload = JSON.parse(body.messages[1].content);
     assert.deepEqual(Object.keys(payload), ['kind', 'tick', 'window', 'facts', 'missing', 'candidates']);
     assert.deepEqual(payload, entityProviderInput(input.snapshot));
@@ -60,6 +62,44 @@ test('the fixed provider receives a minimal grounded catalog and never local ide
   } }));
   assert.equal(calls, 1); assert.equal(result.mode, 'ai'); assert(acceptEntityExplanation(result, buildLocalEntityExplanation(input.snapshot)));
   assert.equal(JSON.stringify(input), before); assert(!JSON.stringify(result).includes('non-deployable-entity-test-placeholder'));
+});
+
+test('a single whole-response json or plain fence retains the validated AI selection', async () => {
+  const input = fixture(), valid = selection(input.snapshot), original = JSON.stringify(input);
+  let calls = 0;
+  for (const content of [
+    `\n\t\`\`\`json\n${JSON.stringify(valid)}\n\`\`\`\n`,
+    `\`\`\`\r\n${JSON.stringify(valid, null, 2)}\r\n\`\`\``,
+  ]) {
+    const result = await buildEntityReport(input, enabled({ fetchImpl: async () => { calls++; return upstreamContent(content); } }));
+    assert.equal(result.mode, 'ai'); assert.deepEqual(result.report, valid);
+    assert(acceptEntityExplanation(result, buildLocalEntityExplanation(input.snapshot)));
+  }
+  assert.equal(calls, 2); assert.equal(JSON.stringify(input), original);
+});
+
+test('fenced output never permits prose, unsupported IDs, extra keys or missing eligible selections', async () => {
+  const input = fixture(), valid = selection(input.snapshot), local = buildLocalEntityExplanation(input.snapshot);
+  const fenced = value => `\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
+  const variants = [
+    `Explanation:\n${fenced(valid)}`,
+    `${fenced(valid)}\nAdditional advice`,
+    `${fenced(valid)}\n${fenced(valid)}`,
+    fenced({ ...valid, observationIds: ['observed.invented'] }),
+    fenced({ ...valid, observationIds: ['cash.current'] }),
+    fenced({ ...valid, hypothesisIds: ['invented.cause'] }),
+    fenced({ ...valid, checkIds: ['invented.check'] }),
+    fenced({ ...valid, explanation: 'Unverified causal narrative' }),
+    fenced({ ...valid, observationIds: [] }),
+    fenced({ ...valid, checkIds: [] }),
+    `\`\`\`javascript\n${JSON.stringify(valid)}\n\`\`\``,
+  ];
+  let calls = 0;
+  for (const content of variants) {
+    const result = await buildEntityReport(input, enabled({ fetchImpl: async () => { calls++; return upstreamContent(content); } }));
+    assert.deepEqual(result, local);
+  }
+  assert.equal(calls, variants.length);
 });
 
 test('insufficient evidence stays local without a paid/provider attempt', async () => {

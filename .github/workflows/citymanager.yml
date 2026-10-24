@@ -50,6 +50,8 @@ jobs:
         run: npm run assets:verify
 
       - name: Type check and build static game
+        env:
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
         run: npm run build
 
       - name: Verify the built game in installed Edge
