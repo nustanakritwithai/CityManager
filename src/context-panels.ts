@@ -21,9 +21,9 @@ function clearHeldRender() {
   heldPointers.clear(); heldKeys.clear(); queuedRequest = null; releaseBarrier = false;
   if (flushTimer !== null) clearTimeout(flushTimer); flushTimer = null;
 }
-function flushAfterActivation() {
-  // pointerup/keyup precedes native click. Keep this barrier through that click,
-  // then flush in the next task (a microtask could still remove the pressed node).
+function flushAfterActivation(waitForClick = false) {
+  // A touch compatibility click may follow pointerup in a later task. Retain
+  // its node until the trusted click, then flush after native activation.
   releaseBarrier = true;
   if (flushTimer !== null) clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
@@ -31,7 +31,7 @@ function flushAfterActivation() {
     if (heldPointers.size || heldKeys.size) return;
     const request = queuedRequest; queuedRequest = null;
     if (request && request === latestRequest) renderContext(request.city, request.selection, request.onHousehold);
-  }, 0);
+  }, waitForClick ? 750 : 0);
 }
 function installInputGuard(host: HTMLElement) {
   if (guardedHost === host) return; guardedHost = host; clearHeldRender(); renderedRevision = '';
@@ -44,10 +44,11 @@ function installInputGuard(host: HTMLElement) {
   host.addEventListener('keydown', event => {
     if (event.isTrusted && (event.key === ' ' || event.key === 'Enter') && event.target instanceof HTMLElement && event.target.closest('button, summary')) heldKeys.set(event.key, event.target);
   }, true);
-  document.addEventListener('pointerup', event => { if (heldPointers.delete(event.pointerId)) flushAfterActivation(); }, true);
+  document.addEventListener('pointerup', event => { if (heldPointers.delete(event.pointerId)) flushAfterActivation(true); }, true);
   document.addEventListener('pointercancel', event => { if (heldPointers.delete(event.pointerId)) flushAfterActivation(); }, true);
-  document.addEventListener('keyup', event => { if (heldKeys.delete(event.key)) flushAfterActivation(); }, true);
-  window.addEventListener('blur', () => { if (heldPointers.size || heldKeys.size) { heldPointers.clear(); heldKeys.clear(); flushAfterActivation(); } });
+  document.addEventListener('keyup', event => { if (heldKeys.delete(event.key)) flushAfterActivation(event.key === ' '); }, true);
+  document.addEventListener('click', event => { if (event.isTrusted && releaseBarrier) flushAfterActivation(); }, true);
+  window.addEventListener('blur', () => { if (heldPointers.size || heldKeys.size || releaseBarrier) { heldPointers.clear(); heldKeys.clear(); flushAfterActivation(); } });
 }
 function scopeOf(city: City, selection: ContextSelection): string {
   if (!selection) return 'none';

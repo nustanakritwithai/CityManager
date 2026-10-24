@@ -52,16 +52,16 @@ function clearJournalInput(state: Journal) {
   state.heldPointers.clear(); state.heldKeys.clear(); state.releaseBarrier = false; state.pending = false;
   if (state.flushTimer !== null) clearTimeout(state.flushTimer); state.flushTimer = null;
 }
-function flushJournalAfterActivation(state: Journal) {
-  // Native summary activation happens after pointerup/keyup. A next-task barrier
-  // retains the pressed node through that click, then reads its actual open state.
+function flushJournalAfterActivation(state: Journal, waitForClick = false) {
+  // Touch may send its compatibility click in a later task. Keep the original
+  // node until that trusted click finishes; the bounded fallback handles aborts.
   state.releaseBarrier = true;
   if (state.flushTimer !== null) clearTimeout(state.flushTimer);
   state.flushTimer = setTimeout(() => {
     state.flushTimer = null; state.releaseBarrier = false;
     if (state.heldPointers.size || state.heldKeys.size || !state.pending) return;
     state.pending = false; rememberExpanded(state); updateJournal(state);
-  }, 0);
+  }, waitForClick ? 750 : 0);
 }
 function installJournalInputGuard(state: Journal) {
   state.list.addEventListener('pointerdown', event => {
@@ -70,11 +70,12 @@ function installJournalInputGuard(state: Journal) {
   state.list.addEventListener('keydown', event => {
     if (event.isTrusted && (event.key === ' ' || event.key === 'Enter') && event.target instanceof Element && event.target.closest('.sm-flow-toggle')) state.heldKeys.add(event.key);
   }, true);
-  document.addEventListener('pointerup', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state); }, true);
+  document.addEventListener('pointerup', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state, true); }, true);
   document.addEventListener('pointercancel', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state); }, true);
-  document.addEventListener('keyup', event => { if (state.heldKeys.delete(event.key)) flushJournalAfterActivation(state); }, true);
+  document.addEventListener('keyup', event => { if (state.heldKeys.delete(event.key)) flushJournalAfterActivation(state, event.key === ' '); }, true);
+  document.addEventListener('click', event => { if (event.isTrusted && state.releaseBarrier) flushJournalAfterActivation(state); }, true);
   window.addEventListener('blur', () => {
-    if (state.heldPointers.size || state.heldKeys.size) { state.heldPointers.clear(); state.heldKeys.clear(); flushJournalAfterActivation(state); }
+    if (state.heldPointers.size || state.heldKeys.size || state.releaseBarrier) { state.heldPointers.clear(); state.heldKeys.clear(); flushJournalAfterActivation(state); }
   });
 }
 function action(label: string, kind: FlowKind, name: string): HTMLButtonElement {

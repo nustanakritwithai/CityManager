@@ -156,23 +156,35 @@ try {
 
   // Keep the native press active across real 10x simulation refreshes. A programmatic
   // click or a re-queried mouseup target would miss the replaced-button regression.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await place(homes[0]); await button('[data-speed="10"]'); await button('#pause');
+  for (const inputKind of ['mouse', 'mouse', 'touch']) {
+    if (inputKind === 'touch') await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
+    await closePanel(); await button('[data-speed="10"]'); await button('#pause'); await place(homes[0]);
     assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'false');
     const selector = `#entity-content [data-household-id="${homeHousehold.id}"]`;
     const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
     assert.equal(await evaluate(`!!document.elementFromPoint(${point.x},${point.y})?.closest(${JSON.stringify(selector)})`), true, 'Held household link is actually hit');
-    const tickBeforePress = (await state()).tick;
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
-    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    await evaluate(`(()=>{const selector=${JSON.stringify(selector)};window.__contextHeldDown=e=>{const node=e.target.closest(selector);if(!e.isTrusted||!node)return;window.__contextHeld={node,id:node.dataset.householdId,source:node.dataset.sourceBuildingId,pointerType:e.pointerType,tick:JSON.parse(window.cityManager.snapshot()).tick}};window.__contextHeldClick=e=>{const p=window.__contextHeld,node=e.target.closest('[data-household-id]');if(!e.isTrusted||!p||!node)return;p.click={sameNode:node===p.node,connected:p.node.isConnected,id:node.dataset.householdId,source:node.dataset.sourceBuildingId}};document.addEventListener('pointerdown',window.__contextHeldDown,true);document.addEventListener('click',window.__contextHeldClick,true)})()`);
+    if (inputKind === 'touch') await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: point.x, y: point.y, id: 1 }] });
+    else {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    }
+    const down = await evaluate('(()=>{const p=window.__contextHeld;return p&&{id:p.id,source:p.source,pointerType:p.pointerType,tick:p.tick}})()');
+    assert.ok(down, 'Actual trusted household pointerdown was observed'); assert.equal(down.id, String(homeHousehold.id)); assert.equal(down.source, String(homes[0].id)); assert.equal(down.pointerType, inputKind);
     await sleep(200);
-    assert.ok((await state()).tick > tickBeforePress, 'A real simulation refresh occurred while the mouse button was still held');
-    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    const held = await evaluate(`(()=>{const p=window.__contextHeld;return{connected:p.node.isConnected,sameNode:document.querySelector(${JSON.stringify(selector)})===p.node,tick:JSON.parse(window.cityManager.snapshot()).tick}})()`);
+    assert.ok(held.connected && held.sameNode, `${inputKind} holds the same actual household DOM node: ${JSON.stringify({ down, held })}`); assert.ok(held.tick > down.tick, 'A real simulation refresh occurred during the 200ms hold');
+    if (inputKind === 'touch') await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    else await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
     await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${homeHousehold.id}'`);
+    const activation = await evaluate('window.__contextHeld.click'); assert.deepEqual(activation, { sameNode: true, connected: true, id: String(homeHousehold.id), source: String(homes[0].id) }, `${inputKind} native compatibility click activates the original held household node: ${JSON.stringify({ down, held, activation })}`);
+    await evaluate('document.removeEventListener("pointerdown",window.__contextHeldDown,true);document.removeEventListener("click",window.__contextHeldClick,true);delete window.__contextHeld;delete window.__contextHeldDown;delete window.__contextHeldClick');
+    await button('#submenu-back'); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${homes[0].id}'`); await closePanel();
     await button('#pause'); assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
     await load(fixtureJson); await button('[data-speed="1"]');
   }
-  checks.push('Two real 200ms household-link presses survive live 10x refreshes; fixture restored before paused data assertions');
+  await viewport({ width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, mobile: false });
+  checks.push('Two mouse and one trusted touch 200ms household-link holds preserve the same DOM through native activation during live 10x refreshes; Back returns to source home and frozen fixture is restored');
 
   for (const home of homes) {
     await place(home); const occupied = homeOccupancy(fixture, home.id), capacity = housingCapacity(home);
