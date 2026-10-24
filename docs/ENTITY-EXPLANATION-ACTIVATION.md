@@ -1,6 +1,6 @@
 # Selected-entity explanation: activation review
 
-This draft adds a read-only inspector explanation. Source baseline fe3072d920b8e56cf5273c7c34bc93c30e0a8770 includes agriculture/save-v4 and the six building cards. The commercial-level-one implementation is owned by another checkout/thread; this draft uses the canonical card projector rather than defining its own zone/level taxonomy and must be checked against that merged source before release.
+This draft adds a read-only inspector explanation on commercial-L1/save-v5 main8fd3367ad2cf387e2d3fc3134e9b4d69409800dd. PR14 was merged by its owner; this branch was rebased afterwards and uses the canonical card projector/isMarket/capacity rather than defining its own zone/level taxonomy. No separateT tool or automatic market-to-shop upgrade is added. Migration-aware tests retain old retail card coverage.
 
 ## Current delivery boundary
 
@@ -21,4 +21,4 @@ This is expanded data transmission and requires review before activation. The pr
 
 No new API route, Apache mapping, hostname, TLS certificate, port, firewall rule, login, password, usage quota, credential or key-file copy is proposed. No shared WebAi service change is needed. Request/response/time bounds and fallback are operation reliability controls. Requests stay user-triggered; simulation and finance mutations remain deterministic game code.
 
-Exact body fields, output ID catalogs, mock tests, screenshot evidence and final source heads are documented with the contract/test deliverables before activation. Any delta from this plan requires a new review; nothing above has executed on production.
+Exact body fields, output ID catalogs, mock tests, screenshot evidence and final source heads are documented with the contract/test deliverables before activation. [Synthetic browser-to-adapter example](entity-example-request.json) and [provider-visible example](entity-example-provider.json) show the actual field boundary without any credential or full save. Any delta from this plan requires a new review; nothing above has executed on production.

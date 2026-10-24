@@ -1,6 +1,6 @@
 # Selected entity explanation contract — draft
 
-This first slice explains only the selected building or linked household. The authoritative snapshot source is the current canonical card projection in `building-card-data.ts`, not a reconstructed ledger or a complete save. It covers house, household, shop, market, factory and farm cards and deliberately follows the card projector's kind, including future commercial level-one taxonomy changes.
+This first slice explains only the selected building or linked household. The authoritative snapshot source is the current canonical card projection in `building-card-data.ts`, not a reconstructed ledger or a complete save. It covers house, household, shop, market, factory and farm cards and follows the merged commercial level-one taxonomy through that projector and `isMarket`. Tests also load a synthetic v4 fixture through current save-v5 migration to retain legacy retail coverage.
 
 ## Request and identity
 

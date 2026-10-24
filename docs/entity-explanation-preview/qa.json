@@ -1,6 +1,6 @@
 {
-  "candidateCommit": "3df65687d5a1b550a3969a731cf6860a584cc8b9",
-  "testedAt": "2026-10-24T15:20:20.697Z",
+  "candidateCommit": "e79c25134939162a2f4bbf525d4ef341e085580f",
+  "testedAt": "2026-10-24T15:31:32.172Z",
   "url": "http://127.0.0.1:4189/CityManager/",
   "browser": "installed Microsoft Edge headless",
   "checks": [
@@ -207,8 +207,8 @@
       "kind": "factory",
       "id": 1,
       "tick": 29,
-      "facts": 19,
-      "missing": 4,
+      "facts": 20,
+      "missing": 3,
       "behavior": "ai"
     },
     {
@@ -223,22 +223,22 @@
       "kind": "factory",
       "id": 1,
       "tick": 29,
-      "facts": 19,
-      "missing": 4,
+      "facts": 20,
+      "missing": 3,
       "behavior": "invalid-reference"
     },
     {
       "kind": "factory",
       "id": 1,
       "tick": 29,
-      "facts": 19,
-      "missing": 4,
+      "facts": 20,
+      "missing": 3,
       "behavior": "ai"
     },
     {
       "kind": "factory",
       "id": 1,
-      "tick": 407,
+      "tick": 48,
       "facts": 20,
       "missing": 3,
       "behavior": "invalid-identity"
@@ -246,7 +246,7 @@
     {
       "kind": "factory",
       "id": 1,
-      "tick": 407,
+      "tick": 48,
       "facts": 20,
       "missing": 3,
       "behavior": "delay"
@@ -254,7 +254,7 @@
     {
       "kind": "factory",
       "id": 1,
-      "tick": 407,
+      "tick": 48,
       "facts": 20,
       "missing": 3,
       "behavior": "ai"
@@ -262,7 +262,7 @@
     {
       "kind": "factory",
       "id": 1,
-      "tick": 407,
+      "tick": 48,
       "facts": 20,
       "missing": 3,
       "behavior": "delay"
@@ -270,7 +270,7 @@
     {
       "kind": "factory",
       "id": 1,
-      "tick": 407,
+      "tick": 48,
       "facts": 20,
       "missing": 3,
       "behavior": "delay"
@@ -279,8 +279,8 @@
       "kind": "factory",
       "id": 1,
       "tick": 29,
-      "facts": 19,
-      "missing": 4,
+      "facts": 20,
+      "missing": 3,
       "behavior": "delay"
     },
     {
