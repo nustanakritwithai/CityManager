@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 2,
+  "operation": "entity-explanation",
+  "locale": "th",
+  "snapshot": {
+    "schemaVersion": 1,
+    "entity": {
+      "kind": "factory",
+      "id": 1,
+      "buildingId": 1,
+      "firmId": 2,
+      "householdId": null,
+      "cell": 322
+    },
+    "tick": 29,
+    "window": {
+      "fromTick": 0,
+      "toTick": 29,
+      "inclusive": true,
+      "maxDays": 30,
+      "empty": false
+    },
+    "facts": [
+      {
+        "id": "access.connected",
+        "value": 1,
+        "unit": "boolean",
+        "period": "snapshot"
+      },
+      {
+        "id": "cash.current",
+        "value": 387000,
+        "unit": "satang",
+        "period": "snapshot"
+      },
+      {
+        "id": "cash.inflow",
+        "value": 468000,
+        "unit": "satang",
+        "period": "window"
+      },
+      {
+        "id": "cash.net",
+        "value": 387000,
+        "unit": "satang",
+        "period": "window"
+      },
+      {
+        "id": "cash.outflow",
+        "value": 81000,
+        "unit": "satang",
+        "period": "window"
+      },
+      {
+        "id": "price.goodsSell",
+        "value": 350,
+        "unit": "satang/goods",
+        "period": "window"
+      },
+      {
+        "id": "quantities.cropsIn",
+        "value": 128,
+        "unit": "crops",
+        "period": "window"
+      },
+      {
+        "id": "quantities.cropsOut",
+        "value": 120,
+        "unit": "crops",
+        "period": "window"
+      },
+      {
+        "id": "quantities.goodsIn",
+        "value": 480,
+        "unit": "goods",
+        "period": "window"
+      },
+      {
+        "id": "quantities.goodsOut",
+        "value": 480,
+        "unit": "goods",
+        "period": "window"
+      },
+      {
+        "id": "stocks.cropCostSatang",
+        "value": 2401,
+        "unit": "satang",
+        "period": "snapshot"
+      },
+      {
+        "id": "stocks.crops",
+        "value": 8,
+        "unit": "crops",
+        "period": "snapshot"
+      },
+      {
+        "id": "stocks.goods",
+        "value": 0,
+        "unit": "goods",
+        "period": "snapshot"
+      },
+      {
+        "id": "today.cropHarvested",
+        "value": 0,
+        "unit": "crops",
+        "period": "today"
+      },
+      {
+        "id": "today.cropProcessed",
+        "value": 8,
+        "unit": "crops",
+        "period": "today"
+      },
+      {
+        "id": "today.goodsProduced",
+        "value": 32,
+        "unit": "goods",
+        "period": "today"
+      },
+      {
+        "id": "workforce.capacity",
+        "value": 4,
+        "unit": "positions",
+        "period": "snapshot"
+      },
+      {
+        "id": "workforce.employed",
+        "value": 4,
+        "unit": "people",
+        "period": "snapshot"
+      },
+      {
+        "id": "workforce.employeeWorkers",
+        "value": 4,
+        "unit": "people",
+        "period": "snapshot"
+      },
+      {
+        "id": "workforce.ownerWorkers",
+        "value": 0,
+        "unit": "people",
+        "period": "snapshot"
+      }
+    ],
+    "missing": [
+      {
+        "id": "price.cropsBuy",
+        "reason": "non-integer"
+      },
+      {
+        "id": "price.cropsSell",
+        "reason": "unavailable"
+      },
+      {
+        "id": "price.goodsBuy",
+        "reason": "unavailable"
+      }
+    ],
+    "snapshotKey": "{\"entity\":{\"buildingId\":1,\"cell\":322,\"firmId\":2,\"householdId\":null,\"id\":1,\"kind\":\"factory\"},\"facts\":[{\"id\":\"access.connected\",\"period\":\"snapshot\",\"unit\":\"boolean\",\"value\":1},{\"id\":\"cash.current\",\"period\":\"snapshot\",\"unit\":\"satang\",\"value\":387000},{\"id\":\"cash.inflow\",\"period\":\"window\",\"unit\":\"satang\",\"value\":468000},{\"id\":\"cash.net\",\"period\":\"window\",\"unit\":\"satang\",\"value\":387000},{\"id\":\"cash.outflow\",\"period\":\"window\",\"unit\":\"satang\",\"value\":81000},{\"id\":\"price.goodsSell\",\"period\":\"window\",\"unit\":\"satang/goods\",\"value\":350},{\"id\":\"quantities.cropsIn\",\"period\":\"window\",\"unit\":\"crops\",\"value\":128},{\"id\":\"quantities.cropsOut\",\"period\":\"window\",\"unit\":\"crops\",\"value\":120},{\"id\":\"quantities.goodsIn\",\"period\":\"window\",\"unit\":\"goods\",\"value\":480},{\"id\":\"quantities.goodsOut\",\"period\":\"window\",\"unit\":\"goods\",\"value\":480},{\"id\":\"stocks.cropCostSatang\",\"period\":\"snapshot\",\"unit\":\"satang\",\"value\":2401},{\"id\":\"stocks.crops\",\"period\":\"snapshot\",\"unit\":\"crops\",\"value\":8},{\"id\":\"stocks.goods\",\"period\":\"snapshot\",\"unit\":\"goods\",\"value\":0},{\"id\":\"today.cropHarvested\",\"period\":\"today\",\"unit\":\"crops\",\"value\":0},{\"id\":\"today.cropProcessed\",\"period\":\"today\",\"unit\":\"crops\",\"value\":8},{\"id\":\"today.goodsProduced\",\"period\":\"today\",\"unit\":\"goods\",\"value\":32},{\"id\":\"workforce.capacity\",\"period\":\"snapshot\",\"unit\":\"positions\",\"value\":4},{\"id\":\"workforce.employed\",\"period\":\"snapshot\",\"unit\":\"people\",\"value\":4},{\"id\":\"workforce.employeeWorkers\",\"period\":\"snapshot\",\"unit\":\"people\",\"value\":4},{\"id\":\"workforce.ownerWorkers\",\"period\":\"snapshot\",\"unit\":\"people\",\"value\":0}],\"missing\":[{\"id\":\"price.cropsBuy\",\"reason\":\"non-integer\"},{\"id\":\"price.cropsSell\",\"reason\":\"unavailable\"},{\"id\":\"price.goodsBuy\",\"reason\":\"unavailable\"}],\"schemaVersion\":1,\"tick\":29,\"window\":{\"empty\":false,\"fromTick\":0,\"inclusive\":true,\"maxDays\":30,\"toTick\":29}}"
+  }
+}

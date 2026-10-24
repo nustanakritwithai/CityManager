@@ -10,6 +10,8 @@ import './compact-layout.css';
 import './agriculture-tools.css';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
 import { createSignalPanel } from './signal-panel.ts';
+import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
+import type { EntitySelection } from './entity-explanation-data.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -17,6 +19,7 @@ const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BAS
 const SIGNAL_ENV = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
 const SIGNALS_ENABLED = SIGNAL_ENV.VITE_CITY_SIGNALS !== 'false' || new URLSearchParams(location.search).get('signals') === '1';
 let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
+let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | undefined;
 let city: City = createCity(61025);
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -52,6 +55,7 @@ function setTool(next: string) {
 }
 function inspector(open: boolean) {
   if (!open) signalPanel?.close();
+  if (!open) entityExplanationPanel?.close();
   if (!open) { closeSubmenus(); route = null; }
   $('#inspector').dataset.open = String(open);
   $('#toggle-inspector').setAttribute('aria-expanded', String(open && route?.page === 'city'));
@@ -60,6 +64,17 @@ function inspector(open: boolean) {
   if (view) { view.abortGesture(); view.cameraBlocked = open; }
   document.querySelectorAll<HTMLButtonElement>('[data-camera], #toggle-camera').forEach(b => b.disabled = open);
   if (!open) { $('#inspector').dataset.page = 'none'; for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = true; }
+}
+function selectedEntity(): EntitySelection | null {
+  if ($('#inspector').dataset.open !== 'true') return null;
+  const current = route;
+  if (current?.page === 'place' && current.buildingId !== null && city.cells[current.cell]?.building === current.buildingId) {
+    return { kind: 'building', buildingId: current.buildingId };
+  }
+  if (current?.page === 'household' && city.households.some(h => h.id === current.id) && city.cells[current.sourceCell]?.building === current.sourceBuildingId) {
+    return { kind: 'household', householdId: current.id, sourceBuildingId: current.sourceBuildingId, sourceCell: current.sourceCell };
+  }
+  return null;
 }
 function openRoute(next: Route) {
   if (route?.page === 'signals' && next.page !== 'signals') signalPanel?.close();
@@ -197,7 +212,7 @@ function render() {
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => { b.classList.toggle('active', Number(b.dataset.speed) === speed); b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)); });
   const demand = node('div', 'demand-grid');
   for (const [zone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const) { const item = node('div', `demand-item ${zone.toLowerCase()}`); item.append(node('span', '', label), node('b', '', String(s.demand[zone]))); demand.append(item); }
-  $('#growth-summary').replaceChildren(demand); renderPlace();
+  $('#growth-summary').replaceChildren(demand); renderPlace(); entityExplanationPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   view.render(city, selected, preview);
@@ -209,6 +224,15 @@ async function boot() {
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
     enabled: SIGNAL_ENV.VITE_CITY_ADVISOR_ONLINE !== 'false', endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
   } });
+  const entityExplanationHost = document.createElement('section');
+  entityExplanationHost.id = 'entity-explanation-host';
+  $('#entity-content').insertAdjacentElement('afterend', entityExplanationHost);
+  entityExplanationPanel = createEntityExplanationPanel(entityExplanationHost, {
+    getCity: () => city, getSelection: selectedEntity, connection: {
+      enabled: SIGNAL_ENV.VITE_CITY_ENTITY_ADVISOR_ONLINE === 'true',
+      endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
+    }
+  });
   $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
     selected = b; roadStart = null; status(buildRoad(city, a, b).message); render();
