@@ -1,0 +1,331 @@
+{
+  "candidateCommit": "3df65687d5a1b550a3969a731cf6860a584cc8b9",
+  "testedAt": "2026-10-24T15:20:20.697Z",
+  "url": "http://127.0.0.1:4189/CityManager/",
+  "browser": "installed Microsoft Edge headless",
+  "checks": [
+    "Native building and household inspectors capture only actual bounded identity/facts/periods; Thai explanations are read-only and requests are manual",
+    "Unknown references and forged snapshot identities fall back; daily clock changes mark stale without calls, and manual retry keeps the exact prior snapshot",
+    "Cancel ignores late replies and permits explicit same-snapshot retry; changing entity cancels and clears the old identity instead of applying its response",
+    "City replacement and deletion discard pending entity replies; only a deliberate native test demolition changes the fixture",
+    "Same-tick owner-capital changes mark captured evidence stale; later response keeps its captured identity and network failure retains local facts",
+    "Real early-game missing evidence is preserved in the exact request and displayed honestly instead of transmitting a fabricated full save or zero-filled values",
+    "S22 normal/wide type and touch controls remain readable; existing city signals and local fact questions retain their no-extra-data behavior"
+  ],
+  "layouts": [
+    {
+      "width": 360,
+      "height": 780,
+      "screenWidth": 360,
+      "left": 6,
+      "right": 354,
+      "top": 6,
+      "bottom": 774,
+      "scrollWidth": 346,
+      "clientWidth": 346,
+      "font": [
+        {
+          "font": 15,
+          "physical": 15,
+          "text": "อธิบายข้อมูลที่เลือก"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "อ่านข้อมูลรายการนี้"
+        },
+        {
+          "font": 15,
+          "physical": 15,
+          "text": "สิ่งที่เห็นจากข้อมูล"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "เงินคงเหลือในขอบเขตที่เลือก 820.00 เครดิต · วันที่ 29"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "ผลต่างเงินเข้าและเงินออก 820.00 เครดิต · วันที่ 0–29 (รวมวัน"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "แรงงานที่ได้รับจัดสรรงาน 2 คน · วันที่ 29"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "สมาชิก 3 คน · วันที่ 29"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "เชื่อมต่อถนนตามกติกาปัจจุบัน เชื่อมต่อ · วันที่ 29"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "เงินเข้าระหว่างช่วงที่แสดง 1,500.00 เครดิต · วันที่ 0–29 (รว"
+        },
+        {
+          "font": 15,
+          "physical": 15,
+          "text": "ข้อสันนิษฐานที่ต้องตรวจต่อ"
+        },
+        {
+          "font": 15,
+          "physical": 15,
+          "text": "ควรตรวจอะไรต่อ"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "เปิดรายการเงินของขอบเขตที่เลือก แยกยอดคงเหลือปัจจุบันออกจากเ"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "ตรวจรายการหลักฐานที่ขาด ค่าที่ยังไม่มีไม่ใช่ศูนย์ และยังสรุป"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "ตรวจตัวเลขและรหัสอ้างอิง"
+        },
+        {
+          "font": 14,
+          "physical": 14,
+          "text": "ข้อมูลที่ยังไม่พอ (3 รายการ)"
+        }
+      ],
+      "controls": [
+        {
+          "w": 130.21875,
+          "h": 44
+        }
+      ]
+    },
+    {
+      "width": 980,
+      "height": 2120,
+      "screenWidth": 360,
+      "left": 16.328125,
+      "right": 963.671875,
+      "top": 16.328125,
+      "bottom": 2103.65625,
+      "scrollWidth": 945,
+      "clientWidth": 945,
+      "font": [
+        {
+          "font": 40.8333,
+          "physical": 14.999987755102042,
+          "text": "อธิบายข้อมูลที่เลือก"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "อ่านข้อมูลรายการนี้"
+        },
+        {
+          "font": 40.8333,
+          "physical": 14.999987755102042,
+          "text": "สิ่งที่เห็นจากข้อมูล"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "เงินคงเหลือในขอบเขตที่เลือก 820.00 เครดิต · วันที่ 29"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "ผลต่างเงินเข้าและเงินออก 820.00 เครดิต · วันที่ 0–29 (รวมวัน"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "แรงงานที่ได้รับจัดสรรงาน 2 คน · วันที่ 29"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "สมาชิก 3 คน · วันที่ 29"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "เชื่อมต่อถนนตามกติกาปัจจุบัน เชื่อมต่อ · วันที่ 29"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "เงินเข้าระหว่างช่วงที่แสดง 1,500.00 เครดิต · วันที่ 0–29 (รว"
+        },
+        {
+          "font": 40.8333,
+          "physical": 14.999987755102042,
+          "text": "ข้อสันนิษฐานที่ต้องตรวจต่อ"
+        },
+        {
+          "font": 40.8333,
+          "physical": 14.999987755102042,
+          "text": "ควรตรวจอะไรต่อ"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "เปิดรายการเงินของขอบเขตที่เลือก แยกยอดคงเหลือปัจจุบันออกจากเ"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "ตรวจรายการหลักฐานที่ขาด ค่าที่ยังไม่มีไม่ใช่ศูนย์ และยังสรุป"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "ตรวจตัวเลขและรหัสอ้างอิง"
+        },
+        {
+          "font": 38.1111,
+          "physical": 13.999995918367349,
+          "text": "ข้อมูลที่ยังไม่พอ (3 รายการ)"
+        }
+      ],
+      "controls": [
+        {
+          "w": 128.94451530612247,
+          "h": 43.995535714285715
+        }
+      ]
+    }
+  ],
+  "entityRequests": [
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 29,
+      "facts": 19,
+      "missing": 4,
+      "behavior": "ai"
+    },
+    {
+      "kind": "household",
+      "id": 4,
+      "tick": 29,
+      "facts": 19,
+      "missing": 3,
+      "behavior": "ai"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 29,
+      "facts": 19,
+      "missing": 4,
+      "behavior": "invalid-reference"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 29,
+      "facts": 19,
+      "missing": 4,
+      "behavior": "ai"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 407,
+      "facts": 20,
+      "missing": 3,
+      "behavior": "invalid-identity"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 407,
+      "facts": 20,
+      "missing": 3,
+      "behavior": "delay"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 407,
+      "facts": 20,
+      "missing": 3,
+      "behavior": "ai"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 407,
+      "facts": 20,
+      "missing": 3,
+      "behavior": "delay"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 407,
+      "facts": 20,
+      "missing": 3,
+      "behavior": "delay"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 29,
+      "facts": 19,
+      "missing": 4,
+      "behavior": "delay"
+    },
+    {
+      "kind": "market",
+      "id": 11,
+      "tick": 29,
+      "facts": 20,
+      "missing": 3,
+      "behavior": "delay"
+    },
+    {
+      "kind": "market",
+      "id": 11,
+      "tick": 29,
+      "facts": 20,
+      "missing": 3,
+      "behavior": "failure"
+    },
+    {
+      "kind": "factory",
+      "id": 1,
+      "tick": 3,
+      "facts": 19,
+      "missing": 4,
+      "behavior": "ai"
+    },
+    {
+      "kind": "household",
+      "id": 4,
+      "tick": 29,
+      "facts": 19,
+      "missing": 3,
+      "behavior": "ai"
+    }
+  ],
+  "cityReports": 1,
+  "realApiRequests": 0,
+  "directProviderAttempts": 0,
+  "browserErrors": 0,
+  "screenshots": [
+    "entity-desktop-building.png",
+    "entity-fallback.png",
+    "entity-insufficient-evidence.png",
+    "entity-s22.png",
+    "entity-s22-wide.png"
+  ],
+  "note": "Synthetic local game fixtures, all reports intercepted; S22 viewport/touch/screen-ratio emulation, not a physical handset test. Timeout behavior is covered by the transport unit tests."
+}
