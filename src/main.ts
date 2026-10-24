@@ -324,6 +324,7 @@ async function boot() {
   const atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator });
   view.app.on('update', (dt: number) => {
     atmosphere.update(dt);
+    view.traffic.update(dt, !paused && !document.hidden);
     if (paused || document.hidden) return;
     accumulator += Math.min(dt, 0.25) * speed;
     let changed = false;

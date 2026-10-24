@@ -7,9 +7,9 @@ import { WeatherOverlay } from './weather-overlay.ts';
 import type { CityView } from './renderer.ts';
 import type { City } from './sim.ts';
 
-export type VisualSettings = { timeMode: TimeMode; quality: Quality | 'auto'; rain: boolean; seasons: boolean };
+export type VisualSettings = { timeMode: TimeMode; quality: Quality | 'auto'; rain: boolean; seasons: boolean; traffic: boolean };
 const STORAGE_KEY = 'citymanager.visual.v1';
-const DEFAULTS: VisualSettings = Object.freeze({ timeMode: 'auto', quality: 'auto', rain: true, seasons: true });
+const DEFAULTS: VisualSettings = Object.freeze({ timeMode: 'auto', quality: 'auto', rain: true, seasons: true, traffic: true });
 const TIME_LABELS: Record<TimeMode, string> = { auto: 'อัตโนมัติ · รอบละ 5 นาที', morning: 'เช้า', noon: 'กลางวัน', evening: 'เย็น', night: 'กลางคืน', local: 'ตามเวลาเครื่อง' };
 const QUALITY_LABELS: Record<Quality | 'auto', string> = { auto: 'อัตโนมัติ', low: 'ต่ำ', medium: 'กลาง', high: 'สูง' };
 const PHASE_ICONS = { night: '☾', dawn: '◒', day: '☀', dusk: '◓' } as const;
@@ -24,6 +24,7 @@ export function loadVisualSettings(): VisualSettings {
       quality: raw.quality === 'auto' || QUALITIES.includes(raw.quality) ? raw.quality : DEFAULTS.quality,
       rain: typeof raw.rain === 'boolean' ? raw.rain : DEFAULTS.rain,
       seasons: typeof raw.seasons === 'boolean' ? raw.seasons : DEFAULTS.seasons,
+      traffic: typeof raw.traffic === 'boolean' ? raw.traffic : DEFAULTS.traffic,
     };
   } catch { return { ...DEFAULTS }; }
 }
@@ -69,6 +70,9 @@ export class AtmosphereController {
     });
   }
 
+  /** City life is decorative and costs continuous frames, so low quality turns it off. */
+  private syncTraffic() { this.host.view.traffic?.setEnabled(this.settings.traffic && this.quality !== 'low'); }
+
   private open(open: boolean) {
     this.menu.hidden = !open; this.button.setAttribute('aria-expanded', String(open));
     if (open) this.menu.querySelector<HTMLInputElement>('input:checked')?.focus();
@@ -102,15 +106,16 @@ export class AtmosphereController {
     note.textContent = 'เวลาในวัน ฤดูกาล และฝนเป็นภาพบรรยากาศเท่านั้น ไม่มีผลต่อการจำลองหรือเซฟ · 1 tick ยังเท่ากับ 1 วัน';
     this.menu.replaceChildren(heading, this.status, time, quality,
       toggle('ฤดูกาลตามเดือนในเกม', this.settings.seasons, value => this.change({ seasons: value })),
-      toggle('ฝนตามฤดู (ภาพตกแต่ง)', this.settings.rain, value => this.change({ rain: value })), note);
+      toggle('ฝนตามฤดู (ภาพตกแต่ง)', this.settings.rain, value => this.change({ rain: value })),
+      toggle('รถ คนเดิน และควันโรงงาน (ภาพตกแต่ง · ปิดในคุณภาพต่ำ)', this.settings.traffic, value => this.change({ traffic: value })), note);
   }
 
   private change(patch: Partial<VisualSettings>) {
-    Object.assign(this.settings, patch); saveVisualSettings(this.settings); this.applied.force = true;
+    Object.assign(this.settings, patch); saveVisualSettings(this.settings); this.applied.force = true; this.syncTraffic();
   }
 
   private setQuality(quality: Quality) {
-    this.quality = quality; this.host.view.setQuality(quality);
+    this.quality = quality; this.host.view.setQuality(quality); this.syncTraffic();
     this.qualityNote.textContent = `ใช้อยู่: ${QUALITY_LABELS[quality]}${this.settings.quality === 'auto' ? ' (เลือกตามอุปกรณ์)' : ''}`;
     document.documentElement.dataset.visualQuality = quality;
   }
@@ -150,6 +155,6 @@ export class AtmosphereController {
   }
 
   get diagnostics() {
-    return { ...this.host.view.atmosphere.diagnostics, renderer: this.renderer, settings: { ...this.settings }, overcast: this.overcast, raining: this.weather.raining };
+    return { ...this.host.view.atmosphere.diagnostics, renderer: this.renderer, settings: { ...this.settings }, overcast: this.overcast, raining: this.weather.raining, traffic: { actors: this.host.view.traffic.count, plumes: this.host.view.traffic.plumes } };
   }
 }
