@@ -47,7 +47,7 @@ export class CityGround {
     floor.setUvs(0, [0, 0, 0, 1, 1, 1, 1, 0]);
     floor.setIndices([0, 1, 2, 0, 2, 3]); floor.update();
     const surface = new Entity('Baked grass surface');
-    surface.addComponent('render', { meshInstances: [new MeshInstance(floor, groundMaterial)], castShadows: false, receiveShadows: false });
+    surface.addComponent('render', { meshInstances: [new MeshInstance(floor, groundMaterial)], castShadows: false, receiveShadows: true });
     this.root.addChild(surface);
 
     const positions: number[] = [], normals: number[] = [], indices: number[] = [];

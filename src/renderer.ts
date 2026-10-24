@@ -3,9 +3,11 @@ import {
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
-import { SIZE, connectedRoads, type City } from './sim.ts';
+import { SIZE, connectedRoads, firmWorkerCount, type City } from './sim.ts';
 import { CityAssets } from './asset-models.ts';
 import { CityGround } from './terrain.ts';
+import { SceneAtmosphere } from './scene-atmosphere.ts';
+import type { Atmosphere, Quality } from './atmosphere.ts';
 
 const UNIT = 2;
 export class CityView {
@@ -21,6 +23,8 @@ export class CityView {
   materials = new Map<string, StandardMaterial>();
   assets: CityAssets | null = null;
   ground!: CityGround;
+  atmosphere!: SceneAtmosphere;
+  private windowLit!: StandardMaterial;
   private edgeMesh?: Mesh;
   private edgeSignature = '';
   private visualRevision = 0;
@@ -49,6 +53,7 @@ export class CityView {
     view.setup();
     app.start();
     void CityAssets.load(app).then(assets => {
+      assets.glowRegistrar = (material, strength) => view.atmosphere.registerGlow(material, strength);
       view.assets = assets; view.visualRevision++;
       for (const tree of view.forest) {
         const model = assets.tree();
@@ -70,9 +75,10 @@ export class CityView {
     this.materials.set(key, material);
     return material;
   }
-  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial) {
+  /** Tall parts cast shadows; flat pads, roads and the world base never do. */
+  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial, castShadows = sy > .12) {
     const entity = new Entity('Original primitive');
-    entity.addComponent('render', { type: 'box', material: typeof color === 'string' ? this.material(color) : color, castShadows: false });
+    entity.addComponent('render', { type: 'box', material: typeof color === 'string' ? this.material(color) : color, castShadows });
     entity.setLocalPosition(x, y, z);
     entity.setLocalScale(sx, sy, sz);
     parent.addChild(entity);
@@ -92,10 +98,10 @@ export class CityView {
     this.box(plot, .55, .29, -.208, .14, .27, .025, '#536754');
     this.box(plot, -.03, .28, .8, 1.5, .065, .045, '#b9ae87');
   }
-  private cropMarket(tile: Entity, cell: number) {
+  private cropMarket(tile: Entity, cell: number, lit: boolean) {
     const stall = new Entity('Crop market'); tile.addChild(stall);
     this.box(stall, 0, .09, 0, 1.65, .025, 1.65, '#b6b9a3');
-    const model = this.assets?.building('C', 1, cell);
+    const model = this.assets?.building('C', 1, cell, lit);
     if (model) {
       const scale = model.getLocalScale(); model.setLocalScale(scale.x * .76, scale.y * .76, scale.z * .76);
       model.setLocalPosition(0, .1, -.12); model.name = 'Crop market model'; stall.addChild(model);
@@ -121,13 +127,14 @@ export class CityView {
     this.app.scene.ambientLight = new Color(0.52, 0.58, 0.63);
     this.camera.addComponent('camera', { clearColor: new Color(0.16, 0.27, 0.32), fov: 48, nearClip: 0.5, farClip: 260 });
     this.app.root.addChild(this.camera);
-    const sun = new Entity('Afternoon sun');
-    sun.addComponent('light', { type: 'directional', color: new Color(1, 0.93, 0.81), intensity: 1.25, castShadows: false });
-    sun.setLocalEulerAngles(48, 25, 0);
-    this.app.root.addChild(sun);
-    this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#365e6b');
-    this.box(this.app.root, 0, -.45, 0, SIZE * UNIT + 5.1, .6, SIZE * UNIT + 5.1, '#b7b596');
-    this.box(this.app.root, 0, -.24, 0, SIZE * UNIT + 4.5, .48, SIZE * UNIT + 4.5, '#7c9875');
+    // Sun/moon, sky dome, fog and post effects follow the visual-only time of day.
+    this.atmosphere = new SceneAtmosphere(this.app, this.camera);
+    this.windowLit = this.material('#f9df9a').clone() as StandardMaterial;
+    this.windowLit.emissive = new Color(1, .82, .52); this.windowLit.update();
+    this.atmosphere.registerGlow(this.windowLit, 1.6);
+    this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#365e6b', false);
+    this.box(this.app.root, 0, -.45, 0, SIZE * UNIT + 5.1, .6, SIZE * UNIT + 5.1, '#b7b596', false);
+    this.box(this.app.root, 0, -.24, 0, SIZE * UNIT + 4.5, .48, SIZE * UNIT + 4.5, '#7c9875', false);
     // One original textured ground, a tool-only grid and one batched edge mesh.
     // These visual surfaces never change the flat simulation/picking plane.
     this.ground = new CityGround(this.app, SIZE, UNIT);
@@ -162,6 +169,7 @@ export class CityView {
       this.forest.push({ entity: tree, x, z });
     }
     this.app.root.addChild(this.markers);
+    this.setQuality('high');
     new ResizeObserver(() => this.resize()).observe(this.canvas);
     window.addEventListener('resize', () => this.resize());
     this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
@@ -196,6 +204,7 @@ export class CityView {
     const elevation = 0.88;
     this.camera.setPosition(this.target.x + Math.sin(this.yaw) * this.radius * Math.cos(elevation), this.radius * Math.sin(elevation), this.target.z + Math.cos(this.yaw) * this.radius * Math.cos(elevation));
     this.camera.lookAt(this.target);
+    this.atmosphere?.follow(this.radius);
     this.app.renderNextFrame = true;
   }
   pan(dx: number, dy: number) {
@@ -269,7 +278,9 @@ export class CityView {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
       const links = cell.road ? [i % SIZE > 0 && city.cells[i - 1].road, i % SIZE < SIZE - 1 && city.cells[i + 1].road, i >= SIZE && city.cells[i - SIZE].road, i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road].map(Number).join('') : '';
       const fertility = cell.zone === 'F' ? city.resources.fertility[i] : '';
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}`;
+      // Night lights only for real occupancy: residents at home or allocated workers on site.
+      const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -282,25 +293,30 @@ export class CityView {
         if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
         if (connected.has(i) && i % 4 === 0 && horizontal && !vertical) {
           const lamp = this.assets?.streetlight();
-          if (lamp) { lamp.setLocalPosition(0, .13, -.84); tile.addChild(lamp); }
+          if (lamp) {
+            lamp.setLocalPosition(0, .13, -.84); tile.addChild(lamp);
+            const pool = new Entity('Street lamp light pool');
+            pool.addComponent('render', { type: 'plane', material: this.atmosphere.lampPool, castShadows: false, receiveShadows: false });
+            pool.setLocalPosition(0, .16, -.45); pool.setLocalScale(1.7, 1, 1.7); tile.addChild(pool);
+          }
         }
       } else if (cell.zone) {
         const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053', F: '#93af58' }[cell.zone];
         this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, color);
         if (b) {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
-          if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i); continue; }
+          if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
           // Retained shops move up one commercial tier; their geometry stays unchanged.
           const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
-          const model = this.assets?.building(b.zone, visualLevel, i);
+          const model = this.assets?.building(b.zone, visualLevel, i, lit);
           if (model) { model.setLocalPosition(0, .1, 0); tile.addChild(model); continue; }
           const h = 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;
           const tower = b.zone === 'I' ? h * 0.65 : h;
           this.box(tile, -0.1, tower / 2 + 0.1, 0, 1.25, tower, 1.2, { R: '#d7e5d1', C: '#b6d4df', I: '#d9c09a' }[b.zone]);
           this.box(tile, -0.1, tower + 0.17, 0, 1.34, 0.16, 1.3, { R: '#386454', C: '#38677f', I: '#8c6340' }[b.zone]);
           for (let level = 0; level < Math.min(visualLevel + 1, 5); level++) {
-            for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, '#f9df9a');
+            for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, lit ? this.windowLit : '#f9df9a', false);
           }
           if (b.zone === 'I') this.box(tile, 0.52, h * 0.65, -0.38, 0.2, h * 1.1, 0.22, '#786b60');
         }
@@ -309,10 +325,13 @@ export class CityView {
     for (const child of [...this.markers.children]) child.destroy();
     for (const i of new Set([...preview, ...(selected === null ? [] : [selected])])) {
       const p = this.position(i); const color = i === selected ? '#fff1bb' : '#f7bf60';
-      for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, color);
-      for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, color);
+      for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, this.material(color, true));
+      for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, this.material(color, true));
     }
   }
+  setAtmosphere(atmosphere: Atmosphere) { this.atmosphere.apply(atmosphere); }
+  setQuality(quality: Quality) { this.atmosphere.setQuality(quality); }
+
   private updateGroundEdges(city: City) {
     const signature = city.cells.map(cell => cell.road ? '1' : '0').join('') + ':' + city.buildings.map(b => b.cell).join(',');
     if (!this.edgeMesh || signature === this.edgeSignature) return;
