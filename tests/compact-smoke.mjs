@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize } from '../src/sim.ts';
+import { deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
 
 const mode = process.env.CITYMANAGER_COMPACT_MODE || 'candidate';
 const referenceCommit = 'd40cd6982ce644ed1e555565d48cf2c1efbdc047';
@@ -13,9 +13,15 @@ const url = process.env.CITYMANAGER_URL || (mode === 'baseline' ? 'https://nusta
 const baselinePath = resolve(process.env.CITYMANAGER_COMPACT_BASELINE || 'docs/compact-preview/baseline.json');
 const shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || `docs/compact-preview/${mode}`), output = resolve('.test-output');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
-const city = createCity(61025); for (let n = 0; n < 65; n++) step(city);
-const fixture = serialize(city), hash = text => createHash('sha256').update(text).digest('hex');
-const home = city.buildings.find(b => b.zone === 'R'), company = city.firms.find(f => f.employees.length > 1) || city.firms[0];
+const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
+const hash = text => createHash('sha256').update(text).digest('hex');
+assert.equal(hash(legacyRaw), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
+const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 2);
+for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(migrated[key], legacy[key], `Migration preserves ${key}`);
+for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
+for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
+const city = mode === 'baseline' ? legacy : migrated, fixture = mode === 'baseline' ? legacyRaw : serialize(city);
+const home = city.buildings.find(b => b.zone === 'R'), company = city.firms.find(f => mode === 'baseline' ? f.employees.length > 1 : firmWorkerCount(city, f.id) > 1) || city.firms[0];
 const firmBuilding = city.buildings.find(b => b.id === company.building), resident = city.households.find(h => h.home === home.id);
 const checks = [], errors = [], expectedErrors = [], screenshots = [], measures = [], liveInputs = [];
 await mkdir(shots, { recursive: true }); await mkdir(output, { recursive: true });
@@ -34,7 +40,7 @@ async function key(value) { for (const type of ['keyDown', 'keyUp']) await send(
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu})');
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : name === 'help' ? '#toggle-help' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}`); }
-async function loadFixture() { await page(mode === 'baseline' ? 'city' : 'game'); if ((await route()).submenu) await button('#submenu-back'); await evaluate(`localStorage.setItem('citymanager.save.v1',${JSON.stringify(fixture)})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
+async function loadFixture() { await page(mode === 'baseline' ? 'city' : 'game'); if ((await route()).submenu) await button('#submenu-back'); await evaluate(`localStorage.setItem(${JSON.stringify(mode === 'baseline' ? 'citymanager.save.v1' : 'citymanager.save.v2')},${JSON.stringify(fixture)})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
 async function place(building) { await close(); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${building.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
 async function viewport(metric) { const { name, ...dimensions } = metric; await close(); await send('Emulation.setDeviceMetricsOverride', { ...dimensions, deviceScaleFactor: 1, mobile: true }); await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&innerHeight===${metric.height}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`); await paints(); }
 async function shot(name) { await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(r.data, 'base64')); screenshots.push(name); }
@@ -121,17 +127,17 @@ async function liveRow() {
 }
 async function candidateAssertions() {
   const baseline = JSON.parse(await readFile(baselinePath, 'utf8'));
-  assert.equal(baseline.schema, 1); assert.equal(baseline.mode, 'baseline'); assert.equal(baseline.fixture.sha256, hash(fixture));
+  assert.equal(baseline.schema, 1); assert.equal(baseline.mode, 'baseline'); assert.equal(baseline.fixture.sha256, hash(legacyRaw), 'Historical density baseline uses the frozen v1 bytes, never the migrated v2 hash');
   assert.equal(baseline.provenance.requestedSourceCommit, referenceCommit); assert.equal(baseline.provenance.admittedAgainst?.commit, referenceCommit, 'Frozen public baseline must have artifact admission');
   assert.ok(baseline.provenance.assets.length >= 2 && /^[a-f0-9]{64}$/.test(baseline.provenance.htmlSha256));
   const metric = name => measures.find(m => m.name === name), before = name => baseline.measures.find(m => m.name === name);
   for (const name of ['s22-ledger', 's22-firm', 's22-house', 's22-household']) assertTall(metric(name), name);
   assert.ok(metric('s22-ledger').ledger.full > before('s22-ledger').ledger.full, 'More full ledger events fit than the measured released baseline');
-  assert.equal(metric('s22-firm').kpi.full, 6, 'All six actual firm KPIs fit initially'); assert.ok(metric('s22-firm').households.full >= 1, 'An actual employee household row fits with the KPIs');
-  assert.equal(metric('s22-house').kpi.full, 3); assert.ok(metric('s22-house').households.full >= 1, 'Actual resident row is initially visible');
-  assert.equal(metric('s22-household').kpi.full, 5);
+  assert.equal(metric('s22-firm').kpi.full, 7, 'All seven actual v2 firm KPIs fit initially'); assert.ok(metric('s22-firm').households.full >= 1, 'An actual employee household row fits with the KPIs');
+  assert.equal(metric('s22-house').kpi.full, 6); assert.ok(metric('s22-house').households.full >= 1, 'Actual resident row is initially visible');
+  assert.equal(metric('s22-household').kpi.full, 10);
   for (const name of ['s22-firm', 's22-house', 's22-household']) { assert.ok(metric(name).kpi.full >= before(name).kpi.full); assert.ok(metric(name).households.full >= before(name).households.full); }
-  checks.push('Frozen artifact-admitted d40 comparison: more full ledger rows, six firm KPIs and actual household rows on the first screen');
+  checks.push('Frozen artifact-admitted d40 comparison uses exact v1 bytes; v2 migration preserves all money/goods/tick/RNG and exposes expanded capacity/composition KPIs with actual household rows');
   await page('city'); await tall('s22-city'); await page('help'); await tall('s22-help');
   await ledger(); await tall('s22-ledger-controls'); await disclosure('global money', '#ledger .sm-flow-card', '.sm-flow-details', 'global-row');
   await place(firmBuilding); await tall('s22-firm-controls'); await disclosure('firm money', '#entity-content .cx-activity[data-kind="money"] .cx-flow-card', '.cx-flow-details', 'firm-row');
@@ -140,7 +146,7 @@ async function candidateAssertions() {
   await liveRow(); assert.deepEqual(await state(), city); checks.push('Actual trusted mouse and touch ledger presses survive 200ms live refreshes with the same DOM, exact journal identity and preserved native expansion');
   await page('game');
   for (const id of ['save', 'load', 'new-city', 'inspector-status']) assert.equal(await evaluate(`!!document.querySelector('#${id}')?.closest('#game-content')`), true, `${id} belongs only to explicit Game page`);
-  await tall('s22-game'); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), fixture); await shot('game-menu.png');
+  await tall('s22-game'); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), fixture); await shot('game-menu.png');
   await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
   await key('Escape'); assert.notEqual((await route()).open, 'true'); await mapRestored(); checks.push('Game menu owns persistence/status; actual Save, confirmation Cancel and Back/Escape preserve state and restore the map');
   for (const item of [

@@ -1,4 +1,4 @@
-import { access, MONTH, summary } from './sim.ts';
+import { access, MONTH, summary, housingCapacity, homeOccupancy } from './sim.ts';
 import type { Building, City, Firm, Household } from './sim.ts';
 import { flowRows } from './inspector-data.ts';
 import type { FlowKind, FlowRow } from './inspector-data.ts';
@@ -17,8 +17,22 @@ export type CityOverview = {
   income: number;
   expense: number;
   net: number;
+  population: number;
   households: number;
+  workforce: number;
+  dependents: number;
   employed: number;
+  unemployed: number;
+  homeless: number;
+  homelessPersons: number;
+  homeSlots: number;
+  personCapacity: number;
+  occupiedHomeSlots: number;
+  occupiedPersons: number;
+  housingVacancy: number;
+  personVacancy: number;
+  legacyHouseholds: number;
+  legacyAssumedPersons: number;
   jobs: number;
   firms: number;
   inventory: number;
@@ -31,7 +45,7 @@ export type CityOverview = {
   water: boolean;
 };
 
-/** Resolve only the selected parcel's real building and its actual occupants. */
+/** Resolve only the selected parcel's real building and its actual households. */
 export function resolvePlace(city: City, cell: number): ResolvedPlace {
   const parcel = Number.isInteger(cell) ? city.cells[cell] : undefined;
   const building = parcel?.building == null ? null : city.buildings.find(b => b.id === parcel.building && b.cell === cell) ?? null;
@@ -43,12 +57,12 @@ export function resolvePlace(city: City, cell: number): ResolvedPlace {
   };
 }
 
-/** No substring matching, inferred counterparties, reindexing or global journal leaks. */
+/** Exact wallet endpoints only; preserve original journal indices and order. */
 export function relatedFlows(city: City, kind: FlowKind, wallet: string): FlowRow[] {
   return flowRows(city, kind).filter(row => row.from === wallet || row.to === wallet);
 }
 
-/** Current stocks/counts plus actual journal flows for the inclusive 30-calendar-day window. */
+/** Current people/housing stocks are separate from inclusive 30-day journal flows. */
 export function cityOverview(city: City): CityOverview {
   const fromTick = Math.max(0, city.tick - MONTH + 1), toTick = city.tick;
   const inPeriod = (tick: number) => tick >= fromTick && tick <= toTick;
@@ -68,21 +82,41 @@ export function cityOverview(city: City): CityOverview {
     }
   }
   const current = summary(city), warnings: string[] = [];
+  let homeSlots = 0, personCapacity = 0, occupiedHomeSlots = 0, occupiedPersons = 0;
+  for (const building of city.buildings.filter(building => building.zone === 'R')) {
+    const capacity = housingCapacity(building), occupied = homeOccupancy(city, building.id);
+    homeSlots += capacity.households; personCapacity += capacity.persons;
+    occupiedHomeSlots += occupied.households; occupiedPersons += occupied.persons;
+  }
+  const displaced = city.households.filter(household => household.home === null);
+  const homelessPersons = displaced.reduce((total, household) => total + household.members, 0);
+  const legacy = city.households.filter(household => household.origin === 'legacy-v1');
   if (!city.utilities.power) warnings.push('แหล่งจ่ายไฟฟ้าภายนอกไม่พร้อม การผลิตและการเติบโตถูกระงับ');
   if (!city.utilities.water) warnings.push('แหล่งจ่ายน้ำภายนอกไม่พร้อม การผลิตและการเติบโตถูกระงับ');
-  const unemployed = city.households.filter(h => h.employer === null).length;
-  if (unemployed) warnings.push(`มี ${unemployed} ครัวเรือนที่ยังไม่มีงาน`);
-  const noPurchase = city.households.filter(h => h.lastPurchaseTick !== city.tick).length;
+  if (current.unemployed) warnings.push(`มีแรงงาน ${current.unemployed} คนที่ยังไม่ได้รับการจัดสรรงาน`);
+  if (displaced.length) warnings.push(`มี ${displaced.length} ครัวเรือน รวม ${homelessPersons} คนที่ยังไม่มีบ้านพัก`);
+  const noPurchase = city.households.filter(household => household.lastPurchaseTick !== city.tick).length;
   if (noPurchase) warnings.push(`มี ${noPurchase} ครัวเรือนที่ยังไม่ได้ซื้อสินค้าในวันนี้`);
-  const disconnected = city.buildings.filter(b => !access(city, b.cell)).length;
+  const disconnected = city.buildings.filter(building => !access(city, building.cell)).length;
   if (disconnected) warnings.push(`มี ${disconnected} อาคารที่ไม่มีถนนเชื่อมถึงทางออกเมือง`);
   if (city.accounts.treasury === 0) warnings.push('เงินคลังเมืองหมด การลงทุนใหม่ต้องมีเงินเพียงพอ');
   return {
     fromTick, toTick,
     treasury: city.accounts.treasury,
     income, expense, net: income - expense,
-    households: city.households.length,
+    population: current.population,
+    households: current.households,
+    workforce: current.workforce,
+    dependents: current.dependents,
     employed: current.employed,
+    unemployed: current.unemployed,
+    homeless: displaced.length,
+    homelessPersons,
+    homeSlots, personCapacity, occupiedHomeSlots, occupiedPersons,
+    housingVacancy: homeSlots - occupiedHomeSlots,
+    personVacancy: personCapacity - occupiedPersons,
+    legacyHouseholds: legacy.length,
+    legacyAssumedPersons: legacy.reduce((total, household) => total + household.members, 0),
     jobs: current.jobs,
     firms: city.firms.length,
     inventory: city.firms.reduce((total, firm) => total + firm.inventory, 0),

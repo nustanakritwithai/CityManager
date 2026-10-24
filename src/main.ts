@@ -7,11 +7,11 @@ import { renderContext, renderCityOverview } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { SIZE, access, createCity, step, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
+import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
 import { createSignalPanel } from './signal-panel.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
-const SAVE_KEY = 'citymanager.save.v1';
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
 const SIGNAL_ENV = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
 const SIGNALS_ENABLED = SIGNAL_ENV.VITE_CITY_SIGNALS !== 'false' || new URLSearchParams(location.search).get('signals') === '1';
@@ -20,13 +20,14 @@ let city: City = createCity(61025);
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1, accumulator = 0;
+let importedLegacyRaw: string | null = null;
 type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
 let route: Route | null = null;
 const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนร้านค้า', I: 'โซนโรงงาน', bulldoze: 'รื้อถอน', pan: 'เลื่อนแผนที่' };
 const help: Record<string, string> = {
   select: 'แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
-  R: 'วางบ้านข้างถนนเชื่อมเมือง · ต้องมีงานว่าง (สองบ้านแรกยกเว้น)',
+  R: 'โซนบ้านสร้างที่ว่างก่อน · ครัวเรือนย้ายเข้าเมื่อผ่านความจุ ถนน บริการ และงาน',
   C: 'วางร้านค้าข้างถนนเชื่อมเมือง · ต้องมีลูกค้า แรงงาน และกำไรที่คุ้มค่าเช่า',
   I: 'วางโรงงานข้างถนนเชื่อมเมือง · ต้องมีแรงงาน (โรงงานแรกยกเว้น)',
   bulldoze: 'แตะถนนหรืออาคารเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้',
@@ -201,21 +202,27 @@ async function boot() {
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
   $('#save').addEventListener('click', () => {
-    try { localStorage.setItem(SAVE_KEY, serialize(city)); status(`บันทึกในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่เบราว์เซอร์ไม่พร้อมหรือเต็ม'); }
+    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); status(`บันทึกรุ่น 2 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
   });
-  $('#load').addEventListener('click', () => {
+  const loadStored = (source: SaveSource) => {
     try {
-      const raw = localStorage.getItem(SAVE_KEY); if (!raw) { status('ยังไม่มีเมืองที่บันทึกในเบราว์เซอร์นี้'); return; }
-      const loaded = deserialize(raw); city = loaded; selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render(); status(`โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
+      const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืน v1' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
+      const loaded = deserialize(saved.raw), legacy = JSON.parse(saved.raw).version === 1;
+      city = loaded; importedLegacyRaw = legacy ? saved.raw : null;
+      selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
+      status(legacy ? `นำเข้า v1 วันที่ ${city.tick} แล้ว · สมาชิกเป็นสมมติฐานขั้นต่ำจากเซฟเดิม · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
     } catch (error) { status(`โหลดไม่สำเร็จ เมืองปัจจุบันยังอยู่ · ${error instanceof Error ? error.message : 'ข้อมูลบันทึกไม่ถูกต้อง'}`); }
-  });
+  };
+  $('#load').addEventListener('click', () => loadStored('current'));
+  $('#load-legacy').addEventListener('click', () => loadStored('legacy'));
+  $('#load-backup').addEventListener('click', () => loadStored('backup'));
   $('#new-city').addEventListener('click', () => {
     const dialog = document.createElement('dialog');
     const title = document.createElement('h2'); title.textContent = 'เริ่มเมืองเดิมอีกครั้ง?';
     const text = document.createElement('p'); text.textContent = 'เมืองที่ยังไม่บันทึกจะถูกแทนที่ เมืองที่เคยบันทึกยังเรียกคืนได้ด้วยปุ่มโหลด';
     const back = document.createElement('button'); back.textContent = 'กลับสู่เมือง'; back.autofocus = true;
     const reset = document.createElement('button'); reset.textContent = 'เริ่มเมืองใหม่';
-    back.onclick = () => dialog.close(); reset.onclick = () => { city = createCity(61025); selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select'); render(); status('เมืองพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา'); dialog.close(); };
+    back.onclick = () => dialog.close(); reset.onclick = () => { city = createCity(61025); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select'); render(); status('เมืองพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา'); dialog.close(); };
     dialog.append(title, text, back, reset); document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
   });
   document.addEventListener('keydown', e => {
