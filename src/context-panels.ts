@@ -344,9 +344,12 @@ function cardIcon(kind: CardKind): SVGElement {
 function cardHero(data: CardData): HTMLElement {
   const labels: Record<CardKind, string> = { house: 'บ้านพัก · การอยู่อาศัย', household: 'ครัวเรือน · สมาชิกและเงินร่วม', shop: 'ร้านค้า · สินค้าสำเร็จรูป', market: 'ตลาดพืชผล · กิจการทำเอง', factory: 'โรงงาน · การแปรรูป', farm: 'ฟาร์ม · พื้นที่และการเก็บเกี่ยว' };
   const hero = el('div', 'bc-hero'), icon = el('span', 'bc-type-icon'), copy = el('div', 'bc-hero-copy'); icon.append(cardIcon(data.kind));
+  const identity = data.kind === 'household'
+    ? `${data.identity.householdId === null ? 'ยังไม่พบรหัสครัวเรือน' : `ครัวเรือน #${data.identity.householdId}`} · ${data.identity.buildingId === null ? 'ยังไม่มีบ้านพัก' : `บ้านพัก: อาคาร #${data.identity.buildingId}`}`
+    : `${data.identity.buildingId === null ? 'ยังไม่พบรหัสอาคาร' : `อาคาร #${data.identity.buildingId}`}${data.kind === 'house' ? '' : ` · ${data.identity.firmId === null ? 'ยังไม่พบรหัสกิจการ' : `กิจการ #${data.identity.firmId}`}`}`;
   const period = el('p', 'bc-period', data.kind === 'house' ? `สถานะที่พัก ณ วัน ${data.window.toTick}` : data.window.empty ? `ช่วงเริ่มต้น · วัน ${data.window.toTick}` : `เงินสดวันที่ ${data.window.fromTick}–${data.window.toTick} · รวมวันต้นและปลาย`);
   Object.assign(period.dataset, { fromTick: String(data.window.fromTick), toTick: String(data.window.toTick), inclusive: String(data.window.inclusive), empty: String(data.window.empty) });
-  copy.append(el('span', 'bc-type-label', labels[data.kind]), period); hero.append(icon, copy); return hero;
+  copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), period); hero.append(icon, copy); return hero;
 }
 /** Move existing metric nodes, retaining each raw key once and every live handler. */
 function cardParts(nodes: HTMLElement[]): CardParts {
@@ -396,6 +399,10 @@ function cardTrade(data: CardData): HTMLElement {
     const side = el('section', 'bc-trade-side'); side.dataset.direction = direction;
     const quantityKey = `${crops ? 'crops' : 'goods'}-${direction === 'buy' ? 'purchased' : 'sold'}`, price = cardStat(direction === 'buy' ? 'purchase-price' : 'sales-price', 'ราคาเฉลี่ยจากรายการจับคู่', values.unitSatang, '', true);
     price.dataset.status = values.status;
+    if (values.unitSatang === null) {
+      const unavailablePrice = { 'non-integer': 'ไม่ลงตัวเป็นสตางค์', ambiguous: 'จับคู่ไม่ชัดเจน', missing: 'ยังไม่มีรายการ', unsafe: 'แสดงค่าไม่ได้', observed: 'แสดงค่าไม่ได้' } as const;
+      price.querySelector('dd')!.textContent = unavailablePrice[values.status];
+    }
     side.append(el('h4', '', direction === 'buy' ? 'ซื้อเข้าสินค้าคงคลัง' : 'ขายออกจากสินค้าคงคลัง'), cardKpis([cardStat(quantityKey, direction === 'buy' ? 'ซื้อจริง' : 'ขายจริง', values.quantity, unit), cardStat(direction === 'buy' ? 'purchase-cash' : 'sales-cash', direction === 'buy' ? 'เงินซื้อจริง' : 'เงินขายจริง', values.cashSatang, '', true), price]));
     if (values.status !== 'observed') side.append(el('p', 'cx-detail-note', values.status === 'missing' ? 'ยังไม่มีรายการสินค้าและเงินที่จับคู่กันในช่วงนี้' : values.status === 'non-integer' ? 'ราคาเฉลี่ยมีเศษสตางค์ จึงแสดงยอดเงินจริงและปริมาณโดยไม่ปัดราคา' : 'ยังไม่แสดงราคา เพราะข้อมูลจับคู่ไม่ชัดเจนหรือเกินขอบเขตที่แสดงได้'));
     flow.append(side);
