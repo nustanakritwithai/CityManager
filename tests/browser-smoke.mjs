@@ -85,7 +85,7 @@ try {
     if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
       const args = message.params.args;
       const deliberatelyBlocked = process.env.CITYMANAGER_BLOCK_MODELS === '1' && args.length === 2 &&
-        /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/(house-[ab]|shop-[ab]|factory-[ab]|tree|streetlight)\.glb-container\]: Network error$/.test(args[0]?.value) && args[1]?.value === 'Network error';
+        /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(args[0]?.value) && args[1]?.value === 'Network error';
       (deliberatelyBlocked ? expectedAssetErrors : errors).push(args);
     }
     if (message.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'Failed' });
@@ -97,8 +97,8 @@ try {
   await until('!!window.cityManager');
   await until('window.cityManager.visuals().ready');
   const visualStatus = await evaluate('window.cityManager.visuals()');
-  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(visualStatus.failed.length, 8);
-  else assert.equal(visualStatus.loaded.length, 8);
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(visualStatus.failed.length, 41);
+  else assert.equal(visualStatus.loaded.length, 41);
   assert.equal(await evaluate('window.cityManager.engine'), 'PlayCanvas 2.23.3');
   await button('#pause'); assert.equal(await paused(), true);
   checks.push('Real Edge WebGL2 startup and pause');
@@ -280,7 +280,7 @@ try {
   assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, false);
   await screenshot('mobile-city.png'); checks.push('390x844 DPR2 layout, unobstructed gateway, >=44px buttons and pinch without construction (emulated)');
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
-  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 8, 'Only the eight deliberately blocked model requests failed');
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 41, 'Only the 41 deliberately blocked model requests failed');
   const version = await send('Browser.getVersion');
   const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, ground: groundState, checks, errors, expectedAssetErrors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png', 'desktop-build-grid.png'] : []), 'mobile-inspector.png', 'mobile-ledger.png', 'mobile-firm.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
   await writeFile(resolve(output, 'browser-report.json'), JSON.stringify(report, null, 2));
