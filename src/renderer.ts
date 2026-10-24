@@ -8,6 +8,7 @@ import { CityAssets } from './asset-models.ts';
 import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
 import { SceneAtmosphere } from './scene-atmosphere.ts';
+import { SceneTraffic } from './scene-traffic.ts';
 import { CityWorld } from './scene-world.ts';
 import type { Atmosphere, Quality } from './atmosphere.ts';
 
@@ -29,6 +30,7 @@ export class CityView {
   ground!: CityGround;
   atmosphere!: SceneAtmosphere;
   world!: CityWorld;
+  traffic!: SceneTraffic;
   private windowLit!: StandardMaterial;
   private edgeMesh?: Mesh;
   private edgeSignature = '';
@@ -164,6 +166,7 @@ export class CityView {
     this.windowLit = this.material('#f9df9a').clone() as StandardMaterial;
     this.windowLit.emissive = new Color(1, .82, .52); this.windowLit.update();
     this.atmosphere.registerGlow(this.windowLit, 1.6);
+    this.traffic = new SceneTraffic(this);
     const gateZ = this.position(Math.floor(SIZE / 2) * SIZE).z;
     this.world = new CityWorld(this.app, SIZE * UNIT / 2, gateZ);
     // One original textured ground, a tool-only grid and one batched edge mesh.
@@ -386,6 +389,7 @@ export class CityView {
         }
       }
     }
+    this.traffic.sync(city);
     for (const child of [...this.markers.children]) child.destroy();
     for (const i of new Set([...preview, ...(selected === null ? [] : [selected])])) {
       const p = this.position(i); const color = i === selected ? '#fff1bb' : '#f7bf60';
