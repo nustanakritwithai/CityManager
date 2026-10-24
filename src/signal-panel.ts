@@ -5,6 +5,7 @@ import type { SignalCapture, SignalReport, SignalRequest } from './signal-data.t
 import { readingSignal, readingComparison, readingWindow } from './signal-reading.ts';
 import { requestSignalReport, signalConnectionReady } from './signal-client.ts';
 import type { SignalConnection, SignalTransportResult } from './signal-client.ts';
+import { createCityQuestionsPanel } from './city-questions-panel.ts';
 
 const node = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string): HTMLElementTagNameMap[K] => {
   const element = document.createElement(tag);
@@ -40,7 +41,12 @@ export function createSignalPanel(host: HTMLElement, { getCity, connection }: { 
   const stamp = node('p', 'signal-stamp'); stamp.append(captured, present);
   const stale = node('p', 'signal-stale'); stale.hidden = true;
   const content = node('div', 'signal-report');
-  host.replaceChildren(controls, feedback, stamp, stale, content);
+  const questions = node('details', 'signal-questions'); questions.id = 'city-fact-questions';
+  const questionHost = node('div'); questionHost.id = 'city-fact-question-content';
+  questions.append(node('summary', '', 'ถามข้อเท็จจริงของเมือง บ้าน และกิจการ'), questionHost);
+  host.replaceChildren(controls, feedback, stamp, stale, content, questions);
+  const questionPanel = createCityQuestionsPanel(questionHost, { getCity });
+  questions.addEventListener('toggle', () => { if (questions.open) questionPanel.sync(); });
 
   function sync() {
     const city = getCity();
@@ -53,6 +59,7 @@ export function createSignalPanel(host: HTMLElement, { getCity, connection }: { 
     stale.hidden = !isStale;
     if (isStale) stale.textContent = `เมืองเดินต่อแล้ว ${city.tick - current!.tick} วัน รายงานยังอ้างอิงวันที่ ${current!.tick} กดจับภาพใหม่เพื่ออ่านค่าปัจจุบัน`;
     host.dataset.stale = String(isStale);
+    if (questions.open) questionPanel.sync();
   }
   function setMode(kind: 'offline' | 'pending' | 'ai' | 'fallback', text: string) {
     mode.dataset.mode = kind; mode.textContent = text;
@@ -160,6 +167,7 @@ export function createSignalPanel(host: HTMLElement, { getCity, connection }: { 
     close(); owner = null; current = null; previous = undefined; lastInput = null; localReport = null;
     host.dataset.snapshotTick = ''; retryButton.hidden = true; message(); setMode('offline', 'คำนวณในเครื่อง');
     content.replaceChildren(node('p', 'signal-note', 'จับภาพข้อมูลเมืองเพื่ออ่านตัวเลขและสัญญาณ รายงานนี้อ่านอย่างเดียว')); sync();
+    questionPanel.reset();
   }
   function request() {
     if (!lastInput || !localReport || !signalConnectionReady(connection)) return;
