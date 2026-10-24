@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile, access, readdir } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, isMarket } from '../src/sim.ts';
+import { createCity, step, serialize, deserialize, isMarket, buildRoad } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { captureOwnerSnapshot, proposeOwnerDecision, executeOwnerProposal, ownerStateHash } from '../src/owner-decision.ts';
 import { createOwnerDecisionSession } from '../src/owner-decision-session.ts';
@@ -76,6 +76,13 @@ const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
 const hostState = () => evaluate('({...document.querySelector("#owner-decisions").dataset})');
 const selector = (key, value) => `[${key}=${JSON.stringify(value)}]`;
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); await paints(); }
+async function drag(from, to) {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y, button: 'none' });
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', buttons: 1, clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: to.x, y: to.y, button: 'left', buttons: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', buttons: 0, clickCount: 1 });
+  await paints();
+}
 async function reveal(target) {
   for (let n = 0; n < 8; n++) {
     const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(target)}),closed=[];for(let p=e?.parentElement;p;p=p.parentElement)if(p instanceof HTMLDetailsElement&&!p.open)closed.push(p);const s=closed.at(-1)?.querySelector(':scope>summary');if(!s)return null;s.scrollIntoView({block:'nearest'});const r=s.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
@@ -211,6 +218,35 @@ try {
   }
   await load(manualFixture); assert.equal((await hostState()).mode, 'proposal');
   checks.push('Off, proposal and explicitly selected auto run at the real monthly boundary; existing saves always load in proposal, never auto');
+
+  stage('4b drag-road mutation keeps owner recording active');
+  await load(monthlyFixture); await mode('auto'); await close(); await button('[data-tool="road"]'); await paints();
+  const gateway = 12 * 24;
+  assert.equal(monthlyFixture.cells[gateway].road, true, 'The starter gateway is a real road cell');
+  const roadEnd = [gateway - 24, gateway + 24].find(index => monthlyFixture.cells[index] && !monthlyFixture.cells[index].road && monthlyFixture.cells[index].zone === null && monthlyFixture.cells[index].building === null);
+  assert.notEqual(roadEnd, undefined, 'A clear neighboring road cell is available beside the gateway');
+  const expectedRoad = clone(monthlyFixture), roadResult = buildRoad(expectedRoad, gateway, roadEnd);
+  assert.equal(roadResult.ok, true, 'The canonical road command accepts the selected empty adjacent cell');
+  assert(expectedRoad.ledger.length > monthlyFixture.ledger.length, 'The road extension records its real construction cost');
+  const roadFrom = await evaluate(`window.cityManager.cellScreen(${gateway})`), roadTo = await evaluate(`window.cityManager.cellScreen(${roadEnd})`);
+  assert(Math.hypot(roadTo.x - roadFrom.x, roadTo.y - roadFrom.y) > 7, 'The real road drag crosses the browser gesture threshold');
+  assert.equal(await evaluate(`document.elementFromPoint(${roadFrom.x},${roadFrom.y})?.id`), 'city-canvas');
+  assert.equal(await evaluate(`document.elementFromPoint(${roadTo.x},${roadTo.y})?.id`), 'city-canvas');
+  assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"'), true, 'Road construction is tested while the simulation is paused');
+  await drag(roadFrom, roadTo);
+  const roadActual = await state();
+  assert.deepEqual(roadActual, expectedRoad, 'A native drag applies exactly the canonical buildRoad result, including cash and ledger entries');
+  assert.equal(roadActual.ledger.at(-1).from, 'treasury'); assert.equal(roadActual.ledger.at(-1).to, 'roadworks');
+  await openPanel(); assert.equal((await hostState()).mode, 'auto', 'External road construction preserves explicit auto mode after journaling');
+  await button('#owner-verify'); await until('["verified","verify-failed"].includes(document.querySelector("#owner-decisions").dataset.lastStatus)');
+  assert.equal((await hostState()).lastStatus, 'verified', 'The road mutation remains inside a valid replay checkpoint');
+  assert.deepEqual(await state(), expectedRoad, 'Replay verification leaves the canonical city unchanged');
+  await close(); await button('#toggle-game-menu'); await button('#save');
+  const savedRoad = await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`);
+  assert.equal(savedRoad, serialize(expectedRoad), 'The normal save stores the exact city after the road mutation');
+  assert.deepEqual(deserialize(savedRoad), expectedRoad, 'The saved road ledger and wallet balances round-trip unchanged');
+  assertConservation(roadActual); await openPanel();
+  checks.push('A real paused drag-built road records cash and ledger exactly, keeps explicit auto mode and replay verification active, and saves as ordinary v6 city state');
 
   stage('5 replay export and readable S22 normal/wide evidence');
   await button('#owner-evaluate'); const stable = await state(); await button('#owner-export');

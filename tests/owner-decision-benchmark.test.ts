@@ -43,6 +43,7 @@ test('720-day four-seed fixed-growth benchmark keeps proposals inert and replays
   assert.equal(report.horizonDays, 720); assert.deepEqual(report.seeds, [61025, 20261023, 1, 42]);
   assert.deepEqual(report.seeds, OWNER_BENCHMARK_SEEDS); assert.equal(report.baseline, 'growth-1');
   assert.equal(report.providerRequests, 0); assert.equal(report.rows.length, 4);
+  assert.equal(report.retentionMode, 'production-default'); assert.equal(report.retentionMaxEvents, 256);
   for (const row of report.rows) {
     assert.equal(row.proposalOnly.stateHash, row.baseline.stateHash);
     assert.equal(row.proposalOnly.final.tick, 720); assert.equal(row.ruleExecution.final.tick, 720);
@@ -50,7 +51,11 @@ test('720-day four-seed fixed-growth benchmark keeps proposals inert and replays
     assert.equal(row.proposalOnly.replay.ok, true); assert.equal(row.ruleExecution.replay.ok, true);
     assert.equal(row.monthly.baseline.length, 24);
     assert(row.ruleExecution.decisions.monthlyEvaluations > 0);
-    assert(row.ruleExecution.replay.checkpointRotations > 0, 'Long run actually exercises bounded retention checkpoints');
+    for (const treatment of [row.proposalOnly, row.ruleExecution]) {
+      assert.equal(treatment.replay.coverageStartTick, 0, 'Production retention keeps the complete fresh-city experiment');
+      assert.equal(treatment.replay.coverageEndTick, 720);
+      assert.equal(treatment.replay.retiredEvents, 0, 'No retired history is mislabeled full-run replay');
+    }
     assert(row.ruleExecution.final.households > 0 && row.ruleExecution.final.population >= row.ruleExecution.final.households);
   }
   assert(report.rows.some(row => row.ruleExecution.decisions.applied > 0), 'At least one actual owner transfer exercises execution, not only holds');

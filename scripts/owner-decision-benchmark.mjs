@@ -12,7 +12,6 @@ import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-dec
 
 export const OWNER_BENCHMARK_SEEDS = Object.freeze([61025, 20261023, 1, 42]);
 export const OWNER_BENCHMARK_DAYS = 720;
-const RETENTION_STRESS_MAX_EVENTS = 32;
 
 function reconcile(city) {
   let money = 0;
@@ -67,7 +66,7 @@ function verifyRetainedReplay(city, session) {
   const stats = session.getStats();
   assert(stats.retiredEvents >= 0 && stats.checkpointRotations >= 0);
   if (stats.retiredEvents > 0) assert(replay.coverageStartTick > 0, 'Retired events disclose a later retained checkpoint');
-  return { ok: true, coverageStartTick: replay.coverageStartTick, events: replay.events,
+  return { ok: true, coverageStartTick: replay.coverageStartTick, coverageEndTick: city.tick, maxEvents: journal.retention.maxEvents, events: replay.events,
     retiredEvents: stats.retiredEvents, checkpointRotations: stats.checkpointRotations };
 }
 
@@ -81,8 +80,7 @@ export function runOwnerDecisionBenchmark({ days = OWNER_BENCHMARK_DAYS, seeds =
   const started = performance.now(), rows = [];
   for (const seed of seeds) {
     const baseline = createCity(seed), proposal = createCity(seed), execution = createCity(seed);
-    const proposalSession = createOwnerDecisionSession(proposal, { maxEvents: RETENTION_STRESS_MAX_EVENTS });
-    const executionSession = createOwnerDecisionSession(execution, { maxEvents: RETENTION_STRESS_MAX_EVENTS });
+    const proposalSession = createOwnerDecisionSession(proposal), executionSession = createOwnerDecisionSession(execution);
     assert.equal(proposalSession.mode, 'proposal', 'A fresh session never starts autonomous');
     executionSession.setMode('auto');
     const monthly = { baseline: [], proposalOnly: [], ruleExecution: [] };
@@ -129,7 +127,7 @@ export function runOwnerDecisionBenchmark({ days = OWNER_BENCHMARK_DAYS, seeds =
   }
   return { schemaVersion: 1, benchmark: 'owner-rule-phase1', baseline: 'growth-1', saveVersion: 6,
     horizonDays: days, seeds: [...seeds], sourceHashes, moneyUnit: 'satang', monthlyPeriodDays: 30,
-    retentionStressMaxEvents: RETENTION_STRESS_MAX_EVENTS,
+    retentionMode: 'production-default', retentionMaxEvents: rows[0].ruleExecution.replay.maxEvents,
     treatments: ['fixed-growth-1', 'rule-proposal-only', 'rule-execution-opt-in'], llmTreatment: 'not implemented; future same-interface comparison',
     checked: ['money/goods/crops/inventory conservation every day', 'no negative internal cash', 'canonical household member counts',
       'proposal-only exact state equivalence each month', 'current-save final round-trip', 'retained checkpoint replay exact final state',
@@ -137,7 +135,6 @@ export function runOwnerDecisionBenchmark({ days = OWNER_BENCHMARK_DAYS, seeds =
     rows, elapsedMs: Math.round(performance.now() - started), providerRequests: 0,
     limitations: ['Synthetic seeded prototype experiment, not evidence that a policy is economically optimal.',
       'Replay covers the explicitly retained checkpoint window; retired event counts and coverage are reported.',
-      'This experiment uses 32 active events to stress retention checkpoints; it is not a game action or API quota.',
       'Legacy migration, stale/invalid proposals and command idempotency are additionally verified by focused unit tests.'] };
 }
 

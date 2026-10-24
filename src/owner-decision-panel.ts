@@ -30,7 +30,7 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
     const node = button(`owner-mode-${mode}`, label, () => {
       options.getSession().setMode(mode as keyof typeof modeLabels);
       lastStatus = 'mode-changed';
-      resultText = mode === 'auto' ? 'เปิดกฎทำรายการเองสำหรับรอบนี้ เริ่มตรวจเดือนถัดไป และบันทึกผลทุกรายการ' : mode === 'off' ? 'ปิดการประเมินเจ้าของตลาดแล้ว' : 'แสดงข้อเสนอให้เลือกทำเอง กฎยังไม่ย้ายเงิน';
+      resultText = mode === 'auto' ? 'เปิดกฎทำรายการเองในเมืองที่เปิดอยู่นี้ ตรวจทุกสิ้นเดือนและบันทึกผล โหลดหรือเริ่มใหม่จะกลับโหมดเสนอ' : mode === 'off' ? 'ปิดการประเมินเจ้าของตลาดแล้ว' : 'แสดงข้อเสนอให้เลือกทำเอง กฎยังไม่ย้ายเงิน';
       signature = ''; sync(); options.onChange();
     });
     node.dataset.ownerMode = mode; modes.append(node); return node;

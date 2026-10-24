@@ -260,7 +260,9 @@ async function boot() {
   });
   $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
-    selected = b; roadStart = null; status(buildRoad(city, a, b).message); render();
+    ownerDecisionSession.beforeExternal(city);
+    selected = b; roadStart = null; status(buildRoad(city, a, b).message);
+    ownerDecisionSession.syncExternal(city, 'player-drag-road'); render();
   });
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool!)));
   document.querySelectorAll<HTMLElement>('[data-camera]').forEach(b => b.addEventListener('click', () => view.control(b.dataset.camera!)));
