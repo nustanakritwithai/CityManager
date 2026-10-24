@@ -1,7 +1,7 @@
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
 import { allocateEmployment, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
-import { deserializeV4, type City as CityV4 } from './legacy-v4.ts';
+import { deserialize as deserializeV5, type City as CityV5 } from './legacy-v5.ts';
 import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, type ResourceMap } from './agriculture.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
@@ -17,12 +17,12 @@ export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; le
 export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
-export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; commercialKind?: 'market' | 'retail'; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
+export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; commercialKind?: 'market' | 'retail'; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
 export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string };
 export type City = {
-  version: 5; rulesVersion: 'commercial-1'; migration: { arrivals: number; legacyHouseholds: number }; employment: EmploymentAllocation[];
+  version: 6; rulesVersion: 'growth-1'; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number }; employment: EmploymentAllocation[];
   ownerLabor: OwnerLabor[]; resources: ResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
   seed: number; rng: number; tick: number; nextId: number;
   cells: Cell[]; buildings: Building[]; households: Household[]; firms: Firm[];
@@ -53,6 +53,39 @@ export const householdWorkerCount = (c: City, id: number): number => employmentF
 export const housingCapacity = (b: Building): HousingCapacity => b.zone === 'R' ? getHousingCapacity(b.housingType!, b.level) : { households: 0, persons: 0 };
 export const homeOccupancy = (c: City, id: number): HousingCapacity => buildOccupancyIndex(c.households).get(id) ?? { households: 0, persons: 0 };
 const householdAccess = (c: City, h: Household) => h.home !== null && access(c, building(c, h.home).cell);
+
+/** Proposed prototype finance policy, in integer satang; no credit or outside grant. */
+export const INDUSTRY_STARTUP_CAPITAL = 300_000;
+const INDUSTRY_WORKING_RESERVE = 20_000;
+export function industryGrowthStatus(c: City) {
+  const industries = c.firms.filter(f => f.zone === 'I').sort((a, b) => a.id - b.id);
+  const fundedVacancies = admissionFacts(c).vacancies;
+  const cropAvailable = c.firms.filter(f => (f.zone === 'F' || isMarket(f)) && access(c, building(c, f.building).cell) && firmWorkerCount(c, f.id) > 0).reduce((n, f) => n + f.cropInventory, 0);
+  const facts = (f?: Firm) => {
+    const cash = f ? balance(c, f.wallet) : 0, payrollReserve = f ? payroll(f) : 0;
+    const taxReserve = f ? Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense - payrollReserve) / 5) : 0;
+    const rentReserve = 10_000, workingReserve = INDUSTRY_WORKING_RESERVE;
+    return { sponsorFirmId: f?.id ?? null, cash, payrollReserve, taxReserve, rentReserve, workingReserve,
+      requiredCapital: INDUSTRY_STARTUP_CAPITAL, availableCapital: Math.max(0, cash - payrollReserve - taxReserve - rentReserve - workingReserve) };
+  };
+  const profitable = industries.filter(f => access(c, building(c, f.building).cell) && firmWorkerCount(c, f.id) === capacity(building(c, f.building)) && f.lastMonthProfit > 0 && f.profit > 0 && f.cropInventory >= 2);
+  const funded = profitable.find(f => facts(f).availableCapital >= INDUSTRY_STARTUP_CAPITAL);
+  const chosen = funded ?? [...profitable].sort((a, b) => facts(b).availableCapital - facts(a).availableCapital || a.id - b.id)[0] ?? industries[0];
+  const finance = facts(chosen), bootstrap = industries.length === 0;
+  const result = (code: string, reason: string, ready = false) => ({ ...finance, bootstrap, code, reason, ready, eligible: ready, fundedVacancies, cropAvailable });
+  if (!c.utilities.power || !c.utilities.water) return result('growth.utilities-unavailable', 'Industry investment waits for connected outside power and water.');
+  if (!c.cells.some((p, i) => p.zone === 'I' && p.building === null && access(c, i))) return result('growth.no-industrial-parcel', 'Zone an empty connected industrial parcel before commissioning paid jobs.');
+  if (bootstrap) return result('growth.bootstrap', 'Only the first factory uses the existing named outside-equity bootstrap; no workers are fabricated.', true);
+  if (fundedVacancies > 0) return result('growth.vacancies-remain', `Fill ${fundedVacancies} existing funded paid vacancies before another factory is commissioned.`);
+  const room = vacantHomes(c).some(b => canAccommodate(housingCapacity(b), homeOccupancy(c, b.id), 3));
+  const residentialSite = c.cells.some((p, i) => p.zone === 'R' && p.building === null && access(c, i));
+  const availableManufacturing = c.households.some(h => householdAccess(c, h) && (['general', 'manufacturing'] as const).some(skill => h.workerSkills[skill] > c.employment.filter(e => e.householdId === h.id && e.skill === skill).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length));
+  if (!room && !residentialSite && !availableManufacturing) return result('growth.housing-unavailable', 'New paid jobs need an available home, a connected residential parcel, or an eligible existing unemployed worker.');
+  if (cropAvailable < 8) return result('growth.no-crop-buffer', `Industry investment needs 8 real accessible crop lots for a startup batch; have ${cropAvailable}. No input is gifted.`);
+  if (!profitable.length) return result('growth.no-profitable-sponsor', 'A connected, fully staffed factory needs positive realized operating profit and actual inputs before sponsoring an expansion.');
+  if (!funded) return result('growth.saving-capital', `Factory #${finance.sponsorFirmId} can invest ${finance.availableCapital}/${INDUSTRY_STARTUP_CAPITAL} satang after earned wages, current tax, rent and working-cash reserves.`);
+  return result('growth.ready', `Factory #${finance.sponsorFirmId} can fund ${INDUSTRY_STARTUP_CAPITAL} satang of new paid-job capital from its own cash; wages and reserves remain protected.`, true);
+}
 
 export function ownerFinance(c: City, firmId: number) {
   const f = c.firms.find(f => f.id === firmId), owner = f?.owner;
@@ -186,7 +219,8 @@ export function bulldoze(c: City, i: number): Result {
     if (spendable(c, f) < tax) return { ok: false, message: 'Closure needs enough cash to settle earned wages and current profit tax; no demolition was charged.' };
     if (!writeOffCrops(c, f, agricultureHooks(c))) return { ok: false, message: 'Crop disposal could not be journaled; business and city retained.' };
   }
-  transfer(c, 'treasury', 'construction', cost, 'Demolition');
+  const fundedClosing = closingFirms.find(f => f.fundedBy);
+  transfer(c, 'treasury', 'construction', cost, fundedClosing ? `Funded industry demolition #${fundedClosing.id}` : 'Demolition');
   if (b) {
     const displaced = c.households.filter(h => h.home === b.id), closing = c.firms.filter(f => f.building === b.id);
     for (const h of displaced) h.home = null;
@@ -202,7 +236,8 @@ export function bulldoze(c: City, i: number): Result {
         const capital = Math.min(balance(c, f.wallet), f.owner.capitalContributed - f.owner.capitalReturned);
         f.owner.capitalReturned += transfer(c, f.wallet, h.wallet, capital, 'Closing owner capital return');
         f.owner.withdrawn += transfer(c, f.wallet, h.wallet, balance(c, f.wallet), 'Closing owner profit distribution');
-      } else transfer(c, f.wallet, 'outside', balance(c, f.wallet), 'Firm liquidation');
+      } else if (f.fundedBy) transfer(c, f.wallet, `firm:${f.fundedBy.firmId}`, balance(c, f.wallet), `Industry expansion residual return #${f.id}`);
+      else transfer(c, f.wallet, 'outside', balance(c, f.wallet), 'Firm liquidation');
       goodsTransfer(c, f.wallet, 'outside', f.inventory, 'Demolition stock write-off to outside'); c.goods.exported += f.inventory;
       c.employment = c.employment.filter(e => e.firmId !== f.id);
       c.ownerLabor = c.ownerLabor.filter(e => e.firmId !== f.id);
@@ -238,7 +273,7 @@ export function summary(c: City) {
     homeless, homeSlots: homes.reduce((n, b) => n + housingCapacity(b).households, 0),
     personCapacity: homes.reduce((n, b) => n + housingCapacity(b).persons, 0), treasury: balance(c, 'treasury'), net,
     demand: { R: Math.max(0, homeless + incoming - vacantSlots), C: c.firms.some(f => f.zone === 'F') && marketOwnerCandidate(c) ? Math.max(0, Math.ceil(c.households.length / 6) - markets) : 0,
-      I: c.firms.some(f => f.zone === 'I') ? (availableWorkers > 0 && jobs - employed < 2 ? 1 : 0) : 1,
+      I: industryGrowthStatus(c).ready ? 1 : 0,
       F: (c.firms.some(f => f.zone === 'I' || isMarket(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!c.firms.some(f => f.zone === 'F') ||
         c.households.length + c.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(c, f.id) * 2, 0) >
         c.firms.filter(f => f.zone === 'F').reduce((n, f) => n + Math.floor(24 * c.resources.fertility[building(c, f.building).cell] / 100), 0)) ? 1 : 0 } };
@@ -260,7 +295,7 @@ function blockers(c: City, i: number): string[] {
     if (c.firms.length >= 64) reasons.push('Firm limit (64) reached.');
     if (cell.zone === 'F' && c.resources.fertility[i] < FERTILITY_THRESHOLD) reasons.push(`Farm needs fertility ${FERTILITY_THRESHOLD}%; this parcel has ${c.resources.fertility[i]}%.`);
     if (cell.zone === 'C' && !marketOwnerCandidate(c)) reasons.push('Raw market needs a connected household owner with one general/retail worker and 600 credits of actual capital.');
-    if (s.demand[cell.zone] <= 0) reasons.push(cell.zone === 'I' ? 'No industry demand: another factory needs an actual connected unemployed resident and fewer than 2 existing job vacancies. Only the first factory has a workforce bootstrap exemption.' : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Raw market needs an actual farm, reachable buyers and a household owner with real capital and labour.' : 'No retail demand: existing shops cover the household market.');
+    if (s.demand[cell.zone] <= 0) reasons.push(cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Raw market needs an actual farm, reachable buyers and a household owner with real capital and labour.' : 'No retail demand: existing shops cover the household market.');
   }
   return reasons;
 }
@@ -293,16 +328,21 @@ function createBuilding(c: City, i: number) {
   if (!canAllocateIds(c, c.cells[i].zone === 'R' ? 1 : 2)) { c.lastEvent = 'Entity ID range exhausted; construction and funding were not created.'; return; }
   const zone = c.cells[i].zone!, owner = zone === 'C' ? marketOwnerCandidate(c) : undefined;
   if (zone === 'C' && !owner) return;
+  const industry = zone === 'I' ? industryGrowthStatus(c) : null;
+  if (industry && !industry.ready) return;
+  const sponsor = industry && !industry.bootstrap ? c.firms.find(f => f.id === industry.sponsorFirmId && f.zone === 'I') : undefined;
+  if (industry && !industry.bootstrap && !sponsor) return;
   const id = c.nextId++;
   const b: Building = { id, cell: i, zone, level: 1, age: 0, ...(zone === 'R' ? { housingType: 'cottage' as const } : {}) }; c.buildings.push(b); c.cells[i].building = id;
   if (zone === 'R') {
     transfer(c, 'outside', 'construction', 40_000, 'Outside residential developer investment');
   } else {
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: id, zone, ...(zone === 'C' ? { commercialKind: 'market' as const } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
+    c.firms.push({ id: fid, building: id, zone, ...(zone === 'C' ? { commercialKind: 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: 60_000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
-    transfer(c, owner ? owner.wallet : 'outside', wallet, owner ? 60_000 : 300_000, owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : 'Outside firm equity investment');
+    const paidCapital = transfer(c, sponsor ? sponsor.wallet : owner ? owner.wallet : 'outside', wallet, owner ? 60_000 : INDUSTRY_STARTUP_CAPITAL, sponsor ? `Industry expansion capital #${fid}` : owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : `Outside industry bootstrap equity #${fid}`);
+    if (paidCapital !== (owner ? 60_000 : INDUSTRY_STARTUP_CAPITAL)) throw new Error('Commissioned capital invariant violated.');
     transfer(c, wallet, 'construction', owner ? 10_000 : 40_000, owner ? 'Self-employed market construction' : 'Firm building investment');
     if (owner) reserveOwnerLabor(c);
   }
@@ -479,7 +519,7 @@ export function step(c: City): void {
 }
 export function createCity(seed = 20261023): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { version: 5, rulesVersion: 'commercial-1', migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { version: 6, rulesVersion: 'growth-1', growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -503,18 +543,15 @@ export function serialize(c: City): string {
   return json;
 }
 
-/** Prior schemas are strictly validated by the frozen v4 reader before taxonomy migration. */
-function migrateV4(old: CityV4): City {
-  return { ...old, version: 5, rulesVersion: 'commercial-1',
-    cells: old.cells.map(cell => ({ ...cell, zone: cell.zone === 'T' ? 'C' : cell.zone })),
-    buildings: old.buildings.map(b => ({ ...b, zone: b.zone === 'T' ? 'C' : b.zone, level: b.zone === 'C' ? b.level + 1 : b.level })),
-    firms: old.firms.map((f): Firm => f.zone === 'T' ? { ...f, zone: 'C', commercialKind: 'market' } : f.zone === 'C' ? { ...f, zone: 'C', commercialKind: 'retail' } : { ...f, zone: f.zone }),
-  };
+/** Original commercial state is validated first; no operating state or history is rewritten. */
+function migrateV5(old: CityV5): City {
+  if (old.firms.some(f => Object.hasOwn(f, 'fundedBy'))) throw new Error('Legacy saves cannot contain growth funding metadata.');
+  return { ...old, version: 6, rulesVersion: 'growth-1', growthStartTick: old.tick };
 }
-function validateV5(c: City): City {
-  const fail = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture save (expected version 5 / commercial-1).'); };
+function validateV6(c: City): City {
+  const fail = (): never => { throw new Error('Unsupported or corrupt CityManager growth save (expected version 6 / growth-1).'); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
-  if (!c || c.version !== 5 || c.rulesVersion !== 'commercial-1' || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
+  if (!c || c.version !== 6 || c.rulesVersion !== 'growth-1' || !int(c.growthStartTick) || c.growthStartTick > c.tick || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
   if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > 192 || !Array.isArray(c.households) || c.households.length > 128 || !Array.isArray(c.firms) || c.firms.length > 64) fail();
   if (!c.migration || !int(c.migration.arrivals) || !int(c.migration.legacyHouseholds) || !Array.isArray(c.employment) || c.employment.length > 256) fail();
   if (!Array.isArray(c.ownerLabor) || c.ownerLabor.length > 64 || c.ownerLabor.some(e => !e || !int(e.householdId, 1) || !int(e.firmId, 1) || e.workers !== 1 || !['general', 'retail'].includes(e.skill)) || !Array.isArray(c.cropLedger) || !c.crops || !['harvested', 'processed', 'consumed', 'writtenOff'].every(k => int(c.crops[k as keyof typeof c.crops])) || !int(c.agricultureStartTick) || c.agricultureStartTick > c.tick || !isCanonicalResourceMap(c.resources, c.seed)) fail();
@@ -539,6 +576,7 @@ function validateV5(c: City): City {
     if (!f || !int(f.id, 1) || ids.has(f.id) || !['C', 'I', 'F'].includes(f.zone) || !c.buildings.some(b => b.id === f.building && b.zone === f.zone) || f.wallet !== `firm:${f.id}` || !int(c.accounts[f.wallet]) || Object.hasOwn(f, 'employees') || !int(f.inventory) || !int(f.profit, Number.MIN_SAFE_INTEGER) || !int(f.lastMonthProfit, Number.MIN_SAFE_INTEGER) || !int(f.monthlyRevenue) || !int(f.monthlyExpense)) fail();
     const premise = c.buildings.find(b => b.id === f.building)!;
     if (f.zone === 'C' ? !['market', 'retail'].includes(f.commercialKind!) || (isMarket(f) ? premise.level !== 1 : premise.level < 2) : f.commercialKind !== undefined) fail();
+    if (f.fundedBy !== undefined && (f.zone !== 'I' || !f.fundedBy || typeof f.fundedBy !== 'object' || Array.isArray(f.fundedBy) || Object.keys(f.fundedBy).length !== 2 || !int(f.fundedBy.firmId, 1) || f.fundedBy.firmId >= f.id || f.fundedBy.capital !== INDUSTRY_STARTUP_CAPITAL || !Object.hasOwn(c.accounts, `firm:${f.fundedBy.firmId}`))) fail();
     if (!f.workDays || typeof f.workDays !== 'object' || Array.isArray(f.workDays) || !Object.entries(f.workDays).every(([wallet, days]) => { const h = c.households.find(h => h.wallet === wallet); return h && int(days, 1) && days <= h.workforce * (c.tick % MONTH); }) || !int(payroll(f)) || payroll(f) > balance(c, f.wallet)) fail();
     ids.add(f.id);
   }
@@ -570,6 +608,53 @@ function validateV5(c: City): City {
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();
   if (!Array.isArray(c.ledger) || !Array.isArray(c.goodsLedger)) fail();
   for (const e of c.ledger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || !Object.hasOwn(c.accounts, e.from) || !Object.hasOwn(c.accounts, e.to) || e.from === e.to) fail();
+  const expansionFunding = new Map<number, Entry>(), bootstrapFunding = new Map<number, Entry>();
+  for (const e of c.ledger) {
+    const expansion = /^Industry expansion capital #([1-9]\d*)$/.exec(e.reason), bootstrap = /^Outside industry bootstrap equity #([1-9]\d*)$/.exec(e.reason);
+    if (!expansion && !bootstrap) continue;
+    const id = Number((expansion ?? bootstrap)![1]);
+    if (!int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || e.amount !== INDUSTRY_STARTUP_CAPITAL || e.tick <= c.growthStartTick) fail();
+    if (expansion) {
+      const parent = /^firm:([1-9]\d*)$/.exec(e.from), parentId = parent ? Number(parent[1]) : 0;
+      if (!int(parentId, 1) || parentId >= id || expansionFunding.has(id)) fail();
+      expansionFunding.set(id, e);
+    } else {
+      if (e.from !== 'outside' || bootstrapFunding.has(id)) fail();
+      bootstrapFunding.set(id, e);
+    }
+  }
+  if ([...expansionFunding.keys()].some(id => bootstrapFunding.has(id))) fail();
+  for (const f of c.firms) {
+    const funding = expansionFunding.get(f.id), born = c.tick - building(c, f.building).age;
+    if (f.fundedBy) {
+      if (!funding || funding.from !== `firm:${f.fundedBy.firmId}` || funding.to !== f.wallet || funding.tick !== born) fail();
+    } else if (funding) fail();
+    if (f.zone === 'I' && born > c.growthStartTick && !f.fundedBy && (bootstrapFunding.get(f.id)?.tick !== born || c.firms.some(other => other.id !== f.id && other.zone === 'I' && c.tick - building(c, other.building).age < born))) fail();
+  }
+  const closureMarkers = new Map<number, number>();
+  c.ledger.forEach((e, index) => {
+    const match = /^Funded industry demolition #([1-9]\d*)$/.exec(e.reason); if (!match) return;
+    const id = Number(match[1]), funding = expansionFunding.get(id);
+    if (!funding || closureMarkers.has(id) || e.from !== 'treasury' || e.to !== 'construction' || e.amount !== 2_000 || e.tick < funding.tick || c.firms.some(f => f.id === id)) fail();
+    closureMarkers.set(id, index);
+  });
+  for (const [id, funding] of expansionFunding) {
+    const parent = c.firms.find(f => f.wallet === funding.from);
+    const historicalIndustry = c.goodsLedger.some(e => e.from === 'production' && e.to === funding.from && e.tick <= funding.tick);
+    if (parent ? parent.zone !== 'I' : !historicalIndustry) fail();
+    if (!c.firms.some(f => f.id === id)) {
+      const closedAt = closureMarkers.get(id); if (closedAt === undefined) fail();
+      const estateReceipts = c.ledger.slice(closedAt! + 1).filter(e => /^Industry expansion residual return #[1-9]\d*$/.test(e.reason) && e.to === funding.to).reduce((n, e) => n + e.amount, 0);
+      if (balance(c, funding.to) !== estateReceipts) fail();
+    }
+  }
+  const returned = new Set<number>();
+  for (const e of c.ledger) {
+    const match = /^Industry expansion residual return #([1-9]\d*)$/.exec(e.reason); if (!match) continue;
+    const id = Number(match[1]), funding = expansionFunding.get(id);
+    if (!funding || e.from !== funding.to || e.to !== funding.from || e.tick < funding.tick || !closureMarkers.has(id) || returned.has(id) || c.firms.some(f => f.id === id)) fail();
+    returned.add(id);
+  }
   const arrivals = c.households.filter(h => h.origin === 'arrival'), legacyCount = c.households.filter(h => h.origin === 'legacy-v1').length;
   const arrivalEntries = c.ledger.filter(e => e.reason === 'New household arrival savings');
   if (c.migration.legacyHouseholds !== legacyCount || c.migration.arrivals !== Math.max(legacyCount, arrivalEntries.length - arrivals.length) + arrivals.length) fail();
@@ -603,6 +688,6 @@ export function deserialize(json: string): City {
   if (typeof json !== 'string' || json.length > 12_000_000) throw new Error('Save is too large or invalid.');
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
-  if (parsed && typeof parsed === 'object' && [1, 2, 3, 4].includes((parsed as { version: number }).version)) return validateV5(migrateV4(deserializeV4(json)));
-  return validateV5(parsed as City);
+  if (parsed && typeof parsed === 'object' && [1, 2, 3, 4, 5].includes((parsed as { version: number }).version)) return validateV6(migrateV5(deserializeV5(json)));
+  return validateV6(parsed as City);
 }

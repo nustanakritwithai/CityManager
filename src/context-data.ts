@@ -1,4 +1,4 @@
-import { access, MONTH, summary, housingCapacity, homeOccupancy } from './sim.ts';
+import { access, MONTH, summary, housingCapacity, homeOccupancy, industryGrowthStatus } from './sim.ts';
 import type { Building, City, Firm, Household } from './sim.ts';
 import type { EmploymentAllocation, WorkerSkill } from './labor.ts';
 import { flowRows } from './inspector-data.ts';
@@ -62,8 +62,26 @@ export function contextRevision(city: City): string {
     city.employment.map(a => [a.householdId, a.firmId, a.occupation, a.rank, a.skill, a.workers]),
     city.ownerLabor, city.resources, city.crops, city.cropLedger.length, city.cropLedger.at(-1),
     city.buildings.map(b => [b.id, b.cell, b.zone, b.level, b.age, 'housingType' in b ? b.housingType : null]),
-    city.firms.map(f => [f.id, f.building, f.zone, f.commercialKind, f.inventory, f.cropInventory, f.cropCost, f.productionTick, f.owner, f.profit, f.monthlyRevenue, f.monthlyExpense, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
+    city.firms.map(f => [f.id, f.building, f.zone, f.commercialKind, f.inventory, f.cropInventory, f.cropCost, f.productionTick, f.owner, f.fundedBy, f.profit, f.monthlyRevenue, f.monthlyExpense, f.lastMonthProfit, f.workDays, city.accounts[f.wallet]])]);
 }
+
+/** Read-only Thai presentation of the simulator's actual expansion decision. */
+export function growthStatusText(city: City) {
+  const status = industryGrowthStatus(city);
+  const labels: Record<string, string> = {
+    'growth.bootstrap': 'โรงงานแรกเริ่มได้ด้วยทุนภายนอกที่บันทึกคู่บัญชี ก่อนรับแรงงานตามกติกาเริ่มเมือง',
+    'growth.ready': `กิจการ #${status.sponsorFirmId} มีทุนที่ใช้ขยายได้ ${formatGrowthCash(status.availableCapital)} บาท พร้อมเปิดโรงงานในแปลงที่ผ่านเงื่อนไข`,
+    'growth.utilities-unavailable': 'น้ำหรือไฟภายนอกยังไม่พร้อม การเปิดกิจการเพิ่มถูกระงับ',
+    'growth.no-industrial-parcel': 'ยังไม่มีแปลง I ว่างที่เชื่อมถนนถึงทางออกเมือง วางโซนโรงงานข้างถนนก่อน',
+    'growth.vacancies-remain': `มีงานว่างที่สำรองค่าจ้างได้ ${status.fundedVacancies} ตำแหน่ง ให้รับแรงงานในงานที่มีอยู่ก่อนเปิดโรงงานเพิ่ม`,
+    'growth.housing-unavailable': 'ต้องมีบ้านที่รับครัวเรือนได้ หรือแปลงบ้านว่างที่เชื่อมเมือง ก่อนเพิ่มโอกาสงาน',
+    'growth.no-crop-buffer': 'พืชผลที่เข้าถึงได้ยังไม่พอเริ่มการผลิตเพิ่ม ตรวจฟาร์ม แรงงาน และถนนก่อน ไม่สร้างวัตถุดิบขึ้นเอง',
+    'growth.no-profitable-sponsor': 'ยังไม่มีโรงงานที่ทำกำไรและผ่านเงื่อนไขลงทุนเพิ่ม ตรวจการผลิต ยอดขาย แรงงาน และภาระกิจการเดิม',
+    'growth.saving-capital': `โรงงานกำลังสะสมทุนขยาย: ใช้ได้ ${formatGrowthCash(status.availableCapital)} / ต้องมี ${formatGrowthCash(status.requiredCapital)} บาท หลังกันภาระและเงินหมุนเวียน`,
+  };
+  return { status, message: labels[status.code] ?? 'ยังไม่ผ่านเงื่อนไขขยายโรงงาน ตรวจข้อมูลจริงในรายละเอียดเงินทุน' };
+}
+const formatGrowthCash = (amount: number) => (amount / 100).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Latest recorded basket, not a guessed commodity from a household timestamp. */
 export function householdConsumption(city: City, id: number): { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null {

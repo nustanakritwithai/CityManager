@@ -1,5 +1,6 @@
-/** Loading never writes; original v1-v4 bytes are independent of the v5 slot. */
-export const SAVE_KEY = 'citymanager.save.v5';
+/** Loading never writes; original v1-v5 bytes are independent of the v6 slot. */
+export const SAVE_KEY = 'citymanager.save.v6';
+export const COMMERCIAL_SAVE_KEY = 'citymanager.save.v5';
 export const AGRICULTURE_SAVE_KEY = 'citymanager.save.v4';
 export const WORKER_SAVE_KEY = 'citymanager.save.v3';
 export const HOUSEHOLD_SAVE_KEY = 'citymanager.save.v2';
@@ -8,25 +9,27 @@ export const LEGACY_BACKUP_KEY = 'citymanager.backup.v1';
 export const HOUSEHOLD_BACKUP_KEY = 'citymanager.backup.v2';
 export const WORKER_BACKUP_KEY = 'citymanager.backup.v3';
 export const AGRICULTURE_BACKUP_KEY = 'citymanager.backup.v4';
+export const COMMERCIAL_BACKUP_KEY = 'citymanager.backup.v5';
 export const LATEST_BACKUP_KEY = 'citymanager.backup.latest';
 const BACKUP_SLOTS = 8;
 type Reader = Pick<Storage, 'getItem'>;
 type Writer = Pick<Storage, 'getItem' | 'setItem'>;
-export type SaveSource = 'current' | 'agriculture' | 'worker' | 'household' | 'legacy' | 'backup';
-const backupKey = (version: 1 | 2 | 3 | 4, i: number) => {
-  const base = version === 1 ? LEGACY_BACKUP_KEY : version === 2 ? HOUSEHOLD_BACKUP_KEY : version === 3 ? WORKER_BACKUP_KEY : AGRICULTURE_BACKUP_KEY;
+export type SaveSource = 'current' | 'commercial' | 'agriculture' | 'worker' | 'household' | 'legacy' | 'backup';
+const backupKey = (version: 1 | 2 | 3 | 4 | 5, i: number) => {
+  const base = version === 1 ? LEGACY_BACKUP_KEY : version === 2 ? HOUSEHOLD_BACKUP_KEY : version === 3 ? WORKER_BACKUP_KEY : version === 4 ? AGRICULTURE_BACKUP_KEY : COMMERCIAL_BACKUP_KEY;
   return i === 0 ? base : `${base}.${i}`;
 };
-const backupKeys = (version: 1 | 2 | 3 | 4) => Array.from({ length: BACKUP_SLOTS }, (_, i) => backupKey(version, BACKUP_SLOTS - i - 1));
+const backupKeys = (version: 1 | 2 | 3 | 4 | 5) => Array.from({ length: BACKUP_SLOTS }, (_, i) => backupKey(version, BACKUP_SLOTS - i - 1));
 export function readStoredCity(storage: Reader, source: SaveSource = 'current'): { raw: string; key: string } | null {
   let keys: string[];
-  if (source === 'current') keys = [SAVE_KEY, AGRICULTURE_SAVE_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY];
+  if (source === 'current') keys = [SAVE_KEY, COMMERCIAL_SAVE_KEY, AGRICULTURE_SAVE_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY];
+  else if (source === 'commercial') keys = [COMMERCIAL_SAVE_KEY];
   else if (source === 'agriculture') keys = [AGRICULTURE_SAVE_KEY];
   else if (source === 'worker') keys = [WORKER_SAVE_KEY];
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1)];
+    keys = [...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1)];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -36,11 +39,11 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   return null;
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
-  if (JSON.parse(raw)?.version !== 5) throw new Error('Expected a version 5 snapshot.');
+  if (JSON.parse(raw)?.version !== 6) throw new Error('Expected a version 6 snapshot.');
   let backup: string | null = null;
   if (importedLegacy !== null) {
     const version: unknown = JSON.parse(importedLegacy)?.version;
-    if (version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new Error('Expected the original version 1, 2, 3 or 4 snapshot.');
+    if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw new Error('Expected the original version 1, 2, 3, 4 or 5 snapshot.');
     let available: string | null = null;
     for (let i = 0; i < BACKUP_SLOTS; i++) {
       const key = backupKey(version, i), previous = storage.getItem(key);
@@ -53,7 +56,7 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
     // Failure here still aborts before changing the primary save.
     if (storage.getItem(LATEST_BACKUP_KEY) !== backup) storage.setItem(LATEST_BACKUP_KEY, backup);
   }
-  // Native setItem is atomic: failed primary writes retain the previous v5
+  // Native setItem is atomic: failed primary writes retain the previous v6
   // bytes, while a successful preceding legacy backup remains recoverable.
   storage.setItem(SAVE_KEY, raw);
   return { backup };

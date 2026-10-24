@@ -1,7 +1,7 @@
 import './context-panels.css';
 import './building-cards.css';
 import { MONTH, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
-import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
+import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
@@ -229,9 +229,19 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
     el('p', '', hasClosedMonth ? `กำไรก่อนภาษีของรอบบัญชีวันที่ ${Math.max(1, lastSettlement - MONTH + 1)}–${lastSettlement} รวมเฉพาะวันที่บริษัทดำเนินงาน ไม่ใช่กำไรที่เพิ่งรับในเดือนนี้` : 'ยังไม่มีเดือนที่ปิดบัญชี จึงยังไม่มีกำไรของรอบบัญชีก่อนหน้า'),
     el('p', '', `บริษัท #${firm.id} · อาคาร #${building.id} · บัญชี ${firm.wallet}`));
   const workerMetric = capacityMetric('workers', 'แรงงานทำงาน / รับได้', workers, capacity, 'คน');
+  const funding: HTMLElement[] = [];
+  if (firm.zone === 'I' && firm.fundedBy) {
+    const source = section('ทุนเปิดกิจการที่โอนมาจริง'); source.classList.add('cx-industry-funding');
+    Object.assign(source.dataset, { industryFunding: 'true', sponsorId: String(firm.fundedBy.firmId), capital: String(firm.fundedBy.capital) });
+    source.append(metrics([
+      growthMetric('funding-sponsor', 'กิจการผู้ลงทุน', `#${firm.fundedBy.firmId}`, firm.fundedBy.firmId),
+      growthMetric('funding-capital', 'ทุนเมื่อเปิดกิจการ', cash(firm.fundedBy.capital), firm.fundedBy.capital, true),
+    ]), el('p', 'cx-detail-note', 'ทุนนี้โอนจากบัญชีกิจการผู้ลงทุน ไม่ใช่ยอดขาย เงินคลัง หรือเงินกู้ เงินปัจจุบันและค่าจ้างของโรงงานนี้ยังแยกบัญชีตามเดิม'));
+    funding.push(source);
+  }
   return [el('p', 'cx-context-meta', `บริษัท #${firm.id} · ${firm.wallet}`), status(city, building.cell), metrics([
     metric('cash', 'เงินกิจการ', cash(wallet), wallet, true), metric('reserved', 'สำรองค่าจ้าง', cash(reserved), reserved, true), metric('spendable', 'เงินพ้นสำรองค่าจ้าง', cash(spendable), spendable, true), metric('stock', 'สำเร็จรูปคงคลัง', `${count(firm.inventory)} หน่วย`, firm.inventory), workerMetric, metric('household-count', 'บัญชีครัวเรือนของผู้ทำงาน', count(labor.householdCount), labor.householdCount), metric('profit', 'กำไรรอบก่อนภาษี', cash(firm.lastMonthProfit, true), firm.lastMonthProfit, true)
-  ]), ...renderAgriculture(city, building, firm, labor.workers), employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), ...(firm.zone === 'I' || isRetail(firm) ? [activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)] : []), ...(!isRetail(firm) ? [cropActivity(city, firm.wallet, `${businessName(firm)} #${firm.id}`)] : [])];
+  ]), ...renderAgriculture(city, building, firm, labor.workers), ...funding, employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), ...(firm.zone === 'I' || isRetail(firm) ? [activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)] : []), ...(!isRetail(firm) ? [cropActivity(city, firm.wallet, `${businessName(firm)} #${firm.id}`)] : [])];
 }
 function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
   if (isRetail(firm)) return [];
@@ -329,7 +339,7 @@ type CardKind = CardData['kind'];
 type CardParts = {
   values: Map<string, HTMLElement>; statuses: HTMLElement[]; assumptions: HTMLElement[];
   journals: HTMLElement[]; notes: HTMLElement[]; residents: HTMLElement | null;
-  employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null;
+  employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null; funding: HTMLElement | null;
 };
 function cardIcon(kind: CardKind): SVGElement {
   const paths: Record<CardKind, string> = {
@@ -354,7 +364,7 @@ function cardHero(data: CardData): HTMLElement {
 }
 /** Move existing metric nodes, retaining each raw key once and every live handler. */
 function cardParts(nodes: HTMLElement[]): CardParts {
-  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], residents: null, employment: null, skills: null, owner: null };
+  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], residents: null, employment: null, skills: null, owner: null, funding: null };
   for (const node of nodes) {
     const cards = [...(node.matches('[data-context-metric]') ? [node] : []), ...node.querySelectorAll<HTMLElement>('[data-context-metric]')];
     for (const card of cards) { parts.values.set(card.dataset.contextMetric!, card); card.remove(); }
@@ -367,6 +377,7 @@ function cardParts(nodes: HTMLElement[]): CardParts {
     else if (node.classList.contains('bc-employment-source')) parts.employment = node;
     else if (node.classList.contains('bc-skills-source')) parts.skills = node;
     else if (node.classList.contains('bc-owner-source')) parts.owner = node;
+    else if (node.classList.contains('cx-industry-funding')) parts.funding = node;
     else parts.notes.push(node);
   }
   return parts;
@@ -421,6 +432,48 @@ function cardDetails(data: CardData, parts: CardParts): HTMLElement {
   if (remaining.length) contents.push(metrics(remaining)); contents.push(...parts.notes);
   const node = facts(`card:${data.kind}:${data.identity.householdId ?? data.identity.buildingId}`, 'ข้อมูลบัญชีและรายละเอียด', ...contents); node.classList.add('bc-secondary'); return cardSection(node, 'details');
 }
+
+function growthMetric(key: string, title: string, value: string, raw: number, money = false): HTMLElement {
+  const item = metric(key, title, value, raw, money); delete item.dataset.contextMetric; item.dataset.growthMetric = key; return item;
+}
+const growthViews = new WeakMap<City, HTMLElement>();
+/** Retain native disclosure identity while the city advances under an open panel. */
+function renderIndustryGrowth(city: City): HTMLElement {
+  const { status: growth, message } = growthStatusText(city);
+  let panel = growthViews.get(city);
+  if (!panel) {
+    panel = section('งานใหม่และทุนขยายโรงงาน'); panel.classList.add('cx-periodflows'); panel.dataset.growthStatus = 'true';
+    const state = el('p', 'cx-detail-note'); state.dataset.growthMessage = 'true';
+    const capital = metrics([
+      growthMetric('capital-available', 'ทุนที่ใช้ขยายได้', '', 0, true), growthMetric('capital-required', 'ทุนที่ต้องมี', '', 0, true),
+    ]); capital.dataset.growthCapital = 'true';
+    const detail = facts('city:industry-growth', 'เงินสำรองและเงื่อนไขจริง', metrics([
+      growthMetric('sponsor-id', 'กิจการผู้ลงทุน', '', 0), growthMetric('cash', 'เงินผู้ลงทุน', '', 0, true),
+      growthMetric('payroll-reserve', 'ค่าจ้างที่ค้างจ่าย', '', 0, true), growthMetric('tax-reserve', 'ภาษีที่กันไว้', '', 0, true),
+      growthMetric('rent-reserve', 'กันค่าเช่า', '', 0, true), growthMetric('working-reserve', 'กันเงินหมุนเวียน', '', 0, true),
+      growthMetric('crop-available', 'พืชผลที่เข้าถึงได้', '', 0), growthMetric('funded-vacancies', 'งานว่างที่จ่ายได้', '', 0),
+    ])); detail.dataset.growthDetails = 'true';
+    const footnote = el('p', 'cx-detail-note'); footnote.dataset.growthFootnote = 'true';
+    panel.append(state, capital, detail, footnote); growthViews.set(city, panel);
+  }
+  Object.assign(panel.dataset, { growthReason: growth.code, ready: String(growth.ready), bootstrap: String(growth.bootstrap), sponsorId: growth.sponsorFirmId === null ? '' : String(growth.sponsorFirmId) });
+  panel.querySelector<HTMLElement>('[data-growth-message]')!.textContent = message;
+  panel.querySelector<HTMLElement>('[data-growth-capital]')!.hidden = growth.bootstrap || growth.sponsorFirmId === null;
+  const values: [string, number, string][] = [
+    ['capital-available', growth.availableCapital, cash(growth.availableCapital)], ['capital-required', growth.requiredCapital, cash(growth.requiredCapital)],
+    ['sponsor-id', growth.sponsorFirmId ?? 0, growth.sponsorFirmId === null ? 'ยังไม่มีผู้ลงทุน' : `#${growth.sponsorFirmId}`], ['cash', growth.cash, growth.sponsorFirmId === null ? 'ยังไม่มีผู้ลงทุน' : cash(growth.cash)],
+    ['payroll-reserve', growth.payrollReserve, cash(growth.payrollReserve)], ['tax-reserve', growth.taxReserve, cash(growth.taxReserve)],
+    ['rent-reserve', growth.rentReserve, cash(growth.rentReserve)], ['working-reserve', growth.workingReserve, cash(growth.workingReserve)],
+    ['crop-available', growth.cropAvailable, `${count(growth.cropAvailable)} ล็อต`], ['funded-vacancies', growth.fundedVacancies, `${count(growth.fundedVacancies)} ตำแหน่ง`],
+  ];
+  for (const [key, raw, text] of values) {
+    const item = panel.querySelector<HTMLElement>(`[data-growth-metric="${key}"]`)!; item.dataset.value = String(raw); item.querySelector('dd')!.textContent = text;
+  }
+  panel.querySelector<HTMLElement>('[data-growth-footnote]')!.textContent = growth.bootstrap
+    ? 'ทุนโรงงานแรกมีคู่บัญชีภายนอกตามกติกาเดิม การรับครัวเรือนยังต้องมีบ้านและผ่านเงื่อนไขจริง'
+    : 'โรงงานเพิ่มใช้เงินกิจการผู้ลงทุนจริง หลังกันภาระทั้งหมด เงินนี้ไม่ใช่เงินคลังหรือยอดขายใหม่ งานเพิ่มก่อนรับครัวเรือนตามเงื่อนไขปกติ การเริ่มผลิตยังต้องซื้อพืชผลจริง และอาจต้องวางฟาร์มเพิ่ม';
+  return panel;
+}
 function cardInterior(data: CardData, nodes: HTMLElement[]): HTMLElement[] {
   const parts = cardParts(nodes), output = [cardHero(data), ...parts.statuses, ...parts.assumptions];
   if (data.kind === 'house') {
@@ -446,6 +499,7 @@ function cardInterior(data: CardData, nodes: HTMLElement[]): HTMLElement[] {
       step.append(el('span', 'bc-chain-label', title), cardKpis(cards)); chain.append(step);
     }
     production.append(chain); output.push(cardSection(production, 'production'));
+    if (parts.funding) output.push(cardSection(parts.funding, 'funding'));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
   } else {
     output.push(cardGroup('พื้นที่เพาะปลูก', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง'), ...takeCards(parts, ['fertility'])], 'bc-plot'));
@@ -530,5 +584,5 @@ export function renderCityOverview(city: City): void {
   const utilities = el('div', 'cx-status'); utilities.append(chip(data.power ? 'ไฟฟ้าภายนอกพร้อม' : 'ไฟฟ้าภายนอกไม่พร้อม', data.power), chip(data.water ? 'น้ำภายนอกพร้อม' : 'น้ำภายนอกไม่พร้อม', data.water));
   const warnings = section('สิ่งที่ควรตรวจสอบ'), list = el('ul', 'cx-warning-list');
   if (data.warnings.length) for (const warning of data.warnings) list.append(el('li', '', warning)); else list.append(el('li', '', 'ไม่พบคำเตือนจากการตรวจข้อมูลเมืองรอบนี้'));
-  warnings.append(list); host.replaceChildren(stocks, housing, period, flows, goods, crops, utilities, warnings);
+  warnings.append(list); host.replaceChildren(stocks, housing, renderIndustryGrowth(city), period, flows, goods, crops, utilities, warnings);
 }

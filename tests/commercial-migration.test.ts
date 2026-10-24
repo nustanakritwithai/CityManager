@@ -11,7 +11,7 @@ function oldCity(day = 179) {
   return legacy.deserializeV4(legacy.serialize(c));
 }
 function preserved(c: City | legacy.City) {
-  const { version: _version, rulesVersion: _rules, cells: _cells, buildings: _buildings, firms: _firms, ...state } = c;
+  const { version: _version, rulesVersion: _rules, growthStartTick: _growth, cells: _cells, buildings: _buildings, firms: _firms, ...state } = c as City;
   return state;
 }
 const loaded = (c: City) => deserialize(serialize(c));
@@ -28,7 +28,7 @@ test('v4 T market becomes commercial L1 without changing any economic or labor f
   assert.equal(legacy.withdrawOwnerProfit(old, owner.id, 10000).ok, true);
   assert.equal(legacy.contributeOwnerCapital(old, owner.id, 10000).ok, true);
   const raw = legacy.serialize(old), city = deserialize(raw);
-  assert.equal(city.version, 5); assert.equal(city.rulesVersion, 'commercial-1');
+  assert.equal(city.version, 6); assert.equal(city.rulesVersion, 'growth-1');
   assert.deepEqual(preserved(city), preserved(old));
   for (const f of old.firms) {
     const current = city.firms.find(n => n.id === f.id)!;
@@ -83,7 +83,7 @@ test('strict v4 validation precedes migration and rejects forged stock, owner ca
     (c: legacy.City) => { c.accounts.treasury++; },
   ];
   for (const corrupt of corruptions) { const bad = structuredClone(old); corrupt(bad); assert.throws(() => deserialize(legacy.serialize(bad)), /corrupt/); }
-  assert.throws(() => deserialize(JSON.stringify({ version: 6 })), /corrupt/);
+  assert.throws(() => deserialize(JSON.stringify({ version: 7 })), /corrupt/);
 });
 
 test('fresh commercial zoning builds only owner-funded L1 markets, keeps crop consumption and never auto-upgrades', () => {
@@ -120,7 +120,7 @@ test('migrated stock, wage liabilities and owner distributions survive determini
   assert.deepEqual(loaded(loaded(a)), a);
 });
 
-test('v4 local slot remains byte-for-byte recoverable with one immutable backup before explicit v5 save', () => {
+test('v4 local slot remains byte-for-byte recoverable with one immutable backup before explicit v6 save', () => {
   const raw = legacy.serialize(oldCity()), migrated = serialize(deserialize(raw)), storage = memory({ [AGRICULTURE_SAVE_KEY]: raw });
   assert.deepEqual(readStoredCity(storage), { raw, key: AGRICULTURE_SAVE_KEY }); assert.deepEqual(storage.writes, []);
   assert.deepEqual(readStoredCity(storage, 'agriculture'), { raw, key: AGRICULTURE_SAVE_KEY });
