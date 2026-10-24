@@ -26,20 +26,39 @@ Baseline ระบุ source commit `d40cd6982ce644ed1e555565d48cf2c1efbdc047` �
 
 กรณี baseline ใช้ viewport **360×740 CSS px**, screen **360×780**, ratio 1 เป็นสมมติฐาน S22-like ที่กำหนดเพื่อทดสอบ ไม่ได้อนุมานจากความละเอียด JPEG หรืออ้างว่าเป็นค่าจอ/zoom จริงของผู้ใช้ จำนวน “เต็มแถว” หมายถึงอยู่ครบภายในพื้นที่ scroll body ณ การเปิดครั้งแรก:
 
-| หน้า | ความสูง body เดิม | เนื้อหาที่เห็นเต็มในหน้าแรก | Candidate |
-|---|---:|---|---|
-| บัญชีเงิน | 412.89px | 1 จาก 12 แถว; แถวสูงประมาณ 139.58px | รอผลวัด |
-| บริษัท | 128.91px | KPI เต็ม 0/6; ครัวเรือนเต็ม 0/5 | รอผลวัด |
-| บ้าน | 128.91px | KPI เต็ม 0/3; ครัวเรือนเต็ม 0/1 | รอผลวัด |
-| ครัวเรือน | 394.50px | KPI เต็ม 5/5 | รอผลวัด |
+| หน้า | ความสูง body เดิม → Candidate | เนื้อหาที่เห็นเต็มในหน้าแรก: เดิม → Candidate |
+|---|---:|---|
+| บัญชีเงิน | 412.89 → 675px | แถวเต็ม **1/12 → 12/12** |
+| บริษัท | 128.91 → 669.20px | KPI **0/6 → 6/6**; ครัวเรือน **0/5 → 5/5** |
+| บ้าน | 128.91 → 669.20px | KPI **0/3 → 3/3**; ครัวเรือน **0/1 → 1/1** |
+| ครัวเรือน | 394.50 → 675px | KPI **5/5 → 5/5** |
 
 ภาพ baseline เป็น game-only captures: [เงิน](compact-preview/baseline/s22-ledger.png), [บริษัท](compact-preview/baseline/s22-firm.png), [บ้าน](compact-preview/baseline/s22-house.png), [ครัวเรือน](compact-preview/baseline/s22-household.png) ไม่คัดลอกภาพโทรศัพท์ดิบของผู้ใช้ลงเอกสารหรือ repository
 
 ## การตรวจและข้อจำกัด
 
-Candidate ยัง **รอผล** unit/build/assets, browser ปกติ, blocked-model fallback, quantitative comparison และ visual review จะเติมค่าหลังรันทดสอบจริง ไม่มีตัวเลขความดีขึ้นที่คาดเดาไว้ล่วงหน้า
+ผล Candidate ปกติที่บันทึกใน [report.json](compact-preview/candidate/report.json) เมื่อ `2026-10-24T08:14:16.157Z` ใช้ Edge `155.0.4283.62` และ fixture เดียวกับ baseline จึงเปรียบเทียบจำนวนแถวและเนื้อหาบนหน้าแรกได้โดยไม่เปลี่ยนเมือง ตัวเลขในตารางเป็นผลวัดจริง ไม่ใช่ค่าคาดการณ์
 
-สถานการณ์ที่ต้องครอบคลุม: 360×740 แบบ baseline, viewport เตี้ยลงเมื่อ browser chrome/keyboard กินพื้นที่, แนวนอน, layout กว้าง 980 บน screen 390, รวมถึงจอ desktop ตรวจจำนวนแถว/KPI/ครัวเรือนที่เห็นก่อนเลื่อน การขยายรายละเอียด/scroll เป้ากด 44px เมนูเกมและผล Save/Load/New ปุ่ม Back/Esc และแผนที่/กล้องที่กลับมาใช้ได้หลังปิดแผง ไม่ปิด pinch zoom หรือกำหนด `user-scalable=no`
+| ภาพก่อน | ภาพ Candidate |
+|---|---|
+| [บัญชีเงิน](compact-preview/baseline/s22-ledger.png) | [บัญชีเงินกระชับ](compact-preview/candidate/s22-ledger.png) |
+| [บริษัท](compact-preview/baseline/s22-firm.png) | [KPI และครัวเรือนของบริษัท](compact-preview/candidate/s22-firm.png) |
+| [บ้าน](compact-preview/baseline/s22-house.png) | [บ้านและครัวเรือน](compact-preview/candidate/s22-house.png) |
+| [ครัวเรือน](compact-preview/baseline/s22-household.png) | [รายละเอียดครัวเรือน](compact-preview/candidate/s22-household.png) |
+
+รายละเอียดเพิ่มเติม: [ขยายรายการเมือง](compact-preview/candidate/global-row-expanded.png), [ขยายรายการบริษัท](compact-preview/candidate/firm-row-expanded.png), [เมนูเกม](compact-preview/candidate/game-menu.png), [viewport สูง 600](compact-preview/candidate/browser-height.png), [viewport สูง 420](compact-preview/candidate/keyboard-height.png), [แนวนอน](compact-preview/candidate/landscape.png), [layout 980 บน screen 390](compact-preview/candidate/wide-request.png) ผู้รวมงานเปิดตรวจภาพหลักทั้งสี่และภาพ wide แล้ว ภาพทั้งหมดเป็น game-only captures ไม่มีภาพโทรศัพท์ดิบของผู้ใช้ถูก commit
+
+- Unit tests **21 ผ่าน**, asset verification และ production build **ผ่าน**
+- Browser suites เดิมรวม **33 กลุ่มผ่าน** ทั้ง normal และ blocked-model fallback
+- Compact suite ใหม่ **5 กลุ่มผ่าน** ทั้ง normal และ fallback รวมทั้งหมด **38 กลุ่มต่อโหมด**; normal ไม่มี unexpected errors, fallback ไม่มี unexpected errors และมี model-load errors ที่จงใจบล็อก 8 รายการตามคาด
+- Fallback compact รอบสุดท้ายบันทึกเวลา `08:15:16 UTC` ใน `.test-output/compact-final/fallback/compact/compact-report.json` ผู้รวมงานตรวจยืนยันผลแล้ว
+- Independent review ไม่พบประเด็นค้าง ผล CI ของ commit ที่จะส่ง draft PR ยังรอตรวจหลัง push; เอกสารนี้ไม่อ้างว่าผ่าน CI หรือเผยแพร่ candidate แล้ว
+
+Compact suite ใช้ native expandable disclosures และ trusted browser input จริงทั้ง mouse และ touch แบบจำลอง โดยกดค้าง 200ms ขณะเวลาเดิน 10×: รอบ mouse tick เดิน `74 → 79` และ touch `77 → 82` แต่ DOM row/summary และ journal identity ที่กำลังกดยังคงเดิมจนปล่อยและขยายได้ถูกต้อง นี่ไม่ใช่การเรียก handler ตรงหรือการยืนยันฮาร์ดแวร์ touch ของโทรศัพท์
+
+การตรวจเมนูเกมครอบคลุม Save จริงและ New/Cancel ที่ไม่ทำลายเมือง รวมถึงกรณี layout กว้างซึ่ง targets เทียบกับหน้าจออยู่ประมาณ 44px และกรณี dynamic height เหลือ 420px ที่ปุ่มกลับ/ปิดยังเข้าถึงได้ ปิดแผงแล้วแผนที่และการควบคุมกลับมาใช้ได้
+
+สถานการณ์ที่ suites ครอบคลุม: 360×740 แบบ baseline, viewport เตี้ยลงเมื่อ browser chrome/keyboard กินพื้นที่, แนวนอน, layout กว้าง 980 บน screen 390, รวมถึงจอ desktop ตรวจจำนวนแถว/KPI/ครัวเรือนที่เห็นก่อนเลื่อน การขยายรายละเอียด/scroll เป้ากด 44px เมนูเกมและผล Save/Load/New ปุ่ม Back/Esc และแผนที่/กล้องที่กลับมาใช้ได้หลังปิดแผง ไม่ปิด pinch zoom หรือกำหนด `user-scalable=no`
 
 ```sh
 npm test
@@ -57,4 +76,4 @@ npm run test:context
 npm run test:compact
 ```
 
-`test:compact` เป็น suite ของ branch นี้ที่กำลังรวมเข้าโครงการ ต้องตรวจซ้ำเมื่อใช้ `CITYMANAGER_BLOCK_MODELS=1` เพื่อให้รูปทรงสำรองยังเล่นและอ่านข้อมูลได้ ผลสุดท้ายต้องระบุ source commit และไฟล์รายงานจริง การจำลอง viewport/touch ใน Edge ช่วยตรวจ layout/interaction แต่ **ไม่ใช่ physical-phone QA บน S22** และไม่ยืนยัน browser mode หรือ zoom ของผู้ใช้ ต้องให้ผู้ใช้ลองรุ่นที่เผยแพร่แล้วอีกครั้งเมื่ออนุมัติการเผยแพร่
+`test:compact` เป็น suite ของ branch นี้ ใช้ `CITYMANAGER_BLOCK_MODELS=1` เพื่อตรวจรูปทรงสำรองควบคู่กัน ผล CI ต้องผูกกับ source commit สุดท้าย การจำลอง viewport/touch ใน Edge ช่วยตรวจ layout/interaction แต่ **ไม่ใช่ physical-phone QA บน S22** และไม่ยืนยัน browser mode หรือ zoom ของผู้ใช้ ต้องให้ผู้ใช้ลองรุ่นที่เผยแพร่แล้วอีกครั้งเมื่ออนุมัติการเผยแพร่
