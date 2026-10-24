@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createCity, serialize, step } from '../src/sim.ts';
+import { createCity, housingCapacity, serialize, step, summary } from '../src/sim.ts';
 import {
   captureCitySignals, requestForCapture, buildLocalSignalReport, acceptRemoteSignalReport,
   validateSignalRequest, type SignalRequest, type SignalReport, type MetricId,
@@ -13,7 +13,10 @@ const expected = () => JSON.parse(readFileSync(new URL('./fixtures/signal-respon
 
 test('initial actual aggregates preserve household semantics and include actual grant without mutating the city', () => {
   const city = createCity(61025), before = serialize(city), capture = captureCitySignals(city);
-  assert.deepEqual(capture.metrics.map(value => value.id), ['households', 'businesses', 'treasury', 'incomePerTick', 'expensesPerTick']);
+  assert.deepEqual(capture.metrics.map(value => value.id), ['population', 'households', 'businesses', 'employed', 'unemployed', 'treasury', 'incomePerTick', 'expensesPerTick', 'housingCapacity']);
+  assert.equal(city.version, 2);
+  assert.equal(metric(capture, 'population').value, 0, 'no households means an observed zero population');
+  assert.equal(metric(capture, 'population').unit, 'people');
   assert.equal(metric(capture, 'households').value, city.households.length);
   assert.equal(metric(capture, 'households').unit, 'households');
   assert.equal(metric(capture, 'businesses').value, city.firms.length);
@@ -23,10 +26,32 @@ test('initial actual aggregates preserve household semantics and include actual 
   assert.equal(metric(capture, 'incomePerTick').value, 30000, 'initial grant is an actual receipt at tick zero');
   assert.equal(metric(capture, 'expensesPerTick').value, 550, 'initial road construction is an actual current-day expense');
   const report = buildLocalSignalReport(requestForCapture(capture));
-  assert(report.data.missingData.some(value => value.id === 'missing.current.population'));
+  assert(!report.data.missingData.some(value => value.id === 'missing.current.population'));
+  assert(report.data.missingData.some(value => value.id === 'missing.current.averageHappiness'));
   assert(report.data.missingData.some(value => value.id === 'missing.prior.households'));
   assert(!report.data.signals.some(value => value.kind === 'trend'));
   assert.equal(serialize(city), before);
+});
+
+test('version-two mapping distinguishes people, household records, workforce and actual person capacity', () => {
+  const city = createCity(61025);
+  for (let day = 0; day < 180; day++) step(city);
+  const before = serialize(city), capture = captureCitySignals(city), actual = summary(city);
+  assert(city.households.some(household => household.members > 1), 'real seeded family composition is present');
+  assert.equal(metric(capture, 'population').value, actual.population);
+  assert.equal(metric(capture, 'households').value, actual.households);
+  assert.notEqual(metric(capture, 'population').value, metric(capture, 'households').value);
+  assert.equal(metric(capture, 'employed').value, actual.employed);
+  assert.equal(metric(capture, 'unemployed').value, actual.unemployed);
+  assert.equal(metric(capture, 'unemployed').value, actual.workforce - actual.employed);
+  assert.notEqual(metric(capture, 'unemployed').value, actual.population - actual.employed, 'dependents are not unemployed workforce');
+  assert.equal(metric(capture, 'housingCapacity').value, actual.personCapacity);
+  assert.equal(metric(capture, 'housingCapacity').unit, 'people');
+  assert.equal(metric(capture, 'housingCapacity').value, city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0));
+  const report = buildLocalSignalReport(requestForCapture(capture));
+  assert.deepEqual(report.data.missingData.filter(value => value.reason === 'current_metric_unavailable').map(value => value.metricRefs[0]), ['averageHappiness', 'pollution', 'trafficPressure']);
+  assert(report.data.signals.some(value => value.id === 'threshold.housing-capacity-exceeded'));
+  assert.equal(serialize(city), before, 'capture/report preserve the complete version-two save and RNG');
 });
 
 test('ledger flows use only current-day treasury endpoints and convert integer satang to credits', () => {
@@ -59,7 +84,7 @@ test('observed capture history keeps exact windows and never reconstructs missin
   const report = buildLocalSignalReport(request);
   assert.equal(report.data.provenance.comparisonPriorTick, 0);
   assert.equal(report.data.provenance.trust, 'client_reported_unverified');
-  assert.equal(report.data.signals.filter(value => value.kind === 'trend').length, 5);
+  assert.equal(report.data.signals.filter(value => value.kind === 'trend').length, 9);
   assert(report.data.signals.filter(value => value.kind === 'trend').every(value => value.window.startTick === 0 && value.window.endTick === 2));
   assert(report.data.metrics.every(value => value.window.startTick === 2 && value.window.endTick === 2));
   assert(report.data.priorMetrics.every(value => value.window.startTick === 0 && value.window.endTick === 0));

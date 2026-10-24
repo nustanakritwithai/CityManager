@@ -1,18 +1,24 @@
 # Read-only signal mapping
 
-This adapter reads published-main CityManager aggregates without changing the city, ledger, household, firm, tick, RNG, save schema or simulation rules.
+This adapter reads the merged household-1 / save-version-two CityManager aggregates without changing the city, ledger, household, firm, tick, RNG, save schema or simulation rules. Nine available metrics are sent.
 
 | Wire metric | Actual source | Wire unit | UI meaning |
 | --- | --- | --- | --- |
+| population | Sum of `city.households[].members` | people | Actual household members, including displaced households |
 | households | `city.households.length` | households | Household records, not individual people |
 | businesses | `city.firms.length` | establishments | Current firm/establishment records |
+| employed | Sum of `city.employment[].workers` | people | Allocated workers, not allocation-record or household counts |
+| unemployed | Sum of household `workforce` minus allocated workers | people | Unemployed workforce; dependents are excluded |
 | treasury | `city.accounts.treasury / 100` | currency | Credits observed at the current tick |
 | incomePerTick | Treasury-bound money ledger entries with `entry.tick === city.tick`, divided by 100 | currency/tick | Receipts recorded on this simulation day |
 | expensesPerTick | Treasury-originating money ledger entries with `entry.tick === city.tick`, divided by 100 | currency/tick | Payments recorded on this simulation day |
+| housingCapacity | Sum of `housingCapacity(building).persons` for residential buildings | people | Actual built residential person capacity from cottage type/level rules |
 
 One tick is one simulation day. Ledger flow values include every recorded current-day municipal receipt/payment: initial grant, construction and upkeep can be included. They are not recurring tax revenue, a forecast, a 30-day sum or an average over the report window. At startup the actual fixture records a 30,000-credit grant and 550-credit starter road payment; treasury is therefore 29,450 credits.
 
-The simulation's `summary().population` currently counts household records, so it is deliberately not sent as the backend's people-valued `population` metric. Employed/unemployed household counts are also not converted into people. No supported person-valued housing capacity, happiness, pollution or traffic metric exists in this inspected version. These metrics stay absent and receive explicit missing-data flags. A zero flow from an empty current-day ledger sum is an observed zero; it does not replace an unavailable metric.
+Population and household count now have distinct actual sources and units. Employment allocations may contain several workers, and a family may work across establishments; counts therefore sum workers rather than records. Unemployment uses workforce minus employed workers, not population minus employed workers. Housing capacity sums all built residential person slots; it is not occupied persons, household slots, an accessibility guarantee or proof that every household has a home. The existing threshold compares population and total built person capacity only and makes no allocation or causal conclusion.
+
+No supported happiness, pollution or traffic metric exists in this inspected version. These three metrics stay absent and receive explicit missing-data flags. Available empty counts/capacities and a zero flow from an empty current-day ledger sum are observed zeros; they do not replace unavailable metrics. Workforce itself is not sent because the existing backend enum has no workforce metric; its role in the unemployment calculation is documented here.
 
 `captureCitySignals` creates detached value snapshots. `requestForCapture(current, prior?)` uses only an earlier observed capture; same/future history is omitted. The comparison window is exactly prior tick to current tick, and current observations are marked at the current tick alone. The caller must discard prior captures when loading, creating or replacing a city. No history is reconstructed from ledger balances or invented tick-zero values.
 

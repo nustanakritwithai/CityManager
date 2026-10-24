@@ -94,7 +94,7 @@ export function createSignalPanel(host: HTMLElement, { getCity, connection }: { 
       const reason = flag.reason === 'prior_metric_unavailable' ? 'ยังไม่มีภาพก่อนหน้าสำหรับเปรียบเทียบ' : flag.reason === 'threshold_inputs_unavailable' ? 'ข้อมูลประกอบเงื่อนไขยังไม่ครบ' : 'เกมยังไม่มีข้อมูลที่ตรงหน่วยนี้';
       const row = node('li', '', `${flag.metricRefs.map(label).join(' / ')}: ${reason}`); row.dataset.missingId = flag.id; missingList.append(row);
     }
-    missing.append(node('p', 'signal-note', 'ข้อมูลที่ไม่มีจะไม่ถูกแทนด้วย 0 เกมรุ่นนี้นับครัวเรือน ไม่ได้วัดจำนวนคน ความสุข มลพิษ หรือการจราจร ภาพก่อนหน้าจะเริ่มสะสมเมื่อจับภาพในคนละวัน และล้างเมื่อโหลดหรือเริ่มเมืองใหม่'), missingList);
+    missing.append(node('p', 'signal-note', 'ข้อมูลที่ไม่มีจะไม่ถูกแทนด้วย 0 จำนวนคนคำนวณจากสมาชิกครัวเรือน แยกจากจำนวนครัวเรือน เกมยังไม่วัดความสุข มลพิษ หรือการจราจร ภาพก่อนหน้าจะเริ่มสะสมเมื่อจับภาพในคนละวัน และล้างเมื่อโหลดหรือเริ่มเมืองใหม่'), missingList);
     const provenance = node('details', 'signal-provenance'); provenance.append(node('summary', '', 'ที่มาและขอบเขตข้อมูล'));
     provenance.append(node('p', 'signal-note', `ข้อมูลจาก: ${report.data.provenance.input} · กฎ: ${report.data.provenance.derivation}`), node('p', 'signal-note', 'เป็นข้อมูลสรุปที่เบราว์เซอร์รายงาน ยังไม่ได้ตรวจรับรองกับบัญชีฝั่งเซิร์ฟเวอร์ ไม่มีข้อมูลรายครัวเรือนหรือรายบริษัทถูกส่งไป'));
     for (const limitation of report.report.limitations) provenance.append(node('p', 'signal-note', limitation));

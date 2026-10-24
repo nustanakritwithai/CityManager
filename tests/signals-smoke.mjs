@@ -3,7 +3,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize } from '../src/sim.ts';
+import { createCity, step, serialize, summary, housingCapacity } from '../src/sim.ts';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
 const profile = resolve(output, 'edge-signals');
@@ -84,28 +84,31 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let n = 0; n < 65; n++) step(fixture);
   await button('#toggle-game-menu');
-  await evaluate(`localStorage.setItem('citymanager.save.v1',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
+  await evaluate(`localStorage.setItem('citymanager.save.v2',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
   const before = await state(); assert.deepEqual(before, fixture);
   await openSignals();
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'offline');
   assert.equal(await evaluate('document.querySelector("#signal-content").dataset.snapshotTick'), '65');
   const metrics = await evaluate('Object.fromEntries([...document.querySelectorAll("[data-signal-metric]")].map(e=>[e.dataset.signalMetric,Number(e.dataset.value)]))');
+  const aggregate = summary(fixture);
   assert.deepEqual(metrics, {
-    households: fixture.households.length, businesses: fixture.firms.length, treasury: fixture.accounts.treasury / 100,
+    population: aggregate.population, households: fixture.households.length, businesses: fixture.firms.length,
+    employed: aggregate.employed, unemployed: aggregate.unemployed, treasury: fixture.accounts.treasury / 100,
     incomePerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.to === 'treasury').reduce((n,e) => n+e.amount,0)/100,
     expensesPerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.from === 'treasury').reduce((n,e) => n+e.amount,0)/100,
+    housingCapacity: fixture.buildings.reduce((n,b) => n+housingCapacity(b).persons,0),
   });
-  assert.equal(await evaluate('document.querySelectorAll("[data-signal-metric=population]").length'), 0);
+  assert.equal(await count('[data-signal-metric=population]'), 1);
   assert((await count('[data-missing-id^="missing.prior."]')) > 0);
   assert.deepEqual(await state(), before, 'Opening report is read-only');
   await button('#signal-refresh'); assert.deepEqual(await state(), before, 'Manual capture is read-only');
   await shot('desktop-signals.png');
-  checks.push('Actual aggregate values, credit units, unsupported population and missing first history match simulation without mutation');
+  checks.push('Actual people, household, employment, housing-capacity and credit units match save-v2 simulation with missing first history and no mutation');
 
   await button('#close-inspector'); await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=68'); await button('#pause');
   const advanced = await state(); await openSignals();
-  assert.equal(await count('[data-signal-id^="trend."]'), 5);
+  assert.equal(await count('[data-signal-id^="trend."]'), 9);
   assert.deepEqual(await state(), advanced, 'Comparative report is read-only');
   await button('#close-inspector'); await button('#pause');
   await until(`JSON.parse(window.cityManager.snapshot()).tick>${advanced.tick}`); await button('#pause');
@@ -138,7 +141,7 @@ try {
   assert.equal(apiRequests.length, 0, 'No API/provider request while connection is disabled');
   assert.equal(errors.length, 0, `Browser errors: ${JSON.stringify(errors)}`);
   checks.push('Load resets history; zero browser errors and zero API/provider requests');
-  await writeFile(resolve(shots, 'qa.json'), JSON.stringify({ sourceBaseCommit: '504f16a30199cd6fd47be0d98e1b20d26aed2c0e', candidateCommit, testedAt: new Date().toISOString(), url, browser: 'installed Microsoft Edge headless', checks, mobile, apiRequests: 0, browserErrors: 0, screenshots, deviceNote: 'Mobile viewport emulation; not a physical handset test.' }, null, 2)+'\n');
+  await writeFile(resolve(shots, 'qa.json'), JSON.stringify({ sourceBaseCommit: '1ed7f8fac1e3d246dcdd883837d6f855c1d9d24a', candidateCommit, testedAt: new Date().toISOString(), url, browser: 'installed Microsoft Edge headless', checks, mobile, apiRequests: 0, browserErrors: 0, screenshots, deviceNote: 'Mobile viewport emulation; not a physical handset test.' }, null, 2)+'\n');
   console.log(JSON.stringify({ passed: checks.length, apiRequests: apiRequests.length, errors: errors.length, screenshots }));
 } finally {
   if (ws?.readyState === WebSocket.OPEN) { try { await send('Browser.close'); } catch {} ws.close(); }

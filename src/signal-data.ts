@@ -1,4 +1,4 @@
-import type { City } from './sim.ts';
+import { housingCapacity, type City } from './sim.ts';
 
 /** Wire contract shared with the isolated city-advisor.rules.v1 backend. */
 export const METRIC_DEFINITIONS = {
@@ -13,10 +13,10 @@ export type MetricId = keyof typeof METRIC_DEFINITIONS;
 export type MetricUnit = typeof METRIC_DEFINITIONS[MetricId][0];
 export type SignalCategory = typeof METRIC_DEFINITIONS[MetricId][1];
 export const METRIC_LABELS: Record<MetricId, string> = {
-  population: 'จำนวนคน (ไม่มีข้อมูล)', households: 'ครัวเรือน', businesses: 'สถานประกอบการ',
-  employed: 'คนมีงาน (ไม่มีข้อมูล)', unemployed: 'คนว่างงาน (ไม่มีข้อมูล)', treasury: 'เงินคลังเมือง',
+  population: 'ประชากร', households: 'ครัวเรือน', businesses: 'สถานประกอบการ',
+  employed: 'แรงงานมีงาน', unemployed: 'แรงงานว่างงาน', treasury: 'เงินคลังเมือง',
   incomePerTick: 'เงินเข้าคลังในวันปัจจุบัน', expensesPerTick: 'เงินออกคลังในวันปัจจุบัน',
-  averageHappiness: 'ความสุข (ไม่มีข้อมูล)', housingCapacity: 'ความจุที่อยู่อาศัยเป็นคน (ไม่มีข้อมูล)',
+  averageHappiness: 'ความสุข (ไม่มีข้อมูล)', housingCapacity: 'ความจุที่อยู่อาศัยเป็นคน',
   pollution: 'มลพิษ (ไม่มีข้อมูล)', trafficPressure: 'ความหนาแน่นจราจร (ไม่มีข้อมูล)',
 };
 export const UNIT_LABELS: Record<MetricUnit, string> = {
@@ -106,13 +106,21 @@ export function captureCitySignals(city: City): SignalCapture {
     if (entry.to === 'treasury') income += entry.amount;
     if (entry.from === 'treasury') expense += entry.amount;
   }
+  const population = city.households.reduce((total, household) => total + household.members, 0);
+  const workforce = city.households.reduce((total, household) => total + household.workforce, 0);
+  const employed = city.employment.reduce((total, allocation) => total + allocation.workers, 0);
+  const personCapacity = city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0);
   const metric = (id: MetricId, value: number): SignalMetric => ({ id, value, unit: METRIC_DEFINITIONS[id][0], source: SOURCE });
   const metrics = [
+    metric('population', population),
     metric('households', city.households.length),
     metric('businesses', city.firms.length),
+    metric('employed', employed),
+    metric('unemployed', workforce - employed),
     metric('treasury', city.accounts.treasury / 100),
     metric('incomePerTick', income / 100),
     metric('expensesPerTick', expense / 100),
+    metric('housingCapacity', personCapacity),
   ];
   return { tick: city.tick, metrics: metricList(metrics) };
 }
