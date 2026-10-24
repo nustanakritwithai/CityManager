@@ -249,7 +249,7 @@ try {
   checks.push('A real paused drag-built road records cash and ledger exactly, keeps explicit auto mode and replay verification active, and saves as ordinary v6 city state');
 
   stage('5 replay export and readable S22 normal/wide evidence');
-  await button('#owner-evaluate'); const stable = await state(); await button('#owner-export');
+  await load(manualFixture); await button('#owner-evaluate'); const stable = await state(); await button('#owner-export');
   const startedDownload = Date.now(); let downloadedFiles = [];
   while (Date.now() - startedDownload < 10000) { downloadedFiles = (await readdir(output)).filter(name => /\.json$/i.test(name)); if (downloadedFiles.length) break; await sleep(80); }
   assert.equal(downloadedFiles.length, 1, 'Exactly one actual sidecar JSON download completes');
