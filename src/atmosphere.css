@@ -59,7 +59,22 @@
 .atmosphere-menu input { width: 18px; height: 18px; margin: 0; accent-color: var(--amber); }
 .atmosphere-note { display: block; margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
-html[data-touch-ui=true] .atmosphere-toggle { padding: 0 5px; }
+/* Touch UI scales by the reader unit so targets stay 44 physical px on wide-layout phones. */
+html[data-touch-ui=true] .atmosphere-toggle {
+  flex-shrink: 0;
+  width: calc(44 * var(--reader-unit, 1px));
+  min-width: calc(44 * var(--reader-unit, 1px));
+  min-height: calc(44 * var(--reader-unit, 1px));
+  padding: 0;
+  justify-content: center;
+}
+html[data-touch-ui=true] .atmosphere-toggle .sky-icon { font-size: calc(16 * var(--reader-unit, 1px)); }
+html[data-touch-ui=true] .atmosphere-menu { font-size: calc(13 * var(--reader-unit, 1px)); }
+html[data-touch-ui=true] .atmosphere-menu h3 { font-size: calc(14 * var(--reader-unit, 1px)); }
+html[data-touch-ui=true] .atmosphere-menu legend,
+html[data-touch-ui=true] .atmosphere-note { font-size: calc(12 * var(--reader-unit, 1px)); }
+html[data-touch-ui=true] .atmosphere-menu label { min-height: calc(44 * var(--reader-unit, 1px)); gap: calc(8 * var(--reader-unit, 1px)); }
+html[data-touch-ui=true] .atmosphere-menu input { width: calc(18 * var(--reader-unit, 1px)); height: calc(18 * var(--reader-unit, 1px)); }
 html[data-touch-ui=true] .atmosphere-toggle .sky-clock { display: none; }
 html[data-touch-ui=true] .atmosphere-menu {
   top: auto;
