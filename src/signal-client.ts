@@ -6,7 +6,7 @@ export type SignalConnection = {
   enabled: boolean;
   endpoint: string;
 };
-export type SignalTransportReason = 'not_configured' | 'invalid_endpoint' | 'network_or_response' | 'invalid_report' | 'cancelled' | 'provider_fallback';
+export type SignalTransportReason = 'not_configured' | 'invalid_endpoint' | 'network_or_response' | 'invalid_report' | 'cancelled' | 'timeout' | 'provider_fallback';
 export type SignalTransportResult = { report: SignalReport; transport: 'offline' | 'remote' | 'fallback'; reason?: SignalTransportReason };
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
@@ -67,6 +67,6 @@ export async function requestSignalReport(input: SignalRequest, local: SignalRep
     if (!report) return { report: local, transport: 'fallback', reason: 'invalid_report' };
     return { report, transport: 'remote', ...(report.mode === 'fallback' ? { reason: 'provider_fallback' as const } : {}) };
   } catch {
-    return { report: local, transport: 'fallback', reason: cancellation?.aborted ? 'cancelled' : 'network_or_response' };
+    return { report: local, transport: 'fallback', reason: cancellation?.aborted ? 'cancelled' : timeout.aborted ? 'timeout' : 'network_or_response' };
   }
 }
