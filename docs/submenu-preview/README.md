@@ -1,6 +1,8 @@
 # ตัวอย่างเมนูย่อย Inspector
 
-Branch `feat/inspector-submenus` เริ่มจาก `main` ที่เผยแพร่แล้ว (`737653b`) งานภาพจาก [PR #2](https://github.com/nustanakritwithai/CityManager/pull/2) เป็นรุ่นสาธารณะปัจจุบัน ส่วน GUI ใหม่นี้ยังเป็น draft สำหรับ review **ยังไม่ merge หรือ deploy** ดู [บัญชีแบบเดิม](../visual-preview/mobile-ledger.png) และ [ภาพ/รายงานรุ่น PR #2](../visual-preview/) เพื่อเปรียบเทียบ
+ดู [แผน GUI ตามภาพอ้างอิง](../CityManager-GUI-Plan-TH.md) และ [ที่มา/ขอบเขตที่รับงานรอบนี้](../GUI-PLAN-SOURCE.md) แผนรวมมีงานระยะถัดไปที่ยังไม่ได้พัฒนา ไม่ใช่รายการฟีเจอร์ที่รับรองแล้ว
+
+หลักฐานชุดนี้บันทึกตอนส่ง `feat/inspector-submenus` ให้ review ก่อน Merge โดยเริ่มจาก `main` ที่เผยแพร่ก่อนหน้า (`737653b`, [PR #2](https://github.com/nustanakritwithai/CityManager/pull/2)) ดู [บัญชีแบบเดิม](../visual-preview/mobile-ledger.png) และ [ภาพ/รายงานรุ่น PR #2](../visual-preview/) เพื่อเปรียบเทียบ สถานะเผยแพร่ล่าสุดตรวจได้จาก GitHub Actions ของ `main`
 
 ## สิ่งที่เปลี่ยน
 
@@ -65,4 +67,4 @@ npm run test:browser
 npm run test:submenus
 ```
 
-ทั้งสองสคริปต์ใช้ Microsoft Edge ที่ติดตั้งไว้และรองรับ `CITYMANAGER_BLOCK_MODELS=1` สำหรับตรวจรูปทรงสำรอง การทดสอบ touch/viewport ไม่ใช่ real-device หรือ cross-browser QA ผล CI ของ source commit สุดท้ายยังรอ push และต้องตรวจอีกครั้งก่อน merge
+ทั้งสองสคริปต์ใช้ Microsoft Edge ที่ติดตั้งไว้และรองรับ `CITYMANAGER_BLOCK_MODELS=1` สำหรับตรวจรูปทรงสำรอง การทดสอบ touch/viewport ไม่ใช่ real-device หรือ cross-browser QA ผล CI และการเผยแพร่ของ commit สุดท้ายต้องตรวจจาก GitHub Actions; รายงาน local เหล่านี้เป็นหลักฐานตอนส่ง review
