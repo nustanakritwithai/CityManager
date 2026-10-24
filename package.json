@@ -1,7 +1,7 @@
 {
   "name": "citymanager",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -12,7 +12,8 @@
     "test:submenus": "node tests/submenus-smoke.mjs",
     "assets:verify": "node scripts/admit-city-assets.mjs --verify && node scripts/admit-ui-assets.mjs --verify",
     "test:context": "node tests/context-smoke.mjs",
-    "test:compact": "node tests/compact-smoke.mjs"
+    "test:compact": "node tests/compact-smoke.mjs",
+    "test:population": "node tests/population-smoke.mjs"
   },
   "dependencies": {
     "playcanvas": "2.23.3"

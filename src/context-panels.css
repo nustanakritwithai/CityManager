@@ -210,3 +210,9 @@
 .inspector .cx-content .cx-period-banner h3 { font-size: calc(13 * var(--reader-unit, 1px)); }
 .inspector .cx-content .cx-period-banner p { margin-top: calc(3 * var(--reader-unit, 1px)); font-size: calc(12 * var(--reader-unit, 1px)); }
 .inspector .cx-content .cx-warning-list li { font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.45; }
+.cx-content .cx-employment-list{display:grid;gap:calc(4 * var(--reader-unit,1px))}
+.cx-content .cx-employment-row{display:grid;gap:calc(2 * var(--reader-unit,1px));padding:calc(6 * var(--reader-unit,1px));border-left:calc(2 * var(--reader-unit,1px)) solid #8fc6ae66;background:#8fc6ae09;border-radius:calc(4 * var(--reader-unit,1px))}
+.cx-content .cx-employment-row strong{font-size:calc(13 * var(--reader-unit,1px));line-height:1.4;font-weight:600}
+.cx-content .cx-employment-row span{font-size:calc(12 * var(--reader-unit,1px));line-height:1.4;color:#b5cec1}
+.inspector .cx-content .cx-legacy-assumption{font-size:calc(12 * var(--reader-unit,1px));line-height:1.45;padding:calc(6 * var(--reader-unit,1px));margin:0 0 calc(6 * var(--reader-unit,1px));border-left:calc(2 * var(--reader-unit,1px)) solid #e1be74;color:#e8cf9f;background:#e1be740c}
+.cx-content .cx-link-copy .cx-legacy-tag{font-size:calc(11 * var(--reader-unit,1px));line-height:1.35;color:#e8cf9f}

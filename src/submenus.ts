@@ -52,16 +52,16 @@ function clearJournalInput(state: Journal) {
   state.heldPointers.clear(); state.heldKeys.clear(); state.releaseBarrier = false; state.pending = false;
   if (state.flushTimer !== null) clearTimeout(state.flushTimer); state.flushTimer = null;
 }
-function flushJournalAfterActivation(state: Journal) {
-  // Native summary activation happens after pointerup/keyup. A next-task barrier
-  // retains the pressed node through that click, then reads its actual open state.
+function flushJournalAfterActivation(state: Journal, waitForClick = false) {
+  // Touch may send its compatibility click in a later task. Keep the original
+  // node until that trusted click finishes; the bounded fallback handles aborts.
   state.releaseBarrier = true;
   if (state.flushTimer !== null) clearTimeout(state.flushTimer);
   state.flushTimer = setTimeout(() => {
     state.flushTimer = null; state.releaseBarrier = false;
     if (state.heldPointers.size || state.heldKeys.size || !state.pending) return;
     state.pending = false; rememberExpanded(state); updateJournal(state);
-  }, 0);
+  }, waitForClick ? 750 : 0);
 }
 function installJournalInputGuard(state: Journal) {
   state.list.addEventListener('pointerdown', event => {
@@ -70,11 +70,12 @@ function installJournalInputGuard(state: Journal) {
   state.list.addEventListener('keydown', event => {
     if (event.isTrusted && (event.key === ' ' || event.key === 'Enter') && event.target instanceof Element && event.target.closest('.sm-flow-toggle')) state.heldKeys.add(event.key);
   }, true);
-  document.addEventListener('pointerup', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state); }, true);
+  document.addEventListener('pointerup', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state, true); }, true);
   document.addEventListener('pointercancel', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state); }, true);
-  document.addEventListener('keyup', event => { if (state.heldKeys.delete(event.key)) flushJournalAfterActivation(state); }, true);
+  document.addEventListener('keyup', event => { if (state.heldKeys.delete(event.key)) flushJournalAfterActivation(state, event.key === ' '); }, true);
+  document.addEventListener('click', event => { if (event.isTrusted && state.releaseBarrier) flushJournalAfterActivation(state); }, true);
   window.addEventListener('blur', () => {
-    if (state.heldPointers.size || state.heldKeys.size) { state.heldPointers.clear(); state.heldKeys.clear(); flushJournalAfterActivation(state); }
+    if (state.heldPointers.size || state.heldKeys.size || state.releaseBarrier) { state.heldPointers.clear(); state.heldKeys.clear(); flushJournalAfterActivation(state); }
   });
 }
 function action(label: string, kind: FlowKind, name: string): HTMLButtonElement {
@@ -187,8 +188,8 @@ function setupRules() {
   grid.append(
     ruleCard('calendar', 'วันและเงินเป็นจำนวนแน่นอน', `1 tick เท่ากับ 1 วัน มี ${MONTH} วันต่อเดือน ค่าจ้างสะสมตามวันที่ทำงานและจ่ายรายเดือน เช่นเดียวกับค่าเช่าและภาษี เงินคำนวณเป็นสตางค์จำนวนเต็ม`),
     ruleCard('utilities', 'น้ำและไฟจากภายนอก', 'ต้นแบบให้บริการภายนอกกับทุกแปลง ยังไม่มีเครือข่ายหรือข้อจำกัดกำลังผลิต หากสถานะไม่พร้อม การผลิตและการเติบโตจะหยุดตามกฎ', 'utilities'),
-    ruleCard('outside', 'ทุนเริ่มต้นมีต้นทาง', 'โรงงานแรกเปิดได้ก่อนมีคนงาน และสองครัวเรือนแรกย้ายเข้าได้ก่อนมีงาน เงินทุนกิจการ เงินออมผู้ย้ายเข้า และทุนพัฒนาบ้านเริ่มต้นมาจากคู่บัญชีภายนอก มีรายการโอนให้ตรวจสอบ', 'bootstrap'),
-    ruleCard('goods', 'สินค้าและตลาดแบบย่อ', 'ใช้สินค้านามธรรมชนิดเดียว มีการผลิต ซื้อขายในเมือง นำเข้า ส่งออก และการบริโภคจริงตามกระเป๋าเงินและสต็อก คู่บัญชีภายนอกติดตามเงินเข้าออก ยอดติดลบไม่ได้หมายถึงหนี้เมือง'),
+    ruleCard('outside', 'ทุนเริ่มต้นมีต้นทาง', 'โรงงานแรกเปิดได้ก่อนมีคนงาน สองครัวเรือนแรกตลอดประวัติเมืองยกเว้นเงื่อนไขงานเท่านั้น แต่ยังต้องมีบ้านว่าง ถนน น้ำ และไฟ เงินทุนกิจการ เงินออมย้ายเข้า และค่าพัฒนาบ้านมีคู่บัญชีภายนอก รื้อบ้านแล้วไม่คืนสิทธิเริ่มต้น', 'bootstrap'),
+    ruleCard('goods', 'สินค้าและตลาดแบบย่อ', 'สินค้านามธรรมหนึ่งหน่วยเป็นตะกร้าต่อครัวเรือนต่อวัน ยังไม่ปรับตามสมาชิก มีการผลิต ซื้อขาย นำเข้า ส่งออก และบริโภคจริงจากกระเป๋าเงินและสต็อก การเพิ่มจำนวนสมาชิกไม่คูณประวัติสินค้าหรือเงิน คู่บัญชีภายนอกติดตามเงินเข้าออก ไม่ใช่หนี้เมือง'),
     ruleCard('limits', `แผนที่กริดราบ ${SIZE} × ${SIZE}`, 'ขอบเขตสูงสุด 192 อาคาร 128 ครัวเรือน และ 64 บริษัท ถนนโค้ง การจราจรรายช่องจราจร สาธารณูปโภคแบบมีความจุ และเมืองขนาดใหญ่ยังเป็นงานระยะถัดไป'),
     ruleCard('growth', 'ต้นแบบแรกที่ตรวจสอบได้', 'ได้รับแรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ยังไม่ครอบคลุมระบบทั้งหมด โค้ดจำลองและถนนเขียนใหม่ ไม่ใช้โค้ด Living City Lab หรือ novel engine', 'version'),
   );
