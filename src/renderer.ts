@@ -1,21 +1,30 @@
 import {
   AppBase, AppOptions, createGraphicsDevice, DEVICETYPE_WEBGL2,
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
-  Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO
+  Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, connectedRoads, type City } from './sim.ts';
+import { CityAssets } from './asset-models.ts';
+import { CityGround } from './terrain.ts';
 
 const UNIT = 2;
 export class CityView {
   app: AppBase;
   camera = new Entity('City camera');
-  target = new Vec3(0, 0, 0);
+  target = new Vec3(-10, 0, 0);
   yaw = Math.PI / 4;
   radius = 65;
   mode = 'select';
   tiles = new Map<number, { entity: Entity; signature: string }>();
   markers = new Entity('Tool previews');
   materials = new Map<string, StandardMaterial>();
+  assets: CityAssets | null = null;
+  ground!: CityGround;
+  private edgeMesh?: Mesh;
+  private edgeSignature = '';
+  private visualRevision = 0;
+  private lastScene: { city: City; selected: number | null; preview: number[] } | null = null;
+  private forest: { entity: Entity; x: number; z: number }[] = [];
   pointers = new Map<number, { x: number; y: number }>();
   dragStart: number | null = null;
   private aspect = 0;
@@ -29,6 +38,7 @@ export class CityView {
     const options = new AppOptions();
     options.graphicsDevice = device;
     options.componentSystems = [RenderComponentSystem, CameraComponentSystem, LightComponentSystem];
+    options.resourceHandlers = [ContainerHandler, TextureHandler];
     const app = new AppBase(canvas);
     app.init(options);
     app.setCanvasFillMode(FILLMODE_NONE);
@@ -37,6 +47,14 @@ export class CityView {
     const view = new CityView(canvas, app, onCell, onHover, onRoad);
     view.setup();
     app.start();
+    void CityAssets.load(app).then(assets => {
+      view.assets = assets; view.visualRevision++;
+      for (const tree of view.forest) {
+        const model = assets.tree();
+        if (model) { tree.entity.destroy(); model.setLocalPosition(tree.x, .04, tree.z); app.root.addChild(model); tree.entity = model; }
+      }
+      if (view.lastScene) view.render(view.lastScene.city, view.lastScene.selected, view.lastScene.preview);
+    });
     return view;
   }
   material(hex: string, emissive = false) {
@@ -51,44 +69,42 @@ export class CityView {
     this.materials.set(key, material);
     return material;
   }
-  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string) {
+  box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial) {
     const entity = new Entity('Original primitive');
-    entity.addComponent('render', { type: 'box', material: this.material(color), castShadows: false });
+    entity.addComponent('render', { type: 'box', material: typeof color === 'string' ? this.material(color) : color, castShadows: false });
     entity.setLocalPosition(x, y, z);
     entity.setLocalScale(sx, sy, sz);
     parent.addChild(entity);
     return entity;
   }
   setup() {
-    this.app.scene.ambientLight = new Color(0.65, 0.72, 0.78);
-    this.camera.addComponent('camera', { clearColor: new Color(0.1, 0.19, 0.25), fov: 48, nearClip: 0.5, farClip: 260 });
+    this.app.scene.ambientLight = new Color(0.52, 0.58, 0.63);
+    this.camera.addComponent('camera', { clearColor: new Color(0.16, 0.27, 0.32), fov: 48, nearClip: 0.5, farClip: 260 });
     this.app.root.addChild(this.camera);
     const sun = new Entity('Afternoon sun');
-    sun.addComponent('light', { type: 'directional', color: new Color(1, 0.9, 0.72), intensity: 1.7, castShadows: false });
+    sun.addComponent('light', { type: 'directional', color: new Color(1, 0.93, 0.81), intensity: 1.25, castShadows: false });
     sun.setLocalEulerAngles(48, 25, 0);
     this.app.root.addChild(sun);
-    this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#264858');
-    this.box(this.app.root, 0, -0.4, 0, SIZE * UNIT + 1.1, 0.8, SIZE * UNIT + 1.1, '#4b6357');
-    // One ground and one grid mesh instead of 576 individual draw calls.
-    // Road graph and parcel occupancy still live only in sim.ts.
-    this.box(this.app.root, 0, 0.005, 0, SIZE * UNIT, 0.035, SIZE * UNIT, '#799375');
-    const positions: number[] = [], normals: number[] = [], indices: number[] = [];
-    const quad = (x0: number, z0: number, x1: number, z1: number) => {
-      const start = positions.length / 3;
-      positions.push(x0, .055, z0, x0, .055, z1, x1, .055, z1, x1, .055, z0);
-      normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-      indices.push(start, start + 1, start + 2, start, start + 2, start + 3);
-    };
-    for (let n = 0; n <= SIZE; n++) {
-      const d = n * UNIT - SIZE;
-      quad(d - .022, -SIZE, d + .022, SIZE);
-      quad(-SIZE, d - .022, SIZE, d + .022);
-    }
-    const gridMesh = new Mesh(this.app.graphicsDevice);
-    gridMesh.setPositions(positions); gridMesh.setNormals(normals); gridMesh.setIndices(indices); gridMesh.update();
-    const grid = new Entity('Parcel grid');
-    grid.addComponent('render', { meshInstances: [new MeshInstance(gridMesh, this.material('#60775e'))], castShadows: false });
-    this.app.root.addChild(grid);
+    this.box(this.app.root, 0, -0.85, 0, 160, 0.4, 160, '#365e6b');
+    this.box(this.app.root, 0, -.45, 0, SIZE * UNIT + 5.1, .6, SIZE * UNIT + 5.1, '#b7b596');
+    this.box(this.app.root, 0, -.24, 0, SIZE * UNIT + 4.5, .48, SIZE * UNIT + 4.5, '#7c9875');
+    // One original textured ground, a tool-only grid and one batched edge mesh.
+    // These visual surfaces never change the flat simulation/picking plane.
+    this.ground = new CityGround(this.app, SIZE, UNIT);
+    this.app.root.addChild(this.ground.root);
+    const edgeMaterial = new StandardMaterial();
+    edgeMaterial.diffuse = new Color(1, 1, 1); edgeMaterial.diffuseVertexColor = true;
+    edgeMaterial.opacityVertexColor = true; edgeMaterial.opacityVertexColorChannel = 'a';
+    edgeMaterial.blendType = BLEND_NORMAL; edgeMaterial.depthWrite = false; edgeMaterial.update();
+    this.edgeMesh = new Mesh(this.app.graphicsDevice);
+    // Establish the vertex-color format before MeshInstance caches shader flags.
+    this.edgeMesh.setPositions([0, .041, 0, 0, .041, 0, 0, .041, 0]);
+    this.edgeMesh.setNormals([0, 1, 0, 0, 1, 0, 0, 1, 0]);
+    this.edgeMesh.setColors32([147, 137, 104, 0, 147, 137, 104, 0, 147, 137, 104, 0]);
+    this.edgeMesh.setIndices([0, 1, 2]); this.edgeMesh.update();
+    const edges = new Entity('Soft road and plot transitions');
+    edges.addComponent('render', { meshInstances: [new MeshInstance(this.edgeMesh, edgeMaterial)], castShadows: false });
+    this.app.root.addChild(edges);
     // Outside gateway across the western map edge.
     const gate = this.position(Math.floor(SIZE / 2) * SIZE);
     this.box(this.app.root, gate.x - 4, 0.04, gate.z, 8, 0.12, 1.4, '#d6b45c');
@@ -98,17 +114,19 @@ export class CityView {
       const angle = n * 2.39996;
       const x = Math.cos(angle) * (SIZE + 1.7), z = Math.sin(angle) * (SIZE + 1.7);
       if (Math.abs(x) < SIZE - 1 && Math.abs(z) < SIZE - 1 || x < -SIZE && Math.abs(z - gate.z) < 3) continue;
-      this.box(this.app.root, x, 0.65, z, 0.22, 1.1, 0.22, '#755f43');
+      const tree = new Entity('Procedural fallback tree'); tree.setLocalPosition(x, 0, z); this.app.root.addChild(tree);
+      this.box(tree, 0, 0.65, 0, 0.22, 1.1, 0.22, '#755f43');
       const crown = new Entity('Original tree');
       crown.addComponent('render', { type: 'cone', material: this.material('#3e6955') });
-      crown.setLocalPosition(x, 1.55, z); crown.setLocalScale(1.4, 2, 1.4); this.app.root.addChild(crown);
+      crown.setLocalPosition(0, 1.55, 0); crown.setLocalScale(1.4, 2, 1.4); tree.addChild(crown);
+      this.forest.push({ entity: tree, x, z });
     }
     this.app.root.addChild(this.markers);
     new ResizeObserver(() => this.resize()).observe(this.canvas);
     window.addEventListener('resize', () => this.resize());
     this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
   }
-  fitRadius() { return Math.max(65, Math.min(150, 65 * .95 / (innerWidth / innerHeight))); }
+  fitRadius() { return Math.max(42, Math.min(100, 42 * .86 / (innerWidth / innerHeight))); }
   resize() {
     const aspect = innerWidth / innerHeight;
     this.app.resizeCanvas(innerWidth, innerHeight);
@@ -148,7 +166,7 @@ export class CityView {
     this.target.z = Math.max(-22, Math.min(22, this.target.z)); this.updateCamera();
   }
   control(action: string) {
-    if (action === 'reset') { this.target.set(0, 0, 0); this.yaw = Math.PI / 4; this.radius = this.fitRadius(); }
+    if (action === 'reset') { this.target.set(-10, 0, 0); this.yaw = Math.PI / 4; this.radius = this.fitRadius(); }
     if (action === 'zoom-in') this.radius = Math.max(19, this.radius * 0.86);
     if (action === 'zoom-out') this.radius = Math.min(180, this.radius / 0.86);
     if (action === 'rotate-left') this.yaw -= Math.PI / 8;
@@ -202,21 +220,35 @@ export class CityView {
   }
   render(city: City, selected: number | null, preview: number[]) {
     this.app.renderNextFrame = true;
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'bulldoze'].includes(this.mode));
+    this.lastScene = { city, selected, preview: [...preview] };
+    this.updateGroundEdges(city);
     const connected = connectedRoads(city);
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}`;
+      const links = cell.road ? [i % SIZE > 0 && city.cells[i - 1].road, i % SIZE < SIZE - 1 && city.cells[i + 1].road, i >= SIZE && city.cells[i - SIZE].road, i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road].map(Number).join('') : '';
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
       this.tiles.set(i, { entity: tile, signature });
       if (cell.road) {
-        this.box(tile, 0, 0.065, 0, 1.96, 0.1, 1.96, connected.has(i) ? '#3c4b54' : '#8f5550');
-        this.box(tile, 0, 0.125, 0, 0.5, 0.015, 0.11, connected.has(i) ? '#ecdeb0' : '#ffc7a0');
+        const horizontal = (i % SIZE > 0 && city.cells[i - 1].road) || (i % SIZE < SIZE - 1 && city.cells[i + 1].road);
+        const vertical = (i >= SIZE && city.cells[i - SIZE].road) || (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road);
+        this.box(tile, 0, .065, 0, 1.98, .1, 1.98, '#bcc4b8');
+        this.box(tile, 0, .12, 0, vertical && !horizontal ? 1.48 : 1.98, .035, horizontal && !vertical ? 1.48 : 1.98, connected.has(i) ? '#46535b' : '#a86155');
+        if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
+        if (connected.has(i) && i % 4 === 0 && horizontal && !vertical) {
+          const lamp = this.assets?.streetlight();
+          if (lamp) { lamp.setLocalPosition(0, .13, -.84); tile.addChild(lamp); }
+        }
       } else if (cell.zone) {
         const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053' }[cell.zone];
         this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, color);
         if (b) {
+          this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
+          const model = this.assets?.building(b.zone, b.level, i);
+          if (model) { model.setLocalPosition(0, .1, 0); tile.addChild(model); continue; }
           const h = 0.9 + b.level * 0.75 + (i % 3) * 0.22;
           const tower = b.zone === 'I' ? h * 0.65 : h;
           this.box(tile, -0.1, tower / 2 + 0.1, 0, 1.25, tower, 1.2, { R: '#d7e5d1', C: '#b6d4df', I: '#d9c09a' }[b.zone]);
@@ -234,5 +266,31 @@ export class CityView {
       for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, color);
       for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, color);
     }
+  }
+  private updateGroundEdges(city: City) {
+    const signature = city.cells.map(cell => cell.road ? '1' : '0').join('') + ':' + city.buildings.map(b => b.cell).join(',');
+    if (!this.edgeMesh || signature === this.edgeSignature) return;
+    this.edgeSignature = signature;
+    const positions: number[] = [], normals: number[] = [], colors: number[] = [], indices: number[] = [];
+    const band = (x: number, z: number, dx: number, dz: number, inner: number, outer: number, opacity: number) => {
+      const start = positions.length / 3, tx = -dz * .99, tz = dx * .99;
+      for (const [distance, tangent, alpha] of [[inner, -1, opacity], [outer, -1, 0], [outer, 1, 0], [inner, 1, opacity]]) {
+        positions.push(x + dx * distance + tx * tangent, .041, z + dz * distance + tz * tangent);
+        normals.push(0, 1, 0); colors.push(147, 137, 104, alpha);
+      }
+      indices.push(start, start + 2, start + 1, start, start + 3, start + 2);
+    };
+    for (let i = 0; i < city.cells.length; i++) if (city.cells[i].road) {
+      const { x, z } = this.position(i);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const cx = i % SIZE + dx, cz = Math.floor(i / SIZE) + dz;
+        if (cx >= 0 && cz >= 0 && cx < SIZE && cz < SIZE && !city.cells[cz * SIZE + cx].road) band(x, z, dx, dz, .98, 1.34, 100);
+      }
+    }
+    for (const building of city.buildings) {
+      const { x, z } = this.position(building.cell);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) band(x, z, dx, dz, .87, 1.18, 55);
+    }
+    this.edgeMesh.setPositions(positions); this.edgeMesh.setNormals(normals); this.edgeMesh.setColors32(colors); this.edgeMesh.setIndices(indices); this.edgeMesh.update();
   }
 }
