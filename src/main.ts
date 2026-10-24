@@ -5,7 +5,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { SIZE, access, createCity, step, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, isMarket, type City, type Zone } from './sim.ts';
+import { SIZE, access, createCity, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
@@ -13,6 +13,8 @@ import { growthStatusText } from './context-data.ts';
 import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
 import type { EntitySelection } from './entity-explanation-data.ts';
+import { createOwnerDecisionSession } from './owner-decision-session.ts';
+import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -22,6 +24,8 @@ const SIGNALS_ENABLED = SIGNAL_ENV.VITE_CITY_SIGNALS !== 'false' || new URLSearc
 let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
 let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | undefined;
 let city: City = createCity(61025);
+const ownerDecisionSession = createOwnerDecisionSession(city);
+let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1, accumulator = 0;
@@ -99,6 +103,7 @@ function cancel() {
   inspector(false); status('กลับสู่แผนที่เมือง');
 }
 function activate(index: number) {
+  if (tool !== 'select' && tool !== 'pan') ownerDecisionSession.beforeExternal(city);
   selected = index;
   if (tool === 'road') {
     if (roadStart === null) { roadStart = index; status('เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
@@ -106,6 +111,7 @@ function activate(index: number) {
   } else if (['R', 'C', 'I', 'F'].includes(tool)) status(zoneCell(city, index, tool as Zone).message);
   else if (tool === 'bulldoze') status(bulldoze(city, index).message);
   else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
+  if (tool !== 'select' && tool !== 'pan') ownerDecisionSession.syncExternal(city, 'player-map-command');
   render();
 }
 function node(tag: string, className = '', content?: string): HTMLElement {
@@ -147,7 +153,9 @@ function ownerFinanceAction(action: 'contribute' | 'withdraw', firmId: number) {
   if (!firm || route?.page !== 'place' || city.cells[route.cell]?.building !== firm.building) {
     status('สถานที่เปลี่ยนแล้ว กรุณาเปิดกิจการที่ต้องการอีกครั้ง'); return;
   }
+  ownerDecisionSession.beforeExternal(city);
   const result = action === 'contribute' ? contributeOwnerCapital(city, firmId, 10_000) : withdrawOwnerProfit(city, firmId, 10_000);
+  if (result.ok) ownerDecisionSession.syncExternal(city, 'manual-owner-finance');
   status(result.message); render();
   showOwnerFinanceResult(firmId, result.message);
 }
@@ -224,7 +232,7 @@ function render() {
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => { b.classList.toggle('active', Number(b.dataset.speed) === speed); b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)); });
   const demand = node('div', 'demand-grid');
   for (const [zone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const) { const item = node('div', `demand-item ${zone.toLowerCase()}`); item.append(node('span', '', label), node('b', '', String(s.demand[zone]))); demand.append(item); }
-  $('#growth-summary').replaceChildren(demand); renderPlace(); entityExplanationPanel?.sync();
+  $('#growth-summary').replaceChildren(demand); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   view.render(city, selected, preview);
@@ -244,6 +252,11 @@ async function boot() {
       enabled: SIGNAL_ENV.VITE_CITY_ENTITY_ADVISOR_ONLINE === 'true',
       endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
     }
+  });
+  const ownerDecisionHost = document.createElement('details');
+  $('#city-content').insertBefore(ownerDecisionHost, $('#city-content .ledger-details'));
+  ownerDecisionPanel = createOwnerDecisionPanel(ownerDecisionHost, {
+    getCity: () => city, getSession: () => ownerDecisionSession, onChange: render,
   });
   $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
@@ -270,6 +283,7 @@ async function boot() {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
       const loaded = deserialize(saved.raw), oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 5;
       city = loaded; importedLegacyRaw = legacy ? saved.raw : null;
+      ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
       status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
     } catch (error) { status(`โหลดไม่สำเร็จ เมืองปัจจุบันยังอยู่ · ${error instanceof Error ? error.message : 'ข้อมูลบันทึกไม่ถูกต้อง'}`); }
@@ -287,7 +301,7 @@ async function boot() {
     const text = document.createElement('p'); text.textContent = 'เมืองที่ยังไม่บันทึกจะถูกแทนที่ เมืองที่เคยบันทึกยังเรียกคืนได้ด้วยปุ่มโหลด';
     const back = document.createElement('button'); back.textContent = 'กลับสู่เมือง'; back.autofocus = true;
     const reset = document.createElement('button'); reset.textContent = 'เริ่มเมืองใหม่';
-    back.onclick = () => dialog.close(); reset.onclick = () => { city = createCity(61025); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select'); render(); status('เมืองพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา'); dialog.close(); };
+    back.onclick = () => dialog.close(); reset.onclick = () => { city = createCity(61025); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select'); render(); status('เมืองพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา'); dialog.close(); };
     dialog.append(title, text, back, reset); document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
   });
   document.addEventListener('keydown', e => {
@@ -307,7 +321,7 @@ async function boot() {
     if (paused || document.hidden) return;
     accumulator += Math.min(dt, 0.25) * speed;
     let changed = false;
-    while (accumulator >= 1) { step(city); accumulator -= 1; changed = true; }
+    while (accumulator >= 1) { const outcomes = ownerDecisionSession.advance(city); ownerDecisionPanel?.noteOutcomes(outcomes); accumulator -= 1; changed = true; }
     if (changed) render();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
