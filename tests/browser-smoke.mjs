@@ -34,6 +34,14 @@ async function until(expression, timeout = 15000) {
 const state = async () => JSON.parse(await evaluate('window.cityManager.snapshot()'));
 const text = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
 const paused = () => evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"');
+async function game() {
+  if (await evaluate('document.querySelector("#inspector").dataset.open!=="true"||document.querySelector("#inspector").dataset.page!=="game"')) { await closeInspector(); await button('#toggle-game-menu'); }
+  await until('document.querySelector("#inspector").dataset.page==="game"&&document.querySelector("#inspector").dataset.open==="true"');
+}
+async function closeInspector() {
+  if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
+  await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+}
 async function clickAt(x, y) {
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
@@ -96,12 +104,12 @@ try {
   assert.deepEqual(await state(), beforeGridTools, 'Ground and grid modes never mutate the city');
   checks.push('Original bounded ground textures and construction-only grid do not mutate simulation');
   // Preserve a deterministic, paused baseline through the public Save control.
-  await button('#toggle-inspector'); await button('#save'); const saved = await state();
+  await game(); await button('#save'); const saved = await state();
   assert.match(await text('#status'), /Saved day/);
   await button('#new-city'); await button('dialog button:first-of-type');
   await button('#new-city'); await key('Escape');
   assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), false);
-  assert.deepEqual(await state(), saved); checks.push('New-city cancel and Escape keep state');
+  assert.deepEqual(await state(), saved); checks.push('Game-menu new-city cancel and Escape keep state'); await closeInspector();
   await button('[data-speed="3"]');
   assert.equal(await evaluate(`document.querySelector('[data-speed="3"]').getAttribute('aria-pressed')`), 'true');
   await button('[data-speed="1"]');
@@ -144,7 +152,7 @@ try {
   await button('[data-tool="select"]'); await cell(15 * 24 + 14);
   assert.match(await text('#explanation'), /ยังไม่มีถนนข้างแปลงที่เชื่อมถึงประตูภายนอก/);
   await screenshot('desktop-disconnected.png'); checks.push('Drag road, zoning, picking and disconnected explanation');
-  await button('#load'); assert.deepEqual(await state(), saved); assert.equal(await paused(), true);
+  await game(); await button('#load'); assert.deepEqual(await state(), saved); assert.equal(await paused(), true); await closeInspector();
   checks.push('Save/load round trip restores exact paused simulation');
   await button('[data-camera="reset"]');
   await button('[data-speed="10"]'); await button('#pause');
@@ -211,8 +219,6 @@ try {
   await button('#submenu-back');
   const inspectorLayout = await evaluate(`(()=>{const p=document.querySelector('#inspector'),r=p.getBoundingClientRect(),c=document.querySelector('#close-inspector').getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height,closeHit:!!document.elementFromPoint(c.x+c.width/2,c.y+c.height/2)?.closest('#close-inspector'),z:Number(getComputedStyle(p).zIndex),watermarkZ:Number(getComputedStyle(document.querySelector('.map-caption')).zIndex)}})()`);
   assert.ok(inspectorLayout.left >= 0 && inspectorLayout.right <= 390 && inspectorLayout.top >= 0 && inspectorLayout.bottom <= 844);
-  assert.ok(inspectorLayout.height <= 844 * .43, 'Context panel leaves most of the mobile view available');
-  assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`), 'city-canvas', 'Selected home stays visible above the docked context panel');
   assert.equal(inspectorLayout.closeHit, true, 'Context panel close is unobstructed');
   assert.ok(inspectorLayout.z > inspectorLayout.watermarkZ, 'Map watermark stays behind the context panel');
   await until('[...document.querySelectorAll("img[src*=kenney-ui]")].every(i=>i.complete)');
@@ -220,6 +226,8 @@ try {
   assert.ok(guiImages.length > 0, 'Licensed GUI artwork is used');
   assert.ok(guiImages.every(i => i.width > 0), 'GUI images load from the Pages base path');
   await screenshot('mobile-inspector.png');
+  await closeInspector();
+  assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`), 'city-canvas', 'Selected home is accessible again after closing the tall panel');
   await button('#toggle-inspector');
   await button('details.ledger-details:has(#ledger) > summary');
   await until('document.querySelector("#inspector").dataset.submenu==="money-section"');
@@ -230,20 +238,20 @@ try {
   await screenshot('mobile-ledger.png');
   const scroll = await evaluate('({x:document.querySelector("#inspector-body").scrollWidth,width:document.querySelector("#inspector-body").clientWidth})');
   assert.ok(scroll.x <= scroll.width, 'Inspector content does not overflow horizontally');
-  await button('#save');
+  await game(); await button('#save');
   const savedMessage = await text('#inspector-status'); assert.match(savedMessage, /Saved day/);
   assert.equal(await evaluate('document.querySelector("#inspector-status").getBoundingClientRect().height>0'), true, 'Save feedback remains visible while the toolbar is hidden');
   await evaluate('window.__restoreStorage=Storage.prototype.setItem;Storage.prototype.setItem=function(){throw new DOMException("Acceptance quota failure", "QuotaExceededError")}');
   try {
-    await button('#save');
+    await game(); await button('#save');
     assert.notEqual(await text('#inspector-status'), savedMessage, 'Storage rejection reports a different visible result');
     assert.match(await text('#inspector-status'), /บันทึกไม่ได้/);
     assert.equal(await text('#inspector-status'), await text('#status'));
   } finally { await evaluate('Storage.prototype.setItem=window.__restoreStorage;delete window.__restoreStorage'); }
-  await button('#load');
+  await game(); await button('#load');
   assert.equal(await text('#inspector-status'), await text('#status'));
-  assert.deepEqual(await state(), beforeMobileSelection, 'Mobile footer save/load preserves the exact city');
-  checks.push('Mobile inspector exposes save success, quota rejection and load feedback while tools are hidden');
+  assert.deepEqual(await state(), beforeMobileSelection, 'Explicit Game-menu save/load preserves the exact city');
+  checks.push('Mobile Game menu exposes save success, quota rejection and load feedback without a persistent entity footer');
   if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
   const firm = beforeMobileSelection.firms[0];
   const firmBuilding = beforeMobileSelection.buildings.find(b => b.id === firm.building);

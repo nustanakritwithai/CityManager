@@ -1,0 +1,754 @@
+{
+  "schema": 1,
+  "mode": "baseline",
+  "date": "2026-10-24T07:54:15.325Z",
+  "browser": "Edg/155.0.4283.62",
+  "fixture": {
+    "seed": 61025,
+    "tick": 65,
+    "sha256": "4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0",
+    "households": 6,
+    "firms": 2
+  },
+  "provenance": {
+    "requestedSourceCommit": "d40cd6982ce644ed1e555565d48cf2c1efbdc047",
+    "deploymentRun": "40073201082",
+    "url": "https://nustanakritwithai.github.io/CityManager/",
+    "fetchedAt": "2026-10-24T07:54:15.323Z",
+    "htmlSha256": "c0df6f7fba48942426201703fced4caf2ca27946637f91592a01b9739a1d3604",
+    "assets": [
+      {
+        "url": "https://nustanakritwithai.github.io/CityManager/assets/index-DiIuMumN.js",
+        "bytes": 1237265,
+        "sha256": "b1dd3e58ee482d358c6428493fea4c6ca2a11bfca81ab4cd0256b6e97e934565"
+      },
+      {
+        "url": "https://nustanakritwithai.github.io/CityManager/assets/index-BRcLCBOp.css",
+        "bytes": 47268,
+        "sha256": "fb6fe9d12fe77249d60e5e3d43015e598b3ae423ae466932e5b5ef36fa8464ab"
+      }
+    ],
+    "note": "Actual public bytes captured. Root must match these hashes to the d40 deployment artifact before admitting this baseline.",
+    "admittedAgainst": {
+      "commit": "d40cd6982ce644ed1e555565d48cf2c1efbdc047",
+      "deploymentRun": "40073201082",
+      "method": "HTML, JS and CSS SHA-256 matched prior downloaded tested Pages artifact readback",
+      "verifiedAt": "2026-10-24T07:55:44.954Z"
+    }
+  },
+  "measures": [
+    {
+      "name": "s22-ledger",
+      "width": 360,
+      "height": 740,
+      "screenWidth": 360,
+      "screenHeight": 780,
+      "ratio": 1,
+      "panel": {
+        "top": 161.609375,
+        "bottom": 724,
+        "left": 12,
+        "right": 348,
+        "height": 562.390625
+      },
+      "body": {
+        "top": 225.609375,
+        "bottom": 638.5,
+        "height": 412.890625,
+        "scrollHeight": 2196,
+        "clientWidth": 334,
+        "scrollWidth": 334
+      },
+      "ledger": {
+        "total": 12,
+        "visible": 1,
+        "full": 1,
+        "rows": [
+          {
+            "index": "451",
+            "height": 139.578125,
+            "visible": true,
+            "full": true,
+            "visibleHeight": 139.578125
+          },
+          {
+            "index": "450",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "449",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "448",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "447",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "446",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "445",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "444",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "443",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "442",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "441",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "440",
+            "height": 139.578125,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "kpi": {
+        "total": 0,
+        "visible": 0,
+        "full": 0,
+        "rows": []
+      },
+      "households": {
+        "total": 0,
+        "visible": 0,
+        "full": 0,
+        "rows": []
+      },
+      "controls": [
+        {
+          "selector": "#close-inspector",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        },
+        {
+          "selector": "#submenu-back",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        }
+      ]
+    },
+    {
+      "name": "s22-firm",
+      "width": 360,
+      "height": 740,
+      "screenWidth": 360,
+      "screenHeight": 780,
+      "ratio": 1,
+      "panel": {
+        "top": 413.203125,
+        "bottom": 724,
+        "left": 12,
+        "right": 348,
+        "height": 310.796875
+      },
+      "body": {
+        "top": 509.59375,
+        "bottom": 638.5,
+        "height": 128.90625,
+        "scrollHeight": 3090,
+        "clientWidth": 334,
+        "scrollWidth": 334
+      },
+      "ledger": {
+        "total": 12,
+        "visible": 0,
+        "full": 0,
+        "rows": [
+          {
+            "index": "451",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "450",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "449",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "448",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "447",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "446",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "445",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "444",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "443",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "442",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "441",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "440",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "kpi": {
+        "total": 6,
+        "visible": 2,
+        "full": 0,
+        "rows": [
+          {
+            "index": "cash",
+            "height": 68.6875,
+            "visible": true,
+            "full": false,
+            "visibleHeight": 16.828125
+          },
+          {
+            "index": "reserved",
+            "height": 68.6875,
+            "visible": true,
+            "full": false,
+            "visibleHeight": 16.828125
+          },
+          {
+            "index": "spendable",
+            "height": 68.6875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "stock",
+            "height": 68.6875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "workers",
+            "height": 91.6875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "profit",
+            "height": 91.6875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "households": {
+        "total": 5,
+        "visible": 0,
+        "full": 0,
+        "rows": [
+          {
+            "index": "4",
+            "height": 63.296875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "6",
+            "height": 63.296875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "8",
+            "height": 63.296875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "10",
+            "height": 63.296875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "16",
+            "height": 63.296875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "controls": [
+        {
+          "selector": "#close-inspector",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        },
+        {
+          "selector": "#submenu-back",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        }
+      ]
+    },
+    {
+      "name": "s22-house",
+      "width": 360,
+      "height": 740,
+      "screenWidth": 360,
+      "screenHeight": 780,
+      "ratio": 1,
+      "panel": {
+        "top": 413.203125,
+        "bottom": 724,
+        "left": 12,
+        "right": 348,
+        "height": 310.796875
+      },
+      "body": {
+        "top": 509.59375,
+        "bottom": 638.5,
+        "height": 128.90625,
+        "scrollHeight": 398,
+        "clientWidth": 334,
+        "scrollWidth": 334
+      },
+      "ledger": {
+        "total": 12,
+        "visible": 0,
+        "full": 0,
+        "rows": [
+          {
+            "index": "451",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "450",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "449",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "448",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "447",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "446",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "445",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "444",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "443",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "442",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "441",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "440",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "kpi": {
+        "total": 3,
+        "visible": 0,
+        "full": 0,
+        "rows": [
+          {
+            "index": "level",
+            "height": 68.6875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "age",
+            "height": 68.6875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "households",
+            "height": 68.6875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "households": {
+        "total": 1,
+        "visible": 0,
+        "full": 0,
+        "rows": [
+          {
+            "index": "4",
+            "height": 63.296875,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "controls": [
+        {
+          "selector": "#close-inspector",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        },
+        {
+          "selector": "#submenu-back",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        }
+      ]
+    },
+    {
+      "name": "s22-household",
+      "width": 360,
+      "height": 740,
+      "screenWidth": 360,
+      "screenHeight": 780,
+      "ratio": 1,
+      "panel": {
+        "top": 161.609375,
+        "bottom": 724,
+        "left": 12,
+        "right": 348,
+        "height": 562.390625
+      },
+      "body": {
+        "top": 244,
+        "bottom": 638.5,
+        "height": 394.5,
+        "scrollHeight": 2697,
+        "clientWidth": 334,
+        "scrollWidth": 334
+      },
+      "ledger": {
+        "total": 12,
+        "visible": 0,
+        "full": 0,
+        "rows": [
+          {
+            "index": "451",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "450",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "449",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "448",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "447",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "446",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "445",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "444",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "443",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "442",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "441",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          },
+          {
+            "index": "440",
+            "height": 0,
+            "visible": false,
+            "full": false,
+            "visibleHeight": 0
+          }
+        ]
+      },
+      "kpi": {
+        "total": 5,
+        "visible": 5,
+        "full": 5,
+        "rows": [
+          {
+            "index": "cash",
+            "height": 68.6875,
+            "visible": true,
+            "full": true,
+            "visibleHeight": 68.6875
+          },
+          {
+            "index": "home",
+            "height": 68.6875,
+            "visible": true,
+            "full": true,
+            "visibleHeight": 68.6875
+          },
+          {
+            "index": "employer",
+            "height": 68.6875,
+            "visible": true,
+            "full": true,
+            "visibleHeight": 68.6875
+          },
+          {
+            "index": "needs",
+            "height": 68.6875,
+            "visible": true,
+            "full": true,
+            "visibleHeight": 68.6875
+          },
+          {
+            "index": "last-purchase",
+            "height": 68.6875,
+            "visible": true,
+            "full": true,
+            "visibleHeight": 68.6875
+          }
+        ]
+      },
+      "households": {
+        "total": 0,
+        "visible": 0,
+        "full": 0,
+        "rows": []
+      },
+      "controls": [
+        {
+          "selector": "#close-inspector",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        },
+        {
+          "selector": "#submenu-back",
+          "width": 44,
+          "height": 44,
+          "hit": true
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    "s22-ledger.png",
+    "s22-firm.png",
+    "s22-house.png",
+    "s22-household.png"
+  ],
+  "errors": [],
+  "note": "360x740 logical viewport and screen360x780 are explicit S22-like assumptions, not dimensions inferred from the user JPEGs or real-device QA."
+}

@@ -140,3 +140,73 @@
 .inspector .cx-content .cx-caption,
 .inspector .cx-content .cx-flow-meta,
 .inspector .cx-content .cx-period-banner p { font-size: calc(14 * var(--reader-unit, 1px)); }
+
+/* Compact content density: controls keep their full 44 CSS-pixel hit area. */
+.inspector .cx-content { line-height: 1.45; }
+.inspector .cx-content h3 { font-size: calc(13 * var(--reader-unit, 1px)); line-height: 1.4; }
+.inspector .cx-content p, .inspector .cx-content li { font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.45; }
+.cx-content .cx-metrics, .cx-content .cx-period-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(6 * var(--reader-unit, 1px)); }
+.cx-content .cx-metric { padding: calc(6 * var(--reader-unit, 1px)) calc(8 * var(--reader-unit, 1px)); border-radius: calc(6 * var(--reader-unit, 1px)); }
+.cx-content .cx-metric:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.cx-content .cx-metric dt { font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.3; }
+.cx-content .cx-metric dd { margin-top: calc(2 * var(--reader-unit, 1px)); font-size: calc(16 * var(--reader-unit, 1px)); line-height: 1.35; }
+.cx-content .cx-metric small { margin-top: calc(2 * var(--reader-unit, 1px)); font-size: calc(11 * var(--reader-unit, 1px)); }
+.cx-content .cx-status { gap: calc(4 * var(--reader-unit, 1px)); margin: 0 0 calc(6 * var(--reader-unit, 1px)); }
+.cx-content .cx-chip { padding: calc(2 * var(--reader-unit, 1px)) calc(5 * var(--reader-unit, 1px)); font-size: calc(11 * var(--reader-unit, 1px)); line-height: 1.4; }
+.inspector .cx-content .cx-context-meta { margin: 0 0 calc(5 * var(--reader-unit, 1px)); color: #adc5b9; font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.4; }
+.cx-content .cx-section { margin-top: calc(10 * var(--reader-unit, 1px)); }
+.cx-content .cx-section-head { gap: calc(5 * var(--reader-unit, 1px)); margin-bottom: calc(5 * var(--reader-unit, 1px)); }
+.cx-content .cx-section h3 { margin-bottom: calc(5 * var(--reader-unit, 1px)); }
+.cx-content .cx-section-head h3 { margin-bottom: 0; }
+.cx-content .cx-count { font-size: calc(11 * var(--reader-unit, 1px)); line-height: 1.4; }
+.cx-content .cx-household-list { gap: calc(4 * var(--reader-unit, 1px)); }
+.cx-content .cx-household-link {
+  min-height: max(44px, calc(44 * var(--reader-unit, 1px))); min-width: 44px;
+  padding: calc(5 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)); gap: calc(7 * var(--reader-unit, 1px));
+  border-radius: calc(6 * var(--reader-unit, 1px));
+}
+.cx-content .cx-household-link .cx-person-symbol { width: calc(20 * var(--reader-unit, 1px)); height: calc(20 * var(--reader-unit, 1px)); background: transparent; border-radius: 0; }
+.cx-content .cx-household-link .cx-person-symbol svg { width: calc(20 * var(--reader-unit, 1px)); height: calc(20 * var(--reader-unit, 1px)); }
+.cx-content .cx-link-copy { gap: calc(1 * var(--reader-unit, 1px)); }
+.cx-content .cx-link-copy strong { font-size: calc(13 * var(--reader-unit, 1px)); line-height: 1.35; }
+.cx-content .cx-link-copy span { font-size: calc(11 * var(--reader-unit, 1px)); line-height: 1.4; }
+.cx-content .cx-link-arrow { font-size: calc(16 * var(--reader-unit, 1px)); }
+.cx-content .cx-empty { gap: calc(5 * var(--reader-unit, 1px)); padding: calc(10 * var(--reader-unit, 1px)); }
+.cx-content .cx-empty svg { width: calc(24 * var(--reader-unit, 1px)); height: calc(24 * var(--reader-unit, 1px)); }
+.inspector .cx-content .cx-empty h3, .inspector .cx-content .cx-empty p { font-size: calc(12 * var(--reader-unit, 1px)); }
+.cx-content .cx-flow-list { gap: calc(4 * var(--reader-unit, 1px)); }
+.cx-content .cx-flow-card { padding: 0; border-radius: calc(6 * var(--reader-unit, 1px)); }
+.inspector .cx-content .cx-flow-summary {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: calc(2 * var(--reader-unit, 1px)) calc(6 * var(--reader-unit, 1px));
+  min-height: max(44px, calc(44 * var(--reader-unit, 1px))); width: 100%; margin: 0;
+  padding: calc(5 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)); list-style: none; cursor: pointer;
+}
+.cx-content .cx-flow-summary::-webkit-details-marker, .cx-content .cx-facts > summary::-webkit-details-marker { display: none; }
+.cx-content .cx-flow-summary::after { content: '+'; grid-column: 2; grid-row: 1 / 3; align-self: center; margin: 0; font-size: calc(14 * var(--reader-unit, 1px)); color: #d6c28d; }
+.cx-content .cx-flow-card[open] > .cx-flow-summary::after { content: '−'; }
+.cx-content .cx-flow-top { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: calc(6 * var(--reader-unit, 1px)); align-items: baseline; min-width: 0; grid-column: 1; }
+.inspector .cx-content .cx-flow-top h4 { font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cx-content .cx-flow-card[open] .cx-flow-top h4 { white-space: normal; }
+.cx-content .cx-amount { font-size: calc(14 * var(--reader-unit, 1px)); line-height: 1.4; white-space: nowrap; }
+.cx-content .cx-flow-inline { min-width: 0; grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11 * var(--reader-unit, 1px)); line-height: 1.35; color: #aec5ba; }
+.cx-content .cx-flow-details { padding: calc(5 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)); border-top: 1px solid #c1dbca1a; }
+.inspector .cx-content .cx-flow-meta, .inspector .cx-content .cx-flow-raw { font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.45; margin: 0; }
+.inspector .cx-content .cx-flow-raw { margin-top: calc(5 * var(--reader-unit, 1px)); color: #9fb8ae; }
+.cx-content .cx-flow-route { margin-top: calc(4 * var(--reader-unit, 1px)); padding-top: 0; border: 0; gap: calc(4 * var(--reader-unit, 1px)); font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.45; }
+.cx-content .cx-flow-route .cx-route-arrow { color: #edc77f; }
+.cx-content .cx-flow-controls { margin-top: calc(6 * var(--reader-unit, 1px)); }
+.cx-content .cx-button { min-height: max(44px, calc(44 * var(--reader-unit, 1px))); padding: calc(5 * var(--reader-unit, 1px)) calc(8 * var(--reader-unit, 1px)); font-size: calc(12 * var(--reader-unit, 1px)); }
+.inspector .cx-content .cx-account-note { padding: calc(4 * var(--reader-unit, 1px)) calc(6 * var(--reader-unit, 1px)); margin-top: calc(5 * var(--reader-unit, 1px)); font-size: calc(11 * var(--reader-unit, 1px)); line-height: 1.4; }
+.inspector .cx-content .cx-detail-note { font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.45; margin-top: calc(5 * var(--reader-unit, 1px)); }
+.cx-content .cx-facts { margin-top: calc(8 * var(--reader-unit, 1px)); border: 1px solid #c1dbca1a; border-radius: calc(6 * var(--reader-unit, 1px)); background: #9abca806; }
+.inspector .cx-content .cx-facts > summary { display: flex; align-items: center; justify-content: space-between; min-height: max(44px, calc(44 * var(--reader-unit, 1px))); padding: calc(5 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)); font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.4; cursor: pointer; list-style: none; }
+.cx-content .cx-facts > summary::after { content: '+'; margin-left: calc(6 * var(--reader-unit, 1px)); }
+.cx-content .cx-facts[open] > summary::after { content: '−'; }
+.cx-content .cx-facts-copy { padding: 0 calc(7 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)); }
+.inspector .cx-content .cx-facts-copy p { margin: calc(4 * var(--reader-unit, 1px)) 0 0; font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.5; }
+.cx-content summary:focus-visible { outline: 2px solid #f3c46b; outline-offset: -2px; }
+.inspector .cx-content .cx-stock-card, .inspector .cx-content .cx-periodflows { padding: calc(7 * var(--reader-unit, 1px)); border-radius: calc(7 * var(--reader-unit, 1px)); }
+.cx-content .cx-period-banner { padding: calc(7 * var(--reader-unit, 1px)); margin: calc(9 * var(--reader-unit, 1px)) 0 calc(8 * var(--reader-unit, 1px)); border-radius: calc(6 * var(--reader-unit, 1px)); }
+.inspector .cx-content .cx-period-banner h3 { font-size: calc(13 * var(--reader-unit, 1px)); }
+.inspector .cx-content .cx-period-banner p { margin-top: calc(3 * var(--reader-unit, 1px)); font-size: calc(12 * var(--reader-unit, 1px)); }
+.inspector .cx-content .cx-warning-list li { font-size: calc(12 * var(--reader-unit, 1px)); line-height: 1.45; }

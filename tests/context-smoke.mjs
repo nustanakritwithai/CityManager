@@ -57,11 +57,11 @@ async function screenshot(name, resetScroll = true) { if(resetScroll) await eval
 async function visible(selector) { return evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return!!e&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden'})()`); }
 async function closePanel() { if ((await route()).open === 'true') await button('#close-inspector'); }
 async function openPage(page) {
-  const current = await route(); if (current.open !== 'true' || current.page !== page) await button(page === 'city' ? '#toggle-inspector' : '#toggle-help');
+  const current = await route(); if (current.open !== 'true' || current.page !== page) { await closePanel(); await button(page === 'city' ? '#toggle-inspector' : page === 'help' ? '#toggle-help' : '#toggle-game-menu'); }
   await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(page)}&&document.querySelector('#inspector').dataset.open==='true'`);
 }
 async function load(json) {
-  await openPage('city');
+  await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
   await evaluate(`localStorage.setItem('citymanager.save.v1',${JSON.stringify(json)})`); await button('#load');
   const expected = JSON.parse(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
@@ -141,7 +141,7 @@ try {
   if (blocked) await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
   await send('Page.navigate', { url }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready');
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
-  await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day save loaded through explicit city page and real Load control');
+  await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day save loaded through explicit Game page and real Load control');
 
   // Keep the native press active across real 10x simulation refreshes. A programmatic
   // click or a re-queried mouseup target would miss the replaced-button regression.
@@ -183,7 +183,7 @@ try {
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: projection.x, y: projection.y, deltaX: 0, deltaY: -180 }); assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await closePanel(); await key('ArrowRight'); await until(`JSON.stringify(window.cityManager.cellScreen(${homes[0].cell}))!==${JSON.stringify(JSON.stringify(projection))}`); assert.notDeepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await button('[data-camera="reset"]'); assert.deepEqual(await state(), fixture); checks.push('Open inspector disables camera buttons and ignores wheel/arrows/q/e; closing restores camera input without model changes');
 
   await place(homes[0]); await button('[data-tool="bulldoze"]'); await cell(homes[0].cell, false); const demolished = await state(); assert.equal(demolished.buildings.some(b => b.id === homes[0].id), false); assert.notEqual((await route()).id, String(homes[0].id)); assert.deepEqual(deserialize(JSON.stringify(demolished)), demolished);
-  await openPage('city'); await button('#save'); assert.deepEqual(JSON.parse(await evaluate('localStorage.getItem("citymanager.save.v1")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Save is exact and loading a different valid city clears old scope');
+  await openPage('game'); await button('#save'); assert.deepEqual(JSON.parse(await evaluate('localStorage.getItem("citymanager.save.v1")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
 
   await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
   await place(homes[0]); await assertLayout(); await screenshot('phone-house.png'); await evaluate('document.querySelector("#entity-content .cx-household-list").scrollIntoView({block:"start"})'); await screenshot('phone-house-members.png',false); await button(`#entity-content [data-household-id="${homeHousehold.id}"]`); await assertLayout(); await screenshot('phone-household.png');

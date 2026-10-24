@@ -3,7 +3,12 @@ import { MONTH, SIZE, ROAD_COST, type City } from './sim.ts';
 import { flowRows, walletGroups, formatMoney, type FlowKind, type FlowRow } from './inspector-data.ts';
 
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
-type Journal = { kind: FlowKind; initial: number; limit: number; count: HTMLElement; scope: HTMLElement; list: HTMLElement; more: HTMLButtonElement; all: HTMLButtonElement; recent: HTMLButtonElement; revision: string };
+type Journal = {
+  kind: FlowKind; initial: number; limit: number; count: HTMLElement; scope: HTMLElement; list: HTMLElement;
+  more: HTMLButtonElement; all: HTMLButtonElement; recent: HTMLButtonElement; revision: string;
+  expanded: Map<number, string>; heldPointers: Set<number>; heldKeys: Set<string>;
+  releaseBarrier: boolean; pending: boolean; flushTimer: ReturnType<typeof setTimeout> | null;
+};
 const journals = new Map<FlowKind, Journal>();
 let ready = false, current: City | null = null, selection: number | null = null, walletRevision = '';
 
@@ -31,8 +36,46 @@ function svg(kind: string): SVGElement {
 }
 function scopeText(journal = true): string { return selection === null ? journal ? 'ข้อมูลทั้งเมือง · เรียงจากรายการล่าสุด' : 'ข้อมูลทั้งเมือง · แยกตามประเภทบัญชี' : 'ข้อมูลทั้งเมือง · ไม่ได้กรองตามสถานที่ที่เลือก'; }
 function intro(kind: string, title: string, description: string): HTMLElement {
-  const intro = element('div', 'sm-intro'), art = element('div', 'sm-section-symbol'), content = element('div'); art.append(svg(kind));
-  content.append(element('span', 'sm-kicker', 'สมุดข้อมูลเมือง'), element('h3', '', title), element('p', '', description)); intro.append(art, content); return intro;
+  const intro = element('p', 'sm-intro', description); Object.assign(intro.dataset, { sectionTitle: title, symbol: kind }); return intro;
+}
+function rowIdentity(row: Pick<FlowRow, 'tick' | 'from' | 'to' | 'value' | 'reason'>): string {
+  return JSON.stringify([row.tick, row.from, row.to, row.value, row.reason]);
+}
+function rememberExpanded(state: Journal) {
+  for (const card of state.list.querySelectorAll<HTMLDetailsElement>('details.sm-flow-card')) {
+    const index = Number(card.dataset.index);
+    if (card.open) state.expanded.set(index, rowIdentity({ tick: Number(card.dataset.tick), from: card.dataset.from!, to: card.dataset.to!, value: Number(card.dataset.value), reason: card.dataset.reason! }));
+    else state.expanded.delete(index);
+  }
+}
+function clearJournalInput(state: Journal) {
+  state.heldPointers.clear(); state.heldKeys.clear(); state.releaseBarrier = false; state.pending = false;
+  if (state.flushTimer !== null) clearTimeout(state.flushTimer); state.flushTimer = null;
+}
+function flushJournalAfterActivation(state: Journal) {
+  // Native summary activation happens after pointerup/keyup. A next-task barrier
+  // retains the pressed node through that click, then reads its actual open state.
+  state.releaseBarrier = true;
+  if (state.flushTimer !== null) clearTimeout(state.flushTimer);
+  state.flushTimer = setTimeout(() => {
+    state.flushTimer = null; state.releaseBarrier = false;
+    if (state.heldPointers.size || state.heldKeys.size || !state.pending) return;
+    state.pending = false; rememberExpanded(state); updateJournal(state);
+  }, 0);
+}
+function installJournalInputGuard(state: Journal) {
+  state.list.addEventListener('pointerdown', event => {
+    if (event.isTrusted && event.target instanceof Element && event.target.closest('.sm-flow-toggle')) state.heldPointers.add(event.pointerId);
+  }, true);
+  state.list.addEventListener('keydown', event => {
+    if (event.isTrusted && (event.key === ' ' || event.key === 'Enter') && event.target instanceof Element && event.target.closest('.sm-flow-toggle')) state.heldKeys.add(event.key);
+  }, true);
+  document.addEventListener('pointerup', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state); }, true);
+  document.addEventListener('pointercancel', event => { if (state.heldPointers.delete(event.pointerId)) flushJournalAfterActivation(state); }, true);
+  document.addEventListener('keyup', event => { if (state.heldKeys.delete(event.key)) flushJournalAfterActivation(state); }, true);
+  window.addEventListener('blur', () => {
+    if (state.heldPointers.size || state.heldKeys.size) { state.heldPointers.clear(); state.heldKeys.clear(); flushJournalAfterActivation(state); }
+  });
 }
 function action(label: string, kind: FlowKind, name: string): HTMLButtonElement {
   const button = element('button', `sm-button${name === 'more' ? ' primary' : ''}`, label); button.type = 'button'; button.dataset.journalAction = name; button.dataset.kind = kind; return button;
@@ -45,22 +88,34 @@ function setupJournal(kind: FlowKind, id: string, initial: number) {
   const more = action(`ดูเพิ่ม ${initial} รายการ`, kind, 'more'), all = action('ดูทั้งหมด', kind, 'all'), recent = action('กลับรายการล่าสุด', kind, 'recent');
   const buttons = element('div', 'sm-pagination'); buttons.append(more, all, recent);
   const note = element('p', 'sm-footnote', kind === 'money' ? 'แต่ละรายการหักต้นทางและเพิ่มปลายทางด้วยจำนวนเงินเดียวกัน ยอดเป็นบาทและสตางค์' : 'หน่วยสินค้าเป็นหน่วยนามธรรมของต้นแบบ การตัดสต็อกจากการรื้อถอนไม่ใช่รายได้ขายสินค้า');
-  host.replaceChildren(intro(kind, kind === 'money' ? 'เงินเดินทางไปที่ไหน' : 'จากผู้ผลิตสู่ผู้ใช้', kind === 'money' ? 'ตามรอยเงินจริงตั้งแต่เงินลงทุน ค่าจ้าง การซื้อสินค้า ไปจนถึงภาษี' : 'ดูต้นทาง ปลายทาง และจำนวนสินค้าของทุกรายการ'), scope, countbar, list, buttons, note);
-  const state: Journal = { kind, initial, limit: initial, count, scope, list, more, all, recent, revision: '' }; journals.set(kind, state);
+  host.replaceChildren(scope, countbar, list, buttons, note);
+  const state: Journal = { kind, initial, limit: initial, count, scope, list, more, all, recent, revision: '', expanded: new Map(), heldPointers: new Set(), heldKeys: new Set(), releaseBarrier: false, pending: false, flushTimer: null }; journals.set(kind, state); installJournalInputGuard(state);
   more.addEventListener('click', () => { state.limit += initial; updateJournal(state); if (more.hidden) recent.focus(); });
   all.addEventListener('click', () => { state.limit = Infinity; updateJournal(state); recent.focus(); });
   recent.addEventListener('click', () => { state.limit = initial; updateJournal(state); if (!more.hidden) more.focus(); });
 }
-function eventCard(row: FlowRow): HTMLElement {
-  const card = element('article', `sm-flow-card${row.kind === 'money' && row.to === 'treasury' ? ' income' : row.kind === 'money' && row.from === 'treasury' ? ' outgoing' : ''}`);
+function eventCard(row: FlowRow, state: Journal): HTMLElement {
+  const card = element('details', `sm-flow-card${row.kind === 'money' && row.to === 'treasury' ? ' income' : row.kind === 'money' && row.from === 'treasury' ? ' outgoing' : ''}`);
   Object.assign(card.dataset, { kind: row.kind, index: String(row.index), tick: String(row.tick), from: row.from, to: row.to, value: String(row.value), reason: row.reason });
-  const top = element('div', 'sm-flow-top'), value = element('strong', 'sm-flow-value', row.kind === 'money' ? `${formatMoney(row.value)} ฿` : `${row.value.toLocaleString('th-TH')} หน่วย`);
+  const top = element('summary', 'sm-flow-top sm-flow-toggle'), value = element('strong', 'sm-flow-value', row.kind === 'money' ? `${formatMoney(row.value)} ฿` : `${row.value.toLocaleString('th-TH')} หน่วย`);
+  Object.assign(top.dataset, { journalRowToggle: '', kind: row.kind, index: String(row.index) });
   if (row.kind === 'money' && (row.to === 'treasury' || row.from === 'treasury')) value.prepend(image(row.to === 'treasury' ? 'arrow-up' : 'arrow-down'));
-  top.append(element('h4', 'sm-event-title', row.label), value);
   const direction = row.kind === 'goods' ? 'ย้ายสินค้า' : row.to === 'treasury' ? 'เข้าคลังเมือง' : row.from === 'treasury' ? 'ออกจากคลังเมือง' : 'โอนระหว่างบัญชี';
-  const meta = element('p', 'sm-flow-meta', `วัน ${row.tick} · รายการ #${row.index + 1} · ${direction}`), route = element('div', 'sm-flow-route');
+  const title = element('span', 'sm-event-title', row.label), badge = element('span', 'sm-flow-direction', row.kind === 'goods' ? 'ย้าย' : row.to === 'treasury' ? 'เข้า' : row.from === 'treasury' ? 'ออก' : 'โอน');
+  title.title = row.label; badge.title = direction; badge.setAttribute('aria-label', direction); top.append(title, value, badge);
+  const body = element('div', 'sm-flow-details'); body.id = `sm-${row.kind}-entry-${row.index}`; top.setAttribute('aria-controls', body.id);
+  const meta = element('p', 'sm-flow-meta', `วัน ${row.tick} · เดือน ${Math.floor(row.tick / MONTH) + 1} · รายการ #${row.index + 1} · ${direction}`), route = element('div', 'sm-flow-route');
   const from = element('div', 'sm-party'), to = element('div', 'sm-party'), arrow = element('span', 'sm-route-arrow'); arrow.append(svg('arrow')); arrow.setAttribute('aria-label', 'ไปยัง');
-  from.append(element('small', '', 'ต้นทาง'), element('strong', '', row.fromLabel)); to.append(element('small', '', 'ปลายทาง'), element('strong', '', row.toLabel)); route.append(from, arrow, to); card.append(top, meta, route); return card;
+  from.append(element('small', '', 'ต้นทาง'), element('strong', '', row.fromLabel), element('code', '', row.from)); to.append(element('small', '', 'ปลายทาง'), element('strong', '', row.toLabel), element('code', '', row.to)); route.append(from, arrow, to);
+  const reason = element('p', 'sm-flow-reason'); reason.append(element('span', '', 'เหตุผล: '), element('code', '', row.reason)); body.append(meta, route, reason); card.append(top, body);
+  const identity = rowIdentity(row), renderedCity = current;
+  card.open = state.expanded.get(row.index) === identity; top.setAttribute('aria-expanded', String(card.open));
+  card.addEventListener('toggle', () => {
+    if (!card.isConnected || current !== renderedCity) return;
+    top.setAttribute('aria-expanded', String(card.open));
+    if (card.open) state.expanded.set(row.index, identity); else state.expanded.delete(row.index);
+  });
+  return card;
 }
 function empty(title: string, description: string, kind: string): HTMLElement {
   const card = element('div', 'sm-empty'); card.append(svg(kind), element('h4', '', title), element('p', '', description)); return card;
@@ -68,11 +123,15 @@ function empty(title: string, description: string, kind: string): HTMLElement {
 function updateJournal(state: Journal) {
   if (!current) return;
   state.scope.textContent = scopeText();
+  if (state.heldPointers.size || state.heldKeys.size || state.releaseBarrier) { state.pending = true; return; }
   const rows = flowRows(current, state.kind), shown = Math.min(rows.length, state.limit), revision = `${rows.length}:${shown}:${rows[0]?.index}:${rows[0]?.tick}:${rows[0]?.value}`;
   if (revision === state.revision) return; state.revision = revision;
+  rememberExpanded(state);
+  const focused = document.activeElement instanceof HTMLElement && state.list.contains(document.activeElement) ? document.activeElement.closest<HTMLElement>('.sm-flow-toggle')?.dataset.index : undefined;
   state.count.textContent = `แสดง ${shown.toLocaleString('th-TH')} จาก ${rows.length.toLocaleString('th-TH')} รายการ`;
   state.count.dataset.shown = String(shown); state.count.dataset.total = String(rows.length);
-  state.list.replaceChildren(...(rows.length ? rows.slice(0, shown).map(eventCard) : [empty('ยังไม่มีรายการ', state.kind === 'money' ? 'รายการโอนเงินจริงจะแสดงเมื่อเมืองเริ่มดำเนินการ' : 'สินค้าเริ่มเคลื่อนย้ายเมื่อมีการผลิต นำเข้า ซื้อ หรือส่งออก', state.kind)]));
+  state.list.replaceChildren(...(rows.length ? rows.slice(0, shown).map(row => eventCard(row, state)) : [empty('ยังไม่มีรายการ', state.kind === 'money' ? 'รายการโอนเงินจริงจะแสดงเมื่อเมืองเริ่มดำเนินการ' : 'สินค้าเริ่มเคลื่อนย้ายเมื่อมีการผลิต นำเข้า ซื้อ หรือส่งออก', state.kind)]));
+  if (focused !== undefined) state.list.querySelector<HTMLElement>(`.sm-flow-toggle[data-index="${focused}"]`)?.focus({ preventScroll: true });
   state.more.hidden = shown >= rows.length; state.all.hidden = shown >= rows.length; state.recent.hidden = shown <= state.initial;
   state.all.textContent = `ดูทั้งหมด ${rows.length.toLocaleString('th-TH')} รายการ`;
 }
@@ -110,7 +169,7 @@ function setupGuide() {
     { art: 'road', title: 'เชื่อมถนนกับโลกภายนอก', text: `เลือกถนนแล้วลาก หรือแตะจุดเริ่มและจุดจบเป็นรูป L ต่อจากประตูสีเหลืองฝั่งตะวันตก ค่าสร้าง ${formatMoney(ROAD_COST)} บาทต่อช่อง`, keys: ['R · ถนน', 'Esc · ยกเลิกจุดเริ่ม'] },
     { art: 'zones', title: 'กำหนดโซนข้างถนน', text: 'เลือก R บ้าน / C ร้านค้า / I โรงงาน แล้วแตะแปลงข้างถนนที่เชื่อมถึงประตู อาคารไม่ได้วางด้วยมือ ระบบทบทวนการพัฒนาทุก 3 วัน', keys: ['1 · บ้าน', '2 · ร้านค้า', '3 · โรงงาน'] },
     { art: 'growth', title: 'ดูเงื่อนไขก่อนขยายเมือง', text: 'กดเล่นต่อและเลือกความเร็ว แตะอาคารเพื่อดูแรงงาน เงินสด สินค้า และเหตุผลที่หยุดนิ่ง ถนน น้ำ ไฟ ความต้องการ และรายได้ที่คุ้มค่าเช่าต้องผ่านเงื่อนไข', keys: ['Space · หยุด/เล่นต่อ', 'V · เลือกข้อมูล'] },
-    { art: 'view', title: 'ปรับมุมมองและเก็บเมืองไว้', text: 'ใช้โหมดเลื่อนหรือลากสองนิ้วเพื่อเลื่อน บีบนิ้วหรือล้อเมาส์เพื่อซูม ลากปุ่มขวาเพื่อหมุน ปุ่มบันทึก/โหลดเก็บเมืองในเบราว์เซอร์นี้ เริ่มใหม่มีปุ่มกลับเพื่อยกเลิก', keys: ['P · เลื่อน', 'Q / E · หมุน', 'ปุ่มกล้อง · จอสัมผัส'] },
+    { art: 'view', title: 'ปรับมุมมองและเก็บเมืองไว้', text: 'ใช้โหมดเลื่อนหรือลากสองนิ้วเพื่อเลื่อน บีบนิ้วหรือล้อเมาส์เพื่อซูม ลากปุ่มขวาเพื่อหมุน เปิดเมนูเกมเพื่อบันทึก/โหลดเมืองในเบราว์เซอร์นี้ เริ่มใหม่มีปุ่มกลับเพื่อยกเลิก', keys: ['P · เลื่อน', 'Q / E · หมุน', 'ปุ่มกล้อง · จอสัมผัส'] },
   ];
   definitions.forEach((definition, i) => {
     const card = element('article', 'sm-step'), art = element('div', 'sm-step-art'), body = element('div', 'sm-step-body'), keys = element('div', 'sm-keycaps'); art.append(svg(definition.art), element('span', 'sm-step-index', String(i + 1)));
@@ -157,7 +216,7 @@ export function setupSubmenus(): void {
 /** Reads the actual simulation. Pagination and disclosure state belong only to the UI. */
 export function renderSubmenus(city: City, selected: number | null): void {
   if (!ready) setupSubmenus();
-  if (current && current !== city) { for (const state of journals.values()) { state.limit = state.initial; state.revision = ''; } walletRevision = ''; }
+  if (current && current !== city) { for (const state of journals.values()) { clearJournalInput(state); state.expanded.clear(); state.limit = state.initial; state.revision = ''; state.list.replaceChildren(); } walletRevision = ''; }
   current = city; selection = selected;
   for (const state of journals.values()) updateJournal(state); updateWallets(); updateRules();
 }
