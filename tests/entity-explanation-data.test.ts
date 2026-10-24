@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, type City } from '../src/sim.ts';
+import { readFileSync } from 'node:fs';
+import { deserialize, serialize, type City } from '../src/sim.ts';
 import { buildingCardData } from '../src/building-card-data.ts';
 import { captureEntityExplanation, makeEntitySnapshot, validateEntitySnapshot, validateEntityRequest, buildLocalEntityExplanation, acceptEntityExplanation, entityExplanationRows, entityExplanationCandidates, entityFactEvidence } from '../src/entity-explanation-data.ts';
 import type { EntitySnapshot } from '../src/entity-explanation-data.ts';
 
-const seeded = createCity(61025); for (let day = 0; day < 180; day++) step(seeded);
-const city = (): City => JSON.parse(serialize(seeded));
+// Synthetic canonical fe307 v4 city preserves pre-commercial-L1 retail evidence.
+// It is a local test fixture only, never included in the provider request.
+const fixture = readFileSync(new URL('./fixtures/entity-card-v4.json', import.meta.url), 'utf8');
+const city = (): City => deserialize(fixture);
 const capture = (c: City, buildingId = c.buildings[0].id) => { const s = captureEntityExplanation(c, { kind: 'building', buildingId }); assert(s); return s; };
 const fact = (s: EntitySnapshot, id: string) => s.facts.find(row => row.id === id);
 function freeze(value: unknown): void { if (value && typeof value === 'object') { Object.freeze(value); for (const child of Object.values(value)) freeze(child); } }
@@ -53,7 +56,7 @@ test('missing firm, unknown price and unsafe values stay missing instead of zero
 });
 
 test('observed unit prices retain explicit commodity denominators while cash stocks remain satang', () => {
-  const c = city(), shop = c.firms.find(f => f.zone === 'C')!, farm = c.firms.find(f => f.zone === 'F')!;
+  const c = city(), shop = c.firms.find(f => buildingCardData(c, f.building)?.kind === 'shop')!, farm = c.firms.find(f => buildingCardData(c, f.building)?.kind === 'farm')!;
   const goods = capture(c, shop.building), crops = capture(c, farm.building);
   assert.equal(fact(goods, 'price.goodsSell')!.unit, 'satang/goods');
   assert.equal(fact(crops, 'price.cropsSell')!.unit, 'satang/crops');
