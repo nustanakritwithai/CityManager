@@ -182,7 +182,6 @@ async function boot() {
   $('#signal-entry').hidden = !SIGNALS_ENABLED;
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
     enabled: SIGNAL_ENV.VITE_CITY_ADVISOR_ONLINE === 'true', endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || ''
-    // A verified sign-in integration must supply its token callback before online use.
   } });
   $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; render(); } }, (a, b) => {

@@ -104,9 +104,8 @@ export function createSignalPanel(host: HTMLElement, { getCity, connection }: { 
   function showResult(result: SignalTransportResult) {
     render(result.report);
     if (result.transport === 'offline') setMode('offline', 'คำนวณในเกม · ออฟไลน์ · ยังไม่เปิด API');
-    else if (result.transport === 'authenticated' && result.report.mode === 'ai') setMode('ai', 'Typhoon จัดกลุ่มสัญญาณ · อ้างอิงผ่านการตรวจสอบ');
-    else if (result.transport === 'authenticated') setMode('fallback', 'เซิร์ฟเวอร์ใช้ผลคำนวณสำรอง · ไม่ใช้คำตอบที่ตรวจสอบไม่ได้');
-    else if (result.reason === 'authentication_missing' || result.reason === 'authentication_failed') setMode('fallback', 'ยังไม่ผ่านการยืนยันผู้ใช้ · แสดงผลคำนวณในเกม');
+    else if (result.transport === 'remote' && result.report.mode === 'ai') setMode('ai', 'Typhoon จัดกลุ่มสัญญาณ · อ้างอิงผ่านการตรวจสอบ');
+    else if (result.transport === 'remote') setMode('fallback', 'เซิร์ฟเวอร์ใช้ผลคำนวณสำรอง · ไม่ใช้คำตอบที่ตรวจสอบไม่ได้');
     else setMode('fallback', 'เชื่อมต่อไม่ได้หรือคำตอบไม่ผ่านตรวจสอบ · แสดงผลคำนวณในเกม');
   }
   function close() {

@@ -13,7 +13,8 @@
     "assets:verify": "node scripts/admit-city-assets.mjs --verify && node scripts/admit-ui-assets.mjs --verify",
     "test:context": "node tests/context-smoke.mjs",
     "test:compact": "node tests/compact-smoke.mjs",
-    "test:signals": "node --experimental-strip-types tests/signals-smoke.mjs"
+    "test:signals": "node --experimental-strip-types tests/signals-smoke.mjs",
+    "test:advisor": "node --test server/city-advisor/test/*.test.mjs"
   },
   "dependencies": {
     "playcanvas": "2.23.3"
