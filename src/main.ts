@@ -6,6 +6,7 @@ import './context-layout.css';
 import { renderContext, renderCityOverview } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { SIZE, access, createCity, step, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, type City, type Zone } from './sim.ts';
+import { gatewayRoadDistance } from './road-network.ts';
 import './compact-layout.css';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -133,6 +134,8 @@ function renderPlace() {
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (cellIndex % SIZE + 1) + ',' + (Math.floor(cellIndex / SIZE) + 1);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road);
     const connected = access(city, cellIndex); tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
+    const roadSteps = gatewayRoadDistance(city, cellIndex);
+    if (roadSteps !== null) reasons.push(`ระยะจากประตูภายนอกผ่านถนน ${roadSteps} ช่อง${cell.road ? '' : ' (รวมทางเข้าแปลง)'} · ยังไม่รวมเวลาเดินทางหรือรถติด`);
     if (!connected) reasons.push('ต้องเชื่อมถนนข้างแปลงกับประตูภายนอกฝั่งตะวันตก');
     if (!city.utilities.power || !city.utilities.water) reasons.push('บริการน้ำหรือไฟภายนอกไม่พร้อม การผลิตและเติบโตหยุดชั่วคราว');
     if (cell.road) { metrics.push(metric('สร้างต่อช่อง', money(5000), true), metric('บำรุงรักษาต่อวัน', money(10), true)); reasons.push(connected ? 'ถนนนี้เชื่อมกับตลาดภายนอก' : 'ถนนนี้ยังแยกจากตลาดภายนอก'); }
