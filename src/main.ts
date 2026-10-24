@@ -7,16 +7,20 @@ import { renderContext, renderCityOverview } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { SIZE, access, createCity, step, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
+import { createSignalPanel } from './signal-panel.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
 const SAVE_KEY = 'citymanager.save.v1';
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
+const SIGNAL_ENV = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
+const SIGNALS_ENABLED = SIGNAL_ENV.VITE_CITY_SIGNALS === 'true' || new URLSearchParams(location.search).get('signals') === '1';
+let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
 let city: City = createCity(61025);
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1, accumulator = 0;
-type Route = { page: 'city' | 'help' | 'game' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
+type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
 let route: Route | null = null;
 const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนร้านค้า', I: 'โซนโรงงาน', bulldoze: 'รื้อถอน', pan: 'เลื่อนแผนที่' };
 const help: Record<string, string> = {
@@ -39,6 +43,7 @@ function setTool(next: string) {
   $('#tool-help').textContent = help[next]; status(`${toolNames[next]}พร้อมใช้งาน`); render();
 }
 function inspector(open: boolean) {
+  if (!open) signalPanel?.close();
   if (!open) { closeSubmenus(); route = null; }
   $('#inspector').dataset.open = String(open);
   $('#toggle-inspector').setAttribute('aria-expanded', String(open && route?.page === 'city'));
@@ -49,14 +54,17 @@ function inspector(open: boolean) {
   if (!open) { $('#inspector').dataset.page = 'none'; for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = true; }
 }
 function openRoute(next: Route) {
+  if (route?.page === 'signals' && next.page !== 'signals') signalPanel?.close();
   route = next; closeSubmenus(); $('#inspector-body').scrollTop = 0;
   if (next.page === 'place') selected = next.cell;
   inspector(true); setTool('select');
+  if (next.page === 'signals') signalPanel?.refresh();
 }
 function cancel() {
   view?.abortGesture();
   if (hasOpenSubmenu()) { closeSubmenus(); return; }
   const current = route;
+  if (current?.page === 'signals') { openRoute({ page: 'city' }); return; }
   if (current?.page === 'household') {
     const source = city.buildings.find(b => b.id === current.sourceBuildingId && b.cell === current.sourceCell);
     if (source) { openRoute({page:'place',cell:source.cell,buildingId:source.id}); return; }
@@ -114,13 +122,15 @@ function renderPlace() {
   const building = cell?.building == null ? null : city.buildings.find(b => b.id === cell.building);
   const householdId = route?.page === 'household' ? route.id : null;
   const household = city.households.find(h => h.id === householdId);
-  const page = route?.page === 'city' || route?.page === 'help' || route?.page === 'game' ? route.page : route ? 'entity' : 'none';
+  const page = route?.page === 'city' || route?.page === 'help' || route?.page === 'game' || route?.page === 'signals' ? route.page : route ? 'entity' : 'none';
   $('#inspector').dataset.page = page; $('#inspector').dataset.back = String(route !== null);
   $('#inspector').dataset.household = String(route?.page === 'household');
   $('#submenu-back').setAttribute('aria-label', route?.page === 'household' ? 'กลับอาคารต้นทาง' : 'ย้อนกลับ');
   for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = e.dataset.pageContent !== page;
   if (route?.page === 'city') {
     $('#selection-title').textContent = 'ภาพรวมเมือง'; $('#place-subtitle').textContent = 'ข้อมูลทั้งเมือง · เศรษฐกิจพื้นฐาน'; symbol(null, false);
+  } else if (route?.page === 'signals') {
+    $('#selection-title').textContent = 'สัญญาณเมือง'; $('#place-subtitle').textContent = 'ข้อมูลจากเกม · อ่านอย่างเดียว'; symbol(null, false);
   } else if (route?.page === 'help') {
     $('#selection-title').textContent = 'คู่มือและสมมติฐาน'; $('#place-subtitle').textContent = 'วิธีเล่น · ขอบเขตต้นแบบ'; symbol(null, false);
   } else if (route?.page === 'game') {
@@ -154,6 +164,7 @@ function validateRoute() {
 
 function render() {
   if (!view) return;
+  signalPanel?.sync();
   validateRoute(); const s = summary(city);
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;
   $('#pause').textContent = paused ? '▶' : 'Ⅱ'; $('#pause').setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา'); $('#pause').title = paused ? 'เล่นต่อ (Space)' : 'หยุดเวลา (Space)'; $('#pause').setAttribute('aria-pressed', String(paused));
@@ -168,6 +179,12 @@ function render() {
 
 async function boot() {
   setupSubmenus(); setupSubmenuNavigation(cancel);
+  $('#signal-entry').hidden = !SIGNALS_ENABLED;
+  signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
+    enabled: SIGNAL_ENV.VITE_CITY_ADVISOR_ONLINE === 'true', endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || ''
+    // A verified sign-in integration must supply its token callback before online use.
+  } });
+  $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; render(); } }, (a, b) => {
     selected = b; roadStart = null; status(buildRoad(city, a, b).message); render();
   });
