@@ -293,6 +293,9 @@
 #entity-content[data-card-kind] .cx-flow-top h4 { color: var(--bc-text); font-size: calc(14 * var(--bc-unit)); }
 #entity-content[data-card-kind] .cx-flow-inline,
 #entity-content[data-card-kind] .cx-flow-meta { color: var(--bc-muted); font-size: calc(12 * var(--bc-unit)); }
+/* Scope and activity paragraphs are reading content too, including when they
+   share a metadata class with the older compact inspector. */
+#entity-content[data-card-kind] .bc-section p { font-size: calc(14 * var(--bc-unit)); }
 #entity-content[data-card-kind] .cx-flow-details { border-color: var(--bc-line); }
 #entity-content[data-card-kind] .cx-owner-controls {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(140 * var(--bc-unit))), 1fr));

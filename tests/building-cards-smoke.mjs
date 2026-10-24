@@ -64,7 +64,20 @@ async function place(city, b) { await cell(b.cell); await until(`document.queryS
 async function household(city, h, source = city.buildings.find(b => b.id === h.home)) { await place(city, source); await button(`#entity-content [data-household-id="${h.id}"]`); await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${h.id}'`); }
 async function metrics(expected) { const actual = await evaluate('Object.fromEntries([...document.querySelectorAll("#entity-content [data-context-metric]")].map(e=>[e.dataset.contextMetric,e.dataset.value]))'); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact contextual metric ${key}`); }
 function boundary(city, wallets) { const scope = new Set(wallets), fromTick = Math.max(0, city.tick - 29); let inflow = 0, outflow = 0; for (const e of city.ledger) if (e.tick >= fromTick && e.tick <= city.tick) { if (scope.has(e.to) && !scope.has(e.from)) inflow += e.amount; if (scope.has(e.from) && !scope.has(e.to)) outflow += e.amount; } return { fromTick, toTick: city.tick, inflow, outflow, net: inflow - outflow }; }
+function observedTrade(city, wallet, crops, direction) {
+  const rows = (crops ? city.cropLedger.filter(e => e.kind === 'trade' || e.kind === 'consumption') : city.goodsLedger.filter(e => e.from !== 'production' && e.reason !== 'Demolition stock write-off to outside'))
+    .filter(e => e.tick >= Math.max(0, city.tick - 29) && e.tick <= city.tick && (direction === 'buy' ? e.to === wallet : e.from === wallet));
+  if (!rows.length) return { quantity: null, cash: null, unit: null, status: 'missing' };
+  let quantity = 0, cash = 0;
+  for (const e of rows) {
+    const reason = crops ? e.reason : e.reason === 'Wholesale stock delivery' ? 'Local wholesale goods' : e.reason === 'Imported shop stock' ? 'Outside goods import' : e.reason === 'Exported goods' ? 'Outside market goods export' : e.reason === 'Household final consumption' ? `Household #${e.to.slice(10)} purchase` : null;
+    const paired = city.ledger.filter(m => m.tick === e.tick && m.from === e.to && m.to === e.from && m.reason === reason); assert.equal(paired.length, 1, 'Fixture physical trade has one actual matching cash payment');
+    quantity += e.quantity; cash += paired[0].amount;
+  }
+  return { quantity, cash, unit: cash % quantity === 0 ? cash / quantity : null, status: cash % quantity === 0 ? 'observed' : 'non-integer' };
+}
 async function card(city, kind, target) {
+  await paints();
   const current = await route(); assert.equal(current.kind, kind); assert.equal(current.id, String(target.id));
   const dom = await evaluate(`(()=>{const h=document.querySelector('#entity-content');return{heroes:h.querySelectorAll('.bc-hero').length,icons:h.querySelectorAll('.bc-type-icon').length,label:h.querySelector('.bc-type-label')?.textContent.trim(),period:[...h.querySelectorAll('.bc-period')].map(e=>({fromTick:e.dataset.fromTick,toTick:e.dataset.toTick,inclusive:e.dataset.inclusive})),sections:[...h.querySelectorAll('.bc-section[data-card-section]')].map(e=>e.dataset.cardSection),stats:Object.fromEntries([...h.querySelectorAll('[data-card-metric]')].map(e=>[e.dataset.cardMetric,{value:e.dataset.value,status:e.dataset.status}])),contextKeys:[...h.querySelectorAll('[data-context-metric]')].map(e=>e.dataset.contextMetric)}})()`);
   assert.equal(dom.heroes, 1); assert.equal(dom.icons, 1); assert.ok(dom.label); assert.equal(dom.period.length, 1); assert.equal(new Set(dom.contextKeys).size, dom.contextKeys.length, 'Retained semantic metrics must appear exactly once');
@@ -87,10 +100,19 @@ async function card(city, kind, target) {
     if (f.zone === 'F') await metrics({ fertility: city.resources.fertility[target.cell], 'harvest-today': city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'harvest' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0) });
     if (f.zone === 'I') await metrics({ 'recipe-input': 2, 'recipe-output': 8 });
     if (f.zone === 'T') await metrics({ 'owner-household': f.owner.householdId, 'owner-capital-contributed': f.owner.capitalContributed, 'owner-withdrawn': f.owner.withdrawn, 'owner-tax': f.owner.taxPaid });
+    if (f.zone === 'C' || f.zone === 'T') for (const direction of ['buy', 'sell']) {
+      const trade = observedTrade(city, f.wallet, f.zone === 'T', direction), prefix = direction === 'buy' ? 'purchase' : 'sales', qty = `${f.zone === 'T' ? 'crops' : 'goods'}-${direction === 'buy' ? 'purchased' : 'sold'}`;
+      assert.equal(dom.stats[qty]?.value, String(trade.quantity), `${kind} actual ${qty}`); assert.equal(dom.stats[`${prefix}-cash`]?.value, String(trade.cash), `${kind} paired ${prefix} cash`);
+      assert.deepEqual(dom.stats[`${prefix}-price`], { value: String(trade.unit), status: trade.status }, `${kind} paired-journal unit price; missing/fractional values are not invented`);
+    }
+    if (f.zone === 'I') assert.equal(dom.stats['goods-produced-today']?.value, String(city.goodsLedger.filter(e => e.tick === city.tick && e.from === 'production' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0)), 'Factory actual daily output, not recipe capacity');
     const scopeLeaks = await evaluate(`(()=>{const w=${JSON.stringify(f.wallet)};return [...document.querySelectorAll('#entity-content .cx-flow-card[data-kind],#entity-content .cx-crop-card[data-kind]')].filter(e=>e.dataset.from!==w&&e.dataset.to!==w).map(e=>e.dataset)})()`); assert.deepEqual(scopeLeaks, [], 'Firm activity contains only its actual wallet counterparties');
   }
   const expected = boundary(city, wallets); assert.deepEqual(dom.period[0], { fromTick: String(expected.fromTick), toTick: String(expected.toTick), inclusive: 'true' });
-  for (const key of ['inflow', 'outflow', 'net']) assert.equal(dom.stats[`cash-${key}`]?.value, String(expected[key]), `${kind} actual period cash-${key}`);
+  if (kind === 'house') {
+    assert.ok(!dom.sections.includes('finance'), 'A house card describes occupancy; household finances have their own contextual view');
+    for (const key of ['inflow', 'outflow', 'net']) assert.equal(dom.stats[`cash-${key}`], undefined, 'No household wallet total is presented as house value');
+  } else for (const key of ['inflow', 'outflow', 'net']) assert.equal(dom.stats[`cash-${key}`]?.value, String(expected[key]), `${kind} actual period cash-${key}`);
   assert.deepEqual(await state(), city, 'Read-only card selection leaves exact simulation and journals untouched');
 }
 async function screenshot(name) { await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const capture = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(capture.data, 'base64')); screenshots.push(name); }

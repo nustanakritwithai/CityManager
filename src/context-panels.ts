@@ -425,8 +425,10 @@ function cardInterior(data: CardData, nodes: HTMLElement[]): HTMLElement[] {
     output.push(cardGroup('สินค้าสำเร็จรูปพร้อมขาย', 'stock', takeCards(parts, ['stock'])), cardTrade(data), cardCash(data, parts));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
   } else if (data.kind === 'market') {
-    output.push(cardGroup('ล็อตพืชผลและมูลค่าตามบัญชี', 'stock', takeCards(parts, ['crop-stock', 'crop-cost']), 'bc-market-stock'), cardTrade(data));
-    if (parts.owner) { parts.owner.firstElementChild?.after(cardKpis(takeCards(parts, ['realised-profit', 'drawable', 'owner-household']))); output.push(cardSection(parts.owner, 'owner')); }
+    const marketKpis = takeCards(parts, ['crop-stock', 'crop-cost', 'realised-profit', 'workers', 'cash']);
+    const ownerWork = marketKpis.find(card => card.dataset.contextMetric === 'workers'); if (ownerWork) ownerWork.querySelector('dt')!.textContent = 'เจ้าของทำงาน / รับได้';
+    output.push(cardGroup('พืชผล เงินกิจการ และเจ้าของที่ทำงาน', 'stock', marketKpis, 'bc-market-stock'), cardTrade(data));
+    if (parts.owner) { parts.owner.firstElementChild?.after(cardKpis(takeCards(parts, ['drawable', 'owner-household']))); output.push(cardSection(parts.owner, 'owner')); }
     output.push(cardCash(data, parts)); const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
   } else if (data.kind === 'factory') {
     const production = section('วัตถุดิบ → สูตรแปรรูป → ผลผลิต'), chain = el('div', 'bc-chain');
