@@ -85,6 +85,28 @@ test('Typhoon auto executes one validated existing transfer after the monthly ch
   replay(c, session); assert.equal(serialize(c), once);
 });
 
+test('Typhoon quarter and half choices execute their exact finite amounts once and replay from the journal', () => {
+  for (const [candidateId, amountSatang] of [['safe-transfer-quarter', 2_500], ['safe-transfer-half', 5_000]] as const) {
+    const c = town(29), session = createOwnerDecisionSession(c);
+    session.setMode('typhoon-auto'); assert.deepEqual(session.advance(c), []);
+    const firm = market(c), [ruleProposal] = session.evaluateTyphoonAutoMonthly(c, firm.id); assert(ruleProposal);
+    const snapshot = captureOwnerSnapshot(c, firm.id); assert(snapshot);
+    const proposal = ownerProposalForCandidate(snapshot, candidateId);
+    assert.equal(proposal.command.type, 'withdrawOwnerProfit');
+    assert.equal(proposal.command.amountSatang, amountSatang);
+    const before = serialize(c), ledgerBefore = c.ledger.length;
+    assert.equal(session.registerTyphoonProposal(c, proposal), true);
+    const result = session.applyTyphoonAuto(c, proposal.proposalId, 'typhoon-auto');
+    assert.equal(result.status, 'applied'); assert.equal(result.command?.amountSatang, amountSatang);
+    assert.equal(c.ledger.length, ledgerBefore + 1); assert.notEqual(serialize(c), before);
+    assert(c.accounts[firm.wallet] >= snapshot.facts.firmTotalReserve!);
+    const once = serialize(c);
+    assert.equal(session.applyTyphoonAuto(c, proposal.proposalId, 'typhoon-auto').code, 'duplicate-proposal');
+    assert.equal(serialize(c), once);
+    replay(c, session); assert.equal(serialize(c), once);
+  }
+});
+
 test('invalid or stale Typhoon auto suggestions are rejected without a transfer', () => {
   const c = town(29), session = createOwnerDecisionSession(c);
   session.setMode('typhoon-auto'); session.advance(c);

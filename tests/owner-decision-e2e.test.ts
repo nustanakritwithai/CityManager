@@ -7,7 +7,7 @@ import { requestOwnerDecision } from '../src/owner-decision-client.ts';
 import { buildOwnerDecisionResponse } from '../server/city-advisor/src/owner-contract.mjs';
 import type { OwnerDecisionRequest } from '../server/city-advisor/src/owner-contract.mjs';
 
-test('a provider-selected safe transfer crosses the client and journal boundary once, then replays without another request', async () => {
+test('a provider-selected half-safe transfer crosses the client and journal boundary once, then replays without another request', async () => {
   const city = createCity(61025);
   for (let day = 0; day < 29; day++) step(city);
 
@@ -31,17 +31,18 @@ test('a provider-selected safe transfer crosses the client and journal boundary 
     const request = JSON.parse(String(init?.body)) as OwnerDecisionRequest;
     assert.equal(request.operation, 'owner-decision');
     assert.equal(request.snapshot.snapshotHash, snapshot.snapshotHash);
-    return new Response(JSON.stringify(buildOwnerDecisionResponse(request, { candidateId: 'safe-transfer' }, 'ai')), {
+    return new Response(JSON.stringify(buildOwnerDecisionResponse(request, { candidateId: 'safe-transfer-half' }, 'ai')), {
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
   });
 
   assert.equal(result.transport, 'remote');
   assert.equal(result.response?.mode, 'ai');
-  assert.equal(result.response?.selection.candidateId, 'safe-transfer');
+  assert.equal(result.response?.selection.candidateId, 'safe-transfer-half');
   assert.equal(requests, 1);
 
   const proposal = ownerProposalForCandidate(snapshot, result.response.selection.candidateId);
+  assert.equal(proposal.command.amountSatang, 5_000);
   const before = serialize(city);
   const ledgerLength = city.ledger.length;
   assert.equal(session.registerTyphoonProposal(city, proposal), true);

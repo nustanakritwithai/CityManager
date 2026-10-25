@@ -69,7 +69,16 @@ const ruleCommand = snapshot => {
 export function ownerDecisionCandidates(raw) {
   const snapshot = validateOwnerSnapshot(raw), command = ruleCommand(snapshot);
   const candidates = [{ id: 'hold', action: 'hold', amountSatang: 0 }];
-  if (command.type !== 'hold') candidates.push({ id: 'safe-transfer', action: command.type, amountSatang: command.amountSatang });
+  if (command.type !== 'hold') {
+    const seen = new Set();
+    for (const [id, divisor] of [['safe-transfer-quarter', 4], ['safe-transfer-half', 2], ['safe-transfer', 1]]) {
+      const amountSatang = Math.floor(command.amountSatang / divisor);
+      if (amountSatang > 0 && !seen.has(amountSatang)) {
+        candidates.push({ id, action: command.type, amountSatang });
+        seen.add(amountSatang);
+      }
+    }
+  }
   return candidates;
 }
 
@@ -86,7 +95,7 @@ export function ownerProviderInput(raw) {
 }
 
 export function validateOwnerDecisionSelection(value, snapshot) {
-  if (!exact(value, ['candidateId']) || !['hold', 'safe-transfer'].includes(value.candidateId)) fail();
+  if (!exact(value, ['candidateId']) || typeof value.candidateId !== 'string') fail();
   const candidates = ownerDecisionCandidates(snapshot);
   if (!candidates.some(candidate => candidate.id === value.candidateId)) fail();
   return { candidateId: value.candidateId };

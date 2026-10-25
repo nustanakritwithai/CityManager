@@ -34,7 +34,7 @@ test('enabled owner operation returns the deterministic candidate when upstream 
   assert.equal(result.selection.candidateId, 'safe-transfer'); assert.equal(calls, 0);
 });
 
-test('upstream receives only validated allowlisted facts at the fixed endpoint and only an existing candidate can return', async () => {
+test('upstream receives bounded amount candidates and can return only one of them', async () => {
   let calls = 0;
   const result = await buildOwnerDecisionReport(input, enabled({ fetchImpl: async (url, options) => {
     calls++; assert.equal(url, ENTITY_UPSTREAM);
@@ -43,13 +43,19 @@ test('upstream receives only validated allowlisted facts at the fixed endpoint a
     assert.equal(options.headers.Authorization, 'Bearer non-deployable-owner-test-placeholder');
     const providerInput = JSON.parse(body.messages[1].content);
     assert.equal(providerInput.tick, input.snapshot.tick); assert.deepEqual(providerInput.facts, input.snapshot.facts);
+    assert(providerInput.facts.withdrawAvailable > 10_000); assert.equal(providerInput.facts.safeWithdraw, 10_000, 'candidate amounts honor the existing transfer ceiling');
     assert.equal('actorId' in providerInput, false); assert.equal('firmId' in providerInput, false);
     assert.equal('stateHash' in providerInput, false); assert.equal('snapshotHash' in providerInput, false);
-    assert.deepEqual(providerInput.candidates.map(candidate => candidate.id), ['hold', 'safe-transfer']);
+    assert.deepEqual(providerInput.candidates, [
+      { id: 'hold', action: 'hold', amountSatang: 0 },
+      { id: 'safe-transfer-quarter', action: 'withdrawOwnerProfit', amountSatang: 2500 },
+      { id: 'safe-transfer-half', action: 'withdrawOwnerProfit', amountSatang: 5000 },
+      { id: 'safe-transfer', action: 'withdrawOwnerProfit', amountSatang: 10_000 },
+    ]);
     assert.equal(JSON.stringify(body).includes('non-deployable-owner-test-placeholder'), false);
-    return output('hold');
+    return output('safe-transfer-half');
   } }));
-  assert.equal(calls, 1); assert.equal(result.mode, 'ai'); assert.equal(result.selection.candidateId, 'hold');
+  assert.equal(calls, 1); assert.equal(result.mode, 'ai'); assert.equal(result.selection.candidateId, 'safe-transfer-half');
   assert.deepEqual(result.snapshot, input.snapshot);
 });
 
