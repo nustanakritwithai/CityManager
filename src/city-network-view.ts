@@ -46,6 +46,7 @@ export class CityNetworkView {
   private readonly valueText = new Map<string, HTMLElement>();
   private readonly colors = new Map<string, string>();
   private readonly projected = new Map<string, Projected>();
+  private readonly labelWidth = new Map<string, number>();
   private values: NetValues = {};
   private before: NetValues | null = null;
   private snapshot: NetSnapshot | null = null;
@@ -321,7 +322,7 @@ export class CityNetworkView {
       if (this.auto && !reduced && !this.selected && !this.hovered && Math.abs(this.spinX) < 0.001) this.yaw += dt * 0.09;
     }
     if (!this.isPaused() && !reduced) this.flowClock += dt;
-    const radius = Math.min(this.width, this.height) * (this.width < 560 ? 0.36 : 0.38) * this.zoom;
+    const radius = Math.min(this.width, this.height) * (this.width < 560 ? 0.44 : 0.38) * this.zoom;
     for (const node of NODES) this.projected.set(node.id, this.project(POS[node.id], radius));
     if (this.reached.size && t > this.reachedUntil) this.reached.clear();
     if (!this.caption.hidden && t > this.captionUntil) this.caption.hidden = true;
@@ -411,16 +412,27 @@ export class CityNetworkView {
     if (focus) { near.add(focus); for (const e of EDGES) { if (e.from === focus) near.add(e.to); if (e.to === focus) near.add(e.from); } }
     for (const id of this.reached.keys()) near.add(id);
     const small = this.width < 560;
-    for (const [id, button] of this.buttons) {
-      const p = this.projected.get(id)!, scale = (small ? 0.62 : 0.72) + p.d * (small ? 0.3 : 0.36);
+    // Front and chosen nodes claim their label space first; a label that would land on one already placed hides.
+    const order = [...this.buttons.keys()].sort((a, b) => this.rank(b, focus, near) - this.rank(a, focus, near));
+    const taken: [number, number, number, number][] = [];
+    const hit = (r: [number, number, number, number]) => taken.some(t => r[0] < t[2] && r[2] > t[0] && r[1] < t[3] && r[3] > t[1]);
+    for (const id of order) {
+      const button = this.buttons.get(id)!, p = this.projected.get(id)!, scale = (small ? 0.62 : 0.72) + p.d * (small ? 0.3 : 0.36);
       button.style.transform = `translate3d(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`;
       button.style.zIndex = String(id === focus ? 300 : near.has(id) ? 200 + Math.round(p.d * 99) : Math.round(p.d * 99));
       button.style.setProperty('--depth', p.d.toFixed(3));
-      button.classList.toggle('is-far', p.d < 0.34 && !near.has(id));
+      const far = p.d < 0.34 && !near.has(id);
+      button.classList.toggle('is-far', far);
       button.classList.toggle('is-dim', !!focus && !near.has(id));
       button.classList.toggle('is-near', !!focus && near.has(id) && id !== focus);
       button.classList.toggle('is-focus', id === focus);
       const effect = this.reached.get(id); button.dataset.effect = effect === undefined || id === this.selected ? '' : effect > 0 ? 'up' : 'down';
+      let width = this.labelWidth.get(id); if (!width) { width = (button.querySelector<HTMLElement>('.net-name')?.offsetWidth ?? 60) + 4; if (width > 4) this.labelWidth.set(id, width); }
+      const orb = 17 * scale, label: [number, number, number, number] = [p.x - width / 2 * scale, p.y + orb, p.x + width / 2 * scale, p.y + orb + (far ? 17 : 32) * scale];
+      const show = id === focus || !hit(label);
+      button.classList.toggle('no-label', !show);
+      taken.push([p.x - orb, p.y - orb, p.x + orb, p.y + orb]); if (show) taken.push(label);
     }
   }
+  private rank(id: string, focus: string | null, near: Set<string>) { return (id === focus ? 3 : near.has(id) ? 2 : 0) + this.projected.get(id)!.d; }
 }
