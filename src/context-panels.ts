@@ -448,7 +448,8 @@ function cardTrade(data: CardData): HTMLElement {
     if (values.status !== 'observed') side.append(el('p', 'cx-detail-note', values.status === 'missing' ? 'ยังไม่มีรายการสินค้าและเงินที่จับคู่กันในช่วงนี้' : values.status === 'non-integer' ? 'ราคาเฉลี่ยมีเศษสตางค์ จึงแสดงยอดเงินจริงและปริมาณโดยไม่ปัดราคา' : 'ยังไม่แสดงราคา เพราะข้อมูลจับคู่ไม่ชัดเจนหรือเกินขอบเขตที่แสดงได้'));
     flow.append(side);
   }
-  outer.append(tradeVisual(buy, sell, unit), flow); return cardSection(outer, 'trade');
+  // The bars sum up the tiles above them; the tiles stay first so key numbers fit the first screen.
+  outer.append(flow, tradeVisual(buy, sell, unit)); return cardSection(outer, 'trade');
 }
 /** Bought vs sold (quantity and cash) as paired bars on one scale, with the gross margin as a chip. */
 function tradeVisual(buy: CardData['prices']['goodsBuy'], sell: CardData['prices']['goodsBuy'], unit: string): HTMLElement {

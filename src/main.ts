@@ -126,6 +126,7 @@ function openRoute(next: Route) {
 function cancel() {
   view?.abortGesture();
   if (cityStatsPanel?.open) { cityStatsPanel.toggle(false); return; }
+  if (dashboard?.modalOpen) { dashboard.closeModal(); return; }
   if (hasOpenSubmenu()) { closeSubmenus(); return; }
   const current = route;
   if (current?.page === 'signals') { openRoute({ page: 'city' }); return; }

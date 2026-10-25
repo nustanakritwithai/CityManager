@@ -75,7 +75,7 @@ dialog { background: #2b4e59; }
 .cx-flow-top > h4 { flex: 1 1 0; min-width: 0; }
 
 /* ---- Trade: bought vs sold as mirrored bars --------------------------------- */
-#inspector .bc-trade-visual { display: grid; gap: 6px; margin: 4px 0 10px; padding: 10px; border-radius: 10px; background: rgba(255, 255, 255, .05); }
+#inspector .bc-trade-visual { display: grid; gap: 6px; margin: 10px 0 4px; padding: 10px; border-radius: 10px; background: rgba(255, 255, 255, .05); }
 #inspector .bc-trade-row { display: grid; grid-template-columns: minmax(56px, auto) minmax(0, 1fr) auto minmax(0, 1fr) minmax(56px, auto); align-items: center; gap: 8px; }
 #inspector .bc-trade-bar { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, .1); }
 #inspector .bc-trade-bar.buy { background: linear-gradient(270deg, #8fc7e8 calc(var(--share) * 100%), rgba(255, 255, 255, .1) 0); }
