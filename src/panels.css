@@ -246,3 +246,6 @@ html #game-content .save-group.danger #new-city { border-color: #ff8a7a88; color
 
 /* An open submenu shows only itself: hide the dashboard and every other city block. */
 #inspector:not([data-submenu=""])[data-submenu] #city-content > :not(.submenu-section[data-active=true]) { display: none; }
+
+/* Bundled Thai typeface (IBM Plex Sans Thai, OFL 1.1) with the previous stack as fallback. */
+:root, button, input, select, textarea { font-family: "IBM Plex Sans Thai", "Segoe UI", Tahoma, Arial, sans-serif; }
