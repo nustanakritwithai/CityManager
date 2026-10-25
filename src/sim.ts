@@ -17,7 +17,7 @@ export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; le
 export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
-export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; commercialKind?: 'market' | 'retail'; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
+export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; commercialKind?: 'market' | 'retail'; convertedAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
 export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string };
@@ -57,6 +57,7 @@ const householdAccess = (c: City, h: Household) => h.home !== null && access(c, 
 /** Proposed prototype finance policy, in integer satang; no credit or outside grant. */
 export const INDUSTRY_STARTUP_CAPITAL = 300_000;
 export const OWNER_STARTUP_CAPITAL = 60_000;
+export const MARKET_CONVERSION_COST = 20_000;
 const INDUSTRY_WORKING_RESERVE = 20_000;
 export function industryGrowthStatus(c: City) {
   const industries = c.firms.filter(f => f.zone === 'I').sort((a, b) => a.id - b.id);
@@ -320,8 +321,8 @@ export function explainCell(c: City, i: number): string[] {
   if (cell.road) return [i === GATEWAY ? 'Reserved outside gateway.' : 'Grid road.', connectedRoads(c).has(i) ? 'Connected to outside market.' : 'Disconnected: no route to the west outside gateway.', 'Road construction 50 credits/cell; upkeep 0.10 credits/day/cell.'];
   if (!cell.zone) return ['Unzoned land. Choose R homes, C commercial level-one markets or I industry, then tap this parcel.', 'Buildings require connected road frontage, power, water, demand and viable expected rent.'];
   if (cell.building === null) {
-    const stopped = blockers(c, i), shop = cell.zone === 'C' && retailDemand(c) > 0 && shopSite(c) === i;
-    if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. Outside equity opens one here on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)); it buys local wholesale first and hires retail workers.`];
+    const stopped = blockers(c, i), shop = cell.zone === 'C' && retailDemand(c) > 0 && !marketToConvert(c) && shopSite(c) === i;
+    if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. A saving household or outside equity opens one here on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)); it buys local wholesale first and hires retail workers.`];
     return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
   }
   const b = building(c, cell.building), f = c.firms.find(v => v.building === b.id), residents = c.households.filter(v => v.home === b.id);
@@ -338,6 +339,8 @@ export function explainCell(c: City, i: number): string[] {
     f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale 3 credits; outside export 3.50.` : 'Buys generic goods locally at 3 credits or imports at 4.50; competes with crop markets for one household basket/day at 8 credits.',
     isMarket(f) ? 'Owner labour earns no fabricated salary; explicit distributions use realised profit after tax and working-cash reserves.' : 'Wages accrue per allocated worker-day and are paid each 30-day month. Reserved wages cannot fund stock or expansion.',
     `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax 20%. Self-employed market stalls stay small; farms grow to level 3 from their own profit.`);
+  if (f && retailDemand(c) > 0 && marketToConvert(c)?.id === f.id) output.push(`Shop conversion: the city wants a shop and this profitable stall can pay the ${MARKET_CONVERSION_COST / 100}-credit refit, so it becomes a shop on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)). Leftover fresh crops are written off.`);
+  if (f?.convertedAt !== undefined) output.push(`Converted from a crop market on day ${f.convertedAt}.`);
   return output;
 }
 function createBuilding(c: City, i: number, shop = false) {
@@ -520,9 +523,30 @@ export function shopSite(c: City): number | null {
   const i = c.cells.findIndex((cell, i) => cell.zone === 'C' && cell.building === null && access(c, i));
   return i < 0 ? null : i;
 }
+/**
+ * A market becomes the next shop when its owner already works it, it earned a profit last month, it can pay
+ * the refit from its own cash and keep 200 credits working, and another market still sells fresh crops.
+ */
+export function marketToConvert(c: City): Firm | undefined {
+  const markets = c.firms.filter(isMarket);
+  if (markets.length < 2 || !c.utilities.power || !c.utilities.water) return undefined;
+  return markets.sort((a, b) => a.id - b.id).find(f => {
+    const b = building(c, f.building);
+    return !!f.owner && b.age >= MONTH && access(c, b.cell) && c.ownerLabor.some(e => e.firmId === f.id) && f.lastMonthProfit > 0 && spendable(c, f) >= MARKET_CONVERSION_COST + 20_000;
+  });
+}
+/** The stall's leftover fresh crops are written off at book value (a shop holds no crops), then the owner pays the refit. */
+function convertMarket(c: City, f: Firm) {
+  if (!writeOffCrops(c, f, agricultureHooks(c))) return;
+  transfer(c, f.wallet, 'construction', MARKET_CONVERSION_COST, 'Market to shop conversion');
+  building(c, f.building).level = 2; f.commercialKind = 'retail'; f.convertedAt = c.tick;
+  c.lastEvent = `Market #${f.id} became a shop: its owner paid the refit from the stall's own profit and keeps working the counter.`;
+}
 /** Shops open on their own day of the cycle, so the seeded growth draw for every other zone is unchanged. */
 function openShop(c: City) {
   if (retailDemand(c) <= 0) return;
+  const market = marketToConvert(c);
+  if (market) { convertMarket(c, market); return; }
   const site = shopSite(c);
   if (site !== null) createBuilding(c, site, true);
 }
@@ -607,6 +631,7 @@ function validateV7(c: City): City {
     if (!f || !int(f.id, 1) || ids.has(f.id) || !['C', 'I', 'F'].includes(f.zone) || !c.buildings.some(b => b.id === f.building && b.zone === f.zone) || f.wallet !== `firm:${f.id}` || !int(c.accounts[f.wallet]) || Object.hasOwn(f, 'employees') || !int(f.inventory) || !int(f.profit, Number.MIN_SAFE_INTEGER) || !int(f.lastMonthProfit, Number.MIN_SAFE_INTEGER) || !int(f.monthlyRevenue) || !int(f.monthlyExpense)) fail();
     const premise = c.buildings.find(b => b.id === f.building)!;
     if (f.zone === 'C' ? !['market', 'retail'].includes(f.commercialKind!) || (isMarket(f) ? premise.level !== 1 : premise.level < 2) : f.commercialKind !== undefined) fail();
+    if (f.convertedAt !== undefined && (!isRetail(f) || !f.owner || !int(f.convertedAt, 1) || f.convertedAt > c.tick || premise.level < 2)) fail();
     if (f.fundedBy !== undefined && (f.zone !== 'I' || !f.fundedBy || typeof f.fundedBy !== 'object' || Array.isArray(f.fundedBy) || Object.keys(f.fundedBy).length !== 2 || !int(f.fundedBy.firmId, 1) || f.fundedBy.firmId >= f.id || f.fundedBy.capital !== INDUSTRY_STARTUP_CAPITAL || !Object.hasOwn(c.accounts, `firm:${f.fundedBy.firmId}`))) fail();
     if (!f.workDays || typeof f.workDays !== 'object' || Array.isArray(f.workDays) || !Object.entries(f.workDays).every(([wallet, days]) => { const h = c.households.find(h => h.wallet === wallet); return h && int(days, 1) && days <= h.workforce * (c.tick % MONTH); }) || !int(payroll(f)) || payroll(f) > balance(c, f.wallet)) fail();
     ids.add(f.id);

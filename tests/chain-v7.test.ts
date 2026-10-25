@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, deserialize, firmCapacity, serialize, step } from '../src/sim.ts';
+import { MARKET_CONVERSION_COST, bulldoze, createCity, deserialize, firmCapacity, isMarket, isRetail, marketToConvert, serialize, step, type City } from '../src/sim.ts';
 import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '../src/legacy-v6.ts';
 
 test('a v6 growth-1 save loads as v7 chain-2 with every other fact unchanged, then keeps running', () => {
@@ -31,4 +31,40 @@ test('a save whose harvest used more workers than the farm level allows is rejec
   const raw = JSON.parse(serialize(c)), farm = raw.firms.find((f: { wallet: string }) => f.wallet === harvest.to);
   raw.buildings.find((b: { id: number }) => b.id === farm.building).level = 1;
   assert.throws(() => deserialize(JSON.stringify(raw)));
+});
+
+function converted(): City {
+  const c = createCity(61025);
+  for (let d = 1; d <= 400 && !c.firms.some(f => f.convertedAt !== undefined); d++) step(c);
+  return c;
+}
+
+test('a profitable owner-run market becomes the next shop: same owner and labour, refit from its own cash, leftover crops written off', () => {
+  const c = converted(), shop = c.firms.find(f => f.convertedAt !== undefined)!;
+  assert.ok(shop, 'a market converted within 400 days');
+  const at = shop.convertedAt!, b = c.buildings.find(b => b.id === shop.building)!;
+  assert.ok(isRetail(shop) && shop.owner && b.level >= 2 && at % 3 === 1, 'a shop-day conversion to an owned shop');
+  assert.ok(c.ownerLabor.some(e => e.firmId === shop.id && e.householdId === shop.owner!.householdId), 'the owner still works the counter');
+  assert.deepEqual(c.ledger.filter(e => e.reason === 'Market to shop conversion').map(e => [e.tick, e.from, e.to, e.amount]), [[at, shop.wallet, 'construction', MARKET_CONVERSION_COST]]);
+  assert.ok(c.ledger.some(e => e.reason === 'Self-employed market construction' && e.from === shop.wallet), 'it was built as a market');
+  assert.equal(shop.cropInventory, 0); assert.equal(shop.cropCost, 0);
+  assert.ok(c.cropLedger.every(e => (e.from !== shop.wallet && e.to !== shop.wallet) || e.tick <= at), 'no crop trading after the conversion day');
+  assert.ok(c.firms.some(isMarket), 'another market still sells fresh crops');
+  assert.deepEqual(deserialize(serialize(c)), c);
+});
+
+test('the last market never converts', () => {
+  const c = converted();
+  for (const f of c.firms.filter(isMarket).slice(1)) assert.equal(bulldoze(c, c.buildings.find(b => b.id === f.building)!.cell).ok, true);
+  assert.equal(c.firms.filter(isMarket).length, 1); assert.equal(marketToConvert(c), undefined);
+});
+
+test('a converted shop save without its refit entry or its conversion day is rejected', () => {
+  const c = converted(), shop = c.firms.find(f => f.convertedAt !== undefined)!, raw = JSON.parse(serialize(c));
+  const noRefit = structuredClone(raw); noRefit.ledger = noRefit.ledger.filter((e: { reason: string }) => e.reason !== 'Market to shop conversion');
+  assert.throws(() => deserialize(JSON.stringify(noRefit)));
+  const noDay = structuredClone(raw); delete noDay.firms.find((f: { id: number }) => f.id === shop.id).convertedAt;
+  assert.throws(() => deserialize(JSON.stringify(noDay)));
+  const early = structuredClone(raw); early.firms.find((f: { id: number }) => f.id === shop.id).convertedAt = 1;
+  assert.throws(() => deserialize(JSON.stringify(early)));
 });

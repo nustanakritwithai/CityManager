@@ -28,7 +28,7 @@ test('a working factory opens shops that sell local goods to households, with mo
     assert.ok(shop.owner
       ? c.ledger.some(e => e.reason === 'Owner capital contribution' && e.from === `household:${shop.owner!.householdId}` && e.to === shop.wallet)
       : c.ledger.some(e => e.reason === 'Outside firm equity investment' && e.from === 'outside' && e.to === shop.wallet));
-    assert.ok((c.tick - b.age) % 3 === 1, 'shops open on their own day of the growth cycle');
+    assert.ok((shop.convertedAt ?? c.tick - b.age) % 3 === 1, 'shops open (or markets convert) on their own day of the growth cycle');
   }
   assert.ok(c.goodsLedger.some(e => e.reason === 'Wholesale stock delivery'), 'shops buy from local factories');
   assert.ok(c.goods.consumed > 0, 'households consume finished goods');

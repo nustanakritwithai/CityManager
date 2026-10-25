@@ -60,7 +60,8 @@ export function validateAgriculture(c: City): void {
   const role = (wallet: string, expected?: Role): Role | undefined => {
     requireThat(/^firm:[1-9][0-9]*$/.test(wallet) && Object.hasOwn(c.accounts, wallet));
     const current = firms.get(wallet), known = roles.get(wallet);
-    const currentRole = current && (isMarket(current) ? 'T' : isRetail(current) ? undefined : current.zone);
+    // A shop converted from a market traded crops as a market up to and including its conversion day.
+    const currentRole = current && (isMarket(current) ? 'T' : isRetail(current) ? (current.convertedAt !== undefined && day <= current.convertedAt ? 'T' : undefined) : current.zone);
     if (current) requireThat(currentRole !== undefined && (!expected || currentRole === expected));
     if (known && expected) requireThat(known === expected);
     const result = expected ?? known ?? (currentRole as Role | undefined);
@@ -163,8 +164,11 @@ function validateShopOwner(c: City, f: Firm): void {
     if (e.reason === 'Monthly firm profit tax') { requireThat(e.from === f.wallet && e.to === 'treasury'); taxPaid += BigInt(e.amount); }
   }
   requireThat(contributed === BigInt(owner.capitalContributed) && withdrawn === BigInt(owner.withdrawn) && taxPaid === BigInt(owner.taxPaid));
-  const construction = c.ledger.filter(e => e.from === f.wallet && e.reason === 'Self-employed shop construction');
+  const built = f.convertedAt === undefined ? 'Self-employed shop construction' : 'Self-employed market construction';
+  const construction = c.ledger.filter(e => e.from === f.wallet && e.reason === built);
   requireThat(construction.length === 1 && construction[0].to === 'construction' && construction[0].amount === 10_000);
+  const refit = c.ledger.filter(e => e.from === f.wallet && e.reason === 'Market to shop conversion');
+  requireThat(f.convertedAt === undefined ? refit.length === 0 : refit.length === 1 && refit[0].to === 'construction' && refit[0].amount === 20_000 && refit[0].tick === f.convertedAt);
 }
 
 /** Capital/earnings movements are distinct from the stall's operating result. */

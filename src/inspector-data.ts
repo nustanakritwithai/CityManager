@@ -80,6 +80,7 @@ const reasonLabels: Record<string, string> = {
   'Owner profit distribution': 'เจ้าของถอนกำไรเข้าครัวเรือน (ไม่ใช่ค่าใช้จ่ายซ้ำ)',
   'Self-employed market construction': 'ครัวเรือนสร้างแผงตลาดเอง',
   'Self-employed shop construction': 'ครัวเรือนสร้างร้านค้าเอง',
+  'Market to shop conversion': 'ปรับปรุงตลาดเป็นร้านค้า (จ่ายจากเงินกิจการ)',
 };
 
 function reasonLabel(reason: string): string {
