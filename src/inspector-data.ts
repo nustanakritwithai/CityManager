@@ -43,7 +43,7 @@ const accountLabels: Record<string, string> = {
   processing: 'พืชผลที่ใช้แปรรูป',
 };
 
-function accountLabel(id: string): string {
+export function accountLabel(id: string): string {
   if (Object.hasOwn(accountLabels, id)) return accountLabels[id];
   if (id.startsWith('household:')) return `ครัวเรือน #${id.slice('household:'.length)}`;
   if (id.startsWith('firm:')) return `บริษัท #${id.slice('firm:'.length)}`;
@@ -83,7 +83,7 @@ const reasonLabels: Record<string, string> = {
   'Market to shop conversion': 'ปรับปรุงตลาดเป็นร้านค้า (จ่ายจากเงินกิจการ)',
 };
 
-function reasonLabel(reason: string): string {
+export function reasonLabel(reason: string): string {
   if (Object.hasOwn(reasonLabels, reason)) return reasonLabels[reason];
   const industryCapital = /^Industry expansion capital #(\d+)$/.exec(reason);
   if (industryCapital) return `ทุนขยายโรงงาน #${industryCapital[1]} (ไม่ใช่ยอดขาย)`;
@@ -101,6 +101,10 @@ function reasonLabel(reason: string): string {
   if (cropPurchase) return `ครัวเรือนซื้อพืชผล · รายการ #${cropPurchase[1]}`;
   const cropExchange = /^Crop exchange #(\d+)$/.exec(reason);
   if (cropExchange) return `ซื้อขายพืชผล · รายการ #${cropExchange[1]}`;
+  const harvest = /^Farm harvest #(\d+)$/.exec(reason);
+  if (harvest) return `ฟาร์มเก็บเกี่ยว · รายการ #${harvest[1]}`;
+  const writeOff = /^Crop write-off #(\d+)$/.exec(reason);
+  if (writeOff) return `ตัดพืชผลออกจากบัญชี · รายการ #${writeOff[1]}`;
   const cropRecipe = /^Crop recipe #(\d+)$/.exec(reason);
   if (cropRecipe) return `สินค้าจากการแปรรูปพืชผล #${cropRecipe[1]}`;
   return `รายการอื่น: ${reason}`;

@@ -150,7 +150,7 @@ try {
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
   await send('Fetch.enable', { patterns: [{ urlPattern: '*://*/api/city-advisor/report*' }, { urlPattern: '*opentyphoon*' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url }); await until('!!window.cityManager && window.cityManager.visuals().ready');
+  await send('Page.navigate', { url: url + '?advanced=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready'); // experimental features are off by default
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let day = 0; day < 65; day++) step(fixture);
   await button('#toggle-game-menu');

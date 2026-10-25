@@ -483,7 +483,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
   const b = c.buildings.find(b => b.id === buildingId && b.zone === 'R');
   if (!b) return ['ไม่พบบ้านพักที่เลือก'];
   const used = homeOccupancy(c, b.id), room = housingCapacity(b), facts = admissionFacts(c), reasons = [
-    `พักจริง ${used.households}/${room.households} ครัวเรือน และ ${used.persons}/${room.persons} คน ตามกฎบ้าน cottage รุ่น household-1`,
+    `พักจริง ${used.households}/${room.households} ครัวเรือน และ ${used.persons}/${room.persons} คน ตามกฎบ้านหลังเล็ก`,
     `มีตำแหน่งว่างที่สำรองค่าจ้างได้ ${facts.vacancies} ตำแหน่ง และแรงงานเดิมที่ยังไม่ได้งาน ${facts.existingUnemployed} คน`,
   ];
   if (b.age < 1) reasons.push('บ้านใหม่ยังว่างในวันที่สร้าง ต้องรออย่างน้อยหนึ่งวันจำลอง');

@@ -231,7 +231,7 @@ function setupRules() {
     ruleCard('growth', 'พืชผลและวัตถุดิบมีต้นทาง', 'ฟาร์มเก็บเกี่ยวพืชผลหมุนเวียนตามความอุดมสมบูรณ์และแรงงาน โรงงานใช้พืชผลจริง 2 ล็อตเป็นสำเร็จรูป 8 หน่วยต่อชุด ตลาดไม่ผลิตเอง สต็อกที่เพิ่งซื้อเริ่มขายได้วันถัดไป บัญชีพืชผลแยกล็อตและต้นทุนจากสินค้าสำเร็จรูป เซฟเดิมไม่มีวัตถุดิบแจก ต้องสร้างห่วงโซ่เกษตรก่อน', 'agriculture'),
     ruleCard('wallets', 'ลูกจ้างและผู้ทำกิจการเอง', 'แรงงานรับจ้างรับค่าจ้างเข้ากระเป๋าครัวเรือน ตลาดขนาดเล็กใช้แรงงานเจ้าของ 1 คน ไม่มีเงินเดือนเจ้าของ ยอดขายอยู่บัญชีกิจการ ถอนเฉพาะกำไรที่มีสิทธิ์และเหลือเงินหมุนเวียน 200 บาท การเติมทุน ถอนกำไร และทุนขยายโรงงานไม่ใช่ยอดขายซ้ำ ยังไม่มีหน้าบริหารกลุ่มกิจการ ตลาดลงทุน หนี้ หรือผลตอบแทนรับประกัน', 'income-roles'),
     ruleCard('limits', `แผนที่กริดราบ ${SIZE} × ${SIZE}`, 'ขอบเขตสูงสุด 192 อาคาร 128 ครัวเรือน และ 64 บริษัท ถนนโค้ง การจราจรรายช่องจราจร สาธารณูปโภคแบบมีความจุ และเมืองขนาดใหญ่ยังเป็นงานระยะถัดไป'),
-    ruleCard('growth', 'ต้นแบบแรกที่ตรวจสอบได้', 'ได้รับแรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ยังไม่ครอบคลุมระบบทั้งหมด โค้ดจำลองและถนนเขียนใหม่ ไม่ใช้โค้ด Living City Lab หรือ novel engine', 'version'),
+    ruleCard('growth', 'ต้นแบบแรกที่ตรวจสอบได้', 'ได้รับแรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ยังไม่ครอบคลุมระบบทั้งหมด โค้ดจำลองและถนนเขียนใหม่ทั้งหมด', 'version'),
   );
   const attribution = element('div', 'sm-attribution'); attribution.append(element('h4', '', 'แหล่งภาพและสิทธิ์ใช้งาน'), element('p', '', 'โมเดลเมือง 8 แบบและไอคอน GUI 4 ภาพจาก Kenney ภายใต้ CC0 สัญลักษณ์เส้นในคู่มือสร้างขึ้นใหม่ในโค้ด'));
   const kenney = element('a', '', 'Kenney · แหล่งต้นฉบับ'), license = element('a', '', 'CC0 · อ่านใบอนุญาต'); kenney.href = 'https://kenney.nl/assets'; license.href = 'https://creativecommons.org/publicdomain/zero/1.0/';
@@ -247,7 +247,7 @@ function updateRules() {
   let grantLabel = bootstrap.querySelector('.sm-rule-status'); if (!grantLabel) { grantLabel = element('div', 'sm-rule-status'); bootstrap.append(grantLabel); }
   grantLabel.textContent = grant ? `ทุนตั้งเมืองที่บันทึก: ${formatMoney(grant.amount)} บาท` : 'ยังไม่มีรายการทุนตั้งเมืองในบัญชีนี้';
   const version = root('simulation-rules').querySelector('[data-rule=version]')!;
-  let label = version.querySelector('.sm-footnote'); if (!label) { label = element('p', 'sm-footnote'); version.append(label); } label.textContent = `บันทึกเวอร์ชัน ${current.version} · Seed ${current.seed} · วันที่ ${current.tick}`;
+  let label = version.querySelector('.sm-footnote'); if (!label) { label = element('p', 'sm-footnote'); version.append(label); } label.textContent = `บันทึกเวอร์ชัน ${current.version} · รหัสเมือง ${current.seed} · วันที่ ${current.tick}`;
 }
 
 /** Installs presentation only; preserves native outer details/summary behavior. */

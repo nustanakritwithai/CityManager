@@ -43,6 +43,7 @@ import './panels.css';
 import './hud.css';
 import './panel-theme.css';
 import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
+import { advancedEnabled, storeAdvanced } from './advanced.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -50,7 +51,9 @@ const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.qu
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
 const SIGNAL_ENV = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
-const SIGNALS_ENABLED = SIGNAL_ENV.VITE_CITY_SIGNALS !== 'false' || new URLSearchParams(location.search).get('signals') === '1';
+let advancedOn = advancedEnabled();
+// Signals are an experimental page: the build flag can still hold them back, `?signals=1` overrides it.
+const signalsEnabled = () => advancedOn && (SIGNAL_ENV.VITE_CITY_SIGNALS !== 'false' || new URLSearchParams(location.search).get('signals') === '1');
 let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
 let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | undefined;
 let city: City = createCity(61025);
@@ -331,21 +334,25 @@ function updateMapInfo(placement: Preview | null) {
 
 async function boot() {
   setupSubmenus(); setupSubmenuNavigation(cancel);
-  $('#signal-entry').hidden = !SIGNALS_ENABLED;
+  $('#signal-entry').hidden = !signalsEnabled();
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
     enabled: SIGNAL_ENV.VITE_CITY_ADVISOR_ONLINE !== 'false', endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
   } });
   const entityExplanationHost = document.createElement('section');
   entityExplanationHost.id = 'entity-explanation-host';
   $('#entity-content').insertAdjacentElement('afterend', entityExplanationHost);
+  const ownerDecisionHost = document.createElement('details');
+  $('#city-content').insertBefore(ownerDecisionHost, $('#city-content .ledger-details'));
+  // Experimental panels are built the first time the switch is on, and only hidden when it goes off.
+  const startAdvanced = () => {
+    entityExplanationHost.hidden = ownerDecisionHost.hidden = !advancedOn; $('#signal-entry').hidden = !signalsEnabled();
+    if (!advancedOn || entityExplanationPanel) return;
   entityExplanationPanel = createEntityExplanationPanel(entityExplanationHost, {
     getCity: () => city, getSelection: selectedEntity, connection: {
       enabled: SIGNAL_ENV.VITE_CITY_ENTITY_ADVISOR_ONLINE === 'true',
       endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
     }
   });
-  const ownerDecisionHost = document.createElement('details');
-  $('#city-content').insertBefore(ownerDecisionHost, $('#city-content .ledger-details'));
   ownerDecisionPanel = createOwnerDecisionPanel(ownerDecisionHost, {
     getCity: () => city, getSession: () => ownerDecisionSession, onChange: render,
     onTyphoonAutoPending: active => {
@@ -358,7 +365,19 @@ async function boot() {
       endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
     }
   });
-  $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
+  };
+  startAdvanced();
+  const advancedButton = $<HTMLButtonElement>('#toggle-advanced');
+  const showAdvanced = () => { advancedButton.textContent = advancedOn ? 'ปิดฟีเจอร์ทดลอง' : 'เปิดฟีเจอร์ทดลอง'; advancedButton.setAttribute('aria-pressed', String(advancedOn)); };
+  showAdvanced();
+  advancedButton.addEventListener('click', () => {
+    advancedOn = !advancedOn; storeAdvanced(advancedOn);
+    // Switching off never leaves Typhoon driving the city: the owner session drops back to proposals.
+    if (!advancedOn) { ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); if (route?.page === 'signals') inspector(false); }
+    startAdvanced(); showAdvanced(); render();
+    status(advancedOn ? 'เปิดฟีเจอร์ทดลองแล้ว · สัญญาณเมืองและ Typhoon อยู่ในภาพรวมเมือง คำอธิบาย AI อยู่ในหน้าสถานที่' : 'ปิดฟีเจอร์ทดลองแล้ว');
+  });
+  $('#open-signals').addEventListener('click', () => { if (signalsEnabled()) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
     ownerDecisionSession.beforeExternal(city);
     selected = b; roadStart = null; status(buildRoad(city, a, b).message);

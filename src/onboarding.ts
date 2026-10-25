@@ -31,7 +31,9 @@ export class Coach {
       const li = document.createElement('li'); li.dataset.step = key; li.append(iconElement(icon, 'ui-icon coach-icon'), document.createTextNode(label));
       this.items.set(key, li); list.append(li);
     }
-    this.root.append(head, list); document.body.append(this.root);
+    // The coach hands over to the goal pill: one line saying where the game is going.
+    const goal = document.createElement('p'); goal.className = 'coach-goal'; goal.textContent = 'เป้าหมาย: พาเมืองถึงระดับ 5 · แตะป้ายระดับใต้ชื่อเกม';
+    this.root.append(head, list, goal); document.body.append(this.root);
   }
   update(city: City) {
     if (this.closed) return;

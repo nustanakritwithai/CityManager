@@ -2,7 +2,7 @@ import './context-panels.css';
 import './building-cards.css';
 import { MONTH, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
-import { formatMoney, cropFlowRows, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
+import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
@@ -148,6 +148,11 @@ function householdButton(city: City, household: Household, source: Building, onH
   if (household.origin === 'legacy-v1') copy.append(el('small', 'cx-legacy-tag', 'สมาชิกจาก v1: สมมติขั้นต่ำ'));
   button.append(art, copy, el('span', 'cx-link-arrow', '→')); button.setAttribute('aria-label', `ดูข้อมูลครัวเรือน #${household.id}`); button.addEventListener('click', () => onHousehold(household.id, source.id, source.cell)); return button;
 }
+/** Provenance in words: who paid whom and why, then the ledger's own ids in small print for tracing. */
+function rawLine(row: { from: string; to: string; reason: string }): HTMLElement {
+  const line = el('p', 'cx-flow-raw', `${accountLabel(row.from)} → ${accountLabel(row.to)} · ${reasonLabel(row.reason)}`);
+  line.append(el('small', 'cx-flow-id', `รหัสบัญชี ${row.from} → ${row.to} · ${row.reason}`)); return line;
+}
 function flowCard(row: FlowRow, wallet: string): HTMLElement {
   const key = JSON.stringify([wallet, row.kind, row.index, row.tick, row.from, row.to, row.value, row.reason]);
   const card = el('details', 'cx-flow-card'); Object.assign(card.dataset, { kind: row.kind, index: String(row.index), tick: String(row.tick), from: row.from, to: row.to, value: String(row.value), reason: row.reason });
@@ -157,7 +162,7 @@ function flowCard(row: FlowRow, wallet: string): HTMLElement {
   top.append(direction, el('h4', '', row.label), el('strong', 'cx-amount cx-flow-value', row.kind === 'money' ? cash(row.value) : `${count(row.value)} หน่วย`));
   summary.append(top, el('span', 'cx-flow-inline', `วัน ${row.tick} · ${row.fromLabel} → ${row.toLabel}`));
   route.append(el('span', '', row.fromLabel), el('span', 'cx-route-arrow', '→'), el('span', '', row.toLabel));
-  detail.append(el('p', 'cx-flow-meta', `วัน ${row.tick} · รายการ #${row.index + 1}`), route, el('p', 'cx-flow-raw', `${row.from} → ${row.to} · ${row.reason}`));
+  detail.append(el('p', 'cx-flow-meta', `วัน ${row.tick} · รายการ #${row.index + 1}`), route, rawLine(row));
   card.append(summary, detail); card.open = expandedActivity.has(key);
   const remember = () => { if (card.isConnected) { if (card.open) expandedActivity.add(key); else expandedActivity.delete(key); } };
   summary.addEventListener('click', () => queueMicrotask(remember)); card.addEventListener('toggle', remember);
@@ -195,7 +200,7 @@ function cropCard(row: CropFlowRow, wallet: string): HTMLElement {
   summary.append(top, el('span', 'cx-flow-inline', `วัน ${row.tick} · ${row.fromLabel} → ${row.toLabel}`));
   detail.append(el('p', 'cx-flow-meta', `วัน ${row.tick} · รหัสพืชผล #${row.id} · แยกจากบัญชีสินค้าสำเร็จรูป`), el('p', '', `มูลค่าตัดจากต้นทาง ${cash(row.fromValue)} · มูลค่าเข้าสต็อก ${cash(row.toValue)} · เงินโอน ${cash(row.cash)}`));
   if (row.cropKind === 'process') detail.append(el('p', '', `แปรรูป ${row.batches} ชุด → สินค้าสำเร็จรูป ${row.outputQuantity} หน่วย · แรงงาน ${row.workers} คน`));
-  detail.append(el('p', 'cx-flow-raw', `${row.from} → ${row.to} · ${row.reason}`)); card.append(summary, detail); card.open = expandedActivity.has(key);
+  detail.append(rawLine(row)); card.append(summary, detail); card.open = expandedActivity.has(key);
   const remember = () => { if (card.isConnected) { if (card.open) expandedActivity.add(key); else expandedActivity.delete(key); } };
   summary.addEventListener('click', () => queueMicrotask(remember)); card.addEventListener('toggle', remember); return card;
 }
@@ -230,7 +235,7 @@ function renderHouse(city: City, building: Building, households: Household[], on
     metric('vacant-households', 'ช่องครัวเรือนว่าง', count(Math.max(0, capacity.households - occupied.households)), Math.max(0, capacity.households - occupied.households)),
     metric('vacant-persons', 'ความจุสมาชิกว่าง', `${count(Math.max(0, capacity.persons - occupied.persons))} คน`, Math.max(0, capacity.persons - occupied.persons)),
     metric('level', 'ระดับอาคาร', String(building.level), building.level), metric('age', 'อายุอาคาร', `${building.age} วัน`, building.age)
-  ]), residents, facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือนและความจุ', ...conditions, el('p', '', `ความจุบ้านเป็นพารามิเตอร์เกมรุ่น ${city.rulesVersion} ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
+  ]), residents, facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือนและความจุ', ...conditions, el('p', '', `ความจุบ้านเป็นค่าที่เกมกำหนด ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
   const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building);
