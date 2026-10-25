@@ -154,7 +154,52 @@ function decorateChecklists(root: ParentNode) {
     list.addEventListener('click', toggle); list.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
   }
 }
-export function decoratePanels(root: ParentNode) { decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); decorateChecklists(root); }
+type FlowNode = [key: string, icon: string, label: string, unit: string];
+const FLOWS: Record<string, FlowNode[]> = {
+  factory: [['crop-stock', 'crop', 'พืชผล', 'ล็อต'], ['available-batches', 'gear', 'แปรรูปได้', 'ชุด'], ['stock', 'box', 'สินค้า', 'หน่วย']],
+  farm: [['fertility', 'F', 'ดิน', ''], ['harvest-today', 'crop', 'เก็บวันนี้', 'ล็อต'], ['crop-stock', 'box', 'คลัง', 'ล็อต']],
+  market: [['crop-stock', 'crop', 'พืชผล', 'ล็อต'], ['workers', 'worker', 'คนขาย', 'คน'], ['cash', 'coin', 'เงิน', '']],
+  shop: [['stock', 'box', 'สินค้า', 'หน่วย'], ['workers', 'worker', 'คนขาย', 'คน'], ['cash', 'coin', 'เงิน', '']],
+};
+/** A firm's work as one strip of icons and numbers: input → process → output. */
+function decorateFlow(root: ParentNode) {
+  const host = root.querySelector<HTMLElement>('#entity-content[data-card-kind]'); if (!host) return;
+  const nodes = FLOWS[host.dataset.cardKind ?? '']; if (!nodes) return;
+  const read = (key: string) => host.querySelector<HTMLElement>(`[data-context-metric="${key}"], [data-card-metric="${key}"]`);
+  const values = nodes.map(([key]) => read(key)), signature = values.map(v => v?.dataset.value ?? '').join('|');
+  const hero = host.querySelector<HTMLElement>('.bc-hero'); if (!hero || values.every(v => !v)) return;
+  const old = host.querySelector<HTMLElement>(':scope > .flow-strip'); if (old?.dataset.signature === signature) return;
+  const strip = document.createElement('div'); strip.className = 'flow-strip'; strip.dataset.signature = signature; strip.setAttribute('role', 'img');
+  const parts: string[] = [];
+  nodes.forEach(([, icon, label, unit], i) => {
+    const card = values[i]; if (!card) return;
+    const text = card.querySelector('dd')?.textContent?.trim() ?? '';
+    const raw = Number(card.dataset.value), money = card.classList.contains('money');
+    const shown = money && Number.isFinite(raw) ? `${Math.round(raw / 100).toLocaleString('th-TH')} ฿` : text.split(/\s/)[0];
+    if (strip.children.length) { const arrow = document.createElement('span'); arrow.className = 'flow-arrow'; arrow.textContent = '›'; arrow.setAttribute('aria-hidden', 'true'); strip.append(arrow); }
+    const node = document.createElement('div'); node.className = `flow-node${card.classList.contains('money') ? ' money' : ''}`;
+    const num = document.createElement('b'); num.textContent = shown; const cap = document.createElement('small'); cap.textContent = unit ? `${label} (${unit})` : label;
+    node.append(iconElement(icon, 'ui-icon flow-icon'), num, cap); strip.append(node); parts.push(`${label} ${text}`);
+  });
+  strip.setAttribute('aria-label', parts.join(' → '));
+  if (old) old.replaceWith(strip); else hero.after(strip);
+}
+/** Where household members work: workplace icon + skill icon lead, the sentence folds behind ⓘ. */
+function decorateWork(root: ParentNode) {
+  for (const row of root.querySelectorAll<HTMLElement>('.cx-employment-row:not([data-decor]), .cx-owner-labor-row:not([data-decor])')) {
+    row.dataset.decor = '';
+    const owner = row.classList.contains('cx-owner-labor-row'), place = owner ? 'market' : row.dataset.occupation === 'manufacturing' ? 'I' : 'shop';
+    const lead = document.createElement('span'); lead.className = 'work-icons';
+    lead.append(iconElement(place, `ui-icon work-place zone-${place}`), iconElement(row.dataset.skill ?? 'general', 'ui-icon work-skill'));
+    row.prepend(lead);
+    const detail = row.querySelector<HTMLElement>(':scope > span:not(.work-icons)'); if (!detail) continue;
+    row.title = detail.textContent ?? '';
+    let host = row.parentElement?.closest<HTMLElement>(HOSTS) ?? null, heading: HTMLElement | null = null;
+    while (host && !(heading = host.querySelector<HTMLElement>(HEADINGS))) host = host.parentElement?.closest<HTMLElement>(HOSTS) ?? null;
+    if (host && heading) { detail.classList.add('info-note'); infoButton(host, heading, detail); }
+  }
+}
+export function decoratePanels(root: ParentNode) { decorateFlow(root); decorateWork(root); decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); decorateChecklists(root); }
 
 /** Re-decorate whenever panel content is replaced; batched to one pass per frame. */
 export function watchPanels(...roots: (HTMLElement | null)[]) {

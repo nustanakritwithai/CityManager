@@ -99,3 +99,23 @@
 .sm-flow-card[data-kind=crops] .sm-flow-top > .sm-flow-direction { color: #a6d86f; }
 .sm-flow-card[data-kind=goods] .sm-flow-top > .sm-flow-direction { color: #f0b45a; }
 .sm-flow-top > .sm-event-title { flex: 1 1 0; min-width: 0; text-align: left; }
+/* Firm flow strip: input › process › output in one compact row under the hero. */
+#inspector .flow-strip { display: flex; align-items: stretch; gap: calc(4 * var(--reader-unit, 1px)); margin: calc(6 * var(--reader-unit, 1px)) 0; }
+#inspector .flow-node { flex: 1 1 0; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'icon num' 'icon cap'; align-items: center; column-gap: calc(7 * var(--reader-unit, 1px)); padding: calc(5 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)); border-radius: calc(9 * var(--reader-unit, 1px)); background: #ffffff0c; }
+#inspector .flow-icon { grid-area: icon; width: calc(24 * var(--reader-unit, 1px)); height: calc(24 * var(--reader-unit, 1px)); color: #cfe1d9; }
+#inspector .flow-node b { grid-area: num; font-size: calc(15 * var(--reader-unit, 1px)); font-variant-numeric: tabular-nums; color: #eef3ea; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#inspector .flow-node.money b { color: #f3c46b; }
+#inspector .flow-node small { grid-area: cap; font-size: calc(12 * var(--reader-unit, 1px)); color: #a3bcb4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#inspector .flow-arrow { align-self: center; color: #ffffff55; font-size: calc(18 * var(--reader-unit, 1px)); }
+#inspector #entity-content[data-card-kind] .flow-strip ~ .cx-status { display: none; }
+#inspector .cx-employment-row, #inspector .cx-owner-labor-row { position: relative; padding-left: calc(64 * var(--reader-unit, 1px)) !important; min-height: calc(40 * var(--reader-unit, 1px)); }
+#inspector .work-icons { position: absolute; left: calc(8 * var(--reader-unit, 1px)); top: 50%; translate: 0 -50%; display: flex; gap: calc(3 * var(--reader-unit, 1px)); }
+#inspector .work-icons .ui-icon { width: calc(24 * var(--reader-unit, 1px)); height: calc(24 * var(--reader-unit, 1px)); padding: calc(3 * var(--reader-unit, 1px)); border-radius: calc(7 * var(--reader-unit, 1px)); background: #ffffff10; }
+#inspector .work-place.zone-I { color: #eeaa72; } #inspector .work-place.zone-shop { color: #85c3ea; } #inspector .work-place.zone-market { color: #c3e07c; }
+#inspector .work-skill { color: #cfe1d9; }
+/* HUD glyphs drawn from the shared SVG set. */
+.svg-glyph { display: inline-grid !important; place-items: center; line-height: 1 !important; }
+.svg-glyph svg { width: 1.15em; height: 1.15em; display: block; }
+.tool .svg-glyph.zone-icon { background: transparent !important; border: 0 !important; color: inherit; }
+.tool.zone-r .svg-glyph { color: #7fd6a2; } .tool.zone-c .svg-glyph { color: #85c3ea; } .tool.zone-i .svg-glyph { color: #eeaa72; } .tool.zone-f .svg-glyph { color: #b9dc73; }
+.tool .zone-icon.svg-glyph svg { width: 1.45em; height: 1.45em; }

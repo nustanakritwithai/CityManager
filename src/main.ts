@@ -24,6 +24,7 @@ import { parcelChecklist, roadFacts, type ParcelChecklist } from './place-checkl
 import { OverviewDashboard } from './overview-panels.ts';
 import { CityStatsPanel } from './city-stats-panel.ts';
 import { decoratePanels, watchPanels } from './panel-decor.ts';
+import { installHudIcons } from './hud-icons.ts';
 import './panels.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
@@ -336,6 +337,7 @@ async function boot() {
   });
   cityStatsPanel = new CityStatsPanel(open => { $('#toggle-stats').setAttribute('aria-expanded', String(open)); if (open) render(); });
   $('#toggle-stats').addEventListener('click', () => cityStatsPanel!.toggle());
+  installHudIcons();
   watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
