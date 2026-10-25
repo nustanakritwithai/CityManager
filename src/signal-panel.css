@@ -3,7 +3,7 @@
 .signal-entry button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--line);background:#f3c46b0c;color:var(--amber);text-align:left}
 #inspector[data-page=signals]{width:min(480px,48vw)}
 .signal-panel{--signal-unit:var(--reader-unit,1px);min-width:0;color:var(--cream)}
-.signal-controls{position:sticky;top:0;z-index:2;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:4px 0 8px;background:var(--panel,#14201e)}
+.signal-controls{position:sticky;top:0;z-index:2;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:4px 0 8px;background:var(--panel,#151d2f)}
 .signal-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
 .signal-actions button{min-height:44px;min-width:44px;padding:6px 10px;font-size:calc(13 * var(--signal-unit));border:1px solid var(--line);background:#f3c46b12}
 .signal-actions [hidden]{display:none!important}

@@ -5,7 +5,7 @@
 .city-question-form{display:grid;gap:6px;padding:12px 0;border-bottom:1px solid var(--line)}
 .city-question-entity-group{display:grid;gap:6px}
 .city-question-entity-group[hidden]{display:none}
-.city-question-form select,.city-question-form button{box-sizing:border-box;width:100%;min-width:0;min-height:calc(44 * var(--question-unit));padding:8px;font:inherit;font-size:calc(14 * var(--question-unit));color:var(--cream);border:1px solid var(--line);border-radius:5px;background:var(--panel,#18251f)}
+.city-question-form select,.city-question-form button{box-sizing:border-box;width:100%;min-width:0;min-height:calc(44 * var(--question-unit));padding:8px;font:inherit;font-size:calc(14 * var(--question-unit));color:var(--cream);border:1px solid var(--line);border-radius:5px;background:var(--panel,#182136)}
 .city-question-form button{background:#f3c46b12;color:var(--amber)}
 .city-question-form button:disabled{opacity:.55}
 .city-question-stale{padding:8px;border-left:2px solid var(--amber);background:#f3c46b0a;color:var(--amber)}

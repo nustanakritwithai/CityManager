@@ -5,14 +5,14 @@
  */
 #inspector {
   --u: var(--reader-unit, 1px);
-  --pnl-bg: #0f1f26;
-  --pnl-surface: #152a32;
-  --pnl-surface-2: #1b343d;
-  --pnl-line: #2c4a52;
-  --pnl-line-soft: #24404a;
+  --pnl-bg: #121c32;
+  --pnl-surface: #1a2640;
+  --pnl-surface-2: #212f4e;
+  --pnl-line: #344468;
+  --pnl-line-soft: #2b3a5d;
   --pnl-text: var(--c-text);
   --pnl-muted: var(--c-muted);
-  --pnl-faint: #8ea9a1;
+  --pnl-faint: #92a2c5;
   --pnl-accent: var(--c-accent);
   --pnl-good: var(--c-good);
   --pnl-warn: var(--c-warn);

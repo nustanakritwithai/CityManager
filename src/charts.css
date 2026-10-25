@@ -14,7 +14,7 @@
 .chart-end-label { fill: var(--chart-ink-2); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--chart-well); stroke-width: 3px; }
 .chart-crosshair { stroke: var(--chart-ink-2); stroke-width: 1; opacity: .7; }
 .chart-hit { fill: transparent; cursor: crosshair; }
-.chart-tip { position: absolute; z-index: 3; top: 8px; min-width: 120px; padding: 7px 9px; border-radius: 8px; background: rgba(16, 33, 39, .96); border: 1px solid rgba(255, 255, 255, .16); box-shadow: 0 8px 20px rgba(0, 0, 0, .35); pointer-events: none; font-size: 12.5px; color: var(--chart-ink); }
+.chart-tip { position: absolute; z-index: 3; top: 8px; min-width: 120px; padding: 7px 9px; border-radius: 8px; background: rgba(20, 29, 52, .96); border: 1px solid rgba(255, 255, 255, .16); box-shadow: 0 8px 20px rgba(0, 0, 0, .35); pointer-events: none; font-size: 12.5px; color: var(--chart-ink); }
 .chart-tip-head { margin-bottom: 4px; color: var(--chart-muted); font-size: 12px; }
 .chart-tip-row { display: grid; grid-template-columns: 14px auto 1fr; align-items: center; gap: 6px; line-height: 1.45; }
 .chart-tip-row i { width: 12px; height: 2px; border-radius: 1px; background: var(--c); }
@@ -87,7 +87,7 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-mix { display: grid; gap: 14px; margin-top: 14px; }
 
 /* Expanded chart view */
-.chart-modal { position: fixed; z-index: 70; left: 50%; top: calc(80px + env(safe-area-inset-top, 0px)); translate: -50% 0; width: min(1100px, calc(100vw - 24px)); max-height: calc(100dvh - 120px); overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 0 14px; border: 1px solid var(--glass-edge, rgba(255, 255, 255, .16)); border-radius: 14px; background: var(--glass-solid, #284a55); box-shadow: 0 24px 60px rgba(0, 0, 0, .45); color: var(--chart-ink); }
+.chart-modal { position: fixed; z-index: 70; left: 50%; top: calc(80px + env(safe-area-inset-top, 0px)); translate: -50% 0; width: min(1100px, calc(100vw - 24px)); max-height: calc(100dvh - 120px); overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 0 14px; border: 1px solid var(--glass-edge, rgba(255, 255, 255, .16)); border-radius: 14px; background: var(--glass-solid, #31436c); box-shadow: 0 24px 60px rgba(0, 0, 0, .45); color: var(--chart-ink); }
 .chart-modal[hidden] { display: none; }
 .chart-modal-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-bottom: 1px solid rgba(255, 255, 255, .12); background: inherit; }
 .chart-modal-title { margin: 0; font-size: 17px; font-weight: 750; }

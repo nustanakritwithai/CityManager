@@ -30,7 +30,7 @@
   display:block;
   font-size:calc(12 * var(--sm-unit));
   font-weight:400;
-  color:#a9c2ba;
+  color:#acbcdd;
   margin-top:calc(2 * var(--sm-unit))
 }
 .inspector .submenu-entry:after {
