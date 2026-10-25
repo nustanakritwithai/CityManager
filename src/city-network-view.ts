@@ -5,7 +5,7 @@
  */
 import './city-network.css';
 import {
-  EDGES, GROUPS, GROUP_ORDER, NODES, NODE_BY_ID, cascade, cascadeRoots, formatNode, neighbours, networkChanges, networkEvents,
+  EDGES, GROUPS, GROUP_ORDER, NODES, NODE_BY_ID, cascade, downstream, cascadeRoots, formatNode, neighbours, networkChanges, networkEvents,
   networkSnapshot, networkValues, pastSnapshot, whatIf, type NetEdge, type NetEvent, type NetPulse, type NetSnapshot, type NetValues,
 } from './city-network.ts';
 import { layoutNetwork, type Vec3 } from './network-layout.ts';
@@ -14,8 +14,7 @@ import type { City } from './sim.ts';
 
 const POS: Record<string, Vec3> = layoutNetwork(NODES, EDGES, GROUP_ORDER);
 const CAMERA = 3.4, HOP_MS = 620, TRAVEL_MS = 900, PING_MS = 900, FEED_SIZE = 8;
-const FALLBACK: Record<number, string> = { 1: '#3987e5', 4: '#c98500', 5: '#d55181', 6: '#008300' };
-const UP = '#ffe7a3', DOWN = '#ff8f7f', SAME = 'rgba(214, 232, 226, A)', OPPOSITE = 'rgba(255, 143, 127, A)';
+const UP = '#ffe7a3', DOWN = '#ff8f7f', SAME = 'rgba(214, 222, 248, A)', OPPOSITE = 'rgba(255, 143, 127, A)';
 
 type Projected = { x: number; y: number; s: number; d: number };
 type LivePulse = NetPulse & { start: number };
@@ -89,7 +88,7 @@ export class CityNetworkView {
     this.layer.setAttribute('role', 'group'); this.layer.setAttribute('aria-label', 'ตัวแปรของเมือง');
     for (const node of NODES) {
       const button = el('button', 'net-node'), orb = el('span', 'net-orb'), name = el('span', 'net-name', node.label), value = el('span', 'net-value');
-      button.type = 'button'; button.dataset.node = node.id; button.dataset.group = node.group; button.style.setProperty('--c', `var(--series-${GROUPS[node.group].slot})`);
+      button.type = 'button'; button.dataset.node = node.id; button.dataset.group = node.group; button.style.setProperty('--c', GROUPS[node.group].color);
       orb.append(iconElement(node.icon)); button.append(orb, name, value);
       button.addEventListener('click', () => { if (performance.now() < this.quietUntil) return; this.select(this.selected === node.id ? null : node.id); });
       button.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') this.hovered = node.id; });
@@ -100,14 +99,14 @@ export class CityNetworkView {
     }
     this.caption.hidden = true;
     const legend = el('div', 'net-legend');
-    for (const group of GROUP_ORDER) { const key = el('span', 'net-key', GROUPS[group].label); key.style.setProperty('--c', `var(--series-${GROUPS[group].slot})`); legend.append(key); }
+    for (const group of GROUP_ORDER) { const key = el('span', 'net-key', GROUPS[group].label); key.style.setProperty('--c', GROUPS[group].color); legend.append(key); }
     legend.append(el('span', 'net-key same', 'ไปทางเดียวกัน'), el('span', 'net-key opposite', 'ไปทางตรงข้าม'), el('span', 'net-key pulse', 'ผลที่ส่งต่อ'));
     const hint = el('p', 'net-hint', 'ลากเพื่อหมุน · แตะจุดเพื่อดูว่าเชื่อมกับอะไร');
     this.stage.append(this.canvas, this.layer, this.caption, legend, hint);
     this.announcer.setAttribute('aria-live', 'polite');
     this.index.append(el('h3', '', 'ตัวแปรทั้งหมด'));
     for (const group of GROUP_ORDER) {
-      const row = el('div', 'net-index-row'); row.style.setProperty('--c', `var(--series-${GROUPS[group].slot})`); row.append(el('span', 'net-index-group', GROUPS[group].label));
+      const row = el('div', 'net-index-row'); row.style.setProperty('--c', GROUPS[group].color); row.append(el('span', 'net-index-group', GROUPS[group].label));
       for (const node of NODES.filter(n => n.group === group)) { const chip = el('button', 'net-chip', node.label); chip.type = 'button'; chip.addEventListener('click', () => this.select(node.id)); row.append(chip); }
       this.index.append(row);
     }
@@ -124,11 +123,9 @@ export class CityNetworkView {
     this.open = open; this.root.hidden = !open; this.onToggle(open);
     if (open) {
       this.key = ''; this.before = null; this.pulses = []; this.pings = [];
-      const style = getComputedStyle(document.documentElement);
-      for (const group of GROUP_ORDER) { const slot = GROUPS[group].slot; this.colors.set(group, style.getPropertyValue(`--series-${slot}`).trim() || FALLBACK[slot]); }
+      for (const group of GROUP_ORDER) this.colors.set(group, GROUPS[group].color);
       if (this.city) this.update(this.city);
       this.renderSide(); this.resize(); this.last = performance.now(); this.raf = requestAnimationFrame(t => this.frame(t));
-      this.stage.focus({ preventScroll: true });
     } else cancelAnimationFrame(this.raf);
   }
 
@@ -145,7 +142,7 @@ export class CityNetworkView {
       this.feed = networkEvents(pastSnapshot(city, 30), city).slice(-FEED_SIZE);
       this.pulses = []; this.pings = [];
     } else {
-      const changed = networkChanges(this.before, values), events = networkEvents(this.snapshot, city);
+      const events = networkEvents(this.snapshot, city), changed = networkChanges(this.before, values, downstream(events.map(e => e.node)));
       const seeds = events.length ? [...new Set(events.map(e => e.node))] : cascadeRoots(changed).filter(id => NODE_BY_ID.get(id)!.kind === 'count');
       if (seeds.length) {
         for (const id of seeds) this.pings.push({ id, start: now, effect: (changed.get(id) ?? 1) > 0 ? 1 : -1 });
@@ -215,7 +212,7 @@ export class CityNetworkView {
     this.detail.hidden = !id; this.feedBox.hidden = this.index.hidden = !!id;
     if (!id) { this.renderFeed(); return; }
     const node = NODE_BY_ID.get(id)!, { incoming, outgoing } = neighbours(id);
-    this.detail.style.setProperty('--c', `var(--series-${GROUPS[node.group].slot})`);
+    this.detail.style.setProperty('--c', GROUPS[node.group].color);
     const head = el('header', 'net-detail-head'), orb = el('span', 'net-orb'); orb.append(iconElement(node.icon));
     const titles = el('div'); titles.append(el('h3', '', node.label), el('span', 'net-group', GROUPS[node.group].label + (node.kind === 'flow' ? ' · รวม 30 วัน' : '')));
     const back = el('button', 'net-back', '✕'); back.type = 'button'; back.setAttribute('aria-label', 'เลิกเลือก'); back.addEventListener('click', () => this.select(null));
@@ -234,7 +231,7 @@ export class CityNetworkView {
     const list = el('ul');
     for (const edge of edges) {
       const other = NODE_BY_ID.get(edge[end])!, item = el('li'), chip = el('button', 'net-chip'), sign = el('span', `net-sign ${edge.sign > 0 ? 'same' : 'opposite'}`, edge.sign > 0 ? '+' : '−');
-      chip.type = 'button'; chip.style.setProperty('--c', `var(--series-${GROUPS[other.group].slot})`); chip.append(iconElement(other.icon), document.createTextNode(other.label));
+      chip.type = 'button'; chip.style.setProperty('--c', GROUPS[other.group].color); chip.append(iconElement(other.icon), document.createTextNode(other.label));
       chip.addEventListener('click', () => this.select(other.id));
       sign.title = edge.sign > 0 ? 'ไปทางเดียวกัน' : 'ไปทางตรงข้าม';
       item.append(sign, chip, el('p', 'net-why', edge.why)); list.append(item);
@@ -246,7 +243,7 @@ export class CityNetworkView {
     const list = el('ol');
     for (const event of [...this.feed].reverse()) {
       const node = NODE_BY_ID.get(event.node)!, item = el('li'), button = el('button', 'net-event');
-      button.type = 'button'; button.style.setProperty('--c', `var(--series-${GROUPS[node.group].slot})`);
+      button.type = 'button'; button.style.setProperty('--c', GROUPS[node.group].color);
       const icon = el('span', 'net-event-icon'); icon.append(iconElement(event.icon));
       button.append(icon, el('span', 'net-event-text', event.text), el('span', 'net-event-day', `วันที่ ${event.tick}`));
       button.addEventListener('click', () => { this.select(event.node); this.play(event.node); });
@@ -345,7 +342,7 @@ export class CityNetworkView {
       for (let i = 0; i <= 72; i++) {
         const a = i / 72 * Math.PI * 2, r = 1.12, p = ring === 0 ? { x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r } : ring === 1 ? { x: Math.cos(a) * r, y: Math.sin(a) * r, z: 0 } : { x: 0, y: Math.sin(a) * r, z: Math.cos(a) * r };
         const q = this.project(p, radius);
-        if (prev) { ctx.strokeStyle = `rgba(190, 225, 215, ${0.03 + 0.09 * q.d})`; ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(q.x, q.y); ctx.stroke(); }
+        if (prev) { ctx.strokeStyle = `rgba(180, 190, 240, ${0.03 + 0.09 * q.d})`; ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(q.x, q.y); ctx.stroke(); }
         prev = q;
       }
     }
@@ -412,6 +409,7 @@ export class CityNetworkView {
   private place() {
     const focus = this.focus(), near = new Set<string>();
     if (focus) { near.add(focus); for (const e of EDGES) { if (e.from === focus) near.add(e.to); if (e.to === focus) near.add(e.from); } }
+    for (const id of this.reached.keys()) near.add(id);
     const small = this.width < 560;
     for (const [id, button] of this.buttons) {
       const p = this.projected.get(id)!, scale = (small ? 0.62 : 0.72) + p.d * (small ? 0.3 : 0.36);

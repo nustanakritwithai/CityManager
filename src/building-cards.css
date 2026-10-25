@@ -8,7 +8,7 @@
   --bc-text: #edf3fa;
   --bc-muted: #b5c7d8;
   --bc-accent: #9bd4ae;
-  --bc-tint: #19372f;
+  --bc-tint: #202f52;
   min-width: 0;
   padding: calc(8 * var(--bc-unit));
   border: 1px solid var(--bc-line);
@@ -22,7 +22,7 @@
 
 #entity-content[data-card-kind="household"] {
   --bc-accent: #83ddce;
-  --bc-tint: #133b3d;
+  --bc-tint: #21325a;
 }
 #entity-content[data-card-kind="shop"] {
   --bc-accent: #d1b3ff;
@@ -160,7 +160,7 @@
 
 /* Homes read as occupancy and family rows, not a business balance sheet. */
 #entity-content[data-card-kind="house"] .bc-kpis .cx-metric {
-  border-bottom-color: #547960;
+  border-bottom-color: #536da8;
 }
 #entity-content[data-card-kind] .cx-household-list { gap: calc(4 * var(--bc-unit)); }
 #entity-content[data-card-kind] .cx-household-link {
@@ -255,7 +255,7 @@
   border-radius: calc(4 * var(--bc-unit));
   background: var(--bc-tint);
 }
-#entity-content[data-card-kind] .bc-plot .cx-metric { background: #182d27; border-bottom-color: #476044; }
+#entity-content[data-card-kind] .bc-plot .cx-metric { background: #1c2741; border-bottom-color: #476044; }
 #entity-content[data-card-kind] .bc-yield {
   margin-top: calc(6 * var(--bc-unit));
   padding-top: calc(6 * var(--bc-unit));

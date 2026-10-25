@@ -1,10 +1,10 @@
 /* City network: a dark glass dialog holding a turning 3D web of the city's variables. */
 .city-net {
-  --net-text: #f1f5ec; --net-muted: #b8cbc4; --net-line: #ffffff1f; --net-up: #ffe7a3; --net-down: #ff8f7f;
+  --net-text: #f2f3fb; --net-muted: #b9bfdc; --net-line: #ffffff1f; --net-up: #ffe7a3; --net-down: #ff8f7f;
   position: fixed; z-index: 62; inset: 84px 16px 16px;
   display: flex; flex-direction: column;
   border: 1px solid #ffffff2e; border-radius: 16px;
-  background: linear-gradient(180deg, #16303af2, #0b1a20f5);
+  background: linear-gradient(180deg, #1b2452f2, #0e1433f5);
   box-shadow: 0 24px 60px #0009, inset 0 1px 0 #ffffff22;
   color: var(--net-text); overflow: hidden;
   animation: net-in .2s ease-out;
@@ -25,7 +25,7 @@
 .net-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(290px, 27vw, 370px); }
 .net-stage {
   position: relative; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; outline: none;
-  background: radial-gradient(ellipse at 50% 46%, #1f4a56 0%, #12282f 52%, #08151a 100%);
+  background: radial-gradient(ellipse at 50% 46%, #2a3878 0%, #161e46 52%, #0b1028 100%);
 }
 .net-stage.dragging { cursor: grabbing; }
 .net-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--c-accent); }
@@ -63,7 +63,7 @@
 .net-node:focus-visible .net-orb { box-shadow: 0 0 0 2px #fff, 0 0 0 5px var(--c-accent); }
 .net-node[data-effect=up] .net-orb::after, .net-node[data-effect=down] .net-orb::after {
   position: absolute; right: -9px; top: -7px; display: grid; place-items: center;
-  width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 800; color: #12242a; box-shadow: 0 1px 4px #0008;
+  width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 800; color: #141a3c; box-shadow: 0 1px 4px #0008;
 }
 .net-node[data-effect=up] .net-orb::after { content: '▲'; background: var(--net-up); }
 .net-node[data-effect=down] .net-orb::after { content: '▼'; background: var(--net-down); }
@@ -81,7 +81,7 @@
 .net-caption {
   position: absolute; z-index: 400; left: 14px; top: 12px; max-width: min(520px, calc(100% - 28px));
   display: grid; gap: 2px; padding: 8px 12px; border: 1px solid #ffffff22; border-radius: 10px;
-  background: #0b1a20e0; box-shadow: 0 8px 22px #0006; pointer-events: none; animation: net-in .2s ease-out;
+  background: #0e1433e6; box-shadow: 0 8px 22px #0006; pointer-events: none; animation: net-in .2s ease-out;
 }
 .net-caption[hidden] { display: none; }
 .net-caption strong { font-size: 14px; }
@@ -90,20 +90,20 @@
 .net-key { display: inline-flex; align-items: center; gap: 6px; text-shadow: 0 1px 2px #000; }
 .net-key::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px #ffffff45; }
 .net-key.same::before, .net-key.opposite::before { width: 18px; height: 0; border-radius: 0; background: none; box-shadow: none; }
-.net-key.same::before { border-top: 2px solid #d6e8e2; }
+.net-key.same::before { border-top: 2px solid #d6def8; }
 .net-key.opposite::before { border-top: 2px dashed var(--net-down); }
 .net-key.pulse::before { background: var(--net-up); box-shadow: 0 0 8px var(--net-up); }
 .net-hint { position: absolute; z-index: 400; right: 14px; top: 12px; margin: 0; font-size: 12.5px; color: var(--net-muted); pointer-events: none; text-shadow: 0 1px 2px #000; }
 .net-announce { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Side panel: what just happened, or the links of the chosen variable. */
-.net-side { min-height: 0; overflow: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 14px; padding: 12px; border-left: 1px solid var(--net-line); background: #0a171c73; scrollbar-width: thin; }
+.net-side { min-height: 0; overflow: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 14px; padding: 12px; border-left: 1px solid var(--net-line); background: #0c1130a6; scrollbar-width: thin; }
 .net-side [hidden] { display: none; }
 .net-side h3 { margin: 0 0 8px; font-size: 14px; font-weight: 750; color: var(--c-accent); }
 .net-feed ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .net-event { width: 100%; min-height: 46px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0; padding: 6px 10px; border: 1px solid #ffffff14; border-radius: 10px; background: #ffffff0a; color: var(--net-text); font: inherit; text-align: left; cursor: pointer; }
 .net-event:hover { background: #ffffff14; border-color: color-mix(in srgb, var(--c) 60%, transparent); }
-.net-event-icon { display: grid; place-items: center; width: 30px; height: 30px; padding: 6px; border-radius: 50%; background: color-mix(in srgb, var(--c) 34%, #10242b); color: #fff; }
+.net-event-icon { display: grid; place-items: center; width: 30px; height: 30px; padding: 6px; border-radius: 50%; background: color-mix(in srgb, var(--c) 34%, #141a3c); color: #fff; }
 .net-event-text { font-size: 13.5px; line-height: 1.35; }
 .net-event-day { font-size: 12px; color: var(--net-muted); white-space: nowrap; }
 .net-empty { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--net-muted); }
@@ -131,7 +131,7 @@
 .net-links .net-chip { justify-self: start; }
 .net-why { grid-column: 2; margin: 0; font-size: 13.5px; line-height: 1.4; color: var(--net-muted); }
 .net-sign { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; font-size: 14px; font-weight: 800; }
-.net-sign.same { background: #d6e8e221; color: #e6f0eb; }
+.net-sign.same { background: #d6def821; color: #e9ecfb; }
 .net-sign.opposite { background: #ff8f7f2b; color: var(--net-down); }
 .net-table summary { min-height: 44px; display: flex; align-items: center; font-size: 13.5px; color: var(--net-muted); cursor: pointer; }
 .net-table table { width: 100%; border-collapse: collapse; font-size: 12.5px; }

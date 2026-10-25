@@ -4,7 +4,7 @@
 #entity-explanation-host p,#entity-explanation-host li,#entity-explanation-host summary{font-size:calc(14 * var(--entity-unit));line-height:1.6;overflow-wrap:anywhere;color:var(--cream)}
 #entity-explanation-host .entity-explain-note{font-size:calc(12 * var(--entity-unit));line-height:1.55;color:var(--muted);margin:calc(7 * var(--entity-unit)) 0}
 #entity-explanation-host .entity-explain-stamp{font-size:calc(14 * var(--entity-unit));line-height:1.55;color:var(--muted);margin:calc(7 * var(--entity-unit)) 0}
-#entity-explanation-host .entity-explain-controls{position:sticky;top:0;z-index:2;display:flex;align-items:flex-start;justify-content:space-between;gap:calc(8 * var(--entity-unit));flex-wrap:wrap;padding:calc(7 * var(--entity-unit)) 0;background:#11242b}
+#entity-explanation-host .entity-explain-controls{position:sticky;top:0;z-index:2;display:flex;align-items:flex-start;justify-content:space-between;gap:calc(8 * var(--entity-unit));flex-wrap:wrap;padding:calc(7 * var(--entity-unit)) 0;background:#162038}
 #entity-explanation-host .entity-explain-mode{color:var(--amber);margin:0;font-size:calc(13 * var(--entity-unit))}
 #entity-explanation-host .entity-explain-actions{display:flex;flex-wrap:wrap;gap:calc(6 * var(--entity-unit))}
 #entity-explanation-host button{min-height:calc(44 * var(--entity-unit));min-width:calc(44 * var(--entity-unit));max-width:100%;font-size:calc(14 * var(--entity-unit));line-height:1.5;padding:calc(6 * var(--entity-unit)) calc(10 * var(--entity-unit));border:1px solid var(--line);background:#f3c46b12;color:var(--cream)}

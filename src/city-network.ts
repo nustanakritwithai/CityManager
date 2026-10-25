@@ -15,9 +15,9 @@ export type NetNode = { id: string; label: string; group: NetGroup; icon: string
 export type NetEdge = { from: string; to: string; sign: 1 | -1; why: string; stream?: string };
 
 export const GROUP_ORDER: readonly NetGroup[] = Object.freeze(['money', 'city', 'people', 'production']);
-/** Four groups so the colours stay apart for every pair (validated all-pairs on the network well). */
-export const GROUPS: Record<NetGroup, { label: string; slot: number }> = {
-  money: { label: 'เงิน', slot: 4 }, city: { label: 'เมืองและที่อยู่', slot: 1 }, people: { label: 'คนและงาน', slot: 5 }, production: { label: 'การผลิต', slot: 6 },
+/** Four groups whose colours stay apart for every pair, colour-blind included (validated all-pairs on the navy well #151c3a). */
+export const GROUPS: Record<NetGroup, { label: string; color: string }> = {
+  money: { label: 'เงิน', color: '#c98500' }, city: { label: 'เมืองและที่อยู่', color: '#17a2b8' }, people: { label: 'คนและงาน', color: '#e0607e' }, production: { label: 'การผลิต', color: '#8a7cf0' },
 };
 
 export const NODES: readonly NetNode[] = Object.freeze([
@@ -143,9 +143,13 @@ function noticeable(node: NetNode, before: number, after: number) {
   if (node.kind === 'stock') return Math.abs(delta) >= Math.max(4, Math.abs(before) * 0.1);
   return true;
 }
-export function networkChanges(before: NetValues, after: NetValues): Map<string, number> {
+/** `exact` lists variables right after an action, where any move is that action's doing and counts. */
+export function networkChanges(before: NetValues, after: NetValues, exact: ReadonlySet<string> = new Set()): Map<string, number> {
   const out = new Map<string, number>();
-  for (const n of NODES) { const a = before[n.id] ?? 0, b = after[n.id] ?? 0; if (noticeable(n, a, b)) out.set(n.id, b - a); }
+  for (const n of NODES) {
+    const a = before[n.id] ?? 0, b = after[n.id] ?? 0;
+    if (noticeable(n, a, b) || exact.has(n.id) && a !== b && n.kind !== 'flow') out.set(n.id, b - a);
+  }
   return out;
 }
 
@@ -227,6 +231,8 @@ export function whatIf(id: string, depth = 3): { pulses: NetPulse[]; reached: Ma
   }
   return { pulses, reached };
 }
+/** Variables one link downstream of the given ones. */
+export const downstream = (ids: readonly string[]) => new Set(EDGES.filter(e => ids.includes(e.from)).map(e => e.to));
 export const neighbours = (id: string) => ({ incoming: EDGES.filter(e => e.to === id), outgoing: EDGES.filter(e => e.from === id) });
 
 /** Value text for a node: money in baht, counts with their unit. */

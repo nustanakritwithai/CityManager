@@ -33,19 +33,19 @@ export function layoutNetwork(nodes: readonly LayoutNode[], edges: readonly Layo
     const f = p.map(() => ({ x: 0, y: 0, z: 0 }));
     for (let i = 0; i < p.length; i++) for (let j = i + 1; j < p.length; j++) {
       const dx = p[i].x - p[j].x, dy = p[i].y - p[j].y, dz = p[i].z - p[j].z, d2 = dx * dx + dy * dy + dz * dz + 1e-4, d = Math.sqrt(d2);
-      const push = 0.0105 / d2;
+      const push = 0.02 / d2;
       f[i].x += dx / d * push; f[i].y += dy / d * push; f[i].z += dz / d * push;
       f[j].x -= dx / d * push; f[j].y -= dy / d * push; f[j].z -= dz / d * push;
     }
     for (const [a, b] of links) {
       const dx = p[b].x - p[a].x, dy = p[b].y - p[a].y, dz = p[b].z - p[a].z, d = Math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-6;
-      const pull = (d - 0.5) * 0.035;
+      const pull = (d - 0.62) * 0.03;
       f[a].x += dx / d * pull; f[a].y += dy / d * pull; f[a].z += dz / d * pull;
       f[b].x -= dx / d * pull; f[b].y -= dy / d * pull; f[b].z -= dz / d * pull;
     }
     nodes.forEach((n, i) => {
       const a = anchor.get(n.group) ?? CORNERS[0];
-      f[i].x += (a.x * 0.72 - p[i].x) * 0.05; f[i].y += (a.y * 0.72 - p[i].y) * 0.05; f[i].z += (a.z * 0.72 - p[i].z) * 0.05;
+      f[i].x += (a.x * 0.8 - p[i].x) * 0.035; f[i].y += (a.y * 0.8 - p[i].y) * 0.035; f[i].z += (a.z * 0.8 - p[i].z) * 0.035;
     });
     for (let i = 0; i < p.length; i++) {
       const m = Math.hypot(f[i].x, f[i].y, f[i].z), k = m > heat ? heat / m : 1;

@@ -115,7 +115,7 @@ html[data-touch-ui=true] .atmosphere-menu {
   max-width: calc(260 * var(--reader-unit, 1px));
   padding: calc(5 * var(--reader-unit, 1px)) calc(9 * var(--reader-unit, 1px));
   border-radius: 8px;
-  background: rgba(17, 36, 43, .92);
+  background: rgba(22, 32, 56, .92);
   border: 1px solid #6fe08a88;
   color: var(--cream);
   font-size: calc(12 * var(--reader-unit, 1px));
@@ -141,7 +141,7 @@ html[data-touch-ui=true] .atmosphere-menu {
   gap: calc(5 * var(--reader-unit, 1px));
   padding: calc(3 * var(--reader-unit, 1px)) calc(8 * var(--reader-unit, 1px));
   border-radius: 999px;
-  background: rgba(17, 36, 43, .88);
+  background: rgba(22, 32, 56, .88);
   color: var(--cream);
   font-size: calc(11 * var(--reader-unit, 1px));
   font-weight: 600;

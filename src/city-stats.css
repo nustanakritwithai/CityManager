@@ -1,7 +1,7 @@
 /* City stats overlay: a wide sheet of frosted glass over the map, four columns of icon rows. */
 .city-stats {
   --u: var(--reader-unit, 1px);
-  --st-text: #f1f5ec; --st-muted: #b4c8c1; --st-faint: #93ada5; --st-line: #ffffff1f;
+  --st-text: #f1f5ec; --st-muted: #b5c3e0; --st-faint: #96a6c8; --st-line: #ffffff1f;
   --st-good: #74dba0; --st-warn: #f4c552; --st-bad: #ff8f7f; --st-money: var(--c-accent);
   --st-power: #ffd257; --st-water: #6cc6f0; --st-goods: #f0b45a;
   position: fixed; z-index: 60;
@@ -10,7 +10,7 @@
   max-height: calc(100dvh - 108 * var(--u) - 120px);
   display: flex; flex-direction: column;
   border: 1px solid #ffffff2e; border-radius: calc(14 * var(--u));
-  background: linear-gradient(180deg, #1a3038cc, #0d1d23d9);
+  background: linear-gradient(180deg, #1f2c47cc, #101a2fd9);
   backdrop-filter: blur(14px) saturate(1.25); -webkit-backdrop-filter: blur(14px) saturate(1.25);
   box-shadow: 0 24px 60px #0008, inset 0 1px 0 #ffffff22;
   color: var(--st-text);
@@ -24,7 +24,7 @@
 .st-close { margin: 0; min-width: calc(44 * var(--u)); min-height: calc(44 * var(--u)); border: 0; border-radius: calc(10 * var(--u)); background: transparent; color: var(--st-muted); font-size: calc(18 * var(--u)); cursor: pointer; }
 .st-close:hover { background: #ffffff14; color: var(--st-text); }
 .st-body { align-self: stretch; display: grid; grid-template-columns: 0.95fr 1.15fr 1.5fr 0.95fr; gap: calc(10 * var(--u)); padding: calc(12 * var(--u)); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.st-col { position: relative; min-width: 0; padding: calc(12 * var(--u)); border: 1px solid #ffffff14; border-radius: calc(10 * var(--u)); background: #0a171c66; }
+.st-col { position: relative; min-width: 0; padding: calc(12 * var(--u)); border: 1px solid #ffffff14; border-radius: calc(10 * var(--u)); background: #0c142766; }
 .st-col + .st-col::before {
   content: ''; position: absolute; left: calc(-10 * var(--u)); top: 50%; translate: -1px -50%;
   border: calc(6 * var(--u)) solid transparent; border-left-color: #ffffff55; border-right: 0;
@@ -34,13 +34,13 @@
 .st-subtitle.first { margin-top: 0; }
 .st-divider { height: 1px; margin: calc(8 * var(--u)) 0; background: var(--st-line); }
 .st-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: calc(10 * var(--u)); padding: calc(5 * var(--u)) 0; }
-.st-icon { display: grid; place-items: center; width: calc(30 * var(--u)); height: calc(30 * var(--u)); border-radius: calc(8 * var(--u)); background: #ffffff10; color: #d9e6df; flex: 0 0 auto; }
+.st-icon { display: grid; place-items: center; width: calc(30 * var(--u)); height: calc(30 * var(--u)); border-radius: calc(8 * var(--u)); background: #ffffff10; color: #d6e3fc; flex: 0 0 auto; }
 .st-icon svg { width: 72%; height: 72%; display: block; }
 .st-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: calc(8 * var(--u)); }
 .st-label { font-size: calc(14 * var(--u)); color: var(--st-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-value { font-size: calc(15 * var(--u)); font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .st-sub { display: block; font-size: calc(12.5 * var(--u)); color: var(--st-faint); margin-top: 1px; }
-.st-bar { display: block; height: calc(4 * var(--u)); margin-top: calc(4 * var(--u)); border-radius: 2px; background: linear-gradient(90deg, var(--bar, #9fc7b8) calc(var(--share) * 100%), #ffffff16 0); }
+.st-bar { display: block; height: calc(4 * var(--u)); margin-top: calc(4 * var(--u)); border-radius: 2px; background: linear-gradient(90deg, var(--bar, #a3bcf2) calc(var(--share) * 100%), #ffffff16 0); }
 .st-bar.good { --bar: var(--st-good); } .st-bar.bad { --bar: var(--st-bad); } .st-bar.power { --bar: var(--st-power); } .st-bar.water { --bar: var(--st-water); }
 .st-icon.power { color: var(--st-power); background: #ffd2571c; } .st-icon.water { color: var(--st-water); background: #6cc6f01c; }
 .st-icon.money { color: var(--st-money); background: #f3c46b1c; } .st-icon.good { color: var(--st-good); } .st-icon.warn { color: var(--st-warn); } .st-icon.bad { color: var(--st-bad); background: #ff8f7f1a; }
@@ -76,4 +76,4 @@
   .st-col::before { display: none; }
 }
 html #toggle-stats::after { content: 'สถิติ'; }
-@media (max-width: 700px) { .city-stats { background: linear-gradient(180deg, #1a3038f5, #0d1d23fa); } }
+@media (max-width: 700px) { .city-stats { background: linear-gradient(180deg, #1f2c47f5, #101a2ffa); } }

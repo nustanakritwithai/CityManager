@@ -19,7 +19,7 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
   ctx.fillStyle = '#6f9a62'; ctx.fillRect(0, 0, size, size);
   for (let i = 0; i < city.cells.length; i++) {
     const c = city.cells[i], x = (i % SIZE) * cell, y = Math.floor(i / SIZE) * cell;
-    if (c.road) { ctx.fillStyle = i === GATEWAY ? '#f3c46b' : '#55636a'; ctx.fillRect(x, y, cell, cell); continue; }
+    if (c.road) { ctx.fillStyle = i === GATEWAY ? '#f3c46b' : '#556078'; ctx.fillRect(x, y, cell, cell); continue; }
     if (!c.zone) continue;
     ctx.fillStyle = FILL[c.zone]; ctx.fillRect(x + .5, y + .5, cell - 1, cell - 1);
     if (c.building !== null) {
@@ -52,7 +52,7 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     ctx.font = `600 ${Math.max(10, cell * .42)}px "IBM Plex Sans Thai", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const label = (text: string, i: number) => {
       const x = (i % SIZE + .5) * cell, y = (Math.floor(i / SIZE) + .5) * cell - cell * .75;
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(12,28,33,.85)'; ctx.strokeText(text, x, y); ctx.fillStyle = '#f4f8f2'; ctx.fillText(text, x, y);
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(15, 25, 46,.85)'; ctx.strokeText(text, x, y); ctx.fillStyle = '#f4f8f2'; ctx.fillText(text, x, y);
     };
     for (const f of city.firms) {
       const b = city.buildings.find(v => v.id === f.building); if (!b) continue;
