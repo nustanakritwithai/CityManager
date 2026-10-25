@@ -31,6 +31,7 @@ import { OverviewDashboard } from './overview-panels.ts';
 import { CityStatsPanel } from './city-stats-panel.ts';
 import { decoratePanels, watchPanels } from './panel-decor.ts';
 import { installHudIcons } from './hud-icons.ts';
+import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
@@ -343,7 +344,7 @@ async function boot() {
   });
   cityStatsPanel = new CityStatsPanel(open => { $('#toggle-stats').setAttribute('aria-expanded', String(open)); if (open) render(); });
   $('#toggle-stats').addEventListener('click', () => cityStatsPanel!.toggle());
-  installHudIcons();
+  installHudIcons(); installSheetHandle($('#inspector'));
   watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
@@ -394,7 +395,10 @@ async function boot() {
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
   mapMarkers = new MapMarkers(view);
   dashboard = new OverviewDashboard($('#city-dashboard'));
-  cityHud = new CityHud((cell, buildingId) => { view.focus(cell); openRoute({ page: 'place', cell, buildingId }); });
+  cityHud = new CityHud((cell, buildingId) => { view.focus(cell); openRoute({ page: 'place', cell, buildingId }); }, () => {
+    openRoute({ page: 'city' });
+    const issues = document.querySelector<HTMLDetailsElement>('#issue-section'); if (issues) { issues.open = true; issues.scrollIntoView({ block: 'start' }); }
+  });
   atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   const visual = atmosphere;
   view.app.on('update', (dt: number) => {

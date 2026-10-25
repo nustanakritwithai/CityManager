@@ -68,7 +68,7 @@ npm run test:building-cards
 
 ฉากมีเวลาในวัน เงา ไฟกลางคืนเฉพาะอาคารที่มีคนอยู่หรือมีแรงงาน ฤดูกาลตามเดือนในเกม และฝนแบบตกแต่ง ทั้งหมดเป็นภาพเท่านั้น ไม่มีผลต่อการจำลองหรือเซฟ ตั้งค่าได้จากปุ่มนาฬิกาในแถบเวลา: [บรรยากาศ](docs/ATMOSPHERE.md)
 
-โมเดลเมืองและไอคอนใช้ Kenney CC0 พร้อมรูปทรงและพื้นดินที่สร้างเอง มี procedural fallback เมื่อโหลดโมเดลไม่ได้: [Assets](docs/ASSETS.md), [GUI assets](docs/GUI-ASSETS.md), [Terrain](docs/TERRAIN.md) ขอบเขตเดิมอ่านได้ที่ [Design](docs/DESIGN.md) และ [แผนภาษาไทย](docs/PLAN.th.md); สถานะเฉพาะรุ่นให้ยึดเอกสารรุ่นและ PR ล่าสุด
+โมเดลเมืองและไอคอนใช้ Kenney CC0 พร้อมรูปทรงและพื้นดินที่สร้างเอง ฟอนต์ IBM Plex Sans Thai (OFL 1.1) ฝังมากับเกม ดูหลักการแผงข้อมูลที่ [Panels](docs/PANELS.th.md) มี procedural fallback เมื่อโหลดโมเดลไม่ได้: [Assets](docs/ASSETS.md), [GUI assets](docs/GUI-ASSETS.md), [Terrain](docs/TERRAIN.md) ขอบเขตเดิมอ่านได้ที่ [Design](docs/DESIGN.md) และ [แผนภาษาไทย](docs/PLAN.th.md); สถานะเฉพาะรุ่นให้ยึดเอกสารรุ่นและ PR ล่าสุด
 
 ## เผยแพร่
 

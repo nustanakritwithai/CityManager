@@ -21,7 +21,7 @@ const METRIC_ICONS: readonly [RegExp, string][] = [
 ];
 export function metricIcon(key: string): string | null { return METRIC_ICONS.find(([pattern]) => pattern.test(key))?.[1] ?? null; }
 
-const NOTES = '.dash-flow-list, .cx-detail-note, .cx-account-note, .sm-footnote, .parcel-note, .dash-note-line, .st-note, .cx-flow-meta';
+const NOTES = '.dash-flow-list, .signal-note, .cx-detail-note, .cx-account-note, .sm-footnote, .parcel-note, .dash-note-line, .st-note, .cx-flow-meta';
 const HOSTS = '.cx-section, .bc-section, .st-col, .dash-card, .parcel-checklist, .growth-section, details, section';
 const openInfo = new Set<string>();
 

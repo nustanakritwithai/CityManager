@@ -170,6 +170,25 @@ function updateWallets() {
 function replaceDetailsBody(id: string, content: HTMLElement) {
   const details = root(id), summary = Array.from(details.children).find(child => child.tagName === 'SUMMARY'); if (!summary) throw new Error(`Missing summary in #${id}`); details.replaceChildren(summary, content);
 }
+const SHORTCUTS: readonly [string, string, string][] = [
+  ['V', 'cursor', 'เลือก'], ['R', 'road', 'ถนน'], ['1', 'R', 'บ้าน'], ['2', 'shop', 'พาณิชย์'], ['3', 'I', 'โรงงาน'], ['4', 'F', 'ฟาร์ม'],
+  ['B', 'bulldoze', 'รื้อ'], ['P', 'move', 'เลื่อน'], ['Space', 'clock', 'หยุด/เล่น'], ['T', 'chart', 'สถิติเมือง'], ['Q / E', 'gear', 'หมุนกล้อง'], ['Esc', 'link', 'ยกเลิก/ย้อน'],
+];
+function shortcutTable(): HTMLElement {
+  const box = element('section', 'sm-shortcuts'), grid = element('div', 'sm-shortcut-grid'); box.append(element('h4', '', 'ปุ่มลัด'));
+  for (const [key, icon, label] of SHORTCUTS) { const cell = element('div', 'sm-shortcut'); cell.append(iconElement(icon, 'ui-icon'), element('kbd', '', key), element('span', '', label)); grid.append(cell); }
+  box.append(grid); return box;
+}
+const LEGEND: readonly [string, string, string][] = [
+  ['R', 'zone-R', 'บ้าน'], ['shop', 'zone-shop', 'พาณิชย์/ร้าน'], ['market', 'zone-market', 'ตลาดพืชผล'], ['I', 'zone-I', 'โรงงาน'], ['F', 'zone-F', 'ฟาร์ม'],
+  ['person', 'legend-work', 'ทำงาน'], ['person', 'legend-idle', 'ว่างงาน'], ['person', 'legend-dep', 'ผู้พึ่งพิง'],
+  ['import', 'legend-good', 'เงินเข้า'], ['export', 'legend-bad', 'เงินออก'], ['shield', 'legend-good', 'ผ่านเงื่อนไข'], ['info', 'legend-warn', 'ยังติดเงื่อนไข'],
+];
+function colourLegend(): HTMLElement {
+  const box = element('section', 'sm-legend'), grid = element('div', 'sm-legend-grid'); box.append(element('h4', '', 'สีและไอคอน'));
+  for (const [icon, tone, label] of LEGEND) { const cell = element('div', `sm-legend-item ${tone}`); cell.append(iconElement(icon, 'ui-icon'), element('span', '', label)); grid.append(cell); }
+  box.append(grid); return box;
+}
 function setupGuide() {
   const content = element('div', 'sm-content sm-guide'), steps = element('div', 'sm-steps');
   content.append(intro('road', 'สร้างเมืองทีละขั้น', 'วางถนนและโซน แล้วให้ครัวเรือนกับบริษัทตัดสินใจภายใต้กติกาจำลอง'));
@@ -183,7 +202,7 @@ function setupGuide() {
     const card = element('article', 'sm-step'), art = element('div', 'sm-step-art'), body = element('div', 'sm-step-body'), keys = element('div', 'sm-keycaps'); art.append(svg(definition.art), element('span', 'sm-step-index', String(i + 1)));
     definition.keys.forEach(key => keys.append(element('kbd', '', key))); body.append(element('h4', '', definition.title), element('p', '', definition.text), keys); card.append(art, body); steps.append(card);
   });
-  content.append(steps, element('p', 'sm-footnote', 'ปุ่มกลับ / Esc ยกเลิกจุดเริ่มถนนก่อน กดอีกครั้งจึงกลับเครื่องมือเลือก การดูบัญชีหรือเปลี่ยนมุมมองไม่เปลี่ยนยอดเงินในเมือง'));
+  content.append(steps, shortcutTable(), colourLegend(), element('p', 'sm-footnote', 'ปุ่มกลับ / Esc ยกเลิกจุดเริ่มถนนก่อน กดอีกครั้งจึงกลับเครื่องมือเลือก การดูบัญชีหรือเปลี่ยนมุมมองไม่เปลี่ยนยอดเงินในเมือง'));
   replaceDetailsBody('guide', content);
 }
 function ruleCard(icon: string, title: string, text: string, id?: string): HTMLElement {
