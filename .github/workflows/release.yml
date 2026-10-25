@@ -1,0 +1,36 @@
+name: Release
+
+# Run by hand once a version is merged: tags main and publishes the CHANGELOG section as a GitHub Release.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version in package.json and CHANGELOG.md, e.g. 1.0.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and publish release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check the version and extract its notes
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Version must look like 1.2.3"; exit 1; }
+          [ "$(node -p "require('./package.json').version")" = "$VERSION" ] || { echo "package.json is not $VERSION"; exit 1; }
+          awk -v v="$VERSION" '$0 ~ "^## " v "( |$)" {on=1; next} /^## / && on {exit} on {print}' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md has no ## $VERSION section"; exit 1; }
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: gh release create "v$VERSION" --target "$GITHUB_SHA" --title "CityManager $VERSION" --notes-file notes.md --latest
