@@ -24,7 +24,7 @@
 
 ## Journal และ replay
 
-Canonical city/save ยังคง **v6 / growth-1** โดยไม่เพิ่มฟิลด์ decision ลงใน City ประวัติเป็น sidecar ของ session ผู้เล่นส่งออกไฟล์ได้จากแผงเจ้าของตลาด ไฟล์ประกอบมี snapshot เมืองสำหรับ replay ในเครื่อง
+Canonical city/save เป็น **v7 / chain-2** (เดิม v6 / growth-1 ก่อนฟาร์มขยายระดับและร้านค้าของครัวเรือน) ข้อเสนอยังครอบคลุมเฉพาะเจ้าของตลาด journal รุ่น growth-1 เดิม replay ไม่ได้เพราะกติกาเปลี่ยน โดยไม่เพิ่มฟิลด์ decision ลงใน City ประวัติเป็น sidecar ของ session ผู้เล่นส่งออกไฟล์ได้จากแผงเจ้าของตลาด ไฟล์ประกอบมี snapshot เมืองสำหรับ replay ในเครื่อง
 
 Journal เก็บ actor, policy/rules version, snapshot/state fingerprints, คำสั่งตามลำดับ ผล validation และผลทำรายการ ช่วง tick ที่ต่อเนื่องกันรวมได้ไม่เกิน 30 วัน ก่อนตัดสินใจจะจำลองช่วงนั้นซ้ำจาก boundary และเทียบสถานะจริง
 

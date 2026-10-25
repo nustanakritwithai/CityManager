@@ -27,7 +27,7 @@ type Checkpoint = {
 };
 type RetiredCoverage = { fromTick: number; toTick: number; fromSequence: number; toSequence: number; eventCount: number; finalHash: string; reason: string };
 export type OwnerJournal = {
-  schemaVersion: 1; policyVersion: typeof OWNER_POLICY_VERSION; rulesVersion: 'growth-1';
+  schemaVersion: 1; policyVersion: typeof OWNER_POLICY_VERSION; rulesVersion: 'chain-2';
   retention: { maxEvents: number; maxBytes: number; maxRetiredSummaries: 8 };
   checkpoint: Checkpoint; events: OwnerJournalEvent[]; retired: RetiredCoverage[];
   stats: OwnerDecisionStats; mode: OwnerDecisionMode; finalTick: number; finalHash: string; journalHash: string;
@@ -280,7 +280,7 @@ export class OwnerDecisionSession {
   }
   exportJournal(): OwnerJournal {
     if (!this.prepare(this.city, 'export-boundary') || !this.checkpoint) throw new Error('Owner journal checkpoint unavailable.');
-    const body = { schemaVersion: 1 as const, policyVersion: OWNER_POLICY_VERSION, rulesVersion: 'growth-1' as const,
+    const body = { schemaVersion: 1 as const, policyVersion: OWNER_POLICY_VERSION, rulesVersion: 'chain-2' as const,
       retention: { maxEvents: this.maxEvents, maxBytes: MAX_JOURNAL_BYTES, maxRetiredSummaries: 8 as const }, checkpoint: this.checkpoint,
       events: this.events, retired: this.retired, stats: this.stats, mode: this.selectedMode, finalTick: this.expectedTick, finalHash: this.expectedHash };
     if (bytes(body) > MAX_JOURNAL_BYTES) throw new Error('Owner journal capacity exceeded.');
@@ -297,7 +297,7 @@ export function replayOwnerJournal(input: unknown): OwnerReplayResult {
     if (!exact(input, ['schemaVersion', 'policyVersion', 'rulesVersion', 'retention', 'checkpoint', 'events', 'retired', 'stats', 'mode', 'finalTick', 'finalHash', 'journalHash']) || bytes(input) > MAX_JOURNAL_BYTES) throw new Error();
     const journal = clone(input) as OwnerJournal;
     const { journalHash, ...body } = journal;
-    if (journal.schemaVersion !== 1 || journal.policyVersion !== OWNER_POLICY_VERSION || journal.rulesVersion !== 'growth-1' || journalHash !== digest(JSON.stringify(body))) throw new Error();
+    if (journal.schemaVersion !== 1 || journal.policyVersion !== OWNER_POLICY_VERSION || journal.rulesVersion !== 'chain-2' || journalHash !== digest(JSON.stringify(body))) throw new Error();
     if (!exact(journal.retention, ['maxEvents', 'maxBytes', 'maxRetiredSummaries']) || !integer(journal.retention.maxEvents) || journal.retention.maxEvents < 4 || journal.retention.maxEvents > 256 || journal.retention.maxBytes !== MAX_JOURNAL_BYTES || journal.retention.maxRetiredSummaries !== 8) throw new Error();
     const cp = journal.checkpoint;
     if (!exact(cp, ['sequence', 'tick', 'state', 'stateHash', 'mode', 'lastMonthlyTick', 'processedIds', 'stats', 'reason']) || !integer(cp.sequence) || !integer(cp.tick) || !integer(cp.lastMonthlyTick) || cp.lastMonthlyTick > cp.tick || !modes.includes(cp.mode) || typeof cp.reason !== 'string' || cp.reason.length > 64 || typeof cp.state !== 'string' || cp.state.length > 12_000_000 || !Array.isArray(cp.processedIds) || cp.processedIds.length > 4096 || cp.processedIds.some(id => typeof id !== 'string' || id.length > 512) || new Set(cp.processedIds).size !== cp.processedIds.length) throw new Error();

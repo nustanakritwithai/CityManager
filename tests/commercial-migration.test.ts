@@ -28,7 +28,7 @@ test('v4 T market becomes commercial L1 without changing any economic or labor f
   assert.equal(legacy.withdrawOwnerProfit(old, owner.id, 10000).ok, true);
   assert.equal(legacy.contributeOwnerCapital(old, owner.id, 10000).ok, true);
   const raw = legacy.serialize(old), city = deserialize(raw);
-  assert.equal(city.version, 6); assert.equal(city.rulesVersion, 'growth-1');
+  assert.equal(city.version, 7); assert.equal(city.rulesVersion, 'chain-2');
   assert.deepEqual(preserved(city), preserved(old));
   for (const f of old.firms) {
     const current = city.firms.find(n => n.id === f.id)!;
@@ -86,16 +86,18 @@ test('strict v4 validation precedes migration and rejects forged stock, owner ca
   assert.throws(() => deserialize(JSON.stringify({ version: 7 })), /corrupt/);
 });
 
-test('fresh commercial zoning builds owner-funded L1 markets, then outside-funded shops once a factory works; markets never auto-upgrade', () => {
+test('fresh commercial zoning builds owner-funded L1 markets, then shops once a factory works; markets never auto-upgrade', () => {
   const city = createCity(), before = serialize(city);
   assert.equal(zoneCell(city, 0, 'T' as never).ok, false); assert.equal(serialize(city), before);
   for (let i = 0; i < 180; i++) { step(city); loaded(city); }
   const markets = city.firms.filter(isMarket);
   assert.ok(markets.length > 0); assert.ok(city.firms.filter(f => f.zone === 'C').every(f => isMarket(f) || isRetail(f)));
-  // Shops close the goods chain: L2, no owner, outside equity, and only once a factory has workers.
+  // Shops close the goods chain: L2+, opened once a factory has workers, funded by a saving household that works the counter or else by outside equity.
   const shops = city.firms.filter(isRetail);
-  assert.ok(shops.every(f => city.buildings.find(b => b.id === f.building)!.level >= 2 && f.owner === null));
-  assert.ok(shops.every(f => city.ledger.some(e => e.from === 'outside' && e.to === f.wallet && e.reason === 'Outside firm equity investment')));
+  assert.ok(shops.every(f => city.buildings.find(b => b.id === f.building)!.level >= 2));
+  assert.ok(shops.every(f => f.owner
+    ? city.ledger.some(e => e.from === `household:${f.owner!.householdId}` && e.to === f.wallet && e.reason === 'Owner capital contribution' && e.amount === 60_000) && city.ownerLabor.some(e => e.firmId === f.id)
+    : city.ledger.some(e => e.from === 'outside' && e.to === f.wallet && e.reason === 'Outside firm equity investment')));
   if (shops.length) assert.ok(city.goodsLedger.some(e => e.reason === 'Household final consumption' && shops.some(f => f.wallet === e.from)));
   assert.ok(city.buildings.every(b => b.zone !== ('T' as never)) && city.cells.every(b => b.zone !== ('T' as never)));
   assert.ok(markets.every(f => city.buildings.find(b => b.id === f.building)!.level === 1 && f.owner !== null && Object.keys(f.workDays).length === 0));

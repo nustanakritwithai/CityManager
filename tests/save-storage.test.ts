@@ -9,7 +9,7 @@ function memory(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial)), writes: string[] = [];
   return { data, writes, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { writes.push(key); data.set(key, value); } };
 }
-const old = JSON.stringify({ version: 1, tick: 65 }), household = JSON.stringify({ version: 2, tick: 180 }), worker = JSON.stringify({ version: 3, tick: 180 }), agriculture = JSON.stringify({ version: 4, tick: 180 }), commercial = JSON.stringify({ version: 5, tick: 388 }), current = JSON.stringify({ version: 6, tick: 180 });
+const old = JSON.stringify({ version: 1, tick: 65 }), household = JSON.stringify({ version: 2, tick: 180 }), worker = JSON.stringify({ version: 3, tick: 180 }), agriculture = JSON.stringify({ version: 4, tick: 180 }), commercial = JSON.stringify({ version: 5, tick: 388 }), current = JSON.stringify({ version: 7, tick: 180 });
 test('read v6, then v5/v4/v3/v2/v1 and explicit old sources without changing storage', () => {
   const s = memory({ [LEGACY_SAVE_KEY]: old }); assert.deepEqual(readStoredCity(s), { raw: old, key: LEGACY_SAVE_KEY });
   s.data.set(HOUSEHOLD_SAVE_KEY, household); assert.deepEqual(readStoredCity(s), { raw: household, key: HOUSEHOLD_SAVE_KEY });
@@ -50,7 +50,7 @@ test('backup quota failure prevents primary overwrite; failed primary retains a 
 });
 test('fresh saves add no legacy data; bad versions and full backups preserve all bytes', () => {
   const s = memory(); saveStoredCity(s, current, null); assert.deepEqual(s.writes, [SAVE_KEY]);
-  for (const raw of [old, household, worker, agriculture, commercial, '{broken', JSON.stringify({ version: 7 })]) assert.throws(() => saveStoredCity(s, raw, null));
+  for (const raw of [old, household, worker, agriculture, commercial, JSON.stringify({ version: 6, tick: 1 }), '{broken', JSON.stringify({ version: 8 })]) assert.throws(() => saveStoredCity(s, raw, null));
   for (const raw of [current, '{broken', JSON.stringify({ version: 0 })]) assert.throws(() => saveStoredCity(s, current, raw));
   for (let i = 0; i < 8; i++) s.data.set(i ? `${LEGACY_BACKUP_KEY}.${i}` : LEGACY_BACKUP_KEY, JSON.stringify({ version: 1, tick: i }));
   const before = [...s.data]; assert.throws(() => saveStoredCity(s, current, old), /full/); assert.deepEqual([...s.data], before);
@@ -185,7 +185,7 @@ test('frozen v3 reader rejects corrupt old skills, claims, journals, capacities 
 
 
 test('v4 agriculture originals, bounded immutable backups and v6 primary remain distinct through repeated saves', () => {
-  assert.equal(SAVE_KEY, 'citymanager.save.v6'); assert.equal(AGRICULTURE_SAVE_KEY, 'citymanager.save.v4');
+  assert.equal(SAVE_KEY, 'citymanager.save.v7'); assert.equal(AGRICULTURE_SAVE_KEY, 'citymanager.save.v4');
   const s = memory({ [AGRICULTURE_SAVE_KEY]: agriculture, [WORKER_SAVE_KEY]: worker });
   assert.deepEqual(saveStoredCity(s, current, agriculture), { backup: AGRICULTURE_BACKUP_KEY });
   assert.equal(s.data.get(AGRICULTURE_SAVE_KEY), agriculture); assert.equal(s.data.get(AGRICULTURE_BACKUP_KEY), agriculture);

@@ -47,7 +47,8 @@ test('fresh deterministic cities pass initial tier population/job capacity witho
   for (const seed of [61025, 20261023]) {
     const c = createCity(seed), twin = createCity(seed); let firstExpansion = 0;
     for (let day = 1; day <= 388; day++) { step(c); step(twin); if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day; if (day % 30 === 0) conservation(c); }
-    assert.ok(firstExpansion > 120 && firstExpansion < 300); assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8); assert.deepEqual(c, twin);
+    // Levelled farms add crop jobs that fill before a factory sponsors expansion, so chain-2 expands a little later than growth-1 (294).
+    assert.ok(firstExpansion > 120 && firstExpansion < 330, String(firstExpansion)); assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8); assert.deepEqual(c, twin);
     for (const f of c.firms.filter(f => f.fundedBy)) { const capital = c.ledger.find(e => e.reason === `Industry expansion capital #${f.id}`)!; assert.equal(c.ledger.some(e => e.to === f.wallet && e.from === 'outside' && e.tick === capital.tick), false); }
     for (const h of c.households.filter(h => h.origin === 'arrival')) assert.equal(c.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1);
     conservation(c);
@@ -107,5 +108,5 @@ test('v5 bytes remain immutable through v6 repeated loading/saving and quota fai
   const migrated = deserialize(item.raw); saveStoredCity(store, serialize(migrated), item.raw); assert.equal(map.get(COMMERCIAL_SAVE_KEY), oldRaw); assert.equal(map.get(COMMERCIAL_BACKUP_KEY), oldRaw);
   const count = map.size; saveStoredCity(store, serialize(deserialize(readStoredCity(store)!.raw)), oldRaw); assert.equal(map.size, count); assert.equal(map.get(COMMERCIAL_BACKUP_KEY), oldRaw);
   const saved = map.get(SAVE_KEY); assert.throws(() => saveStoredCity({ ...store, setItem: (k: string, v: string) => { if (k === SAVE_KEY) throw Error('quota'); store.setItem(k, v); } }, serialize(migrated), oldRaw)); assert.equal(map.get(SAVE_KEY), saved);
-  const v4 = agricultureCity(61025); for (let n = 0; n < 90; n++) agricultureStep(v4); const loaded = deserialize(agricultureSerialize(v4)); assert.equal(loaded.version, 6); assert.equal(loaded.tick, 90); assert.deepEqual(loaded.accounts, v4.accounts); conservation(loaded);
+  const v4 = agricultureCity(61025); for (let n = 0; n < 90; n++) agricultureStep(v4); const loaded = deserialize(agricultureSerialize(v4)); assert.equal(loaded.version, 7); assert.equal(loaded.tick, 90); assert.deepEqual(loaded.accounts, v4.accounts); conservation(loaded);
 });
