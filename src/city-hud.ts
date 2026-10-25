@@ -2,6 +2,9 @@ import { MONTH, summary, type City } from './sim.ts';
 import { cityOverview } from './context-data.ts';
 import { appendEvent, type CityEvent } from './event-text.ts';
 import { buildingIssues } from './map-overlay.ts';
+import { iconElement } from './ui-icons.ts';
+
+const KPI_ICONS: Record<string, string> = { treasury: 'coin', people: 'people', jobs: 'worker', utilities: 'power', warnings: 'info' };
 
 const money = (satang: number) => '฿' + (satang / 100).toLocaleString('th-TH', { maximumFractionDigits: 0 });
 const signed = (satang: number) => (satang > 0 ? '+' : satang < 0 ? '−' : '±') + money(Math.abs(satang));
@@ -65,6 +68,7 @@ export class CityHud {
   private item(key: string, label: string, value: string, note: string, tone = '') {
     const node = document.createElement('div'); node.className = `kpi ${tone}`; node.dataset.kpi = key;
     const title = document.createElement('span'); title.className = 'kpi-label'; title.textContent = label;
+    if (KPI_ICONS[key]) title.prepend(iconElement(KPI_ICONS[key], 'ui-icon kpi-icon'));
     const strong = document.createElement('strong'); strong.textContent = value;
     const small = document.createElement('small'); small.textContent = note;
     node.append(title, strong, small);
@@ -75,9 +79,12 @@ export class CityHud {
   private month(untilPay: number, paused: boolean) {
     const node = document.createElement('div'); node.className = 'kpi kpi-month'; node.dataset.kpi = 'month';
     const title = document.createElement('span'); title.className = 'kpi-label'; title.textContent = paused ? '⏸ หยุดอยู่' : 'ชำระรายเดือน';
-    const bar = document.createElement('span'); bar.className = 'kpi-progress'; bar.style.setProperty('--progress', String((MONTH - untilPay) / MONTH));
+    const progress = (MONTH - untilPay) / MONTH, bar = document.createElement('span'); bar.className = 'kpi-progress'; bar.style.setProperty('--progress', String(progress));
+    // The month as a ring: the arc fills toward the monthly settlement.
+    const ring = document.createElement('span'); ring.className = 'kpi-ring'; ring.setAttribute('aria-hidden', 'true');
+    ring.innerHTML = `<svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15"/><circle class="arc" cx="18" cy="18" r="15" pathLength="100" stroke-dasharray="${(progress * 100).toFixed(1)} 100"/><text x="18" y="22.5" text-anchor="middle">${untilPay}</text></svg>`;
     const small = document.createElement('small'); small.textContent = `อีก ${untilPay} วัน`;
-    node.append(title, bar, small); return node;
+    node.append(ring, title, bar, small); return node;
   }
 
   private renderIssues(city: City, issues: ReturnType<typeof buildingIssues>) {

@@ -36,6 +36,7 @@ import { recordDemand, demandSparkline } from './demand-history.ts';
 import { Coach } from './onboarding.ts';
 import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
+import './hud.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -69,7 +70,14 @@ const help: Record<string, string> = {
   bulldoze: 'แตะถนนหรืออาคารเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้',
   pan: 'ลากเพื่อเลื่อน · สองนิ้วเลื่อน/ซูม · ลากปุ่มขวาเพื่อหมุน'
 };
-function status(message: string) { const text = thaiMessage(message); $('#status').textContent = text; $('#inspector-status').textContent = text; }
+const WARN_TEXT = /ไม่พอ|ไม่ได้|ต้อง|ขวาง|ไม่ถูกต้อง|นอกแผนที่|ยังไม่เชื่อม|ไม่มีอยู่แล้ว|ไม่พบ/;
+function status(message: string) {
+  const text = thaiMessage(message), chip = $('#status'), changed = chip.textContent !== text;
+  chip.textContent = text; $('#inspector-status').textContent = text;
+  // Tone and a short pop make each result read as a toast; the words stay the same.
+  chip.dataset.tone = WARN_TEXT.test(text) ? 'warn' : /แล้ว|เรียบร้อย|Saved/.test(text) ? 'good' : 'info';
+  if (changed && !matchMedia('(prefers-reduced-motion: reduce)').matches) chip.animate?.([{ opacity: .55 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
+}
 function farmHint(index: number | null): string {
   if (index === null) return help.F;
   const fertility = city.resources.fertility[index];
@@ -197,6 +205,9 @@ function renderPlace() {
   const household = city.households.find(h => h.id === householdId);
   const page = route?.page === 'city' || route?.page === 'help' || route?.page === 'game' || route?.page === 'signals' ? route.page : route ? 'entity' : 'none';
   $('#inspector').dataset.page = page; $('#inspector').dataset.back = String(route !== null);
+  // Header tint follows what is selected (visual only).
+  const firmHere = building && city.firms.find(f => f.building === building.id);
+  $('#inspector').dataset.kind = route?.page === 'household' ? 'household' : page !== 'entity' ? page : !cell ? 'none' : cell.road ? 'road' : !cell.zone ? 'land' : cell.zone === 'C' && firmHere && isMarket(firmHere) ? 'market' : cell.zone;
   $('#inspector').dataset.household = String(route?.page === 'household');
   $('#submenu-back').setAttribute('aria-label', route?.page === 'household' ? 'กลับอาคารต้นทาง' : 'ย้อนกลับ');
   for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = e.dataset.pageContent !== page;

@@ -31,3 +31,11 @@
 - หลังปรับ (ภาพรวมเมือง บ้าน ตลาด แปลงว่าง): [panels-after.jpg](visual-redesign-preview/panels-after.jpg)
 - แผงสถิติเมือง: [city-stats.jpg](visual-redesign-preview/city-stats.jpg)
 - ไอคอนแถบเครื่องมือและปุ่มด้านบน: [hud-icons.jpg](visual-redesign-preview/hud-icons.jpg)
+
+## HUD รอบสอง
+- พื้นผิวกระจกฝ้า (`backdrop-filter` เฉพาะคุณภาพกลาง/สูง), ปุ่มที่เลือกอยู่เรืองแสง, ปุ่มโซนเรืองตามสีโซน
+- แถบสรุปบนมีไอคอนทุกช่อง และวันชำระรายเดือนเป็นวงแหวน
+- ข้อความผลการกระทำเป็น toast มีจุดสีตามผล (ข้อมูล / สำเร็จ / ต้องแก้)
+- หัวแผงไล่สีตามสิ่งที่เลือก (บ้าน พาณิชย์ ตลาด โรงงาน ฟาร์ม ถนน ครัวเรือน เมือง ฯลฯ) และทุกหมวดมีไอคอนนำหน้า
+- เปลี่ยนเฉพาะสี เงา และความโปร่ง ไม่เปลี่ยนขนาดหรือตำแหน่ง (`src/hud.css`)
+- ภาพ: [hud-round2.jpg](visual-redesign-preview/hud-round2.jpg), [panels-round2.jpg](visual-redesign-preview/panels-round2.jpg)

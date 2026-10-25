@@ -201,7 +201,19 @@ function decorateWork(root: ParentNode) {
     if (host && heading) { detail.classList.add('info-note'); infoButton(host, heading, detail); }
   }
 }
-export function decoratePanels(root: ParentNode) { decorateFlow(root); decorateWork(root); decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); decorateChecklists(root); }
+const SECTION_ICONS: readonly [RegExp, string][] = [
+  [/ตรวจ/, 'info'], [/ยอดและจำนวน/, 'overview'], [/ที่พัก|ความจุ|พักอยู่/, 'household'], [/ทักษะ|ความสามารถ/, 'general'],
+  [/เพาะปลูก/, 'F'], [/เก็บเกี่ยว|พืชผล/, 'crop'], [/วัตถุดิบ|แปรรูป|ขยายโรงงาน/, 'gear'], [/สินค้า/, 'box'],
+  [/เจ้าของ/, 'market'], [/เงิน|ทุน|บัญชี|คลัง/, 'coin'], [/ครัวเรือน/, 'people'], [/สมาชิก|แรงงาน/, 'worker'],
+];
+/** Each section heading leads with an icon of what it is about. */
+function decorateSections(root: ParentNode) {
+  for (const h3 of root.querySelectorAll<HTMLElement>('.cx-section > .cx-section-head > h3, .cx-section > h3, .growth-section > h3')) {
+    if (h3.querySelector(':scope > .section-icon')) continue;
+    const name = SECTION_ICONS.find(([pattern]) => pattern.test(h3.textContent ?? ''))?.[1]; if (name) h3.prepend(iconElement(name, 'ui-icon section-icon'));
+  }
+}
+export function decoratePanels(root: ParentNode) { decorateSections(root); decorateFlow(root); decorateWork(root); decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); decorateChecklists(root); }
 
 /** Re-decorate whenever panel content is replaced; batched to one pass per frame. */
 export function watchPanels(...roots: (HTMLElement | null)[]) {
