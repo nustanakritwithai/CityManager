@@ -171,7 +171,7 @@ try {
   await send('Network.setCacheDisabled', { cacheDisabled: true });
   await send('Network.setBlockedURLs', { urls: ['*api.opentyphoon.ai*', '*/api/city-advisor/*', '*/chat/completions*'] });
   await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: output, eventsEnabled: true });
-  await send('Page.navigate', { url }); await until('!!window.cityManager'); await paints();
+  await send('Page.navigate', { url: url + '?advanced=1' }); // experimental features are off by default await until('!!window.cityManager'); await paints();
   if (await evaluate('document.querySelector("#pause").textContent.trim()!=="▶"')) await button('#pause');
   await openPanel(); assert.equal((await hostState()).mode, 'proposal');
   const firstText = await evaluate('document.querySelector("#owner-decisions").textContent'); assert.match(firstText, /กฎ/);

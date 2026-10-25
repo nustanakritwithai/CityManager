@@ -139,7 +139,7 @@ try {
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
   await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/city-advisor/report', requestStage: 'Request' }, { urlPattern: '*opentyphoon*', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url }); await until('!!window.cityManager && window.cityManager.visuals().ready');
+  await send('Page.navigate', { url: url + '?advanced=1' }); // experimental features are off by default await until('!!window.cityManager && window.cityManager.visuals().ready');
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fresh = createCity(61025); await loadCity(fresh);
   assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'empty', 'Question section waits for explicit action');
