@@ -23,6 +23,7 @@ import { thaiMessage } from './event-text.ts';
 import { parcelChecklist, roadFacts, type ParcelChecklist } from './place-checklist.ts';
 import { OverviewDashboard } from './overview-panels.ts';
 import { CityStatsPanel } from './city-stats-panel.ts';
+import { decoratePanels, watchPanels } from './panel-decor.ts';
 import './panels.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
@@ -241,6 +242,7 @@ function renderPlace() {
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction);
   if (page === 'city') { renderCityOverview(city); dashboard?.update(city); }
+  decoratePanels($('#inspector'));
 }
 function validateRoute() {
   const current = route;
@@ -334,6 +336,7 @@ async function boot() {
   });
   cityStatsPanel = new CityStatsPanel(open => { $('#toggle-stats').setAttribute('aria-expanded', String(open)); if (open) render(); });
   $('#toggle-stats').addEventListener('click', () => cityStatsPanel!.toggle());
+  watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });

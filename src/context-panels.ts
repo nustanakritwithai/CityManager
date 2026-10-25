@@ -7,6 +7,7 @@ import { CROP_STOCK_CAPS, CROP_PRICES, CROP_RECIPE, harvestYield } from './agric
 import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
+import { iconElement } from './ui-icons.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
 type HouseholdAction = (id: number, sourceBuildingId: number, sourceCell: number) => void;
@@ -164,7 +165,13 @@ function activity(city: City, kind: FlowKind, wallet: string, owner: string): HT
 }
 function capacityMetric(key: string, title: string, occupied: number, capacity: number, unit: string): HTMLElement {
   const card = metric(key, title, `${count(occupied)} / ${count(capacity)} ${unit}`, occupied); card.dataset.capacity = String(capacity);
-  const bar = el('span', 'cx-capacity-bar'), share = capacity > 0 ? Math.min(1, occupied / capacity) : 0; bar.setAttribute('aria-hidden', 'true');
+  const share = capacity > 0 ? Math.min(1, occupied / capacity) : 0;
+  if (capacity > 0 && capacity <= 16) { // small capacities read better as one dot per slot
+    const dots = el('span', 'cx-capacity-dots'); dots.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < capacity; i++) dots.append(el('i', i < occupied ? 'on' : ''));
+    card.append(dots); return card;
+  }
+  const bar = el('span', 'cx-capacity-bar'); bar.setAttribute('aria-hidden', 'true');
   bar.style.setProperty('--share', share.toFixed(3)); if (share >= 1) bar.classList.add('full'); card.append(bar); return card;
 }
 function cropCard(row: CropFlowRow, wallet: string): HTMLElement {
@@ -362,7 +369,8 @@ function cardHero(data: CardData, city: City): HTMLElement {
   const identity = data.kind === 'household'
     ? `${data.identity.householdId === null ? 'ยังไม่พบรหัสครัวเรือน' : `ครัวเรือน #${data.identity.householdId}`} · ${data.identity.buildingId === null ? 'ยังไม่มีบ้านพัก' : `บ้านพัก: อาคาร #${data.identity.buildingId}`}`
     : `${data.identity.buildingId === null ? 'ยังไม่พบรหัสอาคาร' : `อาคาร #${data.identity.buildingId}`}${data.kind === 'house' ? '' : ` · ${data.identity.firmId === null ? 'ยังไม่พบรหัสกิจการ' : `กิจการ #${data.identity.firmId}`}`}`;
-  const period = el('p', 'bc-period', data.kind === 'house' ? `สถานะที่พัก ณ วัน ${data.window.toTick}` : data.window.empty ? `ช่วงเริ่มต้น · วัน ${data.window.toTick}` : `เงินสดวันที่ ${data.window.fromTick}–${data.window.toTick} · รวมวันต้นและปลาย`);
+  const period = el('p', 'bc-period', data.kind === 'house' ? `วันที่ ${data.window.toTick}` : data.window.empty ? `เริ่มต้น · วันที่ ${data.window.toTick}` : `วันที่ ${data.window.fromTick}–${data.window.toTick}`);
+  period.title = data.kind === 'house' ? 'สถานะที่พัก ณ วันนี้' : 'ยอดเงินสดในช่วงนี้ รวมวันต้นและปลาย'; period.prepend(iconElement('clock', 'ui-icon bc-period-icon'));
   Object.assign(period.dataset, { fromTick: String(data.window.fromTick), toTick: String(data.window.toTick), inclusive: String(data.window.inclusive), empty: String(data.window.empty) });
   copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), period); hero.append(icon, copy);
   const cell = data.kind === 'household' ? null : city.buildings.find(b => b.id === data.identity.buildingId)?.cell;

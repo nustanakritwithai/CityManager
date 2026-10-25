@@ -3,35 +3,9 @@
  * grouped into services, buildings, people and labour, and stocks. Read-only.
  */
 import './city-stats.css';
+import { ICONS } from './ui-icons.ts';
 import { cityStats, BUILDING_KINDS, STATS_WINDOW, type BuildingKind, type CityStats, type SkillKey } from './city-stats.ts';
 
-const ICONS: Record<string, string> = {
-  power: '<path d="M13 2 5 13h6l-1 9 8-11h-6z" fill="currentColor"/>',
-  water: '<path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z" fill="currentColor"/>',
-  road: '<path d="M8 2h8l3 20H5z" fill="currentColor" opacity=".5"/><path d="M12 4v3m0 4v3m0 4v3" stroke="currentColor" stroke-width="2"/>',
-  coin: '<circle cx="12" cy="12" r="8" fill="currentColor" opacity=".35"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4" stroke="currentColor" stroke-width="1.6" fill="none"/>',
-  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke="currentColor" stroke-width="2" fill="none"/>',
-  R: '<path d="M3 11 12 4l9 7v9H3z" fill="currentColor"/><path d="M10 14h4v6h-4z" fill="#0b1a20"/>',
-  market: '<path d="M3 9h18v11H3z" fill="currentColor" opacity=".55"/><path d="M2 9 5 4h14l3 5z" fill="currentColor"/><path d="M7 13h4v3H7zM13 13h4v3h-4z" fill="#0b1a20"/>',
-  shop: '<path d="M4 8h16v12H4z" fill="currentColor"/><path d="M3 4h18v5H3z" fill="currentColor" opacity=".6"/><path d="M7 12h4v8H7zM14 12h3v4h-3z" fill="#0b1a20"/>',
-  I: '<path d="M3 20V11l5-3v3l5-3v3l5-3V4h3v16z" fill="currentColor"/>',
-  F: '<path d="M3 15h18v5H3z" fill="currentColor" opacity=".55"/><path d="M12 15V6m0 4c-3 0-4-3-4-3 3-1 4 3 4 3m0-1c3 0 4-3 4-3-3-1-4 3-4 3" stroke="currentColor" stroke-width="2" fill="none"/>',
-  people: '<circle cx="9" cy="8" r="3" fill="currentColor"/><circle cx="16" cy="9" r="2.5" fill="currentColor" opacity=".7"/><path d="M3 20c0-4 3-6 6-6s6 2 6 6zM14 20c0-2 .5-4 2-5 3 0 5 2 5 5z" fill="currentColor"/>',
-  household: '<path d="M4 11 12 5l8 6v9H4z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="14" r="1.8" fill="currentColor"/><circle cx="14.5" cy="15" r="1.4" fill="currentColor"/>',
-  worker: '<path d="M6 11a6 6 0 0 1 12 0z" fill="currentColor"/><path d="M5 11h14v2H5z" fill="currentColor"/><path d="M8 15a4 4 0 0 0 8 0z" fill="currentColor" opacity=".7"/>',
-  idle: '<circle cx="12" cy="8" r="3.5" fill="currentColor"/><path d="M5 21c0-4 3-7 7-7s7 3 7 7z" fill="currentColor" opacity=".55"/><path d="M17 3h4l-4 4h4" stroke="currentColor" stroke-width="1.6" fill="none"/>',
-  dependents: '<circle cx="12" cy="9" r="3" fill="currentColor"/><path d="M7 20c0-3 2-6 5-6s5 3 5 6z" fill="currentColor" opacity=".6"/>',
-  homeless: '<path d="M4 11 12 5l8 6" stroke="currentColor" stroke-width="2" fill="none"/><path d="M6 20 18 8" stroke="currentColor" stroke-width="2"/>',
-  general: '<path d="m5 19 7-7m2-6 4 4-3 3-4-4z" stroke="currentColor" stroke-width="2.2" fill="none"/>',
-  manufacturing: '<circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1M5.6 18.4l2.1-2.1m8.6-8.6 2.1-2.1" stroke="currentColor" stroke-width="2"/>',
-  retail: '<path d="M5 7h14l-1.5 9h-11z" fill="currentColor" opacity=".6"/><path d="M3 4h3l2 12h10" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="9" cy="19" r="1.5" fill="currentColor"/><circle cx="16" cy="19" r="1.5" fill="currentColor"/>',
-  crop: '<path d="M12 21V9" stroke="currentColor" stroke-width="2"/><ellipse cx="9" cy="10" rx="2.2" ry="3.6" transform="rotate(-25 9 10)" fill="currentColor"/><ellipse cx="15" cy="10" rx="2.2" ry="3.6" transform="rotate(25 15 10)" fill="currentColor"/><ellipse cx="12" cy="5.5" rx="2" ry="3" fill="currentColor"/>',
-  box: '<path d="M3 8 12 3l9 5v9l-9 5-9-5z" fill="currentColor" opacity=".55"/><path d="M3 8l9 5 9-5M12 13v9" stroke="currentColor" stroke-width="1.6" fill="none"/>',
-  import: '<path d="M12 3v12m-5-5 5 5 5-5M4 20h16" stroke="currentColor" stroke-width="2.2" fill="none"/>',
-  export: '<path d="M12 15V3M7 8l5-5 5 5M4 20h16" stroke="currentColor" stroke-width="2.2" fill="none"/>',
-  consume: '<path d="M7 3v8a3 3 0 0 0 3 3v7m4-18c-2 0-3 3-3 6s1 4 3 4v8" stroke="currentColor" stroke-width="2" fill="none"/>',
-  gear: '<circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4" stroke="currentColor" stroke-width="2.4"/>',
-};
 const KIND_LABEL: Record<BuildingKind, string> = { R: 'บ้าน', market: 'ตลาด', shop: 'ร้าน', I: 'โรงงาน', F: 'ฟาร์ม' };
 const SKILL_LABEL: Record<SkillKey, string> = { general: 'ทั่วไป', manufacturing: 'การผลิต', retail: 'ค้าปลีก' };
 const JOB_LABEL = { I: 'โรงงาน', F: 'ฟาร์ม', shop: 'ร้านค้า', market: 'ตลาด' } as const;
