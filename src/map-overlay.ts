@@ -9,7 +9,7 @@ export type OverlayMode = 'fertility' | 'roads' | 'growth' | 'housing';
 export type Tone = 'good' | 'warn' | 'bad';
 export type OverlayCell = { cell: number; tone: Tone; strength: number };
 export type Overlay = { mode: OverlayMode; cells: OverlayCell[]; legend: [Tone, string][] };
-export type IssueKind = 'no-road' | 'no-utilities' | 'no-workers' | 'no-input' | 'stock-cap' | 'no-buyer' | 'no-stock' | 'unsuitable-fertility' | 'empty-home';
+export type IssueKind = 'no-road' | 'no-utilities' | 'no-workers' | 'no-input' | 'stock-cap' | 'no-buyer' | 'no-stock' | 'unsuitable-fertility' | 'empty-home' | 'importing';
 export type Issue = { cell: number; kind: IssueKind; text: string };
 
 /** Which layer each build tool shows by default; select/pan/bulldoze show none. */
@@ -24,6 +24,7 @@ export const ISSUE_TEXT: Readonly<Record<IssueKind, string>> = Object.freeze({
   'no-road': 'ไม่มีถนนเชื่อมประตูเมือง', 'no-utilities': 'น้ำหรือไฟไม่พร้อม', 'no-workers': 'ไม่มีแรงงาน',
   'no-input': 'ขาดพืชผลวัตถุดิบ', 'stock-cap': 'คลังพืชผลเต็ม', 'no-buyer': 'ไม่มีผู้ซื้อ', 'no-stock': 'ไม่มีสินค้าขาย',
   'unsuitable-fertility': 'ดินไม่พอปลูก', 'empty-home': 'บ้านว่าง ยังไม่มีครัวเรือน',
+  'importing': 'นำเข้าสินค้าจากนอกเมือง · โรงงานในเมืองผลิตไม่ทัน',
 });
 
 export function mapOverlay(city: City, mode: OverlayMode): Overlay {
@@ -73,10 +74,15 @@ export function buildingIssues(city: City): Issue[] {
     const b = firm && city.buildings.find(v => v.id === firm.building);
     if (kind && b) add(b.cell, kind);
   }
-  // Retail shops are outside economicSignals(); only staffing is a clear problem for them.
+  // Retail shops are outside economicSignals(): staffing, an empty shelf, or stock bought from
+  // outside in the last three days because local factories could not cover the shop.
+  const importedBy = new Set(city.goodsLedger.filter(e => e.reason === 'Imported shop stock' && e.tick > city.tick - 3).map(e => e.to));
   for (const f of city.firms.filter(isRetail)) {
     const b = city.buildings.find(v => v.id === f.building);
-    if (b && firmWorkerCount(city, f.id) === 0) add(b.cell, 'no-workers');
+    if (!b || !access(city, b.cell)) continue;
+    if (firmWorkerCount(city, f.id) === 0) add(b.cell, 'no-workers');
+    else if (f.inventory === 0) add(b.cell, 'no-stock');
+    else if (importedBy.has(f.wallet)) add(b.cell, 'importing');
   }
   // Homes wait one simulated day before admitting households, so only older empty homes are flagged.
   for (const b of city.buildings) if (b.zone === 'R' && b.age >= 2 && homeOccupancy(city, b.id).households === 0) add(b.cell, 'empty-home');

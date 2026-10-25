@@ -47,3 +47,23 @@ test('the shop site is the first connected vacant commercial parcel, read withou
   assert.ok(site !== null && c.cells[site].zone === 'C' && c.cells[site].building === null);
   assert.ok(c.cells.every((cell, i) => i >= site! || !(cell.zone === 'C' && cell.building === null)));
 });
+
+test('shops show chain bottlenecks on the map: empty shelf, and stock imported because local factories fell short', async () => {
+  const { buildingIssues } = await import('../src/map-overlay.ts');
+  const { networkEvents, networkSnapshot } = await import('../src/city-network.ts');
+  const c = strip(true);
+  for (let d = 0; d < 180 && !c.firms.some(f => isRetail(f) && c.employment.some(e => e.firmId === f.id)); d++) step(c);
+  const shop = c.firms.find(f => isRetail(f) && c.employment.some(e => e.firmId === f.id))!;
+  assert.ok(shop, 'a staffed shop exists');
+  const cell = c.buildings.find(b => b.id === shop.building)!.cell;
+  const snap = networkSnapshot(c);
+  const empty = deserialize(serialize(c)); empty.firms.find(f => f.id === shop.id)!.inventory = 0;
+  const issueAt = (city: City) => buildingIssues(city).find(i => i.cell === cell)?.kind;
+  assert.equal(issueAt(empty), 'no-stock');
+  const imported = deserialize(serialize(c)); imported.firms.find(f => f.id === shop.id)!.inventory = Math.max(1, shop.inventory);
+  imported.goodsLedger.push({ tick: imported.tick, from: 'outside', to: shop.wallet, quantity: 5, reason: 'Imported shop stock' });
+  assert.equal(issueAt(imported), 'importing');
+  imported.tick++;
+  imported.goodsLedger.push({ tick: imported.tick, from: 'outside', to: shop.wallet, quantity: 3, reason: 'Imported shop stock' });
+  assert.ok(networkEvents(snap, imported).some(e => e.node === 'shops' && e.text.includes('นำเข้า')));
+});

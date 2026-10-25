@@ -184,6 +184,10 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
   for (const [tick, amount] of taxes) out.push({ node: 'taxes', icon: 'tax', text: `ภาษีเข้าคลัง ${baht(amount)}`, tick });
   for (const [id, kind] of before.buildings) if (!city.buildings.some(b => b.id === id)) { const [node, icon, name] = BUILT[kind] ?? BUILT.R; out.push({ node, icon, text: `${name} #${id} ถูกรื้อหรือปิด`, tick: city.tick }); }
   for (const b of city.buildings) if (!before.buildings.has(b.id)) { const [node, icon, name] = BUILT[kindOf(city, b.id, b.zone)] ?? BUILT.R; out.push({ node, icon, text: `${name}ใหม่ #${b.id}`, tick: city.tick - b.age }); }
+  // Shops buying from outside mean local factories fell short: worth a line in the feed.
+  const imports = new Map<number, number>(), goods = city.goodsLedger;
+  for (let i = goods.length - 1; i >= 0 && goods[i].tick > before.tick; i--) if (goods[i].reason === 'Imported shop stock') add(imports, goods[i].tick, goods[i].quantity);
+  for (const [tick, units] of imports) out.push({ node: 'shops', icon: 'import', text: `ร้านนำเข้าสินค้า ${units.toLocaleString('th-TH')} หน่วย · โรงงานในเมืองผลิตไม่ทัน`, tick });
   const utilities = city.utilities.power && city.utilities.water ? 1 : 0;
   if (utilities !== before.utilities) out.push({ node: 'utilities', icon: 'power', text: utilities ? 'น้ำและไฟพร้อมแล้ว' : 'น้ำหรือไฟขาด', tick: city.tick });
   return out.sort((a, b) => a.tick - b.tick);
