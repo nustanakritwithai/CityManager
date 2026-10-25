@@ -148,9 +148,10 @@ function householdButton(city: City, household: Household, source: Building, onH
   if (household.origin === 'legacy-v1') copy.append(el('small', 'cx-legacy-tag', 'สมาชิกจาก v1: สมมติขั้นต่ำ'));
   button.append(art, copy, el('span', 'cx-link-arrow', '→')); button.setAttribute('aria-label', `ดูข้อมูลครัวเรือน #${household.id}`); button.addEventListener('click', () => onHousehold(household.id, source.id, source.cell)); return button;
 }
-/** Provenance in words: who paid whom and why, with the ledger's own ids in the tooltip. */
+/** Provenance in words: who paid whom and why, then the ledger's own ids in small print for tracing. */
 function rawLine(row: { from: string; to: string; reason: string }): HTMLElement {
-  const line = el('p', 'cx-flow-raw', `${accountLabel(row.from)} → ${accountLabel(row.to)} · ${reasonLabel(row.reason)}`); line.title = `${row.from} → ${row.to} · ${row.reason}`; return line;
+  const line = el('p', 'cx-flow-raw', `${accountLabel(row.from)} → ${accountLabel(row.to)} · ${reasonLabel(row.reason)}`);
+  line.append(el('small', 'cx-flow-id', `รหัสบัญชี ${row.from} → ${row.to} · ${row.reason}`)); return line;
 }
 function flowCard(row: FlowRow, wallet: string): HTMLElement {
   const key = JSON.stringify([wallet, row.kind, row.index, row.tick, row.from, row.to, row.value, row.reason]);

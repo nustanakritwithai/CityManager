@@ -230,3 +230,4 @@
 .cx-content .cx-owner-controls .cx-button{width:100%}
 .cx-content .cx-owner-controls .cx-button:disabled{opacity:.65;cursor:default}
 .cx-content .cx-crop-card .cx-flow-details>p{font-size:calc(12 * var(--reader-unit,1px));line-height:1.5;margin:calc(4 * var(--reader-unit,1px)) 0 0}
+.inspector .cx-content .cx-flow-raw .cx-flow-id { display: block; margin-top: calc(2 * var(--reader-unit, 1px)); color: #a1b1d4; font-size: calc(12 * var(--reader-unit, 1px)); overflow-wrap: anywhere; }
