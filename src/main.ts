@@ -31,6 +31,7 @@ let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1, accumulator = 0;
+let pausedByTyphoonAuto = false;
 let importedLegacyRaw: string | null = null;
 type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
 let route: Route | null = null;
@@ -231,6 +232,7 @@ function render() {
   validateRoute(); const s = summary(city);
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;
   $('#pause').textContent = paused ? '▶' : 'Ⅱ'; $('#pause').setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา'); $('#pause').title = paused ? 'เล่นต่อ (Space)' : 'หยุดเวลา (Space)'; $('#pause').setAttribute('aria-pressed', String(paused));
+  ($('#pause') as HTMLButtonElement).disabled = ownerDecisionPanel?.isAutoPending() ?? false;
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => { b.classList.toggle('active', Number(b.dataset.speed) === speed); b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)); });
   const demand = node('div', 'demand-grid');
   for (const [zone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const) { const item = node('div', `demand-item ${zone.toLowerCase()}`); item.append(node('span', '', label), node('b', '', String(s.demand[zone]))); demand.append(item); }
@@ -259,6 +261,15 @@ async function boot() {
   $('#city-content').insertBefore(ownerDecisionHost, $('#city-content .ledger-details'));
   ownerDecisionPanel = createOwnerDecisionPanel(ownerDecisionHost, {
     getCity: () => city, getSession: () => ownerDecisionSession, onChange: render,
+    onTyphoonAutoPending: active => {
+      if (active) { pausedByTyphoonAuto = !paused; if (!paused) { paused = true; accumulator = 0; } }
+      else if (pausedByTyphoonAuto) { pausedByTyphoonAuto = false; paused = false; accumulator = 0; }
+      render();
+    },
+    connection: {
+      enabled: SIGNAL_ENV.VITE_CITY_OWNER_ADVISOR_ONLINE === 'true',
+      endpoint: SIGNAL_ENV.VITE_CITY_ADVISOR_ENDPOINT || 'https://157.85.96.139:5444/api/city-advisor/report'
+    }
   });
   $('#open-signals').addEventListener('click', () => { if (SIGNALS_ENABLED) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
@@ -269,7 +280,7 @@ async function boot() {
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool!)));
   document.querySelectorAll<HTMLElement>('[data-camera]').forEach(b => b.addEventListener('click', () => view.control(b.dataset.camera!)));
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { speed = Number(b.dataset.speed); accumulator = 0; render(); }));
-  $('#pause').addEventListener('click', () => { paused = !paused; accumulator = 0; render(); });
+  $('#pause').addEventListener('click', () => { if (ownerDecisionPanel?.isAutoPending()) return; paused = !paused; accumulator = 0; render(); });
   $('#cancel-tool').addEventListener('click', cancel);
   $('#toggle-camera').addEventListener('click', () => {
     const open = $('.camera-hud').dataset.open !== 'true';
@@ -328,7 +339,7 @@ async function boot() {
     if (paused || document.hidden) return;
     accumulator += Math.min(dt, 0.25) * speed;
     let changed = false;
-    while (accumulator >= 1) { const outcomes = ownerDecisionSession.advance(city); ownerDecisionPanel?.noteOutcomes(outcomes); accumulator -= 1; changed = true; }
+    while (accumulator >= 1 && !paused) { const outcomes = ownerDecisionSession.advance(city); ownerDecisionPanel?.noteOutcomes(outcomes); accumulator -= 1; changed = true; }
     if (changed) render();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.

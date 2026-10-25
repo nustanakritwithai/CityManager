@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { buildEntityReport } from './entity-report.mjs';
+import { buildOwnerDecisionReport } from './owner-report.mjs';
 
 export const UPSTREAM = 'https://api.opentyphoon.ai/v1/chat/completions';
 export const MODEL = 'typhoon-v2.5-30b-a3b-instruct';
@@ -25,7 +26,7 @@ export function configFromEnv(env = process.env) {
   if (upstreamEnabled && !apiKey) throw new Error('Upstream enablement requires a server credential');
   const port = Number(env.CITY_ADVISOR_PORT || 8791);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid advisor port');
-  return { upstreamEnabled, apiKey, port, entityEnabled: env.CITY_ADVISOR_ENABLE_ENTITY_EXPLANATION === 'true' };
+  return { upstreamEnabled, apiKey, port, entityEnabled: env.CITY_ADVISOR_ENABLE_ENTITY_EXPLANATION === 'true', ownerDecisionEnabled: env.CITY_ADVISOR_ENABLE_OWNER_DECISIONS === 'true' };
 }
 
 function metricList(list) {
@@ -227,6 +228,16 @@ export function createAdvisorServer(config, { fetchImpl = fetch } = {}) {
       if (req.headers['content-encoding']) throw failure(415, 'encoded_body_forbidden');
       if (Number(req.headers['content-length'] || 0) > MAX_BODY) throw failure(413, 'payload_too_large');
       const body = await readInput(req);
+      if (body?.schemaVersion === 3 && body?.operation === 'owner-decision') {
+        const cancellation = new AbortController();
+        const disconnected = () => { if (!res.writableEnded) cancellation.abort(); };
+        res.on('close', disconnected);
+        try {
+          const report = await buildOwnerDecisionReport(body, { ownerDecisionEnabled: config.ownerDecisionEnabled === true, upstreamEnabled: config.upstreamEnabled, apiKey: config.apiKey, fetchImpl, signal: cancellation.signal });
+          if (!res.destroyed) send(200, report);
+        } finally { res.off('close', disconnected); }
+        return;
+      }
       if (body?.schemaVersion === 2) {
         const cancellation = new AbortController();
         const disconnected = () => { if (!res.writableEnded) cancellation.abort(); };

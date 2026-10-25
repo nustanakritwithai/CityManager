@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { contributeOwnerCapital, createCity, deserialize, isMarket, serialize, step, type City } from '../src/sim.ts';
 import { createCity as createLegacy, serialize as serializeLegacy, step as stepLegacy } from '../src/legacy-v5.ts';
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
+import { captureOwnerSnapshot, ownerProposalForCandidate } from '../src/owner-decision.ts';
 
 function town(day = 30): City { const c = createCity(61025); for (let n = 0; n < day; n++) step(c); return c; }
 function market(c: City) { const f = c.firms.find(isMarket); assert(f?.owner); return f; }
@@ -47,6 +48,57 @@ test('manual proposals apply existing guarded transfers once; duplicate and unkn
   assert.equal(session.apply(c, 'unknown-owner-proposal').code, 'unknown-proposal');
   assert.equal(serialize(c), once); assert.equal(session.getStats().applied, 1); assert.equal(session.getStats().rejected, 2);
   replay(c, session);
+});
+
+test('an explicit Typhoon hold is journaled, replayed and remains a no-transfer owner proposal', () => {
+  const c = town(), f = market(c), session = createOwnerDecisionSession(c), before = serialize(c);
+  const snapshot = captureOwnerSnapshot(c, f.id); assert(snapshot);
+  const proposal = ownerProposalForCandidate(snapshot, 'hold');
+  assert.equal(session.registerTyphoonProposal(c, proposal), true);
+  assert.equal(session.getProposalSource(proposal.proposalId), 'typhoon');
+  assert.equal(serialize(c), before);
+  const replayed = replay(c, session); assert.equal(serialize(replayed.city!), before);
+  const outcome = session.apply(c, proposal.proposalId);
+  assert.equal(outcome.status, 'held'); assert.equal(serialize(c), before);
+  assert.equal(session.apply(c, proposal.proposalId).code, 'duplicate-proposal');
+  replay(c, session); assert.equal(serialize(c), before);
+});
+
+test('Typhoon auto executes one validated existing transfer after the monthly choice and replays without a model call', () => {
+  const c = town(29), session = createOwnerDecisionSession(c);
+  session.setMode('typhoon-auto');
+  assert.deepEqual(session.advance(c), []); assert.equal(c.tick, 30);
+  const f = market(c), [ruleProposal] = session.evaluateTyphoonAutoMonthly(c, f.id);
+  assert(ruleProposal); const snapshot = captureOwnerSnapshot(c, f.id); assert(snapshot);
+  const aiProposal = ownerProposalForCandidate(snapshot, 'safe-transfer');
+  const beforeState = serialize(c), beforeAccounts = structuredClone(c.accounts), beforeLedger = c.ledger.length;
+  assert.equal(session.registerTyphoonProposal(c, aiProposal), true);
+  const outcome = session.applyTyphoonAuto(c, aiProposal.proposalId, 'typhoon-auto');
+  assert.equal(outcome.status, 'applied'); assert.equal(outcome.ok, true);
+  assert(['contributeOwnerCapital', 'withdrawOwnerProfit'].includes(outcome.command!.type));
+  assert.notEqual(serialize(c), beforeState); assert.equal(c.ledger.length, beforeLedger + 1);
+  assert.equal(Object.values(c.accounts).reduce((sum, amount) => sum + amount, 0), 0);
+  assert.notDeepEqual(c.accounts, beforeAccounts);
+  const once = serialize(c);
+  assert.equal(session.applyTyphoonAuto(c, aiProposal.proposalId, 'typhoon-auto').code, 'duplicate-proposal');
+  assert.equal(serialize(c), once);
+  replay(c, session); assert.equal(serialize(c), once);
+});
+
+test('invalid or stale Typhoon auto suggestions are rejected without a transfer', () => {
+  const c = town(29), session = createOwnerDecisionSession(c);
+  session.setMode('typhoon-auto'); session.advance(c);
+  const f = market(c), [baseline] = session.evaluateTyphoonAutoMonthly(c, f.id); assert(baseline);
+  const snapshot = captureOwnerSnapshot(c, f.id); assert(snapshot);
+  const valid = ownerProposalForCandidate(snapshot, 'safe-transfer');
+  const invalid = structuredClone(valid); invalid.command.amountSatang += 1;
+  const beforeInvalid = serialize(c);
+  assert.equal(session.registerTyphoonProposal(c, invalid), false); assert.equal(serialize(c), beforeInvalid);
+  session.advance(c);
+  const beforeStale = serialize(c);
+  assert.equal(session.registerTyphoonProposal(c, valid), false);
+  assert.notEqual(session.applyTyphoonAuto(c, valid.proposalId, 'typhoon-auto').status, 'applied');
+  assert.equal(serialize(c), beforeStale); replay(c, session);
 });
 
 test('old proposals are rejected after the next tick without mutating the newer state', () => {
