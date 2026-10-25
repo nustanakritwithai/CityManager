@@ -35,6 +35,7 @@ import { installHudIcons } from './hud-icons.ts';
 import { recordDemand, demandSparkline } from './demand-history.ts';
 import { Coach } from './onboarding.ts';
 import { Minimap } from './minimap.ts';
+import { iconElement } from './ui-icons.ts';
 import { CityNetworkView } from './city-network-view.ts';
 import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
@@ -375,6 +376,9 @@ async function boot() {
   $('#toggle-stats').addEventListener('click', () => cityStatsPanel!.toggle());
   cityNetwork = new CityNetworkView(() => paused, open => { $('#toggle-network').setAttribute('aria-expanded', String(open)); if (open) render(); });
   $('#toggle-network').addEventListener('click', () => cityNetwork!.toggle());
+  const networkEntry = document.createElement('button'); networkEntry.type = 'button'; networkEntry.className = 'st-network'; networkEntry.append(iconElement('network'), document.createTextNode('เครือข่ายเมือง'));
+  networkEntry.addEventListener('click', () => { cityStatsPanel!.toggle(false); cityNetwork!.toggle(true); });
+  document.querySelector('#city-stats .st-titlebar .st-close')?.before(networkEntry);
   installHudIcons(); installSheetHandle($('#inspector')); coach = new Coach();
   minimap = new Minimap(view, cell => { view.focus(cell); render(); }, cell => { view.focus(cell); openRoute({ page: 'place', cell, buildingId: city.cells[cell].building }); });
   watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
