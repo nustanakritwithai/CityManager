@@ -72,7 +72,7 @@ test('farm harvest, real direct inputs, capitalized trader purchase and recipe r
   const { c, hooks, farm, factory, trader } = fixture(), quota = runAgriculture(c, hooks);
   assert.equal(c.crops.harvested, 24); assert.equal(c.crops.processed, 2); assert.equal(c.goods.produced, 8);
   assert.deepEqual([farm.cropInventory, factory.cropInventory, trader.cropInventory], [12, 2, 8]);
-  assert.deepEqual([factory.cropCost, trader.cropCost], [700, 1200]);
+  assert.deepEqual([factory.cropCost, trader.cropCost], [700, 1600], 'markets pay farms the chain-2 price of 2 credits a lot');
   assert.equal(factory.monthlyExpense, 700); assert.equal(trader.monthlyExpense, 0); assert.equal(trader.monthlyRevenue, 0);
   assert.equal(quota.get(trader.id), 0); assert.equal(factory.inventory, 8);
   assert.deepEqual(c.cropLedger.map(e => e.kind), ['harvest', 'trade', 'trade', 'process']); reconciles(c);
@@ -85,7 +85,7 @@ test('fresh market acquisitions wait one day and factory/households share one ca
   assert.equal(consumeMarketCrop(c, h, trader, quota, hooks), true); assert.equal(h.needs, 0); assert.equal(h.lastPurchaseTick, c.tick);
   const once = JSON.stringify(c); assert.equal(consumeMarketCrop(c, h, trader, quota, hooks), false); assert.equal(JSON.stringify(c), once);
   assert.equal(consumeMarketCrop(c, owner, trader, quota, hooks), true); assert.equal(c.crops.consumed, 2); assert.equal(quota.get(trader.id), 4);
-  assert.equal(trader.cropInventory, 6); assert.equal(trader.cropCost, 900); assert.equal(trader.monthlyRevenue, 2200); assert.equal(trader.monthlyExpense, 600);
+  assert.equal(trader.cropInventory, 6); assert.equal(trader.cropCost, 1200); assert.equal(trader.monthlyRevenue, 2200); assert.equal(trader.monthlyExpense, 800);
   const beforeRepeat = JSON.stringify(c), repeated = runAgriculture(c, hooks); assert.equal(JSON.stringify(c), beforeRepeat); assert.equal(repeated.get(trader.id), 4); reconciles(c);
 });
 
@@ -172,7 +172,7 @@ test('overflow proposals and invalid crop books fail before any transfer or bask
 test('demolition writeoff releases exact crop value as expense without a cash receipt and is idempotent', () => {
   const { c, hooks, trader, disconnected } = fixture(); runAgriculture(c, hooks); disconnected.add(c.buildings.find(b => b.id === trader.building)!.cell);
   const money = JSON.stringify([c.accounts, c.ledger]); assert.equal(writeOffCrops(c, trader, hooks), true);
-  assert.equal(trader.cropInventory, 0); assert.equal(trader.cropCost, 0); assert.equal(trader.monthlyExpense, 1200); assert.equal(c.crops.writtenOff, 8);
+  assert.equal(trader.cropInventory, 0); assert.equal(trader.cropCost, 0); assert.equal(trader.monthlyExpense, 1600); assert.equal(c.crops.writtenOff, 8);
   assert.equal(JSON.stringify([c.accounts, c.ledger]), money); const once = JSON.stringify(c); assert.equal(writeOffCrops(c, trader, hooks), true); assert.equal(JSON.stringify(c), once); reconciles(c);
 });
 

@@ -9,7 +9,7 @@ export type OverlayMode = 'fertility' | 'roads' | 'growth' | 'housing';
 export type Tone = 'good' | 'warn' | 'bad';
 export type OverlayCell = { cell: number; tone: Tone; strength: number };
 export type Overlay = { mode: OverlayMode; cells: OverlayCell[]; legend: [Tone, string][] };
-export type IssueKind = 'no-road' | 'no-utilities' | 'no-workers' | 'no-input' | 'stock-cap' | 'no-buyer' | 'no-stock' | 'unsuitable-fertility' | 'empty-home' | 'importing';
+export type IssueKind = 'no-road' | 'no-utilities' | 'no-workers' | 'no-input' | 'stock-cap' | 'no-buyer' | 'no-stock' | 'unsuitable-fertility' | 'empty-home' | 'importing' | 'broke';
 export type Issue = { cell: number; kind: IssueKind; text: string };
 
 /** Which layer each build tool shows by default; select/pan/bulldoze show none. */
@@ -25,6 +25,7 @@ export const ISSUE_TEXT: Readonly<Record<IssueKind, string>> = Object.freeze({
   'no-input': 'ขาดพืชผลวัตถุดิบ', 'stock-cap': 'คลังพืชผลเต็ม', 'no-buyer': 'ไม่มีผู้ซื้อ', 'no-stock': 'ไม่มีสินค้าขาย',
   'unsuitable-fertility': 'ดินไม่พอปลูก', 'empty-home': 'บ้านว่าง ยังไม่มีครัวเรือน',
   'importing': 'นำเข้าสินค้าจากนอกเมือง · โรงงานในเมืองผลิตไม่ทัน',
+  'broke': 'เงินกิจการหมดและไม่มีคนงาน · รื้อแล้ววางโซนเดิมใหม่ ให้เปิดกิจการใหม่',
 });
 
 export function mapOverlay(city: City, mode: OverlayMode): Overlay {
@@ -69,6 +70,8 @@ export function buildingIssues(city: City): Issue[] {
   const issues: Issue[] = [], seen = new Set<number>();
   const add = (cell: number, kind: IssueKind) => { if (!seen.has(cell)) { seen.add(cell); issues.push({ cell, kind, text: ISSUE_TEXT[kind] }); } };
   for (const b of city.buildings) if (!access(city, b.cell)) add(b.cell, 'no-road');
+  // A business with no cash and nobody working cannot buy stock or hire again: only a rebuild restarts it.
+  for (const f of city.firms) { const b = city.buildings.find(v => v.id === f.building); if (b && (city.accounts[f.wallet] ?? 0) === 0 && firmWorkerCount(city, f.id) === 0) add(b.cell, 'broke'); }
   for (const s of economicSignals(city)) {
     const kind = SIGNAL_ISSUES[s.reasonId], firm = city.firms.find(f => f.id === s.firmId);
     const b = firm && city.buildings.find(v => v.id === firm.building);

@@ -111,7 +111,8 @@ export function validateAgriculture(c: City): void {
     } else if (e.kind === 'trade') {
       requireThat(e.workers === 0 && e.batches === 0 && e.outputQuantity === 0 && e.toValue === e.cash && e.reason === `Crop exchange #${e.id}`);
       const unitPrice = e.cash / e.quantity;
-      if (unitPrice === 150) { role(e.from, 'F'); role(e.to, 'T'); }
+      // 1.50 before chain-2 farm prices, 2.00 after; both are farm-to-market lots.
+      if (unitPrice === 150 || unitPrice === 200) { role(e.from, 'F'); role(e.to, 'T'); }
       else if (unitPrice === 350) { role(e.from, 'F'); role(e.to, 'I'); }
       else { requireThat(unitPrice === 300); role(e.from, 'T'); role(e.to, 'I'); }
       if (role(e.from) === 'T') { const limit = sellable.get(e.from) ?? 0; requireThat(e.quantity <= limit); sellable.set(e.from, limit - e.quantity); }

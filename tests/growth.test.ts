@@ -47,8 +47,9 @@ test('fresh deterministic cities pass initial tier population/job capacity witho
   for (const seed of [61025, 20261023]) {
     const c = createCity(seed), twin = createCity(seed); let firstExpansion = 0;
     for (let day = 1; day <= 388; day++) { step(c); step(twin); if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day; if (day % 30 === 0) conservation(c); }
-    // Levelled farms add crop jobs that fill before a factory sponsors expansion, so chain-2 expands a little later than growth-1 (294).
-    assert.ok(firstExpansion > 120 && firstExpansion < 330, String(firstExpansion)); assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8); assert.deepEqual(c, twin);
+    // Levelled farms add crop jobs that fill before a factory sponsors expansion, and markets pay farms more for
+    // the crops factories buy, so chain-2 expands later than growth-1 (294) but still inside the first 13 months.
+    assert.ok(firstExpansion > 120 && firstExpansion < 390, String(firstExpansion)); assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8); assert.deepEqual(c, twin);
     for (const f of c.firms.filter(f => f.fundedBy)) { const capital = c.ledger.find(e => e.reason === `Industry expansion capital #${f.id}`)!; assert.equal(c.ledger.some(e => e.to === f.wallet && e.from === 'outside' && e.tick === capital.tick), false); }
     for (const h of c.households.filter(h => h.origin === 'arrival')) assert.equal(c.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1);
     conservation(c);

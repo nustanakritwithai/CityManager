@@ -3,7 +3,7 @@ import './building-cards.css';
 import { MONTH, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
-import { CROP_STOCK_CAPS, CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
+import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';

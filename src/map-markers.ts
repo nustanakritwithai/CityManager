@@ -13,7 +13,7 @@ const MAX_MARKERS = 64;
  * remain in the inspector, so nothing is conveyed by these badges alone.
  */
 /** The badge shows the cause, not just that something is wrong. */
-const ISSUE_ICONS: Record<string, string> = { 'no-road': 'road', 'no-utilities': 'power', 'no-workers': 'worker', 'no-input': 'crop', 'stock-cap': 'box', 'no-buyer': 'coin', 'no-stock': 'shop', 'unsuitable-fertility': 'F', 'empty-home': 'R', 'importing': 'import' };
+const ISSUE_ICONS: Record<string, string> = { 'no-road': 'road', 'no-utilities': 'power', 'no-workers': 'worker', 'no-input': 'crop', 'stock-cap': 'box', 'no-buyer': 'coin', 'no-stock': 'shop', 'unsuitable-fertility': 'F', 'empty-home': 'R', 'importing': 'import', 'broke': 'coin' };
 export class MapMarkers {
   private readonly layer = document.createElement('div');
   private readonly tip = document.createElement('div');
