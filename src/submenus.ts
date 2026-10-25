@@ -1,3 +1,4 @@
+import { iconElement } from './ui-icons.ts';
 import './submenus.css';
 import { MONTH, SIZE, ROAD_COST, type City } from './sim.ts';
 import { flowRows, cropFlowRows, walletGroups, formatMoney, type FlowKind, type FlowRow, type CropFlowRow } from './inspector-data.ts';
@@ -103,10 +104,9 @@ function eventCard(row: JournalRow, state: Journal): HTMLElement {
   if (row.kind === 'crops') Object.assign(card.dataset, { id: String(row.id), cropKind: row.cropKind, fromValue: String(row.fromValue), toValue: String(row.toValue), cash: String(row.cash), workers: String(row.workers), batches: String(row.batches), outputQuantity: String(row.outputQuantity) });
   const top = element('summary', 'sm-flow-top sm-flow-toggle'), value = element('strong', 'sm-flow-value', row.kind === 'money' ? `${formatMoney(row.value)} ฿` : `${row.value.toLocaleString('th-TH')} ${row.kind === 'crops' ? 'ล็อตพืชผล' : 'หน่วย'}`);
   Object.assign(top.dataset, { journalRowToggle: '', kind: row.kind, index: String(row.index) });
-  if (row.kind === 'money' && (row.to === 'treasury' || row.from === 'treasury')) value.prepend(image(row.to === 'treasury' ? 'arrow-up' : 'arrow-down'));
-  const direction = row.kind === 'crops' ? `บัญชีล็อตพืชผล #${row.id}` : row.kind === 'goods' ? 'ย้ายสินค้าสำเร็จรูป' : row.to === 'treasury' ? 'เข้าคลังเมือง' : row.from === 'treasury' ? 'ออกจากคลังเมือง' : 'โอนระหว่างบัญชี';
-  const title = element('span', 'sm-event-title', row.label), badge = element('span', 'sm-flow-direction', row.kind === 'crops' ? 'ล็อต' : row.kind === 'goods' ? 'ย้าย' : row.to === 'treasury' ? 'เข้า' : row.from === 'treasury' ? 'ออก' : 'โอน');
-  title.title = row.label; badge.title = direction; badge.setAttribute('aria-label', direction); top.append(title, value, badge);
+    const direction = row.kind === 'crops' ? `บัญชีล็อตพืชผล #${row.id}` : row.kind === 'goods' ? 'ย้ายสินค้าสำเร็จรูป' : row.to === 'treasury' ? 'เข้าคลังเมือง' : row.from === 'treasury' ? 'ออกจากคลังเมือง' : 'โอนระหว่างบัญชี';
+  const title = element('span', 'sm-event-title', row.label), badge = iconElement(row.kind === 'crops' ? 'crop' : row.kind === 'goods' ? 'box' : row.to === 'treasury' ? 'import' : row.from === 'treasury' ? 'export' : 'link', 'ui-icon sm-flow-direction');
+  title.title = row.label; badge.title = direction; badge.removeAttribute('aria-hidden'); badge.setAttribute('role', 'img'); badge.setAttribute('aria-label', direction); top.append(badge, title, value);
   const body = element('div', 'sm-flow-details'); body.id = `sm-${row.kind}-entry-${row.index}`; top.setAttribute('aria-controls', body.id);
   const meta = element('p', 'sm-flow-meta', `วัน ${row.tick} · เดือน ${Math.floor(row.tick / MONTH) + 1} · รายการ #${row.index + 1} · ${direction}`), route = element('div', 'sm-flow-route');
   const from = element('div', 'sm-party'), to = element('div', 'sm-party'), arrow = element('span', 'sm-route-arrow'); arrow.append(svg('arrow')); arrow.setAttribute('aria-label', 'ไปยัง');
