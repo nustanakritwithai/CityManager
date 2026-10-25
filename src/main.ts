@@ -5,7 +5,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { SIZE, access, createCity, buildRoad, zoneCell, bulldoze, explainCell, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, isMarket, type City, type Zone } from './sim.ts';
+import { SIZE, access, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
@@ -20,6 +20,10 @@ import { mapOverlay, buildingIssues, TOOL_OVERLAY } from './map-overlay.ts';
 import { MapMarkers } from './map-markers.ts';
 import { CityHud } from './city-hud.ts';
 import { thaiMessage } from './event-text.ts';
+import { parcelChecklist, roadFacts, type ParcelChecklist } from './place-checklist.ts';
+import { OverviewDashboard } from './overview-panels.ts';
+import { CityStatsPanel } from './city-stats-panel.ts';
+import './panels.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -33,7 +37,7 @@ let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | un
 let city: City = createCity(61025);
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
-let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined;
+let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined;
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -100,6 +104,7 @@ function openRoute(next: Route) {
 }
 function cancel() {
   view?.abortGesture();
+  if (cityStatsPanel?.open) { cityStatsPanel.toggle(false); return; }
   if (hasOpenSubmenu()) { closeSubmenus(); return; }
   const current = route;
   if (current?.page === 'signals') { openRoute({ page: 'city' }); return; }
@@ -145,18 +150,19 @@ function symbol(zone: Zone, road: boolean, market = false) {
   const shape = zone === 'F' && !road ? farmShape : market && !road ? marketShape : road ? '<path d="M35 7h26v82H35z" fill="#748b88"/><path d="M48 12v15m0 10v15m0 10v15" stroke="#f3c46b" stroke-width="3"/>' : zone === 'R' ? '<path d="M17 44 48 18l31 26v37H17z" fill="currentColor"/><path d="M12 44 48 13l36 31" fill="none" stroke="#d7e9d4" stroke-width="5"/><path d="M41 55h16v26H41zM25 49h10v13H25zM64 49h10v13H64z" fill="#28474a"/>' : zone === 'C' ? '<path d="M15 36h66v45H15z" fill="currentColor"/><path d="m12 24 72 0v20H12z" fill="#d7e9d4"/><path d="M25 24v20m22-20v20m23-20v20" stroke="currentColor" stroke-width="12"/><path d="M25 54h23v18H25zM59 54h14v27H59z" fill="#28474a"/>' : zone === 'I' ? '<path d="M14 45 35 33v12l22-12v12h25v36H14zM66 14h12v31H66z" fill="currentColor"/><path d="M24 57h11v11H24zM44 57h11v11H44zM64 57h10v11H64z" fill="#28474a"/>' : '<path d="M14 44h19v37H14zM39 21h21v60H39zM66 36h16v45H66z" fill="currentColor"/><path d="M45 30h9m-9 12h9m-9 12h9" stroke="#28474a" stroke-width="4"/>';
   $('#place-art').innerHTML = `<svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" style="color:${color}"><ellipse cx="48" cy="83" rx="38" ry="6" fill="#102d32"/>${shape}</svg>`;
 }
-function shortReason(reason: string): string | null {
-  if (reason.startsWith('No connected road frontage')) return 'ยังไม่มีถนนข้างแปลงที่เชื่อมถึงประตูภายนอก';
-  if (reason.startsWith('No power')) return 'ไฟฟ้าภายนอกไม่พร้อมใช้งาน';
-  if (reason.startsWith('No water')) return 'น้ำภายนอกไม่พร้อมใช้งาน';
-  if (reason.startsWith('No housing demand')) return 'ความจุบ้านว่างที่ใช้ได้ยังรองรับผู้ย้ายเข้าและครัวเรือนไร้บ้านตามเงื่อนไขปัจจุบัน';
-  if (reason.startsWith('No industry demand')) return null;
-  if (reason.startsWith('No retail demand')) return 'ร้านค้าที่มีอยู่รองรับความต้องการปัจจุบันแล้ว';
-  if (reason.startsWith('Viability:')) { const n = reason.match(/need (\d+).*have (\d+)/); return n ? `ร้านค้าต้องมีครัวเรือนที่มีเงินและเชื่อมถนน ${n[1]} ครัวเรือน (ขณะนี้ ${n[2]})` : 'ลูกค้ายังไม่พอให้รายได้คุ้มค่าจ้างและค่าเช่า'; }
-  if (reason.includes('limit (')) return 'ถึงจำนวนสูงสุดที่ต้นแบบรองรับแล้ว';
-  if (reason.startsWith('Expected income')) return 'รายได้คาดหมายยังไม่พอซื้อสินค้าและจ่ายค่าเช่า';
-  if (reason.startsWith('Eligible;')) return `พร้อมพัฒนา ทบทวนแปลงอีก ${3 - city.tick % 3} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`;
-  return null;
+function parcelChecklistView(parcel: ParcelChecklist): HTMLElement {
+  const box = node('div', 'parcel-checklist'); box.dataset.parcelChecklist = parcel.eligible ? 'eligible' : 'blocked';
+  const failed = parcel.checks.filter(c => c.state === 'fail').length;
+  const head = node('p', `parcel-verdict ${parcel.eligible ? 'good' : 'bad'}`, parcel.eligible
+    ? `พร้อมพัฒนา · ทบทวนแปลงอีก ${parcel.nextReview} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`
+    : `ยังไม่โต · ติด ${failed} เงื่อนไข`);
+  const list = node('ol', 'parcel-checks');
+  for (const check of parcel.checks) {
+    const item = node('li', `cx-check ${check.state}`); item.dataset.check = check.key; item.dataset.state = check.state;
+    item.append(node('span', 'parcel-check-label', check.label)); if (check.detail) item.append(node('small', 'parcel-check-detail', check.detail));
+    list.append(item);
+  }
+  box.append(head, list, node('p', 'parcel-note', parcel.note)); return box;
 }
 function ownerFinanceAction(action: 'contribute' | 'withdraw', firmId: number) {
   const firm = city.firms.find(value => value.id === firmId);
@@ -171,6 +177,7 @@ function ownerFinanceAction(action: 'contribute' | 'withdraw', firmId: number) {
 }
 function renderPlace() {
   const metrics: HTMLElement[] = [], tags: HTMLElement[] = [], reasons: string[] = [];
+  let checklist: HTMLElement | null = null;
   const cellIndex = route?.page === 'place' ? route.cell : null;
   const cell = cellIndex === null ? null : city.cells[cellIndex];
   const building = cell?.building == null ? null : city.buildings.find(b => b.id === cell.building);
@@ -203,11 +210,20 @@ function renderPlace() {
       if (!building) metrics.push(metric('ความอุดมสมบูรณ์', `${fertility}%`, false, 'พืชผลหมุนเวียน ไม่ใช่แหล่งที่หมดลง', fertility));
       tags.push(tag(fertility >= 50 ? 'เหมาะสำหรับปลูกพืช' : 'ความอุดมสมบูรณ์ไม่ถึง 50%', fertility >= 50 ? 'good' : 'bad'));
     }
-    if (!connected) reasons.push('ต้องเชื่อมถนนข้างแปลงกับประตูภายนอกฝั่งตะวันตก');
-    if (!city.utilities.power || !city.utilities.water) reasons.push('บริการน้ำหรือไฟภายนอกไม่พร้อม การผลิตและเติบโตหยุดชั่วคราว');
-    if (cell.road) { metrics.push(metric('สร้างต่อช่อง', money(5000), true), metric('บำรุงรักษาต่อวัน', money(10), true)); reasons.push(connected ? 'ถนนนี้เชื่อมกับตลาดภายนอก' : 'ถนนนี้ยังแยกจากตลาดภายนอก'); }
+    const parcel = parcelChecklist(city, cellIndex);
+    if (parcel) checklist = parcelChecklistView(parcel);
+    if (!connected && !parcel) reasons.push('ต้องเชื่อมถนนข้างแปลงกับประตูภายนอกฝั่งตะวันตก');
+    if ((!city.utilities.power || !city.utilities.water) && !parcel) reasons.push('บริการน้ำหรือไฟภายนอกไม่พร้อม การผลิตและเติบโตหยุดชั่วคราว');
+    if (cell.road) {
+      const road = roadFacts(city, cellIndex)!;
+      metrics.push(metric('สร้างต่อช่อง', money(5000), true), metric('บำรุงรักษาต่อวัน', money(10), true),
+        metric('ระยะถึงประตูเมือง', road.gateway ? 'ประตูเมือง' : road.stepsToGateway === null ? 'ไม่ถึง' : `${road.stepsToGateway} ช่อง`, false, 'นับตามถนนที่ต่อกัน', road.stepsToGateway ?? -1),
+        metric('แปลงติดถนนนี้', `${road.frontage} แปลง`, false, `มีอาคาร ${road.buildings} หลัง`, road.frontage),
+        metric('ถนนทั้งเมือง', `${road.network} ช่อง`, false, `เชื่อมประตูเมือง ${road.connectedNetwork} ช่อง`, road.network),
+        metric('บำรุงทั้งเมือง/วัน', money(road.network * 10), true, 'หักจากเงินคลังทุกวัน', road.network * 10));
+      reasons.push(road.gateway ? 'ประตูเมืองฝั่งตะวันตก จุดเชื่อมตลาดและบริการน้ำไฟภายนอก รื้อไม่ได้' : connected ? 'ถนนนี้เชื่อมกับตลาดภายนอก แปลงที่ติดถนนนี้เติบโตได้เมื่อผ่านเงื่อนไขอื่น' : 'ถนนนี้ยังแยกจากตลาดภายนอก ต่อถนนให้ถึงประตูเมืองฝั่งตะวันตกก่อน');
+    }
     else if (!building && cell.zone) {
-      reasons.push(...explainCell(city, cellIndex).map(reason => shortReason(reason) ?? (cell.zone === 'F' || cell.zone === 'C' ? reason : null)).filter((s):s is string => s !== null));
       if (cell.zone === 'I' && connected && city.utilities.power && city.utilities.water) {
         const growth = growthStatusText(city); reasons.push(`โอกาสลงทุนเมือง: ${growth.message}`);
         if (!growth.status.bootstrap && growth.status.sponsorFirmId !== null) {
@@ -221,10 +237,10 @@ function renderPlace() {
     else if (!cell.zone) reasons.push('แปลงนี้ยังไม่มีโซน');
   } else { $('#selection-title').textContent = 'เลือกสถานที่บนแผนที่'; $('#place-subtitle').textContent = 'บ้าน · บริษัท · ครัวเรือน'; symbol(null, false); }
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
-  $('#explanation').replaceChildren(...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length;
+  $('#explanation').replaceChildren(...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction);
-  if (page === 'city') renderCityOverview(city);
+  if (page === 'city') { renderCityOverview(city); dashboard?.update(city); }
 }
 function validateRoute() {
   const current = route;
@@ -243,7 +259,7 @@ function render() {
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => { b.classList.toggle('active', Number(b.dataset.speed) === speed); b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)); });
   const demand = node('div', 'demand-grid');
   for (const [zone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const) { const item = node('div', `demand-item ${zone.toLowerCase()}`); item.append(node('span', '', label), node('b', '', String(s.demand[zone]))); demand.append(item); }
-  $('#growth-summary').replaceChildren(demand); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
+  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   const placement = route ? null : previewPlacement(city, tool, start, hover);
@@ -316,6 +332,8 @@ async function boot() {
     const open = $('.camera-hud').dataset.open !== 'true';
     $('.camera-hud').dataset.open = String(open); $('#toggle-camera').setAttribute('aria-expanded', String(open));
   });
+  cityStatsPanel = new CityStatsPanel(open => { $('#toggle-stats').setAttribute('aria-expanded', String(open)); if (open) render(); });
+  $('#toggle-stats').addEventListener('click', () => cityStatsPanel!.toggle());
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
@@ -356,6 +374,7 @@ async function boot() {
     if (e.key === ' ' && !(e.target instanceof Element && e.target.closest('button, summary, a, select, input, textarea, [contenteditable]'))) { e.preventDefault(); paused = !paused; accumulator = 0; render(); }
     const shortcuts: Record<string, string> = { v: 'select', r: 'road', '1': 'R', '2': 'C', '3': 'I', '4': 'F', b: 'bulldoze', p: 'pan' };
     if (shortcuts[e.key.toLowerCase()]) setTool(shortcuts[e.key.toLowerCase()]);
+    if (e.key.toLowerCase() === 't') cityStatsPanel?.toggle();
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); view.control(e.key.slice(5).toLowerCase()); }
     if (e.key === 'q') view.control('rotate-left'); if (e.key === 'e') view.control('rotate-right');
   });
@@ -363,6 +382,7 @@ async function boot() {
   inspector(false);
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
   mapMarkers = new MapMarkers(view);
+  dashboard = new OverviewDashboard($('#city-dashboard'));
   cityHud = new CityHud((cell, buildingId) => { view.focus(cell); openRoute({ page: 'place', cell, buildingId }); });
   atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   const visual = atmosphere;
