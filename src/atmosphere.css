@@ -196,7 +196,40 @@ html[data-touch-ui=true] .atmosphere-menu {
 }
 .city-kpis[data-paused=true] .kpi-month .kpi-label { color: var(--amber); }
 @media (max-width: 1100px) { .kpi[data-kpi=utilities], .kpi[data-kpi=warnings] { display: none; } }
-@media (max-width: 860px) { .city-kpis { display: none; } }
+@media (max-width: 860px) { html:not([data-touch-ui=true]) .city-kpis { display: none; } }
+
+/* Touch UI: three essentials under the time bar, sized by the reader unit. */
+html[data-touch-ui=true] .city-kpis {
+  top: calc(32px + 44 * var(--reader-unit, 1px) + 58 * var(--reader-unit, 1px) + env(safe-area-inset-top, 0px));
+  left: calc(12 * var(--reader-unit, 1px));
+  translate: none;
+  max-width: calc(100% - 78 * var(--reader-unit, 1px));
+  gap: calc(4 * var(--reader-unit, 1px));
+}
+html[data-touch-ui=true] .kpi:not([data-kpi=treasury]):not([data-kpi=people]):not([data-kpi=month]) { display: none; }
+html[data-touch-ui=true] .kpi {
+  min-width: 0;
+  padding: calc(3 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px)) calc(4 * var(--reader-unit, 1px));
+  border-radius: calc(8 * var(--reader-unit, 1px));
+}
+html[data-touch-ui=true] .kpi-label, html[data-touch-ui=true] .kpi small { font-size: calc(10 * var(--reader-unit, 1px)); }
+html[data-touch-ui=true] .kpi strong { font-size: calc(13 * var(--reader-unit, 1px)); }
+
+.issue-list { margin: 0; padding: 4px 0 0; list-style: none; display: grid; gap: 6px; }
+.issue-link {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: left;
+  background: #ffffff08;
+}
+.issue-link strong { font-size: 13px; }
+.issue-link span { font-size: 12px; color: var(--muted); }
+.issue-link:hover { border-color: #f3c46b66; }
 
 /* Demand meters on the zone tools (decorative; values are in the city overview). */
 .tool[data-tool] { position: relative; }

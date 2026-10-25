@@ -262,6 +262,11 @@ export class CityView {
     this.atmosphere?.follow(this.radius);
     this.app.renderNextFrame = true;
   }
+  /** Centre the camera on a parcel (used by the issue list). */
+  focus(cell: number) {
+    const { x, z } = this.position(cell);
+    this.target.set(Math.max(-22, Math.min(22, x)), 0, Math.max(-22, Math.min(22, z))); this.updateCamera();
+  }
   pan(dx: number, dy: number) {
     const scale = this.radius / 700;
     this.target.x += (-dx * Math.cos(this.yaw) - dy * Math.sin(this.yaw)) * scale;
