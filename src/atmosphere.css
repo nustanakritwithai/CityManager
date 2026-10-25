@@ -155,3 +155,70 @@ html[data-touch-ui=true] .atmosphere-menu {
 .map-legend-item.good::before { background: #3ccf6e; }
 .map-legend-item.warn::before { background: #f2c14e; }
 .map-legend-item.bad::before { background: #e5533d; }
+
+/* City summary strip: read-only and never intercepts map input. */
+.city-kpis {
+  position: fixed;
+  z-index: 9;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+  max-width: calc(100vw - 560px);
+  overflow: hidden;
+}
+.kpi {
+  display: grid;
+  gap: 1px;
+  min-width: 86px;
+  padding: 5px 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.kpi-label { font-size: 10px; font-weight: 600; color: var(--muted); }
+.kpi strong { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--cream); }
+.kpi small { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.kpi[data-kpi=treasury] strong { color: var(--amber); }
+.kpi.warn strong { color: #f2c14e; }
+.kpi.bad strong, .kpi.bad small { color: #ff8a7a; }
+.kpi-progress {
+  display: block;
+  height: 6px;
+  margin: 4px 0 2px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--amber) calc(var(--progress, 0) * 100%), #ffffff1f 0);
+}
+.city-kpis[data-paused=true] .kpi-month .kpi-label { color: var(--amber); }
+@media (max-width: 1100px) { .kpi[data-kpi=utilities], .kpi[data-kpi=warnings] { display: none; } }
+@media (max-width: 860px) { .city-kpis { display: none; } }
+
+/* Demand meters on the zone tools (decorative; values are in the city overview). */
+.tool[data-tool] { position: relative; }
+.demand-meter {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: #ffffff1f;
+  overflow: hidden;
+}
+.demand-meter i {
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(var(--demand, 0) * 100%);
+  background: currentColor;
+  transition: height .3s ease;
+}
+.demand-meter[data-demand="0"] { opacity: .5; }
+
+.event-log { margin: 0; padding: 4px 0 0 0; list-style: none; display: grid; gap: 6px; }
+.event-log li { display: grid; gap: 1px; font-size: 13px; line-height: 1.45; }
+.event-log small { color: var(--muted); font-size: 11px; }
