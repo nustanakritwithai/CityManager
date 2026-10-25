@@ -75,7 +75,7 @@ function decoratePeople(root: ParentNode) {
     const host = employed.closest<HTMLElement>('.cx-section, .bc-section'); if (!host) continue;
     const values = GROUPS.map(([key]) => Number(host.querySelector<HTMLElement>(`[data-context-metric="${key}"]`)?.dataset.value ?? NaN));
     if (values.some(v => !Number.isFinite(v))) continue;
-    const signature = values.join(','), existing = host.querySelector<HTMLElement>(':scope > .people-picto');
+    const signature = values.join(','), existing = host.querySelector<HTMLElement>('.people-picto');
     if (existing?.dataset.signature === signature) continue;
     const total = values.reduce((a, b) => a + b, 0), picto = document.createElement('div');
     picto.className = 'people-picto'; picto.dataset.signature = signature; picto.setAttribute('role', 'img');
@@ -90,12 +90,18 @@ function decoratePeople(root: ParentNode) {
     }
     const legend = document.createElement('div'); legend.className = 'people-legend';
     GROUPS.forEach(([, label, tone], i) => { const item = document.createElement('span'); item.className = `key ${tone}`; item.innerHTML = `<i></i><b>${values[i].toLocaleString('th-TH')}</b>`; item.title = label; item.append(label); legend.append(item); });
+    const card = host.classList.contains('bc-section'), heading = host.querySelector<HTMLElement>(HEADINGS);
+    if (card) {
+      // Cards keep every tile in view; the figures ride along in the heading and add no height.
+      picto.classList.add('inline'); picto.append(visual);
+      if (existing) existing.replaceWith(picto); else (heading ?? host).append(picto);
+      continue;
+    }
     picto.append(visual, legend);
-    // The figures already show these counts; their tiles move behind ⓘ (members and employed stay).
+    // The donut already shows these counts; their city tiles move behind ⓘ.
     const dups = ['workforce', 'dependents', 'unemployed'].map(key => host.querySelector<HTMLElement>(`[data-context-metric="${key}"]`)).filter((e): e is HTMLElement => !!e);
-    const heading = host.querySelector<HTMLElement>(HEADINGS); if (heading) infoButton(host, heading, ...dups);
-    if (existing) existing.replaceWith(picto);
-    else { const head = host.querySelector(':scope > .cx-section-head, :scope > h3'); head ? head.after(picto) : host.prepend(picto); }
+    if (heading) infoButton(host, heading, ...dups);
+    if (existing) existing.replaceWith(picto); else heading ? heading.after(picto) : host.prepend(picto);
   }
 }
 /** City-wide tiles that read zero say nothing at a glance; they wait behind the section's ⓘ. */

@@ -56,3 +56,6 @@
 #inspector .gauge.full .gauge-bar { background: linear-gradient(90deg, #f2c14e calc(var(--share) * 100%), #ffffff14 0); }
 #inspector .gauge b { grid-area: value; font-size: calc(15 * var(--reader-unit, 1px)); font-variant-numeric: tabular-nums; color: #eef3ea; text-align: right; }
 #inspector .gauge small { grid-area: free; font-size: calc(12.5 * var(--reader-unit, 1px)); color: #a3bcb4; text-align: right; }
+#inspector .people-picto.inline { display: inline-flex; margin: 0 0 0 auto; }
+#inspector .people-picto.inline .people-figures { flex: 0 1 auto; justify-content: flex-end; }
+#inspector .people-picto.inline .figure { width: calc(15 * var(--reader-unit, 1px)); height: calc(18 * var(--reader-unit, 1px)); }
