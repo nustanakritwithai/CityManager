@@ -1,3 +1,4 @@
+import { ICONS } from './ui-icons.ts';
 import { Vec3 } from 'playcanvas';
 import type { CityView } from './renderer.ts';
 import type { Issue, IssueKind, Overlay } from './map-overlay.ts';
@@ -11,6 +12,8 @@ const MAX_MARKERS = 64;
  * the active layer legend. Purely presentational (pointer-events: none); the same facts
  * remain in the inspector, so nothing is conveyed by these badges alone.
  */
+/** The badge shows the cause, not just that something is wrong. */
+const ISSUE_ICONS: Record<string, string> = { 'no-road': 'road', 'no-utilities': 'power', 'no-workers': 'worker', 'no-input': 'crop', 'stock-cap': 'box', 'no-buyer': 'coin', 'no-stock': 'shop', 'unsuitable-fertility': 'F', 'empty-home': 'R' };
 export class MapMarkers {
   private readonly layer = document.createElement('div');
   private readonly tip = document.createElement('div');
@@ -34,7 +37,8 @@ export class MapMarkers {
     for (const old of this.issues) old.node.remove();
     this.issues = issues.slice(0, MAX_MARKERS).map(issue => {
       const node = document.createElement('span');
-      node.className = `map-issue ${SEVERE.has(issue.kind) ? 'bad' : 'warn'}`; node.textContent = '!'; node.dataset.kind = issue.kind;
+      node.className = `map-issue ${SEVERE.has(issue.kind) ? 'bad' : 'warn'}`; node.dataset.kind = issue.kind; node.title = issue.text;
+      node.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[ISSUE_ICONS[issue.kind]] ?? ''}</svg>`;
       this.layer.append(node); return { issue, node };
     });
     this.place();

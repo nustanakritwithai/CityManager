@@ -32,6 +32,8 @@ import { OverviewDashboard } from './overview-panels.ts';
 import { CityStatsPanel } from './city-stats-panel.ts';
 import { decoratePanels, watchPanels } from './panel-decor.ts';
 import { installHudIcons } from './hud-icons.ts';
+import { recordDemand, demandSparkline } from './demand-history.ts';
+import { Coach } from './onboarding.ts';
 import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
@@ -47,7 +49,7 @@ let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | un
 let city: City = createCity(61025);
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
-let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined;
+let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, coach: Coach | undefined;
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -269,8 +271,13 @@ function render() {
   ($('#pause') as HTMLButtonElement).disabled = ownerDecisionPanel?.isAutoPending() ?? false;
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => { b.classList.toggle('active', Number(b.dataset.speed) === speed); b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)); });
   const demand = node('div', 'demand-grid');
-  for (const [zone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const) { const item = node('div', `demand-item ${zone.toLowerCase()}`); item.append(node('span', '', label), node('b', '', String(s.demand[zone]))); demand.append(item); }
-  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
+  const history = recordDemand(city, s.demand);
+  for (const [zone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const) {
+    const item = node('div', `demand-item ${zone.toLowerCase()}`); item.append(node('span', '', label), node('b', '', String(s.demand[zone])));
+    const spark = demandSparkline(history, zone); if (spark) item.insertAdjacentHTML('beforeend', spark);
+    demand.append(item);
+  }
+  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); coach?.update(city); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   const placement = route ? null : previewPlacement(city, tool, start, hover);
@@ -349,7 +356,7 @@ async function boot() {
   });
   cityStatsPanel = new CityStatsPanel(open => { $('#toggle-stats').setAttribute('aria-expanded', String(open)); if (open) render(); });
   $('#toggle-stats').addEventListener('click', () => cityStatsPanel!.toggle());
-  installHudIcons(); installSheetHandle($('#inspector'));
+  installHudIcons(); installSheetHandle($('#inspector')); coach = new Coach();
   watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
