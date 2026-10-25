@@ -1,0 +1,61 @@
+/* Icons on number tiles and explanations folded behind ⓘ. */
+.ui-icon { display: inline-grid; place-items: center; flex: 0 0 auto; }
+.ui-icon svg { width: 100%; height: 100%; display: block; }
+.cx-metric dt { display: flex; align-items: center; gap: calc(6 * var(--reader-unit, 1px)); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cx-metric-icon {
+  width: calc(20 * var(--reader-unit, 1px)); height: calc(20 * var(--reader-unit, 1px)); padding: calc(2 * var(--reader-unit, 1px));
+  border-radius: calc(6 * var(--reader-unit, 1px)); background: #ffffff12; color: #cfe1d9;
+}
+.cx-metric.money .cx-metric-icon { color: #f3c46b; background: #f3c46b1f; }
+.cx-metric small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+[data-info-of].info-closed { display: none !important; }
+.info-toggle {
+  display: inline-grid; place-items: center; flex: 0 0 auto; position: relative;
+  width: calc(26 * var(--reader-unit, 1px)); height: calc(26 * var(--reader-unit, 1px)); min-height: 0; min-width: 0;
+  margin-left: calc(6 * var(--reader-unit, 1px)); padding: calc(3 * var(--reader-unit, 1px));
+  border: 0; border-radius: 50%; background: transparent; color: #8fb0a7; cursor: pointer; vertical-align: middle;
+}
+/* 44px hit area around the 26px glyph. */
+.info-toggle::before { content: ''; position: absolute; inset: calc(-9 * var(--reader-unit, 1px)); }
+.info-toggle:hover, .info-toggle[aria-expanded=true] { color: #f3c46b; background: #f3c46b1a; }
+.info-toggle .ui-icon { width: 100%; height: 100%; }
+[data-info-of].info-note:not(.info-closed) {
+  margin-top: calc(6 * var(--reader-unit, 1px)); padding: calc(8 * var(--reader-unit, 1px)) calc(10 * var(--reader-unit, 1px));
+  border-radius: calc(8 * var(--reader-unit, 1px)); background: #f3c46b0f; box-shadow: inset 3px 0 0 #f3c46b66;
+}
+#inspector .cx-capacity-dots { display: flex; flex-wrap: wrap; gap: calc(4 * var(--reader-unit, 1px)); margin-top: calc(7 * var(--reader-unit, 1px)); }
+#inspector .cx-capacity-dots i { width: calc(10 * var(--reader-unit, 1px)); height: calc(10 * var(--reader-unit, 1px)); border-radius: 50%; background: #ffffff1c; box-shadow: inset 0 0 0 1px #ffffff22; }
+#inspector .cx-capacity-dots i.on { background: #6fd49a; box-shadow: none; }
+/* People pictogram: working (green), idle workforce (amber), dependents (blue-grey). */
+#inspector .people-picto { --work: #6fd49a; --idle: #f2c14e; --dep: #8fb2c9; display: flex; align-items: center; gap: calc(12 * var(--reader-unit, 1px)); margin: calc(6 * var(--reader-unit, 1px)) 0 calc(10 * var(--reader-unit, 1px)); }
+#inspector .people-figures { display: flex; flex-wrap: wrap; gap: calc(2 * var(--reader-unit, 1px)); flex: 1; min-width: 0; }
+#inspector .people-figures .figure { width: calc(22 * var(--reader-unit, 1px)); height: calc(26 * var(--reader-unit, 1px)); }
+#inspector .people-figures svg { width: 100%; height: 100%; display: block; }
+#inspector .figure.work { color: var(--work); } #inspector .figure.idle { color: var(--idle); } #inspector .figure.dep { color: var(--dep); opacity: .8; }
+#inspector .people-donut { width: calc(92 * var(--reader-unit, 1px)); flex: 0 0 auto; }
+#inspector .people-donut svg { display: block; width: 100%; height: auto; transform: rotate(-90deg); }
+#inspector .people-donut .arc { fill: none; stroke-width: 6; }
+#inspector .people-donut .arc.track { stroke: #ffffff14; }
+#inspector .people-donut .arc.work { stroke: var(--work); } #inspector .people-donut .arc.idle { stroke: var(--idle); } #inspector .people-donut .arc.dep { stroke: var(--dep); }
+#inspector .people-donut text { transform: rotate(90deg); transform-origin: 21px 21px; fill: #eef3ea; font-size: 9px; font-weight: 800; }
+#inspector .people-legend { display: grid; gap: calc(4 * var(--reader-unit, 1px)); flex: 0 0 auto; }
+#inspector .people-donut + .people-legend { flex: 1; }
+#inspector .people-legend .key { display: flex; align-items: center; gap: calc(6 * var(--reader-unit, 1px)); font-size: calc(13 * var(--reader-unit, 1px)); color: #a3bcb4; white-space: nowrap; }
+#inspector .people-legend .key i { width: calc(10 * var(--reader-unit, 1px)); height: calc(10 * var(--reader-unit, 1px)); border-radius: 50%; background: currentColor; }
+#inspector .people-legend .key b { color: #eef3ea; font-size: calc(15 * var(--reader-unit, 1px)); font-variant-numeric: tabular-nums; min-width: 2ch; }
+#inspector .people-legend .key.work i { color: var(--work); } #inspector .people-legend .key.idle i { color: var(--idle); } #inspector .people-legend .key.dep i { color: var(--dep); }
+/* Card hero: the title already names the building, so the id line stays for assistive tech only. */
+#entity-content[data-card-kind] .bc-identity { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#entity-content[data-card-kind] .bc-period { display: inline-flex; align-items: center; gap: calc(5 * var(--reader-unit, 1px)); width: fit-content; margin-top: calc(4 * var(--reader-unit, 1px)); padding: calc(2 * var(--reader-unit, 1px)) calc(9 * var(--reader-unit, 1px)); border-radius: 999px; background: #ffffff0f; color: #a3bcb4; }
+.bc-period-icon { width: calc(15 * var(--reader-unit, 1px)); height: calc(15 * var(--reader-unit, 1px)); }
+#inspector .gauge-set { display: grid; gap: calc(10 * var(--reader-unit, 1px)); margin: calc(8 * var(--reader-unit, 1px)) 0 calc(4 * var(--reader-unit, 1px)); }
+#inspector .gauge { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'icon bar value' 'icon bar free'; align-items: center; column-gap: calc(10 * var(--reader-unit, 1px)); }
+#inspector .gauge-icon { grid-area: icon; width: calc(30 * var(--reader-unit, 1px)); height: calc(30 * var(--reader-unit, 1px)); padding: calc(5 * var(--reader-unit, 1px)); border-radius: calc(8 * var(--reader-unit, 1px)); background: #ffffff12; color: #cfe1d9; }
+#inspector .gauge-bar { grid-area: bar; height: calc(12 * var(--reader-unit, 1px)); border-radius: 6px; background: linear-gradient(90deg, #6fd49a calc(var(--share) * 100%), #ffffff14 0); }
+#inspector .gauge.full .gauge-bar { background: linear-gradient(90deg, #f2c14e calc(var(--share) * 100%), #ffffff14 0); }
+#inspector .gauge b { grid-area: value; font-size: calc(15 * var(--reader-unit, 1px)); font-variant-numeric: tabular-nums; color: #eef3ea; text-align: right; }
+#inspector .gauge small { grid-area: free; font-size: calc(12.5 * var(--reader-unit, 1px)); color: #a3bcb4; text-align: right; }
+#inspector .people-picto.inline { display: inline-flex; margin: 0 0 0 auto; }
+#inspector .people-picto.inline .people-figures { flex: 0 1 auto; justify-content: flex-end; }
+#inspector .people-picto.inline .figure { width: calc(15 * var(--reader-unit, 1px)); height: calc(18 * var(--reader-unit, 1px)); }

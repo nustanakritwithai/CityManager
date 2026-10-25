@@ -5,6 +5,9 @@ import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, co
 import { formatMoney, cropFlowRows, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
+import { growthChecklist } from './overview-data.ts';
+import { buildingIssues } from './map-overlay.ts';
+import { iconElement } from './ui-icons.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
 type HouseholdAction = (id: number, sourceBuildingId: number, sourceCell: number) => void;
@@ -161,7 +164,15 @@ function activity(city: City, kind: FlowKind, wallet: string, owner: string): HT
   toggle.addEventListener('click', () => { activityLimits.set(key, activityLimits.get(key) === Infinity ? 8 : Infinity); update(); }); controls.append(toggle); body.append(note, counter, list, controls); update(); return body;
 }
 function capacityMetric(key: string, title: string, occupied: number, capacity: number, unit: string): HTMLElement {
-  const card = metric(key, title, `${count(occupied)} / ${count(capacity)} ${unit}`, occupied); card.dataset.capacity = String(capacity); return card;
+  const card = metric(key, title, `${count(occupied)} / ${count(capacity)} ${unit}`, occupied); card.dataset.capacity = String(capacity);
+  const share = capacity > 0 ? Math.min(1, occupied / capacity) : 0;
+  if (capacity > 0 && capacity <= 16) { // small capacities read better as one dot per slot
+    const dots = el('span', 'cx-capacity-dots'); dots.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < capacity; i++) dots.append(el('i', i < occupied ? 'on' : ''));
+    card.append(dots); return card;
+  }
+  const bar = el('span', 'cx-capacity-bar'); bar.setAttribute('aria-hidden', 'true');
+  bar.style.setProperty('--share', share.toFixed(3)); if (share >= 1) bar.classList.add('full'); card.append(bar); return card;
 }
 function cropCard(row: CropFlowRow, wallet: string): HTMLElement {
   const key = JSON.stringify([wallet, 'crops', row.id, row.tick, row.cropKind, row.from, row.to, row.value, row.fromValue, row.toValue, row.cash]);
@@ -352,15 +363,22 @@ function cardIcon(kind: CardKind): SVGElement {
   };
   const host = el('div'); host.innerHTML = `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">${paths[kind]}</svg>`; return host.firstElementChild as SVGElement;
 }
-function cardHero(data: CardData): HTMLElement {
+function cardHero(data: CardData, city: City): HTMLElement {
   const labels: Record<CardKind, string> = { house: 'บ้านพัก · การอยู่อาศัย', household: 'ครัวเรือน · สมาชิกและเงินร่วม', shop: 'พาณิชย์ · ร้านค้าสำเร็จรูป', market: 'พาณิชย์ระดับ 1 · ตลาดพืชผล', factory: 'โรงงาน · การแปรรูป', farm: 'ฟาร์ม · พื้นที่และการเก็บเกี่ยว' };
   const hero = el('div', 'bc-hero'), icon = el('span', 'bc-type-icon'), copy = el('div', 'bc-hero-copy'); icon.append(cardIcon(data.kind));
   const identity = data.kind === 'household'
     ? `${data.identity.householdId === null ? 'ยังไม่พบรหัสครัวเรือน' : `ครัวเรือน #${data.identity.householdId}`} · ${data.identity.buildingId === null ? 'ยังไม่มีบ้านพัก' : `บ้านพัก: อาคาร #${data.identity.buildingId}`}`
     : `${data.identity.buildingId === null ? 'ยังไม่พบรหัสอาคาร' : `อาคาร #${data.identity.buildingId}`}${data.kind === 'house' ? '' : ` · ${data.identity.firmId === null ? 'ยังไม่พบรหัสกิจการ' : `กิจการ #${data.identity.firmId}`}`}`;
-  const period = el('p', 'bc-period', data.kind === 'house' ? `สถานะที่พัก ณ วัน ${data.window.toTick}` : data.window.empty ? `ช่วงเริ่มต้น · วัน ${data.window.toTick}` : `เงินสดวันที่ ${data.window.fromTick}–${data.window.toTick} · รวมวันต้นและปลาย`);
+  const period = el('p', 'bc-period', data.kind === 'house' ? `วันที่ ${data.window.toTick}` : data.window.empty ? `เริ่มต้น · วันที่ ${data.window.toTick}` : `วันที่ ${data.window.fromTick}–${data.window.toTick}`);
+  period.title = data.kind === 'house' ? 'สถานะที่พัก ณ วันนี้' : 'ยอดเงินสดในช่วงนี้ รวมวันต้นและปลาย'; period.prepend(iconElement('clock', 'ui-icon bc-period-icon'));
   Object.assign(period.dataset, { fromTick: String(data.window.fromTick), toTick: String(data.window.toTick), inclusive: String(data.window.inclusive), empty: String(data.window.empty) });
-  copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), period); hero.append(icon, copy); return hero;
+  copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), period); hero.append(icon, copy);
+  const cell = data.kind === 'household' ? null : city.buildings.find(b => b.id === data.identity.buildingId)?.cell;
+  if (cell != null) {
+    const issue = buildingIssues(city).find(i => i.cell === cell), badge = el('span', `bc-status-badge ${issue ? 'bad' : 'good'}`, issue ? issue.text : 'ไม่พบปัญหา');
+    badge.dataset.issue = issue?.kind ?? 'none'; copy.prepend(badge);
+  }
+  return hero;
 }
 /** Move existing metric nodes, retaining each raw key once and every live handler. */
 function cardParts(nodes: HTMLElement[]): CardParts {
@@ -453,12 +471,23 @@ function renderIndustryGrowth(city: City): HTMLElement {
       growthMetric('rent-reserve', 'กันค่าเช่า', '', 0, true), growthMetric('working-reserve', 'กันเงินหมุนเวียน', '', 0, true),
       growthMetric('crop-available', 'พืชผลที่เข้าถึงได้', '', 0), growthMetric('funded-vacancies', 'งานว่างที่จ่ายได้', '', 0),
     ])); detail.dataset.growthDetails = 'true';
+    const progress = el('div', 'cx-growth-progress'); progress.dataset.growthProgress = 'true';
+    progress.append(el('div', 'cx-growth-progress-bar'), el('span', 'cx-growth-progress-text'));
+    const checklist = el('ol', 'cx-growth-checklist'); checklist.dataset.growthChecklist = 'true';
     const footnote = el('p', 'cx-detail-note'); footnote.dataset.growthFootnote = 'true';
-    panel.append(state, capital, detail, footnote); growthViews.set(city, panel);
+    panel.append(state, progress, capital, checklist, detail, footnote); growthViews.set(city, panel);
   }
   Object.assign(panel.dataset, { growthReason: growth.code, ready: String(growth.ready), bootstrap: String(growth.bootstrap), sponsorId: growth.sponsorFirmId === null ? '' : String(growth.sponsorFirmId) });
   panel.querySelector<HTMLElement>('[data-growth-message]')!.textContent = message;
   panel.querySelector<HTMLElement>('[data-growth-capital]')!.hidden = growth.bootstrap || growth.sponsorFirmId === null;
+  const progress = panel.querySelector<HTMLElement>('[data-growth-progress]')!, share = growth.requiredCapital > 0 ? Math.min(1, Math.max(0, growth.availableCapital / growth.requiredCapital)) : 0;
+  progress.hidden = growth.bootstrap || growth.sponsorFirmId === null || growth.requiredCapital <= 0;
+  progress.style.setProperty('--share', share.toFixed(3)); progress.dataset.value = share.toFixed(3);
+  progress.querySelector('span')!.textContent = `ทุนพร้อม ${Math.round(share * 100)}%`;
+  const checklist = panel.querySelector<HTMLElement>('[data-growth-checklist]')!;
+  checklist.replaceChildren(...growthChecklist(growth.code).map(step => {
+    const item = el('li', `cx-check ${step.state}`, step.label); item.dataset.state = step.state; return item;
+  }));
   const values: [string, number, string][] = [
     ['capital-available', growth.availableCapital, cash(growth.availableCapital)], ['capital-required', growth.requiredCapital, cash(growth.requiredCapital)],
     ['sponsor-id', growth.sponsorFirmId ?? 0, growth.sponsorFirmId === null ? 'ยังไม่มีผู้ลงทุน' : `#${growth.sponsorFirmId}`], ['cash', growth.cash, growth.sponsorFirmId === null ? 'ยังไม่มีผู้ลงทุน' : cash(growth.cash)],
@@ -474,8 +503,8 @@ function renderIndustryGrowth(city: City): HTMLElement {
     : 'โรงงานเพิ่มใช้เงินกิจการผู้ลงทุนจริง หลังกันภาระทั้งหมด เงินนี้ไม่ใช่เงินคลังหรือยอดขายใหม่ งานเพิ่มก่อนรับครัวเรือนตามเงื่อนไขปกติ การเริ่มผลิตยังต้องซื้อพืชผลจริง และอาจต้องวางฟาร์มเพิ่ม';
   return panel;
 }
-function cardInterior(data: CardData, nodes: HTMLElement[]): HTMLElement[] {
-  const parts = cardParts(nodes), output = [cardHero(data), ...parts.statuses, ...parts.assumptions];
+function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLElement[] {
+  const parts = cardParts(nodes), output = [cardHero(data, city), ...parts.statuses, ...parts.assumptions];
   if (data.kind === 'house') {
     output.push(cardGroup('พักอยู่จริง / ความจุ', 'occupancy', takeCards(parts, ['households', 'persons', 'vacant-households', 'vacant-persons']), 'bc-occupancy'));
     if (parts.residents) output.push(cardSection(parts.residents, 'residents'));
@@ -533,15 +562,15 @@ export function renderContext(city: City, selection: ContextSelection, onHouseho
   host.dataset.scope = selection.kind;
   if (selection.kind === 'household') {
     host.dataset.entityId = String(selection.id); const household = city.households.find(value => value.id === selection.id); if (household) host.dataset.wallet = household.wallet;
-    const data = householdCardData(city, selection.id), nodes = renderHousehold(city, selection); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes) : nodes));
+    const data = householdCardData(city, selection.id), nodes = renderHousehold(city, selection); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
   } else {
     const place = resolvePlace(city, selection.cell); host.dataset.cell = String(selection.cell);
     if (!place.building) { host.replaceChildren(); return; }
     host.dataset.entityId = String(place.building.id); host.dataset.buildingId = String(place.building.id);
     if (place.building.zone === 'R') {
-      const data = buildingCardData(city, place.building.id), nodes = renderHouse(city, place.building, place.households, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes) : nodes));
+      const data = buildingCardData(city, place.building.id), nodes = renderHouse(city, place.building, place.households, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
     } else if (place.firm) {
-      host.dataset.wallet = place.firm.wallet; const data = buildingCardData(city, place.building.id), nodes = renderFirm(city, place.building, place.firm, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes) : nodes));
+      host.dataset.wallet = place.firm.wallet; const data = buildingCardData(city, place.building.id), nodes = renderFirm(city, place.building, place.firm, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
     }
     else host.replaceChildren(empty('ไม่พบข้อมูลบริษัท', 'อาคารนี้ไม่มีบริษัทที่อ้างอิงอยู่ในข้อมูลเมืองปัจจุบัน'));
   }
