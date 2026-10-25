@@ -114,7 +114,8 @@
 #inspector .work-place.zone-I { color: #eeaa72; } #inspector .work-place.zone-shop { color: #85c3ea; } #inspector .work-place.zone-market { color: #c3e07c; }
 #inspector .work-skill { color: var(--c-icon); }
 /* HUD glyphs drawn from the shared SVG set. */
-.svg-glyph { display: inline-grid !important; place-items: center; line-height: 1 !important; }
+span.svg-glyph { display: inline-grid !important; place-items: center; line-height: 1 !important; }
+button.svg-glyph svg { margin: auto; }
 .svg-glyph svg { width: 1.15em; height: 1.15em; display: block; }
 .tool .svg-glyph.zone-icon { background: transparent !important; border: 0 !important; color: inherit; }
 .tool.zone-r .svg-glyph { color: #7fd6a2; } .tool.zone-c .svg-glyph { color: #85c3ea; } .tool.zone-i .svg-glyph { color: #eeaa72; } .tool.zone-f .svg-glyph { color: #b9dc73; }
@@ -142,3 +143,40 @@ html[data-touch-ui=true] #inspector[data-sheet=full] { max-height: calc(100dvh -
 .city-kpis .kpi[data-kpi=warnings] { pointer-events: auto; cursor: pointer; }
 .city-kpis .kpi[data-kpi=warnings]:hover { border-color: #f3c46b88; }
 .city-kpis .kpi[data-kpi=warnings]:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+/* Desktop camera: one slim column (zoom, rotate, reset); pan arrows behind the move toggle. */
+.camera-pan-toggle { display: none; }
+@media (min-width: 701px) {
+  html:not([data-touch-ui=true]) .camera-hud .camera-grid { display: flex; flex-direction: column; width: auto; padding: 3px; gap: 2px; }
+  html:not([data-touch-ui=true]) .camera-hud .camera-grid > button { width: 40px; height: 40px; min-height: 40px; display: grid; place-items: center; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=zoom-in] { order: 1; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=zoom-out] { order: 2; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=rotate-left] { order: 3; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=rotate-right] { order: 4; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=reset] { order: 5; }
+  html:not([data-touch-ui=true]) .camera-grid .camera-pan-toggle { display: grid; order: 6; }
+  html:not([data-touch-ui=true]) .camera-hud .camera-grid > :is([data-camera=up], [data-camera=down], [data-camera=left], [data-camera=right]) { display: none; order: 7; }
+  html:not([data-touch-ui=true]) .camera-hud[data-pan=true] .camera-grid > :is([data-camera=up], [data-camera=down], [data-camera=left], [data-camera=right]) { display: grid; }
+  html:not([data-touch-ui=true]) .camera-hud[data-pan=true] .camera-pan-toggle { color: var(--c-accent); }
+}
+.camera-grid .svg-glyph svg, .mobile-camera-toggle.svg-glyph svg { width: 22px; height: 22px; }
+/* Contrast audit: the Esc hint under the cancel button was 3.9:1 on the dock. */
+.cancel-button small { color: #9fb6b0; }
+.map-issue svg { width: 72%; height: 72%; display: block; }
+#growth-summary .demand-spark { display: block; width: 100%; height: calc(16 * var(--reader-unit, 1px)); margin-top: calc(2 * var(--reader-unit, 1px)); opacity: .85; }
+/* First-run coach (desktop only): click-through except the close button. */
+.coach { display: none; }
+@media (min-width: 861px) {
+  html:not([data-touch-ui=true]) .coach:not([hidden]) {
+    display: block; position: fixed; z-index: 9; left: 76px; top: 112px; width: 236px; pointer-events: none;
+    padding: 10px 12px 12px; border: 1px solid var(--line, #ffffff22); border-radius: 12px; background: rgba(17, 36, 43, .92); box-shadow: 0 10px 30px #0006;
+  }
+}
+.coach-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.coach-head strong { font-size: 14px; color: var(--c-accent); }
+.coach-close { pointer-events: auto; width: 32px; height: 32px; min-height: 0; margin: -6px -6px 0 0; border: 0; border-radius: 8px; background: transparent; color: var(--c-muted); font-size: 15px; cursor: pointer; }
+.coach-close:hover { background: #ffffff14; color: var(--c-text); }
+.coach-steps { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.coach-steps li { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--c-text); }
+.coach-icon { width: 26px; height: 26px; padding: 4px; border-radius: 8px; background: #ffffff10; color: var(--c-icon); }
+.coach-steps li.done { color: var(--c-muted); text-decoration: line-through; text-decoration-color: #ffffff40; }
+.coach-steps li.done .coach-icon { background: var(--c-good); color: #0f1f26; }
