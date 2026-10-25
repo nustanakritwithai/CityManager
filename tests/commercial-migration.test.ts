@@ -86,7 +86,7 @@ test('strict v4 validation precedes migration and rejects forged stock, owner ca
   assert.throws(() => deserialize(JSON.stringify({ version: 7 })), /corrupt/);
 });
 
-test('fresh commercial zoning builds owner-funded L1 markets, then shops once a factory works; markets never auto-upgrade', () => {
+test('fresh commercial zoning builds owner-funded L1 markets, then shops once a factory works; markets stay level 1', () => {
   const city = createCity(), before = serialize(city);
   assert.equal(zoneCell(city, 0, 'T' as never).ok, false); assert.equal(serialize(city), before);
   for (let i = 0; i < 180; i++) { step(city); loaded(city); }

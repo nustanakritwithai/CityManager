@@ -178,6 +178,7 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
     else if (e.reason === 'Monthly wages') add(wages, e.tick, e.amount);
     else if (e.to === 'treasury' && /tax/i.test(e.reason)) add(taxes, e.tick, e.amount);
     else if (e.reason === 'Outside residential height investment') out.push({ node: 'capacity', icon: 'level', text: 'บ้านเพิ่มชั้น รับคนได้มากขึ้น', tick: e.tick });
+    else if (e.reason === 'Market to shop conversion') out.push({ node: 'shops', icon: 'shop', text: `ตลาดยกระดับเป็นร้านค้า · ${baht(e.amount)}`, tick: e.tick });
     else if (e.reason === 'Profitable firm height investment') out.push({ node: 'jobs', icon: 'level', text: 'กิจการขยายอาคาร ตำแหน่งงานเพิ่ม', tick: e.tick });
   }
   for (const [tick, amount] of wages) out.push({ node: 'employed', icon: 'worker', text: `จ่ายค่าจ้างสิ้นเดือน ${baht(amount)}`, tick });
