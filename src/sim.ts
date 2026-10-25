@@ -337,7 +337,7 @@ export function explainCell(c: City, i: number): string[] {
     isMarket(f) ? 'Owner-operated crop trading only: capital and cash remain separate from household savings. Opening stock can supply factories or one household basket; new purchases cannot resell this tick. Unsold stock ties up capital, never creates profit.' :
     f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale 3 credits; outside export 3.50.` : 'Buys generic goods locally at 3 credits or imports at 4.50; competes with crop markets for one household basket/day at 8 credits.',
     isMarket(f) ? 'Owner labour earns no fabricated salary; explicit distributions use realised profit after tax and working-cash reserves.' : 'Wages accrue per allocated worker-day and are paid each 30-day month. Reserved wages cannot fund stock or expansion.',
-    `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax 20%. Farm and self-employed stall stay small in this release.`);
+    `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax 20%. Self-employed market stalls stay small; farms grow to level 3 from their own profit.`);
   return output;
 }
 function createBuilding(c: City, i: number, shop = false) {

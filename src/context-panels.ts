@@ -245,7 +245,9 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
   }
   if (!labor.householdCount) list.append(el('p', 'cx-detail-note', isMarket(firm) ? 'เจ้าของยังไม่ได้ใช้แรงงานทำตลาดในวันนี้ กิจการและเงินยังคงแยกจากบ้านพัก' : 'ยังไม่มีแรงงานที่มีความสามารถตรงกับงานและสำรองค่าจ้างได้'));
   employees.append(list);
-  if (isRetail(firm)) employees.append(el('p', 'cx-detail-note', `ร้านค้าสำเร็จรูปจากเซฟเดิม · พาณิชย์ระดับ ${building.level} · คงเงิน สินค้า และตำแหน่งงานเดิม ยังไม่มีการอัปเกรดตลาดเป็นร้านค้าประเภทนี้`));
+  if (isRetail(firm)) employees.append(el('p', 'cx-detail-note', firm.owner
+    ? `ร้านค้าของครัวเรือน #${firm.owner.householdId} · พาณิชย์ระดับ ${building.level} · เจ้าของยืนร้านเอง 1 คน ไม่มีเงินเดือน จ้างลูกจ้างได้อีก ${Math.max(0, capacity - 1)} คน`
+    : `ร้านค้าสำเร็จรูป · พาณิชย์ระดับ ${building.level} · ทุนจากนักลงทุนภายนอก ตำแหน่งงานทั้งหมดเป็นลูกจ้าง`));
   const meanings = facts(`firm:${firm.id}`, 'เงินสำรอง แรงงาน และกำไรรอบบัญชี',
     el('p', '', isMarket(firm) ? 'ตลาดนี้เป็นกิจการทำเองของครัวเรือน ใช้แรงงานเจ้าของ 1 คน ไม่จ้างลูกจ้างและไม่มีเงินเดือนเจ้าของ เงินกิจการและเงินครัวเรือนเป็นคนละบัญชี การเติมทุนและถอนกำไรไม่ใช่รายได้หรือค่าใช้จ่ายดำเนินงานรอบใหม่' : 'เงินในกระเป๋ารวมค่าจ้างที่ต้องสำรองไว้แล้ว ยอดใช้จ่ายได้จึงหักเงินสำรองออกก่อน จ้างเป็นจำนวนแรงงานที่มีความสามารถตรงกับงาน ไม่ได้รับครัวเรือนทั้งบ้าน ผู้พึ่งพิงไม่ถูกนับเป็นแรงงาน ค่าจ้างสะสมตามวัน-แรงงานจริงและจ่ายเข้าบัญชีร่วมของครัวเรือน'),
     el('p', '', hasClosedMonth ? `กำไรก่อนภาษีของรอบบัญชีวันที่ ${Math.max(1, lastSettlement - MONTH + 1)}–${lastSettlement} รวมเฉพาะวันที่บริษัทดำเนินงาน ไม่ใช่กำไรที่เพิ่งรับในเดือนนี้` : 'ยังไม่มีเดือนที่ปิดบัญชี จึงยังไม่มีกำไรของรอบบัญชีก่อนหน้า'),
@@ -278,7 +280,7 @@ function renderAgriculture(city: City, building: Building, firm: Firm, workers: 
   body.append(metrics(cards), el('p', 'cx-detail-note', firm.zone === 'F' ? 'พืชผลเก็บเกี่ยวตั้งมูลค่าคงคลังเริ่มต้นเป็นศูนย์ ค่าจ้างและค่าเช่ายังเป็นค่าใช้จ่ายงวด ไม่ได้เป็นผลตอบแทนรับประกัน' : firm.zone === 'I' ? `แต่ละวันใช้ ${CROP_RECIPE.crop} ล็อตจริงต่อ ${CROP_RECIPE.goods} หน่วยสำเร็จรูป ขาดวัตถุดิบผลิตไม่ได้ และไม่ประมวลผลซ้ำวันเดิม` : 'ตลาดไม่ผลิตหรือแปรรูป ซื้อพืชผลเข้าสต็อกก่อน ขายล็อตที่มีตั้งแต่ต้นวันเท่านั้น สต็อกที่โรงงานและครัวเรือนซื้อเป็นกองเดียวกัน'));
   if (firm.zone === 'I' && firm.cropInventory < CROP_RECIPE.crop) body.append(chip('ขาดพืชผลสำหรับแปรรูป', false));
   const output = [body];
-  if (isMarket(firm)) output.push(renderOwnerFinance(city, firm)); return output;
+  if (isMarket(firm) || isRetail(firm) && firm.owner) output.push(renderOwnerFinance(city, firm)); return output;
 }
 function renderOwnerFinance(city: City, firm: Firm): HTMLElement {
   const body = section('เจ้าของที่ทำกิจการเอง'), data = ownerFinance(city, firm.id);
