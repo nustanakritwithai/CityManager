@@ -108,14 +108,14 @@ export class Minimap {
     this.mapCanvas.className = 'city-map-canvas';
     this.mapCanvas.addEventListener('pointermove', e => this.describe(cellAt(this.mapCanvas, e)));
     this.mapCanvas.addEventListener('click', e => { const cell = cellAt(this.mapCanvas, e); if (cell !== null) { this.toggleMap(false); this.onOpen(cell); } });
-    this.mapInfo.className = 'city-map-info'; this.mapInfo.textContent = 'ชี้เพื่อดูว่าตรงนั้นคืออะไร · คลิกเพื่อเปิดข้อมูลสถานที่ · กด M หรือ Esc เพื่อปิด';
+    this.mapInfo.className = 'city-map-info'; this.mapInfo.textContent = matchMedia('(pointer: coarse)').matches ? 'แตะช่องเพื่อเปิดข้อมูลสถานที่' : 'ชี้เพื่อดูว่าตรงนั้นคืออะไร · คลิกเพื่อเปิดข้อมูลสถานที่ · กด M หรือ Esc เพื่อปิด';
     this.map.append(bar, legend, this.mapCanvas, this.mapInfo); document.body.append(this.map);
   }
   get mapOpen() { return !this.map.hidden; }
   toggleMap(open = this.map.hidden) {
     this.map.hidden = !open;
     if (open && this.city) {
-      const size = Math.max(280, Math.min(640, innerHeight - 220, innerWidth - 64));
+      const size = Math.max(260, Math.min(640, innerHeight - 220, innerWidth - (innerWidth < 600 ? 34 : 64)));
       const ctx = setupCanvas(this.mapCanvas, size); draw(ctx, this.city, size, { selected: this.selected, issues: this.issues, labels: true, view: this.view });
     }
   }

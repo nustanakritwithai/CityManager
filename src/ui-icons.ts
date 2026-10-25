@@ -29,6 +29,7 @@ export const ICONS: Record<string, string> = {
   cursor: '<path d="M5 3l13 7.5-5.6 1.4 3.3 6.2-2.6 1.4-3.3-6.2L5 17.5z" fill="currentColor"/>',
   bulldoze: '<path d="M3 15h11v4H3z" fill="currentColor"/><path d="M5 15V9h6l3 6" fill="currentColor" opacity=".6"/><path d="M14 12h3l4 7h-6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="20" r="1.6" fill="currentColor"/><circle cx="11" cy="20" r="1.6" fill="currentColor"/>',
   move: '<path d="M12 2v20M2 12h20M12 2l-3 3m3-3 3 3M12 22l-3-3m3 3 3-3M2 12l3-3m-3 3 3 3M22 12l-3-3m3 3-3 3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
+  map: '<path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z" fill="currentColor" opacity=".35"/><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20zM9 4v13.5M15 6.5V20" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/>',
   network: '<path d="M6 7l5.2 3.6M18 8l-5 2.8M12 13v3.4M6.6 9.2l4.2 7.6M17.4 10 13.4 16.8" stroke="currentColor" stroke-width="1.5" fill="none" opacity=".7"/><circle cx="5" cy="6" r="2.6" fill="currentColor"/><circle cx="19" cy="7" r="2.6" fill="currentColor"/><circle cx="12" cy="11.5" r="2" fill="currentColor"/><circle cx="12" cy="19" r="3" fill="currentColor"/>',
   chart: '<path d="M4 20V10h3v10zM10.5 20V4h3v16zM17 20v-7h3v7z" fill="currentColor"/>',
   overview: '<path d="M3 4h8v7H3zM13 4h8v4h-8zM13 10h8v10h-8zM3 13h8v7H3z" fill="currentColor" opacity=".85"/>',
