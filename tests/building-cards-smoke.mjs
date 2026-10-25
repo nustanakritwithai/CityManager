@@ -139,7 +139,7 @@ try {
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/city-advisor/report*', requestStage: 'Request' }, { urlPattern: '*/chat/completions*', requestStage: 'Request' }, ...(blocked ? [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] : [])] });
-  await send('Page.navigate', { url }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready'); if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause'); await load(fixture);
+  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready'); if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause'); await load(fixture);
 
   for (const [kind, b] of Object.entries(places)) { await place(fixture, b); await card(fixture, kind, b); await screenshot(`cards-${kind}.png`); }
   assert.equal(new Set(Object.values(signatures)).size, 5, 'Five building types have distinct content section layouts');

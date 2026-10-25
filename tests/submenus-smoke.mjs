@@ -42,7 +42,7 @@ try{
  await send('Runtime.enable');await send('Page.enable');
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:2,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
  if(process.env.CITYMANAGER_BLOCK_MODELS==='1')await send('Fetch.enable',{patterns:[{urlPattern:'*kenney-city/models/*.glb',requestStage:'Request'}]});
- await send('Page.navigate',{url});await until('!!window.cityManager');await until('window.cityManager.visuals().ready');await button('#pause');
+ await send('Page.navigate',{url:url+'?starter=1'});await until('!!window.cityManager');await until('window.cityManager.visuals().ready');await button('#pause');
  const initial=await state();assert.equal(initial.goodsLedger.length,0);await open('#goods-section');assert.equal(await evaluate('!!document.querySelector("#goods-ledger .sm-empty")'),true);await assertLayout();await screenshot('phone-goods-empty.png');assert.deepEqual(await state(),initial);checks.push('Empty goods state is explicit and does not mutate the city');
  await button('#close-inspector');await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`);await button('#load');assert.deepEqual(await state(),fixture);await button('#close-inspector');const baseline=await state();
  const home=baseline.buildings.find(b=>b.zone==='R'),homePoint=await evaluate(`window.cityManager.cellScreen(${home.cell})`);assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`),'city-canvas');await click(homePoint.x,homePoint.y);

@@ -23,7 +23,7 @@ async function key(value) { for (const type of ['keyDown', 'keyUp']) await send(
 async function press(selector) { const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`); await sleep(50); await click(p.x, p.y); await sleep(50); }
 const audio = () => evaluate('window.cityManager.audio()');
 const played = async () => (await audio()).played.map(p => p.name);
-const open = async () => { await send('Page.navigate', { url }); await until('!!window.cityManager && window.cityManager.visuals().ready', 60000); };
+const open = async () => { await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready', 60000); };
 
 try {
   let tabs; for (let n = 0; n < 100; n++) { try { tabs = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); break; } catch { await sleep(100); } }

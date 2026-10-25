@@ -2,7 +2,7 @@
  * Goal UI: the level pill under the wordmark, the goals card at the top of the city overview and
  * the win screen. Everything reads cityGoals(); nothing is saved.
  */
-import { cityGoals, cityRecord, type CityGoals } from './city-goals.ts';
+import { WinLatch, cityGoals, cityRecord, type CityGoals } from './city-goals.ts';
 import type { City } from './sim.ts';
 import './goals.css';
 
@@ -64,15 +64,12 @@ export function renderGoalsCard(host: HTMLElement, goals: CityGoals) {
 
 /** One win screen per running city: it fires when the city reaches stage 5 while time is running. */
 export class WinWatch {
-  private city: City | null = null;
-  private wasWon = true;
-  constructor(private readonly onNewCity: () => void, private readonly onWin: () => void) {}
+  private readonly latch = new WinLatch();
+  private readonly onNewCity: () => void;
+  private readonly onWin: () => void;
+  constructor(onNewCity: () => void, onWin: () => void) { this.onNewCity = onNewCity; this.onWin = onWin; }
   /** Call after every render; `running` is false for loads, resets and paused edits. */
-  check(city: City, goals: CityGoals, running: boolean) {
-    if (city !== this.city) { this.city = city; this.wasWon = goals.won; return; }
-    if (goals.won && !this.wasWon && running) this.show(city);
-    this.wasWon = goals.won;
-  }
+  check(city: City, goals: CityGoals, running: boolean) { if (this.latch.check(city, goals.won, running)) this.show(city); }
   private show(city: City) {
     this.onWin();
     const r = cityRecord(city), dialog = el('dialog', 'win-dialog');

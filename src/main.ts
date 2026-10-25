@@ -33,7 +33,7 @@ import { CityStatsPanel } from './city-stats-panel.ts';
 import { decoratePanels, watchPanels } from './panel-decor.ts';
 import { installHudIcons } from './hud-icons.ts';
 import { recordDemand, demandSparkline } from './demand-history.ts';
-import { Coach } from './onboarding.ts';
+import { Guide } from './guide.ts';
 import { Minimap } from './minimap.ts';
 import { iconElement } from './ui-icons.ts';
 import { installKeycaps } from './keycaps.ts';
@@ -59,10 +59,12 @@ let advancedOn = advancedEnabled();
 const signalsEnabled = () => advancedOn && (SIGNAL_ENV.VITE_CITY_SIGNALS !== 'false' || new URLSearchParams(location.search).get('signals') === '1');
 let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
 let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | undefined;
-let city: City = createCity(61025);
+// A first game starts on an empty map with the guide; `?starter=1` opens the sample city instead.
+const STARTER = new URLSearchParams(location.search).get('starter') === '1';
+let city: City = createCity(61025, { starter: STARTER });
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
-let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, coach: Coach | undefined, minimap: Minimap | undefined, cityNetwork: CityNetworkView | undefined;
+let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, guide: Guide | undefined, minimap: Minimap | undefined, cityNetwork: CityNetworkView | undefined;
 let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined, audioPanel: { sync(): void } | undefined;
 const audio = new AudioEngine(BASE + 'assets/audio/'), cueLimiter = new CueLimiter();
 const sound = (name: EffectName) => audio.play(name);
@@ -311,7 +313,7 @@ function render() {
     const spark = demandSparkline(history, zone); if (spark) item.insertAdjacentHTML('beforeend', spark);
     demand.append(item);
   }
-  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); cityNetwork?.update(city); coach?.update(city); minimap?.update(city, selected); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
+  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); cityNetwork?.update(city); guide?.update(city); minimap?.update(city, selected); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   const placement = route ? null : previewPlacement(city, tool, start, hover);
@@ -414,7 +416,8 @@ async function boot() {
   const mapEntry = document.createElement('button'); mapEntry.type = 'button'; mapEntry.className = 'st-network st-map'; mapEntry.setAttribute('aria-label', 'แผนที่เมือง'); mapEntry.append(iconElement('map'), document.createTextNode('แผนที่'));
   mapEntry.addEventListener('click', () => { cityStatsPanel!.toggle(false); minimap?.toggleMap(true); });
   document.querySelector('#city-stats .st-titlebar .st-close')?.before(mapEntry);
-  installHudIcons(); installKeycaps(); installSheetHandle($('#inspector')); coach = new Coach();
+  installHudIcons(); installKeycaps(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); });
+  if (!STARTER) guide.offer();
   goalPill = new GoalPill(() => { if (route?.page !== 'city') openRoute({page:'city'}); document.getElementById('dash-goals')?.scrollIntoView({ block: 'start' }); });
   winWatch = new WinWatch(() => $('#new-city').click(), () => { paused = true; accumulator = 0; });
   minimap = new Minimap(view, cell => { view.focus(cell); render(); }, cell => { view.focus(cell); openRoute({ page: 'place', cell, buildingId: city.cells[cell].building }); });
@@ -446,12 +449,18 @@ async function boot() {
   $('#load-backup').addEventListener('click', () => loadStored('backup'));
   $('#new-city').addEventListener('click', () => {
     const dialog = document.createElement('dialog');
-    const title = document.createElement('h2'); title.textContent = 'เริ่มเมืองเดิมอีกครั้ง?';
+    const title = document.createElement('h2'); title.textContent = 'เริ่มเมืองใหม่?';
     const text = document.createElement('p'); text.textContent = 'เมืองที่ยังไม่บันทึกจะถูกแทนที่ เมืองที่เคยบันทึกยังเรียกคืนได้ด้วยปุ่มโหลด';
     const back = document.createElement('button'); back.textContent = 'กลับสู่เมือง'; back.autofocus = true;
-    const reset = document.createElement('button'); reset.textContent = 'เริ่มเมืองใหม่';
-    back.onclick = () => dialog.close(); reset.onclick = () => { city = createCity(61025); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select'); render(); status('เมืองพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา'); dialog.close(); };
-    dialog.append(title, text, back, reset); document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
+    const empty = document.createElement('button'); empty.textContent = 'เริ่มจากที่ว่าง (มีผู้ช่วยสอน)';
+    const sample = document.createElement('button'); sample.textContent = 'เมืองตัวอย่าง (มีถนนและโซนให้แล้ว)';
+    const restart = (starter: boolean) => {
+      city = createCity(61025, { starter }); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select');
+      if (starter) guide?.hold(); else guide?.start();
+      render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
+    };
+    back.onclick = () => dialog.close(); empty.onclick = () => restart(false); sample.onclick = () => restart(true);
+    dialog.append(title, text, back, empty, sample); document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
   });
   document.addEventListener('keydown', e => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || document.querySelector('dialog[open]')) return;

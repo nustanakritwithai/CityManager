@@ -72,6 +72,20 @@ export function cityGoals(c: City): CityGoals {
   return { level, stages: done, next: done.find(stage => !stage.done) ?? null, won: level === stages.length };
 }
 
+/**
+ * The win screen shows once per city. A loaded city that has already won never shows it, and a
+ * city that dips below stage 5 (one import, a treasury dip) and climbs back does not show it again.
+ */
+export class WinLatch {
+  private city: object | null = null;
+  private shown = false;
+  check(city: object, won: boolean, running: boolean): boolean {
+    if (city !== this.city) { this.city = city; this.shown = won; return false; }
+    if (!won || this.shown || !running) return false;
+    this.shown = true; return true;
+  }
+}
+
 /** Facts for the win screen, all from the ledgers. */
 export function cityRecord(c: City) {
   const s = summary(c);
