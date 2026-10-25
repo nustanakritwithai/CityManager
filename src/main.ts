@@ -42,6 +42,7 @@ import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
 import './hud.css';
 import './panel-theme.css';
+import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -56,6 +57,7 @@ let city: City = createCity(61025);
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
 let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, coach: Coach | undefined, minimap: Minimap | undefined, cityNetwork: CityNetworkView | undefined;
+let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined;
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -285,6 +287,8 @@ function render() {
   if (!view) return;
   signalPanel?.sync();
   validateRoute(); const s = summary(city);
+  // Before the pause button is drawn: reaching stage 5 while running pauses for the win screen.
+  const goals = cityGoals(city); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;
   $('#pause').textContent = paused ? '▶' : 'Ⅱ'; $('#pause').setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา'); $('#pause').title = paused ? 'เล่นต่อ (Space)' : 'หยุดเวลา (Space)'; $('#pause').setAttribute('aria-pressed', String(paused));
   ($('#pause') as HTMLButtonElement).disabled = ownerDecisionPanel?.isAutoPending() ?? false;
@@ -384,6 +388,8 @@ async function boot() {
   mapEntry.addEventListener('click', () => { cityStatsPanel!.toggle(false); minimap?.toggleMap(true); });
   document.querySelector('#city-stats .st-titlebar .st-close')?.before(mapEntry);
   installHudIcons(); installKeycaps(); installSheetHandle($('#inspector')); coach = new Coach();
+  goalPill = new GoalPill(() => { if (route?.page !== 'city') openRoute({page:'city'}); document.getElementById('dash-goals')?.scrollIntoView({ block: 'start' }); });
+  winWatch = new WinWatch(() => $('#new-city').click(), () => { paused = true; accumulator = 0; });
   minimap = new Minimap(view, cell => { view.focus(cell); render(); }, cell => { view.focus(cell); openRoute({ page: 'place', cell, buildingId: city.cells[cell].building }); });
   watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });

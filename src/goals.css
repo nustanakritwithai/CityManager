@@ -1,0 +1,51 @@
+/* City goals: level pill under the wordmark, goals card, win screen. */
+.goal-pill {
+  display: inline-flex; align-items: center; margin-top: calc(2 * var(--reader-unit, 1px)); padding: 0;
+  min-height: 0; border: 0; background: none; color: var(--c-text, #f4f1e8);
+  font: 600 calc(10 * var(--reader-unit, 1px))/1.3 inherit; white-space: nowrap; cursor: pointer; pointer-events: auto;
+}
+.goal-pill-face {
+  display: inline-flex; align-items: center; gap: calc(5 * var(--reader-unit, 1px));
+  padding: calc(2 * var(--reader-unit, 1px)) calc(7 * var(--reader-unit, 1px));
+  border: 1px solid var(--glass-edge); border-radius: 999px; background: rgba(20, 30, 56, .72);
+}
+.goal-pill:hover .goal-pill-face, .goal-pill:focus-visible .goal-pill-face { border-color: var(--c-accent); }
+.goal-pill:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 999px; }
+/* Touch: a 44px target around the small pill, with negative margins so the header keeps its height. */
+html[data-touch-ui] .goal-pill { min-width: 44px; min-height: 44px; margin: -12px 0 -12px; }
+/* Phones keep the header on one row: dots and the level only. */
+@media (max-width: 700px) { .goal-pill .goal-pill-name { display: none; } }
+.goal-pill.won .goal-pill-face { border-color: var(--c-accent); background: rgba(243, 196, 107, .18); }
+.goal-dots { display: inline-flex; gap: calc(2 * var(--reader-unit, 1px)); }
+.goal-dots i {
+  width: calc(5 * var(--reader-unit, 1px)); height: calc(5 * var(--reader-unit, 1px)); border-radius: 50%;
+  background: rgba(255, 255, 255, .22);
+}
+.goal-dots i.done { background: var(--c-accent); }
+.goal-dots i.current { background: transparent; box-shadow: inset 0 0 0 1px var(--c-accent); }
+
+#inspector .goal-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: calc(4 * var(--u)); margin: 0 0 calc(12 * var(--u)); padding: 0; list-style: none; }
+#inspector .goal-steps li { display: grid; justify-items: center; gap: calc(4 * var(--u)); text-align: center; color: var(--pnl-faint); }
+#inspector .goal-step-mark {
+  display: grid; place-items: center; width: calc(26 * var(--u)); height: calc(26 * var(--u)); border-radius: 50%;
+  border: 1px solid var(--pnl-line); background: var(--pnl-bg); font-size: calc(13 * var(--u)); font-weight: 700;
+}
+#inspector .goal-step-name { font-size: calc(12 * var(--u)); line-height: 1.25; }
+#inspector .goal-steps li.done { color: var(--pnl-text); }
+#inspector .goal-steps li.done .goal-step-mark { border-color: var(--pnl-accent); background: var(--pnl-accent); color: #1a2640; }
+#inspector .goal-steps li.current { color: var(--pnl-text); }
+#inspector .goal-steps li.current .goal-step-mark { border: 2px solid var(--pnl-accent); color: var(--pnl-accent); }
+#inspector .goal-next h4 { margin: 0 0 calc(6 * var(--u)); font-size: calc(14 * var(--u)); color: var(--pnl-text); }
+#inspector .goal-checks { display: grid; gap: calc(6 * var(--u)); margin: 0; padding: 0; list-style: none; }
+#inspector .goal-checks li { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: calc(8 * var(--u)); font-size: calc(14 * var(--u)); color: var(--pnl-text); }
+#inspector .goal-checks small { color: var(--pnl-muted); font-size: calc(13 * var(--u)); font-variant-numeric: tabular-nums; }
+#inspector .goal-check-mark { color: var(--pnl-faint); }
+#inspector .goal-checks li.done .goal-check-mark { color: var(--pnl-good); }
+
+.win-dialog { max-width: 380px; text-align: left; }
+.win-dialog .win-kicker { margin: 0 0 4px; color: var(--c-accent); font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.win-stats { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 14px 0 18px; font-size: 14px; }
+.win-stats dt { color: var(--c-muted); }
+.win-stats dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.win-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.win-actions .win-continue { background: var(--c-accent); color: #1a2640; border-color: var(--c-accent); font-weight: 700; }
