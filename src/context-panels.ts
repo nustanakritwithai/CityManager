@@ -153,7 +153,8 @@ function flowCard(row: FlowRow, wallet: string): HTMLElement {
   const card = el('details', 'cx-flow-card'); Object.assign(card.dataset, { kind: row.kind, index: String(row.index), tick: String(row.tick), from: row.from, to: row.to, value: String(row.value), reason: row.reason });
   const summary = el('summary', 'cx-flow-summary'), top = el('div', 'cx-flow-top'), route = el('div', 'cx-flow-route'), detail = el('div', 'cx-flow-details');
   summary.dataset.contextFocus = `flow:${key}`;
-  top.append(el('h4', '', row.label), el('strong', 'cx-amount cx-flow-value', row.kind === 'money' ? cash(row.value) : `${count(row.value)} หน่วย`));
+  const incoming = row.to === wallet, direction = iconElement(row.kind !== 'money' ? 'box' : incoming ? 'import' : 'export', `ui-icon cx-flow-direction ${row.kind !== 'money' ? 'goods' : incoming ? 'in' : 'out'}`);
+  top.append(direction, el('h4', '', row.label), el('strong', 'cx-amount cx-flow-value', row.kind === 'money' ? cash(row.value) : `${count(row.value)} หน่วย`));
   summary.append(top, el('span', 'cx-flow-inline', `วัน ${row.tick} · ${row.fromLabel} → ${row.toLabel}`));
   route.append(el('span', '', row.fromLabel), el('span', 'cx-route-arrow', '→'), el('span', '', row.toLabel));
   detail.append(el('p', 'cx-flow-meta', `วัน ${row.tick} · รายการ #${row.index + 1}`), route, el('p', 'cx-flow-raw', `${row.from} → ${row.to} · ${row.reason}`));
@@ -447,7 +448,22 @@ function cardTrade(data: CardData): HTMLElement {
     if (values.status !== 'observed') side.append(el('p', 'cx-detail-note', values.status === 'missing' ? 'ยังไม่มีรายการสินค้าและเงินที่จับคู่กันในช่วงนี้' : values.status === 'non-integer' ? 'ราคาเฉลี่ยมีเศษสตางค์ จึงแสดงยอดเงินจริงและปริมาณโดยไม่ปัดราคา' : 'ยังไม่แสดงราคา เพราะข้อมูลจับคู่ไม่ชัดเจนหรือเกินขอบเขตที่แสดงได้'));
     flow.append(side);
   }
-  outer.append(flow); return cardSection(outer, 'trade');
+  outer.append(tradeVisual(buy, sell, unit), flow); return cardSection(outer, 'trade');
+}
+/** Bought vs sold (quantity and cash) as paired bars on one scale, with the gross margin as a chip. */
+function tradeVisual(buy: CardData['prices']['goodsBuy'], sell: CardData['prices']['goodsBuy'], unit: string): HTMLElement {
+  const box = el('div', 'bc-trade-visual'); box.setAttribute('aria-hidden', 'true');
+  const pairs = [['box', buy.quantity ?? 0, sell.quantity ?? 0, (n: number) => `${count(n)}`, unit], ['coin', buy.cashSatang ?? 0, sell.cashSatang ?? 0, (n: number) => `${Math.round(n / 100).toLocaleString('th-TH')} ฿`, '']] as const;
+  for (const [icon, bought, sold, format] of pairs) {
+    const max = Math.max(1, bought, sold), row = el('div', 'bc-trade-row');
+    const left = el('span', 'bc-trade-bar buy'), right = el('span', 'bc-trade-bar sell');
+    left.style.setProperty('--share', (bought / max).toFixed(3)); right.style.setProperty('--share', (sold / max).toFixed(3));
+    row.append(el('b', 'bc-trade-num buy', format(bought)), left, iconElement(icon, 'ui-icon bc-trade-icon'), right, el('b', 'bc-trade-num sell', format(sold)));
+    box.append(row);
+  }
+  const margin = (sell.cashSatang ?? 0) - (buy.cashSatang ?? 0), chip = el('span', `bc-trade-margin ${margin < 0 ? 'bad' : 'good'}`, `${margin >= 0 ? '+' : '−'}${Math.round(Math.abs(margin) / 100).toLocaleString('th-TH')} ฿ ส่วนต่างขาย−ซื้อ`);
+  const legend = el('div', 'bc-trade-legend'); legend.append(el('span', 'buy', 'ซื้อเข้า'), chip, el('span', 'sell', 'ขายออก')); box.append(legend);
+  return box;
 }
 function cardEmployment(parts: CardParts): HTMLElement | null {
   if (!parts.employment) return null;

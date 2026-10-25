@@ -213,7 +213,15 @@ function decorateSections(root: ParentNode) {
     const name = SECTION_ICONS.find(([pattern]) => pattern.test(h3.textContent ?? ''))?.[1]; if (name) h3.prepend(iconElement(name, 'ui-icon section-icon'));
   }
 }
-export function decoratePanels(root: ParentNode) { decorateSections(root); decorateFlow(root); decorateWork(root); decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); decorateChecklists(root); }
+/** The trade bars already show quantities and cash; those tiles wait behind ⓘ (prices stay). */
+function foldTradeTiles(root: ParentNode) {
+  for (const visual of root.querySelectorAll<HTMLElement>('.bc-trade-visual')) {
+    const host = visual.closest<HTMLElement>('.cx-section'), heading = host?.querySelector<HTMLElement>(HEADINGS); if (!host || !heading) continue;
+    const tiles = [...host.querySelectorAll<HTMLElement>('[data-card-metric$="-purchased"], [data-card-metric$="-sold"], [data-card-metric="purchase-cash"], [data-card-metric="sales-cash"]')].filter(t => !t.dataset.infoOf);
+    if (tiles.length) infoButton(host, heading, ...tiles);
+  }
+}
+export function decoratePanels(root: ParentNode) { decorateSections(root); foldTradeTiles(root); decorateFlow(root); decorateWork(root); decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); decorateChecklists(root); }
 
 /** Re-decorate whenever panel content is replaced; batched to one pass per frame. */
 export function watchPanels(...roots: (HTMLElement | null)[]) {

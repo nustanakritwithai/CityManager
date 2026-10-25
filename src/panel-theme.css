@@ -1,0 +1,91 @@
+/*
+ * Lighter panel theme: mid-tone teal surfaces instead of near-black, loaded last.
+ * Every text colour here was checked against the lightest surface it sits on (WCAG AA, 4.5:1).
+ */
+:root {
+  --panel: rgba(40, 74, 85, .96);
+  --line: rgba(255, 255, 255, .16);
+  --muted: #cbdad4;
+  --c-muted: #cbdad4;
+  --c-icon: #e2ede7;
+  --c-bad: #ffb0a3;
+  --glass: linear-gradient(180deg, rgba(55, 94, 106, .9), rgba(35, 66, 77, .93));
+  --glass-solid: linear-gradient(180deg, rgba(47, 84, 96, .985), rgba(37, 70, 81, .99));
+  --glass-edge: rgba(255, 255, 255, .18);
+  --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 12px 30px rgba(3, 14, 19, .3);
+}
+#inspector {
+  --pnl-bg: #234450;
+  --pnl-surface: #2b4d59;
+  --pnl-surface-2: #335764;
+  --pnl-line: #577c88;
+  --pnl-line-soft: #476b77;
+  --pnl-muted: #cbdad4;
+  --pnl-faint: #b9ccc6;
+  --pnl-bad: #ffb0a3;
+}
+/* Building cards carry their own navy palette; bring it onto the same mid-tone. */
+#entity-content[data-card-kind] { --bc-bg: #234450; --bc-surface: #2b4d59; --bc-line: #577c88; --bc-muted: #cbdad4; }
+#entity-content[data-card-kind][data-card-kind] { --bc-tint: color-mix(in srgb, var(--bc-accent) 16%, #2b4d59); }
+#entity-content[data-card-kind] .bc-plot .cx-metric { background: color-mix(in srgb, #b4dc87 12%, #2b4d59); }
+#entity-content[data-card-kind] .cx-flow-card[data-kind="crops"] { background: color-mix(in srgb, #a3ccff 10%, #2b4d59); }
+
+/* Cards, links and journal rows that were painted with fixed dark fills. */
+.cx-content .cx-household-link { background: linear-gradient(125deg, #34606a, #2c525b); }
+.cx-content .cx-household-link:hover { background: #3a6871; }
+.sm-section-symbol { background: #34606a; }
+.sm-flow-card { background: linear-gradient(145deg, #335c66, #2b4f59); }
+.sm-flow-card[data-kind="goods"] { background: linear-gradient(145deg, #33596a, #2a4c5b); }
+.save-controls, .inspector[data-open=true] .inspector-status { background: #2d525d; }
+dialog { background: #2b4e59; }
+#entity-explanation-host .entity-explain-controls { background: var(--pnl-surface, #2b4d59); }
+
+/* Stats overlay on the same tone. */
+.city-stats { background: linear-gradient(180deg, rgba(52, 90, 102, .92), rgba(33, 63, 74, .95)); --st-muted: #d0ded9; --st-faint: #b9ccc6; --st-bad: #ffb0a3; }
+.st-col { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .12); }
+
+/* Tiles read as raised cards on the lighter ground. */
+#inspector .cx-metric, #inspector .place-metrics .metric { background: linear-gradient(180deg, rgba(255, 255, 255, .085), rgba(255, 255, 255, .035)); border-color: rgba(255, 255, 255, .1); }
+.coach:not([hidden]) { background: var(--glass); }
+
+/* ---- Fewer words on the help and rules pages ------------------------------ */
+.sm-expandable { cursor: pointer; position: relative; }
+.sm-expandable:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.sm-expandable[aria-expanded=false] .sm-fold { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.sm-expandable h4 { padding-right: 24px; }
+.sm-expandable::after { content: ''; position: absolute; right: 14px; top: 18px; width: 7px; height: 7px; border-right: 2px solid var(--c-muted); border-bottom: 2px solid var(--c-muted); transform: rotate(45deg); transition: transform .15s ease; pointer-events: none; }
+.sm-expandable[aria-expanded=true]::after { transform: rotate(-135deg); top: 22px; }
+.sm-shortcut-grid { grid-template-columns: repeat(auto-fill, minmax(calc(150 * var(--sm-unit, 1px)), 1fr)); }
+.sm-shortcut kbd { white-space: nowrap; }
+
+/* ---- Wallets as bars ------------------------------------------------------ */
+.sm-wallet-card { position: relative; }
+.sm-wallet-card > small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sm-wallet-bar { display: block; width: 100%; height: calc(6 * var(--sm-unit, 1px)); border-radius: 3px; background: linear-gradient(90deg, var(--c-good) calc(var(--share, 0) * 100%), rgba(255, 255, 255, .1) 0); }
+.sm-wallet-card.counterparty .sm-wallet-bar { background: linear-gradient(90deg, var(--c-accent) calc(var(--share, 0) * 100%), rgba(255, 255, 255, .1) 0); }
+.sm-wallet-card.negative .sm-wallet-bar { background: linear-gradient(90deg, var(--c-bad) calc(var(--share, 0) * 100%), rgba(255, 255, 255, .1) 0); }
+.sm-group-description { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; min-width: 0; }
+
+/* ---- Account journal rows in cards lead with a direction icon ------------- */
+.cx-flow-top { align-items: center; }
+.cx-flow-top > .cx-flow-direction { flex: 0 0 auto; width: 24px; height: 24px; padding: 4px; border-radius: 50%; background: rgba(255, 255, 255, .1); }
+.cx-flow-direction.in { color: var(--c-good); background: rgba(111, 212, 154, .16) !important; }
+.cx-flow-direction.out { color: var(--c-bad); background: rgba(255, 138, 122, .15) !important; }
+.cx-flow-direction.goods { color: #f0b45a; }
+.cx-flow-top > h4 { flex: 1 1 0; min-width: 0; }
+
+/* ---- Trade: bought vs sold as mirrored bars --------------------------------- */
+#inspector .bc-trade-visual { display: grid; gap: 6px; margin: 4px 0 10px; padding: 10px; border-radius: 10px; background: rgba(255, 255, 255, .05); }
+#inspector .bc-trade-row { display: grid; grid-template-columns: minmax(56px, auto) minmax(0, 1fr) auto minmax(0, 1fr) minmax(56px, auto); align-items: center; gap: 8px; }
+#inspector .bc-trade-bar { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, .1); }
+#inspector .bc-trade-bar.buy { background: linear-gradient(270deg, #8fc7e8 calc(var(--share) * 100%), rgba(255, 255, 255, .1) 0); }
+#inspector .bc-trade-bar.sell { background: linear-gradient(90deg, var(--c-good) calc(var(--share) * 100%), rgba(255, 255, 255, .1) 0); }
+#inspector .bc-trade-icon { width: 22px; height: 22px; color: var(--c-icon); }
+#inspector .bc-trade-num { font-size: calc(14 * var(--reader-unit, 1px)); font-variant-numeric: tabular-nums; color: var(--c-text); white-space: nowrap; }
+#inspector .bc-trade-num.buy { text-align: right; }
+#inspector .bc-trade-legend { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: calc(13 * var(--reader-unit, 1px)); color: var(--c-muted); }
+#inspector .bc-trade-legend > .buy::before, #inspector .bc-trade-legend > .sell::before { content: ''; display: inline-block; width: 12px; height: 8px; margin-right: 6px; border-radius: 2px; vertical-align: middle; }
+#inspector .bc-trade-legend > .buy::before { background: #8fc7e8; } #inspector .bc-trade-legend > .sell::before { background: var(--c-good); }
+#inspector .bc-trade-margin { padding: 2px 10px; border-radius: 999px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#inspector .bc-trade-margin.good { color: var(--c-good); background: rgba(111, 212, 154, .14); }
+#inspector .bc-trade-margin.bad { color: var(--c-bad); background: rgba(255, 138, 122, .14); }

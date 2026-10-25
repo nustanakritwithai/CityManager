@@ -158,9 +158,13 @@ function updateWallets() {
     const head = element('div', 'sm-wallet-group-head'), title = element('div'), total = element('strong', 'sm-group-total', `${formatMoney(group.total, true)} ฿`);
     title.append(element('h4', '', group.label), element('p', '', `${group.accounts.length} บัญชี`)); head.append(title, total);
     const grid = element('div', 'sm-wallet-grid');
+    // Each card carries a bar scaled to the largest balance in its group, so sizes read at a glance.
+    const largest = Math.max(1, ...group.accounts.map(account => Math.abs(account.balance)));
     for (const account of group.accounts) {
-      const card = element('article', `sm-wallet-card${account.id === 'outside' ? ' counterparty' : ''}`); Object.assign(card.dataset, { id: account.id, balance: String(account.balance) });
-      card.append(element('span', '', account.label), element('strong', '', `${formatMoney(account.balance, true)} ฿`), element('small', '', account.id)); grid.append(card);
+      const card = element('article', `sm-wallet-card${account.id === 'outside' ? ' counterparty' : ''}${account.balance < 0 ? ' negative' : ''}`); Object.assign(card.dataset, { id: account.id, balance: String(account.balance) });
+      const bar = element('span', 'sm-wallet-bar'); bar.setAttribute('aria-hidden', 'true'); bar.style.setProperty('--share', (Math.abs(account.balance) / largest).toFixed(3));
+      card.title = account.id;
+      card.append(element('span', '', account.label), element('strong', '', `${formatMoney(account.balance, true)} ฿`), bar, element('small', '', account.id)); grid.append(card);
     }
     if (!group.accounts.length) grid.append(element('p', 'sm-footnote', 'ยังไม่มีบัญชีในหมวดนี้'));
     section.append(head, element('p', 'sm-group-description', group.description), grid); return section;
@@ -200,13 +204,21 @@ function setupGuide() {
   ];
   definitions.forEach((definition, i) => {
     const card = element('article', 'sm-step'), art = element('div', 'sm-step-art'), body = element('div', 'sm-step-body'), keys = element('div', 'sm-keycaps'); art.append(svg(definition.art), element('span', 'sm-step-index', String(i + 1)));
-    definition.keys.forEach(key => keys.append(element('kbd', '', key))); body.append(element('h4', '', definition.title), element('p', '', definition.text), keys); card.append(art, body); steps.append(card);
+    definition.keys.forEach(key => keys.append(element('kbd', '', key))); body.append(element('h4', '', definition.title), element('p', 'sm-fold', definition.text), keys); card.append(art, body); steps.append(expandable(card));
   });
   content.append(steps, shortcutTable(), colourLegend(), element('p', 'sm-footnote', 'ปุ่มกลับ / Esc ยกเลิกจุดเริ่มถนนก่อน กดอีกครั้งจึงกลับเครื่องมือเลือก การดูบัญชีหรือเปลี่ยนมุมมองไม่เปลี่ยนยอดเงินในเมือง'));
   replaceDetailsBody('guide', content);
 }
+/** Long explanations show their first line; tapping the card (or Enter/Space) reveals the rest. */
+function expandable(card: HTMLElement): HTMLElement {
+  card.classList.add('sm-expandable'); card.tabIndex = 0; card.setAttribute('role', 'button'); card.setAttribute('aria-expanded', 'false');
+  const toggle = () => { const open = card.getAttribute('aria-expanded') !== 'true'; card.setAttribute('aria-expanded', String(open)); };
+  card.addEventListener('click', event => { if (!(event.target as Element).closest('a, button, kbd')) toggle(); });
+  card.addEventListener('keydown', event => { if (event.target === card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggle(); } });
+  return card;
+}
 function ruleCard(icon: string, title: string, text: string, id?: string): HTMLElement {
-  const card = element('article', 'sm-rule-card'), art = element('div', 'sm-rule-icon'); art.append(svg(icon)); card.append(art, element('h4', '', title), element('p', '', text)); if (id) card.dataset.rule = id; return card;
+  const card = element('article', 'sm-rule-card'), art = element('div', 'sm-rule-icon'); art.append(svg(icon)); card.append(art, element('h4', '', title), element('p', 'sm-fold', text)); if (id) card.dataset.rule = id; return expandable(card);
 }
 function setupRules() {
   const content = element('div', 'sm-content sm-rules'), grid = element('div', 'sm-rule-grid');

@@ -37,6 +37,7 @@ import { Coach } from './onboarding.ts';
 import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
 import './hud.css';
+import './panel-theme.css';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
