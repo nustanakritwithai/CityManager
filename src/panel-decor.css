@@ -159,3 +159,5 @@ html[data-touch-ui=true] #inspector[data-sheet=full] { max-height: calc(100dvh -
   html:not([data-touch-ui=true]) .camera-hud[data-pan=true] .camera-pan-toggle { color: var(--c-accent); }
 }
 .camera-grid .svg-glyph svg, .mobile-camera-toggle.svg-glyph svg { width: 22px; height: 22px; }
+/* Contrast audit: the Esc hint under the cancel button was 3.9:1 on the dock. */
+.cancel-button small { color: #9fb6b0; }

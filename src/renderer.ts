@@ -4,6 +4,7 @@ import {
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
+import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
 import { CityAssets } from './asset-models.ts';
 import { roadTileFor, type Side } from './road-tiles.ts';
@@ -16,6 +17,7 @@ import type { Overlay, Tone } from './map-overlay.ts';
 
 const UNIT = 2;
 const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
+
 export class CityView {
   app: AppBase;
   camera = new Entity('City camera');
@@ -390,7 +392,8 @@ export class CityView {
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
       // Buildings without connected frontage are suspended in the sim, so they render faded.
       const reach = !!b && access(city, i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}:${reach}`;
+      const park = pocketPark(city, i);
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -423,6 +426,15 @@ export class CityView {
             pool.setLocalPosition(px, .16, pz); pool.setLocalScale(1.7, 1, 1.7); tile.addChild(pool);
           }
         }
+      } else if (park) {
+        // Visual-only pocket park on unzoned roadside land between buildings.
+        this.box(tile, 0, .05, 0, 1.7, .05, 1.7, this.ground.lawnMaterial, false);
+        const h = hashCell(i);
+        // One tree on most park cells (two on some) keeps the instance count small.
+        for (const [tx, tz] of [[-.35, -.3], [.45, .4]].slice(0, h % 3 === 0 ? 2 : h % 3 === 1 ? 1 : 0)) {
+          const tree = this.assets?.tree(h % 5 === 0); if (tree) { tree.setLocalPosition(tx, .07, tz); tree.setLocalScale(.6, .6, .6); tile.addChild(tree); }
+        }
+        if (h % 4 === 1) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.5, .07, -.5); tile.addChild(planter); } }
       } else if (cell.zone) {
         const color = { R: '#5cad86', C: '#5d9fc7', I: '#d7a053', F: '#93af58' }[cell.zone];
         this.box(tile, 0, 0.05, 0, 1.8, 0.07, 1.8, this.zoneFill(color, !!b), false);
