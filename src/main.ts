@@ -34,6 +34,8 @@ import { decoratePanels, watchPanels } from './panel-decor.ts';
 import { installHudIcons } from './hud-icons.ts';
 import { recordDemand, demandSparkline } from './demand-history.ts';
 import { Coach } from './onboarding.ts';
+import { Minimap } from './minimap.ts';
+import { CityNetworkView } from './city-network-view.ts';
 import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
 import './hud.css';
@@ -51,7 +53,7 @@ let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | un
 let city: City = createCity(61025);
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
-let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, coach: Coach | undefined;
+let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, coach: Coach | undefined, minimap: Minimap | undefined, cityNetwork: CityNetworkView | undefined;
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -125,8 +127,10 @@ function openRoute(next: Route) {
 }
 function cancel() {
   view?.abortGesture();
+  if (cityNetwork?.open) { cityNetwork.toggle(false); return; }
   if (cityStatsPanel?.open) { cityStatsPanel.toggle(false); return; }
   if (dashboard?.modalOpen) { dashboard.closeModal(); return; }
+  if (minimap?.mapOpen) { minimap.toggleMap(false); return; }
   if (hasOpenSubmenu()) { closeSubmenus(); return; }
   const current = route;
   if (current?.page === 'signals') { openRoute({ page: 'city' }); return; }
@@ -290,7 +294,7 @@ function render() {
     const spark = demandSparkline(history, zone); if (spark) item.insertAdjacentHTML('beforeend', spark);
     demand.append(item);
   }
-  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); coach?.update(city); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
+  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); cityNetwork?.update(city); coach?.update(city); minimap?.update(city, selected); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   const placement = route ? null : previewPlacement(city, tool, start, hover);
@@ -369,7 +373,10 @@ async function boot() {
   });
   cityStatsPanel = new CityStatsPanel(open => { $('#toggle-stats').setAttribute('aria-expanded', String(open)); if (open) render(); });
   $('#toggle-stats').addEventListener('click', () => cityStatsPanel!.toggle());
+  cityNetwork = new CityNetworkView(() => paused, open => { $('#toggle-network').setAttribute('aria-expanded', String(open)); if (open) render(); });
+  $('#toggle-network').addEventListener('click', () => cityNetwork!.toggle());
   installHudIcons(); installSheetHandle($('#inspector')); coach = new Coach();
+  minimap = new Minimap(view, cell => { view.focus(cell); render(); }, cell => { view.focus(cell); openRoute({ page: 'place', cell, buildingId: city.cells[cell].building }); });
   watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
@@ -412,6 +419,8 @@ async function boot() {
     const shortcuts: Record<string, string> = { v: 'select', r: 'road', '1': 'R', '2': 'C', '3': 'I', '4': 'F', b: 'bulldoze', p: 'pan' };
     if (shortcuts[e.key.toLowerCase()]) setTool(shortcuts[e.key.toLowerCase()]);
     if (e.key.toLowerCase() === 't') cityStatsPanel?.toggle();
+    if (e.key.toLowerCase() === 'm') minimap?.toggleMap();
+    if (e.key.toLowerCase() === 'n') cityNetwork?.toggle();
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); view.control(e.key.slice(5).toLowerCase()); }
     if (e.key === 'q') view.control('rotate-left'); if (e.key === 'e') view.control('rotate-right');
   });
@@ -428,6 +437,7 @@ async function boot() {
   const visual = atmosphere;
   view.app.on('update', (dt: number) => {
     visual.update(dt);
+    minimap?.redraw();
     view.traffic.update(dt, !paused && !document.hidden);
     if (paused || document.hidden) return;
     accumulator += Math.min(dt, 0.25) * speed;
