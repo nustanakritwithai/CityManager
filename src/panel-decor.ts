@@ -36,14 +36,14 @@ function decorateMetrics(root: ParentNode) {
 }
 function decorateNotes(root: ParentNode) {
   for (const note of root.querySelectorAll<HTMLElement>(NOTES)) {
-    if (note.classList.contains('info-note') || !note.textContent?.trim()) continue;
+    if (note.classList.contains('info-note') || !note.textContent?.trim() || note.closest('.submenu-section')) continue;
     let host = note.parentElement?.closest<HTMLElement>(HOSTS) ?? null, heading: HTMLElement | null = null;
     while (host && !(heading = host.querySelector<HTMLElement>(HEADINGS))) host = host.parentElement?.closest<HTMLElement>(HOSTS) ?? null;
     if (!host || !heading) continue;
     note.classList.add('info-note'); infoButton(host, heading, note);
   }
 }
-const HEADINGS = ':scope > h3, :scope > h4, :scope > summary, :scope > .cx-section-head, :scope > .bc-section-head, :scope > .dash-head, :scope > .st-col-title';
+const HEADINGS = ':scope > h3, :scope > h4, :scope > .cx-section-head, :scope > .bc-section-head, :scope > .dash-head, :scope > .st-col-title';
 /** One ⓘ per section heading; it reveals everything marked `.info-note` / `.dup-metric` inside. */
 let nextHost = 0;
 function infoButton(host: HTMLElement, heading: HTMLElement, ...items: HTMLElement[]) {
