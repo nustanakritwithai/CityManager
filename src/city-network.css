@@ -161,3 +161,4 @@ html #toggle-network::after { content: 'เครือข่าย'; }
 .st-titlebar .st-network .ui-icon svg { display: block; width: 100%; height: 100%; }
 .st-titlebar .st-network:hover { background: #ffffff1c; }
 .city-net .net-node, .city-net .net-node:hover, .city-net .net-node:active, .city-net .net-node:focus { background: none; box-shadow: none; border: 0; }
+@media (max-width: 440px) { .st-titlebar .st-network { min-width: 44px; padding: 0; justify-content: center; font-size: 0; } .st-titlebar .st-network .ui-icon { width: 20px; height: 20px; } }
