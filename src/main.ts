@@ -15,6 +15,9 @@ import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
 import type { EntitySelection } from './entity-explanation-data.ts';
 import { AtmosphereController } from './atmosphere-controls.ts';
 import './atmosphere.css';
+import { previewPlacement, type Preview } from './placement-preview.ts';
+import { mapOverlay, buildingIssues, TOOL_OVERLAY } from './map-overlay.ts';
+import { MapMarkers } from './map-markers.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -28,6 +31,8 @@ let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | un
 let city: City = createCity(61025);
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
+let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined;
+const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1, accumulator = 0;
@@ -239,7 +244,29 @@ function render() {
   $('#growth-summary').replaceChildren(demand); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
-  view.render(city, selected, preview);
+  const placement = route ? null : previewPlacement(city, tool, start, hover);
+  view.render(city, selected, preview, new Set(placement?.cells.filter(cell => !cell.ok).map(cell => cell.cell)));
+  updateMapInfo(placement);
+}
+
+/** Tool-matched map layer, issue badges and the placement tip; recomputed at most twice a second while time runs. */
+function updateMapInfo(placement: Preview | null) {
+  if (!mapMarkers) return;
+  const enabled = atmosphere?.settings.mapInfo !== false;
+  mapMarkers.setVisible(enabled);
+  if (!enabled) { view.setOverlay(null); mapMarkers.setLegend(null); mapMarkers.setPreview(null, null); return; }
+  mapMarkers.setPreview(placement, hover);
+  const mode = route ? undefined : TOOL_OVERLAY[tool], now = performance.now();
+  const layout = city.cells.map(cell => (cell.road ? 'r' : cell.zone ?? '.') + (cell.building === null ? '' : 'b')).join('');
+  const overlayKey = `${mode}:${layout}`;
+  if (overlayKey !== mapInfo.overlayKey || mode && city.tick !== mapInfo.overlayTick && now - mapInfo.overlayAt > 500) {
+    const overlay = mode ? mapOverlay(city, mode) : null;
+    view.setOverlay(overlay); mapMarkers.setLegend(overlay);
+    Object.assign(mapInfo, { overlayKey, overlayTick: city.tick, overlayAt: now });
+  }
+  if (layout !== mapInfo.issueLayout || city.tick !== mapInfo.issueTick && now - mapInfo.issueAt > 500) {
+    mapMarkers.setIssues(buildingIssues(city)); Object.assign(mapInfo, { issueLayout: layout, issueTick: city.tick, issueAt: now });
+  }
 }
 
 async function boot() {
@@ -332,9 +359,11 @@ async function boot() {
   document.addEventListener('visibilitychange', () => { accumulator = 0; });
   inspector(false);
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
-  const atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator });
+  mapMarkers = new MapMarkers(view);
+  atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
+  const visual = atmosphere;
   view.app.on('update', (dt: number) => {
-    atmosphere.update(dt);
+    visual.update(dt);
     view.traffic.update(dt, !paused && !document.hidden);
     if (paused || document.hidden) return;
     accumulator += Math.min(dt, 0.25) * speed;
@@ -343,7 +372,7 @@ async function boot() {
     if (changed) render();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => atmosphere.diagnostics } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

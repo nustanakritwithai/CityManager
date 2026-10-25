@@ -82,3 +82,76 @@ html[data-touch-ui=true] .atmosphere-menu {
   left: 12px;
   max-height: calc(100vh - 220px);
 }
+
+/* Map information layer: issue badges, placement tip and legend. Never intercepts input. */
+.map-markers {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: hidden;
+}
+.map-issue {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: calc(20 * var(--reader-unit, 1px));
+  height: calc(20 * var(--reader-unit, 1px));
+  margin: calc(-10 * var(--reader-unit, 1px)) 0 0 calc(-10 * var(--reader-unit, 1px));
+  border: 2px solid #fff8;
+  border-radius: 50%;
+  font: 800 calc(13 * var(--reader-unit, 1px))/1 system-ui, sans-serif;
+  color: #1b1b1b;
+  box-shadow: 0 2px 6px #0006;
+}
+.map-issue.bad { background: #ff6b5b; color: #fff; }
+.map-issue.warn { background: #f2c14e; }
+.map-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: calc(260 * var(--reader-unit, 1px));
+  padding: calc(5 * var(--reader-unit, 1px)) calc(9 * var(--reader-unit, 1px));
+  border-radius: 8px;
+  background: rgba(17, 36, 43, .92);
+  border: 1px solid #6fe08a88;
+  color: var(--cream);
+  font-size: calc(12 * var(--reader-unit, 1px));
+  font-weight: 600;
+  white-space: nowrap;
+  translate: -50% calc(-100% - 18px);
+}
+.map-tip[data-ok=false] { border-color: #ff6b5b; color: #ffd2cc; }
+.map-legend {
+  position: absolute;
+  left: 50%;
+  bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  translate: -50% 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: calc(6 * var(--reader-unit, 1px));
+  max-width: calc(100vw - 24px);
+}
+.map-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5 * var(--reader-unit, 1px));
+  padding: calc(3 * var(--reader-unit, 1px)) calc(8 * var(--reader-unit, 1px));
+  border-radius: 999px;
+  background: rgba(17, 36, 43, .88);
+  color: var(--cream);
+  font-size: calc(11 * var(--reader-unit, 1px));
+  font-weight: 600;
+}
+.map-legend-item::before {
+  content: '';
+  width: calc(10 * var(--reader-unit, 1px));
+  height: calc(10 * var(--reader-unit, 1px));
+  border-radius: 3px;
+}
+.map-legend-item.good::before { background: #3ccf6e; }
+.map-legend-item.warn::before { background: #f2c14e; }
+.map-legend-item.bad::before { background: #e5533d; }
