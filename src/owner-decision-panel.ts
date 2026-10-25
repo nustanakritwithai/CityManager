@@ -2,6 +2,7 @@ import './owner-decision-panel.css';
 import { OWNER_FACT_LABELS, OWNER_REASON_TEXT, captureOwnerSnapshot, ownerProposalForCandidate, ownerStateHash, proposeOwnerDecision, type OwnerFactKey, type OwnerProposal, type OwnerExecutionOutcome } from './owner-decision.ts';
 import { replayOwnerJournal, type createOwnerDecisionSession } from './owner-decision-session.ts';
 import { ownerDecisionConnectionReady, requestOwnerDecision, type OwnerDecisionConnection } from './owner-decision-client.ts';
+import { createOwnerMonthlyBatch, type OwnerMonthlyStepResult } from './owner-decision-monthly.ts';
 import { MONTH, isMarket, type City } from './sim.ts';
 import type { OwnerSnapshot } from './owner-decision.ts';
 
@@ -29,7 +30,31 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
   const processed = new Set<string>();
   let lastCity = options.getCity(), lastStatus = 'ready', resultText = '', busy = false, signature = '', revision = 0;
   let activeRequest: { controller: AbortController; city: City; snapshot: OwnerSnapshot; stateHash: string; generation: number; automatic: boolean } | null = null;
-  let activeAutoBatch = false, lastTyphoonAutoTick = -1;
+  let activeAutoBatch = false, batchRevision = 0, lastBatchStatus = 'idle';
+  const monthlyBatch = createOwnerMonthlyBatch({
+    getContext: () => ({ city: options.getCity(), mode: options.getSession().mode }),
+    getFirmIds: city => [...city.firms].filter(isMarket).map(firm => firm.id),
+    processFirm: async (city, firmId, controller) => {
+      const [proposal] = options.getSession().evaluateTyphoonAutoMonthly(city, firmId);
+      return proposal ? requestTyphoon(proposal, true, batchRevision, controller) : 'skipped';
+    },
+    onChange: state => {
+      if (state.status === 'running' && lastBatchStatus !== 'running') batchRevision = ++revision;
+      lastBatchStatus = state.status;
+      activeAutoBatch = state.status === 'running'; busy = activeAutoBatch || activeRequest !== null;
+      options.onTyphoonAutoPending?.(activeAutoBatch);
+      if (state.status === 'running') {
+        lastStatus = 'typhoon-auto-pending'; resultText = `Typhoon กำลังตรวจ ${state.completedFirmIds.length}/${state.total} กิจการ`;
+      } else if (state.status === 'paused') {
+        lastStatus = 'typhoon-auto-paused'; resultText = `หยุดหลังตรวจ ${state.completedFirmIds.length}/${state.total} กิจการ กดโหมด Typhoon auto เพื่อทำรายการที่เหลือต่อ`;
+      } else if (state.status === 'stale') {
+        lastStatus = 'typhoon-stale'; resultText = 'เมืองหรือตาของเกมเปลี่ยนแล้ว จึงไม่ใช้ผล Typhoon ที่ค้างอยู่';
+      } else if (state.status === 'complete') {
+        lastStatus = 'typhoon-auto-complete'; resultText = `Typhoon ตรวจครบ ${state.total} กิจการแล้ว ผลถูกบันทึกใน replay`;
+      }
+      signature = ''; sync(); options.onChange();
+    },
+  });
   const modeButtons = Object.entries(modeLabels).map(([mode, label]) => {
     const node = button(`owner-mode-${mode}`, label, () => {
       if (activeAutoBatch && mode !== 'typhoon-auto') stopTyphoonAuto();
@@ -37,6 +62,12 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
       lastStatus = 'mode-changed';
       resultText = mode === 'auto' ? 'กฎในเกมทำรายการเดือนละครั้งในเมืองนี้ โหลดหรือเริ่มใหม่จะกลับโหมดเสนอ' : mode === 'typhoon-auto' ? 'Typhoon จะเลือกเดือนละครั้ง ใช้เฉพาะคำสั่งเจ้าของตลาดที่ผ่านการตรวจ และกลับไปใช้กฎในเกมเมื่อเรียกไม่ได้' : mode === 'off' ? 'ปิดการประเมินเจ้าของตลาดแล้ว' : 'แสดงข้อเสนอให้เลือกทำเอง กฎและ Typhoon ยังไม่ย้ายเงินจนกดใช้';
       signature = ''; sync(); options.onChange();
+      const pausedBatch = monthlyBatch.getState();
+      if (mode !== 'typhoon-auto' && pausedBatch.status === 'paused') {
+        lastStatus = 'typhoon-auto-paused'; resultText = `หยุดหลังตรวจ ${pausedBatch.completedFirmIds.length}/${pausedBatch.total} กิจการ กดโหมด Typhoon auto เพื่อทำรายการที่เหลือต่อ`;
+        signature = ''; sync(); options.onChange();
+      }
+      if (mode === 'typhoon-auto') startTyphoonAutoMonth();
     });
     node.dataset.ownerMode = mode; modes.append(node); return node;
   });
@@ -49,7 +80,8 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
   const cancelTyphoon = button('owner-typhoon-cancel', 'ยกเลิกคำขอ Typhoon', () => {
     if (activeAutoBatch) {
       stopTyphoonAuto(); options.getSession().setMode('proposal');
-      lastStatus = 'typhoon-auto-cancelled'; resultText = 'หยุด Typhoon ทำรายการเองแล้ว ไม่มีคำสั่งของรอบที่กำลังรอถูกนำไปใช้';
+      const progress = monthlyBatch.getState();
+      lastStatus = 'typhoon-auto-paused'; resultText = `หยุดหลังตรวจ ${progress.completedFirmIds.length}/${progress.total} กิจการ กดโหมด Typhoon auto เพื่อทำรายการที่เหลือต่อ`;
     } else if (activeRequest) {
       const request = activeRequest; activeRequest = null; request.controller.abort(); revision++; busy = false;
       lastStatus = 'typhoon-cancelled'; resultText = 'ยกเลิกคำขอแล้ว ข้อเสนอเดิมยังอยู่และเมืองไม่เปลี่ยน';
@@ -92,59 +124,35 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
   host.addEventListener('toggle', () => { signature = ''; sync(); });
 
   function stopTyphoonAuto() {
-    const wasActive = activeAutoBatch;
-    if (activeRequest?.automatic) { const request = activeRequest; activeRequest = null; request.controller.abort(); }
-    activeAutoBatch = false; revision++; busy = false; signature = '';
-    if (wasActive) options.onTyphoonAutoPending?.(false);
+    revision++;
+    if (activeRequest?.automatic) activeRequest = null;
+    monthlyBatch.cancel(); activeAutoBatch = false; busy = activeRequest !== null; signature = '';
+    options.onTyphoonAutoPending?.(false);
   }
 
   function startTyphoonAutoMonth() {
-    const city = options.getCity(), session = options.getSession();
-    if (activeAutoBatch || session.mode !== 'typhoon-auto' || city.tick <= 0 || city.tick % MONTH || city.tick === lastTyphoonAutoTick) return;
-    const firmIds = [...city.firms].filter(isMarket).map(firm => firm.id).sort((a, b) => a - b);
-    lastTyphoonAutoTick = city.tick;
-    if (!firmIds.length) { lastStatus = 'typhoon-auto-empty'; resultText = 'รอบนี้ไม่มีตลาดที่เข้าเกณฑ์เจ้าของกิจการ'; signature = ''; sync(); return; }
-    const generation = ++revision; activeAutoBatch = true; busy = true;
-    lastStatus = 'typhoon-auto-pending'; resultText = `Typhoon จะตรวจ ${firmIds.length} กิจการทีละราย และพักเวลาไว้จนกว่าจะจบ`; signature = '';
-    options.onTyphoonAutoPending?.(true); sync(); options.onChange();
-    void (async () => {
-      try {
-        for (const firmId of firmIds) {
-          if (generation !== revision || !activeAutoBatch || options.getSession().mode !== 'typhoon-auto') break;
-          const current = options.getCity();
-          if (current !== city || current.tick !== city.tick) break;
-          const [proposal] = options.getSession().evaluateTyphoonAutoMonthly(current, firmId);
-          if (!proposal) continue;
-          if (!await requestTyphoon(proposal, true, generation)) break;
-        }
-      } finally {
-        if (generation === revision && activeAutoBatch) {
-          activeRequest = null; activeAutoBatch = false; busy = false; options.onTyphoonAutoPending?.(false);
-          if (lastStatus === 'typhoon-auto-pending') { lastStatus = 'typhoon-auto-complete'; resultText = 'Typhoon ตรวจรอบนี้เสร็จแล้ว คำสั่งที่ผ่านการตรวจถูกบันทึกใน replay'; }
-          signature = ''; sync(); options.onChange();
-        }
-      }
-    })();
+    void monthlyBatch.start();
   }
-
-  async function requestTyphoon(proposal: OwnerProposal, automatic = false, batchGeneration?: number): Promise<boolean> {
+  async function requestTyphoon(proposal: OwnerProposal, automatic = false, batchGeneration?: number, batchController?: AbortController): Promise<OwnerMonthlyStepResult> {
     const mode = options.getSession().mode;
-    if (activeRequest || !ownerDecisionConnectionReady(options.connection) || (automatic ? !activeAutoBatch || mode !== 'typhoon-auto' || batchGeneration !== revision : busy || mode !== 'proposal')) return false;
+    if (activeRequest || !ownerDecisionConnectionReady(options.connection) || (automatic ? !activeAutoBatch || mode !== 'typhoon-auto' || batchGeneration !== revision : busy || mode !== 'proposal')) return 'retry';
     const city = options.getCity(), snapshot = captureOwnerSnapshot(city, proposal.snapshot.firmId);
     if (!snapshot || JSON.stringify(snapshot) !== JSON.stringify(proposal.snapshot)) {
-      lastStatus = 'typhoon-stale'; resultText = 'ภาพข้อมูลของข้อเสนอนี้เปลี่ยนแล้ว กดประเมินใหม่ก่อนขอ Typhoon'; signature = ''; sync(); return false;
+      lastStatus = 'typhoon-stale'; resultText = 'ภาพข้อมูลของข้อเสนอนี้เปลี่ยนแล้ว กดประเมินใหม่ก่อนขอ Typhoon'; signature = ''; sync(); return 'stale';
     }
-    const controller = new AbortController(), stateHash = ownerStateHash(city), generation = automatic ? batchGeneration! : ++revision;
+    const controller = batchController ?? new AbortController(), stateHash = ownerStateHash(city), generation = automatic ? batchGeneration! : ++revision;
     activeRequest = { controller, city, snapshot, stateHash, generation, automatic }; busy = true;
     lastStatus = automatic ? 'typhoon-auto-pending' : 'typhoon-pending'; resultText = automatic ? 'Typhoon กำลังเลือกจากข้อเสนอของกิจการ ระบบพักเวลาไว้จนกว่าจะตรวจครบ' : 'กำลังขอให้ Typhoon เลือกจากข้อเสนอที่ผ่านกฎเดิม'; signature = ''; sync();
+    let automaticResult: OwnerMonthlyStepResult = 'completed';
     try {
       const result = await requestOwnerDecision(snapshot, options.connection, options.fetchImpl ?? fetch, controller.signal);
-      if (generation !== revision || activeRequest?.controller !== controller) return false;
+      if (controller.signal.aborted || result.reason === 'cancelled') return 'cancelled';
+      if (generation !== revision || activeRequest?.controller !== controller) return 'cancelled';
       const latestCity = options.getCity();
       let latestHash: string | null = null;
       try { latestHash = ownerStateHash(latestCity); } catch { /* The answer is discarded below. */ }
       if (latestCity !== city || latestCity.tick !== snapshot.tick || latestHash !== stateHash || options.getSession().mode !== (automatic ? 'typhoon-auto' : 'proposal')) {
-        if (automatic) stopTyphoonAuto();
+        if (automatic) automaticResult = 'stale';
         lastStatus = 'typhoon-stale'; resultText = 'เมืองเปลี่ยนระหว่างรอ Typhoon จึงไม่นำผลเก่ามาใช้';
       } else if (!result.response) {
         if (automatic) {
@@ -190,7 +198,9 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
         activeRequest = null; busy = activeAutoBatch; signature = ''; sync(); options.onChange();
       }
     }
-    return true;
+    if (automatic && lastStatus === 'typhoon-stale') automaticResult = 'stale';
+    else if (automatic && (lastStatus === 'typhoon-auto-rejected' || lastStatus === 'typhoon-fallback')) automaticResult = 'retry';
+    return automatic ? automaticResult : 'completed';
   }
 
   function proposalRow(proposal: OwnerProposal, stale: boolean): HTMLElement {
@@ -244,7 +254,7 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
       if (city === activeRequest.city) { try { currentHash = ownerStateHash(city); } catch { /* Discard if state cannot be checked. */ } }
       if (city !== activeRequest.city || city.tick !== activeRequest.snapshot.tick || currentHash !== activeRequest.stateHash) {
         const request = activeRequest, wasAuto = activeAutoBatch; activeRequest = null; request.controller.abort(); revision++; busy = false;
-        if (wasAuto) { activeAutoBatch = false; options.onTyphoonAutoPending?.(false); }
+        if (wasAuto) { monthlyBatch.invalidate(); activeAutoBatch = false; options.onTyphoonAutoPending?.(false); }
         lastStatus = 'typhoon-stale'; resultText = 'เมืองเปลี่ยนระหว่างรอ Typhoon จึงยกเลิกผลเพื่อไม่ใช้ภาพข้อมูลเก่า'; signature = '';
       }
     }
@@ -274,11 +284,11 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
     list.replaceChildren(...proposals.map(p => proposalRow(p, !processed.has(p.proposalId) && (p.snapshot.tick !== city.tick || p.snapshot.stateHash !== currentHash))));
     if (!proposals.length) list.append(element('p', 'ยังไม่มีข้อเสนอในรอบนี้ ตลาดต้องมีครัวเรือนเจ้าของจริง แล้วรอรอบเดือนหรือกดประเมินตอนนี้', 'owner-empty'));
   }
-  function reset() { if (activeAutoBatch) options.onTyphoonAutoPending?.(false); activeAutoBatch = false; activeRequest?.controller.abort(); activeRequest = null; revision++; busy = false; lastTyphoonAutoTick = -1; processed.clear(); signature = ''; resultText = ''; lastStatus = 'ready'; sync(); }
+  function reset() { if (activeAutoBatch) options.onTyphoonAutoPending?.(false); activeAutoBatch = false; activeRequest?.controller.abort(); activeRequest = null; monthlyBatch.reset(); revision++; busy = false; processed.clear(); signature = ''; resultText = ''; lastStatus = 'ready'; sync(); }
   function noteOutcomes(outcomes: OwnerExecutionOutcome[]) {
     if (!outcomes.length) {
       const city = options.getCity();
-      if (options.getSession().mode === 'typhoon-auto' && city.tick > 0 && city.tick % MONTH === 0 && city.tick !== lastTyphoonAutoTick) startTyphoonAutoMonth();
+      if (options.getSession().mode === 'typhoon-auto' && city.tick > 0 && city.tick % MONTH === 0) startTyphoonAutoMonth();
       return;
     }
     for (const outcome of outcomes) if (outcome.ok && outcome.proposalId) processed.add(outcome.proposalId);
