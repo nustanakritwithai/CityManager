@@ -1,4 +1,5 @@
 import { iconElement } from './ui-icons.ts';
+import { GAME_VERSION } from './version.ts';
 import './submenus.css';
 import { MONTH, SIZE, ROAD_COST, type City } from './sim.ts';
 import { flowRows, cropFlowRows, walletGroups, formatMoney, type FlowKind, type FlowRow, type CropFlowRow } from './inspector-data.ts';
@@ -247,7 +248,7 @@ function updateRules() {
   let grantLabel = bootstrap.querySelector('.sm-rule-status'); if (!grantLabel) { grantLabel = element('div', 'sm-rule-status'); bootstrap.append(grantLabel); }
   grantLabel.textContent = grant ? `ทุนตั้งเมืองที่บันทึก: ${formatMoney(grant.amount)} บาท` : 'ยังไม่มีรายการทุนตั้งเมืองในบัญชีนี้';
   const version = root('simulation-rules').querySelector('[data-rule=version]')!;
-  let label = version.querySelector('.sm-footnote'); if (!label) { label = element('p', 'sm-footnote'); version.append(label); } label.textContent = `บันทึกเวอร์ชัน ${current.version} · รหัสเมือง ${current.seed} · วันที่ ${current.tick}`;
+  let label = version.querySelector('.sm-footnote'); if (!label) { label = element('p', 'sm-footnote'); version.append(label); } label.textContent = `CityManager ${GAME_VERSION} · บันทึกเวอร์ชัน ${current.version} · รหัสเมือง ${current.seed} · วันที่ ${current.tick}`;
 }
 
 /** Installs presentation only; preserves native outer details/summary behavior. */
