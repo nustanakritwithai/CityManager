@@ -9,6 +9,7 @@ import { CHARTS } from './chart-defs.ts';
 import { renderChart, ChartModal } from './chart-modal.ts';
 import { mixBar, statTile } from './charts.ts';
 import { iconElement } from './ui-icons.ts';
+import { cityGoals, renderGoalsCard } from './goals-panel.ts';
 import type { City } from './sim.ts';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -22,7 +23,7 @@ const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
 };
 
 const NAV: readonly [string, string][] = [
-  ['dash-finance', 'การเงิน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
+  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
   ['growth-anchor', 'ความต้องการ'], ['issue-section', 'ปัญหา'], ['event-log-section', 'เหตุการณ์'], ['money-section', 'บัญชี'],
 ];
 const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'ตลาด', factory: 'โรงงาน', shop: 'ร้านค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
@@ -31,6 +32,7 @@ const NODE_W = 92, NODE_H = 48;
 
 export class OverviewDashboard {
   private readonly host: HTMLElement;
+  private readonly goals = el('section', 'dash-card dash-goals');
   private readonly kpis = el('section', 'dash-kpis');
   private readonly finance = el('section', 'dash-card dash-finance');
   private readonly chain = el('section', 'dash-card dash-chain');
@@ -42,7 +44,7 @@ export class OverviewDashboard {
 
   constructor(host: HTMLElement) {
     this.host = host;
-    this.finance.id = 'dash-finance'; this.chain.id = 'dash-chain'; this.growth.id = 'dash-growth'; this.kpis.setAttribute('aria-label', 'ตัวเลขหลักของเมือง');
+    this.goals.id = 'dash-goals'; this.finance.id = 'dash-finance'; this.chain.id = 'dash-chain'; this.growth.id = 'dash-growth'; this.kpis.setAttribute('aria-label', 'ตัวเลขหลักของเมือง');
     const nav = el('nav', 'dash-nav'); nav.setAttribute('aria-label', 'ไปยังหมวดในภาพรวมเมือง');
     for (const [target, label] of NAV) {
       const button = el('button', 'dash-nav-chip', label); button.type = 'button';
@@ -53,7 +55,7 @@ export class OverviewDashboard {
       });
       nav.append(button);
     }
-    host.replaceChildren(nav, this.kpis, this.finance, this.chain, this.growth);
+    host.replaceChildren(nav, this.goals, this.kpis, this.finance, this.chain, this.growth);
   }
   get modalOpen() { return this.modal.isOpen; }
   closeModal() { this.modal.close(); }
@@ -67,6 +69,7 @@ export class OverviewDashboard {
     // Measure once before rebuilding, so building six charts does not force a layout each.
     this.chartWidth = this.width();
     const series = dailySeries(city, 30);
+    renderGoalsCard(this.goals, cityGoals(city));
     this.renderKpis(city, series); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
