@@ -27,7 +27,14 @@ export type ParcelChecklist = { checks: ParcelCheck[]; eligible: boolean; nextRe
 export function parcelChecklist(city: City, cell: number): ParcelChecklist | null {
   const zone = city.cells[cell]?.zone;
   if (!zone || city.cells[cell].road || city.cells[cell].building !== null) return null;
-  const lines = explainCell(city, cell), stopped = lines.slice(1, -2), checks: ParcelCheck[] = [];
+  const lines = explainCell(city, cell);
+  const shop = /^Shop site:.*\(in (\d+) day/.exec(lines[1] ?? '');
+  if (shop) return {
+    checks: [{ key: 'factory', label: 'มีโรงงานที่มีคนงานกำลังผลิต', state: 'pass' }, { key: 'buyers', label: 'มีครัวเรือนเชื่อมถนนพอสำหรับร้านค้า', state: 'pass' }],
+    eligible: true, nextReview: Number(shop[1]),
+    note: 'ร้านค้าเปิดด้วยทุนนักลงทุนภายนอก ซื้อสินค้าจากโรงงานในเมืองก่อนนำเข้า และจ้างแรงงานค้าปลีก ครัวเรือนจึงซื้อของที่เมืองผลิตเองได้',
+  };
+  const stopped = lines.slice(1, -2), checks: ParcelCheck[] = [];
   const used = new Set<string>();
   for (const rule of RULES) {
     if (rule.zones && !rule.zones.includes(zone)) continue;
