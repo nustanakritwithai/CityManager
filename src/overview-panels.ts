@@ -2,7 +2,13 @@
  * City overview dashboard: section navigation, treasury trend and budget, and the
  * 30-day supply chain. Read-only views over overview-data projections.
  */
-import { treasuryHistory, treasuryBudget, supplyChain, type ChainFlow, type ChainNode } from './overview-data.ts';
+import { treasuryBudget, supplyChain, type ChainFlow, type ChainNode } from './overview-data.ts';
+import { dailySeries, BUILDING_ORDER, BUILDING_NAMES, type DailySeries } from './city-series.ts';
+import { cityOverview } from './context-data.ts';
+import { CHARTS } from './chart-defs.ts';
+import { renderChart, ChartModal } from './chart-modal.ts';
+import { mixBar, statTile } from './charts.ts';
+import { iconElement } from './ui-icons.ts';
 import type { City } from './sim.ts';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -16,7 +22,7 @@ const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
 };
 
 const NAV: readonly [string, string][] = [
-  ['dash-finance', 'การเงิน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['city-overview', 'ประชากรและงาน'],
+  ['dash-finance', 'การเงิน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
   ['growth-anchor', 'ความต้องการ'], ['issue-section', 'ปัญหา'], ['event-log-section', 'เหตุการณ์'], ['money-section', 'บัญชี'],
 ];
 const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'ตลาด', factory: 'โรงงาน', shop: 'ร้านค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
@@ -25,13 +31,18 @@ const NODE_W = 92, NODE_H = 48;
 
 export class OverviewDashboard {
   private readonly host: HTMLElement;
+  private readonly kpis = el('section', 'dash-kpis');
   private readonly finance = el('section', 'dash-card dash-finance');
   private readonly chain = el('section', 'dash-card dash-chain');
+  private readonly growth = el('section', 'dash-card dash-growth');
+  private readonly modal = new ChartModal();
+  private city: City | null = null;
   private key = '';
+  private chartWidth = 300;
 
   constructor(host: HTMLElement) {
     this.host = host;
-    this.finance.id = 'dash-finance'; this.chain.id = 'dash-chain';
+    this.finance.id = 'dash-finance'; this.chain.id = 'dash-chain'; this.growth.id = 'dash-growth'; this.kpis.setAttribute('aria-label', 'ตัวเลขหลักของเมือง');
     const nav = el('nav', 'dash-nav'); nav.setAttribute('aria-label', 'ไปยังหมวดในภาพรวมเมือง');
     for (const [target, label] of NAV) {
       const button = el('button', 'dash-nav-chip', label); button.type = 'button';
@@ -42,59 +53,58 @@ export class OverviewDashboard {
       });
       nav.append(button);
     }
-    host.replaceChildren(nav, this.finance, this.chain);
+    host.replaceChildren(nav, this.kpis, this.finance, this.chain, this.growth);
   }
+  get modalOpen() { return this.modal.isOpen; }
+  closeModal() { this.modal.close(); }
 
   /** Rebuild once per simulated day; the navigation stays put so a press is never detached. */
   update(city: City) {
     const key = `${city.tick}:${city.ledger.length}:${city.cropLedger.length}:${city.goodsLedger.length}`;
+    this.city = city; this.modal.update(city);
     if (key === this.key) return;
     this.key = key;
-    this.renderFinance(city); this.renderChain(city);
+    // Measure once before rebuilding, so building six charts does not force a layout each.
+    this.chartWidth = this.width();
+    const series = dailySeries(city, 30);
+    this.renderKpis(city, series); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
+  }
+
+  /** Chart width follows the card so text stays at its real size. */
+  private width() { return Math.max(260, Math.round((this.host.clientWidth || 340) - 44)); }
+  private chart(key: string, series: DailySeries) {
+    const def = CHARTS[key], box = el('div', 'dash-chart'), head = el('div', 'dash-chart-head');
+    const expand = el('button', 'dash-expand'); expand.type = 'button'; expand.title = `ขยาย ${def.title}`; expand.setAttribute('aria-label', `ขยายกราฟ ${def.title}`);
+    expand.append(iconElement('zoom-in')); expand.addEventListener('click', () => { if (this.city) this.modal.open(key, this.city); });
+    head.append(el('h4', '', def.title), expand); box.append(head, renderChart(def, series, this.chartWidth, 140)); return box;
+  }
+
+  private renderKpis(city: City, series: DailySeries) {
+    const o = cityOverview(city), now = series.treasury.at(-1)!, net = o.net, people = series.population, popDelta = people.at(-1)! - people[0];
+    const employed = o.workforce ? o.employed / o.workforce : 0, housing = o.personCapacity ? o.occupiedPersons / o.personCapacity : 0;
+    this.kpis.replaceChildren(
+      statTile({ label: 'เงินคลัง', icon: 'coin', value: money(now), delta: { text: `${signed(net)} ใน 30 วัน`, tone: net > 0 ? 'good' : net < 0 ? 'bad' : 'flat' }, spark: series.treasury }),
+      statTile({ label: 'ประชากร', icon: 'people', value: `${o.population.toLocaleString('th-TH')} คน`, delta: { text: `${popDelta >= 0 ? '+' : '−'}${Math.abs(popDelta).toLocaleString('th-TH')} ใน 30 วัน`, tone: popDelta > 0 ? 'good' : popDelta < 0 ? 'bad' : 'flat' }, spark: people }),
+      statTile({ label: 'มีงานทำ', icon: 'worker', value: `${Math.round(employed * 100)}%`, meter: employed, note: `${o.employed.toLocaleString('th-TH')} จาก ${o.workforce.toLocaleString('th-TH')} คน` }),
+      statTile({ label: 'ที่พักใช้ไป', icon: 'household', value: `${Math.round(housing * 100)}%`, meter: housing, note: `${o.occupiedPersons.toLocaleString('th-TH')} จาก ${o.personCapacity.toLocaleString('th-TH')} คน` }),
+    );
   }
 
   private head(title: string, note: string) {
     const head = el('header', 'dash-head'); head.append(el('h3', '', title), el('span', 'dash-note', note)); return head;
   }
 
-  private renderFinance(city: City) {
-    const history = treasuryHistory(city), budget = treasuryBudget(city), now = history.at(-1)!.balance;
-    const hero = el('div', 'dash-hero');
-    const value = el('strong', 'dash-hero-value', money(now)), delta = el('span', `dash-delta ${budget.net < 0 ? 'bad' : budget.net > 0 ? 'good' : ''}`, `${signed(budget.net)} ใน 30 วัน`);
-    hero.append(el('span', 'dash-hero-label', 'เงินคลังเมือง'), value, delta);
-    const chart = this.trend(history);
-    const lines = el('div', 'dash-budget');
-    const max = Math.max(1, ...budget.income.map(l => l.amount), ...budget.expense.map(l => l.amount));
-    const column = (title: string, items: typeof budget.income, tone: 'good' | 'bad') => {
-      const box = el('div', `dash-budget-col ${tone}`); box.append(el('h4', '', title));
-      if (!items.length) box.append(el('p', 'dash-empty', 'ไม่มีในช่วงนี้'));
-      for (const line of items) {
-        const row = el('div', 'dash-bar-row'); row.dataset.budget = line.key;
-        const bar = el('span', 'dash-bar'); bar.style.setProperty('--share', String(line.amount / max));
-        row.append(el('span', 'dash-bar-label', line.label), bar, el('span', 'dash-bar-value', money(line.amount)));
-        box.append(row);
-      }
-      return box;
-    };
-    lines.append(column('รายรับคลัง', budget.income, 'good'), column('รายจ่ายคลัง', budget.expense, 'bad'));
-    this.finance.replaceChildren(this.head('การเงินของเมือง', `วันที่ ${history[0].tick}–${city.tick}`), hero, chart, lines);
+  private renderFinance(city: City, series: DailySeries) {
+    const budget = treasuryBudget(city);
+    const mix = el('div', 'dash-mix');
+    mix.append(
+      mixBar(budget.income.map((line, i) => ({ key: line.key, label: line.label, value: line.amount, slot: i + 1 })), money, 'รายรับคลังตามแหล่ง'),
+      mixBar(budget.expense.map((line, i) => ({ key: line.key, label: line.label, value: line.amount, slot: i + 1 })), money, 'รายจ่ายคลังตามประเภท'),
+    );
+    this.finance.replaceChildren(this.head('การเงินของเมือง', `วันที่ ${series.ticks[0]}–${city.tick}`), this.chart('treasury', series), this.chart('cashflow', series), mix);
   }
 
-  private trend(points: { tick: number; balance: number }[]) {
-    const W = 440, H = 120, pad = 6, figure = el('figure', 'dash-trend');
-    const values = points.map(p => p.balance), min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
-    const x = (i: number) => pad + (points.length > 1 ? i / (points.length - 1) : 1) * (W - pad * 2), y = (v: number) => H - pad - (v - min) / span * (H - pad * 2 - 10);
-    const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.balance).toFixed(1)}`).join('');
-    const chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `เงินคลัง 30 วัน ต่ำสุด ${money(min)} สูงสุด ${money(max)} ล่าสุด ${money(values.at(-1)!)}` });
-    for (const g of [0, .5, 1]) chart.append(svg('line', { x1: pad, x2: W - pad, y1: y(min + span * g), y2: y(min + span * g), class: 'dash-grid' }));
-    chart.append(svg('path', { d: `${line}L${x(points.length - 1)},${H - pad}L${x(0)},${H - pad}Z`, class: 'dash-area' }), svg('path', { d: line, class: 'dash-line' }));
-    chart.append(svg('circle', { cx: x(points.length - 1), cy: y(values.at(-1)!), r: 4, class: 'dash-dot' }));
-    const caption = el('figcaption', 'dash-trend-caption');
-    caption.append(el('span', '', `วันที่ ${points[0].tick} · ต่ำสุด ${money(min)}`), el('span', '', `สูงสุด ${money(max)}`));
-    figure.append(chart, caption); return figure;
-  }
-
-  private renderChain(city: City) {
+  private renderChain(city: City, series: DailySeries) {
     const chain = supplyChain(city), max = Math.max(1, ...chain.flows.map(f => f.quantity));
     const count = (kind: ChainNode) => kind === 'household' ? city.households.length : kind === 'outside' ? 0
       : city.firms.filter(f => kind === 'farm' ? f.zone === 'F' : kind === 'factory' ? f.zone === 'I' : f.zone === 'C' && (kind === 'market') === (f.commercialKind === 'market')).length;
@@ -141,7 +151,21 @@ export class OverviewDashboard {
       list.append(item);
     }
     const summary = el('p', 'dash-note-line', `เก็บเกี่ยว ${chain.harvested} ล็อต · แปรรูป ${chain.processed} ล็อต เป็นสินค้า ${chain.produced} หน่วย · วันที่ ${chain.window.fromTick}–${chain.window.toTick}`);
-    this.chain.replaceChildren(this.head('ห่วงโซ่สินค้า 30 วัน', 'จากบันทึกพืชผลและสินค้าจริง'), diagram, legend, summary, list);
+    this.chain.replaceChildren(this.head('ห่วงโซ่สินค้า 30 วัน', 'จากบันทึกพืชผลและสินค้าจริง'), diagram, legend, summary, list, this.chart('crops', series), this.chart('goods', series));
+  }
+
+  private renderGrowth(city: City, series: DailySeries) {
+    const o = cityOverview(city), idle = Math.max(0, o.workforce - o.employeeWorkers - o.selfEmployedWorkers);
+    const ICON = { shop: 'shop', I: 'I', R: 'R', F: 'F', market: 'market' } as const;
+    const mix = el('div', 'dash-mix');
+    mix.append(
+      mixBar(BUILDING_ORDER.map((kind, i) => ({ key: kind, label: BUILDING_NAMES[kind], value: series.buildings[kind].at(-1) ?? 0, slot: i + 1, icon: ICON[kind] })), v => `${v.toLocaleString('th-TH')} หลัง`, 'อาคารตอนนี้'),
+      mixBar([
+        { key: 'employee', label: 'ลูกจ้าง', value: o.employeeWorkers, slot: 1, icon: 'worker' }, { key: 'owner', label: 'ทำกิจการเอง', value: o.selfEmployedWorkers, slot: 2, icon: 'market' },
+        { key: 'idle', label: 'ว่างงาน', value: idle, slot: 3, icon: 'idle' }, { key: 'dependents', label: 'ผู้พึ่งพิง', value: o.dependents, slot: 4, icon: 'dependents' },
+      ], v => `${v.toLocaleString('th-TH')} คน`, 'ประชากรตามบทบาท'),
+    );
+    this.growth.replaceChildren(this.head('การเติบโตของเมือง', 'อาคารที่ยังอยู่ · ประชากรจากวันที่ย้ายเข้า'), this.chart('population', series), this.chart('buildings', series), mix);
   }
 }
 

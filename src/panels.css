@@ -87,6 +87,9 @@
 #growth-summary .demand-item.f { color: #b6d978; }
 
 /* ---- City dashboard -------------------------------------------------------- */
+/* These blocks are rebuilt every simulated day. Scroll anchoring must not pick a node inside them,
+   or the reading position jumps each day when the anchor is replaced (the ledger below moves under a finger). */
+.city-dashboard, #city-overview, #growth-summary { overflow-anchor: none; }
 .city-dashboard { display: grid; gap: calc(10 * var(--u)); }
 .dash-nav {
   display: flex;

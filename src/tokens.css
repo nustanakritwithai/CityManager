@@ -3,3 +3,12 @@
   --c-accent: #f3c46b; --c-good: #6fd49a; --c-bad: #ff8a7a; --c-warn: #f2c14e;
   --c-text: #eef3ea; --c-muted: #a3bcb4; --c-icon: #cfe1d9; --c-dependent: #8fb2c9;
 }
+/* Chart palette: the validated categorical order (dark steps), checked against the chart well
+   #1d3a44 — slots 1–5, 7 and 8 clear 3:1; slot 6 needs its labels/table (relief rule). */
+:root {
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  --div-pos: var(--series-1); --div-neg: var(--series-8);
+  --chart-well: #1d3a44; --chart-grid: #2c4b56; --chart-axis: #4a6d79;
+  --chart-ink: #f0f4ee; --chart-ink-2: #c6d6d0; --chart-muted: #a9bfb9;
+}
