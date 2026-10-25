@@ -78,6 +78,8 @@ const reasonLabels: Record<string, string> = {
   'Demolition stock write-off to outside': 'ตัดสต็อกออกเมื่อรื้อถอน (ไม่มีรายรับ)',
   'Owner capital contribution': 'เจ้าของเติมทุนจากเงินครัวเรือน (ไม่ใช่ยอดขาย)',
   'Owner profit distribution': 'เจ้าของถอนกำไรเข้าครัวเรือน (ไม่ใช่ค่าใช้จ่ายซ้ำ)',
+  'Self-employed market construction': 'ครัวเรือนสร้างแผงตลาดเอง',
+  'Self-employed shop construction': 'ครัวเรือนสร้างร้านค้าเอง',
 };
 
 function reasonLabel(reason: string): string {

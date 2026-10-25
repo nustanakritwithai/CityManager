@@ -127,7 +127,7 @@ test('context presenters leave frozen source data and RNG unchanged and report a
 
 test('migrated legacy people are explicitly assumed without rewriting financial or goods history', () => {
   const legacy = JSON.parse(legacyJson), city = populated(), overview = cityOverview(city);
-  assert.equal(city.version, 6);
+  assert.equal(city.version, 7);
   assert.ok(city.households.every(household => household.origin === 'legacy-v1' && household.profile === 'legacy-worker' && household.members === 1 && household.workforce === 1 && household.dependents === 0));
   assert.equal(overview.population, legacy.households.length);
   assert.equal(overview.households, legacy.households.length);

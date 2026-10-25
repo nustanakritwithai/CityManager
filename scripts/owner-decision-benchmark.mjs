@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { createCity, step, summary, serialize, deserialize, isMarket, firmWage, MONTH } from '../src/sim.ts';
+import { createCity, step, summary, serialize, deserialize, isMarket, isRetail, firmWage, MONTH } from '../src/sim.ts';
 import { ownerStateHash } from '../src/owner-decision.ts';
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 
@@ -31,7 +31,7 @@ function reconcile(city) {
     assert(Number.isSafeInteger(firm.cropCost) && firm.cropCost >= 0);
     const earned = Object.values(firm.workDays).reduce((n, days) => n + days * firmWage(firm) / MONTH, 0);
     assert(Number.isSafeInteger(earned) && earned >= 0 && city.accounts[firm.wallet] >= earned, 'Earned wage claims remain fully reserved');
-    assert(isMarket(firm) || firm.owner === null, 'A funded factory is not a household-owned market');
+    assert(isMarket(firm) || isRetail(firm) || firm.owner === null, 'Only markets and shops are household-owned');
   }
   assert.equal(city.households.reduce((n, h) => n + h.workforce + h.dependents, 0),
     city.households.reduce((n, h) => n + h.members, 0), 'Canonical individual households retain actual member counts');
@@ -125,10 +125,10 @@ export function runOwnerDecisionBenchmark({ days = OWNER_BENCHMARK_DAYS, seeds =
       ruleExecution: { final: metrics(execution), stateHash: ownerStateHash(execution), decisions: executionStats,
         replay: executionReplay }, monthly });
   }
-  return { schemaVersion: 1, benchmark: 'owner-rule-phase1', baseline: 'growth-1', saveVersion: 6,
+  return { schemaVersion: 1, benchmark: 'owner-rule-phase1', baseline: 'chain-2', saveVersion: 7,
     horizonDays: days, seeds: [...seeds], sourceHashes, moneyUnit: 'satang', monthlyPeriodDays: 30,
     retentionMode: 'production-default', retentionMaxEvents: rows[0].ruleExecution.replay.maxEvents,
-    treatments: ['fixed-growth-1', 'rule-proposal-only', 'rule-execution-opt-in'], llmTreatment: 'not implemented; future same-interface comparison',
+    treatments: ['fixed-chain-2', 'rule-proposal-only', 'rule-execution-opt-in'], llmTreatment: 'not implemented; future same-interface comparison',
     checked: ['money/goods/crops/inventory conservation every day', 'no negative internal cash', 'canonical household member counts',
       'proposal-only exact state equivalence each month', 'current-save final round-trip', 'retained checkpoint replay exact final state',
       'monthly-only automatic evaluation and real market household ownership'],

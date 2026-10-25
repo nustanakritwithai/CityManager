@@ -80,7 +80,7 @@ export function captureOwnerSnapshot(city: City, firmId: number): OwnerSnapshot 
     const facts = emptyFacts(), missing: OwnerMissing[] = [];
     const mark = (code: OwnerMissing) => { if (!missing.includes(code)) missing.push(code); };
     const home = household.home === null ? undefined : city.buildings.find(b => b.id === household.home && b.zone === 'R');
-    if (city.version !== 6 || city.rulesVersion !== 'growth-1') mark('unsupported-rules');
+    if (city.version !== 7 || city.rulesVersion !== 'chain-2') mark('unsupported-rules');
     if (!home) mark('home-unavailable');
     if (!city.utilities.power || !city.utilities.water || !home || !access(city, home.cell) || !access(city, building.cell)) mark('access-unavailable');
     if (Object.hasOwn(city.accounts, household.wallet) && money(city.accounts[household.wallet])) facts.householdCash = city.accounts[household.wallet];

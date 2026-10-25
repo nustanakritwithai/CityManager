@@ -23,23 +23,26 @@ export function validateAgriculture(c: City): void {
     requireThat(isSafeCount(f.cropInventory) && f.cropInventory <= capacity && isSafeCount(f.cropCost) && (f.cropInventory > 0 || f.cropCost === 0));
     requireThat(isSafeCount(f.productionTick) && f.productionTick >= c.agricultureStartTick && f.productionTick <= c.tick);
     if (isRetail(f)) requireThat(f.cropCost === 0);
-    if (f.zone === 'F' || isMarket(f)) requireThat(f.inventory === 0 && c.buildings.find(b => b.id === f.building)?.level === 1);
+    // Farms grow up to level 3 (one worker per level); crop markets stay single-stall.
+    if (f.zone === 'F' || isMarket(f)) requireThat(f.inventory === 0 && (f.zone === 'F' || c.buildings.find(b => b.id === f.building)?.level === 1));
     if (f.zone === 'F') {
       const b = c.buildings.find(b => b.id === f.building);
       requireThat(b && isViableFarmland(c.resources.fertility[b.cell]) && f.cropCost === 0);
     }
-    if (!isMarket(f)) { requireThat(f.owner === null); continue; }
+    if (!isMarket(f) && !(isRetail(f) && f.owner !== null)) { requireThat(f.owner === null); continue; }
     const owner = f.owner;
     requireThat(object(owner) && isSafeCount(owner.householdId, 1) && households.has(owner.householdId) && !ownerIds.has(owner.householdId));
     requireThat(['capitalContributed', 'capitalReturned', 'withdrawn', 'taxPaid'].every(key => isSafeCount(owner[key as keyof typeof owner])));
-    requireThat(owner.capitalContributed >= 60_000 && owner.capitalReturned === 0 && Object.keys(f.workDays).length === 0 && !c.employment.some(e => e.firmId === f.id));
+    requireThat(owner.capitalContributed >= 60_000 && owner.capitalReturned === 0);
+    // A household-owned shop may hire beside its owner; a market stall is the owner's labour alone.
+    if (isMarket(f)) requireThat(Object.keys(f.workDays).length === 0 && !c.employment.some(e => e.firmId === f.id));
     ownerIds.add(owner.householdId);
   }
   const ownerFirms = new Set<number>();
   for (const e of c.ownerLabor) {
     requireThat(object(e) && isSafeCount(e.householdId, 1) && isSafeCount(e.firmId, 1) && e.workers === 1 && (e.skill === 'general' || e.skill === 'retail') && !ownerFirms.has(e.firmId));
     const h = households.get(e.householdId), f = c.firms.find(f => f.id === e.firmId);
-    requireThat(h && h.home !== null && f && isMarket(f) && f.owner?.householdId === h.id);
+    requireThat(h && h.home !== null && f && (isMarket(f) || isRetail(f)) && f.owner?.householdId === h.id);
     ownerFirms.add(e.firmId);
   }
   for (const h of c.households) {
@@ -97,8 +100,9 @@ export function validateAgriculture(c: City): void {
     previousTick = e.tick;
     if (day !== e.tick) { day = e.tick; sellable = new Map([...holdings].map(([wallet, h]) => [wallet, h.quantity])); }
     if (e.kind === 'harvest') {
-      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers === 1 && e.batches === 0 && e.outputQuantity === 0);
+      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= 3 && e.batches === 0 && e.outputQuantity === 0);
       role(e.to, 'F'); const before = holding(e.to), current = firms.get(e.to), b = current && c.buildings.find(b => b.id === current.building);
+      if (b) requireThat(e.workers <= b.level);
       const maximum = Math.min(96 - before.quantity, b ? harvestYield(c.resources.fertility[b.cell], e.workers) : 24 * e.workers);
       requireThat(e.quantity <= maximum && (!b || e.quantity === maximum));
       const key = e.tick + ':' + e.to; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);
@@ -144,6 +148,23 @@ export function validateAgriculture(c: City): void {
   for (const h of c.households) { const tick = latestPurchase.get(h.wallet); if (tick !== undefined || h.lastPurchaseTick > c.agricultureStartTick) requireThat(h.lastPurchaseTick === tick); }
 
   for (const f of c.firms.filter(f => isMarket(f))) validateOwnerFinance(c, f, operating.get(f.wallet) ?? []);
+  for (const f of c.firms.filter(f => isRetail(f) && f.owner)) validateShopOwner(c, f);
+}
+
+/** A household-owned shop: its owner paid the opening capital and every owner movement is in the ledger. */
+function validateShopOwner(c: City, f: Firm): void {
+  const owner = f.owner!, wallet = `household:${owner.householdId}`;
+  let contributed = 0n, withdrawn = 0n, taxPaid = 0n;
+  for (const e of c.ledger) {
+    if (e.from !== f.wallet && e.to !== f.wallet) continue;
+    requireThat(!e.reason.startsWith('Closing owner ') && e.reason !== 'Outside firm equity investment');
+    if (e.reason === 'Owner capital contribution') { requireThat(e.from === wallet && e.to === f.wallet); if (contributed === 0n) requireThat(e.amount === 60_000); contributed += BigInt(e.amount); }
+    if (e.reason === 'Owner profit distribution') { requireThat(e.from === f.wallet && e.to === wallet); withdrawn += BigInt(e.amount); }
+    if (e.reason === 'Monthly firm profit tax') { requireThat(e.from === f.wallet && e.to === 'treasury'); taxPaid += BigInt(e.amount); }
+  }
+  requireThat(contributed === BigInt(owner.capitalContributed) && withdrawn === BigInt(owner.withdrawn) && taxPaid === BigInt(owner.taxPaid));
+  const construction = c.ledger.filter(e => e.from === f.wallet && e.reason === 'Self-employed shop construction');
+  requireThat(construction.length === 1 && construction[0].to === 'construction' && construction[0].amount === 10_000);
 }
 
 /** Capital/earnings movements are distinct from the stall's operating result. */

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY, SIZE, buildRoad, createCity, deserialize, isRetail, retailDemand, serialize, shopSite, step, zoneCell, type City, type Zone } from '../src/sim.ts';
+import { GATEWAY, SIZE, buildRoad, createCity, deserialize, firmCapacity, firmWorkerCount, isRetail, ownerFinance, retailDemand, serialize, shopSite, step, withdrawOwnerProfit, zoneCell, type City, type Zone } from '../src/sim.ts';
 
 /** A strip of homes, farms, factories and commercial parcels along one road from the gateway. */
 function strip(withFactories: boolean): City {
@@ -17,15 +17,17 @@ function conserved(c: City) {
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((n, f) => n + f.inventory, 0));
 }
 
-test('a working factory opens outside-funded shops that sell local goods to households, with money and goods conserved', () => {
+test('a working factory opens shops that sell local goods to households, with money and goods conserved', () => {
   const c = strip(true);
   for (let d = 0; d < 180; d++) { step(c); if (d % 30 === 0) conserved(c); }
   const shops = c.firms.filter(isRetail);
   assert.ok(shops.length >= 1, 'at least one shop opened');
   for (const shop of shops) {
     const b = c.buildings.find(b => b.id === shop.building)!;
-    assert.equal(b.zone, 'C'); assert.ok(b.level >= 2); assert.equal(shop.owner, null);
-    assert.ok(c.ledger.some(e => e.reason === 'Outside firm equity investment' && e.from === 'outside' && e.to === shop.wallet));
+    assert.equal(b.zone, 'C'); assert.ok(b.level >= 2);
+    assert.ok(shop.owner
+      ? c.ledger.some(e => e.reason === 'Owner capital contribution' && e.from === `household:${shop.owner!.householdId}` && e.to === shop.wallet)
+      : c.ledger.some(e => e.reason === 'Outside firm equity investment' && e.from === 'outside' && e.to === shop.wallet));
     assert.ok((c.tick - b.age) % 3 === 1, 'shops open on their own day of the growth cycle');
   }
   assert.ok(c.goodsLedger.some(e => e.reason === 'Wholesale stock delivery'), 'shops buy from local factories');
@@ -52,8 +54,8 @@ test('shops show chain bottlenecks on the map: empty shelf, and stock imported b
   const { buildingIssues } = await import('../src/map-overlay.ts');
   const { networkEvents, networkSnapshot } = await import('../src/city-network.ts');
   const c = strip(true);
-  for (let d = 0; d < 180 && !c.firms.some(f => isRetail(f) && c.employment.some(e => e.firmId === f.id)); d++) step(c);
-  const shop = c.firms.find(f => isRetail(f) && c.employment.some(e => e.firmId === f.id))!;
+  for (let d = 0; d < 180 && !c.firms.some(f => isRetail(f) && firmWorkerCount(c, f.id) > 0); d++) step(c);
+  const shop = c.firms.find(f => isRetail(f) && firmWorkerCount(c, f.id) > 0)!;
   assert.ok(shop, 'a staffed shop exists');
   const cell = c.buildings.find(b => b.id === shop.building)!.cell;
   const snap = networkSnapshot(c);
@@ -66,4 +68,33 @@ test('shops show chain bottlenecks on the map: empty shelf, and stock imported b
   imported.tick++;
   imported.goodsLedger.push({ tick: imported.tick, from: 'outside', to: shop.wallet, quantity: 3, reason: 'Imported shop stock' });
   assert.ok(networkEvents(snap, imported).some(e => e.node === 'shops' && e.text.includes('นำเข้า')));
+});
+
+test('a household with savings opens the shop itself: its own capital, its own labour, hires only beside it', () => {
+  const c = strip(true);
+  for (let d = 0; d < 360; d++) { step(c); if (d % 30 === 0) conserved(c); }
+  const shop = c.firms.find(f => isRetail(f) && f.owner)!;
+  assert.ok(shop, 'a household-owned shop opened');
+  const owner = shop.owner!, wallet = `household:${owner.householdId}`, b = c.buildings.find(b => b.id === shop.building)!;
+  assert.ok(c.ledger.some(e => e.reason === 'Owner capital contribution' && e.from === wallet && e.to === shop.wallet && e.amount === 60_000));
+  assert.ok(c.ledger.some(e => e.reason === 'Self-employed shop construction' && e.from === shop.wallet && e.amount === 10_000));
+  assert.ok(!c.ledger.some(e => e.to === shop.wallet && e.from === 'outside'), 'no outside equity in an owned shop');
+  assert.ok(c.ownerLabor.some(e => e.firmId === shop.id && e.householdId === owner.householdId));
+  const hired = c.employment.filter(e => e.firmId === shop.id).reduce((n, e) => n + e.workers, 0);
+  assert.ok(hired <= firmCapacity(b) - 1, 'the owner takes one of the shop slots');
+  assert.ok(ownerFinance(c, shop.id), 'owner finance covers shops');
+  const copy = deserialize(serialize(c)), facts = ownerFinance(copy, shop.id)!;
+  if (facts.withdrawAvailable >= 100) { assert.equal(withdrawOwnerProfit(copy, shop.id, 100).ok, true); deserialize(serialize(copy)); }
+  assert.deepEqual(deserialize(serialize(c)), c);
+});
+
+test('owned-shop saves reject a missing construction entry or a foreign owner', () => {
+  const c = strip(true);
+  for (let d = 0; d < 360 && !c.firms.some(f => isRetail(f) && f.owner); d++) step(c);
+  const shop = c.firms.find(f => isRetail(f) && f.owner)!;
+  const raw = JSON.parse(serialize(c));
+  const noBuild = structuredClone(raw); noBuild.ledger = noBuild.ledger.filter((e: { reason: string; from: string }) => !(e.reason === 'Self-employed shop construction' && e.from === shop.wallet));
+  assert.throws(() => deserialize(JSON.stringify(noBuild)));
+  const extra = structuredClone(raw); extra.firms.find((f: { id: number }) => f.id === shop.id).owner.capitalContributed += 1;
+  assert.throws(() => deserialize(JSON.stringify(extra)));
 });

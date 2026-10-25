@@ -84,7 +84,7 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let n = 0; n < 65; n++) step(fixture);
   await button('#toggle-game-menu');
-  await evaluate(`localStorage.removeItem('citymanager.save.v6');localStorage.setItem('citymanager.save.v6',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
+  await evaluate(`localStorage.removeItem('citymanager.save.v7');localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
   const before = await state(); assert.deepEqual(before, fixture);
   await openSignals();
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'offline');
