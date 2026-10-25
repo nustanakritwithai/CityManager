@@ -40,3 +40,9 @@ test('one import in the last 30 days or a shrinking treasury withholds the win',
   spent.ledger.push({ tick: end, from: 'treasury', to: 'roadworks', amount: spent.accounts.treasury, reason: 'Build 1 road cells' });
   assert.equal(cityGoals(spent).won, false);
 });
+
+test('the in-game version matches package.json', async () => {
+  const { GAME_VERSION } = await import('../src/version.ts');
+  const { readFileSync } = await import('node:fs');
+  assert.equal(GAME_VERSION, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+});
