@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "id": "citymanager-audio",
+  "license": "CC0-1.0",
+  "sources": {
+    "interface": {
+      "name": "Interface Sounds",
+      "author": "Kenney",
+      "url": "https://kenney.nl/assets/interface-sounds",
+      "download": "https://kenney.nl/media/pages/assets/interface-sounds/fa43c1dd4d-1677589452/kenney_interface-sounds.zip",
+      "archive": "kenney_interface-sounds.zip",
+      "bytes": 834536,
+      "sha256": "f2193d072726d6758a5f7871b2dcc54dcce0d5c35c6f0a62f92549b327c81232",
+      "license": "CC0-1.0"
+    },
+    "impact": {
+      "name": "Impact Sounds",
+      "author": "Kenney",
+      "url": "https://kenney.nl/assets/impact-sounds",
+      "download": "https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip",
+      "archive": "kenney_impact-sounds.zip",
+      "bytes": 800850,
+      "sha256": "029d734af1582474edf3a694d1b0cebc97c1c152f2f39fa34d4c2bafc5de77f8",
+      "license": "CC0-1.0"
+    },
+    "rpg": {
+      "name": "RPG Audio",
+      "author": "Kenney",
+      "url": "https://kenney.nl/assets/rpg-audio",
+      "download": "https://kenney.nl/media/pages/assets/rpg-audio/8e99002d76-1677590336/kenney_rpg-audio.zip",
+      "archive": "kenney_rpg-audio.zip",
+      "bytes": 964837,
+      "sha256": "6dbeaf8544da958d8f2adcb4a4a4b76c1ade34a05f8ab9edccd327da7375f38b",
+      "license": "CC0-1.0"
+    },
+    "jingles": {
+      "name": "Music Jingles",
+      "author": "Kenney",
+      "url": "https://kenney.nl/assets/music-jingles",
+      "download": "https://kenney.nl/media/pages/assets/music-jingles/f37e530b9e-1677590399/kenney_music-jingles.zip",
+      "archive": "kenney_music-jingles.zip",
+      "bytes": 1239525,
+      "sha256": "b729ba57959bd58793d2c5cafa348aaf2655d354f3da35ec4729e03ec77197b8",
+      "license": "CC0-1.0"
+    },
+    "another-august": {
+      "name": "Another August",
+      "author": "The Cynic Project (cynicmusic.com)",
+      "url": "https://opengameart.org/content/another-august",
+      "download": "https://opengameart.org/sites/default/files/013_Another_August_0.mp3",
+      "file": "music/another-august.mp3",
+      "bytes": 8269313,
+      "sha256": "6de6e4f770cda4d34db433e4df982deccb6877a8fcc5e32b48eeb57f770dec3b",
+      "license": "CC0-1.0"
+    },
+    "vaporware": {
+      "name": "Calm Piano 1 (Vaporware)",
+      "author": "The Cynic Project (cynicmusic.com)",
+      "url": "https://opengameart.org/content/calm-piano-1-vaporware",
+      "download": "https://opengameart.org/sites/default/files/003_Vaporware_2.mp3",
+      "file": "music/calm-piano-1-vaporware.mp3",
+      "bytes": 6604773,
+      "sha256": "1697fa1b7ed6f3fe1eca4daa4f9d1a2eb3db8fe40a0f3c283529ab47e57b5b38",
+      "license": "CC0-1.0"
+    },
+    "apple-cider": {
+      "name": "Apple Cider",
+      "author": "Zane Little Music",
+      "url": "https://opengameart.org/content/apple-cider",
+      "download": "https://opengameart.org/sites/default/files/apple_cider.ogg",
+      "file": "music/apple-cider.ogg",
+      "bytes": 3240559,
+      "sha256": "29dfe7f2491fa2cabd159db70db868445be253e395db5f75b30b3113f798f4ca",
+      "license": "CC0-1.0"
+    }
+  },
+  "files": [
+    {
+      "path": "ev-arrival.mp3",
+      "source": "rpg",
+      "original": "Audio/doorOpen_1.ogg",
+      "originalSha256": "4ab93bab96522d8eb109ff96dc57cb6765deb02448fe14c10472084be5bb2a0b",
+      "bytes": 9666,
+      "sha256": "f31fe2efb588d6f70f47d929bbae2fb48584258c3f5ca0ad53794c43e06d2f84",
+      "seconds": 0.97
+    },
+    {
+      "path": "ev-broke.mp3",
+      "source": "interface",
+      "original": "Audio/error_007.ogg",
+      "originalSha256": "f1ee4c1ac8bfe1a82eacb54b26f49e8974bab93bcf10c01800bc10dbf730f559",
+      "bytes": 2351,
+      "sha256": "9e276edc29627cee28d98127258ed7b9e9cd83947f1ed4f0ef82ec7ccccca069",
+      "seconds": 0.24
+    },
+    {
+      "path": "ev-build-business.mp3",
+      "source": "impact",
+      "original": "Audio/impactMetal_light_000.ogg",
+      "originalSha256": "33b5e6e37c6e9d54e07bf5a89b12c76e879f40c1ea83cdd82714df1d6f9fec6d",
+      "bytes": 4180,
+      "sha256": "a80f23b66986d1c360c6113e318cbdf3bc181182e006c4c403e1b5ec670ae173",
+      "seconds": 0.42
+    },
+    {
+      "path": "ev-build-farm.mp3",
+      "source": "impact",
+      "original": "Audio/impactSoft_medium_000.ogg",
+      "originalSha256": "7d3ba0bb5e60a11b5d3e558c141303dcf494256675fbf753c0d252d2cf0481e3",
+      "bytes": 1568,
+      "sha256": "0d4ae34e1adfd59ad6e6d63039ae32b115b191da2e399265ba5ba7f754d96d5d",
+      "seconds": 0.16
+    },
+    {
+      "path": "ev-build-home.mp3",
+      "source": "impact",
+      "original": "Audio/impactWood_medium_000.ogg",
+      "originalSha256": "1723a9fd25103ed41af06054814e84e65f4a772bac86ab2dc927da93d9592ff5",
+      "bytes": 3657,
+      "sha256": "7654638af7aaa61d07ad36277d27df51eb1e032a1113e335d0855a5d98dd675d",
+      "seconds": 0.37
+    },
+    {
+      "path": "ev-issue.mp3",
+      "source": "interface",
+      "original": "Audio/question_001.ogg",
+      "originalSha256": "abb8f9e4eb2071491b0b15f84ee302386b1847609310c1b000ae174639a6cc5a",
+      "bytes": 5225,
+      "sha256": "09149a7f5087a6eaa5d7234765d4e52cee9ff7585f2a630df272df630c72ab59",
+      "seconds": 0.52
+    },
+    {
+      "path": "ev-month.mp3",
+      "source": "rpg",
+      "original": "Audio/handleCoins.ogg",
+      "originalSha256": "8a91f969e932df709df80ee124d86a51389eed9b67f22e5e716bc2bbf60d8dab",
+      "bytes": 8882,
+      "sha256": "5a7dfcef5d6bcc88ecf08c3c007362f818bc3203f14ed1ebf5279aa8cc7c727f",
+      "seconds": 0.89
+    },
+    {
+      "path": "ev-shop.mp3",
+      "source": "interface",
+      "original": "Audio/bong_001.ogg",
+      "originalSha256": "d21d0f0b782445db579d11e2506b24cd1ac9d664ee33aeaf807761aa7b6fd710",
+      "bytes": 1568,
+      "sha256": "62efada7a3420364b018477d42f1108fb7a261ce22f9d07e678e7e0c67a8bc0d",
+      "seconds": 0.16
+    },
+    {
+      "path": "jingle-level.mp3",
+      "source": "jingles",
+      "original": "Audio/Steel jingles/jingles_STEEL07.ogg",
+      "originalSha256": "206b5cb18870c1faa393047cb857eda28441b9682380c9eb5910119ea04c2ece",
+      "bytes": 15935,
+      "sha256": "c1b3d64ab409e041fcafa5d70fc7f4b7382713be8df797241ede2bb39588be47",
+      "seconds": 1.59
+    },
+    {
+      "path": "jingle-win.mp3",
+      "source": "jingles",
+      "original": "Audio/Sax jingles/jingles_SAX07.ogg",
+      "originalSha256": "241c8570fbded819ee0205e4be3efa80aeb834a70df89318da88f9e219798b11",
+      "bytes": 17764,
+      "sha256": "abe80d7eb9329efd301954bd4e655904ca9f1d97aef5d5ce7f0ebed3a2fea149",
+      "seconds": 1.78
+    },
+    {
+      "path": "music-another-august.mp3",
+      "source": "another-august",
+      "original": "another-august.mp3",
+      "originalSha256": "6de6e4f770cda4d34db433e4df982deccb6877a8fcc5e32b48eeb57f770dec3b",
+      "bytes": 2479229,
+      "sha256": "b4fbe643598876787d2fa3f026d6f7205698467600352645f4d3924b27386e28",
+      "seconds": 206.6
+    },
+    {
+      "path": "music-apple-cider.mp3",
+      "source": "apple-cider",
+      "original": "apple-cider.ogg",
+      "originalSha256": "29dfe7f2491fa2cabd159db70db868445be253e395db5f75b30b3113f798f4ca",
+      "bytes": 2398668,
+      "sha256": "7b991891d5e9fe4983a939881d355fbb981eb2af2c0c8440bbe956f643b1e73c",
+      "seconds": 199.89
+    },
+    {
+      "path": "music-vaporware.mp3",
+      "source": "vaporware",
+      "original": "calm-piano-1-vaporware.mp3",
+      "originalSha256": "1697fa1b7ed6f3fe1eca4daa4f9d1a2eb3db8fe40a0f3c283529ab47e57b5b38",
+      "bytes": 1979873,
+      "sha256": "5fd13e318a72193a41708914278deeff097ecc99ac7acd3ecdff752d83886dd5",
+      "seconds": 164.99
+    },
+    {
+      "path": "ui-bulldoze.mp3",
+      "source": "impact",
+      "original": "Audio/impactWood_heavy_000.ogg",
+      "originalSha256": "15ff82332f342c30e469215539e1cc57e11b221aa2cf7e11e811d313a9927f3d",
+      "bytes": 3396,
+      "sha256": "9ca155c21237eddd5d8f994c65c913515d21b3469235f76faedb5c0e25426cef",
+      "seconds": 0.34
+    },
+    {
+      "path": "ui-click.mp3",
+      "source": "interface",
+      "original": "Audio/click_002.ogg",
+      "originalSha256": "adcd1f4adc35f1b41bc1b5bbefeff7aa44f2f3f0d96d3199b544140c7c1e761c",
+      "bytes": 523,
+      "sha256": "3bcaeb28af530a413b4fbce76ff8dab954a9096dbb05eaace8bbc683b789220f",
+      "seconds": 0.05
+    },
+    {
+      "path": "ui-close.mp3",
+      "source": "interface",
+      "original": "Audio/close_002.ogg",
+      "originalSha256": "bc4279d2bb2bf86592473eab6a8eab55e51b54a8619315000dbd780a83b102d8",
+      "bytes": 3657,
+      "sha256": "54aa5f7f01ec369056323c5d41c2b03893eaa94803d798156f960919878c6117",
+      "seconds": 0.37
+    },
+    {
+      "path": "ui-error.mp3",
+      "source": "interface",
+      "original": "Audio/error_004.ogg",
+      "originalSha256": "0b574cea597d96507e782ae9764f88482ce49f46e931e57054bf7150047f2d69",
+      "bytes": 1306,
+      "sha256": "1bb0e98e8ff6e8e9d9126da766db21ccb7433295b69a1e53f8d2710f48a059fe",
+      "seconds": 0.13
+    },
+    {
+      "path": "ui-open.mp3",
+      "source": "interface",
+      "original": "Audio/open_002.ogg",
+      "originalSha256": "24ff224fe2c09c6aed1b41249825382dc74cf324b887ff279d8494912ce2beee",
+      "bytes": 3657,
+      "sha256": "a689e2a9fc274ee6b37cc48761a6f7a4d6fcbafd473db70b0d2328b0db945455",
+      "seconds": 0.37
+    },
+    {
+      "path": "ui-place.mp3",
+      "source": "interface",
+      "original": "Audio/drop_002.ogg",
+      "originalSha256": "4ac4d1cef7e936965cbf795852ca2020300b9e2ba7daa59f2bf4f1f7bf416218",
+      "bytes": 2351,
+      "sha256": "c85f98777f2ead1ff46e8cff987ad8f3e34f9abc6e56e6d2ae01b7a445b67ca9",
+      "seconds": 0.24
+    },
+    {
+      "path": "ui-road.mp3",
+      "source": "impact",
+      "original": "Audio/impactPlate_light_000.ogg",
+      "originalSha256": "6e797cf8a5bfc52d7ed5eb47c227974c1cf2a674954fec5b539cea7d62c7282c",
+      "bytes": 5747,
+      "sha256": "6531359e3c926cf45407248991c7539fac7d0cf1f1cab5d2fc04e6a3c5fac6dd",
+      "seconds": 0.57
+    },
+    {
+      "path": "ui-save.mp3",
+      "source": "interface",
+      "original": "Audio/confirmation_002.ogg",
+      "originalSha256": "33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c",
+      "bytes": 5747,
+      "sha256": "86ad71dec3a65dd40113208825304c678877199d186c9562e007c12651b85827",
+      "seconds": 0.57
+    },
+    {
+      "path": "ui-select.mp3",
+      "source": "interface",
+      "original": "Audio/select_002.ogg",
+      "originalSha256": "4cc6ac5341b9b2c86fef80c347de028e9ab9f2e037586ac7d9fa59a403a1c012",
+      "bytes": 784,
+      "sha256": "14a6a6aef31c0b829dd634704c22311dc0f7d54f4b0df6e3957d5a5b082d079f",
+      "seconds": 0.08
+    },
+    {
+      "path": "ui-toggle.mp3",
+      "source": "interface",
+      "original": "Audio/toggle_002.ogg",
+      "originalSha256": "1f564f5520cfa0764028ce245ad97599d3ece8f0ab504554c403af92ac72b900",
+      "bytes": 1829,
+      "sha256": "de6dc8d3347a48fed8ff292b7585824380fce697dbd0f89f6f504b465bf49d98",
+      "seconds": 0.18
+    }
+  ]
+}

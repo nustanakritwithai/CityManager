@@ -151,7 +151,7 @@ try {
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
   if (blocked) await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
-  await send('Page.navigate', { url }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready');
+  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready');
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
   await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day save loaded through explicit Game page and real Load control');
 

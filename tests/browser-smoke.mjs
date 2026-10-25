@@ -93,7 +93,7 @@ try {
   await send('Runtime.enable'); await send('Page.enable');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: targetUrl });
+  await send('Page.navigate', { url: targetUrl + '?starter=1' });
   await until('!!window.cityManager');
   await until('window.cityManager.visuals().ready');
   const visualStatus = await evaluate('window.cityManager.visuals()');

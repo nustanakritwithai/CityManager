@@ -163,20 +163,3 @@ html[data-touch-ui=true] #inspector[data-sheet=full] { max-height: calc(100dvh -
 .cancel-button small { color: #a2b0cf; }
 .map-issue svg { width: 72%; height: 72%; display: block; }
 #growth-summary .demand-spark { display: block; width: 100%; height: calc(16 * var(--reader-unit, 1px)); margin-top: calc(2 * var(--reader-unit, 1px)); opacity: .85; }
-/* First-run coach (desktop only): click-through except the close button. */
-.coach { display: none; }
-@media (min-width: 861px) {
-  html:not([data-touch-ui=true]) .coach:not([hidden]) {
-    display: block; position: fixed; z-index: 9; left: 76px; top: 112px; width: 236px; pointer-events: none;
-    padding: 10px 12px 12px; border: 1px solid var(--line, #ffffff22); border-radius: 12px; background: rgba(22, 32, 56, .92); box-shadow: 0 10px 30px #0006;
-  }
-}
-.coach-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.coach-head strong { font-size: 14px; color: var(--c-accent); }
-.coach-close { pointer-events: auto; width: 32px; height: 32px; min-height: 0; margin: -6px -6px 0 0; border: 0; border-radius: 8px; background: transparent; color: var(--c-muted); font-size: 15px; cursor: pointer; }
-.coach-close:hover { background: #ffffff14; color: var(--c-text); }
-.coach-steps { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
-.coach-steps li { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--c-text); }
-.coach-icon { width: 26px; height: 26px; padding: 4px; border-radius: 8px; background: #ffffff10; color: var(--c-icon); }
-.coach-steps li.done { color: var(--c-muted); text-decoration: line-through; text-decoration-color: #ffffff40; }
-.coach-steps li.done .coach-icon { background: var(--c-good); color: #121c32; }

@@ -572,7 +572,8 @@ export function step(c: City): void {
   if (c.tick % 3 === 0) grow(c);
   else if (c.tick % 3 === 1) openShop(c);
 }
-export function createCity(seed = 20261023): City {
+/** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
+export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
   const c: City = { version: 7, rulesVersion: 'chain-2', growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
@@ -581,6 +582,11 @@ export function createCity(seed = 20261023): City {
     buildings: [], households: [], firms: [], accounts: { outside: 0, treasury: 0, construction: 0, roadworks: 0, upkeep: 0, landlord: 0 }, ledger: [], goodsLedger: [],
     goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { power: true, water: true }, lastEvent: '' };
   transfer(c, 'outside', 'treasury', 3_000_000, 'Initial municipal grant');
+  if (options.starter === false) {
+    buildRoad(c, GATEWAY, GATEWAY);
+    c.lastEvent = 'Empty map: only the outside gateway exists. Build a road from it, then zone beside the road.';
+    return c;
+  }
   buildRoad(c, GATEWAY, GATEWAY + 10);
   for (const x of [2, 3, 5, 6, 8, 9]) zoneCell(c, 11 * SIZE + x, 'R');
   for (const x of [4, 7]) zoneCell(c, 13 * SIZE + x, 'C');

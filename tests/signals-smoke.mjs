@@ -76,11 +76,11 @@ try {
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url }); await until('!!window.cityManager && window.cityManager.visuals().ready');
+  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready');
   assert.equal(await evaluate('document.querySelector("#signal-entry").hidden'), true, 'Pilot hidden without feature flag');
   checks.push('Default feature gate hides panel and creates no report request');
 
-  await send('Page.navigate', { url: `${url}?signals=1` }); await until('!!window.cityManager && window.cityManager.visuals().ready');
+  await send('Page.navigate', { url: `${url}?signals=1&starter=1` }); await until('!!window.cityManager && window.cityManager.visuals().ready');
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let n = 0; n < 65; n++) step(fixture);
   await button('#toggle-game-menu');

@@ -1,0 +1,18 @@
+/* Guided first game: a card above the status chip, sized for one hand on phones. */
+.bottom-hud > .guide { display: grid; gap: 4px; width: min(420px, calc(100vw - 16px)); padding: 10px 12px 12px; border-radius: 14px; text-align: left; pointer-events: auto; }
+.guide[hidden] { display: none !important; }
+.guide-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.guide-count { color: var(--c-accent); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.guide-skip { min-height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--c-muted); font-size: 13px; cursor: pointer; }
+.guide-skip:hover, .guide-skip:focus-visible { background: #ffffff14; color: var(--c-text); }
+.guide-body { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.guide-body strong { font-size: 15px; color: var(--c-text); }
+.guide-progress { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; background: #ffffff14; color: var(--c-text); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.guide-text { margin: 0; color: var(--c-muted); font-size: 13px; line-height: 1.5; }
+.guide-action { justify-self: start; min-height: 40px; margin-top: 4px; padding: 0 16px; border: 1px solid var(--c-accent); border-radius: 10px; background: var(--c-accent); color: #1a2640; font-weight: 700; cursor: pointer; }
+.guide-action:hover, .guide-action:focus-visible, .guide-action:active { background: #ffd877; border-color: #ffd877; color: #1a2640; }
+.guide-action[hidden] { display: none; }
+html[data-touch-ui=true] .guide-skip, html[data-touch-ui=true] .guide-action { min-height: 44px; min-width: 44px; }
+html[data-touch-ui=true] .bottom-hud > .guide { padding: 8px 10px 10px; }
+html[data-touch-ui=true] .guide-text { font-size: calc(13 * var(--reader-unit, 1px)); }
+html[data-touch-ui=true] .guide-body strong { font-size: calc(14 * var(--reader-unit, 1px)); }

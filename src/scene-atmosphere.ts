@@ -151,6 +151,8 @@ export class SceneAtmosphere {
     this.app.renderNextFrame = true;
   }
 
+  /** The visual hour now on screen, or null before the first frame. */
+  get hour(): number | null { return this.current?.hour ?? null; }
   get diagnostics() {
     return { quality: this.quality, shadows: this.sun.light!.castShadows, postProcessing: !!this.frame,
       ssao: this.frame?.ssao.type === SSAOTYPE_LIGHTING, hour: this.current?.hour ?? null, night: this.current?.night ?? null,
