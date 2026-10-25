@@ -95,6 +95,13 @@ export class CityView {
     }
     this.highway.enabled = false; this.app.root.addChild(tiles); this.app.renderNextFrame = true;
   }
+  /** A small wooden bench facing the street. */
+  private bench(tile: Entity, x: number, z: number) {
+    this.box(tile, x, .2, z, .34, .035, .11, '#9a6a43', false);
+    this.box(tile, x, .27, z - .05, .34, .09, .025, '#8a5d3a', false);
+    for (const dx of [-.14, .14]) this.box(tile, x + dx, .14, z, .03, .09, .09, '#4b4f5c', false);
+  }
+
   material(hex: string, emissive = false) {
     const key = hex + emissive;
     if (this.materials.has(key)) return this.materials.get(key)!;
@@ -145,14 +152,14 @@ export class CityView {
     // Level-one market: an open stall under an awning with parasols, not a shop building.
     this.box(stall, 0, .34, -.25, 1.1, .45, .5, '#d4ddd1');
     this.box(stall, 0, .27, .2, 1.16, .27, .25, lit ? this.windowLit : '#8f7957');
-    const awning = this.assets?.detail('awning', 1.3);
+    const awning = this.assets?.detail('awning', 1.3, hashCell(cell) % 3);
     if (awning) { awning.setLocalPosition(0, .1, -.05); awning.name = 'Crop market model'; stall.addChild(awning); }
     else {
-      this.box(stall, 0, .7, -.1, 1.34, .14, .98, '#538f83');
+      this.box(stall, 0, .7, -.1, 1.34, .14, .98, '#e07a45');
       for (const x of [-.53, .53]) this.box(stall, x, .35, .34, .065, .5, .065, '#6f7862');
     }
     for (const [name, x, z] of [['parasol-a', -.55, .62], ['parasol-b', .6, .55]] as const) {
-      const parasol = this.assets?.detail(name, .55);
+      const parasol = this.assets?.detail(name, .55, hashCell(cell) % 3);
       if (parasol) { parasol.setLocalPosition(x, .1, z); stall.addChild(parasol); }
     }
     // Empty wooden market furniture; stock quantities are shown by the inspector.
@@ -454,12 +461,15 @@ export class CityView {
             if (b.zone === 'I' && b.level >= 2) { const chimney = this.assets?.detail('chimney', .32); if (chimney) { chimney.setLocalPosition(.68, .1, -.62); tile.addChild(chimney); } }
             if (b.zone === 'I' && b.level >= 3) { const tank = this.assets?.detail('tank', .6); if (tank) { tank.setLocalPosition(-.6, .1, .66); tile.addChild(tank); } }
             if (b.zone === 'R' && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
+            // A lived-in house gets a front-yard bench; some also a second bush (decoration only).
+            if (b.zone === 'R' && lit && hashCell(i + 5) % 2 === 0) this.bench(tile, -.62, .7);
+            if (b.zone === 'R' && hashCell(i) % 3 === 1) { const bush = this.assets?.detail('planter', .34); if (bush) { bush.setLocalPosition(-.7, .1, -.68); tile.addChild(bush); } }
             continue;
           }
           const h = 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;
           const tower = b.zone === 'I' ? h * 0.65 : h;
           this.box(tile, -0.1, tower / 2 + 0.1, 0, 1.25, tower, 1.2, { R: '#d7e5d1', C: '#b6d4df', I: '#d9c09a' }[b.zone]);
-          this.box(tile, -0.1, tower + 0.17, 0, 1.34, 0.16, 1.3, { R: '#386454', C: '#38677f', I: '#8c6340' }[b.zone]);
+          this.box(tile, -0.1, tower + 0.17, 0, 1.34, 0.16, 1.3, { R: '#d0683f', C: '#4a62a6', I: '#8c6340' }[b.zone]);
           for (let level = 0; level < Math.min(visualLevel + 1, 5); level++) {
             for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, lit ? this.windowLit : '#f9df9a', false);
           }

@@ -83,7 +83,7 @@ export class SceneTraffic {
       box(0, .12, .2, .32, .16, .22, '#e8e0cf'); box(0, .15, -.12, .36, .22, .5, '#4a6572'); box(0, .09, .32, .26, .04, .03, this.lightMaterial);
     } else {
       const c = WALKER_COLOURS[colour % WALKER_COLOURS.length];
-      box(0, .09, 0, .07, .14, .07, c); box(0, .2, 0, .06, .06, .06, '#f1c9a5');
+      box(0, .05, 0, .07, .1, .06, '#3b4258'); box(0, .15, 0, .1, .13, .08, c); box(0, .26, 0, .075, .075, .075, '#f1c9a5');
     }
     this.root.addChild(entity);
     const seed = visualHash(route[0], route.length + key.length);

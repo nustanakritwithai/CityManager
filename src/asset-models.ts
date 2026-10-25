@@ -35,6 +35,12 @@ const LEVEL_VARIANTS: Readonly<Record<'R' | 'C' | 'I', readonly (readonly CityMo
   C: [['shop-a', 'shop-b', 'shop-c', 'shop-d'], ['shop-e', 'shop-f', 'shop-g'], ['tower-a', 'tower-b', 'tower-c']],
   I: [['factory-a', 'factory-c'], ['factory-b', 'factory-d'], ['factory-e', 'factory-f']],
 };
+/**
+ * Roof colours for houses, taken from the Kenney atlas itself so they stay in its style. The atlas
+ * roof swatches are its green pair at (row 2–3, column 0); a palette repaints only those two cells.
+ */
+const ROOF_PALETTES: readonly (readonly [light: string, dark: string])[] = [['#ff9144', '#ff7e44'], ['#6282d1', '#5a63c3'], ['#f36743', '#dd5b4a'], ['#787d95', '#626880']];
+const ROOF_SWATCHES: readonly [x: number, y: number][] = [[0, 128], [0, 192]];
 const cellHash = (cell: number, salt = 0) => ((Math.imul((cell + salt * 977) >>> 0, 1103515245) + 12345) >>> 16) & 0x7fff;
 export type GlowRegistrar = (material: StandardMaterial, strength: number) => void;
 
@@ -48,6 +54,8 @@ export class CityAssets {
   private readonly lit = new Map<StandardMaterial, StandardMaterial>();
   private readonly masks = new Map<string, Texture>();
   private readonly tinted = new Map<StandardMaterial, StandardMaterial>();
+  private readonly roofed = new Map<StandardMaterial, StandardMaterial[]>();
+  private readonly roofMaps = new Map<Texture, Texture[]>();
   glowRegistrar: GlowRegistrar | null = null;
 
   private constructor(private readonly app: AppBase) {}
@@ -128,6 +136,31 @@ export class CityAssets {
     return material;
   }
 
+  /** The same atlas with the roof swatches repainted; one texture per (atlas, palette), shared by every house. */
+  private roofMap(source: Texture, palette: number): Texture | null {
+    const image = source.getSource() as CanvasImageSource | undefined;
+    if (!image) return null;
+    let maps = this.roofMaps.get(source); if (!maps) { maps = []; this.roofMaps.set(source, maps); }
+    if (maps[palette]) return maps[palette];
+    const canvas = document.createElement('canvas'); canvas.width = source.width; canvas.height = source.height;
+    const context = canvas.getContext('2d')!, unit = source.width / 512;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    ROOF_SWATCHES.forEach(([x, y], i) => { context.fillStyle = ROOF_PALETTES[palette][i]; context.fillRect(x * unit, y * unit, 64 * unit, 64 * unit); });
+    const texture = new Texture(this.app.graphicsDevice, { name: `Kenney atlas · roof ${palette}`, width: canvas.width, height: canvas.height, format: source.format,
+      mipmaps: source.mipmaps, minFilter: source.minFilter, magFilter: source.magFilter, addressU: source.addressU, addressV: source.addressV });
+    texture.setSource(canvas); maps[palette] = texture; return texture;
+  }
+
+  private roofMaterial(source: StandardMaterial, palette: number): StandardMaterial {
+    let list = this.roofed.get(source); if (!list) { list = []; this.roofed.set(source, list); }
+    if (list[palette]) return list[palette];
+    const map = source.diffuseMap ? this.roofMap(source.diffuseMap, palette) : null;
+    if (!map) return source;
+    const material = source.clone() as StandardMaterial;
+    material.name = `${source.name} · roof ${palette}`; material.diffuseMap = map; material.update();
+    list[palette] = material; return material;
+  }
+
   /** Disconnected roads keep the warning tint they had as primitives. */
   private tintedMaterial(source: StandardMaterial): StandardMaterial {
     const existing = this.tinted.get(source);
@@ -137,7 +170,7 @@ export class CityAssets {
     this.tinted.set(source, material); return material;
   }
 
-  private instantiate(name: CityModelName, width: number, heightFactor = 1, lit = false, tint = false): Entity | null {
+  private instantiate(name: CityModelName, width: number, heightFactor = 1, lit = false, tint = false, roof?: number): Entity | null {
     const resource = this.resources.get(name);
     if (!resource) return null;
     let wrapper: Entity | undefined;
@@ -155,9 +188,12 @@ export class CityAssets {
         }
       }
       const region = glowRegion(name);
-      if (lit && region || tint) for (const render of source.findComponents('render') as RenderComponent[]) for (const instance of render.meshInstances) {
+      if (lit && region || tint || roof !== undefined) for (const render of source.findComponents('render') as RenderComponent[]) for (const instance of render.meshInstances) {
         if (!(instance.material instanceof StandardMaterial)) continue;
-        instance.material = tint ? this.tintedMaterial(instance.material) : this.litMaterial(instance.material, region!, name === 'streetlight' ? 3 : 2.2);
+        let material = roof === undefined ? instance.material : this.roofMaterial(instance.material, roof);
+        if (tint) material = this.tintedMaterial(material);
+        else if (lit && region) material = this.litMaterial(material, region, name === 'streetlight' ? 3 : 2.2);
+        instance.material = material;
       }
       // Flat road tiles only receive shadows.
       if (name.startsWith('road-')) for (const render of source.findComponents('render') as RenderComponent[]) render.castShadows = false;
@@ -182,11 +218,12 @@ export class CityAssets {
   building(zone: 'R' | 'C' | 'I', level: number, cell: number, lit = false): Entity | null {
     const family = LEVEL_VARIANTS[zone][Math.max(1, Math.min(3, level)) - 1];
     const name = family[cellHash(cell) % family.length];
-    return this.instantiate(name, name.startsWith('tower-') ? 1.35 : 1.55, 1, lit);
+    return this.instantiate(name, name.startsWith('tower-') ? 1.35 : 1.55, 1, lit, false, zone === 'R' ? cellHash(cell, 7) % ROOF_PALETTES.length : undefined);
   }
 
   road(tile: RoadTile, connected: boolean): Entity | null { return this.instantiate(tile, 2, 1, false, !connected); }
-  detail(name: 'parasol-a' | 'parasol-b' | 'awning' | 'chimney' | 'tank' | 'planter', width: number): Entity | null { return this.instantiate(name, width); }
+  /** `palette` repaints the atlas green (awnings, parasols) with one of the roof colours. */
+  detail(name: 'parasol-a' | 'parasol-b' | 'awning' | 'chimney' | 'tank' | 'planter', width: number, palette?: number): Entity | null { return this.instantiate(name, width, 1, false, false, palette === undefined ? undefined : palette % ROOF_PALETTES.length); }
   tree(large = false): Entity | null { return large ? this.instantiate('tree-large', 1.1) : this.instantiate('tree', 1.3); }
   streetlight(): Entity | null { return this.instantiate('streetlight', .38, 1, true); }
 }
