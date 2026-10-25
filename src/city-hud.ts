@@ -24,7 +24,8 @@ export class CityHud {
   private issueKey = '';
 
   /** `onIssue` opens the building and centres the camera on it. */
-  constructor(private readonly onIssue: (cell: number, buildingId: number) => void = () => {}) {
+  constructor(private readonly onIssue: (cell: number, buildingId: number) => void = () => {}, private readonly onWarnings: () => void = () => {}) {
+    this.strip.addEventListener('click', e => { if ((e.target as Element).closest('[data-kpi=warnings]')) this.onWarnings(); });
     for (const zone of ['R', 'C', 'I', 'F'] as const) {
       const button = document.querySelector<HTMLElement>(`[data-tool="${zone}"]`);
       if (!button) continue;
@@ -66,7 +67,9 @@ export class CityHud {
     const title = document.createElement('span'); title.className = 'kpi-label'; title.textContent = label;
     const strong = document.createElement('strong'); strong.textContent = value;
     const small = document.createElement('small'); small.textContent = note;
-    node.append(title, strong, small); return node;
+    node.append(title, strong, small);
+    if (key === 'warnings') { node.setAttribute('role', 'button'); node.tabIndex = 0; node.title = 'เปิดรายการที่ควรตรวจ'; node.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.onWarnings(); } }); }
+    return node;
   }
 
   private month(untilPay: number, paused: boolean) {

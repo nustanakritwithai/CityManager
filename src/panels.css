@@ -10,13 +10,13 @@
   --pnl-surface-2: #1b343d;
   --pnl-line: #2c4a52;
   --pnl-line-soft: #24404a;
-  --pnl-text: #eef3ea;
-  --pnl-muted: #a3bcb4;
-  --pnl-faint: #7f9b93;
-  --pnl-accent: #f3c46b;
-  --pnl-good: #6fd49a;
-  --pnl-warn: #f2c14e;
-  --pnl-bad: #ff8a7a;
+  --pnl-text: var(--c-text);
+  --pnl-muted: var(--c-muted);
+  --pnl-faint: #8ea9a1;
+  --pnl-accent: var(--c-accent);
+  --pnl-good: var(--c-good);
+  --pnl-warn: var(--c-warn);
+  --pnl-bad: var(--c-bad);
   --pnl-crops: #a6d86f;
   --pnl-goods: #f0b45a;
   --pnl-radius: calc(13 * var(--u));
@@ -246,3 +246,6 @@ html #game-content .save-group.danger #new-city { border-color: #ff8a7a88; color
 
 /* An open submenu shows only itself: hide the dashboard and every other city block. */
 #inspector:not([data-submenu=""])[data-submenu] #city-content > :not(.submenu-section[data-active=true]) { display: none; }
+
+/* Bundled Thai typeface (IBM Plex Sans Thai, OFL 1.1) with the previous stack as fallback. */
+:root, button, input, select, textarea { font-family: "IBM Plex Sans Thai", "Segoe UI", Tahoma, Arial, sans-serif; }
