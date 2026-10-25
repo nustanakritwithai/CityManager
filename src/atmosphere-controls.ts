@@ -163,6 +163,6 @@ export class AtmosphereController {
   }
 
   get diagnostics() {
-    return { ...this.host.view.atmosphere.diagnostics, renderer: this.renderer, settings: { ...this.settings }, overcast: this.overcast, raining: this.weather.raining, traffic: { actors: this.host.view.traffic.count, plumes: this.host.view.traffic.plumes } };
+    return { ...this.host.view.atmosphere.diagnostics, renderer: this.renderer, settings: { ...this.settings }, overcast: this.overcast, raining: this.weather.raining, traffic: { ...this.host.view.traffic.diagnostics, plumes: this.host.view.traffic.plumes } };
   }
 }
