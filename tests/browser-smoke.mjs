@@ -128,7 +128,7 @@ try {
   assert.deepEqual(await state(), saved); checks.push('Two-stage road cancel has no simulation mutation');
   // Existing road twice: no charge; tool repeated use stays active.
   await button('[data-tool="road"]'); await cell(12 * 24 + 3); await cell(12 * 24 + 5);
-  assert.match(await text('#status'), /already exists/); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
+  assert.match(await text('#status'), /มีถนนอยู่แล้ว ไม่เสียเงิน/); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   await cell(12 * 24 + 3); await cell(12 * 24 + 5); assert.equal((await state()).accounts.treasury, saved.accounts.treasury);
   checks.push('Repeated road use does not duplicate cost');
   // The visual preview opens on the starter district. Back out for construction

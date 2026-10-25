@@ -18,6 +18,8 @@ import './atmosphere.css';
 import { previewPlacement, type Preview } from './placement-preview.ts';
 import { mapOverlay, buildingIssues, TOOL_OVERLAY } from './map-overlay.ts';
 import { MapMarkers } from './map-markers.ts';
+import { CityHud } from './city-hud.ts';
+import { thaiMessage } from './event-text.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -31,7 +33,7 @@ let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | un
 let city: City = createCity(61025);
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
-let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined;
+let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined;
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -51,7 +53,7 @@ const help: Record<string, string> = {
   bulldoze: 'แตะถนนหรืออาคารเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้',
   pan: 'ลากเพื่อเลื่อน · สองนิ้วเลื่อน/ซูม · ลากปุ่มขวาเพื่อหมุน'
 };
-function status(message: string) { $('#status').textContent = message; $('#inspector-status').textContent = message; }
+function status(message: string) { const text = thaiMessage(message); $('#status').textContent = text; $('#inspector-status').textContent = text; }
 function farmHint(index: number | null): string {
   if (index === null) return help.F;
   const fertility = city.resources.fertility[index];
@@ -247,6 +249,7 @@ function render() {
   const placement = route ? null : previewPlacement(city, tool, start, hover);
   view.render(city, selected, preview, new Set(placement?.cells.filter(cell => !cell.ok).map(cell => cell.cell)));
   updateMapInfo(placement);
+  cityHud?.update(city, paused);
 }
 
 /** Tool-matched map layer, issue badges and the placement tip; recomputed at most twice a second while time runs. */
@@ -360,6 +363,7 @@ async function boot() {
   inspector(false);
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
   mapMarkers = new MapMarkers(view);
+  cityHud = new CityHud();
   atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   const visual = atmosphere;
   view.app.on('update', (dt: number) => {
