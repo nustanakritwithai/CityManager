@@ -7,7 +7,7 @@ import type { OwnerSnapshot } from './owner-decision.ts';
 
 type Session = ReturnType<typeof createOwnerDecisionSession>;
 type Options = { getCity(): City; getSession(): Session; onChange(): void; connection: OwnerDecisionConnection; fetchImpl?: typeof fetch; onTyphoonAutoPending?(active: boolean): void };
-const money = (value: number | null) => value === null ? 'ยังคำนวณไม่ได้' : `${(value / 100).toLocaleString('th-TH', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} เครดิต`;
+const money = (value: number | null) => value === null ? 'ยังคำนวณไม่ได้' : `${(value / 100).toLocaleString('th-TH', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} ฿`;
 const modeLabels = { off: 'ปิด', proposal: 'รับข้อเสนอ', auto: 'กฎทำรายการเอง', 'typhoon-auto': 'Typhoon ทำรายการเอง' } as const;
 const commandLabels = { hold: 'คงเดิม', contributeOwnerCapital: 'เติมทุนจากครัวเรือน', withdrawOwnerProfit: 'ถอนกำไรเข้าครัวเรือน' } as const;
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {

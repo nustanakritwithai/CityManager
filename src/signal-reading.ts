@@ -68,7 +68,7 @@ export function readingSignal(signal: CitySignal, report: SignalReport): SignalR
     if (income !== undefined && expenses !== undefined) evidence.push(`incomePerTick − expensesPerTick = ${number(income)} − ${number(expenses)} = ${number(signal.value)} ${unit}`);
     return {
       title: `วันที่ ${signal.window.endTick} เงิน${signal.conditionMet ? 'ออกมากกว่าเงินเข้า' : 'เข้าไม่น้อยกว่าเงินออก'}: สุทธิ ${signed(signal.value)} ${unit}`,
-      explanation: `${atDay} เงินเข้า ${number(income!)} เครดิต เงินออก ${number(expenses!)} เครดิต ผลต่าง ${number(signal.value)} ${unit} นับรายการคลังเฉพาะวันที่จับภาพ รวมเงินทุนและค่าก่อสร้างถ้ามี ไม่ใช่กำไรประจำหรือยอดรวมตลอดช่วงเปรียบเทียบ`, evidence,
+      explanation: `${atDay} เงินเข้า ${number(income!)} ฿ เงินออก ${number(expenses!)} ฿ ผลต่าง ${number(signal.value)} ${unit} นับรายการคลังเฉพาะวันที่จับภาพ รวมเงินทุนและค่าก่อสร้างถ้ามี ไม่ใช่กำไรประจำหรือยอดรวมตลอดช่วงเปรียบเทียบ`, evidence,
     };
   }
   if (signal.id === 'threshold.housing-capacity-exceeded') {
