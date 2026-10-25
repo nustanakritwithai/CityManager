@@ -1,0 +1,5 @@
+/* Shared colour tokens for the panel, overlay and HUD layers (checked against WCAG AA on the panel surfaces). */
+:root {
+  --c-accent: #f3c46b; --c-good: #6fd49a; --c-bad: #ff8a7a; --c-warn: #f2c14e;
+  --c-text: #eef3ea; --c-muted: #a3bcb4; --c-icon: #cfe1d9; --c-dependent: #8fb2c9;
+}

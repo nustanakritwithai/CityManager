@@ -5,6 +5,7 @@ import '@fontsource/ibm-plex-sans-thai/latin-400.css';
 import '@fontsource/ibm-plex-sans-thai/latin-600.css';
 import '@fontsource/ibm-plex-sans-thai/latin-700.css';
 import './style.css';
+import './tokens.css';
 import { setupSubmenus, renderSubmenus } from './submenus.ts';
 import { setupSubmenuNavigation, closeSubmenus, hasOpenSubmenu } from './submenu-navigation.ts';
 import './submenu-layout.css';

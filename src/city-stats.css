@@ -1,8 +1,8 @@
 /* City stats overlay: a wide sheet of frosted glass over the map, four columns of icon rows. */
 .city-stats {
   --u: var(--reader-unit, 1px);
-  --st-text: #f1f5ec; --st-muted: #b4c8c1; --st-faint: #86a19a; --st-line: #ffffff1f;
-  --st-good: #74dba0; --st-warn: #f4c552; --st-bad: #ff8f7f; --st-money: #f3c46b;
+  --st-text: #f1f5ec; --st-muted: #b4c8c1; --st-faint: #93ada5; --st-line: #ffffff1f;
+  --st-good: #74dba0; --st-warn: #f4c552; --st-bad: #ff8f7f; --st-money: var(--c-accent);
   --st-power: #ffd257; --st-water: #6cc6f0; --st-goods: #f0b45a;
   position: fixed; z-index: 60;
   top: calc(108 * var(--u)); left: 50%; translate: -50% 0;
