@@ -54,7 +54,7 @@ export function mapOverlay(city: City, mode: OverlayMode): Overlay {
 
 /** A vacant zoned parcel is ready when the simulator's own explanation has no blockers. */
 function eligible(city: City, cell: number): boolean {
-  return explainCell(city, cell).some(line => line.startsWith('Eligible;'));
+  return explainCell(city, cell).some(line => (line.startsWith('Eligible;') || line.startsWith('Shop site:')));
 }
 
 const SIGNAL_ISSUES: Readonly<Record<string, IssueKind>> = {

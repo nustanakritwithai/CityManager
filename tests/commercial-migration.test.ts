@@ -86,12 +86,17 @@ test('strict v4 validation precedes migration and rejects forged stock, owner ca
   assert.throws(() => deserialize(JSON.stringify({ version: 7 })), /corrupt/);
 });
 
-test('fresh commercial zoning builds only owner-funded L1 markets, keeps crop consumption and never auto-upgrades', () => {
+test('fresh commercial zoning builds owner-funded L1 markets, then outside-funded shops once a factory works; markets never auto-upgrade', () => {
   const city = createCity(), before = serialize(city);
   assert.equal(zoneCell(city, 0, 'T' as never).ok, false); assert.equal(serialize(city), before);
   for (let i = 0; i < 180; i++) { step(city); loaded(city); }
   const markets = city.firms.filter(isMarket);
-  assert.ok(markets.length > 0); assert.ok(city.firms.filter(f => f.zone === 'C').every(isMarket));
+  assert.ok(markets.length > 0); assert.ok(city.firms.filter(f => f.zone === 'C').every(f => isMarket(f) || isRetail(f)));
+  // Shops close the goods chain: L2, no owner, outside equity, and only once a factory has workers.
+  const shops = city.firms.filter(isRetail);
+  assert.ok(shops.every(f => city.buildings.find(b => b.id === f.building)!.level >= 2 && f.owner === null));
+  assert.ok(shops.every(f => city.ledger.some(e => e.from === 'outside' && e.to === f.wallet && e.reason === 'Outside firm equity investment')));
+  if (shops.length) assert.ok(city.goodsLedger.some(e => e.reason === 'Household final consumption' && shops.some(f => f.wallet === e.from)));
   assert.ok(city.buildings.every(b => b.zone !== ('T' as never)) && city.cells.every(b => b.zone !== ('T' as never)));
   assert.ok(markets.every(f => city.buildings.find(b => b.id === f.building)!.level === 1 && f.owner !== null && Object.keys(f.workDays).length === 0));
   assert.ok(city.cropLedger.some(e => e.kind === 'consumption'));
