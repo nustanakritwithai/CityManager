@@ -1,6 +1,6 @@
 /** Local rule proposals only. These are game actors, not authenticated website users. */
 import { access, contributeOwnerCapital, firmRent, firmWage, isMarket, MONTH, ownerFinance, serialize, withdrawOwnerProfit, type City } from './sim.ts';
-import { validateOwnerDecisionSelection, type OwnerCandidateId } from '../server/city-advisor/src/owner-contract.mjs';
+import { ownerDecisionCandidates, validateOwnerDecisionSelection, type OwnerCandidateId } from '../server/city-advisor/src/owner-contract.mjs';
 
 export const OWNER_POLICY_VERSION = 'owner-rule-1' as const;
 export const OWNER_MAX_TRANSFER = 10_000;
@@ -147,12 +147,11 @@ export function proposeOwnerDecision(snapshot: OwnerSnapshot): OwnerProposal {
 /** Convert a provider choice into the same canonical proposal that the game revalidates. */
 export function ownerProposalForCandidate(snapshot: OwnerSnapshot, candidateId: OwnerCandidateId): OwnerProposal {
   const selected = validateOwnerDecisionSelection({ candidateId }, snapshot);
-  if (selected.candidateId === 'safe-transfer') {
-    const proposal = proposeOwnerDecision(snapshot);
-    if (proposal.command.type === 'hold') throw new Error('No safe transfer candidate exists.');
-    return proposal;
-  }
-  return makeProposal(snapshot, { type: 'hold', amountSatang: 0 }, snapshot.budgetKnown ? 'reserves-protected' : 'budget-unavailable');
+  const candidate = ownerDecisionCandidates(snapshot).find(item => item.id === selected.candidateId);
+  if (!candidate) throw new Error('Selected owner decision candidate is no longer available.');
+  if (candidate.action === 'hold') return makeProposal(snapshot, { type: 'hold', amountSatang: 0 }, snapshot.budgetKnown ? 'reserves-protected' : 'budget-unavailable');
+  if (candidate.action !== 'contributeOwnerCapital' && candidate.action !== 'withdrawOwnerProfit') throw new Error('Unsupported owner decision candidate.');
+  return makeProposal(snapshot, { type: candidate.action, amountSatang: candidate.amountSatang }, candidate.action === 'contributeOwnerCapital' ? 'firm-shortfall' : 'realized-profit');
 }
 
 function validSnapshotShape(v: unknown): v is OwnerSnapshot {

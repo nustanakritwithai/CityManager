@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bulldoze, contributeOwnerCapital, createCity, deserialize, serialize, step, type City } from '../src/sim.ts';
 import { captureOwnerSnapshot, executeOwnerProposal, ownerStateHash, proposeOwnerDecision, validateOwnerProposal, type OwnerProposal } from '../src/owner-decision.ts';
+import { ownerDecisionCandidates, validateOwnerDecisionSelection } from '../server/city-advisor/src/owner-contract.mjs';
 
 function fixture() {
   const city = createCity(61025);
@@ -68,6 +69,36 @@ test('a cash shortfall can use only actual household surplus, without creating o
   assert.equal(city.accounts[household.wallet], beforeHousehold - 5_000); assert(city.accounts[household.wallet] >= s.facts.householdEssentialReserve!);
   assert.equal(city.accounts.outside, outside); assert.equal(city.ledger.at(-1)?.reason, 'Owner capital contribution');
   conserved(city); assert.deepEqual(deserialize(serialize(city)), city);
+});
+
+test('Typhoon receives distinct quarter, half and full safe contribution amounts only', () => {
+  const { city, firm } = fixture();
+  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - 18_000);
+  const s = snapshot(city, firm.id), candidates = ownerDecisionCandidates(s);
+  assert.equal(s.facts.safeContribute, 5_000);
+  assert.deepEqual(candidates, [
+    { id: 'hold', action: 'hold', amountSatang: 0 },
+    { id: 'safe-transfer-quarter', action: 'contributeOwnerCapital', amountSatang: 1_250 },
+    { id: 'safe-transfer-half', action: 'contributeOwnerCapital', amountSatang: 2_500 },
+    { id: 'safe-transfer', action: 'contributeOwnerCapital', amountSatang: 5_000 },
+  ]);
+  assert.equal(new Set(candidates.map(candidate => candidate.amountSatang)).size, candidates.length);
+  assert(candidates.every(candidate => candidate.amountSatang <= s.facts.safeContribute!));
+  for (const candidate of candidates) assert.equal(validateOwnerDecisionSelection({ candidateId: candidate.id }, s).candidateId, candidate.id);
+  assert.throws(() => validateOwnerDecisionSelection({ candidateId: 'arbitrary-amount' }, s));
+});
+
+test('fractional choices that round to zero are omitted without losing the legacy full-safe ID', () => {
+  const { city, firm } = fixture(), initial = snapshot(city, firm.id);
+  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - (initial.facts.firmTotalReserve! - 3));
+  const s = snapshot(city, firm.id), candidates = ownerDecisionCandidates(s);
+  assert.equal(s.facts.safeContribute, 3);
+  assert.deepEqual(candidates, [
+    { id: 'hold', action: 'hold', amountSatang: 0 },
+    { id: 'safe-transfer-half', action: 'contributeOwnerCapital', amountSatang: 1 },
+    { id: 'safe-transfer', action: 'contributeOwnerCapital', amountSatang: 3 },
+  ]);
+  assert.throws(() => validateOwnerDecisionSelection({ candidateId: 'safe-transfer-quarter' }, s));
 });
 
 test('household essentials and next rent cap a partial contribution instead of draining its wallet', () => {

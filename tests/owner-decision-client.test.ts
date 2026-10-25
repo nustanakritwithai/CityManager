@@ -51,6 +51,18 @@ test('one explicit request sends only the bounded owner snapshot without browser
   assert.equal(result.response?.selection.candidateId, 'hold'); assert.deepEqual(request, before);
 });
 
+test('new client accepts the legacy full-safe response from an older adapter', async () => {
+  const { snapshot } = fixture(), endpoint = 'https://advisor.example/api/city-advisor/report';
+  const legacyResponse = {
+    schemaVersion: 3, operation: 'owner-decision', mode: 'ai', snapshot,
+    selection: { candidateId: 'safe-transfer' },
+  };
+  const result = await requestOwnerDecision(snapshot, { enabled: true, endpoint }, (async () => json(legacyResponse)) as typeof fetch);
+  assert.equal(result.transport, 'remote');
+  assert.equal(result.response?.mode, 'ai');
+  assert.equal(result.response?.selection.candidateId, 'safe-transfer');
+});
+
 test('provider fallback is deterministic and no arbitrary prose, candidate or altered snapshot is accepted', async () => {
   const { snapshot, request } = fixture();
   const knownFallback = buildOwnerDecisionResponse(request, { candidateId: 'safe-transfer' }, 'fallback');
