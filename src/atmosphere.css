@@ -127,7 +127,7 @@ html[data-touch-ui=true] .atmosphere-menu {
 .map-legend {
   position: absolute;
   left: 50%;
-  bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(118px + var(--guide-h, 0px) + env(safe-area-inset-bottom, 0px));
   translate: -50% 0;
   display: flex;
   flex-wrap: wrap;

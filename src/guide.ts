@@ -39,6 +39,8 @@ export class Guide {
     body.append(this.title, this.progress);
     this.root.append(head, body, this.text, this.action);
     document.querySelector('.bottom-hud')?.prepend(this.root);
+    // The map legend sits above the dock; lift it over the card while the card shows.
+    new ResizeObserver(() => document.documentElement.style.setProperty('--guide-h', `${this.root.hidden ? 0 : this.root.offsetHeight + 8}px`)).observe(this.root);
   }
 
   get active() { return this.state === 'active'; }

@@ -10,6 +10,7 @@
 .guide-progress { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; background: #ffffff14; color: var(--c-text); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .guide-text { margin: 0; color: var(--c-muted); font-size: 13px; line-height: 1.5; }
 .guide-action { justify-self: start; min-height: 40px; margin-top: 4px; padding: 0 16px; border: 1px solid var(--c-accent); border-radius: 10px; background: var(--c-accent); color: #1a2640; font-weight: 700; cursor: pointer; }
+.guide-action:hover, .guide-action:focus-visible, .guide-action:active { background: #ffd877; border-color: #ffd877; color: #1a2640; }
 .guide-action[hidden] { display: none; }
 html[data-touch-ui=true] .guide-skip, html[data-touch-ui=true] .guide-action { min-height: 44px; min-width: 44px; }
 html[data-touch-ui=true] .bottom-hud > .guide { padding: 8px 10px 10px; }

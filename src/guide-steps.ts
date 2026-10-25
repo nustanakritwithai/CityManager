@@ -17,7 +17,7 @@ export function guideSteps(c: City): (GuideStep & { done: boolean })[] {
   const step = (id: string, title: string, text: string, tool: GuideTool, have: number, need: number) =>
     ({ id, title, text, tool, progress: [Math.min(have, need), need] as [number, number], done: have >= need });
   return [
-    step('road', 'ต่อถนนจากประตูเมือง', 'เลือกถนน แล้วลากจากประตูสีทองฝั่งซ้ายไปทางขวาอย่างน้อย 6 ช่อง ทุกอาคารต้องติดถนนที่เชื่อมถึงประตู', 'road', roads, 6),
+    step('road', 'ต่อถนนจากประตูเมือง', 'เลือกถนน แล้วลากจากประตูสีเหลืองออกไปอย่างน้อย 6 ช่อง ทุกอาคารต้องติดถนนที่เชื่อมถึงประตู', 'road', roads, 6),
     step('homes', 'วางโซนบ้าน 4 แปลง', 'เลือกบ้าน แล้วแตะแปลงที่ติดถนน ครัวเรือนจะย้ายเข้ามาเมื่อมีบ้านว่าง', 'R', homes, 4),
     step('farm', 'วางฟาร์ม 1 แปลง', 'เลือกฟาร์ม แผนที่จะแสดงความอุดมสมบูรณ์ของดิน วางบนแปลงสีเขียวเข้มที่ติดถนน', 'F', zoned(c, 'F'), 1),
     step('factory', 'วางโรงงาน 1 แปลง', 'เลือกโรงงาน แล้ววางข้างถนน โรงงานแปรรูปพืชผลจากฟาร์มเป็นสินค้า', 'I', zoned(c, 'I'), 1),
