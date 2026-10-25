@@ -1,9 +1,10 @@
 import {
   AppBase, AppOptions, createGraphicsDevice, DEVICETYPE_WEBGL2,
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
-  Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
+  Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
-import { SIZE, GATEWAY, connectedRoads, firmWorkerCount, type City } from './sim.ts';
+import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
+import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
 import { CityAssets } from './asset-models.ts';
 import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
@@ -27,6 +28,10 @@ export class CityView {
   markers = new Entity('Tool previews');
   private overlayRoot = new Entity('Map information layer');
   private overlayRef: Overlay | null = null;
+  private buildingState = new Map<number, BuildingState>();
+  private animations = new Map<number, { kind: BuildEvent['kind']; t: number }>();
+  private faded = new Map<StandardMaterial, StandardMaterial>();
+  private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private highway = new Entity('Decorative highway');
   materials = new Map<string, StandardMaterial>();
   assets: CityAssets | null = null;
@@ -210,6 +215,7 @@ export class CityView {
     this.app.root.addChild(this.markers);
     this.app.root.addChild(this.overlayRoot);
     this.setQuality('high');
+    this.app.on('update', (dt: number) => this.animate(dt));
     new ResizeObserver(() => this.resize()).observe(this.canvas);
     window.addEventListener('resize', () => this.resize());
     this.radius = this.fitRadius(); this.resize(); this.updateCamera(); this.input();
@@ -317,6 +323,33 @@ export class CityView {
     });
     c.addEventListener('pointercancel', e => { this.pointers.delete(e.pointerId); this.down = null; this.dragStart = null; this.onHover(null); });
   }
+  /** Swap every material under `entity` for a greyed clone (cached per source material). */
+  private fade(entity: Entity) {
+    for (const render of entity.findComponents('render') as RenderComponent[]) for (const instance of render.meshInstances) {
+      const source = instance.material;
+      if (!(source instanceof StandardMaterial)) continue;
+      let material = this.faded.get(source);
+      if (!material) {
+        material = source.clone() as StandardMaterial; material.name = `${source.name} · disconnected`;
+        material.diffuse = new Color(.52, .54, .58); material.emissiveIntensity = 0; material.update();
+        this.faded.set(source, material);
+      }
+      instance.material = material;
+    }
+  }
+  /** Short grow/bounce for parcels that just gained a building or a level. */
+  private animate(dt: number) {
+    if (!this.animations.size) return;
+    for (const [cell, animation] of this.animations) {
+      animation.t += Math.min(dt, .1);
+      const tile = this.tiles.get(cell)?.entity, done = animation.t >= (animation.kind === 'built' ? .7 : .5);
+      tile?.setLocalScale(1, done ? 1 : buildScale(animation.kind, animation.t), 1);
+      if (done) this.animations.delete(cell);
+    }
+    this.app.renderNextFrame = true;
+  }
+  get animating() { return this.animations.size; }
+
   /** Unlit translucent plates so the layer stays readable at night; null hides it. */
   setOverlay(overlay: Overlay | null) {
     if (overlay === this.overlayRef) return;
@@ -343,17 +376,21 @@ export class CityView {
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city);
+    const fadeLater: Entity[] = [];
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
       const links = cell.road ? [i % SIZE > 0 && city.cells[i - 1].road, i % SIZE < SIZE - 1 && city.cells[i + 1].road, i >= SIZE && city.cells[i - SIZE].road, i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road].map(Number).join('') : '';
       const fertility = cell.zone === 'F' ? city.resources.fertility[i] : '';
       // Night lights only for real occupancy: residents at home or allocated workers on site.
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}`;
+      // Buildings without connected frontage are suspended in the sim, so they render faded.
+      const reach = !!b && access(city, i);
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}:${reach}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
       this.tiles.set(i, { entity: tile, signature });
+      if (b && !reach) fadeLater.push(tile);
       if (cell.road) {
         const horizontal = (i % SIZE > 0 && city.cells[i - 1].road) || (i % SIZE < SIZE - 1 && city.cells[i + 1].road);
         const vertical = (i >= SIZE && city.cells[i - SIZE].road) || (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road);
@@ -413,6 +450,10 @@ export class CityView {
         }
       }
     }
+    for (const tile of fadeLater) this.fade(tile);
+    const changes = diffBuildings(this.buildingState, city.buildings);
+    this.buildingState = changes.next;
+    if (!this.reducedMotion.matches) for (const event of changes.events) this.animations.set(event.cell, { kind: event.kind, t: 0 });
     this.traffic.sync(city);
     for (const child of [...this.markers.children]) child.destroy();
     for (const i of new Set([...preview, ...(selected === null ? [] : [selected])])) {
