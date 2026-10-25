@@ -114,7 +114,8 @@
 #inspector .work-place.zone-I { color: #eeaa72; } #inspector .work-place.zone-shop { color: #85c3ea; } #inspector .work-place.zone-market { color: #c3e07c; }
 #inspector .work-skill { color: var(--c-icon); }
 /* HUD glyphs drawn from the shared SVG set. */
-.svg-glyph { display: inline-grid !important; place-items: center; line-height: 1 !important; }
+span.svg-glyph { display: inline-grid !important; place-items: center; line-height: 1 !important; }
+button.svg-glyph svg { margin: auto; }
 .svg-glyph svg { width: 1.15em; height: 1.15em; display: block; }
 .tool .svg-glyph.zone-icon { background: transparent !important; border: 0 !important; color: inherit; }
 .tool.zone-r .svg-glyph { color: #7fd6a2; } .tool.zone-c .svg-glyph { color: #85c3ea; } .tool.zone-i .svg-glyph { color: #eeaa72; } .tool.zone-f .svg-glyph { color: #b9dc73; }
@@ -142,3 +143,19 @@ html[data-touch-ui=true] #inspector[data-sheet=full] { max-height: calc(100dvh -
 .city-kpis .kpi[data-kpi=warnings] { pointer-events: auto; cursor: pointer; }
 .city-kpis .kpi[data-kpi=warnings]:hover { border-color: #f3c46b88; }
 .city-kpis .kpi[data-kpi=warnings]:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+/* Desktop camera: one slim column (zoom, rotate, reset); pan arrows behind the move toggle. */
+.camera-pan-toggle { display: none; }
+@media (min-width: 701px) {
+  html:not([data-touch-ui=true]) .camera-hud .camera-grid { display: flex; flex-direction: column; width: auto; padding: 3px; gap: 2px; }
+  html:not([data-touch-ui=true]) .camera-hud .camera-grid > button { width: 40px; height: 40px; min-height: 40px; display: grid; place-items: center; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=zoom-in] { order: 1; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=zoom-out] { order: 2; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=rotate-left] { order: 3; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=rotate-right] { order: 4; }
+  html:not([data-touch-ui=true]) .camera-grid [data-camera=reset] { order: 5; }
+  html:not([data-touch-ui=true]) .camera-grid .camera-pan-toggle { display: grid; order: 6; }
+  html:not([data-touch-ui=true]) .camera-hud .camera-grid > :is([data-camera=up], [data-camera=down], [data-camera=left], [data-camera=right]) { display: none; order: 7; }
+  html:not([data-touch-ui=true]) .camera-hud[data-pan=true] .camera-grid > :is([data-camera=up], [data-camera=down], [data-camera=left], [data-camera=right]) { display: grid; }
+  html:not([data-touch-ui=true]) .camera-hud[data-pan=true] .camera-pan-toggle { color: var(--c-accent); }
+}
+.camera-grid .svg-glyph svg, .mobile-camera-toggle.svg-glyph svg { width: 22px; height: 22px; }

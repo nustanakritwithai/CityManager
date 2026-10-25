@@ -21,7 +21,7 @@ const METRIC_ICONS: readonly [RegExp, string][] = [
 ];
 export function metricIcon(key: string): string | null { return METRIC_ICONS.find(([pattern]) => pattern.test(key))?.[1] ?? null; }
 
-const NOTES = '.dash-flow-list, .signal-note, .cx-detail-note, .cx-account-note, .sm-footnote, .parcel-note, .dash-note-line, .st-note, .cx-flow-meta';
+const NOTES = '.dash-flow-list, .signal-note, .city-question-note, .entity-explain-note, .owner-note, .owner-summary-note, #game-content .game-menu > p:not(.inspector-status), .cx-detail-note, .cx-account-note, .sm-footnote, .parcel-note, .dash-note-line, .st-note, .cx-flow-meta';
 const HOSTS = '.cx-section, .bc-section, .st-col, .dash-card, .parcel-checklist, .growth-section, details, section';
 const openInfo = new Set<string>();
 
@@ -37,6 +37,8 @@ function decorateMetrics(root: ParentNode) {
 function decorateNotes(root: ParentNode) {
   for (const note of root.querySelectorAll<HTMLElement>(NOTES)) {
     if (note.classList.contains('info-note') || !note.textContent?.trim() || note.closest('.submenu-section')) continue;
+    // Live feedback (status, alerts, errors) always stays in view.
+    if (note.matches('[role=status], [role=alert], [aria-live], [class*=error], [class*=warn]')) continue;
     let host = note.parentElement?.closest<HTMLElement>(HOSTS) ?? null, heading: HTMLElement | null = null;
     while (host && !(heading = host.querySelector<HTMLElement>(HEADINGS))) host = host.parentElement?.closest<HTMLElement>(HOSTS) ?? null;
     if (!host || !heading) continue;

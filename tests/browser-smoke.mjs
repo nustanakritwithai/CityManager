@@ -186,7 +186,10 @@ try {
   }
   // Camera controls must move the projection, then return to the reset state.
   const cameraBefore = await cellPoint(12 * 24 + 6);
-  await button('[data-camera="rotate-left"]'); await button('[data-camera="zoom-in"]'); await button('[data-camera="left"]');
+  await button('[data-camera="rotate-left"]'); await button('[data-camera="zoom-in"]');
+  // Desktop keeps pan arrows behind the move toggle; they must still move the camera when shown.
+  if (await evaluate('getComputedStyle(document.querySelector(\'[data-camera="left"]\')).display==="none"')) await button('#toggle-camera-pan');
+  await button('[data-camera="left"]');
   assert.notDeepEqual(await cellPoint(12 * 24 + 6), cameraBefore); await button('[data-camera="reset"]');
   checks.push('Pan/rotate/zoom/reset controls');
   // Summary Space is handled natively and must not resume the simulation.

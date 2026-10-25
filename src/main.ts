@@ -91,7 +91,7 @@ function inspector(open: boolean) {
   $('#toggle-help').setAttribute('aria-expanded', String(open && route?.page === 'help'));
   $('#toggle-game-menu').setAttribute('aria-expanded', String(open && route?.page === 'game'));
   if (view) { view.abortGesture(); view.cameraBlocked = open; }
-  document.querySelectorAll<HTMLButtonElement>('[data-camera], #toggle-camera').forEach(b => b.disabled = open);
+  document.querySelectorAll<HTMLButtonElement>('[data-camera], #toggle-camera, #toggle-camera-pan').forEach(b => b.disabled = open);
   if (!open) { $('#inspector').dataset.page = 'none'; for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = true; }
 }
 function selectedEntity(): EntitySelection | null {
@@ -339,6 +339,10 @@ async function boot() {
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { speed = Number(b.dataset.speed); accumulator = 0; render(); }));
   $('#pause').addEventListener('click', () => { if (ownerDecisionPanel?.isAutoPending()) return; paused = !paused; accumulator = 0; render(); });
   $('#cancel-tool').addEventListener('click', cancel);
+  $('#toggle-camera-pan').addEventListener('click', () => {
+    const open = $('.camera-hud').dataset.pan !== 'true';
+    $('.camera-hud').dataset.pan = String(open); $('#toggle-camera-pan').setAttribute('aria-expanded', String(open));
+  });
   $('#toggle-camera').addEventListener('click', () => {
     const open = $('.camera-hud').dataset.open !== 'true';
     $('.camera-hud').dataset.open = String(open); $('#toggle-camera').setAttribute('aria-expanded', String(open));
