@@ -25,6 +25,7 @@ export const ICONS: Record<string, string> = {
   export: '<path d="M12 15V3M7 8l5-5 5 5M4 20h16" stroke="currentColor" stroke-width="2.2" fill="none"/>',
   consume: '<path d="M7 3v8a3 3 0 0 0 3 3v7m4-18c-2 0-3 3-3 6s1 4 3 4v8" stroke="currentColor" stroke-width="2" fill="none"/>',
   gear: '<circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4" stroke="currentColor" stroke-width="2.4"/>',
+  person: '<circle cx="12" cy="6.5" r="3.6" fill="currentColor"/><path d="M5.5 22v-6.5a6.5 6.5 0 0 1 13 0V22z" fill="currentColor"/>',
   clock: '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2" fill="none"/>',
   level: '<path d="M4 20h4v-5H4zM10 20h4V10h-4zM16 20h4V4h-4z" fill="currentColor"/>',
   info: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6" stroke="currentColor" stroke-width="2.4"/><circle cx="12" cy="7.5" r="1.4" fill="currentColor"/>',

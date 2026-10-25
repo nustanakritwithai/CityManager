@@ -113,7 +113,7 @@ export function createSignalPanel(host: HTMLElement, { getCity, connection }: { 
       const card = node('dl', 'signal-metric'); card.dataset.signalMetric = metric.id; card.dataset.value = String(metric.value);
       card.append(node('dt', '', label(metric.id)), node('dd', '', valueText(metric.value)), node('small', '', `${unit(metric.unit)} · ${windowText(metric.window)}`)); grid.append(card);
     }
-    stocks.append(grid, node('p', 'signal-note', '1 tick = 1 วัน · เงินแสดงในเครดิต (100 สตางค์ = 1 เครดิต) เงินเข้า/ออกนับเฉพาะรายการคลังในวันที่จับภาพ รวมทุนเริ่มเมืองและค่าก่อสร้างถ้ามี ไม่ใช่รายรับประจำหรือยอดรวมหลายวัน'));
+    stocks.append(grid, node('p', 'signal-note', '1 tick = 1 วัน · เงินแสดงเป็นบาท (100 สตางค์ = 1 ฿) เงินเข้า/ออกนับเฉพาะรายการคลังในวันที่จับภาพ รวมทุนเริ่มเมืองและค่าก่อสร้างถ้ามี ไม่ใช่รายรับประจำหรือยอดรวมหลายวัน'));
 
     const signals = block('ตรวจที่มาของสัญญาณ');
     if (!report.data.signals.length) signals.append(node('p', '', 'ยังไม่มีสัญญาณที่มีข้อมูลพอคำนวณ'));

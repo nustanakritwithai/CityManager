@@ -214,7 +214,7 @@ try {
   await shot('desktop-summary.png');
   await button('[data-signal-id="trend.treasury"]>summary');
   const detail = await evaluate('document.querySelector(\'[data-signal-id="trend.treasury"]\').textContent');
-  assert.match(detail, /treasury/); assert.match(detail, /เครดิต/);
+  assert.match(detail, /treasury/); assert.match(detail, /฿/);
   assert(detail.includes(String(failedCapture)) && detail.includes(String(advanced.tick)));
   assert.equal(await evaluate('document.querySelector(\'[data-signal-id="trend.treasury"] .signal-technical\').open'), false, 'Technical references begin collapsed');
   assert(!await evaluate('document.querySelector(\'[data-signal-id="trend.treasury"] .signal-observation-detail>p\').textContent.includes("treasury")'), 'Plain Thai explanation keeps technical metric IDs in disclosure');
@@ -245,7 +245,7 @@ try {
   await shot('s22-comparison.png', '#signal-comparison');
   await button('[data-signal-id="threshold.net-flow-negative"]>summary');
   const flow = await evaluate('document.querySelector(\'[data-signal-id="threshold.net-flow-negative"]\').textContent');
-  assert.match(flow, /incomePerTick/); assert.match(flow, /expensesPerTick/); assert.match(flow, /เครดิต/);
+  assert.match(flow, /incomePerTick/); assert.match(flow, /expensesPerTick/); assert.match(flow, /฿/);
   assert.equal(await evaluate('document.querySelector(\'[data-signal-id="threshold.net-flow-negative"] .signal-technical\').open'), false);
   assert(!await evaluate('/incomePerTick|expensesPerTick/.test(document.querySelector(\'[data-signal-id="threshold.net-flow-negative"] .signal-observation-detail>p\').textContent)'));
   await shot('s22-drilldown.png', '[data-signal-id="threshold.net-flow-negative"]');

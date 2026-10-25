@@ -99,8 +99,8 @@ export function ownerFinance(c: City, firmId: number) {
   return { ownerHouseholdId: h.id, capitalContributed: owner.capitalContributed, capitalReturned: owner.capitalReturned,
     withdrawn: owner.withdrawn, taxPaid: owner.taxPaid, realizedProfit: f.profit + currentProfit, distributable, taxReserve,
     contributeAvailable, withdrawAvailable, workingCashFloor: 20_000,
-    contributeReason: contributeAvailable >= 10_000 ? 'พร้อมเติมทุนจากเงินครัวเรือนจริง' : 'เงินครัวเรือนไม่พอเติมทุน 100 เครดิต',
-    withdrawReason: withdrawAvailable >= 10_000 ? 'ถอนจากกำไรที่เกิดขึ้นจริงได้' : 'ต้องมีกำไรหลังสำรองภาษีและเงินหมุนเวียน 200 เครดิต' };
+    contributeReason: contributeAvailable >= 10_000 ? 'พร้อมเติมทุนจากเงินครัวเรือนจริง' : 'เงินครัวเรือนไม่พอเติมทุน 100 ฿',
+    withdrawReason: withdrawAvailable >= 10_000 ? 'ถอนจากกำไรที่เกิดขึ้นจริงได้' : 'ต้องมีกำไรหลังสำรองภาษีและเงินหมุนเวียน 200 ฿' };
 }
 export function contributeOwnerCapital(c: City, firmId: number, amount: number): Result {
   const f = c.firms.find(f => f.id === firmId), facts = ownerFinance(c, firmId);
@@ -108,7 +108,7 @@ export function contributeOwnerCapital(c: City, firmId: number, amount: number):
   const h = c.households.find(h => h.id === facts.ownerHouseholdId)!;
   if (transfer(c, h.wallet, f.wallet, amount, 'Owner capital contribution') !== amount) throw new Error('Owner contribution invariant violated.');
   f.owner.capitalContributed += amount;
-  return { ok: true, message: `เติมทุน ${(amount / 100).toFixed(2)} เครดิตจากครัวเรือน #${h.id} แล้ว` };
+  return { ok: true, message: `เติมทุน ${(amount / 100).toFixed(2)} ฿ จากครัวเรือน #${h.id} แล้ว` };
 }
 export function withdrawOwnerProfit(c: City, firmId: number, amount: number): Result {
   const f = c.firms.find(f => f.id === firmId), facts = ownerFinance(c, firmId);
@@ -116,7 +116,7 @@ export function withdrawOwnerProfit(c: City, firmId: number, amount: number): Re
   const h = c.households.find(h => h.id === facts.ownerHouseholdId)!;
   if (transfer(c, f.wallet, h.wallet, amount, 'Owner profit distribution') !== amount) throw new Error('Owner draw invariant violated.');
   f.owner.withdrawn += amount;
-  return { ok: true, message: `ถอนกำไร ${(amount / 100).toFixed(2)} เครดิตเข้าครัวเรือน #${h.id} แล้ว` };
+  return { ok: true, message: `ถอนกำไร ${(amount / 100).toFixed(2)} ฿ เข้าครัวเรือน #${h.id} แล้ว` };
 }
 function marketOwnerCandidate(c: City): Household | undefined {
   return [...c.households].sort((a, b) => a.id - b.id).find(h => householdAccess(c, h) && balance(c, h.wallet) >= 60_000 &&
@@ -470,7 +470,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (!c.utilities.power || !c.utilities.water) reasons.push('แหล่งน้ำและไฟภายนอกต้องพร้อม');
   if (used.households >= room.households || used.persons >= room.persons) reasons.push('ความจุครัวเรือนหรือจำนวนคนเต็มแล้ว การเพิ่มระดับเพิ่มเฉพาะความจุ');
   if (c.households.some(h => h.home === null)) reasons.push('ครัวเรือนที่ไร้บ้านจะได้รับการจัดบ้านก่อนรับครัวเรือนใหม่');
-  if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 เครดิตต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
+  if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
   return reasons;

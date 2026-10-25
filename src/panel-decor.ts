@@ -133,7 +133,28 @@ function decorateHousing(root: ParentNode) {
     const tiles = [...host.querySelectorAll<HTMLElement>('.cx-metric')]; infoButton(host, heading, ...tiles);
   }
 }
-export function decoratePanels(root: ParentNode) { decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); }
+const GROWTH_ICONS = ['power', 'I', 'worker', 'household', 'crop', 'coin', 'coin'];
+const CHECK_ICONS: Record<string, string> = { road: 'road', power: 'power', water: 'water', ids: 'gear', 'building-limit': 'level', 'firm-limit': 'level', 'housing-demand': 'household', income: 'coin', fertility: 'F', 'crop-demand': 'crop', owner: 'people', 'market-demand': 'market', industry: 'I' };
+const expandedChecks = new Set<string>();
+/** Condition lists as a row of icon tiles with ✓ / ! badges; only the blocking step keeps its words. Tap to see all. */
+function decorateChecklists(root: ParentNode) {
+  for (const list of root.querySelectorAll<HTMLOListElement>('ol.cx-growth-checklist, ol.parcel-checks')) {
+    if (list.dataset.decor !== undefined) continue;
+    list.dataset.decor = ''; list.classList.add('icon-checks');
+    const kind = list.classList.contains('parcel-checks') ? 'parcel' : 'growth';
+    [...list.children].forEach((item, index) => {
+      const li = item as HTMLElement, key = li.dataset.check, icon = kind === 'growth' ? GROWTH_ICONS[index] : CHECK_ICONS[key ?? ''] ?? 'info';
+      if (!li.querySelector('.cx-check-label, .parcel-check-label')) { const label = document.createElement('span'); label.className = 'cx-check-label'; label.textContent = li.textContent; li.textContent = ''; li.append(label); }
+      li.title = li.querySelector('.cx-check-label, .parcel-check-label')?.textContent ?? '';
+      li.prepend(iconElement(icon, 'ui-icon check-icon'));
+    });
+    const toggle = () => { const open = list.dataset.expanded !== 'true'; list.dataset.expanded = String(open); list.setAttribute('aria-expanded', String(open)); if (open) expandedChecks.add(kind); else expandedChecks.delete(kind); };
+    list.dataset.expanded = String(expandedChecks.has(kind)); list.tabIndex = 0; list.setAttribute('role', 'button');
+    list.setAttribute('aria-label', 'แตะเพื่อดูเงื่อนไขทั้งหมด'); list.setAttribute('aria-expanded', list.dataset.expanded);
+    list.addEventListener('click', toggle); list.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  }
+}
+export function decoratePanels(root: ParentNode) { decorateMetrics(root); decorateNotes(root); decoratePeople(root); decorateHousing(root); foldZeros(root); decorateChecklists(root); }
 
 /** Re-decorate whenever panel content is replaced; batched to one pass per frame. */
 export function watchPanels(...roots: (HTMLElement | null)[]) {

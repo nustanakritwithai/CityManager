@@ -24,7 +24,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     const affordable = cost <= treasury, ok = !blocked.size && affordable;
     const label = blocked.size ? 'มีอาคารขวางทาง ต้องรื้อก่อน'
       : !added.length ? 'มีถนนอยู่แล้ว ไม่เสียเงิน'
-      : `ถนน ${added.length} ช่อง · ${credits(cost)} เครดิต${affordable ? '' : ' · เงินคลังไม่พอ'}`;
+      : `ถนน ${added.length} ช่อง · ${credits(cost)} ฿${affordable ? '' : ' · เงินคลังไม่พอ'}`;
     return { ok, cost, label: start === null && added.length ? `${label} · แตะจุดจบ` : label, cells: path.map(cell => ({ cell, ok: ok && !blocked.has(cell) })) };
   }
   if (tool === 'R' || tool === 'C' || tool === 'I' || tool === 'F') {
@@ -39,7 +39,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
   if (tool === 'bulldoze') {
     const cell = city.cells[hover], target = cell.building !== null || cell.road, cost = target ? DEMOLITION_COST : 0;
     const reason = hover === GATEWAY ? 'ประตูเมืองรื้อไม่ได้' : cost > treasury ? 'เงินคลังไม่พอค่ารื้อ' : null;
-    const label = reason ?? (cell.building !== null ? `รื้ออาคาร · ${credits(cost)} เครดิต` : cell.road ? `รื้อถนน · ${credits(cost)} เครดิต` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
+    const label = reason ?? (cell.building !== null ? `รื้ออาคาร · ${credits(cost)} ฿` : cell.road ? `รื้อถนน · ${credits(cost)} ฿` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
     return { ok: !reason, cost, label, cells: [{ cell: hover, ok: !reason }] };
   }
   return null;

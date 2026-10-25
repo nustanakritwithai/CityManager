@@ -59,7 +59,7 @@ test('cash stocks and inclusive trailing cash movements match canonical card, ne
   assert.deepEqual(s.window, { fromTick: 151, toTick: 180, inclusive: true, maxDays: 30, empty: false });
   assert.equal(fact(s, 'cash.current')!.value, card.cash.current); assert.equal(fact(s, 'cash.inflow')!.value, card.cash.inflow); assert.equal(fact(s, 'cash.outflow')!.value, card.cash.outflow); assert.equal(fact(s, 'cash.net')!.value, card.cash.net);
   assert.equal(fact(s, 'cash.current')!.period, 'snapshot'); assert.equal(fact(s, 'cash.net')!.period, 'window'); assert.equal(fact(s, 'cash.net')!.unit, 'satang');
-  assert.match(entityFactEvidence(s, 'cash.current'), /เครดิต/); assert.match(entityFactEvidence(s, 'cash.net'), /151–180/);
+  assert.match(entityFactEvidence(s, 'cash.current'), /฿/); assert.match(entityFactEvidence(s, 'cash.net'), /151–180/);
   assert(!s.facts.some(row => /profit|revenue/.test(row.id)));
   const zero = city(); zero.tick = 0; const z = capture(zero, h.id);
   assert.equal(z.window.empty, true); assert(!z.facts.some(row => row.period !== 'snapshot'));
@@ -84,8 +84,8 @@ test('observed unit prices retain explicit commodity denominators while cash sto
   assert.equal(fact(goods, 'price.goodsSell')!.unit, 'satang/goods');
   assert.equal(fact(crops, 'price.cropsSell')!.unit, 'satang/crops');
   assert.equal(fact(goods, 'cash.current')!.unit, 'satang');
-  assert.match(entityFactEvidence(goods, 'price.goodsSell'), /เครดิต\/หน่วยสินค้า/);
-  assert.match(entityFactEvidence(crops, 'price.cropsSell'), /เครดิต\/หน่วยพืชผล/);
+  assert.match(entityFactEvidence(goods, 'price.goodsSell'), /฿\/หน่วยสินค้า/);
+  assert.match(entityFactEvidence(crops, 'price.cropsSell'), /฿\/หน่วยพืชผล/);
 });
 
 test('selection guards reject removed, wrong-source and stale household references', () => {
@@ -146,5 +146,5 @@ test('deep-frozen city reads and returned report edits cannot mutate simulation;
   local.snapshot.entity.id = 999; local.snapshot.facts[0].value = 1; assert.equal(serialize(c), before);
   const core = capture(c), { snapshotKey: _, ...rest } = core;
   rest.facts = [{ id: 'cash.current', value: Number.MAX_SAFE_INTEGER, unit: 'satang', period: 'snapshot' }]; rest.missing = [];
-  assert.match(entityFactEvidence(makeEntitySnapshot(rest), 'cash.current'), /90,071,992,547,409\.91 เครดิต/);
+  assert.match(entityFactEvidence(makeEntitySnapshot(rest), 'cash.current'), /90,071,992,547,409\.91 ฿/);
 });

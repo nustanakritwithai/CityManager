@@ -24,12 +24,12 @@ test('day zero is a valid observed endpoint and comparison retains people versus
   assert.deepEqual(readingComparison(value), [
     { id: 'population', label: 'ประชากร', unit: 'คน', current: 7, prior: 0, delta: 7 },
     { id: 'households', label: 'ครัวเรือน', unit: 'ครัวเรือน', current: 3, prior: 0, delta: 3 },
-    { id: 'treasury', label: 'เงินคลังเมือง', unit: 'เครดิต', current: 10.5, prior: 11, delta: -0.5 },
+    { id: 'treasury', label: 'เงินคลังเมือง', unit: '฿', current: 10.5, prior: 11, delta: -0.5 },
   ]);
   assert.match(readingWindow(value), /วันที่ 0 → 3 ห่างกัน 3 วัน/);
   const reading = read(value, 'trend.treasury');
-  assert.match(reading.title, /ลดลง 0.5 เครดิต/);
-  assert.match(reading.explanation, /วันที่ 0: 11 → วันที่ 3: 10.5 เครดิต/);
+  assert.match(reading.title, /ลดลง 0.5 ฿/);
+  assert.match(reading.explanation, /วันที่ 0: 11 → วันที่ 3: 10.5 ฿/);
   assert.match(reading.explanation, /ไม่บอกการเปลี่ยนแปลงระหว่างวัน/);
   assert(reading.evidence.some(line => line.includes('trend.treasury')));
 });
@@ -45,20 +45,20 @@ test('missing individual prior metric cannot become a zero or borrowed earlier v
 test('flow trends explicitly compare captured daily totals, not interval sums or causal claims', () => {
   const value = report(capture(12, { incomePerTick: 15, expensesPerTick: 15 }), capture(2, { incomePerTick: 30, expensesPerTick: 15 }));
   const income = read(value, 'trend.incomePerTick'), expense = read(value, 'trend.expensesPerTick');
-  assert.match(income.title, /ลดลง 15 เครดิต\/วัน/);
+  assert.match(income.title, /ลดลง 15 ฿\/วัน/);
   assert.match(income.explanation, /วันที่ 2: 30 → วันที่ 12: 15/);
   assert.match(income.explanation, /ไม่ใช่ยอดสะสมตลอดช่วงหรือค่าเฉลี่ยต่อวัน/);
   assert(!income.explanation.includes('เพราะ'));
-  assert.match(expense.title, /คงเดิม 15 เครดิต\/วัน$/);
+  assert.match(expense.title, /คงเดิม 15 ฿\/วัน$/);
   assert(readingComparison(value).every(row => row.prior !== null));
 });
 
 test('threshold readings expose grounded formulas and distinguish a single day from operating profit', () => {
   const value = report(capture(11, { treasury: -4, incomePerTick: 10.5, expensesPerTick: 12, population: 9, housingCapacity: 7 }));
   const treasury = read(value, 'threshold.treasury-negative');
-  assert.match(treasury.title, /เงินคลังติดลบ -4 เครดิต/);
+  assert.match(treasury.title, /เงินคลังติดลบ -4 ฿/);
   const flow = read(value, 'threshold.net-flow-negative');
-  assert.match(flow.title, /เงินออกมากกว่าเงินเข้า.*-1.5 เครดิต\/วัน/);
+  assert.match(flow.title, /เงินออกมากกว่าเงินเข้า.*-1.5 ฿\/วัน/);
   assert(flow.evidence.some(line => line.includes('10.5 − 12 = -1.5')));
   assert.match(flow.explanation, /รวมเงินทุนและค่าก่อสร้างถ้ามี/);
   assert.match(flow.explanation, /ไม่ใช่กำไรประจำ/);

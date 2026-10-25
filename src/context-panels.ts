@@ -119,6 +119,14 @@ function purchaseText(city: City, household: Household): string {
   return household.lastPurchaseTick < 0 ? 'ยังไม่เคยซื้อ' : household.lastPurchaseTick === city.tick ? 'วันนี้' : `${city.tick - household.lastPurchaseTick} วันก่อน`;
 }
 const businessName = (firm: Firm) => firm.zone === 'F' ? 'ฟาร์ม' : isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาดพืชผล' : firm.zone === 'I' ? 'โรงงาน' : 'พาณิชย์ · ร้านค้าสำเร็จรูป';
+/** Members as figures (working, idle, dependents) and the household purse as one coin chip. */
+function householdVisual(household: Household, employed: number, wallet: number, label: string): HTMLElement {
+  const row = el('span', 'cx-hh-visual'); row.title = label; row.setAttribute('aria-label', label);
+  const figures = el('span', 'cx-hh-figures'), idle = Math.max(0, household.workforce - employed);
+  for (const [n, tone] of [[employed, 'work'], [idle, 'idle'], [household.dependents, 'dep']] as const) for (let i = 0; i < n; i++) figures.append(iconElement('person', `ui-icon figure ${tone}`));
+  const purse = el('span', 'cx-hh-cash'); purse.append(iconElement('coin', 'ui-icon'), el('span', '', `${Math.round(wallet / 100).toLocaleString('th-TH')} ฿`));
+  row.append(figures, purse); return row;
+}
 function householdButton(city: City, household: Household, source: Building, onHousehold: HouseholdAction, assignedWorkers?: number, assignments: ReturnType<typeof employmentForHousehold> = [], ownerAssignments: City['ownerLabor'] = []): HTMLButtonElement {
   const button = el('button', 'cx-household-link'); button.type = 'button'; Object.assign(button.dataset, { householdId: String(household.id), sourceBuildingId: String(source.id), sourceCell: String(source.cell), contextFocus: `household:${household.id}` });
   Object.assign(button.dataset, { members: String(household.members), workforce: String(household.workforce), dependents: String(household.dependents), employedWorkers: String(householdWorkerCount(city, household.id)) });
@@ -126,7 +134,9 @@ function householdButton(city: City, household: Household, source: Building, onH
   if (assignedWorkers !== undefined) button.dataset.incomeRole = ownerAssignments.length ? 'self-employed' : 'employee';
   const labor = assignedWorkers === undefined ? `ทำงาน ${householdWorkerCount(city, household.id)}/${household.workforce} คน` : `จากแรงงานในบ้าน ${household.workforce} คน`;
   const art = el('span', 'cx-person-symbol'), copy = el('span', 'cx-link-copy'); art.append(symbol('household'));
-  copy.append(el('strong', '', assignedWorkers === undefined ? `ครัวเรือน #${household.id} · ${household.members} คน` : `${ownerAssignments.length ? 'ทำกิจการเอง' : 'รับแรงงาน'} ${assignedWorkers} คน · ครัวเรือน #${household.id}`), el('span', '', `${labor} · เงินร่วม ${cash(city.accounts[household.wallet] ?? 0)}`));
+  copy.append(el('strong', '', assignedWorkers === undefined ? `ครัวเรือน #${household.id}` : `${ownerAssignments.length ? 'ทำกิจการเอง' : 'รับแรงงาน'} ${assignedWorkers} คน · ครัวเรือน #${household.id}`));
+  if (assignedWorkers === undefined) copy.append(householdVisual(household, householdWorkerCount(city, household.id), city.accounts[household.wallet] ?? 0, `${labor} · เงินร่วม ${cash(city.accounts[household.wallet] ?? 0)}`));
+  else copy.append(el('span', '', `${labor} · เงินร่วม ${cash(city.accounts[household.wallet] ?? 0)}`));
   for (const allocation of assignments) {
     const role = el('span', 'cx-assigned-role', `${allocation.occupation === 'manufacturing' ? 'งานผลิต' : 'งานค้าปลีก'} · ${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน`);
     Object.assign(role.dataset, { skill: allocation.skill, occupation: allocation.occupation, workers: String(allocation.workers) }); copy.append(role);

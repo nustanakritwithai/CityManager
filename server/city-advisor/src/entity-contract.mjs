@@ -75,7 +75,7 @@ export function validateEntityRequest(value) {
 }
 const num = value => value.toLocaleString('th-TH', { maximumFractionDigits: 2 });
 const money = value => { const raw = BigInt(value), absolute = raw < 0n ? -raw : raw; return `${raw < 0n ? '-' : ''}${Number(absolute / 100n).toLocaleString('th-TH')}.${String(absolute % 100n).padStart(2, '0')}`; };
-const units = { satang: 'เครดิต', 'satang/goods': 'เครดิต/หน่วยสินค้า', 'satang/crops': 'เครดิต/หน่วยพืชผล', people: 'คน', households: 'ครัวเรือน', goods: 'หน่วยสินค้า', crops: 'หน่วยพืชผล', positions: 'ตำแหน่ง', boolean: '' };
+const units = { satang: '฿', 'satang/goods': '฿/หน่วยสินค้า', 'satang/crops': '฿/หน่วยพืชผล', people: 'คน', households: 'ครัวเรือน', goods: 'หน่วยสินค้า', crops: 'หน่วยพืชผล', positions: 'ตำแหน่ง', boolean: '' };
 const period = (snapshot, code) => code === 'window' ? `วันที่ ${snapshot.window.fromTick}–${snapshot.window.toTick} (รวมวันต้นและปลาย)` : `วันที่ ${snapshot.tick}`;
 function factValue(fact) {
   if (fact.unit === 'boolean') return fact.value === 1 ? 'เชื่อมต่อ' : 'ไม่เชื่อมต่อ';

@@ -20,8 +20,8 @@ export const METRIC_LABELS: Record<MetricId, string> = {
   pollution: 'มลพิษ (ไม่มีข้อมูล)', trafficPressure: 'ความหนาแน่นจราจร (ไม่มีข้อมูล)',
 };
 export const UNIT_LABELS: Record<MetricUnit, string> = {
-  people: 'คน', households: 'ครัวเรือน', establishments: 'แห่ง', currency: 'เครดิต',
-  'currency/tick': 'เครดิต/วัน', index_0_100: 'ดัชนี 0–100',
+  people: 'คน', households: 'ครัวเรือน', establishments: 'แห่ง', currency: '฿',
+  'currency/tick': '฿/วัน', index_0_100: 'ดัชนี 0–100',
 };
 export type SignalWindow = { startTick: number; endTick: number };
 export type SignalMetric = { id: MetricId; value: number; unit: MetricUnit; source: 'citymanager.aggregate.v1' };
