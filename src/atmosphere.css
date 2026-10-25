@@ -255,3 +255,12 @@ html[data-touch-ui=true] .kpi strong { font-size: calc(13 * var(--reader-unit, 1
 .event-log { margin: 0; padding: 4px 0 0 0; list-style: none; display: grid; gap: 6px; }
 .event-log li { display: grid; gap: 1px; font-size: 13px; line-height: 1.45; }
 .event-log small { color: var(--muted); font-size: 11px; }
+
+/* Sound settings share the atmosphere menu. Range inputs keep a 44px row for touch. */
+.atmosphere-menu .audio-settings { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.atmosphere-menu .audio-slider { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 10px; }
+.atmosphere-menu .audio-slider input[type=range] { width: 100%; height: 44px; }
+.atmosphere-menu .audio-slider input[type=range]:disabled { opacity: .45; }
+.atmosphere-menu .audio-track { margin: 6px 0; color: var(--muted); }
+.atmosphere-menu #audio-next { min-height: 44px; padding: 0 16px; border: 1px solid var(--glass-edge); border-radius: 10px; background: rgba(255, 255, 255, .08); color: inherit; font-weight: 600; }
+.atmosphere-menu #audio-next:hover, .atmosphere-menu #audio-next:focus-visible { border-color: var(--amber); }

@@ -44,6 +44,9 @@ import './hud.css';
 import './panel-theme.css';
 import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
 import { advancedEnabled, storeAdvanced } from './advanced.ts';
+import { AudioEngine, type EffectName } from './audio-engine.ts';
+import { installAudioPanel } from './audio-panel.ts';
+import { CueLimiter, cityCues, cueSnapshot } from './audio-cues.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 
@@ -60,7 +63,11 @@ let city: City = createCity(61025);
 const ownerDecisionSession = createOwnerDecisionSession(city);
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
 let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, coach: Coach | undefined, minimap: Minimap | undefined, cityNetwork: CityNetworkView | undefined;
-let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined;
+let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined, audioPanel: { sync(): void } | undefined;
+const audio = new AudioEngine(BASE + 'assets/audio/'), cueLimiter = new CueLimiter();
+const sound = (name: EffectName) => audio.play(name);
+/** A map command's result gets its own sound: the action on success, a soft refusal otherwise. */
+const resultSound = <T extends { ok: boolean }>(result: T, success: EffectName): T => { sound(result.ok ? success : 'ui-error'); return result; };
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -106,6 +113,7 @@ function inspector(open: boolean) {
   if (!open) signalPanel?.close();
   if (!open) entityExplanationPanel?.close();
   if (!open) { closeSubmenus(); route = null; }
+  if ($('#inspector').dataset.open !== String(open)) sound(open ? 'ui-open' : 'ui-close');
   $('#inspector').dataset.open = String(open);
   $('#toggle-inspector').setAttribute('aria-expanded', String(open && route?.page === 'city'));
   $('#toggle-help').setAttribute('aria-expanded', String(open && route?.page === 'help'));
@@ -155,9 +163,9 @@ function activate(index: number) {
   selected = index;
   if (tool === 'road') {
     if (roadStart === null) { roadStart = index; status('เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
-    else { const result = buildRoad(city, roadStart, index); roadStart = null; status(result.message); }
-  } else if (['R', 'C', 'I', 'F'].includes(tool)) status(zoneCell(city, index, tool as Zone).message);
-  else if (tool === 'bulldoze') status(bulldoze(city, index).message);
+    else { const result = resultSound(buildRoad(city, roadStart, index), 'ui-road'); roadStart = null; status(result.message); }
+  } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
+  else if (tool === 'bulldoze') status(resultSound(bulldoze(city, index), 'ui-bulldoze').message);
   else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
   if (tool !== 'select' && tool !== 'pan') ownerDecisionSession.syncExternal(city, 'player-map-command');
   render();
@@ -380,13 +388,13 @@ async function boot() {
   $('#open-signals').addEventListener('click', () => { if (signalsEnabled()) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
     ownerDecisionSession.beforeExternal(city);
-    selected = b; roadStart = null; status(buildRoad(city, a, b).message);
+    selected = b; roadStart = null; status(resultSound(buildRoad(city, a, b), 'ui-road').message);
     ownerDecisionSession.syncExternal(city, 'player-drag-road'); render();
   });
-  document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool!)));
+  document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => { sound('ui-select'); setTool(b.dataset.tool!); }));
   document.querySelectorAll<HTMLElement>('[data-camera]').forEach(b => b.addEventListener('click', () => view.control(b.dataset.camera!)));
-  document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { speed = Number(b.dataset.speed); accumulator = 0; render(); }));
-  $('#pause').addEventListener('click', () => { if (ownerDecisionPanel?.isAutoPending()) return; paused = !paused; accumulator = 0; render(); });
+  document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { sound('ui-click'); speed = Number(b.dataset.speed); accumulator = 0; render(); }));
+  $('#pause').addEventListener('click', () => { if (ownerDecisionPanel?.isAutoPending()) return; sound('ui-click'); paused = !paused; accumulator = 0; render(); });
   $('#cancel-tool').addEventListener('click', cancel);
   $('#toggle-camera-pan').addEventListener('click', () => {
     const open = $('.camera-hud').dataset.pan !== 'true';
@@ -416,7 +424,7 @@ async function boot() {
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
   $('#save').addEventListener('click', () => {
-    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); status(`บันทึกรุ่น 7 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
+    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); sound('ui-save'); status(`บันทึกรุ่น 7 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
   });
   const loadStored = (source: SaveSource) => {
     try {
@@ -448,10 +456,11 @@ async function boot() {
   document.addEventListener('keydown', e => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || document.querySelector('dialog[open]')) return;
     if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+    if (e.key.toLowerCase() === 'u' && !(e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]'))) { audio.change({ muted: !audio.settings.muted }); audioPanel?.sync(); status(audio.settings.muted ? 'ปิดเสียงแล้ว (U)' : 'เปิดเสียงแล้ว (U)'); return; }
     if (route) return;
     if (e.key === ' ' && !(e.target instanceof Element && e.target.closest('button, summary, a, select, input, textarea, [contenteditable]'))) { e.preventDefault(); paused = !paused; accumulator = 0; render(); }
     const shortcuts: Record<string, string> = { v: 'select', r: 'road', '1': 'R', '2': 'C', '3': 'I', '4': 'F', b: 'bulldoze', p: 'pan' };
-    if (shortcuts[e.key.toLowerCase()]) setTool(shortcuts[e.key.toLowerCase()]);
+    if (shortcuts[e.key.toLowerCase()]) { sound('ui-select'); setTool(shortcuts[e.key.toLowerCase()]); }
     if (e.key.toLowerCase() === 't') cityStatsPanel?.toggle();
     if (e.key.toLowerCase() === 'm') minimap?.toggleMap();
     if (e.key.toLowerCase() === 'n') cityNetwork?.toggle();
@@ -469,18 +478,29 @@ async function boot() {
   });
   atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => accumulator, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   const visual = atmosphere;
+  audioPanel = installAudioPanel(audio, $('#atmosphere-menu'));
+  // Ambience follows what the screen shows; the city-wide levels only change once a day.
+  let soundTick = -1, traffic = 0, factories = 0;
   view.app.on('update', (dt: number) => {
     visual.update(dt);
     minimap?.redraw();
     view.traffic.update(dt, !paused && !document.hidden);
+    if (city.tick !== soundTick) {
+      soundTick = city.tick;
+      traffic = Math.min(1, summary(city).population / 40);
+      factories = Math.min(1, new Set(city.cropLedger.filter(e => e.kind === 'process' && e.tick === city.tick).map(e => e.from)).size / 3);
+    }
+    audio.updateAmbience({ ...visual.soundscape, traffic, factories, closeness: Math.min(1, Math.max(0, (130 - view.radius) / 100)) });
     if (paused || document.hidden) return;
     accumulator += Math.min(dt, 0.25) * speed;
     let changed = false;
+    const before = accumulator >= 1 ? cueSnapshot(city) : null;
     while (accumulator >= 1 && !paused) { const outcomes = ownerDecisionSession.advance(city); ownerDecisionPanel?.noteOutcomes(outcomes); accumulator -= 1; changed = true; }
+    if (changed && before) for (const cue of cueLimiter.admit(cityCues(before, city), performance.now())) sound(cue);
     if (changed) render();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

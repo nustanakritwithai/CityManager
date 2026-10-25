@@ -156,6 +156,12 @@ export class AtmosphereController {
     document.documentElement.dataset.phase = phase;
   }
 
+  /** Phase and rain for the ambience; rain follows the overlay so sound and picture agree. */
+  get soundscape() {
+    const hour = this.applied.hour < 0 ? START_HOUR : this.applied.hour;
+    return { phase: phaseOf(hour), rain: this.weather.raining ? Math.min(1, this.overcast) : 0 };
+  }
+
   get diagnostics() {
     return { ...this.host.view.atmosphere.diagnostics, renderer: this.renderer, settings: { ...this.settings }, overcast: this.overcast, raining: this.weather.raining, traffic: { actors: this.host.view.traffic.count, plumes: this.host.view.traffic.plumes } };
   }
