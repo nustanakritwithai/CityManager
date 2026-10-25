@@ -38,6 +38,7 @@ export class OverviewDashboard {
   private readonly modal = new ChartModal();
   private city: City | null = null;
   private key = '';
+  private chartWidth = 300;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -63,6 +64,8 @@ export class OverviewDashboard {
     this.city = city; this.modal.update(city);
     if (key === this.key) return;
     this.key = key;
+    // Measure once before rebuilding, so building six charts does not force a layout each.
+    this.chartWidth = this.width();
     const series = dailySeries(city, 30);
     this.renderKpis(city, series); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
@@ -73,7 +76,7 @@ export class OverviewDashboard {
     const def = CHARTS[key], box = el('div', 'dash-chart'), head = el('div', 'dash-chart-head');
     const expand = el('button', 'dash-expand'); expand.type = 'button'; expand.title = `ขยาย ${def.title}`; expand.setAttribute('aria-label', `ขยายกราฟ ${def.title}`);
     expand.append(iconElement('zoom-in')); expand.addEventListener('click', () => { if (this.city) this.modal.open(key, this.city); });
-    head.append(el('h4', '', def.title), expand); box.append(head, renderChart(def, series, this.width(), 140)); return box;
+    head.append(el('h4', '', def.title), expand); box.append(head, renderChart(def, series, this.chartWidth, 140)); return box;
   }
 
   private renderKpis(city: City, series: DailySeries) {
