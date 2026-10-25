@@ -4,6 +4,13 @@ export const RESOURCE_CELL_COUNT = 24 * 24;
 export const FERTILITY_THRESHOLD = 50;
 export const CROP_STOCK_CAPS = Object.freeze({ F: 96, T: 48, I: 24 } as const);
 export const CROP_PRICES = Object.freeze({ farmToTrader: 150, traderToFactory: 300, farmToFactory: 350, householdCrop: 800 } as const);
+export type CropPrices = { readonly farmToTrader: number; readonly traderToFactory: number; readonly farmToFactory: number; readonly householdCrop: number };
+/**
+ * Current rules pay farms 2 credits a lot from markets: at 1.50 a farm worker's harvest
+ * (about 9 lots a day) could not cover a wage plus rent, so every farm slowly went broke.
+ * CROP_PRICES stays the frozen original table that legacy saves replay with.
+ */
+export const CHAIN_CROP_PRICES: CropPrices = Object.freeze({ ...CROP_PRICES, farmToTrader: 200 });
 export const CROP_RECIPE = Object.freeze({ crop: 2, goods: 8 } as const);
 export type ResourceMap = { version: typeof RESOURCE_VERSION; seed: number; fertility: number[] };
 export type CropZone = keyof typeof CROP_STOCK_CAPS;
@@ -118,10 +125,10 @@ function walletValid(wallet: unknown, kind: 'firm' | 'household'): wallet is str
 export function validCropAccount(value: unknown): value is CropAccount {
   return record(value) && walletValid(value.wallet, 'firm') && isSafeCount(value.cash) && isSafeCount(value.reservedCash) && value.reservedCash <= value.cash && (value.zone === 'F' || value.zone === 'T' || value.zone === 'I') && validCropHolding(value, CROP_STOCK_CAPS[value.zone]);
 }
-export function cropPrice(from: CropZone, to: CropZone): number | null {
-  if (from === 'F' && to === 'T') return CROP_PRICES.farmToTrader;
-  if (from === 'T' && to === 'I') return CROP_PRICES.traderToFactory;
-  if (from === 'F' && to === 'I') return CROP_PRICES.farmToFactory;
+export function cropPrice(from: CropZone, to: CropZone, prices: CropPrices = CROP_PRICES): number | null {
+  if (from === 'F' && to === 'T') return prices.farmToTrader;
+  if (from === 'T' && to === 'I') return prices.traderToFactory;
+  if (from === 'F' && to === 'I') return prices.farmToFactory;
   return null;
 }
 export type CropPurchaseProposal = { ok: boolean; reason: AgricultureReason; nextSeller: CropAccount; nextBuyer: CropAccount; quantity: number; cash: number; fromValue: number; toValue: number; sellerRevenue: number; sellerExpense: number; buyerExpense: number; margin: number };
@@ -133,11 +140,11 @@ function purchaseResult(seller: CropAccount, buyer: CropAccount, ok: boolean, re
  * state. For trader sales pass the shared remaining start-of-day sellableLimit;
  * buying stock never enlarges that limit or creates operating profit/expense.
  */
-export function proposeCropPurchase(seller: CropAccount, buyer: CropAccount, options: { quantity: number; sellableLimit?: number }): CropPurchaseProposal {
+export function proposeCropPurchase(seller: CropAccount, buyer: CropAccount, options: { quantity: number; sellableLimit?: number; prices?: CropPrices }): CropPurchaseProposal {
   const fail = (reason: AgricultureReason) => purchaseResult(seller, buyer, false, reason);
   if (!validCropAccount(seller) || !validCropAccount(buyer) || !record(options) || !isSafeCount(options.quantity, 1) || (options.sellableLimit !== undefined && !isSafeCount(options.sellableLimit))) return fail('invalid-input');
   if (seller.wallet === buyer.wallet) return fail('same-counterparty');
-  const price = cropPrice(seller.zone, buyer.zone);
+  const price = cropPrice(seller.zone, buyer.zone, options.prices);
   if (price === null) return fail('invalid-channel');
   if (options.quantity > seller.cropInventory) return fail('insufficient-stock');
   if (options.quantity > (options.sellableLimit ?? seller.cropInventory)) return fail('sellable-limit');

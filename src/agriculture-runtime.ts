@@ -1,7 +1,7 @@
 /** Canonical crop operations. Proposals are checked before synchronous commits. */
 import { isMarket, isRetail, type City, type Firm, type Household, type CropEntry } from './sim.ts';
 import {
-  CROP_PRICES, CROP_STOCK_CAPS, isSafeCount, isViableFarmland,
+  CHAIN_CROP_PRICES as CROP_PRICES, CROP_STOCK_CAPS, isSafeCount, isViableFarmland,
   proposeHarvest, proposeRecipe, proposeCropPurchase, proposeCropConsumption,
   validCropAccount, validCropHolding, safeAdd, releaseCropCost, harvestYield,
   type CropAccount,
@@ -79,7 +79,7 @@ function exchange(c: City, seller: Firm, buyer: Firm, quantity: number, quota: M
   const from = cropAccount(c, seller, hooks), to = cropAccount(c, buyer, hooks);
   if (!from || !to) return false;
   const limit = isMarket(seller) ? quota.get(seller.id) ?? 0 : undefined;
-  const proposal = proposeCropPurchase(from, to, { quantity, ...(limit === undefined ? {} : { sellableLimit: limit }) });
+  const proposal = proposeCropPurchase(from, to, { quantity, prices: CROP_PRICES, ...(limit === undefined ? {} : { sellableLimit: limit }) });
   if (!proposal.ok) return false;
   let event: CropEntry, revenue: number, expense: number;
   try {
