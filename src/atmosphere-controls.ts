@@ -7,9 +7,9 @@ import { WeatherOverlay } from './weather-overlay.ts';
 import type { CityView } from './renderer.ts';
 import type { City } from './sim.ts';
 
-export type VisualSettings = { timeMode: TimeMode; quality: Quality | 'auto'; rain: boolean; seasons: boolean; traffic: boolean };
+export type VisualSettings = { timeMode: TimeMode; quality: Quality | 'auto'; rain: boolean; seasons: boolean; traffic: boolean; mapInfo: boolean };
 const STORAGE_KEY = 'citymanager.visual.v1';
-const DEFAULTS: VisualSettings = Object.freeze({ timeMode: 'auto', quality: 'auto', rain: true, seasons: true, traffic: true });
+const DEFAULTS: VisualSettings = Object.freeze({ timeMode: 'auto', quality: 'auto', rain: true, seasons: true, traffic: true, mapInfo: true });
 const TIME_LABELS: Record<TimeMode, string> = { auto: 'อัตโนมัติ · รอบละ 5 นาที', morning: 'เช้า', noon: 'กลางวัน', evening: 'เย็น', night: 'กลางคืน', local: 'ตามเวลาเครื่อง' };
 const QUALITY_LABELS: Record<Quality | 'auto', string> = { auto: 'อัตโนมัติ', low: 'ต่ำ', medium: 'กลาง', high: 'สูง' };
 const PHASE_ICONS = { night: '☾', dawn: '◒', day: '☀', dusk: '◓' } as const;
@@ -25,6 +25,7 @@ export function loadVisualSettings(): VisualSettings {
       rain: typeof raw.rain === 'boolean' ? raw.rain : DEFAULTS.rain,
       seasons: typeof raw.seasons === 'boolean' ? raw.seasons : DEFAULTS.seasons,
       traffic: typeof raw.traffic === 'boolean' ? raw.traffic : DEFAULTS.traffic,
+      mapInfo: typeof raw.mapInfo === 'boolean' ? raw.mapInfo : DEFAULTS.mapInfo,
     };
   } catch { return { ...DEFAULTS }; }
 }
@@ -36,7 +37,7 @@ export const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|basic render|war
 const autoQuality = (renderer: string): Quality => SOFTWARE_RENDERER.test(renderer) ? 'low'
   : matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600 ? 'medium' : 'high';
 
-type Host = { view: CityView; getCity: () => City; isPaused: () => boolean; getSpeed: () => number; tickFraction: () => number };
+type Host = { view: CityView; getCity: () => City; isPaused: () => boolean; getSpeed: () => number; tickFraction: () => number; onChange?: () => void };
 
 /** Drives the visual-only sky clock, season tint, decorative rain and render quality. */
 export class AtmosphereController {
@@ -107,11 +108,12 @@ export class AtmosphereController {
     this.menu.replaceChildren(heading, this.status, time, quality,
       toggle('ฤดูกาลตามเดือนในเกม', this.settings.seasons, value => this.change({ seasons: value })),
       toggle('ฝนตามฤดู (ภาพตกแต่ง)', this.settings.rain, value => this.change({ rain: value })),
-      toggle('รถ คนเดิน และควันโรงงาน (ภาพตกแต่ง · ปิดในคุณภาพต่ำ)', this.settings.traffic, value => this.change({ traffic: value })), note);
+      toggle('รถ คนเดิน และควันโรงงาน (ภาพตกแต่ง · ปิดในคุณภาพต่ำ)', this.settings.traffic, value => this.change({ traffic: value })),
+      toggle('ชั้นข้อมูลตามเครื่องมือ และไอคอนปัญหาเหนืออาคาร', this.settings.mapInfo, value => this.change({ mapInfo: value })), note);
   }
 
   private change(patch: Partial<VisualSettings>) {
-    Object.assign(this.settings, patch); saveVisualSettings(this.settings); this.applied.force = true; this.syncTraffic();
+    Object.assign(this.settings, patch); saveVisualSettings(this.settings); this.applied.force = true; this.syncTraffic(); this.host.onChange?.();
   }
 
   private setQuality(quality: Quality) {

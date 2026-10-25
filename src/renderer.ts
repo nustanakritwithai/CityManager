@@ -11,6 +11,7 @@ import { SceneAtmosphere } from './scene-atmosphere.ts';
 import { SceneTraffic } from './scene-traffic.ts';
 import { CityWorld } from './scene-world.ts';
 import type { Atmosphere, Quality } from './atmosphere.ts';
+import type { Overlay, Tone } from './map-overlay.ts';
 
 const UNIT = 2;
 const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
@@ -24,6 +25,8 @@ export class CityView {
   cameraBlocked = false;
   tiles = new Map<number, { entity: Entity; signature: string }>();
   markers = new Entity('Tool previews');
+  private overlayRoot = new Entity('Map information layer');
+  private overlayRef: Overlay | null = null;
   private highway = new Entity('Decorative highway');
   materials = new Map<string, StandardMaterial>();
   assets: CityAssets | null = null;
@@ -205,6 +208,7 @@ export class CityView {
     }
     for (const spot of this.world.treeSpots) this.plantTree(spot.x, spot.y, spot.z, spot.scale);
     this.app.root.addChild(this.markers);
+    this.app.root.addChild(this.overlayRoot);
     this.setQuality('high');
     new ResizeObserver(() => this.resize()).observe(this.canvas);
     window.addEventListener('resize', () => this.resize());
@@ -313,7 +317,27 @@ export class CityView {
     });
     c.addEventListener('pointercancel', e => { this.pointers.delete(e.pointerId); this.down = null; this.dragStart = null; this.onHover(null); });
   }
-  render(city: City, selected: number | null, preview: number[]) {
+  /** Unlit translucent plates so the layer stays readable at night; null hides it. */
+  setOverlay(overlay: Overlay | null) {
+    if (overlay === this.overlayRef) return;
+    this.overlayRef = overlay;
+    for (const child of [...this.overlayRoot.children]) child.destroy();
+    for (const item of overlay?.cells ?? []) {
+      const { x, z } = this.position(item.cell);
+      this.box(this.overlayRoot, x, .19, z, 1.9, .02, 1.9, this.overlayMaterial(item.tone, Math.round(item.strength * 10) / 10), false);
+    }
+    this.app.renderNextFrame = true;
+  }
+  private overlayMaterial(tone: Tone, strength: number) {
+    const key = `overlay:${tone}:${strength}`;
+    if (this.materials.has(key)) return this.materials.get(key)!;
+    const material = new StandardMaterial(), colour = new Color().fromString({ good: '#3ccf6e', warn: '#f2c14e', bad: '#e5533d' }[tone]);
+    material.diffuse = new Color(0, 0, 0); material.emissive = colour; material.useLighting = false; material.useFog = false;
+    material.opacity = .25 + strength * .45; material.blendType = BLEND_NORMAL; material.depthWrite = false; material.update();
+    this.materials.set(key, material); return material;
+  }
+  /** `invalid` marks previewed cells where the action would be refused (red frame). */
+  render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
     this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'bulldoze'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
@@ -392,7 +416,7 @@ export class CityView {
     this.traffic.sync(city);
     for (const child of [...this.markers.children]) child.destroy();
     for (const i of new Set([...preview, ...(selected === null ? [] : [selected])])) {
-      const p = this.position(i); const color = i === selected ? '#fff1bb' : '#f7bf60';
+      const p = this.position(i); const color = i === selected ? '#fff1bb' : invalid.has(i) ? '#ff5a4a' : this.mode === 'select' || this.mode === 'pan' ? '#f7bf60' : '#6fe08a';
       for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, this.material(color, true));
       for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, this.material(color, true));
     }
