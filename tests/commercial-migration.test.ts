@@ -11,7 +11,7 @@ function oldCity(day = 179) {
   return legacy.deserializeV4(legacy.serialize(c));
 }
 function preserved(c: City | legacy.City) {
-  const { version: _version, rulesVersion: _rules, growthStartTick: _growth, cells: _cells, buildings: _buildings, firms: _firms, ...state } = c as City;
+  const { version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, cells: _cells, buildings: _buildings, firms: _firms, ...state } = c as City;
   return state;
 }
 const loaded = (c: City) => deserialize(serialize(c));
@@ -28,11 +28,11 @@ test('v4 T market becomes commercial L1 without changing any economic or labor f
   assert.equal(legacy.withdrawOwnerProfit(old, owner.id, 10000).ok, true);
   assert.equal(legacy.contributeOwnerCapital(old, owner.id, 10000).ok, true);
   const raw = legacy.serialize(old), city = deserialize(raw);
-  assert.equal(city.version, 7); assert.equal(city.rulesVersion, 'chain-2');
+  assert.equal(city.version, 8); assert.equal(city.rulesVersion, 'chain-3');
   assert.deepEqual(preserved(city), preserved(old));
   for (const f of old.firms) {
     const current = city.firms.find(n => n.id === f.id)!;
-    const { zone: _zone, commercialKind: _kind, ...rest } = current;
+    const { zone: _zone, commercialKind: _kind, crops: _crops, products: _products, recipe: _recipe, ...rest } = current;
     const { zone: _oldZone, ...oldRest } = f;
     assert.deepEqual(rest, oldRest);
     assert.equal(current.zone, f.zone === 'T' ? 'C' : f.zone);

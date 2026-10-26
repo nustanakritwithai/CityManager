@@ -34,6 +34,8 @@ import { decoratePanels, watchPanels } from './panel-decor.ts';
 import { installHudIcons } from './hud-icons.ts';
 import { recordDemand, demandSparkline } from './demand-history.ts';
 import { Guide } from './guide.ts';
+import { firmGoodsName } from './goods-view.ts';
+import { CROP_LABELS, cropForFertility } from './goods.ts';
 import { Minimap } from './minimap.ts';
 import { iconElement } from './ui-icons.ts';
 import { installKeycaps } from './keycaps.ts';
@@ -247,10 +249,12 @@ function renderPlace() {
     $('#place-subtitle').textContent = 'ข้อมูลเฉพาะครัวเรือน · ไม่ใช่บุคคลรายคน'; symbol('R', false);
   } else if (cell && cellIndex !== null) {
     const firm = building && city.firms.find(f => f.building === building.id);
-    const name = cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? firm && isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาด' : building ? 'พาณิชย์ · ร้านค้าสำเร็จรูป' : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
+    const name = cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? firm && isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาด' : building ? 'พาณิชย์ · ร้านค้าสำเร็จรูป' : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (cellIndex % SIZE + 1) + ',' + (Math.floor(cellIndex / SIZE) + 1);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, !!firm && isMarket(firm));
     const connected = access(city, cellIndex); tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
+    if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
+    if (cell.zone === 'F' && !building) { const crop = cropForFertility(city.resources.fertility[cellIndex]); if (crop) tags.push(tag(`ปลูก${CROP_LABELS[crop]}ได้`, 'good')); }
     if (cell.zone === 'F') {
       const fertility = city.resources.fertility[cellIndex];
       if (!building) metrics.push(metric('ความอุดมสมบูรณ์', `${fertility}%`, false, 'พืชผลหมุนเวียน ไม่ใช่แหล่งที่หมดลง', fertility));
@@ -436,7 +440,7 @@ async function boot() {
       city = loaded; importedLegacyRaw = legacy ? saved.raw : null;
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
-      status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว · หยุดเวลาให้ตรวจข้อมูล`);
+      status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว${oldVersion === 7 ? ' · เซฟรุ่น 1.x แปลงเป็นสินค้า 3 สายแล้ว (เก็บสำเนาเดิมไว้ตอนบันทึก)' : ''} · หยุดเวลาให้ตรวจข้อมูล`);
     } catch (error) { status(`โหลดไม่สำเร็จ เมืองปัจจุบันยังอยู่ · ${error instanceof Error ? error.message : 'ข้อมูลบันทึกไม่ถูกต้อง'}`); }
   };
   $('#load').addEventListener('click', () => loadStored('current'));

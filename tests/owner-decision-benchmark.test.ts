@@ -15,7 +15,7 @@ test('legacy v1-v5 migration opens a proposal-only owner session without rewriti
   for (let index = 0; index < raws.length; index++) {
     assert.equal(JSON.parse(raws[index]).version, index + 1);
     const city = deserialize(raws[index]), before = serialize(city), session = createOwnerDecisionSession(city);
-    assert.equal(city.version, 7); assert.equal(session.mode, 'proposal');
+    assert.equal(city.version, 8); assert.equal(session.mode, 'proposal');
     session.evaluate(city); assert.equal(serialize(city), before, 'Evaluating imported household/owner state is read-only');
     session.setMode('auto'); session.reset(city);
     assert.equal(session.mode, 'proposal', 'Reset/load never silently restores autonomous execution');
@@ -41,7 +41,7 @@ test('checkpoint retention changes audit coverage without changing deterministic
 test('720-day four-seed fixed-growth benchmark keeps proposals inert and replays bounded owner rule execution', { timeout: 240_000 }, () => {
   const report = runOwnerDecisionBenchmark();
   assert.equal(report.horizonDays, 720); assert.deepEqual(report.seeds, [61025, 20261023, 1, 42]);
-  assert.deepEqual(report.seeds, OWNER_BENCHMARK_SEEDS); assert.equal(report.baseline, 'chain-2');
+  assert.deepEqual(report.seeds, OWNER_BENCHMARK_SEEDS); assert.equal(report.baseline, 'chain-3');
   assert.equal(report.providerRequests, 0); assert.equal(report.rows.length, 4);
   assert.equal(report.retentionMode, 'production-default'); assert.equal(report.retentionMaxEvents, 256);
   for (const row of report.rows) {

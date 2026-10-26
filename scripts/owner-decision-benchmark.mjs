@@ -125,7 +125,7 @@ export function runOwnerDecisionBenchmark({ days = OWNER_BENCHMARK_DAYS, seeds =
       ruleExecution: { final: metrics(execution), stateHash: ownerStateHash(execution), decisions: executionStats,
         replay: executionReplay }, monthly });
   }
-  return { schemaVersion: 1, benchmark: 'owner-rule-phase1', baseline: 'chain-2', saveVersion: 7,
+  return { schemaVersion: 1, benchmark: 'owner-rule-phase1', baseline: 'chain-3', saveVersion: 8,
     horizonDays: days, seeds: [...seeds], sourceHashes, moneyUnit: 'satang', monthlyPeriodDays: 30,
     retentionMode: 'production-default', retentionMaxEvents: rows[0].ruleExecution.replay.maxEvents,
     treatments: ['fixed-chain-2', 'rule-proposal-only', 'rule-execution-opt-in'], llmTreatment: 'not implemented; future same-interface comparison',

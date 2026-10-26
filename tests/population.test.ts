@@ -13,7 +13,7 @@ const populated = (day = 180) => advance(createCity(61025), day);
 test('frozen v1 migration preserves history, clocks, claims and IDs with explicit minimum legacy composition', () => {
   assert.equal(createHash('sha256').update(frozen).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
   const old = deserializeV1(frozen), migrated = deserialize(frozen);
-  assert.equal(migrated.version, 7); assert.equal(migrated.rulesVersion, 'chain-2');
+  assert.equal(migrated.version, 8); assert.equal(migrated.rulesVersion, 'chain-3');
   for (const key of ['seed', 'rng', 'tick', 'nextId', 'accounts', 'ledger', 'goodsLedger', 'goods', 'lastEvent'] as const) assert.deepEqual(migrated[key], old[key]);
   assert.equal(migrated.households.length, old.households.length);
   assert.equal(migrated.migration.legacyHouseholds, 6); assert.equal(migrated.migration.arrivals, 6);

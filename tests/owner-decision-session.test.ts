@@ -181,7 +181,7 @@ test('off blocks manual execution and load/reset never restores auto or changes 
   const old = createLegacy(61025); for (let n = 0; n < 30; n++) stepLegacy(old);
   const imported = deserialize(serializeLegacy(old)), frozen = serialize(imported);
   session.setMode('auto'); session.reset(imported);
-  assert.equal(session.mode, 'proposal'); assert.equal(serialize(imported), frozen); assert.equal(imported.version, 7);
+  assert.equal(session.mode, 'proposal'); assert.equal(serialize(imported), frozen); assert.equal(imported.version, 8);
   assert.equal(Object.hasOwn(imported, 'ownerDecisions'), false); replay(imported, session);
 });
 

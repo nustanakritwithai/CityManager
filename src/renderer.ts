@@ -378,7 +378,7 @@ export class CityView {
   private overlayMaterial(tone: Tone, strength: number) {
     const key = `overlay:${tone}:${strength}`;
     if (this.materials.has(key)) return this.materials.get(key)!;
-    const material = new StandardMaterial(), colour = new Color().fromString({ good: '#3ccf6e', warn: '#f2c14e', bad: '#e5533d' }[tone]);
+    const material = new StandardMaterial(), colour = new Color().fromString({ good: '#3ccf6e', warn: '#f2c14e', bad: '#e5533d', rice: '#f5d35a', vegetables: '#4fd06a', sugarcane: '#59c3ec' }[tone]);
     material.diffuse = new Color(0, 0, 0); material.emissive = colour; material.useLighting = false; material.useFog = false;
     material.opacity = .25 + strength * .45; material.blendType = BLEND_NORMAL; material.depthWrite = false; material.update();
     this.materials.set(key, material); return material;

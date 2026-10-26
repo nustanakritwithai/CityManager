@@ -180,7 +180,9 @@ function decorateFlow(root: ParentNode) {
     const shown = money && Number.isFinite(raw) ? `${Math.round(raw / 100).toLocaleString('th-TH')} ฿` : text.split(/\s/)[0];
     if (strip.children.length) { const arrow = document.createElement('span'); arrow.className = 'flow-arrow'; arrow.textContent = '›'; arrow.setAttribute('aria-hidden', 'true'); strip.append(arrow); }
     const node = document.createElement('div'); node.className = `flow-node${card.classList.contains('money') ? ' money' : ''}`;
-    const num = document.createElement('b'); num.textContent = shown; const cap = document.createElement('small'); cap.textContent = unit ? `${label} (${unit})` : label;
+    // A factory or farm names its own crop and product (data set by the place card).
+    const named = (i === 0 && host.dataset.goodsIn && label === 'พืชผล') ? host.dataset.goodsIn : (i === 2 && host.dataset.goodsOut && label === 'สินค้า') ? host.dataset.goodsOut : label;
+    const num = document.createElement('b'); num.textContent = shown; const cap = document.createElement('small'); cap.textContent = unit ? `${named} (${unit})` : named;
     node.append(iconElement(icon, 'ui-icon flow-icon'), num, cap); strip.append(node); parts.push(`${label} ${text}`);
   });
   strip.setAttribute('aria-label', parts.join(' → '));

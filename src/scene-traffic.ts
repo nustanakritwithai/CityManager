@@ -6,7 +6,8 @@ import { START_HOUR } from './atmosphere.ts';
 
 const CAR_COLOURS = ['#d9534f', '#e8a53a', '#4a90d9', '#58b368', '#e6e6e0', '#8e5ea2'];
 const WALKER_COLOURS = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f', '#9b72aa', '#d9d9d9'];
-const CARGO_COLOURS = ['#e8e0cf', '#8fbf5a']; // goods crates, crop sacks
+// Cargo beds, in traffic-plan CARGO order: rice, vegetables, sugarcane, milled rice, canned food, sugar.
+const CARGO_COLOURS = ['#e9cf6a', '#5fae4e', '#7cc5d9', '#f2ecdc', '#c8573f', '#ffffff'];
 const CELL = 2, LANE = .36, SIDEWALK = .8;
 /** Car following: stop this far behind the vehicle ahead, drive at full pace from SAFE_GAP. */
 const MIN_GAP = .14, SAFE_GAP = .75, ACCEL = 3, WAIT_LIMIT = 3, GHOST = 1.2;

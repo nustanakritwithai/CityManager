@@ -1,6 +1,8 @@
 import './context-panels.css';
 import './building-cards.css';
-import { MONTH, access, departureDay, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
+import { CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
+import { MONTH, access, departureDay, farmCrop, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -118,7 +120,7 @@ function empty(title: string, description: string): HTMLElement {
 function purchaseText(city: City, household: Household): string {
   return household.lastPurchaseTick < 0 ? 'ยังไม่เคยซื้อ' : household.lastPurchaseTick === city.tick ? 'วันนี้' : `${city.tick - household.lastPurchaseTick} วันก่อน`;
 }
-const businessName = (firm: Firm) => firm.zone === 'F' ? 'ฟาร์ม' : isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาดพืชผล' : firm.zone === 'I' ? 'โรงงาน' : 'พาณิชย์ · ร้านค้าสำเร็จรูป';
+const businessName = (firm: Firm) => firm.zone === 'F' ? 'ฟาร์ม' : isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาดพืชผล' : firm.zone === 'I' ? (firm.recipe ? RECIPE_LABELS[firm.recipe] : 'โรงงาน') : 'พาณิชย์ · ร้านค้าสำเร็จรูป';
 /** Members as figures (working, idle, dependents) and the household purse as one coin chip. */
 function householdVisual(household: Household, employed: number, wallet: number, label: string): HTMLElement {
   const row = el('span', 'cx-hh-visual'); row.title = label; row.setAttribute('aria-label', label);
@@ -393,7 +395,9 @@ function cardHero(data: CardData, city: City): HTMLElement {
   const period = el('p', 'bc-period', data.kind === 'house' ? `วันที่ ${data.window.toTick}` : data.window.empty ? `เริ่มต้น · วันที่ ${data.window.toTick}` : `วันที่ ${data.window.fromTick}–${data.window.toTick}`);
   period.title = data.kind === 'house' ? 'สถานะที่พัก ณ วันนี้' : 'ยอดเงินสดในช่วงนี้ รวมวันต้นและปลาย'; period.prepend(iconElement('clock', 'ui-icon bc-period-icon'));
   Object.assign(period.dataset, { fromTick: String(data.window.fromTick), toTick: String(data.window.toTick), inclusive: String(data.window.inclusive), empty: String(data.window.empty) });
-  copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), period); hero.append(icon, copy);
+  const firm = data.kind === 'household' ? undefined : city.firms.find(f => f.id === data.identity.firmId);
+  const goods = firm ? [el('div', 'bc-goods', `${firmGoodsName(city, firm)} · ${firmGoodsLine(city, firm)}`)] : [];
+  copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), ...goods, period); hero.append(icon, copy);
   const cell = data.kind === 'household' ? null : city.buildings.find(b => b.id === data.identity.buildingId)?.cell;
   if (cell != null) {
     const issue = buildingIssues(city).find(i => i.cell === cell), badge = el('span', `bc-status-badge ${issue ? 'bad' : 'good'}`, issue ? issue.text : 'ไม่พบปัญหา');
@@ -594,7 +598,7 @@ export function renderContext(city: City, selection: ContextSelection, onHouseho
   queuedRequest = null; renderedCity = city; renderedScope = scope; renderedRevision = revision;
   if (latestCity && latestCity !== city) { activityLimits.clear(); expandedActivity.clear(); expandedFacts.clear(); } latestCity = city;
   const focused = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement.dataset.contextFocus : undefined;
-  delete host.dataset.wallet; delete host.dataset.buildingId; delete host.dataset.cell; delete host.dataset.entityId; delete host.dataset.cardKind;
+  delete host.dataset.wallet; delete host.dataset.buildingId; delete host.dataset.cell; delete host.dataset.entityId; delete host.dataset.cardKind; delete host.dataset.goodsIn; delete host.dataset.goodsOut;
   if (selection === null) { host.dataset.scope = 'none'; host.replaceChildren(); return; }
   host.dataset.scope = selection.kind;
   if (selection.kind === 'household') {
@@ -607,6 +611,10 @@ export function renderContext(city: City, selection: ContextSelection, onHouseho
     if (place.building.zone === 'R') {
       const data = buildingCardData(city, place.building.id), nodes = renderHouse(city, place.building, place.households, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
     } else if (place.firm) {
+      // The flow strip names this firm's own crop and product instead of generic "crops/goods".
+      const recipe = place.firm.recipe ? RECIPE[place.firm.recipe] : null;
+      if (recipe) Object.assign(host.dataset, { goodsIn: CROP_LABELS[recipe.crop], goodsOut: PRODUCT_LABELS[recipe.product] });
+      else if (place.firm.zone === 'F') host.dataset.goodsIn = CROP_LABELS[farmCrop(city, place.firm)];
       host.dataset.wallet = place.firm.wallet; const data = buildingCardData(city, place.building.id), nodes = renderFirm(city, place.building, place.firm, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
     }
     else host.replaceChildren(empty('ไม่พบข้อมูลบริษัท', 'อาคารนี้ไม่มีบริษัทที่อ้างอิงอยู่ในข้อมูลเมืองปัจจุบัน'));

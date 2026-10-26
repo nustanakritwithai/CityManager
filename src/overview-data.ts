@@ -2,7 +2,8 @@
  * Read-only projections for the city overview dashboard. Every number is derived from
  * the money, goods and crop journals the simulator already records; nothing is mutated.
  */
-import { MONTH, isMarket, type City } from './sim.ts';
+import { RECIPE, RECIPES, type CropId, type ProductId, type RecipeId } from './goods.ts';
+import { MONTH, farmCrop, isMarket, type City } from './sim.ts';
 
 export type TreasuryPoint = { tick: number; balance: number };
 /** End-of-day treasury balances for the last `days` days, rebuilt backwards from today. */
@@ -63,12 +64,13 @@ export const CHAIN_ROUTES: readonly Omit<ChainFlow, 'quantity'>[] = Object.freez
 /** Crop and goods movements between kinds of establishments over the last 30 days. */
 export function supplyChain(city: City, days = MONTH): SupplyChain {
   const fromTick = Math.max(0, city.tick - days + 1), inWindow = (tick: number) => tick >= fromTick && tick <= city.tick;
-  const kindOf = (wallet: string): ChainNode | null => {
+  // A shop converted from a market was still a market for the crops it traded up to that day.
+  const kindOf = (wallet: string, tick = city.tick): ChainNode | null => {
     if (wallet === 'outside') return 'outside';
     if (wallet.startsWith('household:')) return 'household';
     const firm = city.firms.find(f => f.wallet === wallet);
     if (!firm) return null;
-    return firm.zone === 'F' ? 'farm' : firm.zone === 'I' ? 'factory' : isMarket(firm) ? 'market' : 'shop';
+    return firm.zone === 'F' ? 'farm' : firm.zone === 'I' ? 'factory' : isMarket(firm) || firm.convertedAt !== undefined && tick <= firm.convertedAt ? 'market' : 'shop';
   };
   const totals = new Map<string, number>(), bump = (from: ChainNode | null, to: ChainNode | null, commodity: ChainFlow['commodity'], quantity: number) => {
     if (!from || !to) return; const key = `${from}>${to}>${commodity}`; totals.set(key, (totals.get(key) ?? 0) + quantity);
@@ -78,13 +80,32 @@ export function supplyChain(city: City, days = MONTH): SupplyChain {
     if (!inWindow(e.tick)) continue;
     if (e.kind === 'harvest') harvested += e.quantity;
     else if (e.kind === 'process') { processed += e.quantity; produced += e.outputQuantity; }
-    else if (e.kind === 'trade' || e.kind === 'consumption') bump(kindOf(e.from), kindOf(e.to), 'crops', e.quantity);
+    else if (e.kind === 'trade' || e.kind === 'consumption') bump(kindOf(e.from, e.tick), kindOf(e.to, e.tick), 'crops', e.quantity);
   }
   for (const e of city.goodsLedger) {
     if (!inWindow(e.tick)) continue;
     if (e.reason === 'Wholesale stock delivery' || e.reason === 'Imported shop stock' || e.reason === 'Household final consumption' || e.reason === 'Exported goods') bump(kindOf(e.from), kindOf(e.to), 'goods', e.quantity);
   }
   return { flows: CHAIN_ROUTES.map(route => ({ ...route, quantity: totals.get(`${route.from}>${route.to}>${route.commodity}`) ?? 0 })), harvested, processed, produced, window: { fromTick, toTick: city.tick } };
+}
+
+export type GoodsLine = { recipe: RecipeId; crop: CropId; product: ProductId; harvested: number; freshSold: number; produced: number; sold: number; imported: number; exportedCrops: number; farms: number; factories: number };
+/** Per farm-to-table line over the last 30 days: what was grown, made and sold, from the typed journals. */
+export function goodsLines(city: City, days = MONTH): GoodsLine[] {
+  const since = city.tick - days;
+  return RECIPES.map(recipe => {
+    const { crop, product } = RECIPE[recipe], line: GoodsLine = { recipe, crop, product, harvested: 0, freshSold: 0, produced: 0, sold: 0, imported: 0, exportedCrops: 0,
+      farms: city.firms.filter(f => f.zone === 'F' && farmCrop(city, f) === crop).length, factories: city.firms.filter(f => f.recipe === recipe).length };
+    for (let i = city.cropLedger.length - 1; i >= 0 && city.cropLedger[i].tick > since; i--) {
+      const e = city.cropLedger[i]; if (e.crop !== crop) continue;
+      if (e.kind === 'harvest') line.harvested += e.quantity; else if (e.kind === 'consumption') line.freshSold += e.quantity; else if (e.kind === 'export') line.exportedCrops += e.quantity;
+    }
+    for (let i = city.goodsLedger.length - 1; i >= 0 && city.goodsLedger[i].tick > since; i--) {
+      const e = city.goodsLedger[i]; if (e.product !== product) continue;
+      if (e.from === 'production') line.produced += e.quantity; else if (e.reason === 'Household final consumption') line.sold += e.quantity; else if (e.reason === 'Imported shop stock') line.imported += e.quantity;
+    }
+    return line;
+  });
 }
 
 /** The simulator checks industry expansion in this order; everything before the failing code passed. */

@@ -155,6 +155,9 @@ html[data-touch-ui=true] .atmosphere-menu {
 .map-legend-item.good::before { background: #3ccf6e; }
 .map-legend-item.warn::before { background: #f2c14e; }
 .map-legend-item.bad::before { background: #e5533d; }
+.map-legend-item.rice::before { background: #f5d35a; }
+.map-legend-item.vegetables::before { background: #4fd06a; }
+.map-legend-item.sugarcane::before { background: #59c3ec; }
 
 /* City summary strip: read-only and never intercepts map input. */
 .city-kpis {
