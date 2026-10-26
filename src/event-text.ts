@@ -2,6 +2,7 @@
  * Thai text for the simulator's English action results and `lastEvent` strings.
  * Presentation only: the simulator keeps its messages; unknown text is shown unchanged.
  */
+import { CROP_LABELS, RECIPE_LABELS, type CropId, type RecipeId } from './goods.ts';
 const ZONES: Record<string, string> = { R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' };
 const zone = (z: string) => ZONES[z] ?? z;
 
@@ -25,7 +26,7 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Closure needs enough cash to settle earned wages and current profit tax/, () => 'ปิดกิจการไม่ได้ เงินไม่พอจ่ายค่าจ้างและภาษีที่ค้าง ยังไม่เสียค่ารื้อ'],
   [/^Crop disposal could not be journaled/, () => 'บันทึกการตัดพืชผลไม่ได้ กิจการและเมืองยังคงเดิม'],
   [/^Parcel cleared\./, () => 'รื้อแล้ว อาคารที่ขาดถนนเชื่อมจะหยุดรับคน ค้าขาย และเติบโต'],
-  [/^([RCIF]) building #(\d+) grew:/, m => `${zone(m[1])} #${m[2]} สร้างเสร็จ ผ่านเงื่อนไขถนน น้ำไฟ ความต้องการ และค่าเช่า`],
+  [/^([RCIF]) building #(\d+) grew:.*?(?:Recipe: ([a-z-]+)\.|Crop: ([a-z]+)\.)?$/, m => `${m[3] ? RECIPE_LABELS[m[3] as RecipeId] ?? zone(m[1]) : m[4] ? `ฟาร์ม${CROP_LABELS[m[4] as CropId] ?? ''}` : zone(m[1])} #${m[2]} สร้างเสร็จ ผ่านเงื่อนไขถนน น้ำไฟ ความต้องการ และค่าเช่า`],
   [/^Household #(\d+) arrived with (\d+) members and (\d+) workforce;(.*)$/, m => `ครัวเรือน #${m[1]} ย้ายเข้า ${m[2]} คน แรงงาน ${m[3]} คน${/bootstrap/.test(m[4]) ? ' (สิทธิเริ่มเมือง)' : ''}`],
   [/^Market #(\d+) became a shop:/, m => `ตลาด #${m[1]} ยกระดับเป็นร้านค้าแล้ว เจ้าของจ่ายค่าปรับปรุงจากกำไรของแผงเองและยังยืนร้านต่อ`],
   [/^Empty map: only the outside gateway exists\./, () => 'แผนที่ว่าง มีแค่ประตูเมือง · ต่อถนนจากประตูก่อน แล้ววางโซนข้างถนน'],

@@ -3,7 +3,9 @@ import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingTy
 import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
 import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, type ResourceMap } from './agriculture.ts';
+import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
+import { validateTypes } from './goods-validation.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
@@ -17,12 +19,18 @@ export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; le
 export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
-export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; commercialKind?: 'market' | 'retail'; convertedAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
-export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string };
+export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
+/** `crop` names the lots moved (every kind but a write-off); a write-off carries the whole `mix`. Untyped only before `typeBaseline.tick`. */
+export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
-export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string };
+export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string; product?: ProductId };
+/**
+ * Typed stock at the moment typing began, and how many crop and goods journal entries came before
+ * it (those stay untyped). A fresh city starts empty; a migrated v7 city records its stock on load.
+ */
+export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = {
-  version: 7; rulesVersion: 'chain-2'; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number; departures?: number }; employment: EmploymentAllocation[];
+  version: 8; rulesVersion: 'chain-3'; typeBaseline: TypeBaseline; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number; departures?: number }; employment: EmploymentAllocation[];
   ownerLabor: OwnerLabor[]; resources: ResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number; exported?: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
   seed: number; rng: number; tick: number; nextId: number;
   cells: Cell[]; buildings: Building[]; households: Household[]; firms: Firm[];
@@ -192,8 +200,33 @@ function transfer(c: City, from: string, to: string, amount: number, reason: str
   }
   return paid;
 }
-function goodsTransfer(c: City, from: string, to: string, quantity: number, reason: string) {
-  if (quantity > 0) c.goodsLedger.push({ tick: c.tick, from, to, quantity, reason });
+function goodsTransfer(c: City, from: string, to: string, quantity: number, reason: string, product: ProductId) {
+  if (quantity > 0) c.goodsLedger.push({ tick: c.tick, from, to, quantity, reason, product });
+}
+/** Move finished goods between firm shelves, keeping each firm's product mix with its total. */
+function moveProduct(c: City, from: Firm | null, to: Firm | null, product: ProductId, quantity: number) {
+  if (from) { from.products[product] -= quantity; from.inventory -= quantity; }
+  if (to) { to.products[product] += quantity; to.inventory += quantity; }
+}
+/** The crop a farm grows: set by its parcel's fertility band. */
+export function farmCrop(c: City, f: Pick<Firm, 'building'>): CropId {
+  return cropForFertility(c.resources.fertility[building(c, f.building).cell]) ?? 'rice';
+}
+/** Lots a day a new four-worker factory needs. */
+const NEW_FACTORY_LOTS = 8;
+/**
+ * The recipe for a new factory. Spare supply is each crop's farm harvest at full staffing minus
+ * what factories already running its recipe use. Among crops that can feed a new factory, the
+ * product the fewest factories make wins (the city's shelves get variety), then the larger
+ * surplus; with no crop to spare, the largest surplus; ties and an empty map go to the rice mill.
+ */
+export function chooseRecipe(c: City, factories: readonly Firm[] = c.firms.filter(f => f.zone === 'I' && f.recipe)): RecipeId {
+  const spare = emptyCrops(), making = emptyCrops();
+  for (const f of c.firms) if (f.zone === 'F' && access(c, building(c, f.building).cell)) spare[farmCrop(c, f)] += Math.floor(24 * c.resources.fertility[building(c, f.building).cell] / 100) * building(c, f.building).level;
+  for (const f of factories) if (f.recipe) { spare[RECIPE[f.recipe].crop] -= capacity(building(c, f.building)) * 2; making[RECIPE[f.recipe].crop]++; }
+  const order = (a: CropId, b: CropId) => spare[b] - spare[a] || CROPS.indexOf(a) - CROPS.indexOf(b);
+  const fed = CROPS.filter(k => spare[k] >= NEW_FACTORY_LOTS).sort((a, b) => making[a] - making[b] || order(a, b));
+  return recipeForCrop(fed[0] ?? [...CROPS].sort(order)[0]);
 }
 
 export function connectedRoads(c: City): Set<number> {
@@ -273,7 +306,7 @@ export function bulldoze(c: City, i: number): Result {
         f.owner.withdrawn += transfer(c, f.wallet, h.wallet, balance(c, f.wallet), 'Closing owner profit distribution');
       } else if (f.fundedBy) transfer(c, f.wallet, `firm:${f.fundedBy.firmId}`, balance(c, f.wallet), `Industry expansion residual return #${f.id}`);
       else transfer(c, f.wallet, 'outside', balance(c, f.wallet), 'Firm liquidation');
-      goodsTransfer(c, f.wallet, 'outside', f.inventory, 'Demolition stock write-off to outside'); c.goods.exported += f.inventory;
+      for (const product of PRODUCTS) { const n = f.products[product]; goodsTransfer(c, f.wallet, 'outside', n, 'Demolition stock write-off to outside', product); moveProduct(c, f, null, product, n); c.goods.exported += n; }
       c.employment = c.employment.filter(e => e.firmId !== f.id);
       c.ownerLabor = c.ownerLabor.filter(e => e.firmId !== f.id);
     }
@@ -379,7 +412,7 @@ function createBuilding(c: City, i: number, shop = false) {
     transfer(c, 'outside', 'construction', 40_000, 'Outside residential developer investment');
   } else {
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: id, zone, ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
+    c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: 60_000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
     const paidCapital = transfer(c, sponsor ? sponsor.wallet : owner ? owner.wallet : 'outside', wallet, owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL, sponsor ? `Industry expansion capital #${fid}` : owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : retail ? 'Outside firm equity investment' : industry?.outside ? `Outside industry equity #${fid}` : `Outside industry bootstrap equity #${fid}`);
@@ -387,7 +420,8 @@ function createBuilding(c: City, i: number, shop = false) {
     transfer(c, wallet, 'construction', owner ? 10_000 : 40_000, owner ? retail ? 'Self-employed shop construction' : 'Self-employed market construction' : 'Firm building investment');
     if (owner) reserveOwnerLabor(c);
   }
-  c.lastEvent = `${zone} building #${id} grew: road + utilities + demand + viable expected rent. Initial investment is recorded in the ledger.`;
+  const made = c.firms.find(f => f.building === id), goods = zone === 'I' && made?.recipe ? ` Recipe: ${made.recipe}.` : zone === 'F' ? ` Crop: ${farmCrop(c, { building: id })}.` : '';
+  c.lastEvent = `${zone} building #${id} grew: road + utilities + demand + viable expected rent. Initial investment is recorded in the ledger.${goods}`;
 }
 function employ(c: City) {
   reserveOwnerLabor(c);
@@ -408,7 +442,7 @@ function agricultureHooks(c: City) {
   const roads = connectedRoads(c);
   return { connected: (cell: number) => validIndex(cell) && neighbors(cell).some(n => roads.has(n)), workers: (f: Firm) => firmWorkerCount(c, f.id),
     spendable: (f: Firm) => spendable(c, f), transfer: (from: string, to: string, amount: number, reason: string, book = false) => transfer(c, from, to, amount, reason, book),
-    goodsTransfer: (from: string, to: string, quantity: number, reason: string) => goodsTransfer(c, from, to, quantity, reason) };
+    goodsTransfer: (from: string, to: string, quantity: number, reason: string, product: ProductId) => goodsTransfer(c, from, to, quantity, reason, product) };
 }
 export function economicSignals(c: City) {
   const hooks = agricultureHooks(c);
@@ -417,18 +451,22 @@ export function economicSignals(c: City) {
 function trade(c: City) {
   const active = c.firms.filter(f => access(c, building(c, f.building).cell));
   const hooks = agricultureHooks(c), sellable = runAgriculture(c, hooks);
+  // Shops stock every product the city makes, an even share of the shelf each, local wholesale first.
+  const made = PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && RECIPE[f.recipe].product === p));
   for (const shop of active.filter(f => isRetail(f) && firmWorkerCount(c, f.id) > 0)) {
-    const target = Math.min(24, Math.max(4, c.households.length * 2));
-    for (const producer of active.filter(f => f.zone === 'I')) {
-      const qty = Math.min(producer.inventory, target - shop.inventory, Math.floor(spendable(c, shop) / 300));
-      if (qty <= 0) continue;
-      transfer(c, shop.wallet, producer.wallet, qty * 300, 'Local wholesale goods', true);
-      shop.inventory += qty; producer.inventory -= qty; goodsTransfer(c, producer.wallet, shop.wallet, qty, 'Wholesale stock delivery');
-    }
-    const imported = Math.min(target - shop.inventory, Math.floor(spendable(c, shop) / 450));
-    if (imported > 0) {
-      transfer(c, shop.wallet, 'outside', imported * 450, 'Outside goods import', true);
-      shop.inventory += imported; c.goods.imported += imported; goodsTransfer(c, 'outside', shop.wallet, imported, 'Imported shop stock');
+    const target = Math.min(24, Math.max(4, c.households.length * 2)), share = Math.ceil(target / Math.max(1, made.length));
+    for (const product of made) {
+      for (const producer of active.filter(f => f.zone === 'I' && f.recipe && RECIPE[f.recipe].product === product)) {
+        const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 300));
+        if (qty <= 0) continue;
+        transfer(c, shop.wallet, producer.wallet, qty * 300, 'Local wholesale goods', true);
+        moveProduct(c, producer, shop, product, qty); goodsTransfer(c, producer.wallet, shop.wallet, qty, 'Wholesale stock delivery', product);
+      }
+      const imported = Math.min(share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 450));
+      if (imported > 0) {
+        transfer(c, shop.wallet, 'outside', imported * 450, 'Outside goods import', true);
+        moveProduct(c, null, shop, product, imported); c.goods.imported += imported; goodsTransfer(c, 'outside', shop.wallet, imported, 'Imported shop stock', product);
+      }
     }
   }
   for (const h of c.households) {
@@ -438,15 +476,20 @@ function trade(c: City) {
     const shop = shops.length ? shops[Math.floor(random(c) * shops.length)] : null;
     if (shop && isMarket(shop)) consumeMarketCrop(c, h, shop, sellable, hooks);
     else if (shop) {
+      // Today's basket: the household's first preference that is on this shelf.
+      const product = productPreference(h.id, c.tick).find(p => shop.products[p] > 0)!;
       transfer(c, h.wallet, shop.wallet, 800, `Household #${h.id} purchase`, true);
-      shop.inventory--; c.goods.consumed++; h.lastPurchaseTick = c.tick; h.needs = 0;
-      goodsTransfer(c, shop.wallet, h.wallet, 1, 'Household final consumption');
+      moveProduct(c, shop, null, product, 1); c.goods.consumed++; h.lastPurchaseTick = c.tick; h.needs = 0;
+      goodsTransfer(c, shop.wallet, h.wallet, 1, 'Household final consumption', product);
     }
   }
   for (const f of active.filter(f => f.zone === 'I' && firmWorkerCount(c, f.id) > 0)) {
-    const exported = Math.min(f.inventory, firmWorkerCount(c, f.id) * 8);
-    transfer(c, 'outside', f.wallet, exported * 350, 'Outside market goods export', true);
-    f.inventory -= exported; c.goods.exported += exported; goodsTransfer(c, f.wallet, 'outside', exported, 'Exported goods');
+    const exported = takeLargest(f.products, PRODUCTS, Math.min(f.inventory, firmWorkerCount(c, f.id) * 8));
+    for (const product of PRODUCTS) {
+      const n = exported[product]; if (!n) continue;
+      transfer(c, 'outside', f.wallet, n * 350, 'Outside market goods export', true);
+      moveProduct(c, f, null, product, n); c.goods.exported += n; goodsTransfer(c, f.wallet, 'outside', n, 'Exported goods', product);
+    }
   }
 }
 function payWages(c: City, f: Firm, onlyWallet?: string) {
@@ -657,7 +700,7 @@ export function step(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { version: 7, rulesVersion: 'chain-2', growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { version: 8, rulesVersion: 'chain-3', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -689,12 +732,34 @@ export function serialize(c: City): string {
 /** Original commercial state is validated first; no operating state or history is rewritten. */
 /** v6 state is already valid v7 state (every v6 farm and shop rule still holds); only the stamp changes. */
 function migrateV6(old: CityV6): City {
-  return { ...old, version: 7, rulesVersion: 'chain-2' } as City;
+  return { ...old, version: 7, rulesVersion: 'chain-2' } as unknown as City;
 }
-function validateV7(c: City): City {
-  const fail = (): never => { throw new Error('Unsupported or corrupt CityManager save (expected version 7 / chain-2).'); };
+/**
+ * v7 (chain-2) had one crop and one generic product. Typing starts now: farms hold their land's
+ * crop, factories get recipes in ID order as if each had just opened, markets' lots count as the
+ * first farm's crop and shop shelves as the first factory's product. This stock is recorded as
+ * the type baseline; no history is rewritten.
+ */
+function migrateV7(old: City): City {
+  const c = { ...old, version: 8, rulesVersion: 'chain-3', typeBaseline: { tick: old.tick, cropEntries: old.cropLedger.length, goodsEntries: old.goodsLedger.length, crops: {}, products: {} } } as City;
+  const byId = [...c.firms].sort((a, b) => a.id - b.id), assigned: Firm[] = [];
+  for (const f of byId) { f.crops = emptyCrops(); f.products = emptyProducts(); delete f.recipe; }
+  for (const f of byId.filter(f => f.zone === 'I')) { f.recipe = chooseRecipe(c, assigned); assigned.push(f); }
+  const firstFarm = byId.find(f => f.zone === 'F'), firstFactory = byId.find(f => f.zone === 'I');
+  for (const f of byId) {
+    const crop: CropId = f.zone === 'F' ? farmCrop(c, f) : f.zone === 'I' ? RECIPE[f.recipe!].crop : firstFarm ? farmCrop(c, firstFarm) : 'rice';
+    const product: ProductId = f.zone === 'I' ? RECIPE[f.recipe!].product : firstFactory ? RECIPE[firstFactory.recipe!].product : 'milled-rice';
+    f.crops[crop] = f.cropInventory; f.products[product] = f.inventory;
+    if (f.cropInventory) c.typeBaseline.crops[f.wallet] = { ...f.crops };
+    if (f.inventory) c.typeBaseline.products[f.wallet] = { ...f.products };
+  }
+  return c;
+}
+/** Every rule of a chain-2 (v7) save; a chain-3 (v8) save also has to reconcile its typed stock. */
+function validateV7(c: City, typed = false): City {
+  const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${typed ? '8 / chain-3' : '7 / chain-2'}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
-  if (!c || c.version !== 7 || c.rulesVersion !== 'chain-2' || !int(c.growthStartTick) || c.growthStartTick > c.tick || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
+  if (!c || (c.version as number) !== (typed ? 8 : 7) || (c.rulesVersion as string) !== (typed ? 'chain-3' : 'chain-2') || !int(c.growthStartTick) || c.growthStartTick > c.tick || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
   if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > 192 || !Array.isArray(c.households) || c.households.length > 128 || !Array.isArray(c.firms) || c.firms.length > 64) fail();
   if (!c.migration || !int(c.migration.arrivals) || !int(c.migration.legacyHouseholds) || !Array.isArray(c.employment) || c.employment.length > 256) fail();
   if (!Array.isArray(c.ownerLabor) || c.ownerLabor.length > 64 || c.ownerLabor.some(e => !e || !int(e.householdId, 1) || !int(e.firmId, 1) || e.workers !== 1 || !['general', 'retail'].includes(e.skill)) || !Array.isArray(c.cropLedger) || !c.crops || !['harvested', 'processed', 'consumed', 'writtenOff'].every(k => int(c.crops[k as keyof typeof c.crops])) || !int(c.agricultureStartTick) || c.agricultureStartTick > c.tick || !isCanonicalResourceMap(c.resources, c.seed)) fail();
@@ -835,6 +900,7 @@ function validateV7(c: City): City {
   for (const e of c.ledger) { reconciled[e.from] -= e.amount; reconciled[e.to] += e.amount; }
   if (Object.entries(c.accounts).some(([key, value]) => reconciled[key] !== value)) fail();
   validateAgriculture(c);
+  if (typed) validateTypes(c);
   return c;
 }
 
@@ -844,6 +910,9 @@ export function deserialize(json: string): City {
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
-  if (parsed && typeof parsed === 'object' && [1, 2, 3, 4, 5, 6].includes((parsed as { version: number }).version)) return validateV7(migrateV6(deserializeV6(json)));
-  return validateV7(parsed as City);
+  const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (typeof version === 'number' && [1, 2, 3, 4, 5, 6].includes(version)) return validateV7(migrateV7(validateV7(migrateV6(deserializeV6(json)))), true);
+  // A 1.x (chain-2) save is validated by its own rules, then typed.
+  if (version === 7) return validateV7(migrateV7(validateV7(parsed as City)), true);
+  return validateV7(parsed as City, true);
 }

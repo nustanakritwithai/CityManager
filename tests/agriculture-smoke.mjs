@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { isMarket, isRetail, createCity, step, serialize, deserialize, zoneCell, bulldoze, buildRoad, access, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, housingCapacity, firmCapacity, firmRent, contributeOwnerCapital, withdrawOwnerProfit, industryGrowthStatus, summary, WAGES, MONTH } from '../src/sim.ts';
+import { untyped } from './untyped.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createCity as createCityV5, step as stepV5, serialize as serializeV5, summary as summaryV5 } from '../src/legacy-v5.ts';
 const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
@@ -15,7 +16,7 @@ const hash=raw=>createHash('sha256').update(raw).digest('hex');
 const oldRaw=await readFile(new URL('./fixtures/legacy-v3-day180.json',import.meta.url),'utf8'),old=JSON.parse(oldRaw);
 assert.equal(hash(oldRaw),'59518ff5b7d2a7c7de52ef8cb8362ed387f91df67ffc09934c93e97f3a556693');
 const imported=deserialize(oldRaw),importedRaw=serialize(imported);
-assert.equal(imported.version, 7);assert.equal(imported.rulesVersion,'chain-2');
+assert.equal(imported.version, 8);assert.equal(imported.rulesVersion,'chain-3');
 for(const key of ['seed','rng','tick','nextId','accounts','ledger','goods','goodsLedger','households','employment','cells'])assert.deepEqual(imported[key],old[key],'Strict v3 import preserves '+key);
 for(const b of imported.buildings){const prior=old.buildings.find(p=>p.id===b.id);assert.deepEqual(b,{...prior,level:prior.level+(prior.zone==='C'?1:0)});}
 assert.deepEqual(imported.cropLedger,[]);assert.deepEqual(imported.ownerLabor,[]);
@@ -26,7 +27,7 @@ const legacyAgriculture=createCityV4(61025);for(let day=0;day<29;day++)stepV4(le
 const legacyV4Raw=serializeV4(legacyAgriculture),legacyV4Imported=deserialize(legacyV4Raw);
 for(const key of ['seed','rng','tick','nextId','accounts','ledger','goods','goodsLedger','households','employment','ownerLabor','resources','crops','cropLedger','agricultureStartTick'])assert.deepEqual(legacyV4Imported[key],legacyAgriculture[key],'Strict v4 import preserves '+key);
 for(const b of legacyAgriculture.buildings){const current=legacyV4Imported.buildings.find(item=>item.id===b.id);assert.deepEqual(current,{...b,zone:b.zone==='T'?'C':b.zone,level:b.level+(b.zone==='C'?1:0)});}
-for(const f of legacyAgriculture.firms){const current=legacyV4Imported.firms.find(item=>item.id===f.id);assert.deepEqual(current,{...f,zone:f.zone==='T'?'C':f.zone,...(f.zone==='T'||f.zone==='C'?{commercialKind:f.zone==='T'?'market':'retail'}:{})});}
+for(const f of legacyAgriculture.firms){const {crops,products,recipe,...current}=legacyV4Imported.firms.find(item=>item.id===f.id);assert.equal(Object.values(crops).reduce((a,b)=>a+b,0),current.cropInventory);assert.equal(Object.values(products).reduce((a,b)=>a+b,0),current.inventory);assert.equal(recipe!==undefined,f.zone==='I');assert.deepEqual(current,{...f,zone:f.zone==='T'?'C':f.zone,...(f.zone==='T'||f.zone==='C'?{commercialKind:f.zone==='T'?'market':'retail'}:{})});}
 for(const [i,cell] of legacyAgriculture.cells.entries())assert.deepEqual(legacyV4Imported.cells[i],{...cell,zone:cell.zone==='T'?'C':cell.zone});
 assert.deepEqual(deserialize(serialize(legacyV4Imported)),legacyV4Imported,'Repeated v6 loading does not re-increment commercial levels or duplicate entities');
 const fresh=deserialize(legacyV4Raw),resources=JSON.parse(JSON.stringify(fresh.resources));
@@ -66,7 +67,7 @@ for(let day=1;day<=388;day++){stepV5(oldGrowth);if(day===120)growthEarlyRaw=seri
 const oldGrowthRaw=serializeV5(oldGrowth),oldGrowthSummary=summaryV5(oldGrowth),growthStart=deserialize(oldGrowthRaw),growthEarly=deserialize(growthEarlyRaw);
 assert.equal(oldGrowth.version,5);assert.equal(oldGrowth.rulesVersion,'commercial-1');
 assert.equal(oldGrowthSummary.population,10);assert.equal(oldGrowthSummary.households,6);assert.equal(oldGrowthSummary.jobs,8);assert.equal(oldGrowthSummary.employed,8);assert.equal(oldGrowthSummary.homeSlots,12);
-const withoutGrowthMetadata=city=>{const{version,rulesVersion,growthStartTick,...preserved}=city;return preserved;};
+const withoutGrowthMetadata=city=>{const{version,rulesVersion,growthStartTick,...preserved}=untyped(JSON.stringify(city));return preserved;};
 assert.deepEqual(withoutGrowthMetadata(growthStart),withoutGrowthMetadata(oldGrowth));assert.equal(growthStart.growthStartTick,388);
 assert.ok(industryGrowthStatus(growthEarly).availableCapital<industryGrowthStatus(growthEarly).requiredCapital);
 const growthReplay=deserialize(serialize(growthStart)),growthSteps=[];let growthBefore,growthBorn,growthFinal,growthFirmId;

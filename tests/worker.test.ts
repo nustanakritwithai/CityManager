@@ -15,11 +15,11 @@ test('actual published v2 import preserves every economic and temporal field, jo
  assert.equal(createHash('sha256').update(raw180).digest('hex'),'0c33c983c1e71063496f4a95b935c22647b972c0084d2ce98449b7e7b8c13475');
  for(const raw of [raw65,raw180]){
   const old=deserializeV2(raw),c=deserialize(raw);
-  assert.equal(c.version,7);assert.equal(c.rulesVersion,'chain-2');
+  assert.equal(c.version,8);assert.equal(c.rulesVersion,'chain-3');
   for(const key of ['seed','rng','tick','nextId','migration','accounts','ledger','goodsLedger','goods','cells','lastEvent'] as const)assert.deepEqual(c[key],old[key]);
   assert.deepEqual(c.buildings,old.buildings.map(b=>({...b,level:b.zone==='C'?b.level+1:b.level})));
   for(const b of c.buildings.filter(b=>b.zone==='C')) assert.equal(firmCapacity(b),old.buildings.find(previous=>previous.id===b.id)!.level,'Commercial level renumbering preserves the actual old worker capacity');
-  assert.deepEqual(c.firms.map(({cropInventory,cropCost,productionTick,owner,commercialKind,...preserved})=>{assert.equal(commercialKind,preserved.zone==='C'?'retail':undefined);assert.equal(cropInventory,0);assert.equal(cropCost,0);assert.equal(productionTick,old.tick);assert.equal(owner,null);return preserved;}),old.firms);
+  assert.deepEqual(c.firms.map(({cropInventory,cropCost,productionTick,owner,commercialKind,crops:_crops,products:_products,recipe:_recipe,...preserved})=>{assert.equal(commercialKind,preserved.zone==='C'?'retail':undefined);assert.equal(cropInventory,0);assert.equal(cropCost,0);assert.equal(productionTick,old.tick);assert.equal(owner,null);return preserved;}),old.firms);
   assert.equal(c.agricultureStartTick,old.tick);assert.deepEqual(c.cropLedger,[]);assert.deepEqual(c.crops,{harvested:0,processed:0,consumed:0,writtenOff:0});assert.deepEqual(c.ownerLabor,[]);
   for(const h of c.households){const previous=old.households.find(p=>p.id===h.id)!;const {workerSkills,skillSource,...preserved}=h;assert.deepEqual(preserved,previous);assert.deepEqual(workerSkills,{general:h.workforce,manufacturing:0,retail:0});assert.equal(skillSource,'legacy-assumed');}
   assert.deepEqual(c.employment.map(({skill,...e})=>{assert.equal(skill,'general');return e;}),old.employment);

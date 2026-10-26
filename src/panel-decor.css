@@ -163,3 +163,7 @@ html[data-touch-ui=true] #inspector[data-sheet=full] { max-height: calc(100dvh -
 .cancel-button small { color: #a2b0cf; }
 .map-issue svg { width: 72%; height: 72%; display: block; }
 #growth-summary .demand-spark { display: block; width: 100%; height: calc(16 * var(--reader-unit, 1px)); margin-top: calc(2 * var(--reader-unit, 1px)); opacity: .85; }
+/* What this business grows, makes or stocks, e.g. "โรงสีข้าว · ข้าว 12 → ข้าวสาร 40". */
+#entity-content[data-card-kind] .bc-goods { color: var(--c-accent, #f5c451); font-size: calc(13 * var(--reader-unit, 1px)); font-weight: 700; line-height: 1.4; }
+/* A short landscape phone keeps the identity and key metrics on the first screen; the goods still show in the flow strip. */
+@media (max-height: 500px) { #entity-content[data-card-kind] .bc-goods { display: none; } }

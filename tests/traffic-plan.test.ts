@@ -58,7 +58,7 @@ test('trucks follow real delivery routes of the last full week and keep their ke
     if (delivered) withDeliveries++;
     assert.ok(keys.every(k => !k.includes(String(c.tick))), 'truck keys carry the route, not the day');
     assert.equal(new Set(keys).size, keys.length); assert.ok(plan.trucks.length <= MAX_TRUCKS);
-    assert.ok(plan.trucks.every(t => t.colour === 0 || t.colour === 1), 'cargo is goods or crops');
+    assert.ok(plan.trucks.every(t => t.colour >= 0 && t.colour < 6), 'cargo is one of the three crops or three products');
     if (previous.length && deliveryWeek(c.tick)[0] === deliveryWeek(c.tick - 1)[0]) assert.deepEqual(keys, previous, 'the fleet only changes when a new week starts');
     if (previous.length) { compared += previous.length; kept += previous.filter(k => keys.includes(k)).length; }
     previous = keys;

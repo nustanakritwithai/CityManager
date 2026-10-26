@@ -4,9 +4,11 @@
  */
 import { access, connectedRoads, economicSignals, explainCell, firmWorkerCount, homeOccupancy, housingCapacity, isRetail, type City } from './sim.ts';
 import { FERTILITY_THRESHOLD } from './agriculture.ts';
+import { CROP_BANDS, CROP_LABELS, cropForFertility, type CropId } from './goods.ts';
 
 export type OverlayMode = 'fertility' | 'roads' | 'growth' | 'housing';
-export type Tone = 'good' | 'warn' | 'bad';
+/** Status tones, plus one per crop for the farm layer. */
+export type Tone = 'good' | 'warn' | 'bad' | CropId;
 export type OverlayCell = { cell: number; tone: Tone; strength: number };
 export type Overlay = { mode: OverlayMode; cells: OverlayCell[]; legend: [Tone, string][] };
 export type IssueKind = 'no-road' | 'no-utilities' | 'no-workers' | 'no-input' | 'stock-cap' | 'no-buyer' | 'no-stock' | 'unsuitable-fertility' | 'empty-home' | 'importing' | 'broke';
@@ -15,7 +17,8 @@ export type Issue = { cell: number; kind: IssueKind; text: string };
 /** Which layer each build tool shows by default; select/pan/bulldoze show none. */
 export const TOOL_OVERLAY: Readonly<Record<string, OverlayMode | undefined>> = Object.freeze({ road: 'roads', F: 'fertility', R: 'housing', C: 'growth', I: 'growth' });
 export const OVERLAY_LEGENDS: Readonly<Record<OverlayMode, [Tone, string][]>> = Object.freeze({
-  fertility: [['good', `ดินดี ≥ ${FERTILITY_THRESHOLD + 20}%`], ['warn', `ปลูกได้ ${FERTILITY_THRESHOLD}–${FERTILITY_THRESHOLD + 19}%`], ['bad', `ต่ำกว่า ${FERTILITY_THRESHOLD}% ปลูกไม่ได้`]],
+  // The land decides the crop: a farm grows what its fertility band suits.
+  fertility: [...(['rice', 'vegetables', 'sugarcane'] as const).map(k => [k, `${CROP_LABELS[k]} ${CROP_BANDS[k][0]}–${CROP_BANDS[k][1]}%`] as [Tone, string]), ['bad', `ต่ำกว่า ${FERTILITY_THRESHOLD}% ปลูกไม่ได้`]],
   roads: [['good', 'เชื่อมประตูเมือง'], ['bad', 'ไม่เชื่อม · โซน/อาคารไม่โต']],
   growth: [['good', 'พร้อมเกิดอาคาร'], ['warn', 'มีอาคารแล้ว'], ['bad', 'ติดเงื่อนไข · แตะดูเหตุผล']],
   housing: [['good', 'มีที่ว่างรับครัวเรือน'], ['warn', 'เต็มแล้ว'], ['bad', 'บ้านว่าง / แปลงบ้านติดเงื่อนไข']],
@@ -35,7 +38,7 @@ export function mapOverlay(city: City, mode: OverlayMode): Overlay {
     if (mode === 'fertility') {
       if (cell.road || cell.building !== null && cell.zone !== 'F') continue;
       const f = city.resources.fertility[i];
-      cells.push({ cell: i, tone: f >= FERTILITY_THRESHOLD + 20 ? 'good' : f >= FERTILITY_THRESHOLD ? 'warn' : 'bad', strength: .35 + f / 200 });
+      cells.push({ cell: i, tone: cropForFertility(f) ?? 'bad', strength: .35 + f / 200 });
     } else if (mode === 'roads') {
       if (cell.road) cells.push({ cell: i, tone: roads.has(i) ? 'good' : 'bad', strength: .7 });
       else if (cell.zone || cell.building !== null) cells.push({ cell: i, tone: access(city, i) ? 'good' : 'bad', strength: .45 });

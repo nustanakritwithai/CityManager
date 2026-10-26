@@ -9,7 +9,7 @@ function fixture() {
   const seed = 61025, resources = createResourceMap(seed), farmCell = resources.fertility.findIndex((n, i) => n === 100 && i > 10);
   assert.ok(farmCell > 10);
   const c: City = {
-    version: 7, rulesVersion: 'chain-2', growthStartTick: 0, seed, rng: seed, tick: 1, nextId: 103,
+    version: 8, rulesVersion: 'chain-3', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, seed, rng: seed, tick: 1, nextId: 103,
     migration: { arrivals: 2, legacyHouseholds: 0 }, agricultureStartTick: 0, resources,
     cells: Array.from({ length: 576 }, () => ({ road: false, zone: null, building: null })),
     buildings: [
@@ -23,7 +23,7 @@ function fixture() {
       { id: 101, home: 1, members: 3, workforce: 2, dependents: 1, workerSkills: { general: 1, manufacturing: 1, retail: 0 }, skillSource: 'arrival-profile', profile: 'family', origin: 'arrival', wallet: 'household:101', lastPurchaseTick: -1, needs: 2 },
       { id: 102, home: 2, members: 1, workforce: 1, dependents: 0, workerSkills: { general: 1, manufacturing: 0, retail: 0 }, skillSource: 'arrival-profile', profile: 'single-worker', origin: 'arrival', wallet: 'household:102', lastPurchaseTick: -1, needs: 3 },
     ],
-    firms: (['F', 'I', 'C'] as const).map((zone, i) => ({ ...(zone === 'C' ? { commercialKind: 'market' as const } : {}), id: 11 + i, building: 3 + i, zone, wallet: `firm:${11 + i}`, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: 0, owner: zone === 'C' ? { householdId: 102, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null, profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 })),
+    firms: (['F', 'I', 'C'] as const).map((zone, i) => ({ ...(zone === 'C' ? { commercialKind: 'market' as const } : {}), ...(zone === 'I' ? { recipe: 'rice-mill' as const } : {}), crops: { rice: 0, vegetables: 0, sugarcane: 0 }, products: { 'milled-rice': 0, 'canned-food': 0, sugar: 0 }, id: 11 + i, building: 3 + i, zone, wallet: `firm:${11 + i}`, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: 0, owner: zone === 'C' ? { householdId: 102, capitalContributed: 60000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null, profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 })),
     employment: [
       { householdId: 101, firmId: 11, occupation: 'manufacturing', rank: 'entry', skill: 'manufacturing', workers: 1 },
       { householdId: 101, firmId: 12, occupation: 'manufacturing', rank: 'entry', skill: 'general', workers: 1 },
@@ -94,8 +94,9 @@ test('factory gets cheaper opening trader stock before direct farm channel and r
   // Dispose seven existing lots through the canonical writeoff operation by
   // temporarily splitting a projection; no cash or extra crop is introduced.
   const originalQty = trader.cropInventory, originalCost = trader.cropCost;
-  trader.cropInventory = 7; trader.cropCost = 1050; assert.equal(writeOffCrops(c, trader, hooks), true);
-  trader.cropInventory = originalQty - 7; trader.cropCost = originalCost - 1050;
+  // The fixture's farm grows rice on 100% land, so every lot here is rice.
+  trader.cropInventory = 7; trader.cropCost = 1050; trader.crops.rice = 7; assert.equal(writeOffCrops(c, trader, hooks), true);
+  trader.cropInventory = originalQty - 7; trader.cropCost = originalCost - 1050; trader.crops.rice = originalQty - 7;
   day(c); disconnected.add(c.buildings.find(b => b.id === farm.building)!.cell);
   const quota = runAgriculture(c, hooks), today = c.cropLedger.filter(e => e.tick === c.tick);
   assert.equal(today.find(e => e.kind === 'trade')?.from, trader.wallet); assert.equal(quota.get(trader.id), 0);

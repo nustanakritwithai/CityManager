@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createCity, step, summary, serialize, deserialize, industryGrowthStatus, firmWorkerCount, firmWage, bulldoze, zoneCell, type City } from '../src/sim.ts';
 import { createCity as legacyCity, step as legacyStep, serialize as legacySerialize } from '../src/legacy-v5.ts';
 import { createCity as agricultureCity, step as agricultureStep, serialize as agricultureSerialize } from '../src/legacy-v4.ts';
+import { untyped } from './untyped.ts';
 import { SAVE_KEY, COMMERCIAL_SAVE_KEY, COMMERCIAL_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 
 function oldCity(day: number) { const c = legacyCity(61025); for (let n = 0; n < day; n++) legacyStep(c); return c; }
@@ -10,7 +11,7 @@ const legacy388 = oldCity(388), legacy251 = oldCity(251);
 const oldRaw = legacySerialize(legacy388);
 const clone = (c: City) => deserialize(serialize(c));
 const current = (day = 388) => deserialize(legacySerialize(day === 388 ? legacy388 : day === 251 ? legacy251 : oldCity(day)));
-function sameOldState(c: City, raw: string) { const projected = JSON.parse(serialize(c)); delete projected.growthStartTick; projected.version = 5; projected.rulesVersion = 'commercial-1'; assert.deepEqual(projected, JSON.parse(raw)); }
+function sameOldState(c: City, raw: string) { const projected = untyped(serialize(c)); delete projected.growthStartTick; projected.version = 5; projected.rulesVersion = 'commercial-1'; assert.deepEqual(projected, JSON.parse(raw)); }
 function conservation(c: City) {
   assert.equal(Object.values(c.accounts).reduce((n, v) => n + v, 0), 0);
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((n, f) => n + f.inventory, 0));
@@ -111,5 +112,5 @@ test('v5 bytes remain immutable through v6 repeated loading/saving and quota fai
   const migrated = deserialize(item.raw); saveStoredCity(store, serialize(migrated), item.raw); assert.equal(map.get(COMMERCIAL_SAVE_KEY), oldRaw); assert.equal(map.get(COMMERCIAL_BACKUP_KEY), oldRaw);
   const count = map.size; saveStoredCity(store, serialize(deserialize(readStoredCity(store)!.raw)), oldRaw); assert.equal(map.size, count); assert.equal(map.get(COMMERCIAL_BACKUP_KEY), oldRaw);
   const saved = map.get(SAVE_KEY); assert.throws(() => saveStoredCity({ ...store, setItem: (k: string, v: string) => { if (k === SAVE_KEY) throw Error('quota'); store.setItem(k, v); } }, serialize(migrated), oldRaw)); assert.equal(map.get(SAVE_KEY), saved);
-  const v4 = agricultureCity(61025); for (let n = 0; n < 90; n++) agricultureStep(v4); const loaded = deserialize(agricultureSerialize(v4)); assert.equal(loaded.version, 7); assert.equal(loaded.tick, 90); assert.deepEqual(loaded.accounts, v4.accounts); conservation(loaded);
+  const v4 = agricultureCity(61025); for (let n = 0; n < 90; n++) agricultureStep(v4); const loaded = deserialize(agricultureSerialize(v4)); assert.equal(loaded.version, 8); assert.equal(loaded.tick, 90); assert.deepEqual(loaded.accounts, v4.accounts); conservation(loaded);
 });

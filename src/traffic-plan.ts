@@ -12,7 +12,9 @@ export const MAX_CARS = 40, MAX_TRUCKS = 12, MAX_WALKERS = 60;
  */
 export const DELIVERY_WINDOW = 7, TRUCK_LOAD = 60;
 const TRUCKED = ['Wholesale stock delivery', 'Imported shop stock', 'Exported goods'];
-/** `colour` is the paint for cars; for trucks it is the cargo: 0 goods, 1 crops. */
+/** Truck cargo, in paint order: the three crops, then the three products. */
+export const CARGO = ['rice', 'vegetables', 'sugarcane', 'milled-rice', 'canned-food', 'sugar'] as const;
+/** `colour` is the paint for cars; for trucks it is the index in CARGO of what the route mostly carries. */
 export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; colour: number };
 export type Walker = { key: string; route: number[]; colour: number };
 export type TrafficPlan = { cars: Vehicle[]; trucks: Vehicle[]; walkers: Walker[]; smoke: number[]; signature: string };
@@ -132,18 +134,19 @@ export function trafficPlan(city: City): TrafficPlan {
     }
     // Trucks: one per real delivery route of the last full week (goods wholesale/import/export, crop
     // trades and crop exports to the gateway), two on a busy route. Keys carry no day, so a route keeps its truck.
-    const [since, until] = deliveryWeek(city.tick), flows = new Map<string, { from: string; to: string; quantity: number; cargo: number }>();
-    const flow = (from: string, to: string, quantity: number, cargo: number) => {
-      const key = `${from}>${to}`, f = flows.get(key) ?? { from, to, quantity: 0, cargo }; f.quantity += quantity; flows.set(key, f);
+    const [since, until] = deliveryWeek(city.tick), flows = new Map<string, { from: string; to: string; quantity: number; loads: number[] }>();
+    const flow = (from: string, to: string, quantity: number, cargo: string | undefined) => {
+      const key = `${from}>${to}`, f = flows.get(key) ?? { from, to, quantity: 0, loads: CARGO.map(() => 0) }; f.quantity += quantity;
+      const i = CARGO.indexOf(cargo as typeof CARGO[number]); if (i >= 0) f.loads[i] += quantity; flows.set(key, f);
     };
-    for (let i = city.goodsLedger.length - 1; i >= 0 && city.goodsLedger[i].tick >= since; i--) { const e = city.goodsLedger[i]; if (e.tick < until && TRUCKED.includes(e.reason)) flow(e.from, e.to, e.quantity, 0); }
-    for (let i = city.cropLedger.length - 1; i >= 0 && city.cropLedger[i].tick >= since; i--) { const e = city.cropLedger[i]; if (e.tick < until && (e.kind === 'trade' || e.kind === 'export')) flow(e.from, e.to, e.quantity, 1); }
+    for (let i = city.goodsLedger.length - 1; i >= 0 && city.goodsLedger[i].tick >= since; i--) { const e = city.goodsLedger[i]; if (e.tick < until && TRUCKED.includes(e.reason)) flow(e.from, e.to, e.quantity, e.product ?? 'milled-rice'); }
+    for (let i = city.cropLedger.length - 1; i >= 0 && city.cropLedger[i].tick >= since; i--) { const e = city.cropLedger[i]; if (e.tick < until && (e.kind === 'trade' || e.kind === 'export')) flow(e.from, e.to, e.quantity, e.crop ?? 'rice'); }
     for (const [key, f] of [...flows].sort((a, b) => b[1].quantity - a[1].quantity || (a[0] < b[0] ? -1 : 1))) {
       if (trucks.length >= MAX_TRUCKS) break;
       const from = walletCell(city, roads, f.from), to = walletCell(city, roads, f.to);
       if (from == null || to == null || from === to) continue;
       const route = roadRoute(roads, from, to);
-      for (let k = 0; route.length > 1 && k < (f.quantity >= TRUCK_LOAD ? 2 : 1) && trucks.length < MAX_TRUCKS; k++) trucks.push({ key: `truck:${key}:${k}`, kind: 'truck', route, colour: f.cargo });
+      for (let k = 0; route.length > 1 && k < (f.quantity >= TRUCK_LOAD ? 2 : 1) && trucks.length < MAX_TRUCKS; k++) trucks.push({ key: `truck:${key}:${k}`, kind: 'truck', route, colour: f.loads.indexOf(Math.max(...f.loads)) });
     }
     // Walkers: residents of connected homes stroll a short stretch of their street.
     const people = new Map<number, number>();

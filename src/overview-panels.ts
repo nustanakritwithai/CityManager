@@ -2,7 +2,8 @@
  * City overview dashboard: section navigation, treasury trend and budget, and the
  * 30-day supply chain. Read-only views over overview-data projections.
  */
-import { treasuryBudget, supplyChain, type ChainFlow, type ChainNode } from './overview-data.ts';
+import { treasuryBudget, supplyChain, goodsLines, type ChainFlow, type ChainNode } from './overview-data.ts';
+import { CROP_LABELS, PRODUCT_LABELS, RECIPE_LABELS } from './goods.ts';
 import { dailySeries, BUILDING_ORDER, BUILDING_NAMES, type DailySeries } from './city-series.ts';
 import { cityOverview } from './context-data.ts';
 import { CHARTS } from './chart-defs.ts';
@@ -154,7 +155,15 @@ export class OverviewDashboard {
       list.append(item);
     }
     const summary = el('p', 'dash-note-line', `เก็บเกี่ยว ${chain.harvested} ล็อต · แปรรูป ${chain.processed} ล็อต เป็นสินค้า ${chain.produced} หน่วย · วันที่ ${chain.window.fromTick}–${chain.window.toTick}`);
-    this.chain.replaceChildren(this.head('ห่วงโซ่สินค้า 30 วัน', 'จากบันทึกพืชผลและสินค้าจริง'), diagram, legend, summary, list, this.chart('crops', series), this.chart('goods', series));
+    // One row per farm-to-table line: grown, made and sold in the window.
+    const lines = el('ul', 'dash-flow-list dash-goods');
+    for (const line of goodsLines(city)) {
+      const active = line.farms + line.factories > 0, item = el('li', active ? '' : 'idle'); item.dataset.recipe = line.recipe;
+      item.append(el('span', `dash-key ${active ? 'goods' : 'idle'}`, `${CROP_LABELS[line.crop]} → ${PRODUCT_LABELS[line.product]}`),
+        el('strong', '', active ? `ฟาร์ม ${line.farms} · ${RECIPE_LABELS[line.recipe]} ${line.factories} · เก็บ ${line.harvested} · ผลิต ${line.produced} · ขาย ${line.sold + line.freshSold}${line.imported ? ` · นำเข้า ${line.imported}` : ''}${line.exportedCrops ? ` · ส่งออกพืช ${line.exportedCrops}` : ''}` : `ยังไม่มี · วางฟาร์มบนดิน${CROP_LABELS[line.crop]}`));
+      lines.append(item);
+    }
+    this.chain.replaceChildren(this.head('ห่วงโซ่สินค้า 30 วัน', 'จากบันทึกพืชผลและสินค้าจริง'), diagram, legend, summary, lines, list, this.chart('crops', series), this.chart('goods', series));
   }
 
   private renderGrowth(city: City, series: DailySeries) {

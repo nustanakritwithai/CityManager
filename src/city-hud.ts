@@ -1,3 +1,4 @@
+import { firmGoodsName } from './goods-view.ts';
 import { MONTH, summary, type City } from './sim.ts';
 import { cityOverview } from './context-data.ts';
 import { appendEvent, type CityEvent } from './event-text.ts';
@@ -96,7 +97,8 @@ export class CityHud {
     this.issueList.replaceChildren(...(issues.length ? issues : []).map(issue => {
       const building = city.buildings.find(b => b.cell === issue.cell), item = document.createElement('li');
       const button = document.createElement('button'); button.type = 'button'; button.className = 'issue-link';
-      const name = building ? { R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[building.zone] + ` #${building.id}` : `แปลง ${issue.cell}`;
+      const firm = building && city.firms.find(f => f.building === building.id);
+      const name = building ? (firm && building.zone !== 'R' ? firmGoodsName(city, firm) : { R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[building.zone]) + ` #${building.id}` : `แปลง ${issue.cell}`;
       const where = `${issue.cell % 24 + 1},${Math.floor(issue.cell / 24) + 1}`;
       button.append(Object.assign(document.createElement('strong'), { textContent: name }), Object.assign(document.createElement('span'), { textContent: `${issue.text} · ${where}` }));
       button.dataset.issue = issue.kind; button.setAttribute('aria-label', `ไปที่${name}: ${issue.text}`);

@@ -13,6 +13,8 @@ export const AGRICULTURE_BACKUP_KEY = 'citymanager.backup.v4';
 export const COMMERCIAL_BACKUP_KEY = 'citymanager.backup.v5';
 export const GROWTH_BACKUP_KEY = 'citymanager.backup.v6';
 export const LATEST_BACKUP_KEY = 'citymanager.backup.latest';
+/** The 1.x (v7 / chain-2) bytes in the main slot, copied once before the first v8 write replaces them. */
+export const CHAIN2_BACKUP_KEY = 'citymanager.backup.chain-2';
 const BACKUP_SLOTS = 8;
 type Reader = Pick<Storage, 'getItem'>;
 type Writer = Pick<Storage, 'getItem' | 'setItem'>;
@@ -32,7 +34,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1)];
+    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -42,7 +44,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   return null;
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
-  if (JSON.parse(raw)?.version !== 7) throw new Error('Expected a version 7 snapshot.');
+  if (JSON.parse(raw)?.version !== 8) throw new Error('Expected a version 8 snapshot.');
   let backup: string | null = null;
   if (importedLegacy !== null) {
     const version: unknown = JSON.parse(importedLegacy)?.version;
@@ -59,8 +61,14 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
     // Failure here still aborts before changing the primary save.
     if (storage.getItem(LATEST_BACKUP_KEY) !== backup) storage.setItem(LATEST_BACKUP_KEY, backup);
   }
-  // Native setItem is atomic: failed primary writes retain the previous v7
-  // bytes, while a successful preceding legacy backup remains recoverable.
+  // The slot keeps its v7 name; a 1.x save there is kept once, untouched, before v8 replaces it.
+  const current = storage.getItem(SAVE_KEY);
+  if (current !== null && storage.getItem(CHAIN2_BACKUP_KEY) === null) {
+    let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
+    if (version === 7) storage.setItem(CHAIN2_BACKUP_KEY, current);
+  }
+  // Native setItem is atomic: failed primary writes retain the previous bytes,
+  // while a successful preceding backup remains recoverable.
   storage.setItem(SAVE_KEY, raw);
   return { backup };
 }
