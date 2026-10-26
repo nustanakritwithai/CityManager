@@ -17,7 +17,7 @@ const snapshot = (city: City, firmId: number) => { const s = captureOwnerSnapsho
 function conserved(city: City) {
   assert.equal(Object.values(city.accounts).reduce((n, amount) => n + amount, 0), 0);
   assert.equal(city.goods.produced + city.goods.imported - city.goods.consumed - city.goods.exported, city.firms.reduce((n, f) => n + f.inventory, 0));
-  assert.equal(city.crops.harvested - city.crops.processed - city.crops.consumed - city.crops.writtenOff, city.firms.reduce((n, f) => n + f.cropInventory, 0));
+  assert.equal(city.crops.harvested - city.crops.processed - city.crops.consumed - city.crops.writtenOff - (city.crops.exported ?? 0), city.firms.reduce((n, f) => n + f.cropInventory, 0));
 }
 // Stress fixtures record both sides of a synthetic non-operating cash movement.
 // They are not a new game command and do not claim an operating profit/expense.

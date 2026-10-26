@@ -47,13 +47,13 @@ export class CityHud {
     if (key === this.key) return;
     this.key = key;
     const s = summary(city), o = cityOverview(city), untilPay = MONTH - city.tick % MONTH;
-    const vacancies = Math.max(0, s.jobs - s.employed), issues = buildingIssues(city);
+    const vacancies = s.openJobs, issues = buildingIssues(city);
     this.renderIssues(city, issues);
     this.strip.dataset.paused = String(paused);
     this.strip.replaceChildren(
       this.item('treasury', 'เงินคลัง', money(o.treasury), `30 วัน ${signed(o.net)}`, o.net < 0 ? 'bad' : ''),
       this.item('people', 'ประชากร', `${s.population} คน`, `${s.households} ครัวเรือน`),
-      this.item('jobs', 'งาน', `ว่าง ${vacancies}`, `ว่างงาน ${s.unemployed} คน`, s.unemployed > 0 ? 'warn' : ''),
+      this.item('jobs', 'งาน', `ว่าง ${vacancies}`, s.unfundedJobs ? `ว่างงาน ${s.unemployed} · ขาดงบจ้าง ${s.unfundedJobs}` : `ว่างงาน ${s.unemployed} คน`, s.unemployed > 0 || s.unfundedJobs > 0 ? 'warn' : ''),
       this.item('utilities', 'น้ำ · ไฟ', `${city.utilities.water ? '✓' : '✗'} · ${city.utilities.power ? '✓' : '✗'}`, 'จากภายนอก', city.utilities.water && city.utilities.power ? '' : 'bad'),
       this.item('warnings', 'ควรตรวจ', `${o.warnings.length + issues.length}`, issues.length ? `อาคาร ${issues.length} แห่ง` : o.warnings.length ? 'ดูในภาพรวมเมือง' : 'ไม่มี', o.warnings.length + issues.length ? 'warn' : ''),
       this.month(untilPay, paused),

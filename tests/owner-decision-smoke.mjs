@@ -137,7 +137,7 @@ function assertConservation(city) {
   assert.equal(Object.values(city.accounts).reduce((a, b) => a + b, 0), 0);
   assert(Object.entries(city.accounts).every(([id, amount]) => Number.isSafeInteger(amount) && (id === 'outside' || amount >= 0)));
   assert.equal(city.goods.produced + city.goods.imported - city.goods.consumed - city.goods.exported, city.firms.reduce((n, firm) => n + firm.inventory, 0));
-  assert.equal(city.crops.harvested - city.crops.processed - city.crops.consumed - city.crops.writtenOff, city.firms.reduce((n, firm) => n + firm.cropInventory, 0));
+  assert.equal(city.crops.harvested - city.crops.processed - city.crops.consumed - city.crops.writtenOff - (city.crops.exported ?? 0), city.firms.reduce((n, firm) => n + firm.cropInventory, 0));
   assert.deepEqual(deserialize(serialize(city)), city);
 }
 

@@ -18,12 +18,12 @@ export type Household = { id: number; home: number | null; members: number; work
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
 export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; commercialKind?: 'market' | 'retail'; convertedAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
-export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string };
+export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
 export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string };
 export type City = {
   version: 7; rulesVersion: 'chain-2'; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number; departures?: number }; employment: EmploymentAllocation[];
-  ownerLabor: OwnerLabor[]; resources: ResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
+  ownerLabor: OwnerLabor[]; resources: ResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number; exported?: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
   seed: number; rng: number; tick: number; nextId: number;
   cells: Cell[]; buildings: Building[]; households: Household[]; firms: Firm[];
   accounts: Record<string, number>; ledger: Entry[]; goodsLedger: GoodsEntry[];
@@ -59,6 +59,21 @@ export const INDUSTRY_STARTUP_CAPITAL = 300_000;
 export const OWNER_STARTUP_CAPITAL = 60_000;
 export const MARKET_CONVERSION_COST = 20_000;
 const INDUSTRY_WORKING_RESERVE = 20_000;
+/**
+ * Outside investors fund a factory when the city keeps exporting crops it cannot process: at
+ * least a new factory's monthly intake (4 workers × 2 lots × 30 days) in the last 30 days, and at
+ * most one such factory a month.
+ */
+export const OUTSIDE_INDUSTRY_CROPS = 240;
+/** Outside investors only look at an established city: at least this many residents. */
+export const OUTSIDE_INDUSTRY_POPULATION = 20;
+/** Crop lots exported in the last 30 days and whether outside investors already funded a factory this month. */
+function idleCrops(c: City): { exported: number; recentOutside: boolean } {
+  let exported = 0, recentOutside = false;
+  for (let i = c.cropLedger.length - 1; i >= 0 && c.cropLedger[i].tick > c.tick - MONTH; i--) if (c.cropLedger[i].kind === 'export') exported += c.cropLedger[i].quantity;
+  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick > c.tick - MONTH; i--) if (/^Outside industry equity #/.test(c.ledger[i].reason)) recentOutside = true;
+  return { exported, recentOutside };
+}
 export function industryGrowthStatus(c: City) {
   const industries = c.firms.filter(f => f.zone === 'I').sort((a, b) => a.id - b.id);
   const fundedVacancies = admissionFacts(c).vacancies;
@@ -74,7 +89,9 @@ export function industryGrowthStatus(c: City) {
   const funded = profitable.find(f => facts(f).availableCapital >= INDUSTRY_STARTUP_CAPITAL);
   const chosen = funded ?? [...profitable].sort((a, b) => facts(b).availableCapital - facts(a).availableCapital || a.id - b.id)[0] ?? industries[0];
   const finance = facts(chosen), bootstrap = industries.length === 0;
-  const result = (code: string, reason: string, ready = false) => ({ ...finance, bootstrap, code, reason, ready, eligible: ready, fundedVacancies, cropAvailable });
+  const idle = idleCrops(c), residents = c.households.reduce((n, h) => n + h.members, 0);
+  const outside = !bootstrap && !funded && residents >= OUTSIDE_INDUSTRY_POPULATION && idle.exported >= OUTSIDE_INDUSTRY_CROPS && !idle.recentOutside;
+  const result = (code: string, reason: string, ready = false) => ({ ...finance, bootstrap, outside: ready && code === 'growth.outside-investor', code, reason, ready, eligible: ready, fundedVacancies, cropAvailable, exportedCrops: idle.exported });
   if (!c.utilities.power || !c.utilities.water) return result('growth.utilities-unavailable', 'Industry investment waits for connected outside power and water.');
   if (!c.cells.some((p, i) => p.zone === 'I' && p.building === null && access(c, i))) return result('growth.no-industrial-parcel', 'Zone an empty connected industrial parcel before commissioning paid jobs.');
   if (bootstrap) return result('growth.bootstrap', 'Only the first factory uses the existing named outside-equity bootstrap; no workers are fabricated.', true);
@@ -84,6 +101,7 @@ export function industryGrowthStatus(c: City) {
   const availableManufacturing = c.households.some(h => householdAccess(c, h) && (['general', 'manufacturing'] as const).some(skill => h.workerSkills[skill] > c.employment.filter(e => e.householdId === h.id && e.skill === skill).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length));
   if (!room && !residentialSite && !availableManufacturing) return result('growth.housing-unavailable', 'New paid jobs need an available home, a connected residential parcel, or an eligible existing unemployed worker.');
   if (cropAvailable < 8) return result('growth.no-crop-buffer', `Industry investment needs 8 real accessible crop lots for a startup batch; have ${cropAvailable}. No input is gifted.`);
+  if (outside) return result('growth.outside-investor', `Farms exported ${idle.exported} crop lots in 30 days that no factory here could use; outside investors fund ${INDUSTRY_STARTUP_CAPITAL} satang of new factory capital.`, true);
   if (!profitable.length) return result('growth.no-profitable-sponsor', 'A connected, fully staffed factory needs positive realized operating profit and actual inputs before sponsoring an expansion.');
   if (!funded) return result('growth.saving-capital', `Factory #${finance.sponsorFirmId} can invest ${finance.availableCapital}/${INDUSTRY_STARTUP_CAPITAL} satang after earned wages, current tax, rent and working-cash reserves.`);
   return result('growth.ready', `Factory #${finance.sponsorFirmId} can fund ${INDUSTRY_STARTUP_CAPITAL} satang of new paid-job capital from its own cash; wages and reserves remain protected.`, true);
@@ -284,7 +302,9 @@ export function summary(c: City) {
   }, 0);
   const homeless = c.households.filter(h => h.home === null).length;
   const incoming = Math.min(128 - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2)));
-  return { population: c.households.reduce((n, h) => n + h.members, 0), households: c.households.length, workforce,
+  // Open jobs people can take now (a seat and a wage the firm can pay) vs seats a firm cannot fund.
+  const seats = c.firms.filter(f => !isMarket(f) && access(c, building(c, f.building).cell)).reduce((n, f) => n + Math.max(0, capacity(building(c, f.building)) - firmWorkerCount(c, f.id)), 0);
+  return { population: c.households.reduce((n, h) => n + h.members, 0), households: c.households.length, workforce, openJobs: admission.vacancies, unfundedJobs: Math.max(0, seats - admission.vacancies),
     dependents: c.households.reduce((n, h) => n + h.dependents, 0), jobs, employed, unemployed: workforce - employed,
     homeless, homeSlots: homes.reduce((n, b) => n + housingCapacity(b).households, 0),
     personCapacity: homes.reduce((n, b) => n + housingCapacity(b).persons, 0), treasury: balance(c, 'treasury'), net,
@@ -351,8 +371,8 @@ function createBuilding(c: City, i: number, shop = false) {
   if (zone === 'C' && !owner && !retail) return;
   const industry = zone === 'I' ? industryGrowthStatus(c) : null;
   if (industry && !industry.ready) return;
-  const sponsor = industry && !industry.bootstrap ? c.firms.find(f => f.id === industry.sponsorFirmId && f.zone === 'I') : undefined;
-  if (industry && !industry.bootstrap && !sponsor) return;
+  const sponsor = industry && !industry.bootstrap && !industry.outside ? c.firms.find(f => f.id === industry.sponsorFirmId && f.zone === 'I') : undefined;
+  if (industry && !industry.bootstrap && !industry.outside && !sponsor) return;
   const id = c.nextId++;
   const b: Building = { id, cell: i, zone, level: retail ? 2 : 1, age: 0, ...(zone === 'R' ? { housingType: 'cottage' as const } : {}) }; c.buildings.push(b); c.cells[i].building = id;
   if (zone === 'R') {
@@ -362,7 +382,7 @@ function createBuilding(c: City, i: number, shop = false) {
     c.firms.push({ id: fid, building: id, zone, ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: 60_000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
-    const paidCapital = transfer(c, sponsor ? sponsor.wallet : owner ? owner.wallet : 'outside', wallet, owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL, sponsor ? `Industry expansion capital #${fid}` : owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : retail ? 'Outside firm equity investment' : `Outside industry bootstrap equity #${fid}`);
+    const paidCapital = transfer(c, sponsor ? sponsor.wallet : owner ? owner.wallet : 'outside', wallet, owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL, sponsor ? `Industry expansion capital #${fid}` : owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : retail ? 'Outside firm equity investment' : industry?.outside ? `Outside industry equity #${fid}` : `Outside industry bootstrap equity #${fid}`);
     if (paidCapital !== (owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL)) throw new Error('Commissioned capital invariant violated.');
     transfer(c, wallet, 'construction', owner ? 10_000 : 40_000, owner ? retail ? 'Self-employed shop construction' : 'Self-employed market construction' : 'Firm building investment');
     if (owner) reserveOwnerLabor(c);
@@ -732,9 +752,14 @@ function validateV7(c: City): City {
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();
   if (!Array.isArray(c.ledger) || !Array.isArray(c.goodsLedger)) fail();
   for (const e of c.ledger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || !Object.hasOwn(c.accounts, e.from) || !Object.hasOwn(c.accounts, e.to) || e.from === e.to) fail();
-  const expansionFunding = new Map<number, Entry>(), bootstrapFunding = new Map<number, Entry>();
+  const expansionFunding = new Map<number, Entry>(), bootstrapFunding = new Map<number, Entry>(), outsideFunding = new Map<number, Entry>();
   for (const e of c.ledger) {
-    const expansion = /^Industry expansion capital #([1-9]\d*)$/.exec(e.reason), bootstrap = /^Outside industry bootstrap equity #([1-9]\d*)$/.exec(e.reason);
+    const expansion = /^Industry expansion capital #([1-9]\d*)$/.exec(e.reason), bootstrap = /^Outside industry bootstrap equity #([1-9]\d*)$/.exec(e.reason), outsideEquity = /^Outside industry equity #([1-9]\d*)$/.exec(e.reason);
+    if (outsideEquity) {
+      const id = Number(outsideEquity[1]);
+      if (!int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || e.from !== 'outside' || e.amount !== INDUSTRY_STARTUP_CAPITAL || e.tick <= c.growthStartTick || outsideFunding.has(id)) fail();
+      outsideFunding.set(id, e); continue;
+    }
     if (!expansion && !bootstrap) continue;
     const id = Number((expansion ?? bootstrap)![1]);
     if (!int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || e.amount !== INDUSTRY_STARTUP_CAPITAL || e.tick <= c.growthStartTick) fail();
@@ -747,13 +772,15 @@ function validateV7(c: City): City {
       bootstrapFunding.set(id, e);
     }
   }
-  if ([...expansionFunding.keys()].some(id => bootstrapFunding.has(id))) fail();
+  if ([...expansionFunding.keys()].some(id => bootstrapFunding.has(id)) || [...outsideFunding.keys()].some(id => bootstrapFunding.has(id) || expansionFunding.has(id))) fail();
   for (const f of c.firms) {
     const funding = expansionFunding.get(f.id), born = c.tick - building(c, f.building).age;
     if (f.fundedBy) {
       if (!funding || funding.from !== `firm:${f.fundedBy.firmId}` || funding.to !== f.wallet || funding.tick !== born) fail();
     } else if (funding) fail();
-    if (f.zone === 'I' && born > c.growthStartTick && !f.fundedBy && (bootstrapFunding.get(f.id)?.tick !== born || c.firms.some(other => other.id !== f.id && other.zone === 'I' && c.tick - building(c, other.building).age < born))) fail();
+    // A later factory without a sponsor was funded by outside investors on the day it opened.
+    if (f.zone === 'I' && born > c.growthStartTick && !f.fundedBy && (outsideFunding.has(f.id) ? outsideFunding.get(f.id)!.tick !== born : bootstrapFunding.get(f.id)?.tick !== born || c.firms.some(other => other.id !== f.id && other.zone === 'I' && c.tick - building(c, other.building).age < born))) fail();
+    if (outsideFunding.has(f.id) && (f.zone !== 'I' || f.fundedBy)) fail();
   }
   const closureMarkers = new Map<number, number>();
   c.ledger.forEach((e, index) => {

@@ -2,7 +2,7 @@
 import { isMarket, isRetail, type City, type Firm, type Household, type CropEntry } from './sim.ts';
 import {
   CHAIN_CROP_PRICES as CROP_PRICES, CROP_STOCK_CAPS, isSafeCount, isViableFarmland,
-  proposeHarvest, proposeRecipe, proposeCropPurchase, proposeCropConsumption,
+  proposeHarvest, proposeRecipe, proposeCropPurchase, proposeCropConsumption, proposeCropExport,
   validCropAccount, validCropHolding, safeAdd, releaseCropCost, harvestYield,
   type CropAccount,
 } from './agriculture.ts';
@@ -189,8 +189,26 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
     }
     trader.productionTick = c.tick;
   }
+  // What local buyers left above each farm's reserve goes out through the gateway.
+  for (const farm of activeFarms) exportSurplus(c, farm, hooks);
   for (const factory of factories) process(c, factory, hooks);
   return sellable;
+}
+
+function exportSurplus(c: City, farm: Firm, hooks: AgricultureHooks): void {
+  const account = cropAccount(c, farm, hooks); if (!account) return;
+  const proposal = proposeCropExport(account); if (!proposal.ok) return;
+  let event: CropEntry, exported: number, revenue: number, expense: number;
+  try {
+    exported = safeAdd(c.crops.exported ?? 0, proposal.quantity); revenue = safeAdd(farm.monthlyRevenue, proposal.cash); expense = safeAdd(farm.monthlyExpense, proposal.fromValue);
+    const id = nextEntry(c);
+    event = entry(c, { kind: 'export', from: farm.wallet, to: 'outside', quantity: proposal.quantity, fromValue: proposal.fromValue, toValue: proposal.cash, cash: proposal.cash, workers: 0, batches: 0, outputQuantity: 0, reason: `Crop export #${id}` });
+  } catch { return; }
+  commit(c, [farm], null, null, () => {
+    cashPayment(hooks, 'outside', farm.wallet, proposal.cash, event.reason);
+    farm.cropInventory = proposal.nextFarm.cropInventory; farm.cropCost = proposal.nextFarm.cropCost; farm.monthlyRevenue = revenue; farm.monthlyExpense = expense;
+    c.crops.exported = exported; c.cropLedger.push(event);
+  });
 }
 
 /** Fulfils the same ONE daily basket as generic retail, from canonical T stock. */

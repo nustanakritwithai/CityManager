@@ -55,7 +55,7 @@ function reconciles(c: City): void {
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
   const cash: Record<string, number> = Object.fromEntries(Object.keys(c.accounts).map(k => [k, 0]));
   for (const e of c.ledger) { cash[e.from] -= e.amount; cash[e.to] += e.amount; } assert.deepEqual(cash, c.accounts);
-  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff, c.firms.reduce((n, f) => n + f.cropInventory, 0));
+  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0), c.firms.reduce((n, f) => n + f.cropInventory, 0));
   const qty: Record<string, number> = {}, value: Record<string, number> = {};
   c.cropLedger.forEach((e, i) => {
     assert.equal(e.id, i + 1); qty[e.from] = (qty[e.from] ?? 0) - e.quantity; qty[e.to] = (qty[e.to] ?? 0) + e.quantity;

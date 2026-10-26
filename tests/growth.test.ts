@@ -14,7 +14,7 @@ function sameOldState(c: City, raw: string) { const projected = JSON.parse(seria
 function conservation(c: City) {
   assert.equal(Object.values(c.accounts).reduce((n, v) => n + v, 0), 0);
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((n, f) => n + f.inventory, 0));
-  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff, c.firms.reduce((n, f) => n + f.cropInventory, 0));
+  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0), c.firms.reduce((n, f) => n + f.cropInventory, 0));
   assert.deepEqual(clone(c), c);
 }
 
@@ -36,7 +36,9 @@ test('midmonth expansion preserves all earned wages, tax/rent/working reserves a
   const child = c.firms.find(f => f.fundedBy)!; assert.ok(child); assert.equal(c.tick, 252);
   const sponsor = c.firms.find(f => f.id === child.fundedBy!.firmId)!, prior = old.firms.find(f => f.id === sponsor.id)!;
   assert.equal(c.accounts[sponsor.wallet], old.accounts[prior.wallet] - 300_000);
-  assert.equal(c.accounts[child.wallet], 260_000); assert.equal(c.accounts.construction, old.accounts.construction + 40_000); assert.equal(c.accounts.outside, old.accounts.outside);
+  // Farms now sell surplus crops to outside; that is the only outside flow the old rules lack.
+  const cropExports = c.ledger.filter(e => e.tick === c.tick && /^Crop export #/.test(e.reason)).reduce((n, e) => n + e.amount, 0);
+  assert.equal(c.accounts[child.wallet], 260_000); assert.equal(c.accounts.construction, old.accounts.construction + 40_000); assert.equal(c.accounts.outside + cropExports, old.accounts.outside);
   for (const key of ['workDays', 'profit', 'lastMonthProfit', 'monthlyRevenue', 'monthlyExpense'] as const) assert.deepEqual(sponsor[key], prior[key]);
   const earned = Object.values(sponsor.workDays).reduce((n, days) => n + days * firmWage(sponsor) / 30, 0);
   const tax = Math.floor(Math.max(0, sponsor.monthlyRevenue - sponsor.monthlyExpense - earned) / 5);

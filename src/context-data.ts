@@ -69,6 +69,7 @@ export function contextRevision(city: City): string {
 export function growthStatusText(city: City) {
   const status = industryGrowthStatus(city);
   const labels: Record<string, string> = {
+    'growth.outside-investor': `ฟาร์มส่งออกพืชผลที่โรงงานในเมืองใช้ไม่ทัน ${status.exportedCrops} ล็อตใน 30 วัน ผู้ลงทุนภายนอกพร้อมเปิดโรงงานใหม่ในแปลงที่ผ่านเงื่อนไข (เดือนละไม่เกิน 1 แห่ง)`,
     'growth.bootstrap': 'โรงงานแรกเริ่มได้ด้วยทุนภายนอกที่บันทึกคู่บัญชี ก่อนรับแรงงานตามกติกาเริ่มเมือง',
     'growth.ready': `กิจการ #${status.sponsorFirmId} มีทุนที่ใช้ขยายได้ ${formatGrowthCash(status.availableCapital)} บาท พร้อมเปิดโรงงานในแปลงที่ผ่านเงื่อนไข`,
     'growth.utilities-unavailable': 'น้ำหรือไฟภายนอกยังไม่พร้อม การเปิดกิจการเพิ่มถูกระงับ',

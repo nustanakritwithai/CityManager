@@ -130,14 +130,14 @@ export function trafficPlan(city: City): TrafficPlan {
       const route = roadRoute(roads, from, to);
       if (route.length > 1) cars.push({ key: `car:${job.h}:${job.f}`, kind: 'car', route, colour: Math.floor(visualHash(job.h, job.f) * 6) });
     }
-    // Trucks: one per real delivery route of the last full week (goods wholesale/import/export and
-    // crop trades), two on a busy route. Keys carry no day, so a route keeps its truck.
+    // Trucks: one per real delivery route of the last full week (goods wholesale/import/export, crop
+    // trades and crop exports to the gateway), two on a busy route. Keys carry no day, so a route keeps its truck.
     const [since, until] = deliveryWeek(city.tick), flows = new Map<string, { from: string; to: string; quantity: number; cargo: number }>();
     const flow = (from: string, to: string, quantity: number, cargo: number) => {
       const key = `${from}>${to}`, f = flows.get(key) ?? { from, to, quantity: 0, cargo }; f.quantity += quantity; flows.set(key, f);
     };
     for (let i = city.goodsLedger.length - 1; i >= 0 && city.goodsLedger[i].tick >= since; i--) { const e = city.goodsLedger[i]; if (e.tick < until && TRUCKED.includes(e.reason)) flow(e.from, e.to, e.quantity, 0); }
-    for (let i = city.cropLedger.length - 1; i >= 0 && city.cropLedger[i].tick >= since; i--) { const e = city.cropLedger[i]; if (e.tick < until && e.kind === 'trade') flow(e.from, e.to, e.quantity, 1); }
+    for (let i = city.cropLedger.length - 1; i >= 0 && city.cropLedger[i].tick >= since; i--) { const e = city.cropLedger[i]; if (e.tick < until && (e.kind === 'trade' || e.kind === 'export')) flow(e.from, e.to, e.quantity, 1); }
     for (const [key, f] of [...flows].sort((a, b) => b[1].quantity - a[1].quantity || (a[0] < b[0] ? -1 : 1))) {
       if (trucks.length >= MAX_TRUCKS) break;
       const from = walletCell(city, roads, f.from), to = walletCell(city, roads, f.to);
