@@ -184,7 +184,11 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[]): void {
   const owner = f.owner!, wallet = `household:${owner.householdId}`;
   let contributed = 0n, withdrawn = 0n, taxPaid = 0n, cash = 0n;
   const rows = [...operating];
-  c.ledger.forEach((e, i) => { if (e.from === f.wallet && e.reason === 'Monthly firm rent') { requireThat(e.to === 'landlord'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); } });
+  c.ledger.forEach((e, i) => {
+    if (e.from === f.wallet && e.reason === 'Monthly firm rent') { requireThat(e.to === 'landlord'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
+    // Water and power bills (chain-4) are operating costs too.
+    if (e.from === f.wallet && e.reason === 'Monthly water and power bill') { requireThat(e.to === 'treasury'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
+  });
   const earnings = (endTick: number, endIndex = Infinity, fromTick = -1) => rows.filter(e => e.tick > fromTick && e.tick <= endTick && (e.moneyIndex === undefined || e.moneyIndex < endIndex)).reduce((n, e) => n + BigInt(e.revenue) - BigInt(e.expense), 0n);
   for (let i = 0; i < c.ledger.length; i++) {
     const e = c.ledger[i]; if (e.from !== f.wallet && e.to !== f.wallet) continue;

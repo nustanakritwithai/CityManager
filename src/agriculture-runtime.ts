@@ -11,6 +11,8 @@ import {
 /** Hooks append only their stated journal and change only named cash accounts. */
 export type AgricultureHooks = {
   connected(cell: number): boolean;
+  /** Whether the building has the water and power it draws today. */
+  served(buildingId: number): boolean;
   workers(firm: Firm): number;
   spendable(firm: Firm): number;
   transfer(from: string, to: string, amount: number, reason: string, book?: boolean): number;
@@ -27,12 +29,12 @@ function workers(firm: Firm, hooks: AgricultureHooks): number | null {
 }
 function operational(c: City, firm: Firm, hooks: AgricultureHooks): boolean {
   const building = c.buildings.find(b => b.id === firm.building && b.zone === firm.zone), count = workers(firm, hooks);
-  if (!c.firms.includes(firm) || !building || !c.utilities.power || !c.utilities.water || !hooks.connected(building.cell) || count === null || count === 0) return false;
+  if (!c.firms.includes(firm) || !building || !hooks.served(building.id) || !hooks.connected(building.cell) || count === null || count === 0) return false;
   return !isMarket(firm) || !!firm.owner && c.ownerLabor.some(e => e.firmId === firm.id && e.householdId === firm.owner!.householdId && e.workers === 1);
 }
 function accessibleHousehold(c: City, h: Household, hooks: AgricultureHooks): boolean {
   const home = c.buildings.find(b => b.id === h.home && b.zone === 'R');
-  return c.households.includes(h) && !!home && c.utilities.power && c.utilities.water && hooks.connected(home.cell);
+  return c.households.includes(h) && !!home && hooks.connected(home.cell);
 }
 function cropAccount(c: City, f: Firm, hooks: AgricultureHooks): CropAccount | null {
   if (f.zone !== 'F' && !isMarket(f) && f.zone !== 'I') return null;
@@ -265,7 +267,7 @@ export function agricultureDiagnostic(c: City, f: Firm, hooks: AgricultureHooks)
   const result = (reasonId: string, qty = f.cropInventory): AgricultureDiagnostic => ({ reasonId, qty, unit: 'crop lot', tick: c.tick });
   const b = c.buildings.find(b => b.id === f.building);
   if (!b || !hooks.connected(b.cell)) return result('agriculture.no-road');
-  if (!c.utilities.power || !c.utilities.water) return result('agriculture.no-utilities');
+  if (!hooks.served(b.id)) return result('agriculture.no-utilities');
   if (!workers(f, hooks) || !operational(c, f, hooks)) return result('agriculture.no-workers');
   if (f.zone === 'F') {
     const fertility = c.resources.fertility[b.cell];
