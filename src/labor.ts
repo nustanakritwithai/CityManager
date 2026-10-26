@@ -10,6 +10,20 @@ export const OCCUPATION_BY_ZONE = Object.freeze({ I: 'manufacturing', C: 'retail
 export const EMPLOYMENT_RANKS = Object.freeze(['entry'] as const);
 export const WORKER_SKILLS = Object.freeze(['general', 'manufacturing', 'retail'] as const);
 export const skillEligible = (skill: WorkerSkill, occupation: Occupation): boolean => skill === 'general' || skill === occupation;
+/**
+ * Career change for one household: idle specialists whose own trade has no funded opening, while
+ * the other trade has some, retrain as general workers (who can take either). Returns how many
+ * move from each specialist pool; bounded by the other trade's openings, which the caller spends.
+ */
+export function retrainingMoves(skills: WorkerSkills, working: { manufacturing: number; retail: number }, open: { I: number; C: number }): { manufacturing: number; retail: number } {
+  const left = { ...open }, moves = { manufacturing: 0, retail: 0 };
+  for (const [skill, zone, other] of [['manufacturing', 'I', 'C'], ['retail', 'C', 'I']] as const) {
+    if (left[zone] > 0) continue;
+    moves[skill] = Math.max(0, Math.min(skills[skill] - working[skill], left[other]));
+    left[other] -= moves[skill];
+  }
+  return moves;
+}
 type HouseholdState = { id: number; remaining: WorkerSkills };
 type OfferState = { id: number; occupation: Occupation; remaining: number };
 function count(value: number, label: string, minimum = 0): void {

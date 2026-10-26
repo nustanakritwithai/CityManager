@@ -1,6 +1,6 @@
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
-import { allocateEmployment, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
+import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
 import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, type ResourceMap } from './agriculture.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
@@ -22,7 +22,7 @@ export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
 export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string };
 export type City = {
-  version: 7; rulesVersion: 'chain-2'; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number }; employment: EmploymentAllocation[];
+  version: 7; rulesVersion: 'chain-2'; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number; departures?: number }; employment: EmploymentAllocation[];
   ownerLabor: OwnerLabor[]; resources: ResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
   seed: number; rng: number; tick: number; nextId: number;
   cells: Cell[]; buildings: Building[]; households: Household[]; firms: Firm[];
@@ -451,7 +451,68 @@ function settleMonth(c: City) {
     f.monthlyRevenue = 0; f.monthlyExpense = 0;
   }
   for (const h of c.households) if (h.home !== null) transfer(c, h.wallet, 'landlord', 10_000, 'Monthly household rent');
-  c.lastEvent = 'Month settled: actual firm wages, household rent and taxes are in the money ledger.';
+  const { retrained, departed } = reviewLabour(c);
+  c.lastEvent = 'Month settled: actual firm wages, household rent and taxes are in the money ledger.'
+    + (retrained ? ` ${retrained} idle specialist worker(s) retrained as general workers for open jobs in the other trade.` : '')
+    + (departed ? ` ${departed} household(s) left the city after two months without paid work; their savings left with them.` : '');
+}
+
+/**
+ * The month-end on which this household would leave if it still has no paid work, or null when it
+ * stays (it has work, owns a firm, or came from a v1 import). The floor and the monthly cap can
+ * only delay it.
+ */
+export function departureDay(c: City, householdId: number): number | null {
+  const h = c.households.find(h => h.id === householdId);
+  if (!h || h.origin !== 'arrival' || householdWorkerCount(c, h.id) > 0 || c.firms.some(f => f.owner?.householdId === h.id)) return null;
+  let last = 0;
+  for (let i = c.ledger.length - 1; i >= 0; i--) {
+    const e = c.ledger[i];
+    if (e.to === h.wallet && (e.reason === 'Monthly wages' || e.reason === 'New household arrival savings')) { last = e.tick; break; }
+  }
+  return Math.max(c.tick % MONTH ? c.tick - c.tick % MONTH + MONTH : c.tick + MONTH, Math.ceil((last + DEPARTURE_MONTHS * MONTH) / MONTH) * MONTH);
+}
+
+/** Households never leave below this many, so a quiet city keeps a seed population. */
+export const DEPARTURE_FLOOR = 2;
+/** Months without any paid work before a household leaves. */
+export const DEPARTURE_MONTHS = 2;
+/** At most this share of households leaves in one month, so a downturn empties the city gradually. */
+export const DEPARTURE_SHARE = .2;
+
+/**
+ * Monthly labour review, after wages and rent are settled. A specialist with no opening in
+ * their trade while the other trade has funded openings retrains as a general worker (career
+ * change). A household with no worker in any job, no wage in the last two settlements and in
+ * the city for at least that long leaves with its savings (to outside), freeing its home. Shop
+ * owners and households that arrived recently stay; at most a fifth leave in one month, and the
+ * city never drops below the floor.
+ */
+function reviewLabour(c: City): { retrained: number; departed: number } {
+  const open = { ...admissionFacts(c).vacanciesByZone };
+  let retrained = 0;
+  for (const h of [...c.households].sort((a, b) => a.id - b.id)) {
+    const working = (skill: 'manufacturing' | 'retail') => employmentForHousehold(c, h.id).filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length;
+    const moves = retrainingMoves(h.workerSkills, { manufacturing: working('manufacturing'), retail: working('retail') }, open);
+    h.workerSkills.manufacturing -= moves.manufacturing; h.workerSkills.retail -= moves.retail; h.workerSkills.general += moves.manufacturing + moves.retail;
+    open.C -= moves.manufacturing; open.I -= moves.retail; retrained += moves.manufacturing + moves.retail;
+  }
+  const since = c.tick - DEPARTURE_MONTHS * MONTH, paid = new Set<string>(), recent = new Set<string>();
+  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick > since; i--) {
+    const e = c.ledger[i];
+    if (e.reason === 'Monthly wages') paid.add(e.to);
+    else if (e.reason === 'New household arrival savings') recent.add(e.to);
+  }
+  const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
+  const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet))
+    .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
+  for (const h of leaving) {
+    for (const f of c.firms) payWages(c, f, h.wallet); // no claim should remain after settlement; pay any that does
+    transfer(c, h.wallet, 'outside', balance(c, h.wallet), 'Emigration savings');
+    c.households = c.households.filter(x => x.id !== h.id);
+    c.migration.departures = (c.migration.departures ?? 0) + 1;
+  }
+  return { retrained, departed: leaving.length };
 }
 
 export function moveHousehold(c: City, householdId: number, destinationId: number): Result {
@@ -494,6 +555,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
+  reasons.push(`สิ้นเดือน: แรงงานเฉพาะทางที่สายงานเดิมไม่มีตำแหน่งว่างแต่อีกสายมี จะเปลี่ยนเป็นแรงงานทั่วไป ครัวเรือนที่ไม่มีงานได้ค่าจ้างเลย ${DEPARTURE_MONTHS} เดือนจะย้ายออกพร้อมเงินออม (เจ้าของร้านและผู้มาใหม่ไม่ย้าย เมืองเหลืออย่างน้อย ${DEPARTURE_FLOOR} ครัวเรือน)`);
   return reasons;
 }
 function admitHousehold(c: City) {
@@ -719,7 +781,11 @@ function validateV7(c: City): City {
   }
   const arrivals = c.households.filter(h => h.origin === 'arrival'), legacyCount = c.households.filter(h => h.origin === 'legacy-v1').length;
   const arrivalEntries = c.ledger.filter(e => e.reason === 'New household arrival savings');
-  if (c.migration.legacyHouseholds !== legacyCount || c.migration.arrivals !== Math.max(legacyCount, arrivalEntries.length - arrivals.length) + arrivals.length) fail();
+  // Departed arrivals keep their funding entry and a zero wallet; the departure count covers them.
+  const departures = c.migration.departures ?? 0;
+  if (!int(departures) || departures > arrivalEntries.length - arrivals.length) fail();
+  if (c.migration.legacyHouseholds !== legacyCount || c.migration.arrivals !== Math.max(legacyCount, arrivalEntries.length - arrivals.length - departures) + arrivals.length + departures) fail();
+  for (const e of c.ledger) if (e.reason === 'Emigration savings' && (e.to !== 'outside' || c.households.some(h => h.wallet === e.from) || !/^household:\d+$/.test(e.from))) fail();
   const arrivalDays = new Set<number>();
   for (const h of arrivals) {
     const funding = arrivalEntries.filter(e => e.to === h.wallet);
