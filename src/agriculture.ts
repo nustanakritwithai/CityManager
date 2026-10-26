@@ -12,6 +12,12 @@ export type CropPrices = { readonly farmToTrader: number; readonly traderToFacto
  */
 export const CHAIN_CROP_PRICES: CropPrices = Object.freeze({ ...CROP_PRICES, farmToTrader: 200 });
 export const CROP_RECIPE = Object.freeze({ crop: 2, goods: 8 } as const);
+/**
+ * Surplus the city cannot use: a farm keeps `keep` lots for local buyers and sells the rest to
+ * the outside market through the gateway, below every local price, so a full farm still earns
+ * and the harvest is not wasted. The export journal is also the signal outside investors read.
+ */
+export const CROP_EXPORT = Object.freeze({ price: 120, keep: 48 } as const);
 export type ResourceMap = { version: typeof RESOURCE_VERSION; seed: number; fertility: number[] };
 export type CropZone = keyof typeof CROP_STOCK_CAPS;
 export type CropHolding = { cropInventory: number; cropCost: number };
@@ -24,7 +30,7 @@ export const COMMODITIES = Object.freeze({
   crop: Object.freeze({ id: 'crop', unit: 'crop lot', industrialInput: true, directConsumable: true } as const),
   goods: Object.freeze({ id: 'goods', unit: 'generic basket', industrialInput: false, directConsumable: true } as const),
 });
-export type AgricultureReason = 'harvested' | 'processed' | 'purchased' | 'consumed' | 'invalid-input' | 'overflow' | 'already-processed' | 'stale-tick' | 'not-operational' | 'no-workers' | 'unsuitable-fertility' | 'stock-cap' | 'no-input' | 'output-limit' | 'invalid-channel' | 'same-counterparty' | 'insufficient-stock' | 'sellable-limit' | 'insufficient-cash' | 'capacity' | 'not-consumable' | 'wrong-commodity' | 'already-consumed';
+export type AgricultureReason = 'exported' | 'harvested' | 'processed' | 'purchased' | 'consumed' | 'invalid-input' | 'overflow' | 'already-processed' | 'stale-tick' | 'not-operational' | 'no-workers' | 'unsuitable-fertility' | 'stock-cap' | 'no-input' | 'output-limit' | 'invalid-channel' | 'same-counterparty' | 'insufficient-stock' | 'sellable-limit' | 'insufficient-cash' | 'capacity' | 'not-consumable' | 'wrong-commodity' | 'already-consumed';
 const MAX = BigInt(Number.MAX_SAFE_INTEGER);
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export const isSafeCount = (value: unknown, minimum = 0): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum;
@@ -182,4 +188,16 @@ export function proposeCropConsumption(trader: CropAccount, household: Household
   proposal.nextTrader.cropInventory--; proposal.nextTrader.cropCost -= released; proposal.nextTrader.cash = traderCash;
   proposal.nextHousehold.cash -= CROP_PRICES.householdCrop; proposal.nextHousehold.lastPurchaseTick = options.tick;
   return proposal;
+}
+export type CropExportProposal = { ok: boolean; reason: AgricultureReason; nextFarm: CropAccount; quantity: number; cash: number; fromValue: number };
+/** Sell a farm's stock above the local reserve to outside at the export price. */
+export function proposeCropExport(farm: CropAccount): CropExportProposal {
+  const fail = (reason: AgricultureReason): CropExportProposal => ({ ok: false, reason, nextFarm: { ...farm }, quantity: 0, cash: 0, fromValue: 0 });
+  if (!validCropAccount(farm)) return fail('invalid-input');
+  if (farm.zone !== 'F') return fail('invalid-channel');
+  const quantity = farm.cropInventory - CROP_EXPORT.keep;
+  if (quantity <= 0) return fail('insufficient-stock');
+  let cash: number, nextCash: number; try { cash = safeMultiply(quantity, CROP_EXPORT.price); nextCash = safeAdd(farm.cash, cash); } catch { return fail('overflow'); }
+  const fromValue = releaseCropCost(farm.cropInventory, farm.cropCost, quantity);
+  return { ok: true, reason: 'exported', nextFarm: { ...farm, cropInventory: farm.cropInventory - quantity, cropCost: farm.cropCost - fromValue, cash: nextCash }, quantity, cash, fromValue };
 }

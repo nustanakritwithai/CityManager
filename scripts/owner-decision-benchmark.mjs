@@ -23,7 +23,7 @@ function reconcile(city) {
   assert.equal(money, 0, 'All cash debits and credits reconcile, including named outside flows');
   assert.equal(city.goods.produced + city.goods.imported - city.goods.consumed - city.goods.exported,
     city.firms.reduce((total, firm) => total + firm.inventory, 0), 'Finished goods reconcile with actual inventories');
-  assert.equal(city.crops.harvested - city.crops.processed - city.crops.consumed - city.crops.writtenOff,
+  assert.equal(city.crops.harvested - city.crops.processed - city.crops.consumed - city.crops.writtenOff - (city.crops.exported ?? 0),
     city.firms.reduce((total, firm) => total + firm.cropInventory, 0), 'Crops reconcile with actual inventories');
   for (const firm of city.firms) {
     assert(Number.isSafeInteger(firm.inventory) && firm.inventory >= 0);

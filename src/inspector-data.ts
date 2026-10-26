@@ -112,7 +112,7 @@ export function reasonLabel(reason: string): string {
 
 export function cropFlowRows(city: City): CropFlowRow[] {
   const labels: Record<City['cropLedger'][number]['kind'], string> = {
-    harvest: 'เก็บเกี่ยวพืชผล', trade: 'ซื้อขายพืชผล', process: 'ใช้พืชผลแปรรูป', writeoff: 'ตัดพืชผลออกจากบัญชี', consumption: 'ครัวเรือนบริโภคพืชผล',
+    harvest: 'เก็บเกี่ยวพืชผล', trade: 'ซื้อขายพืชผล', export: 'ส่งออกพืชผลส่วนเกิน', process: 'ใช้พืชผลแปรรูป', writeoff: 'ตัดพืชผลออกจากบัญชี', consumption: 'ครัวเรือนบริโภคพืชผล',
   };
   return city.cropLedger.map((entry, index): CropFlowRow => ({
     index, kind: 'crops', id: entry.id, cropKind: entry.kind, tick: entry.tick, reason: entry.reason, from: entry.from, to: entry.to,

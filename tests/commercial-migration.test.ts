@@ -120,7 +120,7 @@ test('migrated stock, wage liabilities and owner distributions survive determini
   assert.notEqual(serialize(a), initial);
   assert.ok(a.ledger.some(e => e.tick === 180 && e.reason === 'Monthly wages'));
   assert.equal(Object.values(a.accounts).reduce((n, value) => n + value, 0), 0);
-  assert.equal(a.crops.harvested - a.crops.processed - a.crops.consumed - a.crops.writtenOff, a.firms.reduce((n, f) => n + f.cropInventory, 0));
+  assert.equal(a.crops.harvested - a.crops.processed - a.crops.consumed - a.crops.writtenOff - (a.crops.exported ?? 0), a.firms.reduce((n, f) => n + f.cropInventory, 0));
   const market = a.firms.find(isMarket)!;
   const factsBefore = structuredClone(market.owner);
   if (withdrawOwnerProfit(a, market.id, 10000).ok) { loaded(a); assert.equal(market.owner!.withdrawn, factsBefore!.withdrawn + 10000); }
