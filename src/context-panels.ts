@@ -1,6 +1,6 @@
 import './context-panels.css';
 import './building-cards.css';
-import { MONTH, access, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -348,10 +348,13 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     metric('needs', 'ยังไม่ได้ซื้อสินค้า', `${household.needs} วัน`, household.needs), metric('last-purchase', 'ซื้อครั้งล่าสุด', purchaseText(city, household), household.lastPurchaseTick)
   ]));
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
+  const leaves = departureDay(city, household.id);
+  if (leaves !== null) { const row = el('div', 'cx-status cx-departure-status'); row.dataset.departureDay = String(leaves); row.append(chip(`ไม่มีงาน · ย้ายออกในอีก ${leaves - city.tick} วัน`, false)); output.push(row); }
   const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
   jobs.classList.add('bc-employment-source');
   rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow));
   if (!employed) rows.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง หรือทำตลาดของตนเอง'));
+  if (leaves !== null) { const note = el('p', 'cx-detail-note cx-departure', `ถ้ายังไม่มีงานที่ได้ค่าจ้าง ครัวเรือนนี้จะย้ายออกพร้อมเงินออมตอนชำระสิ้นเดือนวันที่ ${leaves} (อีก ${leaves - city.tick} วัน)`); note.dataset.departureDay = String(leaves); rows.append(note); }
   jobs.append(rows); output.push(jobs, renderWorkerSkills(city, household));
   const consumed = householdConsumption(city, household.id), basket = el('p', 'cx-detail-note cx-last-commodity', consumed ? `บัญชีบริโภคล่าสุด: ${consumed.commodity === 'crops' ? 'พืชผล' : 'สินค้าสำเร็จรูป'} ${consumed.quantity} ${consumed.commodity === 'crops' ? 'ล็อต' : 'หน่วย'} · วัน ${consumed.tick}` : 'ยังไม่มีรายการบริโภคในบัญชีของครัวเรือนนี้');
   if (consumed) Object.assign(basket.dataset, { commodity: consumed.commodity, tick: String(consumed.tick), quantity: String(consumed.quantity) }); output.push(basket);
