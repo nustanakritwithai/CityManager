@@ -76,7 +76,11 @@ if (opt('stills', false)) {
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p', '-r', String(FPS), file], async (stdin) => {
       for (let f = a; f < b; f++) {
         await page.evaluate((tt) => window.seek(tt), from + f / FPS);
-        const buf = await page.screenshot({ type: 'jpeg', quality: 92, clip: stage });
+        // Heavy 3D frames can take a while in software GL: allow 3 minutes and retry once.
+        let buf;
+        for (let attempt = 0; !buf; attempt++) {
+          try { buf = await page.screenshot({ type: 'jpeg', quality: 92, clip: stage, timeout: 180000 }); } catch (e) { if (attempt) throw e; console.error(`frame ${f}: ${e.name}, retrying`); }
+        }
         if (!stdin.write(buf)) await new Promise((r) => stdin.once('drain', r));
         done++;
       }

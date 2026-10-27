@@ -1,8 +1,8 @@
 // Render a story to MP4 (or stills) by seeking the player frame by frame in headless Chromium.
-//   node scripts/render.mjs ../tai-kadai-war/story.yaml --stills
-//   node scripts/render.mjs ../tai-kadai-war/story.yaml [--workers 4] [--from 0 --to 30] [--out name]
+//   node scripts/render.mjs story.yaml --stills [--at 0.8]        one PNG per scene + contact-sheet.png
+//   node scripts/render.mjs story.yaml [--workers 2] [--from 0 --to 30] [--fps 24] [--out name]
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { startServer } from './serve.mjs';
@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
 const args = process.argv.slice(2);
-const storyPath = resolve(args.find((a) => !a.startsWith('--')) || '../tai-kadai-war/story.yaml');
+const storyPath = resolve(args[0]);
 const opt = (name, def) => { const i = args.indexOf(`--${name}`); return i < 0 ? def : (args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : true); };
 const OUT = join(dirname(storyPath), 'out');
 mkdirSync(OUT, { recursive: true });
@@ -44,21 +44,23 @@ console.log(`story: ${SCENES.length} scenes, ${TOTAL}s @ ${FPS}fps`);
 const stage = { x: 0, y: 0, width: 1080, height: 1920 };
 
 if (opt('stills', false)) {
-  const dir = join(OUT, 'stills'); mkdirSync(dir, { recursive: true });
-  const at = Number(opt('at', 0.8));
-  for (const s of SCENES) {
+  // Stills are numbered in scene order so any scene id works and the sheet keeps the timeline order.
+  const dir = join(OUT, 'stills');
+  rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
+  const at = Number(opt('at', 0.8)); // fraction into each scene; a list `sub:` shows the part playing then
+  for (const [i, s] of SCENES.entries()) {
     const t = s.start + (s.end - s.start) * at;
     await first.evaluate((tt) => window.seek(tt), t);
-    await first.screenshot({ path: join(dir, `${s.id}.png`), clip: stage });
+    await first.screenshot({ path: join(dir, `${String(i + 1).padStart(2, '0')}-${s.id}.png`), clip: stage });
     process.stdout.write(`${s.id} `);
   }
   console.log();
-  const cols = 7; const rows = Math.ceil(SCENES.length / cols);
-  await run('ffmpeg', ['-v', 'error', '-y', '-pattern_type', 'glob', '-i', join(dir, 's*.png'), '-vf', `scale=270:480,tile=${cols}x${rows}:padding=6:color=black`, '-frames:v', '1', join(OUT, 'contact-sheet.png')]);
+  const cols = Math.min(7, SCENES.length); const rows = Math.ceil(SCENES.length / cols);
+  await run('ffmpeg', ['-v', 'error', '-y', '-pattern_type', 'glob', '-i', join(dir, '*.png'), '-vf', `scale=270:480,tile=${cols}x${rows}:padding=6:color=black`, '-frames:v', '1', join(OUT, 'contact-sheet.png')]);
   console.log(`stills + contact sheet in ${OUT} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
 } else {
   const from = Number(opt('from', 0)); const to = Math.min(TOTAL, Number(opt('to', TOTAL)));
-  const workers = Number(opt('workers', 4));
+  const workers = Number(opt('workers', 2));
   const name = opt('out', 'clip');
   const frames = Math.round((to - from) * FPS);
   const per = Math.ceil(frames / workers);
@@ -74,7 +76,11 @@ if (opt('stills', false)) {
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p', '-r', String(FPS), file], async (stdin) => {
       for (let f = a; f < b; f++) {
         await page.evaluate((tt) => window.seek(tt), from + f / FPS);
-        const buf = await page.screenshot({ type: 'jpeg', quality: 92, clip: stage });
+        // Heavy 3D frames can take a while in software GL: allow 3 minutes and retry once.
+        let buf;
+        for (let attempt = 0; !buf; attempt++) {
+          try { buf = await page.screenshot({ type: 'jpeg', quality: 92, clip: stage, timeout: 180000 }); } catch (e) { if (attempt) throw e; console.error(`frame ${f}: ${e.name}, retrying`); }
+        }
         if (!stdin.write(buf)) await new Promise((r) => stdin.once('drain', r));
         done++;
       }
