@@ -57,14 +57,17 @@ layers:
 |---|---|
 | `type` | `river` (glowing line that draws itself), `area` (filled polygon with neon edge), `line` (dashed line from `coords`) |
 | `src` | file name in `<story>/geo/` without `.json` — written by `build-geo.mjs` |
-| `build` | how to make `src` from Natural Earth: `rivers: [names]` (+ `upstream: [lng,lat]` to set the drawing direction, `clip: [w,s,e,n]`), `countries: [names or ISO3]`, `provinces: [{country, names?, minLat?, maxLat?, minLng?, maxLng?}]` (+ `clip`). Names are Natural Earth English names (`name_en`), e.g. `Guangxi`, `Nam Ou` |
+| `build` | how to make `src` from Natural Earth (a layer without `build` just reuses an existing `src`, e.g. two layers on one file with different labels): `rivers: [names]` (+ `upstream: [lng,lat]` to set the drawing direction, `clip: [w,s,e,n]`), `countries: [names or ISO3]`, `provinces: [{country, names?, minLat?, maxLat?, minLng?, maxLng?}]` (+ `clip`). Names are Natural Earth English names (`name_en`), e.g. `Guangxi`, `Nam Ou` |
 | `color`, `fill` | area fill opacity (default 0.22) |
 | `style: hatch` | diagonal stripes, for a claimed/hypothetical/merged area |
 | `pulse: true` | edge glow breathes |
 | `label`, `labelAt`, `labelSize` | big coloured name; `approx: true` adds "แนวโดยประมาณ" under it — use for every historical border |
+| `labelAngle` | rotation of a river label in degrees |
 | `draw` | seconds a river takes to draw (default 2.2) |
 
-Labels are placed with collision avoidance (pins win over regions, regions over rivers); a label that cannot fit is skipped for that frame, so if a label never shows, move `labelAt`.
+Labels are placed with collision avoidance (pins first, then dot labels, region/zone labels, river labels); a label that cannot fit — or would sit in the title band above y 330 or below y 1350 — is skipped for that frame. If a label never shows in one scene, move it for that scene only with `labelAt: { layerId: [lng, lat] }` on the scene (or `false` to hide it there).
+
+River names: Natural Earth often names upper reaches separately (the Mekong above Qamdo is `Za`). `build-geo` prints each river's start and end; list names in an area with `node scripts/build-geo.mjs --list-rivers w,s,e,n`.
 
 ## 4. factions
 ```yaml
@@ -73,7 +76,7 @@ factions:
   yue:     { name: ไป่เยว่, color: gold, glyph: 越 }
   local:   { name: คนพื้นเมือง, color: gold }        # no glyph = a dot in the flag
 ```
-Used by `units`, formations and the HUD. One colour per side, consistent through the whole clip. Glyphs render in Noto Serif SC (Chinese characters); keep them to one character.
+Used by `units`, formations and the HUD. One colour per side, consistent through the whole clip. Glyphs render in Noto Serif SC, so only Chinese characters work; leave `glyph` out for other sides (Burmese, Thai, …) and the flag shows a dot.
 
 ## 5. zones
 Territory revealed by a circle growing out of `from` — reads as a front line or campaign spreading. Drawn in SVG above layers.
@@ -89,7 +92,7 @@ zones:
 scenes:
   - id: s05
     dur: 6                       # seconds
-    title: ["ราชวงศ์จิ๋นและฮั่นลงใต้"]      # stays until a later scene sets a new title; "!" prefix = red line
+    title: ["ราชวงศ์จิ๋นและฮั่นลงใต้"]      # stays until a later scene sets a new one; title: [] clears it; "!" prefix = red line
     era: ราว 221 ปีก่อน ค.ศ.               # pill under the title; or { count: [622, 866], prefix: "ค.ศ. ", dur: 3 } to tick
     camera: { center: [112.4, 27.2], zoom: 5.2, move: pan }
     map: [yangtze, baiyue]
@@ -108,7 +111,7 @@ scenes:
 | `moveDur` | seconds of the move (default min(2.4, 42% of dur)) |
 | `drift` | zoom added slowly during the hold (default 0.12) — keeps still shots alive |
 | `pitch`, `bearing`, `orbit` | tilt (0–60), heading, degrees of slow rotation during the hold. Pitch > 0 turns on terrain |
-| `focus` | where the target sits on screen, 0–1 from top (default 0.37 so cards and subtitles fit below). Use 0.5 for 3D battle scenes |
+| `focus` | where the target sits on screen, 0–1 from top (default 0.37 so cards and subtitles fit below). Use 0.5 for 3D battle scenes and ~0.3 for a wide summary shot with a card under it |
 
 ### pins
 ```yaml
@@ -168,7 +171,7 @@ Pop up in a zone below the map focus (y 860–1360) and leave in the scene's las
 | `words` | `items: [{w, n}]`, `lead: true` makes the first big | glossary / name cards |
 | `image` | `src: /media/file.jpg` (file in `<story>/media/`), `caption` | user-supplied map or photo |
 | `titlecard` | `text`, `sub` | named event |
-| `summary` | `title`, `items` | numbered recap |
+| `summary` | `title` (default สรุป), `items` | numbered recap |
 | `sources` | `title`, `items` | end notes / credits |
 
 ### HUD and big caption
@@ -177,12 +180,17 @@ Pop up in a zone below the map focus (y 860–1360) and leave in the scene's las
 
 ### text
 - `title`: list of lines; the first is gold, the next white; prefix `!` for red.
-- `sub`: subtitle, `**word**` = gold highlight. A list splits the scene time between parts — use it when a line exceeds ~60 base characters (2 lines).
+- `sub`: subtitle, `**word**` = gold highlight. One line holds about 30 base characters (Thai vowel/tone marks don't count), two lines at most; a list splits the scene time between parts. Check the stills for a single word stranded on line 2.
 - `credits: false` hides the credit line (end card).
 
 ### effects and imagery
 - `fx: [night]` darkens (strength `night: 0.3`), `fx: [shake]` shakes the first 0.9 s.
 - `imagery: sentinel2016` cross-fades to sharper Sentinel-2 imagery — use for close-ups (zoom ≥ 9). It has cloud patches in some regions (southern China), so check the still.
+
+### what carries over between scenes
+`camera` (a scene without one keeps the last view) and `title` carry over. Everything else is per scene: `map`, `zones`, `pins`, `units`, `routes`, `cards`, `era`, `hud`, `callout`, `fx`, `night`, `imagery`, `labelAt`. Repeat them on each scene that needs them; elements with the same id in consecutive scenes stay on screen without re-animating.
+
+Scene ids can be anything unique (`s01`, `intro`, …); stills are numbered in timeline order.
 
 ### voice
 - `voice`: the spoken line (numbers as words). `voiceTempo`: per-scene speed override.

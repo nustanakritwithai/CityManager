@@ -193,7 +193,9 @@ function updateLayers(t, s, out) {
       paint(`${id}-glow2`, 'line-opacity', a * 0.55 * pulse); paint(`${id}-glow1`, 'line-opacity', a * 0.9);
       paint(`${id}-edge`, 'line-opacity', a * 0.85);
     }
-    if (a > 0 && def.label && def.type !== 'river') out.push({ kind: 'region', def, a, id });
+    // a scene can move a label (labelAt: { id: [lng, lat] }) or hide it (labelAt: { id: false })
+    const la = s.labelAt?.[id];
+    if (a > 0 && def.label && def.type !== 'river' && la !== false) out.push({ kind: 'region', def: la ? { ...def, labelAt: la } : def, a, id });
   }
 }
 
@@ -512,7 +514,8 @@ function applyFrame(t) {
   for (const [id, def] of Object.entries(L)) {
     if (def.type !== 'river' || !def.label) continue;
     const lf = life(t, s, (sc) => (sc.map || []).includes(id));
-    if (lf) labelItems.push({ kind: 'river', def, a: lf.alpha * clamp((lf.age - 1) / 0.6) });
+    const la = s.labelAt?.[id];
+    if (lf && la !== false) labelItems.push({ kind: 'river', def: la ? { ...def, labelAt: la } : def, a: lf.alpha * clamp((lf.age - 1) / 0.6) });
   }
   const nightOn = (sc) => (sc.fx || []).includes('night');
   const nl = life(t, s, nightOn, 0.8);

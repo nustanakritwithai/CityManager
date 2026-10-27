@@ -12,8 +12,9 @@ Use chapter titles (`title:`) to mark periods; the era pill (`era:`) carries the
 
 ## Length and pacing
 - 60–90 s total for reels (the user asked to cut a 4:40 draft down — long clips also take hours to render). Pick the 12–15 strongest beats; drop secondary dates rather than speeding everything up.
+- Under 45 s: 6–8 scenes of 3.5–5 s — hook, 4–6 beats, a one-line summary, a short note card.
 - 4–8 s per scene. A scene needs roughly: camera move 1.5–2.5 s + the line read. With Thai TTS at 1.5× a 50-character line takes ~4–5 s.
-- One idea per subtitle, ≤ 2 lines (~60 base characters). Highlight 1–3 words with `**…**`: names, numbers, the key verb.
+- One idea per subtitle, ≤ 2 lines (a line holds about 30 base characters; vowel and tone marks don't count). Highlight 1–3 words with `**…**`: names, numbers, the key verb.
 - Write `voice:` after the subtitles, then run `voice.mjs` to see which scenes are too short.
 
 ## Choosing the look
@@ -23,7 +24,10 @@ Use chapter titles (`title:`) to mark periods; the era pill (`era:`) carries the
 | kingdoms and borders | glowing `area` layers with `approx: true`, ticking era |
 | migration / trade | `routes` with `people`/`trade` styles, many pins, a wide final zoom |
 | one province or town | close zoom, `imagery: sentinel2016`, polaroid cards, `words` cards for names |
+| one river/route across countries | outline only the country being passed, one colour each; a counter in `era:` ("ประเทศที่ 2 / 6"); final wide shot with all labels (per-scene `labelAt` to re-place them) |
 | hypothetical ("what if") | `style: hatch` for the imagined part, and say "สมมติ" in the title |
+
+In 3D scenes keep the screen for the battle: title, era pill, callout and HUD only — cards sit at y 860–1360, right where `focus: 0.5` puts the action. Stop marching units a little short of a route's end so they don't hide the arrowhead.
 
 3D scenes are expensive to render (≈2× a flat scene) and only read well at zoom 11.5–12.5 with `focus: 0.5`, so use them for 1–3 key moments, not for every event.
 
@@ -32,6 +36,7 @@ These matter more than polish — the clips get shared as facts.
 - Everything shown as fact (numbers, dates, names, who did what) traces to the source. Add `ref:` to each scene so it can be checked.
 - Keep the source's hedges. If it says "อาจ", "น่าจะ", "มีส่วน", "แม้ไม่ใช่ทั้งหมด", the subtitle and the voice say it too.
 - Anything you constructed is labelled: historical borders (`approx: true` → "แนวโดยประมาณ"), battle layouts and unit positions (`era: … · ภาพจำลองการรบ`; if the source names no location, say "ต้นฉบับไม่ระบุสถานที่"), war zones (`approx: true`). The end card repeats this.
+- When the user wants armies moving but the source names no routes ("ยกทัพมาหลายทาง"), draw plausible routes but say so: `era: "… · เส้นทางโดยประมาณ"` on that scene and a line in the end note.
 - Ancient place names map to modern stand-ins; list each mapping for the user at checkpoint 1 and flag what you could not find.
 - Casualty numbers appear as numbers only — no gore in illustrations.
 - Present-day disputed borders: draw with a dashed `line`, don't assign them.

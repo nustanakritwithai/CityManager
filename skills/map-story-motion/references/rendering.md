@@ -24,7 +24,8 @@ What actually helps:
 |---|---|
 | `validate` says geo file missing | add a `build:` spec and run `build-geo.mjs`; check the Natural Earth English name |
 | river draws backwards | set `upstream:` near the source |
-| a label never appears | it collides with a pin, HUD or era pill — move `labelAt` |
+| river stops short of its source | the upper reach has another Natural Earth name — `build-geo.mjs --list-rivers w,s,e,n` |
+| a label never appears | it collides with a pin, HUD or era pill, or sits in the title band — move it for that scene with `labelAt: { id: [lng, lat] }` |
 | 3D units tiny / far away | zoom 11.5–12.5, `focus: 0.5`, bigger `tile` |
 | grey or white patches in close-ups | Sentinel-2 2016 clouds — move the camera or stay on `bluemarble` |
 | Chinese glyphs show as boxes | Noto Serif SC not installed — run `setup.mjs` again |

@@ -34,7 +34,7 @@ for (const [id, l] of Object.entries(layers)) {
 }
 for (const [id, z] of Object.entries(zones)) {
   if (!z.coords && !z.src) E(`zones.${id}: needs coords or src`);
-  if (z.src && !existsSync(join(dir, 'geo', `${z.src}.json`))) E(`zones.${id}: geo/${z.src}.json missing`);
+  if (z.src && !existsSync(join(dir, 'geo', `${z.src}.json`)) && !existsSync(join(ROOT, 'geo', `${z.src}.json`))) E(`zones.${id}: geo/${z.src}.json missing`);
   if (z.from) place(z.from, `zones.${id}.from`);
   if (z.label && !z.labelAt) E(`zones.${id}: label needs labelAt`);
 }
@@ -76,7 +76,8 @@ for (const s of scenes) {
   if (s.hud) for (const r of s.hud.rows || []) if (!factions[r.f]) E(`${w}.hud: unknown faction ${r.f}`);
   const subs = Array.isArray(s.sub) ? s.sub : s.sub ? [s.sub] : [];
   // Thai vowel and tone marks take no width, so count base characters only
-  for (const t of subs) { const len = t.replace(/\*\*/g, '').replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, '').length; if (len > 60) Wn(`${w}: subtitle ${len} chars may run past 2 lines — split it into a list`); }
+  for (const t of subs) { const len = t.replace(/\*\*/g, '').replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, '').length; if (len > 52) Wn(`${w}: subtitle ${len} base chars — a line holds ~30, so this may wrap to 3 lines or strand a word; shorten or split into a list`); }
+  for (const k of Object.keys(s.labelAt || {})) if (!layers[k] && !zones[k]) E(`${w}.labelAt: unknown layer ${k}`);
   if (s.voice && /\d/.test(s.voice)) Wn(`${w}: voice contains digits — write numbers as Thai words so TTS reads them right`);
 }
 

@@ -9,33 +9,34 @@ Make a 9:16 map video from source text. The engine in `engine/` renders a `story
 
 ## Workflow
 
-Copy `engine/` and the story into a working folder the user can see (for example `<project>/map-story/engine` and `<project>/map-story/<story-name>/`). Run every script from inside `engine/`.
+Run every script from inside `engine/` (copy it into the user's project if the skill folder is read-only). The story folder can live anywhere — scripts take its path, and `geo/`, `media/` and `out/` resolve next to `story.yaml`. Paths below write it as `<story>/story.yaml`.
 
-1. **Setup** — `node scripts/setup.mjs`. Installs npm packages and downloads Natural Earth data (~100 MB, once). It needs node, ffmpeg and Playwright with Chromium; if Playwright is missing, say so rather than improvising another renderer.
+1. **Setup** — `node scripts/setup.mjs`. Installs npm packages and downloads Natural Earth data (~100 MB, once; re-running only checks). It needs node, ffmpeg and Playwright with Chromium; if Playwright is missing, say so rather than improvising another renderer.
 
 2. **Storyboard (checkpoint 1)** — Read the source and draft a table: scene · seconds · what the map shows · card/illustration · subtitle · reference to the source paragraph. Read `references/storytelling.md` first: it covers structure, scene length, which scenes deserve 3D, and the accuracy rules (keep the author's hedges like "อาจ", "น่าจะ", label reconstructions). Show the table and ask the user to confirm before building — wrong facts or places cost a full render.
    Also ask, once, what you can't infer: target length (short reels work best at 60–90 s), whether to credit the author/sources, whether original images the user supplied may appear in the clip.
+   If the user says not to wait ("ไม่ต้องรอยืนยัน"), carry on with sensible defaults and put every assumption — places, invented routes, credits, length — in your reply instead.
 
 3. **Places** — `node scripts/geocode.mjs "Guangzhou, China" "Luang Prabang, Laos" …` prints `places:` lines. Ancient places map to a modern stand-in; list every interpretation and anything not found in the storyboard notes so the user can correct it.
 
 4. **Write `story.yaml`** — follow `references/story-schema.md` (every field, with examples). Start from `examples/tai-kadai-war/story.yaml`, which uses almost every feature. Put `build:` specs on river/area layers so the geometry comes from Natural Earth, then:
    ```bash
-   node scripts/build-geo.mjs ../<story>/story.yaml
-   node scripts/validate.mjs ../<story>/story.yaml
+   node scripts/build-geo.mjs <story>/story.yaml
+   node scripts/validate.mjs <story>/story.yaml
    ```
-   Fix every ERROR. Warnings about long subtitles mean "split into a list".
+   Fix every ERROR. Warnings about long subtitles mean "shorten or split into a list". `build-geo` prints where each river starts and ends: if a river misses its source, the upper reach has its own Natural Earth name — find it with `node scripts/build-geo.mjs --list-rivers w,s,e,n` and add it to `rivers:`.
 
-5. **Stills (checkpoint 2)** — `node scripts/render.mjs ../<story>/story.yaml --stills` writes one PNG per scene and `out/contact-sheet.png` in ~2 minutes. Look at it yourself first (labels colliding, cards covering the action, a 3D scene where the units are tiny, wrong colours), fix, re-run, then show the user. This is the cheap place to iterate; a video render is not.
+5. **Stills (checkpoint 2)** — `node scripts/render.mjs <story>/story.yaml --stills` writes one PNG per scene (taken 80% into the scene; `--at 0.3` shows earlier moments, e.g. the first part of a list subtitle) and `out/contact-sheet.png` in ~2 minutes. Look at it yourself first (labels colliding, cards covering the action, a 3D scene where the units are tiny, wrong colours), fix, re-run, then show the user. This is the cheap place to iterate; a video render is not.
 
-6. **Voice (optional, Thai)** — give each scene a `voice:` line: the spoken version of the subtitle with numbers written as words ("ห้าแสน", "ปีเจ็ดร้อยยี่สิบแปด", "คริสต์ศักราช"). Then `node scripts/voice.mjs ../<story>/story.yaml` reports how each line fits its scene. If many lines run long, either tighten the wording or write a fitted copy with `--fit fitted.yaml` and render that (scenes get longer). Default tempo is 1.5× because Google's Thai voice is slow; `voiceTempo:` on a scene overrides it. The voice is Google Translate TTS — fine for drafts, tell the user to use a licensed voice or their own recording for monetised pages.
+6. **Voice (optional, Thai)** — give each scene a `voice:` line: the spoken version of the subtitle with numbers written as words ("ห้าแสน", "ปีเจ็ดร้อยยี่สิบแปด", "คริสต์ศักราช"). Then `node scripts/voice.mjs <story>/story.yaml` reports how each line fits its scene. If many lines run long, either tighten the wording or write a fitted copy with `--fit fitted.yaml` and render that (scenes get longer). Default tempo is 1.5× because Google's Thai voice is slow; `voiceTempo:` on a scene overrides it. The voice is Google Translate TTS — fine for drafts, tell the user to use a licensed voice or their own recording for monetised pages.
 
 7. **Render** — tell the user the time first: on a machine without a GPU expect roughly 1 frame per second (3D scenes slower), so a 90 s clip at 24 fps ≈ 35–60 minutes. Run it in the background and report progress from `out/render.log`:
    ```bash
-   node scripts/render.mjs ../<story>/story.yaml --workers 2 --out <name>
+   node scripts/render.mjs <story>/story.yaml --workers 2 --out <name>
    ```
    Two workers is the sweet spot on 4 cores; more workers fight over the CPU and get slower. Use `--from/--to` to re-render one section while iterating.
 
-8. **Deliver** — mux the voice without re-rendering video: `node scripts/voice.mjs ../<story>/story.yaml --mux ../<story>/out/<name>.mp4` → `<name>-voice.mp4`. If the file must go through a chat upload, re-encode to stay under ~30 MB:
+8. **Deliver** — mux the voice without re-rendering video: `node scripts/voice.mjs <story>/story.yaml --mux <story>/out/<name>.mp4` → `<name>-voice.mp4`. If the file must go through a chat upload, re-encode to stay under ~30 MB:
    `ffmpeg -i in.mp4 -c:v libx264 -preset slow -crf 29 -c:a copy -movflags +faststart small.mp4`.
    Send the MP4 and the `.srt`, and say plainly what you checked (frame count, duration, sampled frames) and what you did not (you cannot watch or listen to it).
 
@@ -48,8 +49,9 @@ Copy `engine/` and the story into a working folder the user can see (for example
 ## Files
 
 - `engine/player/` — `app.js` (timeline, camera, layers, cards, text), `tactical.js` (units, formations, zones, volleys, HUD, callout), `kit.js` (vector illustrations and polaroid icons), `style.css`.
-- `engine/scripts/` — `setup`, `geocode`, `build-geo`, `validate`, `render`, `voice`, `serve` (live preview: `node scripts/serve.mjs ../<story>/story.yaml` then open `http://127.0.0.1:5180/?preview=1`, Space plays).
+- `engine/scripts/` — `setup`, `geocode`, `build-geo`, `validate`, `render`, `voice`, `serve` (live preview: `node scripts/serve.mjs <story>/story.yaml` then open `http://127.0.0.1:5180/?preview=1`, Space plays).
 - `references/story-schema.md` — every story.yaml field.
 - `references/storytelling.md` — structure, pacing, style presets, accuracy rules.
 - `references/rendering.md` — performance, troubleshooting, delivery.
 - `examples/tai-kadai-war/story.yaml` — an 88 s history clip with tactical and 3D scenes.
+- `evals/` — three test cases (river explainer, tactical + 3D battle, keeping the source's hedges).

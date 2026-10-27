@@ -153,7 +153,8 @@ export function createTactical({ story, scenes, P, proj, col, life, clamp, inOut
       if (k <= 0) continue;
       out.push(`<clipPath id="zc-${id}"><circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${(maxD * k + 1).toFixed(1)}"/></clipPath>`);
       out.push(`<g clip-path="url(#zc-${id})" opacity="${lf.alpha.toFixed(3)}"><path d="${paths}" fill="${c}" fill-opacity="${z.fill ?? 0.5}" stroke="${c}" stroke-width="4" stroke-linejoin="round" fill-rule="evenodd"/></g>`);
-      if (z.label && k > 0.6) labels.push({ kind: 'region', def: { ...z, color: z.labelColor || 'white' }, a: lf.alpha * clamp((k - 0.6) / 0.4) });
+      const la = s.labelAt?.[id];
+      if (z.label && k > 0.6 && la !== false) labels.push({ kind: 'region', def: { ...z, ...(la ? { labelAt: la } : {}), color: z.labelColor || 'white' }, a: lf.alpha * clamp((k - 0.6) / 0.4) });
     }
     return out.join('');
   }

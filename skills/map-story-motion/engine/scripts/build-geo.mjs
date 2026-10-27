@@ -19,6 +19,17 @@ const RIVERS = join(NE, 'ne_10m_rivers_lake_centerlines/ne_10m_rivers_lake_cente
 const ADM0 = join(NE, 'ne_10m_admin_0_countries/ne_10m_admin_0_countries.shp');
 const ADM1 = join(NE, 'ne_10m_admin_1_states_provinces/ne_10m_admin_1_states_provinces.shp');
 
+// --list-rivers w,s,e,n prints the Natural Earth river names inside a box (upper reaches often
+// have their own names, e.g. the Mekong's headwater is "Za").
+const li = process.argv.indexOf('--list-rivers');
+if (li > 0) {
+  const tmp = join(ROOT, '.cache/rivers-list.json');
+  execFileSync(MS, [RIVERS, '-clip', `bbox=${process.argv[li + 1]}`, '-o', tmp, 'format=geojson'], { stdio: 'ignore' });
+  const names = {};
+  for (const f of JSON.parse(readFileSync(tmp, 'utf8')).features) { const n = f.properties.name_en || f.properties.name; if (n) names[n] = (names[n] || 0) + 1; }
+  console.log(Object.keys(names).sort().join(' · '));
+  process.exit(0);
+}
 const storyPath = resolve(process.argv[2]);
 const force = process.argv.includes('--force');
 const story = YAML.parse(readFileSync(storyPath, 'utf8'));
@@ -54,7 +65,8 @@ function chainRiver(file, hint) {
   }
   if (hint) { const d = (c) => Math.hypot(c[0] - hint[0], c[1] - hint[1]); if (d(chain.at(-1)) < d(chain[0])) chain.reverse(); }
   writeFileSync(file, J({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: chain } }));
-  return `${chain.length} pts${parts.length ? `, ${parts.length} side branches dropped` : ''}`;
+  const f = (c) => `[${c.map((v) => v.toFixed(2)).join(', ')}]`;
+  return `${chain.length} pts from ${f(chain[0])} to ${f(chain.at(-1))}${parts.length ? `, ${parts.length} side branches dropped` : ''}`;
 }
 
 function provinceExpr(list) {

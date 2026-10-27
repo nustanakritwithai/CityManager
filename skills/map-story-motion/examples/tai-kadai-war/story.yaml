@@ -287,6 +287,7 @@ scenes:
 
   - id: s27
     dur: 3.5
+    title: []
     credits: false
     cards:
       - { type: sources, title: หมายเหตุ, items: ["ไทกะได หมายถึงผู้พูดภาษาตระกูลนี้ ไม่ใช่เชื้อชาติ", "ฉากรบเป็นภาพจำลอง ขอบเขตและตำแหน่งเป็นแนวโดยประมาณ", "ภาพ: NASA Blue Marble · Sentinel-2 cloudless 2016 by EOX · Terrain Tiles · Natural Earth"] }
