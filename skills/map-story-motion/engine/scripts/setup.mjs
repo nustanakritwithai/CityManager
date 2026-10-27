@@ -21,7 +21,9 @@ for (const [cmd, arg] of [['node', '-v'], ['ffmpeg', '-version'], ['ffprobe', '-
 console.log('npm packages');
 if (!existsSync(join(ROOT, 'node_modules/maplibre-gl'))) {
   console.log('  installing…');
-  execFileSync('npm', ['install', '--silent'], { cwd: ROOT, stdio: 'inherit' });
+  // npm is a cmd shim on Windows. The command is constant: no story or user input is interpolated.
+  if (process.platform === 'win32') execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm.cmd install --silent'], { cwd: ROOT, stdio: 'inherit' });
+  else execFileSync('npm', ['install', '--silent'], { cwd: ROOT, stdio: 'inherit' });
 }
 ok('engine dependencies installed');
 try {
@@ -52,9 +54,13 @@ for (const s of sets) {
   if (readdirSync(dir).length) { bad(`${name}: destination is not empty`); continue; }
   const zip = join(dir, 'download.zip');
   writeFileSync(zip, Buffer.from(await res.arrayBuffer()), { flag: 'wx' });
-  const entries = execFileSync('unzip', ['-Z', '-1', zip], { encoding: 'utf8' }).trim().split(/\r?\n/);
+  // Windows includes bsdtar, while unzip is not guaranteed to be installed.
+  const archiveTool = process.platform === 'win32' ? 'tar' : 'unzip';
+  const listArgs = process.platform === 'win32' ? ['-tf', zip] : ['-Z', '-1', zip];
+  const entries = execFileSync(archiveTool, listArgs, { encoding: 'utf8' }).trim().split(/\r?\n/);
   if (!entries.length || new Set(entries.map(entry => entry.toLowerCase())).size !== entries.length || entries.some(entry => !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(entry) || entry.toLowerCase() === 'download.zip')) throw new Error(`${name}: unsafe archive entry`);
-  execFileSync('unzip', ['-q', zip, '-d', dir]);
+  if (process.platform === 'win32') execFileSync(archiveTool, ['-xkf', zip, '-C', dir]);
+  else execFileSync(archiveTool, ['-q', zip, '-d', dir]);
   for (const entry of entries) { const st = lstatSync(join(dir, entry)); if (!st.isFile() || st.isSymbolicLink()) throw new Error(`${name}: unsafe archive file`); }
 
   ok(name);

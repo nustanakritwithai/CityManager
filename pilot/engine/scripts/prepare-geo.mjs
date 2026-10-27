@@ -4,12 +4,12 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { newOutputDirectory } from './output-files.mjs';
 
-const MS = 'node_modules/.bin/mapshaper';
+const MS = 'node_modules/mapshaper/bin/mapshaper';
 const NE = '.cache/ne';
 const OUT = newOutputDirectory('.', 'geo-build-');
 console.log(`Geo output: ${OUT}`);
 
-const ms = (...args) => execFileSync(MS, args, { stdio: ['ignore', 'ignore', 'inherit'] });
+const ms = (...args) => execFileSync(process.execPath, [MS, ...args], { stdio: ['ignore', 'ignore', 'inherit'] });
 
 // Rivers: keep the ones the story names, dissolve each into one feature, light simplify.
 const rivers = { yangtze: ['Yangtze'], huai: ['Huai'], red: ['Red'], mekong: ['Mekong'], ou: ['Ou', 'Nam Ou'], xi: ['Xi', 'Xunjiang', 'Xun'], black: ['Black'] };

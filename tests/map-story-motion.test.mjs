@@ -223,3 +223,90 @@ test('geo CLI rejects unsafe src and force before invoking mapshaper', () => {
   assert.notEqual(force.status, 0); assert.match(force.stderr, /unsupported/);
   assert.equal(readFileSync(outside, 'utf8'), 'sentinel');
 });
+
+
+test('real mapshaper creates geo output and preserves it on a second build', async t => {
+  const modules = process.env.MAP_TEST_MODULES;
+  if (!modules) { if (process.env.MAP_REQUIRE_MAPSHAPER) assert.fail('Mapshaper fixture dependencies required'); return t.skip('Mapshaper fixture dependencies unavailable'); }
+  const tmp = mkdtempSync(join(tmpdir(), 'map-real-geo-')), work = join(tmp, 'engine'), scripts = join(work, 'scripts');
+  mkdirSync(scripts, {recursive:true});
+  for (const name of ['build-geo.mjs', 'geo-output.mjs', 'output-files.mjs']) copyFileSync(join(root, 'skills/map-story-motion/engine/scripts', name), join(scripts, name));
+  symlinkSync(modules, join(work, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  const ne = join(work, '.cache', 'ne'), adm = join(ne, 'ne_10m_admin_0_countries'), rivers = join(ne, 'ne_10m_rivers_lake_centerlines');
+  mkdirSync(adm,{recursive:true}); mkdirSync(rivers,{recursive:true});
+  writeFileSync(join(rivers,'ne_10m_rivers_lake_centerlines.shp'), 'existence fixture');
+  const input = join(tmp, 'input.geojson');
+  writeFileSync(input, JSON.stringify({type:'FeatureCollection', features:[{type:'Feature', properties:{ADMIN:'Fixture',NAME_EN:'Fixture',ISO_A3:'FIX'}, geometry:{type:'Polygon',coordinates:[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}}]}));
+  const ms = join(modules, 'mapshaper','bin','mapshaper'), shp = join(adm, 'ne_10m_admin_0_countries.shp');
+  const create = spawnSync(process.execPath, [ms, input, '-o', shp, 'format=shapefile'], {encoding:'utf8', timeout:30000});
+  assert.equal(create.status,0,create.stderr);
+  const storyDir = join(tmp,'story'); mkdirSync(storyDir); const story = join(storyDir,'story.yaml');
+  const spec = {countries:['Fixture'], simplify:'100%'};
+  writeFileSync(story, JSON.stringify({layers:{first:{src:'region',build:spec},same:{src:'region',build:spec}}}));
+  const run = () => spawnSync(process.execPath,[join(scripts,'build-geo.mjs'),story],{encoding:'utf8',timeout:30000});
+  const first = run(); assert.equal(first.status,0,first.stdout+'\n'+first.stderr);
+  const output = join(storyDir,'geo','region.json'), original = readFileSync(output);
+  const result = JSON.parse(original); assert.ok(['GeometryCollection','FeatureCollection'].includes(result.type)); assert.ok((result.geometries || result.features).length > 0); assert.match(first.stdout,/reusing/);
+  const second = run(); assert.notEqual(second.status,0); assert.match(second.stdout,/already exists/);
+  assert.deepEqual(readFileSync(output),original);
+});
+
+
+test('clean setup invokes npm through the platform launcher', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'map-setup-cli-')), work = join(tmp,'engine'), scripts = join(work,'scripts'), bin = join(tmp,'bin');
+  mkdirSync(scripts,{recursive:true}); mkdirSync(bin);
+  for(const name of ['setup.mjs','safe-cache.mjs']) copyFileSync(join(root,'skills/map-story-motion/engine/scripts',name),join(scripts,name));
+  writeFileSync(join(work,'package.json'),'{}');
+  const pw = join(work,'node_modules','playwright'); mkdirSync(pw,{recursive:true}); writeFileSync(join(pw,'index.js'),'module.exports = {};');
+  for(const name of ['ne_10m_admin_0_countries','ne_10m_admin_1_states_provinces','ne_10m_rivers_lake_centerlines']) {
+    const dir=join(work,'.cache','ne',name); mkdirSync(dir,{recursive:true}); writeFileSync(join(dir,name+'.shp'),'fixture');
+  }
+  const marker=join(tmp,'npm-called');
+  if(process.platform==='win32') writeFileSync(join(bin,'npm.cmd'),'@echo off\r\n> "%TEST_NPM_MARKER%" echo called\r\n');
+  else { const npm=join(bin,'npm'); writeFileSync(npm,'#!/bin/sh\nprintf called > "$TEST_NPM_MARKER"\n',{mode:0o755}); }
+  const env={...process.env,TEST_NPM_MARKER:marker,PATH:bin+ (process.platform==='win32'?';':':') +process.env.PATH};
+  const result=spawnSync(process.execPath,[join(scripts,'setup.mjs')],{env,encoding:'utf8',timeout:30000});
+  assert.equal(result.status,0,result.stdout+'\n'+result.stderr); assert.match(readFileSync(marker,'utf8'),/called/);
+});
+
+
+test('pilot geo preparation runs real mapshaper into a fresh directory', async t => {
+  const modules=process.env.MAP_TEST_MODULES;
+  if (!modules) { if (process.env.MAP_REQUIRE_MAPSHAPER) assert.fail('Mapshaper fixture dependencies required'); return t.skip('Mapshaper fixture dependencies unavailable'); }
+  const tmp=mkdtempSync(join(tmpdir(),'map-pilot-geo-')), work=join(tmp,'engine'), scripts=join(work,'scripts'); mkdirSync(scripts,{recursive:true});
+  for(const name of ['prepare-geo.mjs','output-files.mjs']) copyFileSync(join(root,'pilot/engine/scripts',name),join(scripts,name));
+  symlinkSync(modules,join(work,'node_modules'),process.platform==='win32'?'junction':'dir');
+  const ne=join(work,'.cache','ne'), rivers=join(ne,'ne_10m_rivers_lake_centerlines'), provinces=join(ne,'ne_10m_admin_1_states_provinces');
+  mkdirSync(rivers,{recursive:true}); mkdirSync(provinces,{recursive:true});
+  const geo=join(work,'geo'); mkdirSync(geo); writeFileSync(join(geo,'river-red.json'),'sentinel');
+  const ms=join(modules,'mapshaper','bin','mapshaper');
+  const create=(name,data,out)=>{const input=join(tmp,name+'.json');writeFileSync(input,JSON.stringify({type:'FeatureCollection',features:data})); const r=spawnSync(process.execPath,[ms,input,'-o',out,'format=shapefile'],{encoding:'utf8',timeout:30000});assert.equal(r.status,0,r.stderr);};
+  create('rivers',['Yangtze','Huai','Red','Mekong','Ou','Xi','Black'].map(name=>({type:'Feature',properties:{name,name_en:name},geometry:{type:'LineString',coordinates:[[100,28],[105,25],[110,20]]}})),join(rivers,'ne_10m_rivers_lake_centerlines.shp'));
+  const provinceNames=['Zhejiang','Fujian','Jiangxi','Hunan','Guangdong','Guangxi','Yunnan','Anhui','Jiangsu'];
+  const feats=provinceNames.map(name=>({type:'Feature',properties:{admin:'China',name_en:name,latitude:25,longitude:110},geometry:{type:'Polygon',coordinates:[[[105,21],[119,21],[119,32],[105,32],[105,21]]]}}));
+  feats.push({type:'Feature',properties:{admin:'Vietnam',name_en:'North',latitude:22,longitude:105},geometry:{type:'Polygon',coordinates:[[[105,21],[106,21],[106,22],[105,22],[105,21]]]}});
+  create('provinces',feats,join(provinces,'ne_10m_admin_1_states_provinces.shp'));
+  const run=spawnSync(process.execPath,[join(scripts,'prepare-geo.mjs')],{cwd:work,encoding:'utf8',timeout:120000});
+  assert.equal(run.status,0,run.stdout+'\n'+run.stderr); const generated=readdirSync(work).filter(n=>n.startsWith('geo-build-'));assert.equal(generated.length,1);
+  assert.ok(readFileSync(join(work,generated[0],'river-red.json')).length>0); assert.equal(readFileSync(join(geo,'river-red.json'),'utf8'),'sentinel');
+});
+
+
+test('setup extracts fixture Natural Earth archives without external unzip on Windows', async t => {
+  const modules=process.env.MAP_TEST_MODULES;
+  if (!modules) { if (process.env.MAP_REQUIRE_MAPSHAPER) assert.fail('fixture archive dependencies required'); return t.skip('fixture archive dependencies unavailable'); }
+  const {createRequire}=await import('node:module'); const AdmZip=createRequire(join(modules,'fixture.cjs'))('adm-zip');
+  const tmp=mkdtempSync(join(tmpdir(),'map-setup-archive-')), work=join(tmp,'engine'), scripts=join(work,'scripts'), fixtures=join(tmp,'archives');
+  mkdirSync(scripts,{recursive:true}); mkdirSync(fixtures);
+  for(const name of ['setup.mjs','safe-cache.mjs']) copyFileSync(join(root,'skills/map-story-motion/engine/scripts',name),join(scripts,name));
+  writeFileSync(join(work,'package.json'),'{}'); mkdirSync(join(work,'node_modules','maplibre-gl'),{recursive:true});
+  const pw=join(work,'node_modules','playwright');mkdirSync(pw,{recursive:true});writeFileSync(join(pw,'index.js'),'module.exports={};');
+  const names=['ne_10m_admin_0_countries','ne_10m_admin_1_states_provinces','ne_10m_rivers_lake_centerlines'];
+  for(const name of names){const zip=new AdmZip();zip.addFile(name+'.shp',Buffer.from('fixture '+name));zip.writeZip(join(fixtures,name+'.zip'));}
+  const bootstrap=join(tmp,'bootstrap.mjs');writeFileSync(bootstrap,`import {readFileSync} from 'node:fs'; import {join} from 'node:path'; globalThis.fetch=async url=>({ok:true,arrayBuffer:async()=>readFileSync(join(process.env.TEST_ARCHIVES,new URL(url).pathname.split('/').pop()))});`);
+  const env={...process.env,TEST_ARCHIVES:fixtures};const run=()=>spawnSync(process.execPath,['--import',pathToFileURL(bootstrap).href,join(scripts,'setup.mjs')],{env,encoding:'utf8',timeout:30000});
+  const first=run();assert.equal(first.status,0,first.stdout+'\n'+first.stderr);
+  for(const name of names) assert.equal(readFileSync(join(work,'.cache','ne',name,name+'.shp'),'utf8'),'fixture '+name);
+  const second=run();assert.equal(second.status,0,second.stdout+'\n'+second.stderr);
+  for(const name of names) assert.equal(readFileSync(join(work,'.cache','ne',name,name+'.shp'),'utf8'),'fixture '+name);
+});

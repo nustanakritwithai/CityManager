@@ -51,7 +51,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ffprobe -version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install pinned geo test dependencies
+        shell: pwsh
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP/map-geo-deps" --no-save --ignore-scripts --omit=optional --no-audit --no-fund mapshaper@0.6.99 yaml@2.6.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: node --test tests/map-story-motion.test.mjs
         env:
           MAP_REQUIRE_FFMPEG: '1'
+          MAP_REQUIRE_MAPSHAPER: '1'
+          MAP_TEST_MODULES: ${{ runner.temp }}/map-geo-deps/node_modules
       - run: python tests/map-story-package.test.py

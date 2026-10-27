@@ -16,7 +16,7 @@ import { buildGeoFile } from './geo-output.mjs';
 import { safeOutputName } from './output-files.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const MS = join(ROOT, 'node_modules/.bin/mapshaper');
+const MS = join(ROOT, 'node_modules/mapshaper/bin/mapshaper');
 const NE = join(ROOT, '.cache/ne');
 const RIVERS = join(NE, 'ne_10m_rivers_lake_centerlines/ne_10m_rivers_lake_centerlines.shp');
 const ADM0 = join(NE, 'ne_10m_admin_0_countries/ne_10m_admin_0_countries.shp');
@@ -30,7 +30,7 @@ if (li > 0) {
   const tempDir = mkdtempSync(join(tmpdir(), 'map-rivers-'));
   const tmp = join(tempDir, 'rivers.json');
   try {
-  execFileSync(MS, [RIVERS, '-clip', `bbox=${process.argv[li + 1]}`, '-o', tmp, 'format=geojson'], { stdio: 'ignore' });
+  execFileSync(process.execPath, [MS, RIVERS, '-clip', `bbox=${process.argv[li + 1]}`, '-o', tmp, 'format=geojson'], { stdio: 'ignore' });
   const names = {};
   for (const f of JSON.parse(readFileSync(tmp, 'utf8')).features) { const n = f.properties.name_en || f.properties.name; if (n) names[n] = (names[n] || 0) + 1; }
   console.log(Object.keys(names).sort().join(' · '));
@@ -44,7 +44,7 @@ try { for (const [, def] of jobs) safeOutputName(def.src); }
 catch (e) { console.error(`Invalid geo src: ${e.message}`); process.exit(1); }
 if (!existsSync(RIVERS)) { console.error('Natural Earth data missing: run node scripts/setup.mjs first'); process.exit(1); }
 
-const ms = (...args) => execFileSync(MS, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+const ms = (...args) => execFileSync(process.execPath, [MS, ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
 const J = JSON.stringify;
 const clipArgs = (b) => (b.clip ? ['-clip', `bbox=${b.clip.join(',')}`] : []);
 
