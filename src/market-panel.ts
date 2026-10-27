@@ -1,5 +1,6 @@
 import { MARKET_ITEMS, MarketClient, type MarketItem } from './market-client.ts';
-import type { City } from './sim.ts';
+import { RECIPE, type ProductId } from './goods.ts';
+import type { City, Firm } from './sim.ts';
 
 const labels: Record<string, string> = {
   'crop:rice': 'ข้าว', 'crop:vegetables': 'ผัก', 'crop:sugarcane': 'อ้อย',
@@ -17,6 +18,15 @@ const errorText = (error: unknown) => {
   };
   return thai[message] ?? (message || 'ข้อผิดพลาดที่ไม่ทราบสาเหตุ');
 };
+const itemKey = (item: MarketItem) => item.slice(item.indexOf(':') + 1);
+export const depositSourceStock = (firm: Firm, item: MarketItem) => {
+  const key = itemKey(item);
+  const value = item.startsWith('crop:')
+    ? firm.zone === 'F' ? Number(firm.crops[key as keyof typeof firm.crops] ?? 0) : 0
+    : firm.zone === 'I' && firm.recipe && RECIPE[firm.recipe].product === key ? Number(firm.products[key as ProductId] ?? 0) : 0;
+  return Number.isSafeInteger(value) && value > 0 ? value : 0;
+};
+export const eligibleDepositFirms = (city: Pick<City, 'firms'>, item: MarketItem) => city.firms.filter(f => depositSourceStock(f, item) > 0);
 
 export function installMarketPanel(city: () => City, onChanged: () => void, saveCity: () => void) {
   const base = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_MARKET_URL ?? '';
@@ -67,15 +77,23 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
       }
 
       const deposit = document.createElement('form'); deposit.className = 'market-listing-form';
-      const firm = document.createElement('select'); const firms = city().firms.filter(x => x.commercialKind === 'market');
-      for (const f of firms) { const o = el('option', `firm:${f.id}`); o.value = String(f.id); firm.append(o); }
+      const firm = document.createElement('select');
       const depositItem = document.createElement('select'); for (const item of MARKET_ITEMS) { const o = el('option', labels[item]); o.value = item; depositItem.append(o); }
       const depositQty = document.createElement('input'); depositQty.type = 'number'; depositQty.min = '1'; depositQty.value = '1';
       const depositSubmit = el('button', inventory.imports_enabled ? 'ฝากสต็อกเข้า escrow' : 'ฝากสต็อกปิดอยู่'); depositSubmit.type = 'submit';
-      const depositDisabled = !inventory.imports_enabled || firms.length === 0; [firm, depositItem, depositQty, depositSubmit].forEach(x => { x.disabled = depositDisabled; });
+      const refreshDepositSources = () => {
+        const item = depositItem.value as MarketItem, firms = eligibleDepositFirms(city(), item);
+        firm.replaceChildren(...firms.map(f => { const o = el('option', `firm:${f.id}`); o.value = String(f.id); return o; }));
+        const stock = firms.length ? depositSourceStock(firms[0], item) : 0; depositQty.max = String(Math.max(0, stock));
+        const wanted = Number(depositQty.value), enabled = inventory.imports_enabled && firms.length > 0 && Number.isSafeInteger(wanted) && wanted > 0 && wanted <= stock;
+        [firm, depositItem, depositQty, depositSubmit].forEach(x => { x.disabled = !enabled && x !== depositItem && x !== firm ? true : (!inventory.imports_enabled || firms.length === 0); });
+        depositSubmit.disabled = !enabled || !inventory.imports_enabled;
+      };
+      depositItem.addEventListener('change', refreshDepositSources); depositQty.addEventListener('input', refreshDepositSources);
+      refreshDepositSources();
       deposit.append(el('label', 'firm'), firm, el('label', 'สินค้า'), depositItem, el('label', 'จำนวน'), depositQty, depositSubmit);
-      deposit.addEventListener('submit', async e => { e.preventDefault(); if (depositDisabled) return; try { await client.deposit(Number(firm.value), depositItem.value as MarketItem, Number(depositQty.value), saveCity); status.textContent = 'ฝากสต็อกสำเร็จ · escrow อยู่ภายใต้ server'; await render(); onChanged(); } catch (x) { status.textContent = `ฝากไม่สำเร็จ: ${errorText(x)}`; } });
-      list.append(el('h4', 'ฝากสต็อกจาก firm'), deposit, el('p', inventory.imports_enabled ? 'การฝากใช้สต็อก firm ที่ตรวจสอบแล้ว' : 'ฝากของถูกปิดตามนโยบายทดสอบ จึงยังไม่ส่งข้อมูลเมืองเข้า server'));
+      deposit.addEventListener('submit', async e => { e.preventDefault(); if (depositSubmit.disabled) return; try { await client.deposit(Number(firm.value), depositItem.value as MarketItem, Number(depositQty.value), saveCity); status.textContent = 'ฝากสต็อกสำเร็จ · escrow อยู่ภายใต้ server'; await render(); onChanged(); } catch (x) { status.textContent = `ฝากไม่สำเร็จ: ${errorText(x)}`; } });
+      list.append(el('h4', 'ฝากสต็อกจาก firm'), deposit, el('p', inventory.imports_enabled ? 'เลือกฟาร์มสำหรับพืชผล หรือโรงงานสูตรตรงกันสำหรับสินค้าแปรรูป' : 'ฝากของถูกปิดตามนโยบายทดสอบ จึงยังไม่ส่งข้อมูลเมืองเข้า server'));
 
       const listing = document.createElement('form'); listing.className = 'market-listing-form';
       const select = document.createElement('select'); for (const item of MARKET_ITEMS) { const o = el('option', labels[item]); o.value = item; select.append(o); }
