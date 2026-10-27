@@ -1,0 +1,5 @@
+engine/node_modules/
+engine/.cache/
+*/out/*
+!*/out/contact-sheet.png
+*/media/
