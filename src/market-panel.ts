@@ -27,6 +27,11 @@ export const depositSourceStock = (firm: Firm, item: MarketItem) => {
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
 };
 export const eligibleDepositFirms = (city: Pick<City, 'firms'>, item: MarketItem) => city.firms.filter(f => depositSourceStock(f, item) > 0);
+export const depositSourceLabel = (firm: Firm, item: MarketItem) => {
+  const stock = depositSourceStock(firm, item);
+  const name = item.startsWith('crop:') ? 'ฟาร์ม' : `โรงงาน${labels[item] ?? item}`;
+  return `${name} #${firm.id} · มี ${stock} หน่วย`;
+};
 
 export function installMarketPanel(city: () => City, onChanged: () => void, saveCity: () => void) {
   const base = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_MARKET_URL ?? '';
@@ -83,7 +88,7 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
       const depositSubmit = el('button', inventory.imports_enabled ? 'ฝากสต็อกเข้า escrow' : 'ฝากสต็อกปิดอยู่'); depositSubmit.type = 'submit';
       const refreshDepositSources = () => {
         const item = depositItem.value as MarketItem, firms = eligibleDepositFirms(city(), item);
-        firm.replaceChildren(...firms.map(f => { const o = el('option', `firm:${f.id}`); o.value = String(f.id); return o; }));
+        firm.replaceChildren(...firms.map(f => { const o = el('option', depositSourceLabel(f, item)); o.value = String(f.id); return o; }));
         const stock = firms.length ? depositSourceStock(firms[0], item) : 0; depositQty.max = String(Math.max(0, stock));
         const wanted = Number(depositQty.value), enabled = inventory.imports_enabled && firms.length > 0 && Number.isSafeInteger(wanted) && wanted > 0 && wanted <= stock;
         [firm, depositItem, depositQty, depositSubmit].forEach(x => { x.disabled = !enabled && x !== depositItem && x !== firm ? true : (!inventory.imports_enabled || firms.length === 0); });
@@ -100,7 +105,7 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
       const qty = document.createElement('input'); qty.type = 'number'; qty.min = '1'; qty.value = '1';
       const price = document.createElement('input'); price.type = 'number'; price.min = '1'; price.value = '10';
       const available = el('small'); const submit = el('button', 'ลงขายสต็อกตลาด'); submit.type = 'submit';
-      const updateListingAvailability = () => { const have = serverStock.get(select.value) ?? 0; const wanted = Number(qty.value); const ok = Number.isSafeInteger(wanted) && wanted > 0 && wanted <= have; available.textContent = `สต็อกตลาดของ Guest: ${have} หน่วย`; submit.disabled = !ok; submit.title = ok ? '' : 'สต็อกตลาดของ Guest ไม่พอ'; };
+      const updateListingAvailability = () => { const have = serverStock.get(select.value) ?? 0; const wanted = Number(qty.value); const ok = Number.isSafeInteger(wanted) && wanted > 0 && wanted <= have; available.textContent = `คลังตลาดของ Guest บน server: ${have} หน่วย`; submit.disabled = !ok; submit.title = ok ? '' : 'คลังตลาดของ Guest บน server ไม่พอ'; };
       select.addEventListener('change', updateListingAvailability); qty.addEventListener('input', updateListingAvailability);
       listing.append(el('label', 'สินค้า'), select, el('label', 'จำนวน'), qty, el('label', 'ราคา/หน่วย'), price, available, submit); updateListingAvailability();
       listing.addEventListener('submit', async e => { e.preventDefault(); if (submit.disabled) return; try { await client.list(select.value as MarketItem, Number(price.value), Number(qty.value)); status.textContent = 'ลงขายสำเร็จ'; await render(); } catch (x) { status.textContent = `ลงขายไม่สำเร็จ: ${errorText(x)}`; } });
