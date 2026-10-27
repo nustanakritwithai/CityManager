@@ -192,10 +192,34 @@ try {
   assert.equal(Number((await pool.query('SELECT balance FROM wallets WHERE account_id=$1', [buyerId])).rows[0].balance), 0);
   const saved = await pool.query('SELECT status,quantity FROM listings WHERE id=$1', [listingId]);
   assert.equal(saved.rows[0].status, 'open'); assert.equal(Number(saved.rows[0].quantity), 1);
+  // Give this disposable CI buyer test credits, then use the real UI for a
+  // fresh purchase after the earlier durable rejection was quarantined.
+  await pool.query('UPDATE wallets SET balance=10 WHERE account_id=$1', [buyerId]);
+  await page.locator('.market-tabs button').first().click();
+  await page.locator('.market-product').filter({ hasText: 'ข้าว' }).first().click();
+  await page.locator('.market-offer button').first().click();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'ตรวจสอบและซื้อ' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('citymanager.market.v10') || '{}').operations?.some(o => o.kind === 'buy' && o.state === 'confirmed'));
+  assert.equal(boughtStatus, 201); assert.equal(buyKeys.length, 3);
+  assert.notEqual(buyKeys[2], buyKeys[0]);
+  const purchase = await pool.query('SELECT operation_id,quantity,total FROM purchases WHERE buyer_id=$1 AND listing_id=$2', [buyerId,listingId]);
+  assert.equal(purchase.rowCount, 1); assert.equal(Number(purchase.rows[0].quantity), 1); assert.equal(Number(purchase.rows[0].total), 5);
+  const receipt = await pool.query('SELECT item_code,quantity,acknowledged_at FROM delivery_receipts WHERE buyer_id=$1 AND operation_id=$2', [buyerId,purchase.rows[0].operation_id]);
+  assert.equal(receipt.rowCount, 1); assert.equal(receipt.rows[0].item_code, 'crop:rice'); assert.equal(Number(receipt.rows[0].quantity), 1); assert.equal(receipt.rows[0].acknowledged_at, null);
+  const balances = await pool.query('SELECT account_id,balance FROM wallets WHERE account_id=ANY($1::uuid[])', [[buyerId,seller.guest_id]]);
+  assert.equal(Number(balances.rows.find(w => w.account_id === buyerId).balance), 5);
+  assert.equal(Number(balances.rows.find(w => w.account_id === seller.guest_id).balance), 5);
+  const entries = await pool.query('SELECT kind,amount FROM ledger_entries WHERE operation_id=$1 ORDER BY kind', [purchase.rows[0].operation_id]);
+  assert.deepEqual(entries.rows.map(e => [e.kind,Number(e.amount)]), [['credit',5],['debit',5]]);
+  const remaining = await pool.query('SELECT status,quantity FROM listings WHERE id=$1', [listingId]);
+  assert.equal(remaining.rows[0].status, 'sold_out'); assert.equal(Number(remaining.rows[0].quantity), 0);
+  const sellerStock = await pool.query("SELECT quantity FROM inventories WHERE account_id=$1 AND item_code='crop:rice'", [seller.guest_id]);
+  assert.equal(Number(sellerStock.rows[0].quantity), 0); assert.equal(crossSiteCookies, 0); assert.deepEqual(problems, []);
   console.log(JSON.stringify({ result: 'passed', frontend: 'pinned CI artifact d3b061c5', backend: expectedBackend,
     database: 'disposable CI PostgreSQL', browser: 'installed Chrome via Playwright',
     origins: 'intercepted exact HTTPS origins', cookie: 'browser-stored backend headers',
-    thirdPartyCookies: 'restricted', scenario: 'lost durable rejection then same-key retry', screenshots: 2 }));
+    thirdPartyCookies: 'restricted', scenario: 'lost durable rejection, same-key retry, then successful purchase and receipt', screenshots: 2 }));
 } finally {
   if (context) await context.close(); if (browser) await browser.close(); child.kill();
   await new Promise(ok => proxy.close(ok)); await pool.end();
