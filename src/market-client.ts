@@ -56,7 +56,7 @@ export class MarketClient {
   async createGuest() { const me = await this.request('/v1/auth/guest', { method: 'POST', body: '{}' }); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me; }
   quarantine() { for (const o of this.journal.operations) if (o.state === 'pending') o.state = 'quarantined'; this.guestId = null; this.journal.guestId = null; this.save(); }
   resetCity() { for (const o of this.journal.operations) if (o.state === 'pending') o.state = 'quarantined'; this.journal.cityId = uuid(); this.save(); }
-  private stock(firmId: number, itemId: MarketItem) { const f = this.city().firms.find(f => f.id === firmId && isMarket(f)); if (!f) throw new Error('typed market firm required'); return { f, bucket: itemId.startsWith('crop:') ? f.crops : f.products, key: itemId.slice(itemId.indexOf(':') + 1) } as const; }
+  private stock(firmId: number, itemId: MarketItem) { const f = this.city().firms.find(f => f.id === firmId && isMarket(f)); if (!f) throw new Error('typed market firm required'); const bucket = (itemId.startsWith('crop:') ? f.crops : f.products) as Record<string, number>; return { f, bucket, key: itemId.slice(itemId.indexOf(':') + 1) } as const; }
   async deposit(firmId: number, itemId: MarketItem, quantity: number, saveCity: () => void) {
     if (!MARKET_ITEMS.includes(itemId) || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error('invalid typed deposit');
     const { f, bucket, key } = this.stock(firmId, itemId); const current = bucket[key as keyof typeof bucket]; if (!Number.isSafeInteger(current) || current < quantity) throw new Error('insufficient typed firm stock');
