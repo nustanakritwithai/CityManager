@@ -11,7 +11,7 @@ export const GUIDE_KEY = 'citymanager.guide.v1';
 type Stored = 'active' | 'done' | 'skipped' | null;
 const read = (): Stored => { try { const v = localStorage.getItem(GUIDE_KEY); return v === 'active' || v === 'done' || v === 'skipped' ? v : null; } catch { return null; } };
 const write = (v: Exclude<Stored, null>) => { try { localStorage.setItem(GUIDE_KEY, v); } catch { /* the guide still runs for this visit */ } };
-const TOOL_LABELS: Record<string, string> = { road: 'เลือกถนน', R: 'เลือกบ้าน', C: 'เลือกพาณิชย์', I: 'เลือกโรงงาน', F: 'เลือกฟาร์ม', play: 'กดเล่น' };
+const TOOL_LABELS: Record<string, string> = { road: 'เลือกถนน', R: 'เลือกบ้าน', C: 'เลือกพาณิชย์', I: 'เลือกโรงงาน', F: 'เลือกฟาร์ม', power: 'เลือกโรงไฟฟ้า', water: 'เลือกโรงสูบน้ำ', play: 'กดเล่น' };
 
 export class Guide {
   private readonly root = document.createElement('aside');
@@ -23,10 +23,10 @@ export class Guide {
   private state: Stored = read();
   private key = '';
   private finishedAt = 0;
-  private readonly onTool: (tool: Exclude<Zone, null> | 'road') => void;
+  private readonly onTool: (tool: Exclude<Zone, null> | 'road' | 'power' | 'water') => void;
   private readonly onPlay: () => void;
 
-  constructor(onTool: (tool: Exclude<Zone, null> | 'road') => void, onPlay: () => void) {
+  constructor(onTool: (tool: Exclude<Zone, null> | 'road' | 'power' | 'water') => void, onPlay: () => void) {
     this.onTool = onTool; this.onPlay = onPlay;
     this.root.id = 'guide-card'; this.root.className = 'guide panel'; this.root.hidden = true; this.root.setAttribute('aria-label', 'ผู้ช่วยสอน'); this.root.setAttribute('aria-live', 'polite');
     const head = document.createElement('div'); head.className = 'guide-head';
@@ -71,6 +71,6 @@ export class Guide {
     this.count.textContent = `ผู้ช่วยสอน · ${count}`; this.title.textContent = title; this.text.textContent = text;
     this.progress.textContent = progress; this.progress.hidden = !progress;
     this.action.hidden = !tool; this.action.textContent = tool ? TOOL_LABELS[tool] : '';
-    this.action.onclick = !tool ? null : tool === 'play' ? () => this.onPlay() : () => this.onTool(tool as Exclude<Zone, null> | 'road');
+    this.action.onclick = !tool ? null : tool === 'play' ? () => this.onPlay() : () => this.onTool(tool as Exclude<Zone, null> | 'road' | 'power' | 'water');
   }
 }

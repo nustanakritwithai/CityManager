@@ -49,7 +49,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
   if (tool === 'bulldoze') {
     const cell = city.cells[hover], target = cell.building !== null || cell.road || plantAt(city, hover) !== undefined, cost = target ? DEMOLITION_COST : 0;
     const reason = hover === GATEWAY ? 'ประตูเมืองรื้อไม่ได้' : cost > treasury ? 'เงินคลังไม่พอค่ารื้อ' : null;
-    const label = reason ?? (cell.building !== null ? `รื้ออาคาร · ${credits(cost)} ฿` : cell.road ? `รื้อถนน · ${credits(cost)} ฿` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
+    const label = reason ?? (cell.building !== null ? `รื้ออาคาร · ${credits(cost)} ฿` : cell.road ? `รื้อถนน · ${credits(cost)} ฿` : plantAt(city, hover) ? `รื้อ${PLANT_LABELS[plantAt(city, hover)!.kind]} · ${credits(cost)} ฿` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
     return { ok: !reason, cost, label, cells: [{ cell: hover, ok: !reason }] };
   }
   return null;
