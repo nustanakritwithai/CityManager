@@ -18,7 +18,7 @@ export const PLANTS: Readonly<Record<UtilityKind, { capacity: number; cost: numb
   water: Object.freeze({ capacity: 40, cost: 300_000, upkeep: 6_000 }),
 });
 /** The outside contract a new city starts with at the gateway, in units. */
-export const OUTSIDE_SUPPLY: Readonly<Need> = Object.freeze({ power: 20, water: 20 });
+export const OUTSIDE_SUPPLY: Readonly<Need> = Object.freeze({ power: 24, water: 24 });
 /** What a served user pays the city per unit each month (satang). */
 export const TARIFF: Readonly<Need> = Object.freeze({ power: 500, water: 300 });
 /** What the city pays outside per gateway unit actually used each month (satang). */
@@ -100,4 +100,16 @@ export function householdBill(service: Service, homeId: number): number {
 export function buildingBill(service: Service, buildingId: number): number {
   const n = service.need.get(buildingId), s = service.served.get(buildingId);
   return n && s ? UTILITY_KINDS.reduce((sum, k) => sum + (s[k] ? n[k] * TARIFF[k] : 0), 0) : 0;
+}
+
+/** Buildings on the network that go without each kind today. */
+export function unserved(service: Service): Record<UtilityKind, number> {
+  const out = { power: 0, water: 0 };
+  for (const id of service.distance.keys()) for (const kind of UTILITY_KINDS) if (!service.served.get(id)![kind]) out[kind]++;
+  return out;
+}
+/** Whether every building on the network has this kind: the simple good/bad flag the HUD and panels show. */
+export function utilityFlags(service: Service): Record<UtilityKind, boolean> {
+  const out = unserved(service);
+  return { power: out.power === 0, water: out.water === 0 };
 }

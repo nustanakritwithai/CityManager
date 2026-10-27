@@ -61,8 +61,8 @@ export class CityStatsPanel {
   private services(s: CityStats) {
     const v = s.services;
     return column('บริการและการเงิน', 'services',
-      row('power', 'ไฟฟ้า', v.power ? 'พร้อม' : 'ขาด', { tone: v.power ? 'power' : 'bad', sub: 'จากภายนอก', share: v.power ? 1 : 0, bar: v.power ? 'power' : 'bad', key: 'power' }),
-      row('water', 'น้ำประปา', v.water ? 'พร้อม' : 'ขาด', { tone: v.water ? 'water' : 'bad', sub: 'จากภายนอก', share: v.water ? 1 : 0, bar: v.water ? 'water' : 'bad', key: 'water' }),
+      row('power', 'ไฟฟ้า', `${n(v.powerUsed)} / ${n(v.powerCapacity)}`, { tone: v.power ? 'power' : 'bad', sub: v.power ? 'ใช้ / กำลังผลิต หน่วย' : `อาคารขาดไฟ ${n(v.unservedPower)} แห่ง`, share: v.powerCapacity ? Math.min(1, v.powerUsed / v.powerCapacity) : 0, bar: v.power ? 'power' : 'bad', key: 'power' }),
+      row('water', 'น้ำประปา', `${n(v.waterUsed)} / ${n(v.waterCapacity)}`, { tone: v.water ? 'water' : 'bad', sub: v.water ? `ใช้ / กำลังผลิต หน่วย · โรง ${n(v.plants)} แห่ง` : `อาคารขาดน้ำ ${n(v.unservedWater)} แห่ง`, share: v.waterCapacity ? Math.min(1, v.waterUsed / v.waterCapacity) : 0, bar: v.water ? 'water' : 'bad', key: 'water' }),
       row('road', 'ถนน', `${n(v.connectedRoads)} / ${n(v.roads)}`, { sub: `เชื่อมประตูเมือง · บำรุง ${baht(v.upkeepPerDay)}/วัน`, share: v.roads ? v.connectedRoads / v.roads : 0, key: 'roads' }),
       row('link', 'อาคารขาดถนน', n(v.disconnectedBuildings), { tone: v.disconnectedBuildings ? 'bad' : 'good', key: 'disconnected' }),
       el('div', 'st-divider'),

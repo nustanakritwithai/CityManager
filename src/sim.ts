@@ -7,7 +7,7 @@ import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyPr
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
-import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
+import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
@@ -68,6 +68,16 @@ const householdAccess = (c: City, h: Household) => h.home !== null && access(c, 
 export const utilities = (c: City): Service => utilityService(c, connectedRoads(c));
 /** A home can take one more household: it is supplied now and the network has a unit of each to spare. */
 function homeSupplied(c: City, home: Building, svc = utilities(c)): boolean { return svc.ok(home.id) && fits(svc.spare, HOUSEHOLD_NEED); }
+/** Simple per-kind flags and shortage counts for the HUD and panels. */
+export function utilityStatus(c: City) {
+  const svc = utilities(c);
+  return { ...utilityFlags(svc), capacity: svc.capacity, used: svc.used, spare: svc.spare, outside: svc.outside, unserved: unserved(svc), plants: c.plants.length };
+}
+/** Whether the parcel has water and power: a building is served now; an empty connected parcel could take a new household. */
+export function utilityAt(c: City, cell: number): boolean {
+  const b = c.buildings.find(b => b.cell === cell), svc = utilities(c);
+  return b ? svc.ok(b.id) : access(c, cell) && fits(svc.spare, HOUSEHOLD_NEED);
+}
 export const plantAt = (c: City, i: number): Plant | undefined => c.plants.find(p => p.cell === i);
 
 /** Proposed prototype finance policy, in integer satang; no credit or outside grant. */

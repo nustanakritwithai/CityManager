@@ -1,7 +1,7 @@
 import { iconElement } from './ui-icons.ts';
 import { GAME_VERSION } from './version.ts';
 import './submenus.css';
-import { MONTH, SIZE, ROAD_COST, type City } from './sim.ts';
+import { MONTH, SIZE, ROAD_COST, utilityStatus, type City } from './sim.ts';
 import { flowRows, cropFlowRows, walletGroups, formatMoney, type FlowKind, type FlowRow, type CropFlowRow } from './inspector-data.ts';
 
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
@@ -226,12 +226,12 @@ function setupRules() {
   content.append(intro('limits', 'รู้ขอบเขตก่อนวางแผน', 'สิ่งที่จำลองแล้ว สมมติฐานที่ใช้ และระบบที่ยังอยู่ในระยะถัดไป'));
   grid.append(
     ruleCard('calendar', 'วันและเงินเป็นจำนวนแน่นอน', `1 tick เท่ากับ 1 วัน มี ${MONTH} วันต่อเดือน ค่าจ้างสะสมตามวันที่ทำงานและจ่ายรายเดือน เช่นเดียวกับค่าเช่าและภาษี เงินคำนวณเป็นสตางค์จำนวนเต็ม`),
-    ruleCard('utilities', 'น้ำและไฟจากภายนอก', 'ต้นแบบให้บริการภายนอกกับทุกแปลง ยังไม่มีเครือข่ายหรือข้อจำกัดกำลังผลิต หากสถานะไม่พร้อม การผลิตและการเติบโตจะหยุดตามกฎ', 'utilities'),
+    ruleCard('utilities', 'น้ำและไฟตามถนนและกำลังผลิต', 'ประตูเมืองจ่ายน้ำและไฟตามสัญญาจำกัด เมืองสร้างโรงไฟฟ้าและโรงสูบน้ำริมถนนเพื่อเพิ่มกำลังผลิต น้ำไฟวิ่งไปตามถนนที่ต่อกัน ถ้าไม่พอ อาคารที่ไกลจากแหล่งจ่ายที่สุดจะหยุดงาน ผลิต และเติบโตก่อน ครัวเรือนและกิจการจ่ายค่าน้ำค่าไฟให้เมืองทุกเดือน เมืองจ่ายค่าโรงงานและค่าซื้อจากภายนอก', 'utilities'),
     ruleCard('outside', 'ทุนเริ่มต้นและทุนขยายมีต้นทาง', 'โรงงานแรกเปิดได้ก่อนมีคนงาน สองครัวเรือนแรกยกเว้นเงื่อนไขงาน แต่ยังต้องมีบ้าน ถนน น้ำ และไฟ บ้าน ฟาร์ม และโรงงานแรกใช้ทุนภายนอกที่มีบัญชีคู่ โรงงานเพิ่มใช้ทุนจริงจากกิจการที่ผ่านเงื่อนไขและกันค่าจ้าง ภาษี ค่าเช่า กับเงินหมุนเวียนก่อน ไม่แจกทุนเมื่อโหลดเซฟ พาณิชย์ใหม่เป็นตลาดระดับ 1 ใช้เงินครัวเรือนเจ้าของ 600 บาท จ่ายก่อสร้าง 100 บาท เหลือหมุนเวียน 500 บาท ร้านค้าเปิดเมื่อโรงงานมีคนงาน ครัวเรือนที่มีเงินออม 600 บาทเป็นเจ้าของและยืนร้านเอง ถ้าไม่มีจึงใช้ทุนภายนอก ฟาร์มขยายได้ถึงระดับ 3 ด้วยกำไรของตัวเอง เมื่อเมืองต้องการร้านเพิ่ม ตลาดที่มีกำไรและมีเงิน 400 บาทขึ้นไปยกระดับเป็นร้านค้าได้ (จ่ายค่าปรับปรุง 200 บาทจากเงินกิจการ พืชผลที่เหลือตัดออก) ถ้ายังมีตลาดอื่นขายพืชผลสด รื้อบ้านไม่คืนสิทธิเริ่มต้น', 'bootstrap'),
     ruleCard('goods', 'หนึ่งตะกร้ารวมต่อครัวเรือนต่อวัน', 'ซื้อพืชผล 1 ล็อตจากตลาด หรือสินค้าสำเร็จรูป 1 หน่วยจากร้านค้า จ่ายจากกระเป๋าจริงและตัดสต็อกเดียวกับผู้ซื้ออื่น ไม่ซื้อทั้งสองซ้ำวันเดียว จำนวนสมาชิกไม่คูณตะกร้าหรือประวัติเงิน คู่บัญชีภายนอกติดตามเงินเข้าออก ไม่ใช่หนี้เมือง'),
     ruleCard('growth', 'พืชผลและวัตถุดิบมีต้นทาง', 'ฟาร์มเก็บเกี่ยวพืชผลหมุนเวียนตามความอุดมสมบูรณ์และแรงงาน โรงงานใช้พืชผลจริง 2 ล็อตเป็นสำเร็จรูป 8 หน่วยต่อชุด ตลาดไม่ผลิตเอง สต็อกที่เพิ่งซื้อเริ่มขายได้วันถัดไป บัญชีพืชผลแยกล็อตและต้นทุนจากสินค้าสำเร็จรูป เซฟเดิมไม่มีวัตถุดิบแจก ต้องสร้างห่วงโซ่เกษตรก่อน', 'agriculture'),
     ruleCard('wallets', 'ลูกจ้างและผู้ทำกิจการเอง', 'แรงงานรับจ้างรับค่าจ้างเข้ากระเป๋าครัวเรือน ตลาดขนาดเล็กใช้แรงงานเจ้าของ 1 คน ไม่มีเงินเดือนเจ้าของ ยอดขายอยู่บัญชีกิจการ ถอนเฉพาะกำไรที่มีสิทธิ์และเหลือเงินหมุนเวียน 200 บาท การเติมทุน ถอนกำไร และทุนขยายโรงงานไม่ใช่ยอดขายซ้ำ ยังไม่มีหน้าบริหารกลุ่มกิจการ ตลาดลงทุน หนี้ หรือผลตอบแทนรับประกัน', 'income-roles'),
-    ruleCard('limits', `แผนที่กริดราบ ${SIZE} × ${SIZE}`, 'ขอบเขตสูงสุด 192 อาคาร 128 ครัวเรือน และ 64 บริษัท ถนนโค้ง การจราจรรายช่องจราจร สาธารณูปโภคแบบมีความจุ และเมืองขนาดใหญ่ยังเป็นงานระยะถัดไป'),
+    ruleCard('limits', `แผนที่กริดราบ ${SIZE} × ${SIZE}`, 'ขอบเขตสูงสุด 192 อาคาร 128 ครัวเรือน 64 บริษัท และ 32 โรงน้ำไฟ ถนนโค้ง การจราจรรายช่องจราจร และเมืองขนาดใหญ่ยังเป็นงานระยะถัดไป'),
     ruleCard('growth', 'ต้นแบบแรกที่ตรวจสอบได้', 'ได้รับแรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ยังไม่ครอบคลุมระบบทั้งหมด โค้ดจำลองและถนนเขียนใหม่ทั้งหมด', 'version'),
   );
   const attribution = element('div', 'sm-attribution'); attribution.append(element('h4', '', 'แหล่งภาพและสิทธิ์ใช้งาน'), element('p', '', 'โมเดลเมือง 8 แบบและไอคอน GUI 4 ภาพจาก Kenney ภายใต้ CC0 สัญลักษณ์เส้นในคู่มือสร้างขึ้นใหม่ในโค้ด'));
@@ -243,7 +243,7 @@ function updateRules() {
   if (!current) return;
   const utilities = root('simulation-rules').querySelector('[data-rule=utilities]')!;
   let status = utilities.querySelector('.sm-rule-status'); if (!status) { status = element('div', 'sm-rule-status'); utilities.append(status); }
-  const power = current.utilities.power, water = current.utilities.water; status.replaceChildren(image(power && water ? 'status-ok' : 'status-alert'), document.createTextNode(`ขณะนี้: ไฟฟ้า${power ? 'พร้อม' : 'ไม่พร้อม'} · น้ำ${water ? 'พร้อม' : 'ไม่พร้อม'}`));
+  const u = utilityStatus(current), power = u.power, water = u.water; status.replaceChildren(image(power && water ? 'status-ok' : 'status-alert'), document.createTextNode(`ขณะนี้: ไฟฟ้า ${u.used.power}/${u.capacity.power} ${power ? 'พร้อม' : 'ไม่พอ'} · น้ำ ${u.used.water}/${u.capacity.water} ${water ? 'พร้อม' : 'ไม่พอ'}`));
   const bootstrap = root('simulation-rules').querySelector('[data-rule=bootstrap]')!, grant = current.ledger.find(entry => entry.reason === 'Initial municipal grant');
   let grantLabel = bootstrap.querySelector('.sm-rule-status'); if (!grantLabel) { grantLabel = element('div', 'sm-rule-status'); bootstrap.append(grantLabel); }
   grantLabel.textContent = grant ? `ทุนตั้งเมืองที่บันทึก: ${formatMoney(grant.amount)} บาท` : 'ยังไม่มีรายการทุนตั้งเมืองในบัญชีนี้';

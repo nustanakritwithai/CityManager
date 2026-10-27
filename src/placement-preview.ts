@@ -3,7 +3,8 @@
  * up-front checks in buildRoad / zoneCell / bulldoze (sim.ts) without mutating City;
  * tests compare every preview against the real action on a cloned city.
  */
-import { GATEWAY, ROAD_COST, SIZE, roadPath, type City, type Zone } from './sim.ts';
+import { GATEWAY, ROAD_COST, SIZE, access, plantAt, roadPath, type City, type Zone } from './sim.ts';
+import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
 import { FERTILITY_THRESHOLD } from './agriculture.ts';
 
 export type PreviewCell = { cell: number; ok: boolean };
@@ -36,8 +37,17 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     const label = reason ?? (cell.zone === tool ? `เป็นโซน${ZONE_NAMES[tool]}อยู่แล้ว` : `วางโซน${ZONE_NAMES[tool]} · ไม่เสียเงิน${tool === 'F' ? ` · ดิน ${fertility}%` : ''}`);
     return { ok: !reason, cost: 0, label, cells: [{ cell: hover, ok: !reason }] };
   }
+  if (tool === 'power' || tool === 'water') {
+    const cell = city.cells[hover], plant = PLANTS[tool], name = PLANT_LABELS[tool];
+    const reason = cell.road || cell.building !== null || plantAt(city, hover) ? 'วางโรงได้เฉพาะแปลงว่าง'
+      : !access(city, hover) ? 'ต้องมีถนนเชื่อมประตูเมืองข้างแปลง'
+      : city.plants.length >= MAX_PLANTS ? `มีโรงครบ ${MAX_PLANTS} แห่งแล้ว`
+      : plant.cost > treasury ? 'เงินคลังไม่พอ' : null;
+    const label = reason ?? `${name} · ${credits(plant.cost)} ฿ · +${plant.capacity} หน่วย · บำรุง ${credits(plant.upkeep)} ฿/เดือน`;
+    return { ok: !reason, cost: reason ? 0 : plant.cost, label, cells: [{ cell: hover, ok: !reason }] };
+  }
   if (tool === 'bulldoze') {
-    const cell = city.cells[hover], target = cell.building !== null || cell.road, cost = target ? DEMOLITION_COST : 0;
+    const cell = city.cells[hover], target = cell.building !== null || cell.road || plantAt(city, hover) !== undefined, cost = target ? DEMOLITION_COST : 0;
     const reason = hover === GATEWAY ? 'ประตูเมืองรื้อไม่ได้' : cost > treasury ? 'เงินคลังไม่พอค่ารื้อ' : null;
     const label = reason ?? (cell.building !== null ? `รื้ออาคาร · ${credits(cost)} ฿` : cell.road ? `รื้อถนน · ${credits(cost)} ฿` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
     return { ok: !reason, cost, label, cells: [{ cell: hover, ok: !reason }] };

@@ -1,4 +1,4 @@
-import { access, MONTH, summary, housingCapacity, homeOccupancy, industryGrowthStatus } from './sim.ts';
+import { access, MONTH, summary, housingCapacity, homeOccupancy, industryGrowthStatus, utilityStatus } from './sim.ts';
 import type { Building, City, Firm, Household } from './sim.ts';
 import type { EmploymentAllocation, WorkerSkill } from './labor.ts';
 import { flowRows } from './inspector-data.ts';
@@ -133,6 +133,7 @@ export type CityOverview = {
   exported: number;
   warnings: string[];
   power: boolean;
+  utility: { powerUsed: number; powerCapacity: number; waterUsed: number; waterCapacity: number; plants: number };
   water: boolean;
 };
 
@@ -191,8 +192,9 @@ export function cityOverview(city: City): CityOverview {
   const displaced = city.households.filter(household => household.home === null);
   const homelessPersons = displaced.reduce((total, household) => total + household.members, 0);
   const legacy = city.households.filter(household => household.origin === 'legacy-v1');
-  if (!city.utilities.power) warnings.push('แหล่งจ่ายไฟฟ้าภายนอกไม่พร้อม การผลิตและการเติบโตถูกระงับ');
-  if (!city.utilities.water) warnings.push('แหล่งจ่ายน้ำภายนอกไม่พร้อม การผลิตและการเติบโตถูกระงับ');
+  const utility = utilityStatus(city);
+  if (!utility.power) warnings.push(`ไฟฟ้าไม่พอ อาคาร ${utility.unserved.power} แห่งที่ไกลสุดไม่มีไฟ งาน การผลิต และการเติบโตของอาคารเหล่านั้นหยุด สร้างโรงไฟฟ้าริมถนน`);
+  if (!utility.water) warnings.push(`น้ำไม่พอ อาคาร ${utility.unserved.water} แห่งที่ไกลสุดไม่มีน้ำ งาน การผลิต และการเติบโตของอาคารเหล่านั้นหยุด สร้างโรงสูบน้ำริมถนน`);
   if (current.unemployed) warnings.push(`มีแรงงาน ${current.unemployed} คนที่ยังไม่ได้รับการจัดสรรงาน`);
   if (displaced.length) warnings.push(`มี ${displaced.length} ครัวเรือน รวม ${homelessPersons} คนที่ยังไม่มีบ้านพัก`);
   const noPurchase = city.households.filter(household => household.lastPurchaseTick !== city.tick).length;
@@ -227,7 +229,8 @@ export function cityOverview(city: City): CityOverview {
     selfEmployedWorkers: city.ownerLabor.reduce((sum, allocation) => sum + allocation.workers, 0),
     produced, imported, consumed, exported,
     warnings,
-    power: city.utilities.power,
-    water: city.utilities.water,
+    power: utility.power,
+    water: utility.water,
+    utility: { powerUsed: utility.used.power, powerCapacity: utility.capacity.power, waterUsed: utility.used.water, waterCapacity: utility.capacity.water, plants: utility.plants },
   };
 }

@@ -120,7 +120,7 @@ function walletCell(city: City, roads: ReadonlySet<number>, wallet: string): num
 export function trafficPlan(city: City): TrafficPlan {
   const roads = connectedRoads(city), cars: Vehicle[] = [], trucks: Vehicle[] = [], walkers: Walker[] = [], smoke: number[] = [];
   const buildingCell = (id: number) => city.buildings.find(b => b.id === id)?.cell ?? null;
-  if (roads.size > 1 && city.utilities.power && city.utilities.water) {
+  if (roads.size > 1) {
     // Commuters: one car per real employment allocation (household home → firm), plus self-employed owners.
     const jobs = [...city.employment.map(e => ({ h: e.householdId, f: e.firmId })), ...city.ownerLabor.map(e => ({ h: e.householdId, f: e.firmId }))];
     for (const job of jobs.sort((a, b) => a.f - b.f || a.h - b.h)) {
