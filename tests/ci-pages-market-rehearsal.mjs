@@ -216,10 +216,28 @@ try {
   assert.equal(remaining.rows[0].status, 'sold_out'); assert.equal(Number(remaining.rows[0].quantity), 0);
   const sellerStock = await pool.query("SELECT quantity FROM inventories WHERE account_id=$1 AND item_code='crop:rice'", [seller.guest_id]);
   assert.equal(Number(sellerStock.rows[0].quantity), 0); assert.equal(crossSiteCookies, 0); assert.deepEqual(problems, []);
+  // Separate isolated seller API check: cancelling an owned listing twice
+  // with the same key must release the reserved unit exactly once.
+  await pool.query("UPDATE inventories SET quantity=1 WHERE account_id=$1 AND item_code='crop:vegetables'", [seller.guest_id]);
+  const sellerHeaders = { origin: market, cookie: cookies.join('; '), 'x-csrf-token': csrf, 'content-type': 'application/json' };
+  const cancelOffer = await fetch(proxyBase + '/v1/listings', { method: 'POST', headers: { ...sellerHeaders, 'idempotency-key': randomUUID() },
+    body: JSON.stringify({ item_code: 'crop:vegetables', unit_price: 5, quantity: 1 }) });
+  assert.equal(cancelOffer.status, 201); const cancelId = (await cancelOffer.json()).id, cancelKey = randomUUID();
+  const cancel = () => fetch(`${proxyBase}/v1/listings/${cancelId}/cancel`, { method: 'POST',
+    headers: { ...sellerHeaders, 'idempotency-key': cancelKey }, body: '{}' });
+  const firstCancel = await cancel(), firstCancelBody = await firstCancel.json();
+  const repeatCancel = await cancel(), repeatCancelBody = await repeatCancel.json();
+  assert.equal(firstCancel.status, 200); assert.equal(repeatCancel.status, 200); assert.deepEqual(repeatCancelBody, firstCancelBody);
+  const cancelled = await pool.query('SELECT status,quantity FROM listings WHERE id=$1', [cancelId]);
+  assert.equal(cancelled.rows[0].status, 'cancelled'); assert.equal(Number(cancelled.rows[0].quantity), 0);
+  const vegetableStock = await pool.query("SELECT quantity FROM inventories WHERE account_id=$1 AND item_code='crop:vegetables'", [seller.guest_id]);
+  assert.equal(Number(vegetableStock.rows[0].quantity), 1);
+  const releases = await pool.query("SELECT count(*)::int AS n FROM inventory_movements WHERE listing_id=$1 AND kind='release'", [cancelId]);
+  assert.equal(releases.rows[0].n, 1);
   console.log(JSON.stringify({ result: 'passed', frontend: 'pinned CI artifact d3b061c5', backend: expectedBackend,
     database: 'disposable CI PostgreSQL', browser: 'installed Chrome via Playwright',
     origins: 'intercepted exact HTTPS origins', cookie: 'browser-stored backend headers',
-    thirdPartyCookies: 'restricted', scenario: 'lost durable rejection, same-key retry, then successful purchase and receipt', screenshots: 2 }));
+    thirdPartyCookies: 'restricted', scenario: 'lost rejection and retry; successful browser purchase and receipt; API cancel replay', screenshots: 2 }));
 } finally {
   if (context) await context.close(); if (browser) await browser.close(); child.kill();
   await new Promise(ok => proxy.close(ok)); await pool.end();
