@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { depositSourceLabel, depositSourceStock, eligibleDepositFirms } from '../src/market-panel.ts';
+import { canBuyListing, depositSourceLabel, depositSourceStock, eligibleDepositFirms } from '../src/market-panel.ts';
 import type { City, Firm } from '../src/sim.ts';
 
 const firm = (patch: Partial<Firm>): Firm => ({
@@ -25,4 +25,13 @@ test('empty or invalid deposit stock is not eligible', () => {
   assert.deepEqual(eligibleDepositFirms(city(emptyFarm, emptyFactory), 'crop:rice'), []);
   assert.deepEqual(eligibleDepositFirms(city(emptyFarm, emptyFactory), 'product:milled-rice'), []);
   assert.equal(depositSourceStock(firm({ zone: 'F', crops: { rice: Number.NaN, vegetables: 0, sugarcane: 0 } }), 'crop:rice'), 0);
+});
+
+test('buy controls fail closed for empty, invalid, or unaffordable listings', () => {
+  assert.equal(canBuyListing(1, 10n, '10'), true);
+  assert.equal(canBuyListing(0, 100n, '1'), false);
+  assert.equal(canBuyListing(-1, 100n, '1'), false);
+  assert.equal(canBuyListing(Number.NaN, 100n, '1'), false);
+  assert.equal(canBuyListing(1, 9n, '10'), false);
+  assert.equal(canBuyListing(1, 100n, 'not-a-price'), false);
 });
