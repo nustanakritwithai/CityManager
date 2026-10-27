@@ -11,6 +11,13 @@ test('market journal starts at v10/chain-5 and has no guest token field', () => 
   assert.deepEqual(j.operations, []);
 });
 
+test('public same-origin test route is opt-in and exact, while arbitrary remote URLs stay disabled', () => {
+  const city = createCity(1, { starter: false });
+  assert.equal(new MarketClient(() => city, '/citymanager-api/').enabled, true);
+  assert.equal(new MarketClient(() => city, '/other-api').enabled, false);
+  assert.equal(new MarketClient(() => city, 'https://example.invalid').enabled, false);
+});
+
 test('market journal rejects malformed or unknown operation records', () => {
   assert.throws(() => marketJournalForTest(JSON.stringify({ version: 9, rulesVersion: 'chain-4', operations: [], receipts: {} })));
   assert.throws(() => marketJournalForTest(JSON.stringify({ version: 10, rulesVersion: 'chain-5', cityId: '00000000-0000-4000-8000-000000000001', operations: [{ opId: '00000000-0000-4000-8000-000000000002', guestId: '00000000-0000-4000-8000-000000000003', cityId: '00000000-0000-4000-8000-000000000001', kind: 'unknown', state: 'pending', payload: {}, createdAt: '2026-10-27T00:00:00.000Z' }], receipts: {}, seq: '0' })));

@@ -37,7 +37,7 @@ export class MarketClient {
   journal: MarketJournal;
   guestId: string | null = null;
   private readonly city: () => City;
-  constructor(city: () => City, baseUrl = '') { this.city = city; let safeBase = ''; try { const u = new URL(baseUrl); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '4317' && !u.username && !u.password && !u.search && !u.hash) safeBase = u.origin; } catch { /* disabled by default */ } this.baseUrl = safeBase; const raw = globalThis.localStorage?.getItem(MARKET_SAVE_KEY) ?? null; try { this.journal = safeJournal(raw); } catch { if (raw && globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine`, raw); this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
+  constructor(city: () => City, baseUrl = '') { this.city = city; let safeBase = ''; if (/^\/citymanager-api\/?$/.test(baseUrl)) safeBase = '/citymanager-api'; else try { const u = new URL(baseUrl); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '4317' && !u.username && !u.password && !u.search && !u.hash) safeBase = u.origin; } catch { /* disabled by default */ } this.baseUrl = safeBase; const raw = globalThis.localStorage?.getItem(MARKET_SAVE_KEY) ?? null; try { this.journal = safeJournal(raw); } catch { if (raw && globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine`, raw); this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
   get enabled() { return Boolean(this.baseUrl); }
   exportSave() { return structuredClone(this.journal); }
   validateSave(value: unknown) { safeJournal(JSON.stringify(value)); }
