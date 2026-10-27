@@ -39,7 +39,7 @@ export type City = {
   accounts: Record<string, number>; ledger: Entry[]; goodsLedger: GoodsEntry[];
   goods: { produced: number; imported: number; consumed: number; exported: number };
   /** Optional v10 market envelope; the city simulator never reads or trusts its server token. */
-  market?: { version: 10; rulesVersion: 'chain-5'; cityId: string; guestId: string | null; operations: unknown[]; receipts: Record<string, unknown>; seq: string };
+  market?: { version: 10; rulesVersion: 'chain-5'; cityId: string; guestId: string | null; operations: unknown[]; escrow: unknown[]; receipts: Record<string, unknown>; seq: string };
   /** The gateway's outside water/power contract in units; plants add the rest (see utilities.ts). */
   utilities: { outside: Need }; plants: Plant[]; lastEvent: string;
 };

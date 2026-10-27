@@ -5,18 +5,20 @@ export const MARKET_RULES = 'chain-5' as const;
 export const MARKET_ITEMS = ['crop:rice', 'crop:vegetables', 'crop:sugarcane', 'product:milled-rice', 'product:canned-food', 'product:sugar'] as const;
 export type MarketItem = typeof MARKET_ITEMS[number];
 export type MarketOperation = { opId: string; guestId: string; cityId: string; kind: 'deposit' | 'listing' | 'buy' | 'claim' | 'ack'; payload: Record<string, unknown>; state: 'pending' | 'confirmed' | 'quarantined'; createdAt: string };
-export type MarketJournal = { version: 10; rulesVersion: typeof MARKET_RULES; guestId: string | null; cityId: string; operations: MarketOperation[]; receipts: Record<string, { claimId: string; state: 'claimed' | 'applied' | 'delivered'; firmId?: number }>; seq: string };
+export type MarketEscrow = { opId: string; cityId: string; firmId: number; itemId: MarketItem; quantity: number; state: 'pending' | 'confirmed' | 'cancelled' };
+export type MarketJournal = { version: 10; rulesVersion: typeof MARKET_RULES; guestId: string | null; cityId: string; operations: MarketOperation[]; escrow: MarketEscrow[]; receipts: Record<string, { claimId: string; state: 'claimed' | 'applied' | 'delivered'; firmId?: number }>; seq: string };
 export type MarketReceipt = { receipt_id: string; item_code: string; quantity: number; state?: string };
 
 const uuid = () => crypto.randomUUID();
 const readCsrf = () => document.cookie.split('; ').find(v => v.startsWith('cm_csrf='))?.slice(8) ?? '';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const safeJournal = (raw: string | null): MarketJournal => {
-  if (!raw) return { version: 10, rulesVersion: MARKET_RULES, guestId: null, cityId: uuid(), operations: [], receipts: {}, seq: '0' };
+  if (!raw) return { version: 10, rulesVersion: MARKET_RULES, guestId: null, cityId: uuid(), operations: [], escrow: [], receipts: {}, seq: '0' };
   let v: unknown; try { v = JSON.parse(raw); } catch { throw new Error('Invalid market journal'); }
-  if (!v || typeof v !== 'object' || (v as any).version !== 10 || (v as any).rulesVersion !== MARKET_RULES || !UUID.test(String((v as any).cityId)) || !Array.isArray((v as any).operations) || typeof (v as any).receipts !== 'object' || !/^\d+$/.test(String((v as any).seq))) throw new Error('Invalid market journal');
+  if (!v || typeof v !== 'object' || (v as any).version !== 10 || (v as any).rulesVersion !== MARKET_RULES || !UUID.test(String((v as any).cityId)) || !Array.isArray((v as any).operations) || !Array.isArray((v as any).escrow) || typeof (v as any).receipts !== 'object' || !/^\d+$/.test(String((v as any).seq))) throw new Error('Invalid market journal');
   const j = v as MarketJournal;
   if (j.guestId !== null && !UUID.test(j.guestId) || j.operations.some(o => !o || !UUID.test(o.opId) || !UUID.test(o.guestId) || !UUID.test(o.cityId) || o.cityId !== j.cityId || !['deposit', 'listing', 'buy', 'claim', 'ack'].includes(o.kind) || !['pending', 'confirmed', 'quarantined'].includes(o.state) || !o.payload || typeof o.payload !== 'object' || Number.isNaN(Date.parse(o.createdAt)))) throw new Error('Invalid market journal operation');
+  if (j.escrow.some(e => !e || !UUID.test(e.opId) || e.cityId !== j.cityId || !Number.isSafeInteger(e.firmId) || !MARKET_ITEMS.includes(e.itemId) || !Number.isSafeInteger(e.quantity) || e.quantity < 1 || !['pending', 'confirmed', 'cancelled'].includes(e.state))) throw new Error('Invalid market escrow');
   for (const [receiptId, r] of Object.entries(j.receipts)) if (!UUID.test(receiptId) || !r || !UUID.test(r.claimId) || !['claimed', 'applied', 'delivered'].includes(r.state) || (r.firmId !== undefined && !Number.isSafeInteger(r.firmId))) throw new Error('Invalid market journal receipt');
   return j;
 };
@@ -30,6 +32,7 @@ export class MarketClient {
   constructor(city: () => City, baseUrl = '') { this.city = city; this.baseUrl = baseUrl.replace(/\/$/, ''); const raw = globalThis.localStorage?.getItem(MARKET_SAVE_KEY) ?? null; try { this.journal = safeJournal(raw); } catch { if (raw && globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine`, raw); this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
   get enabled() { return Boolean(this.baseUrl); }
   exportSave() { return structuredClone(this.journal); }
+  validateSave(value: unknown) { safeJournal(JSON.stringify(value)); }
   importSave(value: unknown) { const imported = safeJournal(JSON.stringify(value)); this.journal = imported; this.guestId = imported.guestId; this.save(); }
   private save() { if (globalThis.localStorage) persist(this.journal); }
   private async request(path: string, init: RequestInit = {}) {
@@ -53,6 +56,15 @@ export class MarketClient {
   async createGuest() { const me = await this.request('/v1/auth/guest', { method: 'POST', body: '{}' }); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me; }
   quarantine() { for (const o of this.journal.operations) if (o.state === 'pending') o.state = 'quarantined'; this.guestId = null; this.journal.guestId = null; this.save(); }
   resetCity() { for (const o of this.journal.operations) if (o.state === 'pending') o.state = 'quarantined'; this.journal.cityId = uuid(); this.save(); }
+  private stock(firmId: number, itemId: MarketItem) { const f = this.city().firms.find(f => f.id === firmId && isMarket(f)); if (!f) throw new Error('typed market firm required'); return { f, bucket: itemId.startsWith('crop:') ? f.crops : f.products, key: itemId.slice(itemId.indexOf(':') + 1) } as const; }
+  async deposit(firmId: number, itemId: MarketItem, quantity: number, saveCity: () => void) {
+    if (!MARKET_ITEMS.includes(itemId) || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error('invalid typed deposit');
+    const { f, bucket, key } = this.stock(firmId, itemId); const current = bucket[key as keyof typeof bucket]; if (!Number.isSafeInteger(current) || current < quantity) throw new Error('insufficient typed firm stock');
+    const o = this.op('deposit', { itemId, qty: quantity, firmId }); const escrow: MarketEscrow = { opId: o.opId, cityId: this.journal.cityId, firmId, itemId, quantity, state: 'pending' }; const old = current; bucket[key as keyof typeof bucket] = old - quantity; this.journal.escrow.push(escrow);
+    try { saveCity(); } catch (e) { bucket[key as keyof typeof bucket] = old; this.journal.escrow.pop(); this.journal.operations.pop(); try { this.save(); } catch { /* retain in-memory recovery state */ } throw e; }
+    try { const result = await this.request('/v1/deposits', { method: 'POST', body: JSON.stringify({ opId: o.opId, itemId, qty: quantity }) }); escrow.state = 'confirmed'; o.state = 'confirmed'; this.journal.seq = String(result.seq ?? this.journal.seq); saveCity(); return result; } catch (e) { throw e; }
+  }
+  async fenceDeposit(opId: string, saveCity: () => void) { const e = this.journal.escrow.find(x => x.opId === opId); if (!e || e.state !== 'pending') throw new Error('deposit-not-pending'); const status = await this.request(`/v1/op/${encodeURIComponent(opId)}`); if (status.state !== 'cancelled') throw new Error('deposit-not-fenced'); const { bucket, key } = this.stock(e.firmId, e.itemId); bucket[key as keyof typeof bucket] += e.quantity; e.state = 'cancelled'; const o = this.journal.operations.find(x => x.opId === opId); if (o) o.state = 'confirmed'; saveCity(); return status; }
   async listings() { return this.request('/v1/listings'); }
   async wallet() { return this.request('/v1/wallet'); }
   async inventory() { return this.request('/v1/inventory'); }
@@ -76,9 +88,9 @@ export class MarketClient {
     const item = receipt.item_code as MarketItem;
     if (item.startsWith('crop:')) firm.f.crops[item.slice(5) as keyof typeof firm.f.crops] += receipt.quantity;
     else firm.f.products[item.slice(8) as keyof typeof firm.f.products] += receipt.quantity;
-    try { saveCity(); } catch (e) { firm.f.crops = oldCrops; firm.f.products = oldProducts; throw e; }
-    record.state = 'applied'; record.firmId = firm.f.id; this.save();
-    return this.ack(receipt.receipt_id);
+    const oldRecord = { ...record }; record.state = 'applied'; record.firmId = firm.f.id;
+    try { saveCity(); } catch (e) { firm.f.crops = oldCrops; firm.f.products = oldProducts; Object.assign(record, oldRecord); try { this.save(); } catch { /* preserve in-memory recovery state */ } throw e; }
+    try { const result = await this.ack(receipt.receipt_id); saveCity(); return result; } catch (e) { throw e; }
   }
 }
 

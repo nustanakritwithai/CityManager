@@ -443,7 +443,7 @@ async function boot() {
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
-  marketPanel = installMarketPanel(() => city, () => render(), () => saveStoredCity(localStorage, serialize(city), importedLegacyRaw));
+  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); });
   $('#save').addEventListener('click', () => {
     try { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); sound('ui-save'); status(market ? `บันทึกเมือง v10/chain-5 และตลาดแยกแล้ว · Saved day ${city.tick}` : `บันทึกเมืองรุ่น 7 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
   });
@@ -451,6 +451,7 @@ async function boot() {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
       const loaded = deserialize(saved.raw), oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
+      if (loaded.market) marketPanel?.client.validateSave(loaded.market);
       city = loaded; if (city.market) marketPanel?.client.importSave(city.market); importedLegacyRaw = legacy ? saved.raw : null;
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
