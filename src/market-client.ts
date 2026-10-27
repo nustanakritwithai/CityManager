@@ -1,6 +1,6 @@
 import { isMarket, type City } from './sim.ts';
 import { CROP_STOCK_CAPS, releaseCropCost } from './agriculture.ts';
-import { RECIPE } from './goods.ts';
+import { CROPS, PRODUCTS, RECIPE, type CropId, type ProductId } from './goods.ts';
 
 export const MARKET_SAVE_KEY = 'citymanager.market.v10';
 export const MARKET_RULES = 'chain-5' as const;
@@ -14,6 +14,8 @@ export type MarketReceipt = { receipt_id: string; item_code: string; quantity: n
 const uuid = () => crypto.randomUUID();
 const readCsrf = () => document.cookie.split('; ').find(v => v.startsWith('cm_csrf='))?.slice(8) ?? '';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isCropId = (value: string): value is CropId => CROPS.includes(value as CropId);
+const isProductId = (value: string): value is ProductId => PRODUCTS.includes(value as ProductId);
 // Retail inventory is a goods stock, not worker capacity: the live engine can
 // legitimately hold more goods than its staffing capacity. Keep a separate
 // bounded receipt cap so a malformed server quantity still fails closed.
@@ -62,12 +64,12 @@ export class MarketClient {
   async createGuest() { const me = await this.request('/v1/auth/guest', { method: 'POST', body: '{}' }); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me; }
   quarantine() { const old = JSON.stringify(this.journal); if (globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine.${this.journal.cityId}.${Date.now()}`, old); this.journal = safeJournal(null); this.guestId = null; this.save(); }
   resetCity() { const old = JSON.stringify(this.journal); if (globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.city-${this.journal.cityId}`, old); this.journal = safeJournal(null); this.guestId = null; this.save(); }
-  private stock(firmId: number, itemId: MarketItem) { const product = itemId.startsWith('product:'), key = itemId.slice(itemId.indexOf(':') + 1); const f = this.city().firms.find(f => f.id === firmId && (product ? f.zone === 'I' && !!f.recipe && RECIPE[f.recipe].product === key : f.zone === 'F')); if (!f) throw new Error('typed source firm required'); const bucket = (product ? f.products : f.crops) as Record<string, number>; return { f, bucket, key } as const; }
+  private stock(firmId: number, itemId: MarketItem) { const product = itemId.startsWith('product:'), key = itemId.slice(itemId.indexOf(':') + 1); if (product ? !isProductId(key) : !isCropId(key)) throw new Error('invalid typed market item'); const f = this.city().firms.find(f => f.id === firmId && (product ? f.zone === 'I' && !!f.recipe && RECIPE[f.recipe].product === key : f.zone === 'F')); if (!f) throw new Error('typed source firm required'); const bucket = (product ? f.products : f.crops) as Record<string, number>; return { f, bucket, key } as const; }
   async deposit(firmId: number, itemId: MarketItem, quantity: number, saveCity: () => void) {
     if (!MARKET_ITEMS.includes(itemId) || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error('invalid typed deposit');
     const { f, bucket, key } = this.stock(firmId, itemId); const current = bucket[key as keyof typeof bucket]; if (!Number.isSafeInteger(current) || current < quantity) throw new Error('insufficient typed firm stock');
     const o = this.op('deposit', { itemId, qty: quantity, firmId }); const value = itemId.startsWith('crop:') ? releaseCropCost(f.cropInventory, f.cropCost, quantity) : 0; const escrow: MarketEscrow = { opId: o.opId, cityId: this.journal.cityId, firmId, itemId, quantity, value, state: 'pending' }; const old = current; bucket[key as keyof typeof bucket] = old - quantity; this.journal.escrow.push(escrow);
-    const crop = key as keyof typeof f.crops; const product = key as keyof typeof f.products; const isCrop = itemId.startsWith('crop:');
+    const crop = key as keyof typeof f.crops; const product = key as ProductId; const isCrop = itemId.startsWith('crop:');
     const event = { tick: this.city().tick, from: f.wallet, to: isCrop ? 'market-server' : 'outside', quantity, reason: `Market escrow deposit #${isCrop ? this.city().cropLedger.length + 1 : this.city().goodsLedger.length + 1}`, ...(isCrop ? { id: this.city().cropLedger.length + 1, kind: 'market-deposit' as const, fromValue: value, toValue: value, cash: 0, workers: 0, batches: 0, outputQuantity: 0, crop } : { product }) };
     if (isCrop) { f.cropInventory -= quantity; f.cropCost -= value; this.city().cropLedger.push(event as any); } else { f.inventory -= quantity; this.city().goods.exported += quantity; this.city().goodsLedger.push(event as any); }
     try { saveCity(); } catch (e) { if (isCrop) { this.city().cropLedger.pop(); f.cropInventory += quantity; f.cropCost += value; } else { this.city().goodsLedger.pop(); f.inventory += quantity; this.city().goods.exported -= quantity; } bucket[isCrop ? crop : product] = old; this.journal.escrow.pop(); this.journal.operations.pop(); try { this.save(); } catch { /* retain in-memory recovery state */ } throw e; }
