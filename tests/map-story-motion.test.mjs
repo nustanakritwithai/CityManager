@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { request } from 'node:http';
@@ -63,5 +64,25 @@ for (const engine of engines) {
     assert.equal(readFileSync(join(out, 'contact-sheet.png'), 'utf8'), 'old contact sheet');
     assert.equal(readFileSync(first.sheet, 'utf8'), 'new sheet');
     assert.equal(readFileSync(second.sheet, 'utf8'), 'new sheet');
+    assert.deepEqual(JSON.parse(readFileSync(join(first.dir, 'scenes.json'), 'utf8')), [
+      { file: '000001.png', scene: '../../escape', time: 8 },
+      { file: '000002.png', scene: 'next', time: 18 },
+    ]);
+  });
+
+  test(`${engine}: FFmpeg reads still sequence without glob support`, async t => {
+    const version = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });
+    if (version.error?.code === 'ENOENT') return t.skip('ffmpeg is not installed');
+    assert.equal(version.status, 0);
+    const { renderStills, contactSheetArgs } = await import(pathToFileURL(join(root, engine, 'scripts/stills.mjs')));
+    const tmp = mkdtempSync(join(tmpdir(), 'map-ffmpeg-test-'));
+    const out = join(tmp, 'out%literal'); mkdirSync(out);
+    const source = join(tmp, 'source.png');
+    const create = spawnSync('ffmpeg', ['-v','error','-f','lavfi','-i','color=c=blue:s=16x16','-frames:v','1',source], { encoding:'utf8' });
+    assert.equal(create.status, 0, create.stderr);
+    const page = { evaluate: async () => {}, screenshot: async ({ path }) => copyFileSync(source, path) };
+    const result = await renderStills({ out, scenes:[{ id:'a',start:0,end:1 },{ id:'b',start:1,end:2 }], page, at:0.8, stage:{},
+      buildSheet: async (dir,sheet,count) => { const run=spawnSync('ffmpeg',contactSheetArgs(dir,sheet,count),{encoding:'utf8'});assert.equal(run.status,0,run.stderr); } });
+    assert.deepEqual([...readFileSync(result.sheet).subarray(0,8)], [137,80,78,71,13,10,26,10]);
   });
 }

@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { startServer } from './serve.mjs';
-import { renderStills } from './stills.mjs';
+import { renderStills, contactSheetArgs } from './stills.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -47,8 +47,7 @@ const stage = { x: 0, y: 0, width: 1080, height: 1920 };
 if (opt('stills', false)) {
   const at = Number(opt('at', 0.8)); // fraction into each scene; a list `sub:` shows the part playing then
   const { dir, sheet } = await renderStills({ out: OUT, scenes: SCENES, page: first, at, stage, buildSheet: async (dir, sheet, count) => {
-    const cols = Math.min(7, count); const rows = Math.ceil(count / cols);
-    await run('ffmpeg', ['-v', 'error', '-y', '-pattern_type', 'glob', '-i', join(dir, '*.png'), '-vf', `scale=270:480,tile=${cols}x${rows}:padding=6:color=black`, '-frames:v', '1', sheet]);
+    await run('ffmpeg', contactSheetArgs(dir, sheet, count));
   } });
   console.log();
   console.log(`stills in ${dir}; contact sheet: ${sheet} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
