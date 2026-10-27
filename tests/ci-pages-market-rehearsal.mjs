@@ -1,4 +1,4 @@
-// CI-only rehearsal: the exact previously built Pages artifact, the pinned
+// CI-only rehearsal: the current-run Pages build or a verified supplied artifact, the pinned
 // market server fixture and a disposable PostgreSQL database. No live service.
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -234,7 +234,8 @@ try {
   assert.equal(Number(vegetableStock.rows[0].quantity), 1);
   const releases = await pool.query("SELECT count(*)::int AS n FROM inventory_movements WHERE listing_id=$1 AND kind='release'", [cancelId]);
   assert.equal(releases.rows[0].n, 1);
-  console.log(JSON.stringify({ result: 'passed', frontend: 'pinned CI artifact d3b061c5', backend: expectedBackend,
+  console.log(JSON.stringify({ result: 'passed', frontend: process.env.CI_MARKET_FRONTEND_MODE,
+    checkout: process.env.CI_MARKET_FRONTEND_REVISION, backend: expectedBackend,
     database: 'disposable CI PostgreSQL', browser: 'installed Chrome via Playwright',
     origins: 'intercepted exact HTTPS origins', cookie: 'browser-stored backend headers',
     thirdPartyCookies: 'restricted', scenario: 'lost rejection and retry; successful browser purchase and receipt; API cancel replay', screenshots: 2 }));
