@@ -1,0 +1,91 @@
+name: Isolated Pages market browser rehearsal
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/market-browser-rehearsal.yml'
+      - 'tests/ci-pages-market-rehearsal.mjs'
+      - 'tests/fixtures/market-server/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out test-only source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Download exact previously verified Pages artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: '12766293020'
+          run-id: '40574629719'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/cm-artifact
+          skip-decompress: 'true'
+          digest-mismatch: error
+      - name: Verify artifact SHA-256 before extraction
+        env:
+          CM_ARTIFACT: ${{ runner.temp }}/cm-artifact
+          CM_DEST: ${{ runner.temp }}/cm-pages
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib, stat, zipfile
+          source = pathlib.Path(os.environ['CM_ARTIFACT'])
+          files = list(source.rglob('*.zip'))
+          if len(files) != 1:
+              raise SystemExit('expected exactly one artifact ZIP')
+          expected = '26c16940cde5b8f14b1a5c64fcc56374d7864f6387f83a5b635aec3a3b0ace2f'
+          if hashlib.sha256(files[0].read_bytes()).hexdigest() != expected:
+              raise SystemExit('artifact digest mismatch')
+          dest = pathlib.Path(os.environ['CM_DEST']).resolve()
+          dest.mkdir(parents=True, exist_ok=False)
+          with zipfile.ZipFile(files[0]) as archive:
+              for item in archive.infolist():
+                  target = (dest / item.filename).resolve()
+                  if target != dest and dest not in target.parents:
+                      raise SystemExit('unsafe artifact path')
+                  if stat.S_ISLNK(item.external_attr >> 16):
+                      raise SystemExit('artifact symlink rejected')
+              archive.extractall(dest)
+          print('verified exact d3b061c5 artifact digest')
+          PY
+      - name: Install locked CI fixture dependencies
+        run: |
+          npm ci --prefix tests/fixtures/market-server --ignore-scripts --no-audit --no-fund
+          npm ci --prefix skills/map-story-motion/engine --ignore-scripts --no-audit --no-fund
+      - name: Start disposable runner PostgreSQL and exercise actual game popup
+        env:
+          CI_MARKET_FIXTURE: '1'
+          CI_MARKET_ARTIFACT_DIR: ${{ runner.temp }}/cm-pages
+          CI_MARKET_SCREENSHOT_DIR: ${{ runner.temp }}/cm-screens
+          MAP_TEST_MODULES: ${{ github.workspace }}/skills/map-story-motion/engine/node_modules
+        run: |
+          sudo systemctl start postgresql.service
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -v ci_password="$password" <<'SQL'
+          CREATE ROLE ci_market LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'ci_password';
+          SQL
+          sudo -u postgres createdb --owner=ci_market citymanager_ci
+          export DATABASE_URL="postgresql://ci_market:${password}@127.0.0.1:5432/citymanager_ci"
+          node tests/ci-pages-market-rehearsal.mjs
+      - name: Retain fake-account browser screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: isolated-market-browser-screens
+          path: ${{ runner.temp }}/cm-screens
+          if-no-files-found: ignore
+          retention-days: 1
