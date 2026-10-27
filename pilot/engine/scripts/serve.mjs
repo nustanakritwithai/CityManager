@@ -2,7 +2,8 @@
 // for satellite tiles so renders are repeatable and do not hammer the tile host.
 // CLI: node scripts/serve.mjs ../tai-kadai-war/story.yaml [port]
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import { safeSubdirectory } from './safe-cache.mjs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { safeFile } from './safe-path.mjs';
@@ -19,17 +20,18 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/ja
 const inflight = new Map();
 async function tile(layer, z, y, x) {
   const dem = layer === 'dem';
-  const file = join(TILE_CACHE, layer, z, y, `${x}.${dem ? 'png' : 'jpg'}`);
-  if (existsSync(file)) return readFileSync(file);
+  const dir = safeSubdirectory(ROOT, ['.cache', 'tiles', layer, z, y]);
+  const file = join(dir, `${x}.${dem ? 'png' : 'jpg'}`);
+  const readCached = () => { const st = lstatSync(file); if (!st.isFile() || st.isSymbolicLink()) throw new Error('unsafe tile cache entry'); return readFileSync(file); };
+  try { return readCached(); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   if (!inflight.has(file)) {
     inflight.set(file, (async () => {
       for (let attempt = 0; attempt < 4; attempt++) {
         const res = await fetch((dem ? DEM_URL : TILE_URL).replace('{layer}', layer).replace('{z}', z).replace('{y}', y).replace('{x}', x));
         if (res.ok) {
           const buf = Buffer.from(await res.arrayBuffer());
-          mkdirSync(dirname(file), { recursive: true });
-          writeFileSync(file, buf);
-          return buf;
+          try { writeFileSync(file, buf, { flag: 'wx' }); return buf; }
+          catch (e) { if (e.code !== 'EEXIST') throw e; return readCached(); }
         }
         if (res.status === 404) return null;
         await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));

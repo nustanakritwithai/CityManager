@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { safeOutputName } from './output-files.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const storyPath = resolve(process.argv[2]);
@@ -26,15 +27,16 @@ const place = (ref, where) => {
 };
 
 for (const [id, p] of Object.entries(places)) if (typeof p.lng !== 'number' || typeof p.lat !== 'number') E(`places.${id}: needs numeric lng and lat`);
+const validSrc = (src, where) => { try { safeOutputName(src); return true; } catch { E(`${where}: src must be a simple filename`); return false; } };
 for (const [id, l] of Object.entries(layers)) {
   if (!['river', 'area', 'line'].includes(l.type)) E(`layers.${id}: type must be river, area or line`);
   if (l.type === 'line' && !l.coords) E(`layers.${id}: line needs coords`);
-  if (l.src && !existsSync(join(dir, 'geo', `${l.src}.json`)) && !existsSync(join(ROOT, 'geo', `${l.src}.json`))) E(`layers.${id}: geo/${l.src}.json missing — run build-geo.mjs${l.build ? '' : ' (and add a build: spec)'}`);
+  if (l.src && validSrc(l.src, `layers.${id}`) && !existsSync(join(dir, 'geo', `${l.src}.json`)) && !existsSync(join(ROOT, 'geo', `${l.src}.json`))) E(`layers.${id}: geo/${l.src}.json missing — run build-geo.mjs${l.build ? '' : ' (and add a build: spec)'}`);
   if (l.label && !l.labelAt) E(`layers.${id}: label needs labelAt`);
 }
 for (const [id, z] of Object.entries(zones)) {
   if (!z.coords && !z.src) E(`zones.${id}: needs coords or src`);
-  if (z.src && !existsSync(join(dir, 'geo', `${z.src}.json`)) && !existsSync(join(ROOT, 'geo', `${z.src}.json`))) E(`zones.${id}: geo/${z.src}.json missing`);
+  if (z.src && validSrc(z.src, `zones.${id}`) && !existsSync(join(dir, 'geo', `${z.src}.json`)) && !existsSync(join(ROOT, 'geo', `${z.src}.json`))) E(`zones.${id}: geo/${z.src}.json missing`);
   if (z.from) place(z.from, `zones.${id}.from`);
   if (z.label && !z.labelAt) E(`zones.${id}: label needs labelAt`);
 }

@@ -1,12 +1,13 @@
 // Builds the small GeoJSON files the player loads, from Natural Earth 10m (public domain).
 // Run once: node scripts/prepare-geo.mjs  (expects .cache/ne/* from the download step)
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { newOutputDirectory } from './output-files.mjs';
 
 const MS = 'node_modules/.bin/mapshaper';
 const NE = '.cache/ne';
-const OUT = 'geo';
-mkdirSync(OUT, { recursive: true });
+const OUT = newOutputDirectory('.', 'geo-build-');
+console.log(`Geo output: ${OUT}`);
 
 const ms = (...args) => execFileSync(MS, args, { stdio: ['ignore', 'ignore', 'inherit'] });
 

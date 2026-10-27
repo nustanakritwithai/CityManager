@@ -6,15 +6,15 @@
 //   node scripts/voice.mjs story.yaml --mp3 voice.mp3 # the voice track alone, same timing as the clip
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, linkSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { muxOutput, newOutputDirectory, withExclusiveOutput } from './output-files.mjs';
+import { safeSubdirectory } from './safe-cache.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CACHE = join(ROOT, '.cache/tts');
-mkdirSync(CACHE, { recursive: true });
+const CACHE = safeSubdirectory(ROOT, ['.cache', 'tts']);
 const args = process.argv.slice(2);
 const storyPath = resolve(args[0]);
 const opt = (n) => { const i = args.indexOf(`--${n}`); return i < 0 ? null : args[i + 1]; };

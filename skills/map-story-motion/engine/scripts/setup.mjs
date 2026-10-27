@@ -1,7 +1,8 @@
 // One-time setup check: tools on the machine, npm packages, and Natural Earth data.
 //   node scripts/setup.mjs
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, writeFileSync } from 'node:fs';
+import { safeSubdirectory } from './safe-cache.mjs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,17 +34,29 @@ try {
 
 console.log('Natural Earth 10m (public domain)');
 const sets = ['cultural/ne_10m_admin_0_countries', 'cultural/ne_10m_admin_1_states_provinces', 'physical/ne_10m_rivers_lake_centerlines'];
-mkdirSync(NE, { recursive: true });
+safeSubdirectory(ROOT, ['.cache', 'ne']);
 for (const s of sets) {
   const name = s.split('/')[1];
-  const shp = join(NE, name, `${name}.shp`);
-  if (existsSync(shp)) { ok(name); continue; }
-  console.log(`  downloading ${name}…`);
+  const target = join(NE, name);
+  if (existsSync(target)) {
+    safeSubdirectory(ROOT, ['.cache', 'ne', name]);
+    const shp = join(target, `${name}.shp`);
+    try { const st = lstatSync(shp); if (!st.isFile() || st.isSymbolicLink()) throw new Error('unsafe shapefile'); }
+    catch { bad(`${name}: existing incomplete or unsafe directory; preserve it and resolve manually`); continue; }
+    ok(name); continue;
+  }
+  console.log(`  downloading ${name}...`);
   const res = await fetch(`https://naciscdn.org/naturalearth/10m/${s}.zip`);
   if (!res.ok) { bad(`${name}: HTTP ${res.status}`); continue; }
-  const zip = join(NE, `${name}.zip`);
-  writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
-  execFileSync('unzip', ['-oq', zip, '-d', join(NE, name)]);
+  const dir = safeSubdirectory(ROOT, ['.cache', 'ne', name]);
+  if (readdirSync(dir).length) { bad(`${name}: destination is not empty`); continue; }
+  const zip = join(dir, 'download.zip');
+  writeFileSync(zip, Buffer.from(await res.arrayBuffer()), { flag: 'wx' });
+  const entries = execFileSync('unzip', ['-Z', '-1', zip], { encoding: 'utf8' }).trim().split(/\r?\n/);
+  if (!entries.length || new Set(entries.map(entry => entry.toLowerCase())).size !== entries.length || entries.some(entry => !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(entry) || entry.toLowerCase() === 'download.zip')) throw new Error(`${name}: unsafe archive entry`);
+  execFileSync('unzip', ['-q', zip, '-d', dir]);
+  for (const entry of entries) { const st = lstatSync(join(dir, entry)); if (!st.isFile() || st.isSymbolicLink()) throw new Error(`${name}: unsafe archive file`); }
+
   ok(name);
 }
 console.log(process.exitCode ? '\nsetup incomplete' : '\nready');

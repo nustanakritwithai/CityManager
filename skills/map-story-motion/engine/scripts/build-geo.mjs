@@ -1,16 +1,19 @@
 // Builds the GeoJSON a story needs from Natural Earth, driven by `build:` specs on its layers and
 // zones. Output goes to <story folder>/geo/<src>.json, which the player loads as /geo/<src>.json.
-//   node scripts/build-geo.mjs path/to/story.yaml [--force]
+//   node scripts/build-geo.mjs path/to/story.yaml
 //
 // build specs (see references/story-schema.md):
 //   rivers:   { rivers: [Mekong, "Nam Ou"], upstream: [lng, lat], clip: [w, s, e, n] }
 //   countries:{ countries: [Thailand, Laos] }
 //   provinces:{ provinces: [{ country: China, names: [Yunnan] }, { country: Vietnam, minLat: 19.9 }], clip: [...] }
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { buildGeoFile } from './geo-output.mjs';
+import { safeOutputName } from './output-files.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MS = join(ROOT, 'node_modules/.bin/mapshaper');
@@ -21,20 +24,24 @@ const ADM1 = join(NE, 'ne_10m_admin_1_states_provinces/ne_10m_admin_1_states_pro
 
 // --list-rivers w,s,e,n prints the Natural Earth river names inside a box (upper reaches often
 // have their own names, e.g. the Mekong's headwater is "Za").
+if (process.argv.includes('--force')) { console.error('--force is unsupported; choose a new src to preserve existing output'); process.exit(1); }
 const li = process.argv.indexOf('--list-rivers');
 if (li > 0) {
-  const tmp = join(ROOT, '.cache/rivers-list.json');
+  const tempDir = mkdtempSync(join(tmpdir(), 'map-rivers-'));
+  const tmp = join(tempDir, 'rivers.json');
+  try {
   execFileSync(MS, [RIVERS, '-clip', `bbox=${process.argv[li + 1]}`, '-o', tmp, 'format=geojson'], { stdio: 'ignore' });
   const names = {};
   for (const f of JSON.parse(readFileSync(tmp, 'utf8')).features) { const n = f.properties.name_en || f.properties.name; if (n) names[n] = (names[n] || 0) + 1; }
   console.log(Object.keys(names).sort().join(' · '));
+  } finally { try { unlinkSync(tmp); } catch (e) { if (e.code !== 'ENOENT') throw e; } rmdirSync(tempDir); }
   process.exit(0);
 }
 const storyPath = resolve(process.argv[2]);
-const force = process.argv.includes('--force');
 const story = YAML.parse(readFileSync(storyPath, 'utf8'));
-const OUT = join(dirname(storyPath), 'geo');
-mkdirSync(OUT, { recursive: true });
+const jobs = [...Object.entries(story.layers || {}), ...Object.entries(story.zones || {})].filter(([, d]) => d.build && d.src);
+try { for (const [, def] of jobs) safeOutputName(def.src); }
+catch (e) { console.error(`Invalid geo src: ${e.message}`); process.exit(1); }
 if (!existsSync(RIVERS)) { console.error('Natural Earth data missing: run node scripts/setup.mjs first'); process.exit(1); }
 
 const ms = (...args) => execFileSync(MS, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -81,13 +88,17 @@ function provinceExpr(list) {
   }).join(' || ');
 }
 
-const jobs = [...Object.entries(story.layers || {}), ...Object.entries(story.zones || {})].filter(([, d]) => d.build && d.src);
 if (!jobs.length) console.log('no layers with build: specs');
+const completed = new Map();
 for (const [id, def] of jobs) {
-  const file = join(OUT, `${def.src}.json`);
-  if (existsSync(file) && !force) { console.log(`${id}: ${def.src}.json exists (use --force to rebuild)`); continue; }
   const b = def.build;
+  if (completed.has(def.src)) {
+    if (completed.get(def.src) !== J(b)) { console.error(`${id}: conflicting build spec for ${def.src}`); process.exitCode = 1; }
+    else console.log(`${id}: reusing geo/${def.src}.json generated in this run`);
+    continue;
+  }
   try {
+    const file = buildGeoFile(dirname(storyPath), def.src, (file) => {
     if (b.rivers) {
       ms(RIVERS, '-filter', `${J(b.rivers)}.includes(name_en) || ${J(b.rivers)}.includes(name)`, ...clipArgs(b), '-dissolve', '-simplify', b.simplify || '20%', 'keep-shapes', '-o', file, 'format=geojson', 'precision=0.001');
       console.log(`${id}: river ${chainRiver(file, b.upstream)}`);
@@ -97,7 +108,9 @@ for (const [id, def] of jobs) {
     } else if (b.provinces) {
       ms(ADM1, '-filter', provinceExpr(b.provinces), ...clipArgs(b), '-dissolve', '-simplify', b.simplify || '8%', 'keep-shapes', '-filter-slivers', '-o', file, 'format=geojson', 'precision=0.001');
       console.log(`${id}: provinces ${b.provinces.map((p) => `${p.country}${p.names ? `(${p.names.join(', ')})` : ''}`).join(' + ')}`);
-    } else console.log(`${id}: unknown build spec ${J(b)}`);
+    } else throw new Error(`unknown build spec ${J(b)}`);
+    });
+    completed.set(def.src, J(b));
     const size = readFileSync(file).length;
     if (size < 200) console.log(`  ⚠ ${def.src}.json is nearly empty — names may not match Natural Earth spelling (name_en)`);
   } catch (e) {

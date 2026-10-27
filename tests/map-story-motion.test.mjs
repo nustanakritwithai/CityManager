@@ -73,7 +73,7 @@ for (const engine of engines) {
 
   test(`${engine}: FFmpeg reads still sequence without glob support`, async t => {
     const version = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });
-    if (version.error?.code === 'ENOENT') return t.skip('ffmpeg is not installed');
+    if (version.error?.code === 'ENOENT') { if (process.env.MAP_REQUIRE_FFMPEG) assert.fail('ffmpeg is required in CI'); return t.skip('ffmpeg is not installed'); }
     assert.equal(version.status, 0);
     const { renderStills, contactSheetArgs } = await import(pathToFileURL(join(root, engine, 'scripts/stills.mjs')));
     const tmp = mkdtempSync(join(tmpdir(), 'map-ffmpeg-test-'));
@@ -116,7 +116,7 @@ for (const engine of engines) {
 
   test(`${engine}: exclusive MP3 output works with FFmpeg`, async t => {
     const version=spawnSync('ffmpeg',['-version'],{encoding:'utf8'});
-    if(version.error?.code==='ENOENT')return t.skip('ffmpeg is not installed');
+    if(version.error?.code==='ENOENT'){ if (process.env.MAP_REQUIRE_FFMPEG) assert.fail('ffmpeg is required in CI'); return t.skip('ffmpeg is not installed'); }
     const { withExclusiveOutput }=await import(pathToFileURL(join(root,engine,'scripts/output-files.mjs')));
     const parent=mkdtempSync(join(tmpdir(),'map-mp3-test-')), output=join(parent,'voice.mp3');
     withExclusiveOutput(output,fd=>{
@@ -129,11 +129,11 @@ for (const engine of engines) {
 
   test(`${engine}: real render and voice commands preserve existing files`, async t => {
     const version=spawnSync('ffmpeg',['-version'],{encoding:'utf8'});
-    if(version.error?.code==='ENOENT')return t.skip('ffmpeg is not installed');
+    if(version.error?.code==='ENOENT'){ if (process.env.MAP_REQUIRE_FFMPEG) assert.fail('ffmpeg is required in CI'); return t.skip('ffmpeg is not installed'); }
     const tmp=mkdtempSync(join(tmpdir(),'map-cli-test-')), work=join(tmp,'engine'), scripts=join(work,'scripts');
     const story=join(tmp,'story.yaml'), out=join(tmp,'out'), modules=join(work,'node_modules');
     mkdirSync(scripts,{recursive:true});mkdirSync(join(modules,'playwright'),{recursive:true});mkdirSync(join(modules,'yaml'),{recursive:true});mkdirSync(out);
-    for(const name of ['serve.mjs','safe-path.mjs','stills.mjs','output-files.mjs','render.mjs','voice.mjs']) copyFileSync(join(root,engine,'scripts',name),join(scripts,name));
+    for(const name of ['serve.mjs','safe-path.mjs','safe-cache.mjs','stills.mjs','output-files.mjs','render.mjs','voice.mjs']) copyFileSync(join(root,engine,'scripts',name),join(scripts,name));
     writeFileSync(join(work,'package.json'),'{"type":"module"}');
     writeFileSync(join(modules,'playwright','package.json'),'{"main":"index.cjs"}');
     writeFileSync(join(modules,'playwright','index.cjs'),`const fs=require('fs');exports.chromium={launch:async()=>({newPage:async()=>({on(){},goto:async()=>{},waitForFunction:async()=>{},evaluate:async(fn)=>String(fn).includes('window.TOTAL')?{TOTAL:1,FPS:1,SCENES:[{id:'a',start:0,end:1,sub:'fixture'}]}:undefined,screenshot:async()=>fs.readFileSync(process.env.TEST_FRAME)}),close:async()=>{}})};`);
@@ -151,7 +151,7 @@ for (const engine of engines) {
     const runs=readdirSync(out).filter(n=>n.startsWith('render-'));assert.equal(runs.length,2);
     for(const dir of runs){assert.ok(readFileSync(join(out,dir,'clip.mp4')).length>0);assert.ok(readFileSync(join(out,dir,'clip.srt')).length>0);}
     for(const name of ['clip.mp4','clip.srt','.seg-0.mp4','.segs.txt'])assert.equal(readFileSync(join(out,name),'utf8'),`original ${name}`);
-    const probe=spawnSync('ffprobe',['-version'],{encoding:'utf8'});if(probe.error?.code==='ENOENT')return t.skip('ffprobe is not installed');
+    const probe=spawnSync('ffprobe',['-version'],{encoding:'utf8'});if(probe.error?.code==='ENOENT'){ if (process.env.MAP_REQUIRE_FFMPEG) assert.fail('ffprobe is required in CI'); return t.skip('ffprobe is not installed'); }
     const cache=join(work,'.cache','tts');mkdirSync(cache,{recursive:true});
     const key=createHash('sha1').update('1.5|fixture').digest('hex').slice(0,16),wav=join(cache,key+'.wav');
     const wavRun=spawnSync('ffmpeg',['-v','error','-f','lavfi','-i','sine=frequency=440:duration=0.2','-ar','44100','-ac','1',wav],{encoding:'utf8'});assert.equal(wavRun.status,0,wavRun.stderr);
@@ -168,3 +168,58 @@ for (const engine of engines) {
     for(const dir of voiceRuns)assert.ok(readFileSync(join(dirname(clip),dir,'clip-voice.mp4')).length>0);
   });
 }
+
+
+test('geo output rejects traversal, existing targets and directory links', async () => {
+  const { buildGeoFile } = await import(pathToFileURL(join(root, 'skills/map-story-motion/engine/scripts/geo-output.mjs')));
+  const tmp = mkdtempSync(join(tmpdir(), 'map-geo-test-'));
+  const story = join(tmp, 'story'), outside = join(tmp, 'outside'); mkdirSync(story); mkdirSync(outside);
+  const sentinel = join(outside, 'sentinel.json'); writeFileSync(sentinel, 'original');
+  const generate = file => writeFileSync(file, 'generated');
+  for (const bad of ['../../outside/sentinel', '/absolute', 'C:\\outside', 'a/b', 'CON']) assert.throws(() => buildGeoFile(story, bad, generate), /simple filename/);
+  const geo = join(story, 'geo'); mkdirSync(geo); writeFileSync(join(geo, 'existing.json'), 'existing');
+  assert.throws(() => buildGeoFile(story, 'existing', generate), /already exists/);
+  try { symlinkSync(sentinel, join(geo, 'linked.json'), 'file'); assert.throws(() => buildGeoFile(story, 'linked', generate), /already exists/); }
+  catch (e) { if (!['EPERM', 'EACCES'].includes(e.code)) throw e; }
+  assert.equal(readFileSync(buildGeoFile(story, 'fresh', generate), 'utf8'), 'generated');
+  assert.throws(() => buildGeoFile(story, 'fresh', generate), /already exists/);
+  assert.equal(readFileSync(join(geo, 'existing.json'), 'utf8'), 'existing');
+  const linkedStory = join(tmp, 'linked-story'); mkdirSync(linkedStory);
+  symlinkSync(outside, join(linkedStory, 'geo'), process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(() => buildGeoFile(linkedStory, 'sentinel', generate), /symlink/);
+  assert.equal(readFileSync(sentinel, 'utf8'), 'original');
+});
+
+
+test('cache directories reject junctions and invalid components', async () => {
+  for (const engine of engines) {
+    const { safeSubdirectory } = await import(pathToFileURL(join(root, engine, 'scripts/safe-cache.mjs')));
+    const tmp = mkdtempSync(join(tmpdir(), 'map-cache-test-'));
+    const outside = join(tmp, 'outside'), base = join(tmp, 'base'); mkdirSync(outside); mkdirSync(base);
+    writeFileSync(join(outside, 'sentinel'), 'original');
+    symlinkSync(outside, join(base, '.cache'), process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => safeSubdirectory(base, ['.cache', 'tiles']), /symlink/);
+    assert.throws(() => safeSubdirectory(base, ['..']), /invalid/);
+    assert.equal(readFileSync(join(outside, 'sentinel'), 'utf8'), 'original');
+  }
+});
+
+
+test('geo CLI rejects unsafe src and force before invoking mapshaper', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'map-geo-cli-')), work = join(tmp, 'engine'), scripts = join(work, 'scripts'), modules = join(work, 'node_modules', 'yaml');
+  mkdirSync(scripts, { recursive: true }); mkdirSync(modules, { recursive: true });
+  for (const name of ['build-geo.mjs', 'validate.mjs', 'geo-output.mjs', 'output-files.mjs']) copyFileSync(join(root, 'skills/map-story-motion/engine/scripts', name), join(scripts, name));
+  writeFileSync(join(modules, 'package.json'), '{"main":"index.cjs"}'); writeFileSync(join(modules, 'index.cjs'), 'module.exports={parse: JSON.parse};');
+  const storyDir = join(tmp, 'story'); mkdirSync(storyDir); const story = join(storyDir, 'story.yaml');
+  const outside = join(tmp, 'outside.json'); writeFileSync(outside, 'sentinel');
+  for (const src of ['../../outside', '/absolute', 'C:\\outside']) {
+    writeFileSync(story, JSON.stringify({layers: {bad: {type:'area', src, build:{countries:['Laos']}}}, scenes:[]}));
+    const build = spawnSync(process.execPath, [join(scripts, 'build-geo.mjs'), story], {encoding:'utf8'});
+    assert.notEqual(build.status, 0); assert.match(build.stderr, /Invalid geo src/);
+    const validate = spawnSync(process.execPath, [join(scripts, 'validate.mjs'), story], {encoding:'utf8'});
+    assert.notEqual(validate.status, 0); assert.match(validate.stdout, /src must be a simple filename/);
+  }
+  const force = spawnSync(process.execPath, [join(scripts, 'build-geo.mjs'), story, '--force'], {encoding:'utf8'});
+  assert.notEqual(force.status, 0); assert.match(force.stderr, /unsupported/);
+  assert.equal(readFileSync(outside, 'utf8'), 'sentinel');
+});

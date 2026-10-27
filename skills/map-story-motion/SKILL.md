@@ -24,7 +24,7 @@ Run every script from inside `engine/` (copy it into the user's project if the s
    node scripts/build-geo.mjs <story>/story.yaml
    node scripts/validate.mjs <story>/story.yaml
    ```
-   Fix every ERROR. Warnings about long subtitles mean "shorten or split into a list". `build-geo` prints where each river starts and ends: if a river misses its source, the upper reach has its own Natural Earth name — find it with `node scripts/build-geo.mjs --list-rivers w,s,e,n` and add it to `rivers:`.
+   Geo outputs are never overwritten; choose a new `src` when rebuilding and preserve any existing files. Fix every ERROR. Warnings about long subtitles mean "shorten or split into a list". `build-geo` prints where each river starts and ends: if a river misses its source, the upper reach has its own Natural Earth name — find it with `node scripts/build-geo.mjs --list-rivers w,s,e,n` and add it to `rivers:`.
 
 5. **Stills (checkpoint 2)** — `node scripts/render.mjs <story>/story.yaml --stills` writes one PNG per scene (taken 80% into the scene; `--at 0.3` shows earlier moments, e.g. the first part of a list subtitle) and a contact sheet in a new `out/stills-*/` directory in ~2 minutes. The command prints the exact paths; `scenes.json` maps numbered PNGs to scene IDs and times, and earlier runs remain intact. Look at the sheet yourself first (labels colliding, cards covering the action, a 3D scene where the units are tiny, wrong colours), fix, re-run, then show the user. This is the cheap place to iterate; a video render is not.
 

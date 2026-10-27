@@ -5,7 +5,7 @@
 ```bash
 npm install
 # ดาวน์โหลด Natural Earth 10m ลง .cache/ne แล้ว
-node scripts/prepare-geo.mjs                                  # สร้าง geo/*.json
+node scripts/prepare-geo.mjs                                  # สร้าง geo-build-*/ โดยไม่ทับไฟล์เดิม
 node scripts/serve.mjs ../tai-kadai-war/story.yaml            # preview: http://127.0.0.1:5180/?preview=1 (Space = เล่น)
 node scripts/render.mjs ../tai-kadai-war/story.yaml --stills  # ภาพนิ่งและ contact sheet อยู่ใน out/stills-* ใหม่ ดูตำแหน่งจากผลคำสั่ง
 node scripts/render.mjs ../tai-kadai-war/story.yaml --workers 4 --out clip   # MP4 + .srt อยู่ใน out/render-* ใหม่ ดูตำแหน่งจากผลคำสั่ง
