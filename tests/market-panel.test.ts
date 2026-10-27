@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canBuyListing, depositSourceLabel, depositSourceStock, eligibleDepositFirms, mergeMarketListings } from '../src/market-panel.ts';
+import { activeMarketListings, canBuyListing, depositSourceLabel, depositSourceStock, eligibleDepositFirms, mergeMarketListings } from '../src/market-panel.ts';
 import type { City, Firm } from '../src/sim.ts';
 
 const firm = (patch: Partial<Firm>): Firm => ({
@@ -41,7 +41,19 @@ test('buy controls fail closed for empty, invalid, or unaffordable listings', ()
 });
 
 test('central market includes own listings once and marks them non-buyable', () => {
-  const rows = mergeMarketListings([{ id: 'a', item_code: 'crop:rice' }], [{ id: 'a', item_code: 'crop:rice' }, { id: 'b', item_code: 'crop:sugarcane' }]);
-  assert.deepEqual(rows, [{ id: 'a', item_code: 'crop:rice', own: true }, { id: 'b', item_code: 'crop:sugarcane', own: true }]);
+  const rows = mergeMarketListings([{ id: 'a', item_code: 'crop:rice', status: 'open' }], [{ id: 'a', item_code: 'crop:rice', status: 'open' }, { id: 'b', item_code: 'crop:sugarcane', status: 'open' }]);
+  assert.deepEqual(rows, [{ id: 'a', item_code: 'crop:rice', status: 'open', own: true }, { id: 'b', item_code: 'crop:sugarcane', status: 'open', own: true }]);
   assert.equal(rows.find(x => x.id === 'b')?.own, true);
+});
+
+test('closed listings are hidden from both market sources while open rows remain', () => {
+  const publicRows = [{ id: 'open-public', status: 'open' }, { id: 'cancelled-public', status: 'cancelled' }, { id: 'expired-public', status: 'expired' }];
+  const ownRows = [{ id: 'open-own', status: 'open' }, { id: 'cancelled-own', status: 'cancelled' }, { id: 'expired-own', status: 'expired' }];
+  assert.deepEqual(activeMarketListings([...publicRows, ...ownRows]).map(row => row.id), ['open-public', 'open-own']);
+  assert.deepEqual(mergeMarketListings(publicRows, ownRows).map(row => row.id), ['open-public', 'open-own']);
+});
+
+test('closed own listing suppresses a stale open public duplicate', () => {
+  const rows = mergeMarketListings([{ id: 'same', status: 'open' }], [{ id: 'same', status: 'cancelled' }]);
+  assert.deepEqual(rows, []);
 });

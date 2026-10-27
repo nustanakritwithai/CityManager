@@ -12,7 +12,9 @@ export const depositSourceStock = (firm: Firm, item: MarketItem) => { const key 
 export const eligibleDepositFirms = (city: Pick<City,'firms'>, item: MarketItem) => city.firms.filter(f => depositSourceStock(f, item) > 0);
 export const depositSourceLabel = (firm: Firm, item: MarketItem) => `${item.startsWith('crop:') ? 'ฟาร์ม' : `โรงงาน${labels[item] ?? item}`} #${firm.id} · มี ${depositSourceStock(firm,item)} หน่วย`;
 export const canBuyListing = (quantity: unknown, credits: bigint, unitPrice: unknown) => { const q = Number(quantity); const p = Number(unitPrice); if (!Number.isSafeInteger(q) || q <= 0 || !Number.isSafeInteger(p) || p <= 0) return false; try { return credits >= BigInt(p); } catch { return false; } };
-export const mergeMarketListings = <T extends { id: string }>(publicRows: T[], ownRows: T[]) => { const byId = new Map(publicRows.map(row => [row.id, { ...row, own: false }])); for (const row of ownRows) byId.set(row.id, { ...row, own: true }); return [...byId.values()]; };
+export const isOpenMarketListing = (row: { status?: unknown }) => row.status === 'open';
+export const activeMarketListings = <T extends { status?: unknown }>(rows: T[]) => rows.filter(isOpenMarketListing);
+export const mergeMarketListings = <T extends { id: string; status?: unknown }>(publicRows: T[], ownRows: T[]) => { const ownedIds = new Set(ownRows.map(row => row.id)); const byId = new Map(activeMarketListings(publicRows).filter(row => !ownedIds.has(row.id)).map(row => [row.id, { ...row, own: false }])); for (const row of activeMarketListings(ownRows)) byId.set(row.id, { ...row, own: true }); return [...byId.values()]; };
 
 export function installMarketPanel(city: () => City, onChanged: () => void, saveCity: () => void) {
   const base = (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '';
