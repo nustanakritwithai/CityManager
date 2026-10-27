@@ -32,6 +32,7 @@ body {
 .market-listing-form input, .market-listing-form select { min-width:90px; max-width:150px; padding:6px; background:#101c32; color:#f2efe2; border:1px solid #deecdf44; border-radius:6px; }
 .market-card { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; padding:9px 0; border-top:1px solid #deecdf24; }
 .market-card button, .market-controls button, .market-listing-form button { padding:7px 10px; border:1px solid #80b9db99; border-radius:7px; background:#244766; color:#f2efe2; cursor:pointer; }
+.market-game-panel button:disabled, .market-game-panel select:disabled, .market-game-panel input:disabled { opacity:.48; cursor:not-allowed; }
 @media (max-width:600px) { .market-listing-form { display:grid; grid-template-columns:1fr 1fr; } .market-listing-form input, .market-listing-form select, .market-listing-form button { max-width:none; width:100%; } }
 h1,h2,h3,p,dl,dd {
   margin:0
