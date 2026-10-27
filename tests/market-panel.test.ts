@@ -33,5 +33,9 @@ test('buy controls fail closed for empty, invalid, or unaffordable listings', ()
   assert.equal(canBuyListing(-1, 100n, '1'), false);
   assert.equal(canBuyListing(Number.NaN, 100n, '1'), false);
   assert.equal(canBuyListing(1, 9n, '10'), false);
+  assert.equal(canBuyListing(1, 100n, '0'), false);
+  assert.equal(canBuyListing(1, 100n, '-1'), false);
+  assert.equal(canBuyListing(1, 100n, Number.NaN), false);
+  assert.equal(canBuyListing(1, 100n, Number.MAX_SAFE_INTEGER + 1), false);
   assert.equal(canBuyListing(1, 100n, 'not-a-price'), false);
 });
