@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MarketClient, marketJournalForTest, MARKET_RULES } from '../src/market-client.ts';
+import { mergeMarketListings } from '../src/market-panel.ts';
 import { createCity, deserialize, serialize } from '../src/sim.ts';
 
 test('market journal starts at v10/chain-5 and has no guest token field', () => {
@@ -16,6 +17,12 @@ test('public same-origin test route is opt-in and exact, while arbitrary remote 
   assert.equal(new MarketClient(() => city, '/citymanager-api/').enabled, true);
   assert.equal(new MarketClient(() => city, '/other-api').enabled, false);
   assert.equal(new MarketClient(() => city, 'https://example.invalid').enabled, false);
+});
+
+test('client projection keeps closed owner tombstones for stale-duplicate suppression', async () => {
+  const store = new Map<string, string>(); Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } });
+  const originalFetch = globalThis.fetch; globalThis.fetch = async () => new Response(JSON.stringify([{ id: 'same', item_code: 'crop:rice', unit_price: 10, quantity: 1, status: 'cancelled' }, { id: 'open', item_code: 'crop:rice', unit_price: 10, quantity: 1, status: 'open' }]), { status: 200, headers: { 'content-type': 'application/json' } });
+  try { const client = new MarketClient(() => createCity(1, { starter: false }), 'http://127.0.0.1:4317'); const rows = await client.myListings(); assert.deepEqual(rows.map(row => row.id), ['open']); assert.deepEqual((rows as typeof rows & { allRows: typeof rows }).allRows.map(row => row.id), ['same', 'open']); assert.deepEqual(mergeMarketListings([{ id: 'same', item_code: 'crop:rice', unit_price: 10, quantity: 1, status: 'open' }], rows).map(row => row.id), ['open']); } finally { globalThis.fetch = originalFetch; }
 });
 
 test('market journal rejects malformed or unknown operation records', () => {

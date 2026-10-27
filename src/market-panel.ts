@@ -14,7 +14,7 @@ export const depositSourceLabel = (firm: Firm, item: MarketItem) => `${item.star
 export const canBuyListing = (quantity: unknown, credits: bigint, unitPrice: unknown) => { const q = Number(quantity); const p = Number(unitPrice); if (!Number.isSafeInteger(q) || q <= 0 || !Number.isSafeInteger(p) || p <= 0) return false; try { return credits >= BigInt(p); } catch { return false; } };
 export const isOpenMarketListing = (row: { status?: unknown }) => row.status === 'open';
 export const activeMarketListings = <T extends { status?: unknown }>(rows: T[]) => rows.filter(isOpenMarketListing);
-export const mergeMarketListings = <T extends { id: string; status?: unknown }>(publicRows: T[], ownRows: T[]) => { const ownedIds = new Set(ownRows.map(row => row.id)); const byId = new Map(activeMarketListings(publicRows).filter(row => !ownedIds.has(row.id)).map(row => [row.id, { ...row, own: false }])); for (const row of activeMarketListings(ownRows)) byId.set(row.id, { ...row, own: true }); return [...byId.values()]; };
+export const mergeMarketListings = <T extends { id: string; status?: unknown }>(publicRows: T[], ownRows: T[]) => { const allOwnRows = ((ownRows as T[] & { allRows?: T[] }).allRows ?? ownRows); const ownedIds = new Set(allOwnRows.map(row => row.id)); const byId = new Map(activeMarketListings(publicRows).filter(row => !ownedIds.has(row.id)).map(row => [row.id, { ...row, own: false }])); for (const row of activeMarketListings(ownRows)) byId.set(row.id, { ...row, own: true }); return [...byId.values()]; };
 
 export function installMarketPanel(city: () => City, onChanged: () => void, saveCity: () => void) {
   const base = (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '';
