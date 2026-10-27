@@ -19,19 +19,25 @@ for (const [cmd, arg] of [['node', '-v'], ['ffmpeg', '-version'], ['ffprobe', '-
 }
 
 console.log('npm packages');
-if (!existsSync(join(ROOT, 'node_modules/maplibre-gl'))) {
+const require = createRequire(join(ROOT, 'package.json'));
+const required = ['maplibre-gl', 'mapshaper', 'yaml', 'playwright'];
+const missing = required.filter(name => { try { require.resolve(name); return false; } catch { return true; } });
+if (missing.length) {
   console.log('  installing…');
   // npm is a cmd shim on Windows. The command is constant: no story or user input is interpolated.
   if (process.platform === 'win32') execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm.cmd install --silent'], { cwd: ROOT, stdio: 'inherit' });
   else execFileSync('npm', ['install', '--silent'], { cwd: ROOT, stdio: 'inherit' });
 }
-ok('engine dependencies installed');
+const unresolved = required.filter(name => { try { require.resolve(name); return false; } catch { return true; } });
+if (unresolved.length) bad(`missing local dependencies: ${unresolved.join(', ')}`);
+else ok('engine dependencies installed');
 try {
-  const require = createRequire(join(ROOT, 'package.json'));
-  require('playwright');
+  const { chromium } = require('playwright');
   ok('playwright');
+  if (!existsSync(chromium.executablePath())) bad('Playwright Chromium is missing; run npx playwright install chromium from engine/');
+  else ok(`Chromium ${chromium.executablePath()}`);
 } catch {
-  bad('playwright not found — install it (npm i -g playwright && npx playwright install chromium) or use a machine that has it');
+  bad('local Playwright is missing — run npm install from engine/');
 }
 
 console.log('Natural Earth 10m (public domain)');

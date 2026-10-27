@@ -4,6 +4,7 @@
 
 ```bash
 npm install
+npx playwright install chromium
 # ดาวน์โหลด Natural Earth 10m ลง .cache/ne แล้ว
 node scripts/prepare-geo.mjs                                  # สร้าง geo-build-*/ โดยไม่ทับไฟล์เดิม
 node scripts/serve.mjs ../tai-kadai-war/story.yaml            # preview: http://127.0.0.1:5180/?preview=1 (Space = เล่น)

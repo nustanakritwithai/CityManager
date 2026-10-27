@@ -11,7 +11,7 @@ Make a 9:16 map video from source text. The engine in `engine/` renders a `story
 
 Run every script from inside `engine/` (copy it into the user's project if the skill folder is read-only). The story folder can live anywhere — scripts take its path, and `geo/`, `media/` and `out/` resolve next to `story.yaml`. Paths below write it as `<story>/story.yaml`.
 
-1. **Setup** — `node scripts/setup.mjs`. Installs npm packages and downloads Natural Earth data (~100 MB, once; re-running only checks). It needs node, ffmpeg and Playwright with Chromium; if Playwright is missing, say so rather than improvising another renderer.
+1. **Setup** — `node scripts/setup.mjs`. Installs npm packages and downloads Natural Earth data (~100 MB, once; re-running only checks). It needs Node and FFmpeg. If setup reports that Chromium is missing, run `npx playwright install chromium` inside `engine/`, then rerun setup; Playwright itself is a pinned local dependency.
 
 2. **Storyboard (checkpoint 1)** — Read the source and draft a table: scene · seconds · what the map shows · card/illustration · subtitle · reference to the source paragraph. Read `references/storytelling.md` first: it covers structure, scene length, which scenes deserve 3D, and the accuracy rules (keep the author's hedges like "อาจ", "น่าจะ", label reconstructions). Show the table and ask the user to confirm before building — wrong facts or places cost a full render.
    Also ask, once, what you can't infer: target length (short reels work best at 60–90 s), whether to credit the author/sources, whether original images the user supplied may appear in the clip.

@@ -13,6 +13,7 @@
     "@fontsource/noto-serif-sc": "^5.1.1",
     "maplibre-gl": "^4.7.1",
     "mapshaper": "^0.6.99",
+    "playwright": "1.56.1",
     "yaml": "^2.6.1"
   }
 }

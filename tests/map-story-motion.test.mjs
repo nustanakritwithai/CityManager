@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -257,13 +257,14 @@ test('clean setup invokes npm through the platform launcher', () => {
   mkdirSync(scripts,{recursive:true}); mkdirSync(bin);
   for(const name of ['setup.mjs','safe-cache.mjs']) copyFileSync(join(root,'skills/map-story-motion/engine/scripts',name),join(scripts,name));
   writeFileSync(join(work,'package.json'),'{}');
-  const pw = join(work,'node_modules','playwright'); mkdirSync(pw,{recursive:true}); writeFileSync(join(pw,'index.js'),'module.exports = {};');
+  const pw = join(work,'node_modules','playwright'); mkdirSync(pw,{recursive:true}); writeFileSync(join(pw,'index.js'),'module.exports = {chromium:{executablePath:()=>__filename}};');
+  for(const name of ['mapshaper','yaml']) { const dir=join(work,'node_modules',name); mkdirSync(dir,{recursive:true}); writeFileSync(join(dir,'index.js'),'module.exports={};'); }
   for(const name of ['ne_10m_admin_0_countries','ne_10m_admin_1_states_provinces','ne_10m_rivers_lake_centerlines']) {
     const dir=join(work,'.cache','ne',name); mkdirSync(dir,{recursive:true}); writeFileSync(join(dir,name+'.shp'),'fixture');
   }
   const marker=join(tmp,'npm-called');
-  if(process.platform==='win32') writeFileSync(join(bin,'npm.cmd'),'@echo off\r\n> "%TEST_NPM_MARKER%" echo called\r\n');
-  else { const npm=join(bin,'npm'); writeFileSync(npm,'#!/bin/sh\nprintf called > "$TEST_NPM_MARKER"\n',{mode:0o755}); }
+  if(process.platform==='win32') writeFileSync(join(bin,'npm.cmd'),'@echo off\r\n> "%TEST_NPM_MARKER%" echo called\r\nmkdir node_modules\\maplibre-gl\r\necho module.exports={}; > node_modules\\maplibre-gl\\index.js\r\n');
+  else { const npm=join(bin,'npm'); writeFileSync(npm,'#!/bin/sh\nprintf called > "$TEST_NPM_MARKER"\nmkdir -p node_modules/maplibre-gl\nprintf "module.exports={};" > node_modules/maplibre-gl/index.js\n',{mode:0o755}); }
   const env={...process.env,TEST_NPM_MARKER:marker,PATH:bin+ (process.platform==='win32'?';':':') +process.env.PATH};
   const result=spawnSync(process.execPath,[join(scripts,'setup.mjs')],{env,encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,result.stdout+'\n'+result.stderr); assert.match(readFileSync(marker,'utf8'),/called/);
@@ -300,7 +301,8 @@ test('setup extracts fixture Natural Earth archives without external unzip on Wi
   mkdirSync(scripts,{recursive:true}); mkdirSync(fixtures);
   for(const name of ['setup.mjs','safe-cache.mjs']) copyFileSync(join(root,'skills/map-story-motion/engine/scripts',name),join(scripts,name));
   writeFileSync(join(work,'package.json'),'{}'); mkdirSync(join(work,'node_modules','maplibre-gl'),{recursive:true});
-  const pw=join(work,'node_modules','playwright');mkdirSync(pw,{recursive:true});writeFileSync(join(pw,'index.js'),'module.exports={};');
+  const pw=join(work,'node_modules','playwright');mkdirSync(pw,{recursive:true});writeFileSync(join(pw,'index.js'),'module.exports={chromium:{executablePath:()=>__filename}};');
+  for(const name of ['maplibre-gl','mapshaper','yaml']) { const dir=join(work,'node_modules',name); mkdirSync(dir,{recursive:true}); writeFileSync(join(dir,'index.js'),'module.exports={};'); }
   const names=['ne_10m_admin_0_countries','ne_10m_admin_1_states_provinces','ne_10m_rivers_lake_centerlines'];
   for(const name of names){const zip=new AdmZip();zip.addFile(name+'.shp',Buffer.from('fixture '+name));zip.writeZip(join(fixtures,name+'.zip'));}
   const bootstrap=join(tmp,'bootstrap.mjs');writeFileSync(bootstrap,`import {readFileSync} from 'node:fs'; import {join} from 'node:path'; globalThis.fetch=async url=>({ok:true,arrayBuffer:async()=>readFileSync(join(process.env.TEST_ARCHIVES,new URL(url).pathname.split('/').pop()))});`);
@@ -309,4 +311,55 @@ test('setup extracts fixture Natural Earth archives without external unzip on Wi
   for(const name of names) assert.equal(readFileSync(join(work,'.cache','ne',name,name+'.shp'),'utf8'),'fixture '+name);
   const second=run();assert.equal(second.status,0,second.stdout+'\n'+second.stderr);
   for(const name of names) assert.equal(readFileSync(join(work,'.cache','ne',name,name+'.shp'),'utf8'),'fixture '+name);
+});
+
+
+test('both clean engine installations resolve the pinned local Playwright', async t => {
+  const paths = [process.env.MAP_TEST_MODULES, process.env.MAP_TEST_PILOT_MODULES];
+  if (paths.some(p=>!p)) { if(process.env.MAP_REQUIRE_BROWSER) assert.fail('both engine installations are required'); return t.skip('both engine installations unavailable'); }
+  const {createRequire}=await import('node:module');
+  for (const modules of paths) {
+    const require=createRequire(join(modules,'fixture.cjs')), resolved=require.resolve('playwright');
+    assert.ok(resolved.startsWith(resolve(modules))); assert.equal(require('playwright/package.json').version,'1.56.1');
+    assert.equal(typeof require('playwright').chromium.launch,'function');
+  }
+});
+
+test('installed Playwright Chromium launches and renders a page', async t => {
+  const modules=process.env.MAP_TEST_MODULES;
+  if (!modules || !process.env.MAP_REQUIRE_BROWSER) return t.skip('Playwright Chromium fixture unavailable');
+  const {createRequire}=await import('node:module'); const {chromium}=createRequire(join(modules,'fixture.cjs'))('playwright');
+  assert.ok(existsSync(chromium.executablePath()), 'Playwright Chromium binary is missing');
+  const browser=await chromium.launch({headless:true});
+  try { const page=await browser.newPage(); await page.setContent('<h1>fixture</h1>'); assert.equal(await page.textContent('h1'),'fixture'); }
+  finally { await browser.close(); }
+});
+
+
+test('clean setup resolves the real installed Playwright and browser', async t => {
+  const modules=process.env.MAP_TEST_MODULES;
+  if (!modules || !process.env.MAP_REQUIRE_BROWSER) return t.skip('installed browser fixture unavailable');
+  const tmp=mkdtempSync(join(tmpdir(),'map-real-setup-')),work=join(tmp,'engine'),scripts=join(work,'scripts');mkdirSync(scripts,{recursive:true});
+  for(const name of ['setup.mjs','safe-cache.mjs'])copyFileSync(join(root,'skills/map-story-motion/engine/scripts',name),join(scripts,name));
+  symlinkSync(modules,join(work,'node_modules'),process.platform==='win32'?'junction':'dir');writeFileSync(join(work,'package.json'),'{}');
+  for(const name of ['ne_10m_admin_0_countries','ne_10m_admin_1_states_provinces','ne_10m_rivers_lake_centerlines']){const dir=join(work,'.cache','ne',name);mkdirSync(dir,{recursive:true});writeFileSync(join(dir,name+'.shp'),'fixture');}
+  const result=spawnSync(process.execPath,[join(scripts,'setup.mjs')],{encoding:'utf8',timeout:30000});
+  assert.equal(result.status,0,result.stdout+'\n'+result.stderr);assert.match(result.stdout,/Chromium/);
+});
+
+
+test('render CLI runs with real Playwright Chromium and FFmpeg', async t => {
+  const modulePaths=[process.env.MAP_TEST_PILOT_MODULES,process.env.MAP_TEST_MODULES];
+  if (!process.env.MAP_REQUIRE_BROWSER || modulePaths.some(p=>!p)) return t.skip('installed browser fixtures unavailable');
+  for(const [i,engine] of engines.entries()) {
+    const tmp=mkdtempSync(join(tmpdir(),'map-real-render-')),work=join(tmp,'engine'),scripts=join(work,'scripts'),player=join(work,'player'),story=join(tmp,'story.yaml');
+    mkdirSync(scripts,{recursive:true});mkdirSync(player);
+    for(const name of ['render.mjs','serve.mjs','safe-path.mjs','safe-cache.mjs','stills.mjs','output-files.mjs'])copyFileSync(join(root,engine,'scripts',name),join(scripts,name));
+    symlinkSync(modulePaths[i],join(work,'node_modules'),process.platform==='win32'?'junction':'dir');
+    writeFileSync(story,'{}');writeFileSync(join(player,'index.html'),`<!doctype html><body style="margin:0;background:blue"><script>window.READY=true;window.TOTAL=1;window.FPS=1;window.SCENES=[{id:'fixture',start:0,end:1,sub:'fixture'}];window.seek=()=>{};</script>`);
+    const out=join(tmp,'out');mkdirSync(out);writeFileSync(join(out,'clip.mp4'),'sentinel');
+    const run=spawnSync(process.execPath,[join(scripts,'render.mjs'),story,'--workers','1','--fps','1','--out','clip'],{encoding:'utf8',timeout:120000});
+    assert.equal(run.status,0,run.stdout+'\n'+run.stderr);const dirs=readdirSync(out).filter(n=>n.startsWith('render-'));assert.equal(dirs.length,1);
+    assert.ok(readFileSync(join(out,dirs[0],'clip.mp4')).length>0);assert.equal(readFileSync(join(out,'clip.mp4'),'utf8'),'sentinel');
+  }
 });

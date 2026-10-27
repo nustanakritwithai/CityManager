@@ -27,7 +27,11 @@ const run = (cmd, a, input) => new Promise((ok, fail) => {
 });
 
 const { server, port } = await startServer(storyPath);
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
+let browser;
+try { browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] }); }
+catch (error) { server.close(); throw error; }
+let timer;
+try {
 
 async function openPage() {
   const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, deviceScaleFactor: 1 });
@@ -63,7 +67,7 @@ if (stills) {
   const pages = [first];
   while (pages.length < workers) pages.push(await openPage());
   let done = 0;
-  const timer = setInterval(() => console.log(`  ${done}/${frames} frames, ${((Date.now() - t0) / 1000).toFixed(0)}s`), 30000);
+  timer = setInterval(() => console.log(`  ${done}/${frames} frames, ${((Date.now() - t0) / 1000).toFixed(0)}s`), 30000);
   const segs = await Promise.all(pages.map(async (page, w) => {
     const a = w * per; const b = Math.min(frames, a + per);
     const file = join(output.dir, `.seg-${w}.mp4`);
@@ -105,5 +109,7 @@ if (stills) {
   console.log(`${mp4} — ${frames} frames in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 }
 
-await browser.close();
-server.close();
+} finally {
+  if (timer) clearInterval(timer);
+  try { await browser.close(); } finally { server.close(); }
+}

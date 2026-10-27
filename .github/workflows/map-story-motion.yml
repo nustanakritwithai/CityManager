@@ -28,7 +28,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -36,9 +36,14 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - name: Install FFmpeg (Ubuntu packages)
+      - name: Install pinned FFmpeg and ffprobe (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/media-tools" --no-save --ignore-scripts --no-audit --no-fund @ffmpeg-installer/linux-x64@4.1.0 @ffprobe-installer/linux-x64@5.2.0
+          chmod +x "$RUNNER_TEMP/media-tools/node_modules/@ffmpeg-installer/linux-x64/ffmpeg" "$RUNNER_TEMP/media-tools/node_modules/@ffprobe-installer/linux-x64/ffprobe"
+          echo "$RUNNER_TEMP/media-tools/node_modules/@ffmpeg-installer/linux-x64" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/media-tools/node_modules/@ffprobe-installer/linux-x64" >> "$GITHUB_PATH"
       - name: Install FFmpeg (Chocolatey)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -51,14 +56,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ffprobe -version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Install pinned geo test dependencies
+      - name: Install locked engine dependencies
         shell: pwsh
         run: |
-          npm install --prefix "$env:RUNNER_TEMP/map-geo-deps" --no-save --ignore-scripts --omit=optional --no-audit --no-fund mapshaper@0.6.99 yaml@2.6.1
+          npm ci --prefix skills/map-story-motion/engine --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --prefix pilot/engine --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install Playwright Chromium
+        run: node skills/map-story-motion/engine/node_modules/playwright/cli.js install chromium
       - run: node --test tests/map-story-motion.test.mjs
         env:
           MAP_REQUIRE_FFMPEG: '1'
           MAP_REQUIRE_MAPSHAPER: '1'
-          MAP_TEST_MODULES: ${{ runner.temp }}/map-geo-deps/node_modules
+          MAP_TEST_MODULES: ${{ github.workspace }}/skills/map-story-motion/engine/node_modules
+          MAP_TEST_PILOT_MODULES: ${{ github.workspace }}/pilot/engine/node_modules
+          MAP_REQUIRE_BROWSER: '1'
       - run: python tests/map-story-package.test.py
