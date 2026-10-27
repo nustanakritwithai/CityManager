@@ -1,0 +1,142 @@
+# ศึกถลาง พ.ศ. 2328 — คลิปสั้น ≤ 45 วินาที (tactical map + ฉาก 3 มิติ)
+# ref: ชี้กลับไปที่ประโยคในเนื้อหาที่ผู้ใช้ให้มา
+#   ¶1 "ปี พ.ศ. 2328 พม่ายกทัพมาหลายทาง"
+#   ¶2 "ทัพหนึ่งลงมาตีหัวเมืองปักษ์ใต้และล้อมเมืองถลาง"
+#   ¶3 "ท้าวเทพกระษัตรีและท้าวศรีสุนทรนำชาวเมืองต่อสู้ป้องกันเมืองนานราวหนึ่งเดือน"
+#   ¶4 "จนพม่าขาดเสบียงและถอยทัพกลับไป"
+# สิ่งที่สร้างขึ้นเอง (ไม่มีในต้นฉบับ): ทิศทางเส้นทางทัพ, ขอบเขตหัวเมืองปักษ์ใต้, ตำแหน่งหน่วยรบในฉาก 3 มิติ
+meta:
+  title: ศึกถลาง พ.ศ. 2328
+  width: 1080
+  height: 1920
+  fps: 24
+  basemap: bluemarble
+  mapPixelRatio: 0.7
+  tint: { color: "#1f3f9a", opacity: 0.32 }
+  terrain: { exaggeration: 1.7, shade: 0.4 }
+  credits: "ภาพ: NASA Blue Marble · Sentinel-2 cloudless 2016 by EOX · Terrain Tiles (AWS) · Natural Earth"
+
+factions:
+  burma:   { name: พม่า, color: red }
+  thalang: { name: ชาวเมืองถลาง, color: gold }
+
+places:
+  # เมืองถลางเก่า → ใช้บริเวณวัดพระนางสร้าง อ.ถลาง จ.ภูเก็ต เป็นจุดแทน (Nominatim)
+  thalang:   { name: เมืองถลาง, lng: 98.335, lat: 8.030 }
+  # จุดเริ่มทัพสายใต้ (ไม่มีชื่อ เพราะต้นฉบับไม่ระบุ) — ใช้แถบตะนาวศรีเป็นภาพประกอบ
+  south_src: { lng: 98.60, lat: 12.40 }
+
+layers:
+  burma: { type: area, src: country-myanmar, color: red, fill: 0.16, label: พม่า, labelAt: [96.2, 21.2], approx: true,
+           build: { countries: [Myanmar] } }
+
+zones:
+  south: { src: region-south-thai, color: gold, from: [99.3, 10.4], grow: 2.4, at: 1.4, fill: 0.30,
+           label: หัวเมืองปักษ์ใต้, labelAt: [100.55, 7.45], labelSize: 42, approx: true,
+           build: { provinces: [{ country: Thailand, maxLat: 10.6 }] } }
+
+scenes:
+  - id: s01
+    dur: 5.2
+    title: ["ศึกถลาง", "พ.ศ. 2328"]
+    camera: { center: [98.6, 13.6], zoom: 4.9, move: cut, drift: 0.25 }
+    pins:
+      - { place: thalang, style: ripple, color: gold, at: 1.0 }
+    sub: "**ท้าวเทพกระษัตรี** และ **ท้าวศรีสุนทร** รักษาเมืองถลางไว้ได้อย่างไร"
+    voice: "ท้าวเทพกระษัตรี และท้าวศรีสุนทร รักษาเมืองถลางไว้ได้อย่างไร"
+    ref: ¶3 (คำถามนำเรื่อง)
+
+  - id: s02
+    dur: 5.5
+    era: พ.ศ. 2328 · เส้นทางโดยประมาณ
+    camera: { center: [98.4, 15.6], zoom: 5.05, move: pan }
+    map: [burma]
+    routes:
+      - { id: r1, path: [[96.6, 20.6], [99.7, 19.1]], style: army, color: red, curve: 0.10, at: 0.6, draw: 2.0 }
+      - { id: r2, path: [[96.9, 17.6], [99.9, 16.2]], style: army, color: red, curve: 0.08, at: 0.9, draw: 2.0 }
+      - { id: r3, path: [[97.9, 15.6], [100.0, 14.1]], style: army, color: red, curve: -0.08, at: 1.2, draw: 2.0 }
+      - { id: r4, path: [south_src, [98.70, 9.9]], style: army, color: red, curve: -0.10, at: 1.5, draw: 2.0 }
+    units:
+      - { id: b1, f: burma, at: [96.6, 20.6], to: [98.4, 19.8], move: [0.6, 3.6], n: 3, r: 26 }
+      - { id: b2, f: burma, at: [96.9, 17.6], to: [98.6, 16.9], move: [0.9, 3.4], n: 3, r: 26 }
+      - { id: b3, f: burma, at: [97.9, 15.6], to: [98.9, 14.9], move: [1.2, 3.2], n: 3, r: 26 }
+      - { id: b4, f: burma, at: south_src, to: [98.75, 10.8], move: [1.5, 3.2], n: 3, r: 26 }
+    pins:
+      - { place: thalang, color: gold, small: true }
+    sub: "ปี พ.ศ. 2328 **พม่า** ยกทัพมา **หลายทาง**"
+    voice: "ปีพุทธศักราชสองพันสามร้อยยี่สิบแปด พม่ายกทัพมาหลายทาง"
+    ref: ¶1
+
+  - id: s03
+    dur: 7
+    camera: { center: [99.1, 9.3], zoom: 6.8 }
+    map: [burma]
+    zones: [south]
+    routes:
+      - { id: r5, path: [[98.75, 10.8], [98.15, 9.2], [98.30, 8.12]], style: army, color: red, at: 0.8, draw: 2.6 }
+    units:
+      - { id: b4, f: burma, at: [98.75, 10.8], to: [98.05, 8.75], move: [0.8, 3.4], n: 4, r: 30 }
+    pins:
+      - { place: thalang, style: siege, color: gold, at: 4.0 }
+    sub: ["ทัพหนึ่งลงมาตี **หัวเมืองปักษ์ใต้**", "และ **ล้อมเมืองถลาง**"]
+    voice: "ทัพหนึ่งลงมาตีหัวเมืองปักษ์ใต้ และล้อมเมืองถลาง"
+    ref: ¶2
+
+  - id: s04
+    dur: 8.5
+    title: ["ท้าวเทพกระษัตรี", "ท้าวศรีสุนทร"]
+    era: พ.ศ. 2328 · ภาพจำลองการรบ
+    imagery: sentinel2016
+    callout: ป้องกันเมืองถลาง
+    camera: { center: [98.335, 8.030], zoom: 12.2, pitch: 58, bearing: 15, focus: 0.5, moveDur: 3.0, orbit: 10, drift: 0.15 }
+    pins:
+      - { place: thalang, style: siege, color: gold, at: 2.8 }
+    units:
+      - { id: thC,  f: thalang, kind: formation, tile: 520, gap: 120, at: [98.335, 8.022], rows: 2, cols: 3, icon: spear, heading: 0, appear: 2.6 }
+      - { id: bmN, f: burma, kind: formation, tile: 520, gap: 120, at: [98.335, 8.095], to: [98.335, 8.062], move: [3.0, 3.5], rows: 2, cols: 6, icon: spear, appear: 2.2 }
+      - { id: bmW, f: burma, kind: formation, tile: 520, gap: 120, at: [98.272, 8.030], to: [98.303, 8.030], move: [3.2, 3.5], rows: 2, cols: 4, icon: spear, appear: 2.4 }
+      - { id: bmE, f: burma, kind: formation, tile: 520, gap: 120, at: [98.398, 8.028], to: [98.367, 8.028], move: [3.4, 3.5], rows: 2, cols: 4, icon: bow, appear: 2.6 }
+      - { id: bmS, f: burma, kind: formation, tile: 520, gap: 120, at: [98.336, 7.968], to: [98.336, 7.999], move: [3.6, 3.5], rows: 1, cols: 6, icon: spear, appear: 2.8 }
+    volleys:
+      - { from: [98.367, 8.028], to: [98.336, 8.031], at: 4.8, dur: 3.2, n: 14, spread: 400 }
+      - { from: [98.335, 8.034], to: [98.335, 8.060], at: 5.2, dur: 3.0, n: 12, spread: 400 }
+    sub: ["**ท้าวเทพกระษัตรี** และ **ท้าวศรีสุนทร**", "นำชาวเมือง **ต่อสู้ป้องกันเมือง**"]
+    voice: "ท้าวเทพกระษัตรี และท้าวศรีสุนทร นำชาวเมืองต่อสู้ป้องกันเมือง"
+    ref: ¶3
+
+  - id: s05
+    dur: 7
+    era: ล้อมเมืองราว 1 เดือน · ภาพจำลองการรบ
+    imagery: sentinel2016
+    callout: พม่าขาดเสบียง ถอยทัพ
+    pins:
+      - { place: thalang, style: ripple, color: gold }
+    units:
+      - { id: thC, f: thalang, kind: formation, tile: 520, gap: 120, at: [98.335, 8.022], rows: 2, cols: 3, icon: spear, heading: 0 }
+      - { id: bmN, f: burma, kind: formation, tile: 520, gap: 120, at: [98.335, 8.062], to: [98.335, 8.110], move: [3.0, 3.6], rows: 2, cols: 6, icon: spear }
+      - { id: bmW, f: burma, kind: formation, tile: 520, gap: 120, at: [98.303, 8.030], to: [98.255, 8.040], move: [3.2, 3.6], rows: 2, cols: 4, icon: spear }
+      - { id: bmE, f: burma, kind: formation, tile: 520, gap: 120, at: [98.367, 8.028], to: [98.410, 8.040], move: [3.4, 3.6], rows: 2, cols: 4, icon: bow }
+      - { id: bmS, f: burma, kind: formation, tile: 520, gap: 120, at: [98.336, 7.999], to: [98.336, 7.955], move: [3.6, 3.4], rows: 1, cols: 6, icon: spear }
+    sub: ["ต่อสู้นาน **ราวหนึ่งเดือน**", "จนพม่า **ขาดเสบียง** และ **ถอยทัพกลับไป**"]
+    voice: "สู้กันนานราวหนึ่งเดือน จนพม่าขาดเสบียง และถอยทัพกลับไป"
+    ref: ¶3–¶4
+
+  - id: s06
+    dur: 5.3
+    title: []
+    camera: { center: [98.6, 9.2], zoom: 6.6 }
+    map: [burma]
+    pins:
+      - { place: thalang, color: gold }
+    cards:
+      - { type: summary, items: ["พ.ศ. 2328 พม่ายกทัพมาหลายทาง ทัพหนึ่ง **ล้อมเมืองถลาง**", "**ท้าวเทพกระษัตรี** และ **ท้าวศรีสุนทร** นำชาวเมืองป้องกันเมืองราว 1 เดือน", "พม่า **ขาดเสบียง** และถอยทัพกลับไป"] }
+    sub: "ชาวเมืองถลาง **รักษาเมืองไว้ได้**"
+    voice: "สรุป ชาวเมืองถลาง รักษาเมืองไว้ได้"
+    ref: ¶1–¶4
+
+  - id: s07
+    dur: 3.5
+    title: []
+    credits: false
+    cards:
+      - { type: sources, title: หมายเหตุ, items: ["เส้นทางทัพและฉากรบเป็นภาพจำลอง ตำแหน่งเป็นแนวโดยประมาณ", "เมืองถลางแสดงที่บริเวณ อ.ถลาง จ.ภูเก็ต ปัจจุบัน", "ภาพ: NASA Blue Marble · Sentinel-2 cloudless 2016 by EOX · Terrain Tiles · Natural Earth"] }

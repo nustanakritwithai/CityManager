@@ -1,0 +1,17 @@
+{
+  "name": "map-story-motion",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/setup.mjs"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-sans-thai": "5.1.0",
+    "@fontsource/kanit": "5.1.0",
+    "@fontsource/noto-serif-sc": "5.1.1",
+    "maplibre-gl": "4.7.1",
+    "mapshaper": "0.6.99",
+    "playwright": "1.56.1",
+    "yaml": "2.6.1"
+  }
+}
