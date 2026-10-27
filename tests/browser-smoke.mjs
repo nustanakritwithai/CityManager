@@ -227,6 +227,7 @@ try {
   assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`), 'city-canvas', 'Town remains visible above mobile controls');
   await cell(homeBuilding.cell);
   assert.ok((await text('#selection-title')).replaceAll(' ', '').includes(`${homeBuilding.cell % 24 + 1},${Math.floor(homeBuilding.cell / 24) + 1}`));
+  assert.match(await text('#explanation'), /ระยะจากประตูเมืองผ่านถนน \d+ ช่อง รวมทางเข้าแปลง \(ไม่ใช่เวลาเดินทาง\)/, 'Connected building shows actual gateway road distance');
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'), beforeMobileSelection.households.filter(h=>h.home===homeBuilding.id).map(h=>h.id), 'House lists only its actual households');
   await button('[data-household-id="' + household.id + '"]');
   assert.equal(await evaluate('Number(document.querySelector("[data-context-metric=cash]").dataset.value)'), beforeMobileSelection.accounts[household.wallet], 'Household info binds its exact wallet');
