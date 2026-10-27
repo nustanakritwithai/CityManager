@@ -34,7 +34,7 @@ for (let day = 1; day <= 720 && (!monthlyFixture || !manualFixture); day++) {
   }
 }
 assert(monthlyFixture && manualFixture && manualProposal, 'Natural seed61025 supplies a real monthly market and executable owner proposal');
-assert.equal(monthlyFixture.version, 8); assert.equal(SAVE_KEY, 'citymanager.save.v7');
+assert.equal(monthlyFixture.version, 9); assert.equal(SAVE_KEY, 'citymanager.save.v7');
 const evidence = {
   candidateCommit, url, seed: 61025, saveVersion: 6, ruleOnly: true, llmImplemented: false,
   fixture: { monthlyTick: monthlyFixture.tick, manualTick: manualFixture.tick, firmId: manualProposal.snapshot.firmId, actorId: manualProposal.snapshot.actorId, command: manualProposal.command.type, amountSatang: manualProposal.command.amountSatang },

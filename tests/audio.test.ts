@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { AUDIO_DEFAULTS, AUDIO_KEY, busGain, loadAudioSettings, parseAudioSettings, saveAudioSettings } from '../src/audio-settings.ts';
 import { CueLimiter, cityCues, cueSnapshot } from '../src/audio-cues.ts';
 import { MONTH, createCity, serialize, step } from '../src/sim.ts';
+import { keepSupplied } from './plants.ts';
 
 test('sound settings default on at a low level, clamp every volume and survive bad storage', () => {
   assert.deepEqual(parseAudioSettings(null), AUDIO_DEFAULTS);
@@ -20,7 +21,7 @@ test('sound settings default on at a low level, clamp every volume and survive b
 test('city cues follow real changes: new buildings, arrivals, month end, shops and goal levels', () => {
   const c = createCity(61025), heard = new Set<string>();
   for (let d = 1; d <= 400; d++) {
-    const before = cueSnapshot(c), bytes = serialize(c); step(c);
+    const before = cueSnapshot(c), bytes = serialize(c); step(c); keepSupplied(c);
     assert.notEqual(serialize(c), bytes);
     const cues = cityCues(before, c);
     for (const cue of cues) heard.add(cue);

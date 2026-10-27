@@ -2,7 +2,7 @@ import './context-panels.css';
 import './building-cards.css';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
-import { MONTH, access, departureDay, farmCrop, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -109,7 +109,7 @@ function metric(key: string, title: string, text: string, raw: number | string, 
 function metrics(cards: HTMLElement[]): HTMLElement { const grid = el('div', 'cx-metrics'); grid.append(...cards); return grid; }
 function chip(text: string, good: boolean): HTMLElement { return el('span', `cx-chip ${good ? 'good' : 'warn'}`, text); }
 function status(city: City, cell: number): HTMLElement {
-  const row = el('div', 'cx-status'), connected = access(city, cell); row.append(chip(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดถนนเชื่อม', connected), chip(city.utilities.power && city.utilities.water ? 'น้ำและไฟพร้อม' : 'น้ำหรือไฟไม่พร้อม', city.utilities.power && city.utilities.water)); return row;
+  const row = el('div', 'cx-status'), connected = access(city, cell); row.append(chip(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดถนนเชื่อม', connected), chip(utilityAt(city, cell) ? 'น้ำและไฟพร้อม' : 'น้ำหรือไฟไม่พร้อม', utilityAt(city, cell))); return row;
 }
 function section(title: string, description?: string): HTMLElement {
   const body = el('section', 'cx-section'), head = el('div', 'cx-section-head'); head.append(el('h3', '', title)); if (description) head.append(el('span', 'cx-count', description)); body.append(head); return body;
@@ -655,7 +655,7 @@ export function renderCityOverview(city: City): void {
     metric('crop-harvested', 'เก็บเกี่ยวในช่วงนี้', `${count(data.cropHarvested)} ล็อต`, data.cropHarvested), metric('crop-processed', 'ใช้แปรรูปในช่วงนี้', `${count(data.cropProcessed)} ล็อต`, data.cropProcessed),
     metric('crop-consumed', 'บริโภคในช่วงนี้', `${count(data.cropConsumed)} ล็อต`, data.cropConsumed), metric('crop-written-off', 'ตัดออกในช่วงนี้', `${count(data.cropWrittenOff)} ล็อต`, data.cropWrittenOff),
   ]), el('p', 'cx-detail-note', 'ล็อตพืชผลแยกหน่วยจากสินค้าสำเร็จรูป ยอดเก็บเกี่ยว ใช้แปรรูป บริโภค และตัดออกนับจากบัญชีพืชผลภายในวันต้น–วันปลายเดียวกัน'));
-  const utilities = el('div', 'cx-status'); utilities.append(chip(data.power ? 'ไฟฟ้าภายนอกพร้อม' : 'ไฟฟ้าภายนอกไม่พร้อม', data.power), chip(data.water ? 'น้ำภายนอกพร้อม' : 'น้ำภายนอกไม่พร้อม', data.water));
+  const utilities = el('div', 'cx-status'); utilities.append(chip(`${data.power ? 'ไฟฟ้าพร้อม' : 'ไฟฟ้าไม่พอ'} ${data.utility.powerUsed}/${data.utility.powerCapacity}`, data.power), chip(`${data.water ? 'น้ำพร้อม' : 'น้ำไม่พอ'} ${data.utility.waterUsed}/${data.utility.waterCapacity}`, data.water), chip(`โรงผลิต ${data.utility.plants} แห่ง`, true));
   const warnings = section('สิ่งที่ควรตรวจสอบ'), list = el('ul', 'cx-warning-list');
   if (data.warnings.length) for (const warning of data.warnings) list.append(el('li', '', warning)); else list.append(el('li', '', 'ไม่พบคำเตือนจากการตรวจข้อมูลเมืองรอบนี้'));
   warnings.append(list); host.replaceChildren(stocks, housing, renderIndustryGrowth(city), period, flows, goods, crops, utilities, warnings);

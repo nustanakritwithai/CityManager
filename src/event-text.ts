@@ -11,7 +11,7 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Road built, but disconnected from the west outside gateway\./, () => 'สร้างถนนแล้ว แต่ยังไม่เชื่อมประตูเมืองฝั่งตะวันตก โซนข้างถนนนี้จะยังไม่โต'],
   [/^Road already exists; no charge\.$/, () => 'มีถนนอยู่แล้ว ไม่เสียเงิน'],
   [/^Need (\d+) credits for this road\.$/, m => `เงินคลังไม่พอ ถนนนี้ต้องใช้ ${m[1]} ฿`],
-  [/^A building blocks this road\./, () => 'มีอาคารขวางทาง ต้องรื้อก่อนจึงสร้างถนนได้'],
+  [/^A building (?:or plant )?blocks this road\./, () => 'มีอาคารหรือโรงน้ำไฟขวางทาง ต้องรื้อก่อนจึงสร้างถนนได้'],
   [/^Road is outside the bounded map\.$/, () => 'ถนนอยู่นอกแผนที่'],
   [/^Zone cleared\.$/, () => 'ล้างโซนแล้ว'],
   [/^([RCIF]) zone marked\. Growth is evaluated every 3 days\.$/, m => `วางโซน${zone(m[1])}แล้ว ระบบทบทวนการเติบโตทุก 3 วัน`],
@@ -30,7 +30,7 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Household #(\d+) arrived with (\d+) members and (\d+) workforce;(.*)$/, m => `ครัวเรือน #${m[1]} ย้ายเข้า ${m[2]} คน แรงงาน ${m[3]} คน${/bootstrap/.test(m[4]) ? ' (สิทธิเริ่มเมือง)' : ''}`],
   [/^Market #(\d+) became a shop:/, m => `ตลาด #${m[1]} ยกระดับเป็นร้านค้าแล้ว เจ้าของจ่ายค่าปรับปรุงจากกำไรของแผงเองและยังยืนร้านต่อ`],
   [/^Empty map: only the outside gateway exists\./, () => 'แผนที่ว่าง มีแค่ประตูเมือง · ต่อถนนจากประตูก่อน แล้ววางโซนข้างถนน'],
-  [/^Month settled:[^.]*\.?(?: (\d+) idle specialist[^.]*\.)?(?: (\d+) household\(s\) left[^.]*\.)?/, m => 'ชำระรายเดือนแล้ว ค่าจ้าง ค่าเช่า และภาษีอยู่ในบัญชีเงิน'
+  [/^Month settled:[^.]*\.?(?: (\d+) idle specialist[^.]*\.)?(?: (\d+) household\(s\) left[^.]*\.)?/, m => 'ชำระรายเดือนแล้ว ค่าจ้าง ค่าเช่า ค่าน้ำไฟ และภาษีอยู่ในบัญชีเงิน'
     + (m[1] ? ` · แรงงาน ${m[1]} คนเปลี่ยนอาชีพเป็นแรงงานทั่วไป เพราะสายงานเดิมไม่มีตำแหน่งว่าง` : '')
     + (m[2] ? ` · ${m[2]} ครัวเรือนย้ายออกจากเมือง หลังไม่มีงานที่ได้ค่าจ้าง 2 เดือน เงินออมติดตัวไปด้วย` : '')],
   [/^Starter road and zones are funded by the recorded grant\./, () => 'รับทุนตั้งเมืองแล้ว กดเล่นเพื่อดูการทบทวนการเติบโตทุก 3 วัน'],
@@ -39,10 +39,20 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Owner profit withdrawal rejected/, () => 'ถอนกำไรไม่ได้ ต้องเหลือกำไร ภาษี และเงินหมุนเวียนพอ'],
   [/^Household moved with the same identity/, () => 'ย้ายครัวเรือนแล้ว ข้อมูลเดิมครบ'],
   [/^Household already lives here/, () => 'ครัวเรือนอยู่บ้านนี้แล้ว'],
-  [/^Destination needs a later daily tick/, () => 'บ้านปลายทางต้องรออีกวัน และต้องมีถนน น้ำ ไฟ'],
+  [/^Destination needs a later daily tick/, () => 'บ้านปลายทางต้องรออีกวัน ต้องมีถนน และน้ำไฟในเครือข่ายเหลือพอ'],
   [/^Destination lacks household slots/, () => 'บ้านปลายทางไม่มีที่ว่างพอ'],
   [/^Household or destination home does not exist\.$/, () => 'ไม่พบครัวเรือนหรือบ้านปลายทาง'],
+  [/^(power plant|water pump) #(\d+) built: \+(\d+) [a-z]+ units along connected roads; upkeep ([\d.]+) credits\/month\.$/, m => `สร้าง${PLANT[m[1]]} #${m[2]} แล้ว เพิ่ม${m[1] === 'power plant' ? 'ไฟ' : 'น้ำ'} ${m[3]} หน่วยตามถนนที่ต่อกัน บำรุง ${m[4]} ฿/เดือน`],
+  [/^(power plant|water pump) #(\d+) removed: the network loses (\d+)/, m => `รื้อ${PLANT[m[1]]} #${m[2]} แล้ว เครือข่ายเสีย${m[1] === 'power plant' ? 'ไฟ' : 'น้ำ'} ${m[3]} หน่วย อาคารที่ไกลที่สุดจะขาดก่อน`],
+  [/^A water or power plant stands here\./, () => 'มีโรงน้ำไฟอยู่ ต้องรื้อก่อนวางโซน'],
+  [/^A plant needs an empty parcel/, () => 'วางโรงน้ำไฟได้เฉพาะแปลงว่าง ถนนและอาคารเดิมย้ายไม่ได้'],
+  [/^A plant needs road frontage connected/, () => 'โรงน้ำไฟต้องติดถนนที่เชื่อมประตูเมือง น้ำไฟวิ่งไปตามถนน'],
+  [/^Plant limit \((\d+)\) reached\.$/, m => `มีโรงน้ำไฟครบ ${m[1]} แห่งแล้ว`],
+  [/^Need (\d+) credits for a (power plant|water pump)\.$/, m => `เงินคลังไม่พอ ${PLANT[m[2]]}ต้องใช้ ${Number(m[1]).toLocaleString('th-TH')} ฿`],
+  [/^Invalid parcel or plant\.$/, () => 'แปลงหรือชนิดโรงไม่ถูกต้อง'],
+  [/^Dead business taken over: (.*)\. The premises stay;/, m => `กิจการที่เจ๊งมีเจ้าใหม่รับช่วง: ${m[1].replace(/household #(\d+)/g, 'ครัวเรือน #$1').replace(/outside investors/g, 'ผู้ลงทุนภายนอก')} ใช้อาคารเดิม เริ่มด้วยทุนใหม่`],
 ];
+const PLANT: Record<string, string> = { 'power plant': 'โรงไฟฟ้า', 'water pump': 'โรงสูบน้ำ' };
 
 export function thaiMessage(text: string): string {
   for (const [pattern, render] of RULES) { const match = text.match(pattern); if (match) return render(match); }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MONTH, OUTSIDE_INDUSTRY_CROPS, OUTSIDE_INDUSTRY_POPULATION, SIZE, buildRoad, createCity, deserialize, industryGrowthStatus, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS } from '../src/agriculture.ts';
+import { keepSupplied } from './plants.ts';
 
 /** The sample city on day 200, plus a big new block the player zones in one go. */
 function zonedBlock(): City {
@@ -41,7 +42,7 @@ test('farms sell only their surplus above the local reserve to outside, at the e
 test('a zoned block fills: outside investors open factories for idle crops, homes follow the jobs, no farm sits full', { timeout: 180_000 }, () => {
   const c = zonedBlock(), outsideDays: number[] = [];
   for (let d = 0; d < 330; d++) {
-    const before = c.firms.length; step(c);
+    const before = c.firms.length; step(c); keepSupplied(c);
     for (const f of c.firms.slice(before)) if (c.ledger.some(e => e.reason === `Outside industry equity #${f.id}`)) {
       outsideDays.push(c.tick);
       assert.ok(summary(c).population >= OUTSIDE_INDUSTRY_POPULATION, 'investors only look at an established city');
@@ -58,7 +59,7 @@ test('a zoned block fills: outside investors open factories for idle crops, home
 });
 
 test('outside equity is only valid for a later factory opened that day', { timeout: 120_000 }, () => {
-  const c = zonedBlock(); for (let d = 0; d < 330; d++) step(c);
+  const c = zonedBlock(); for (let d = 0; d < 330; d++) { step(c); keepSupplied(c); }
   const raw = JSON.parse(serialize(c)), at = raw.ledger.findIndex((e: { reason: string }) => /^Outside industry equity #/.test(e.reason));
   assert.ok(at >= 0);
   for (const mutate of [

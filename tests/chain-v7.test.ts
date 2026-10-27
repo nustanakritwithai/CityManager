@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { MARKET_CONVERSION_COST, bulldoze, createCity, deserialize, firmCapacity, isMarket, isRetail, marketToConvert, serialize, step, type City } from '../src/sim.ts';
 import { untyped } from './untyped.ts';
 import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '../src/legacy-v6.ts';
+import { keepSupplied } from './plants.ts';
 
 test('a v6 growth-1 save loads as v8 chain-3 with only goods typing added, then keeps running', () => {
   const old = v6City(61025); for (let d = 0; d < 150; d++) v6Step(old);
   const raw = v6Serialize(old), city = deserialize(raw);
-  assert.equal(city.version, 8); assert.equal(city.rulesVersion, 'chain-3');
+  assert.equal(city.version, 9); assert.equal(city.rulesVersion, 'chain-4');
   assert.deepEqual({ ...untyped(serialize(city)), version: 6, rulesVersion: 'growth-1' }, JSON.parse(raw));
   for (let d = 0; d < 90; d++) step(city);
   assert.deepEqual(deserialize(serialize(city)), city);
@@ -36,7 +37,7 @@ test('a save whose harvest used more workers than the farm level allows is rejec
 
 function converted(): City {
   const c = createCity(61025);
-  for (let d = 1; d <= 400 && !c.firms.some(f => f.convertedAt !== undefined); d++) step(c);
+  for (let d = 1; d <= 400 && !c.firms.some(f => f.convertedAt !== undefined); d++) { step(c); keepSupplied(c); }
   return c;
 }
 

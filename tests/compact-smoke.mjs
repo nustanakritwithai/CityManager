@@ -16,7 +16,7 @@ const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 const hash = text => createHash('sha256').update(text).digest('hex');
 assert.equal(hash(legacyRaw), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 8);
+const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 9);
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }

@@ -9,7 +9,7 @@ function fixture() {
   const seed = 61025, resources = createResourceMap(seed), farmCell = resources.fertility.findIndex((n, i) => n === 100 && i > 10);
   assert.ok(farmCell > 10);
   const c: City = {
-    version: 8, rulesVersion: 'chain-3', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, seed, rng: seed, tick: 1, nextId: 103,
+    version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, seed, rng: seed, tick: 1, nextId: 103,
     migration: { arrivals: 2, legacyHouseholds: 0 }, agricultureStartTick: 0, resources,
     cells: Array.from({ length: 576 }, () => ({ road: false, zone: null, building: null })),
     buildings: [
@@ -30,12 +30,13 @@ function fixture() {
     ],
     ownerLabor: [{ householdId: 102, firmId: 13, skill: 'general', workers: 1 }],
     accounts: { outside: 0, treasury: 0, construction: 0, roadworks: 0, upkeep: 0, landlord: 0, 'firm:11': 0, 'firm:12': 0, 'firm:13': 0, 'household:101': 0, 'household:102': 0 },
-    ledger: [], goodsLedger: [], cropLedger: [], goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, utilities: { power: true, water: true }, lastEvent: '',
+    ledger: [], goodsLedger: [], cropLedger: [], goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, utilities: { outside: { power: 24, water: 24 } }, plants: [], lastEvent: '',
   };
   for (const b of c.buildings) c.cells[b.cell] = { road: false, zone: b.zone, building: b.id };
-  const disconnected = new Set<number>(), salaries = { I: 60000, C: 42000, F: 42000, T: 0 };
+  const disconnected = new Set<number>(), unserved = new Set<number>(), salaries = { I: 60000, C: 42000, F: 42000, T: 0 };
   const hooks: AgricultureHooks = {
     connected: cell => !disconnected.has(cell),
+    served: id => !unserved.has(id),
     workers: f => c.employment.filter(e => e.firmId === f.id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.firmId === f.id).length,
     spendable: f => Math.max(0, c.accounts[f.wallet] - Object.values(f.workDays).reduce((n, days) => n + days * (f.commercialKind === 'market' ? 0 : salaries[f.zone]) / 30, 0)),
     transfer: (from, to, amount, reason, book = false) => {
@@ -49,7 +50,7 @@ function fixture() {
   for (const f of c.firms.filter(f => f.commercialKind !== 'market')) { hooks.transfer('outside', f.wallet, 300000, 'Test outside equity'); hooks.transfer(f.wallet, 'construction', 40000, 'Test construction'); }
   for (const h of c.households) hooks.transfer('outside', h.wallet, 150000, 'Test household opening funding');
   hooks.transfer('household:102', 'firm:13', 60000, 'Test real owner capital'); hooks.transfer('firm:13', 'construction', 10000, 'Test market construction');
-  return { c, hooks, disconnected, farm: c.firms[0], factory: c.firms[1], trader: c.firms[2], h: c.households[0], owner: c.households[1] };
+  return { c, hooks, disconnected, unserved, farm: c.firms[0], factory: c.firms[1], trader: c.firms[2], h: c.households[0], owner: c.households[1] };
 }
 function reconciles(c: City): void {
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
@@ -128,11 +129,11 @@ test('wage reserve cash cannot buy crop inputs and a factory with no inputs crea
 });
 
 test('road/utility stoppage conserves holdings and resumes actual harvest/production after recovery', () => {
-  const { c, hooks, farm, disconnected } = fixture(); const cell = c.buildings.find(b => b.id === farm.building)!.cell;
+  const { c, hooks, farm, disconnected, unserved } = fixture(); const cell = c.buildings.find(b => b.id === farm.building)!.cell;
   disconnected.add(cell); runAgriculture(c, hooks); assert.equal(c.crops.harvested, 0); assert.equal(c.goods.produced, 0);
   assert.equal(agricultureDiagnostic(c, farm, hooks).reasonId, 'agriculture.no-road');
-  disconnected.delete(cell); day(c); c.utilities.power = false; runAgriculture(c, hooks); assert.equal(c.crops.harvested, 0);
-  c.utilities.power = true; day(c); runAgriculture(c, hooks); assert.equal(c.crops.harvested, 24); assert.equal(c.goods.produced, 8); reconciles(c);
+  disconnected.delete(cell); day(c); unserved.add(farm.building); runAgriculture(c, hooks); assert.equal(c.crops.harvested, 0); assert.equal(agricultureDiagnostic(c, farm, hooks).reasonId, 'agriculture.no-utilities');
+  unserved.delete(farm.building); day(c); runAgriculture(c, hooks); assert.equal(c.crops.harvested, 24); assert.equal(c.goods.produced, 8); reconciles(c);
 });
 
 test('inactive owner labour cannot operate market or be replaced by fabricated salaried workers', () => {

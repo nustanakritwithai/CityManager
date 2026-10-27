@@ -1,5 +1,5 @@
 /** Local rule proposals only. These are game actors, not authenticated website users. */
-import { access, contributeOwnerCapital, firmRent, firmWage, isMarket, MONTH, ownerFinance, serialize, withdrawOwnerProfit, type City } from './sim.ts';
+import { access, utilityAt, contributeOwnerCapital, firmRent, firmWage, isMarket, MONTH, ownerFinance, serialize, withdrawOwnerProfit, type City } from './sim.ts';
 import { ownerDecisionCandidates, validateOwnerDecisionSelection, type OwnerCandidateId } from '../server/city-advisor/src/owner-contract.mjs';
 
 export const OWNER_POLICY_VERSION = 'owner-rule-1' as const;
@@ -80,9 +80,9 @@ export function captureOwnerSnapshot(city: City, firmId: number): OwnerSnapshot 
     const facts = emptyFacts(), missing: OwnerMissing[] = [];
     const mark = (code: OwnerMissing) => { if (!missing.includes(code)) missing.push(code); };
     const home = household.home === null ? undefined : city.buildings.find(b => b.id === household.home && b.zone === 'R');
-    if (city.version !== 8 || city.rulesVersion !== 'chain-3') mark('unsupported-rules');
+    if (city.version !== 9 || city.rulesVersion !== 'chain-4') mark('unsupported-rules');
     if (!home) mark('home-unavailable');
-    if (!city.utilities.power || !city.utilities.water || !home || !access(city, home.cell) || !access(city, building.cell)) mark('access-unavailable');
+    if (!home || !access(city, home.cell) || !access(city, building.cell) || !utilityAt(city, home.cell) || !utilityAt(city, building.cell)) mark('access-unavailable');
     if (Object.hasOwn(city.accounts, household.wallet) && money(city.accounts[household.wallet])) facts.householdCash = city.accounts[household.wallet];
     else mark('invalid-household-budget');
     if (Object.hasOwn(city.accounts, firm.wallet) && money(city.accounts[firm.wallet])) facts.firmCash = city.accounts[firm.wallet];

@@ -1,5 +1,5 @@
 import { firmGoodsName } from './goods-view.ts';
-import { MONTH, summary, type City } from './sim.ts';
+import { MONTH, summary, utilityStatus, type City } from './sim.ts';
 import { cityOverview } from './context-data.ts';
 import { appendEvent, type CityEvent } from './event-text.ts';
 import { buildingIssues } from './map-overlay.ts';
@@ -47,7 +47,7 @@ export class CityHud {
     const key = `${city.tick}:${paused}:${city.ledger.length}:${city.buildings.length}:${city.households.length}`;
     if (key === this.key) return;
     this.key = key;
-    const s = summary(city), o = cityOverview(city), untilPay = MONTH - city.tick % MONTH;
+    const s = summary(city), o = cityOverview(city), u = utilityStatus(city), untilPay = MONTH - city.tick % MONTH;
     const vacancies = s.openJobs, issues = buildingIssues(city);
     this.renderIssues(city, issues);
     this.strip.dataset.paused = String(paused);
@@ -55,7 +55,7 @@ export class CityHud {
       this.item('treasury', 'เงินคลัง', money(o.treasury), `30 วัน ${signed(o.net)}`, o.net < 0 ? 'bad' : ''),
       this.item('people', 'ประชากร', `${s.population} คน`, `${s.households} ครัวเรือน`),
       this.item('jobs', 'งาน', `ว่าง ${vacancies}`, s.unfundedJobs ? `ว่างงาน ${s.unemployed} · ขาดงบจ้าง ${s.unfundedJobs}` : `ว่างงาน ${s.unemployed} คน`, s.unemployed > 0 || s.unfundedJobs > 0 ? 'warn' : ''),
-      this.item('utilities', 'น้ำ · ไฟ', `${city.utilities.water ? '✓' : '✗'} · ${city.utilities.power ? '✓' : '✗'}`, 'จากภายนอก', city.utilities.water && city.utilities.power ? '' : 'bad'),
+      this.item('utilities', 'น้ำ · ไฟ', `${u.used.water}/${u.capacity.water} · ${u.used.power}/${u.capacity.power}`, u.unserved.water + u.unserved.power ? `อาคารขาดบริการ ${Math.max(u.unserved.water, u.unserved.power)}` : u.plants ? `โรง ${u.plants} แห่ง` : 'จากภายนอก', u.unserved.water + u.unserved.power ? 'bad' : u.spare.water < 3 || u.spare.power < 3 ? 'warn' : ''),
       this.item('warnings', 'ควรตรวจ', `${o.warnings.length + issues.length}`, issues.length ? `อาคาร ${issues.length} แห่ง` : o.warnings.length ? 'ดูในภาพรวมเมือง' : 'ไม่มี', o.warnings.length + issues.length ? 'warn' : ''),
       this.month(untilPay, paused),
     );

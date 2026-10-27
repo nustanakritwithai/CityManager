@@ -4,8 +4,11 @@
  * opposite way). Day-to-day differences and ledger events say which links just carried a change,
  * so the view can light up the chain an action set off. Read-only; nothing here mutates the city.
  */
-import { MONTH, ROAD_COST, access, isMarket, summary, type City } from './sim.ts';
+import { MONTH, ROAD_COST, access, isMarket, summary, utilityStatus, type City } from './sim.ts';
+
 import { cityOverview } from './context-data.ts';
+/** 1 when every building on the network has both water and power. */
+const utilitiesOk = (city: City): number => { const u = utilityStatus(city); return u.power && u.water ? 1 : 0; };
 
 export type NetGroup = 'city' | 'people' | 'production' | 'money';
 /** count: whole things · stock: a level that drifts daily · money: satang · flow: 30-day total · flag: on/off. */
@@ -125,7 +128,7 @@ export function networkValues(city: City): NetValues {
   for (const [id, v] of Object.entries(city.accounts)) { if (id.startsWith('household:')) householdCash += v; else if (firmWallets.has(id)) firmCash += v; }
   return {
     roads: city.cells.filter(c => c.road).length, access: city.buildings.filter(b => access(city, b.cell)).length,
-    utilities: city.utilities.power && city.utilities.water ? 1 : 0,
+    utilities: utilitiesOk(city),
     demandR: s.demand.R, homes: city.buildings.filter(b => b.zone === 'R').length, capacity: Math.max(0, o.personVacancy),
     households: s.households, population: s.population, workforce: s.workforce, jobs: s.jobs, employed: s.employed, unemployed: s.unemployed,
     farms: city.firms.filter(f => f.zone === 'F').length, harvest: o.cropHarvested, cropStock: o.cropInventory, markets: city.firms.filter(isMarket).length,
@@ -160,7 +163,7 @@ const kindOf = (city: City, buildingId: number, zone: string) => {
   const firm = city.firms.find(f => f.building === buildingId); return firm && !isMarket(firm) ? 'shop' : 'market';
 };
 export function networkSnapshot(city: City): NetSnapshot {
-  return { tick: city.tick, ledger: city.ledger.length, buildings: new Map(city.buildings.map(b => [b.id, kindOf(city, b.id, b.zone)])), utilities: city.utilities.power && city.utilities.water ? 1 : 0 };
+  return { tick: city.tick, ledger: city.ledger.length, buildings: new Map(city.buildings.map(b => [b.id, kindOf(city, b.id, b.zone)])), utilities: utilitiesOk(city) };
 }
 const BUILT: Record<string, [node: string, icon: string, name: string]> = {
   R: ['homes', 'R', 'บ้าน'], I: ['factories', 'I', 'โรงงาน'], F: ['farms', 'F', 'ฟาร์ม'], market: ['markets', 'market', 'ตลาด'], shop: ['shops', 'shop', 'ร้านค้า'],
@@ -189,14 +192,14 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
   const imports = new Map<number, number>(), goods = city.goodsLedger;
   for (let i = goods.length - 1; i >= 0 && goods[i].tick > before.tick; i--) if (goods[i].reason === 'Imported shop stock') add(imports, goods[i].tick, goods[i].quantity);
   for (const [tick, units] of imports) out.push({ node: 'shops', icon: 'import', text: `ร้านนำเข้าสินค้า ${units.toLocaleString('th-TH')} หน่วย · โรงงานในเมืองผลิตไม่ทัน`, tick });
-  const utilities = city.utilities.power && city.utilities.water ? 1 : 0;
+  const utilities = utilitiesOk(city);
   if (utilities !== before.utilities) out.push({ node: 'utilities', icon: 'power', text: utilities ? 'น้ำและไฟพร้อมแล้ว' : 'น้ำหรือไฟขาด', tick: city.tick });
   return out.sort((a, b) => a.tick - b.tick);
 }
 /** A snapshot as the city stood `days` ago, as far as the ledger and building ages can tell. */
 export function pastSnapshot(city: City, days: number): NetSnapshot {
   const from = Math.max(0, city.tick - days + 1), ledger = city.ledger.findIndex(e => e.tick >= from);
-  return { tick: from - 1, ledger: ledger < 0 ? city.ledger.length : ledger, utilities: city.utilities.power && city.utilities.water ? 1 : 0,
+  return { tick: from - 1, ledger: ledger < 0 ? city.ledger.length : ledger, utilities: utilitiesOk(city),
     buildings: new Map(city.buildings.filter(b => city.tick - b.age < from).map(b => [b.id, kindOf(city, b.id, b.zone)])) };
 }
 

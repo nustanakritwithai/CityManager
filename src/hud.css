@@ -87,3 +87,6 @@ html #inspector[data-open=true] .inspector-heading { background: linear-gradient
 
 /* ---- Map caption and compass ---------------------------------------------- */
 .map-caption .compass { color: var(--c-accent); }
+.tool.utility-power.active { box-shadow: 0 0 0 1px #ffd23faa, 0 0 16px #ffd23f44; background: linear-gradient(180deg, #ffd23f38, #ffd23f0f); }
+.tool.utility-water.active { box-shadow: 0 0 0 1px #59c3ecaa, 0 0 16px #59c3ec44; background: linear-gradient(180deg, #59c3ec38, #59c3ec0f); }
+.tool.utility-power.active > span:last-child { color: #ffe27a; } .tool.utility-water.active > span:last-child { color: #9fdcf3; }

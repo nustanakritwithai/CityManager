@@ -15,7 +15,7 @@ test('actual published v2 import preserves every economic and temporal field, jo
  assert.equal(createHash('sha256').update(raw180).digest('hex'),'0c33c983c1e71063496f4a95b935c22647b972c0084d2ce98449b7e7b8c13475');
  for(const raw of [raw65,raw180]){
   const old=deserializeV2(raw),c=deserialize(raw);
-  assert.equal(c.version,8);assert.equal(c.rulesVersion,'chain-3');
+  assert.equal(c.version,9);assert.equal(c.rulesVersion,'chain-4');
   for(const key of ['seed','rng','tick','nextId','migration','accounts','ledger','goodsLedger','goods','cells','lastEvent'] as const)assert.deepEqual(c[key],old[key]);
   assert.deepEqual(c.buildings,old.buildings.map(b=>({...b,level:b.zone==='C'?b.level+1:b.level})));
   for(const b of c.buildings.filter(b=>b.zone==='C')) assert.equal(firmCapacity(b),old.buildings.find(previous=>previous.id===b.id)!.level,'Commercial level renumbering preserves the actual old worker capacity');

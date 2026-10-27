@@ -16,7 +16,7 @@ const hash=raw=>createHash('sha256').update(raw).digest('hex');
 const oldRaw=await readFile(new URL('./fixtures/legacy-v3-day180.json',import.meta.url),'utf8'),old=JSON.parse(oldRaw);
 assert.equal(hash(oldRaw),'59518ff5b7d2a7c7de52ef8cb8362ed387f91df67ffc09934c93e97f3a556693');
 const imported=deserialize(oldRaw),importedRaw=serialize(imported);
-assert.equal(imported.version, 8);assert.equal(imported.rulesVersion,'chain-3');
+assert.equal(imported.version, 9);assert.equal(imported.rulesVersion,'chain-4');
 for(const key of ['seed','rng','tick','nextId','accounts','ledger','goods','goodsLedger','households','employment','cells'])assert.deepEqual(imported[key],old[key],'Strict v3 import preserves '+key);
 for(const b of imported.buildings){const prior=old.buildings.find(p=>p.id===b.id);assert.deepEqual(b,{...prior,level:prior.level+(prior.zone==='C'?1:0)});}
 assert.deepEqual(imported.cropLedger,[]);assert.deepEqual(imported.ownerLabor,[]);

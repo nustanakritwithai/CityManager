@@ -109,7 +109,7 @@ test('deleted, unbuilt, invalid and stale parcel references cannot resolve an un
 });
 
 test('context presenters leave frozen source data and RNG unchanged and report actual utility flags', () => {
-  const city = populated(); city.utilities.power = false; city.utilities.water = false;
+  const city = populated(); city.utilities.outside = { power: 0, water: 0 };
   const before = JSON.stringify(city), rng = city.rng;
   const deepFreeze = (value: unknown): void => {
     if (value && typeof value === 'object') { for (const child of Object.values(value)) deepFreeze(child); Object.freeze(value); }
@@ -127,7 +127,7 @@ test('context presenters leave frozen source data and RNG unchanged and report a
 
 test('migrated legacy people are explicitly assumed without rewriting financial or goods history', () => {
   const legacy = JSON.parse(legacyJson), city = populated(), overview = cityOverview(city);
-  assert.equal(city.version, 8);
+  assert.equal(city.version, 9);
   assert.ok(city.households.every(household => household.origin === 'legacy-v1' && household.profile === 'legacy-worker' && household.members === 1 && household.workforce === 1 && household.dependents === 0));
   assert.equal(overview.population, legacy.households.length);
   assert.equal(overview.households, legacy.households.length);
