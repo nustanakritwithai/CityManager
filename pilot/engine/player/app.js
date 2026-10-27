@@ -97,7 +97,7 @@ const DETAIL = BASEMAPS.sentinel2016;
 const TERRAIN = story.meta?.terrain;
 const cam0 = cameraAt(0);
 const map = new maplibregl.Map({
-  container: 'map', interactive: false, attributionControl: false, fadeDuration: 0, preserveDrawingBuffer: true,
+  container: 'map', interactive: false, pixelRatio: story.meta?.mapPixelRatio ?? 1, attributionControl: false, fadeDuration: 0, preserveDrawingBuffer: true,
   center: cam0.center, zoom: cam0.zoom, maxZoom: 13, maxPitch: 72,
   style: {
     version: 8,
@@ -121,7 +121,16 @@ const map = new maplibregl.Map({
 });
 await new Promise((ok) => map.on('load', ok));
 map.setPadding(PAD);
-if (TERRAIN) map.setTerrain({ source: 'dem', exaggeration: TERRAIN.exaggeration ?? 1.5 });
+// Terrain and hillshade are costly in software GL, so they are switched on only around tilted scenes.
+const tilted = (sc) => sc.camStart.p > 0 || sc.camTarget.p > 0;
+let terrainOn = null;
+function setRelief(on) {
+  if (!TERRAIN || terrainOn === on) return;
+  terrainOn = on;
+  map.setTerrain(on ? { source: 'dem', exaggeration: TERRAIN.exaggeration ?? 1.5 } : null);
+  map.setLayoutProperty('hillshade', 'visibility', on ? 'visible' : 'none');
+}
+setRelief(false);
 
 function hatchImage(color) {
   const c = document.createElement('canvas'); c.width = c.height = 28;
@@ -491,6 +500,7 @@ function applyFrame(t) {
   const fx = s.fx || [];
   const u = t - s.start;
   shakeEl.style.transform = fx.includes('shake') && u < 0.9 ? `translate(${(Math.sin(u * 60) * 9 * (1 - u / 0.9)).toFixed(1)}px, ${(Math.cos(u * 47) * 6 * (1 - u / 0.9)).toFixed(1)}px)` : '';
+  setRelief(tilted(s));
   // focus = where the camera target sits, as a fraction of frame height from the top
   map.jumpTo({ center: c.center, zoom: c.zoom, bearing: c.bearing, pitch: c.pitch || 0, padding: { top: 0, left: 0, right: 0, bottom: Math.max(0, H * (1 - 2 * c.focus)) } });
   const dl = life(t, s, (sc) => sc.imagery === 'sentinel2016', 1.0);
@@ -543,6 +553,7 @@ window.TOTAL = TOTAL;
 window.FPS = story.meta?.fps || 30;
 window.SCENES = scenes.map((s) => ({ id: s.id, start: s.start, end: s.end, sub: s.sub || '' }));
 window.seek = async (t) => { applyFrame(t); await settle(); };
+window.MAP = map;
 window.READY = true;
 
 // Preview: scrub bar and real-time playback (never used when rendering).

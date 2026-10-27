@@ -4,8 +4,9 @@ meta:
   title: สงครามและการอพยพของไทกะได
   width: 1080
   height: 1920
-  fps: 30
+  fps: 24
   basemap: bluemarble
+  mapPixelRatio: 0.7
   tint: { color: "#1f3f9a", opacity: 0.32 }
   terrain: { exaggeration: 1.7, shade: 0.4 }
   credits: "ภาพ: NASA Blue Marble · Sentinel-2 cloudless 2016 by EOX · Terrain Tiles (AWS) · Natural Earth"

@@ -36,7 +36,9 @@ async function openPage() {
 
 const t0 = Date.now();
 const first = await openPage();
-const { TOTAL, FPS, SCENES } = await first.evaluate(() => ({ TOTAL: window.TOTAL, FPS: window.FPS, SCENES: window.SCENES }));
+const info = await first.evaluate(() => ({ TOTAL: window.TOTAL, FPS: window.FPS, SCENES: window.SCENES }));
+const { TOTAL, SCENES } = info;
+const FPS = Number(opt('fps', info.FPS));
 console.log(`story: ${SCENES.length} scenes, ${TOTAL}s @ ${FPS}fps`);
 
 const stage = { x: 0, y: 0, width: 1080, height: 1920 };
