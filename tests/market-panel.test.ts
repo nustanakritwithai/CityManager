@@ -15,8 +15,8 @@ test('deposit source selection is item-dependent and stock-aware', () => {
   assert.deepEqual(eligibleDepositFirms(city(farm, wrongFactory, riceFactory), 'crop:rice').map(x => x.id), [1]);
   assert.deepEqual(eligibleDepositFirms(city(farm, wrongFactory, riceFactory), 'product:milled-rice').map(x => x.id), [3]);
   assert.equal(depositSourceStock(wrongFactory, 'product:milled-rice'), 0);
-  assert.equal(depositSourceLabel(farm, 'crop:rice'), 'ฟาร์ม #1 · มี 2 หน่วย');
-  assert.equal(depositSourceLabel(riceFactory, 'product:milled-rice'), 'โรงงานข้าวสาร #3 · มี 3 หน่วย');
+  assert.equal(depositSourceLabel(farm, 'crop:rice'), 'ฟาร์มข้าว #1 · มี 2 ล็อต', 'crops count in lots');
+  assert.equal(depositSourceLabel(riceFactory, 'product:milled-rice'), 'โรงสีข้าว #3 · มี 3 หน่วย', 'a factory is named by its recipe');
 });
 
 test('empty or invalid deposit stock is not eligible', () => {
