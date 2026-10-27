@@ -1,7 +1,7 @@
 # Rendering, performance and delivery
 
 ## How a frame is made
-`render.mjs` starts the local server (`serve.mjs`), opens N Chromium pages at 1080×1920, and for each frame calls `window.seek(t)`, waits until every tile source (imagery, terrain, GeoJSON) is loaded and drawn, takes a JPEG screenshot and pipes it to ffmpeg. Segments are concatenated at the end and an `.srt` is written from the subtitles. Satellite and terrain tiles are cached in `engine/.cache/`, so a second render of the same area is faster.
+`render.mjs` starts the local server (`serve.mjs`), opens N Chromium pages at 1080×1920, and for each frame calls `window.seek(t)`, waits until every tile source (imagery, terrain, GeoJSON) is loaded and drawn, takes a JPEG screenshot and pipes it to ffmpeg. Segments are concatenated at the end and an `.srt` is written from the subtitles. Each video render uses a fresh `out/render-*/` directory and prints its MP4 path; `--out` accepts a simple filename, not a path or extension. Satellite and terrain tiles are cached in `engine/.cache/`, so a second render of the same area is faster.
 
 ## Expected speed (no GPU, 4 cores)
 | scene type | ≈ per frame |
@@ -33,6 +33,6 @@ What actually helps:
 | TTS fails with certificate or WebSocket errors | behind a proxy, set the proxy's CA for node (`NODE_EXTRA_CA_CERTS`); edge-tts style WebSocket voices may be blocked — `voice.mjs` uses plain HTTPS |
 
 ## Delivery
-- `voice.mjs --mux clip.mp4` adds the voice track without re-encoding video.
+- `voice.mjs --mux clip.mp4` adds the voice track without re-encoding video, in a new `voice-*/` directory next to the input. `--fit` and `--mp3` require a new output filename and never overwrite an existing file.
 - Chat uploads often cap around 30 MB: `ffmpeg -i in.mp4 -c:v libx264 -preset slow -crf 29 -c:a copy -movflags +faststart small.mp4` (≈ 20 MB for 90 s). Keep the full-quality file too.
 - Facebook/TikTok accept 1080×1920 H.264 + AAC directly; upload the `.srt` separately if the platform supports captions.

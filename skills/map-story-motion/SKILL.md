@@ -34,9 +34,9 @@ Run every script from inside `engine/` (copy it into the user's project if the s
    ```bash
    node scripts/render.mjs <story>/story.yaml --workers 2 --out <name>
    ```
-   Two workers is the sweet spot on 4 cores; more workers fight over the CPU and get slower. Use `--from/--to` to re-render one section while iterating.
+   Two workers is the sweet spot on 4 cores; more workers fight over the CPU and get slower. Use `--from/--to` to re-render one section while iterating. Each run writes to a fresh `out/render-*/` directory and prints its MP4 path. The `--out` name is a simple filename without a path or extension.
 
-8. **Deliver** — mux the voice without re-rendering video: `node scripts/voice.mjs <story>/story.yaml --mux <story>/out/<name>.mp4` → `<name>-voice.mp4`. `--mp3 <file>.mp3` exports the narration alone, the same length and timing as the clip (for editing apps). If the file must go through a chat upload, re-encode to stay under ~30 MB:
+8. **Deliver** — mux the voice without re-rendering video: `node scripts/voice.mjs <story>/story.yaml --mux <printed-mp4-path>`. The mux is written in a fresh `voice-*/` directory next to the input; the command prints the exact path. `--mp3 <file>.mp3` exports the narration alone, the same length and timing as the clip (for editing apps). `--fit` and `--mp3` refuse to overwrite existing files. If the file must go through a chat upload, re-encode to stay under ~30 MB:
    `ffmpeg -i in.mp4 -c:v libx264 -preset slow -crf 29 -c:a copy -movflags +faststart small.mp4`.
    Send the MP4 and the `.srt`, and say plainly what you checked (frame count, duration, sampled frames) and what you did not (you cannot watch or listen to it).
 

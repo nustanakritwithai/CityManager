@@ -8,7 +8,7 @@ npm install
 node scripts/prepare-geo.mjs                                  # สร้าง geo/*.json
 node scripts/serve.mjs ../tai-kadai-war/story.yaml            # preview: http://127.0.0.1:5180/?preview=1 (Space = เล่น)
 node scripts/render.mjs ../tai-kadai-war/story.yaml --stills  # ภาพนิ่งและ contact sheet อยู่ใน out/stills-* ใหม่ ดูตำแหน่งจากผลคำสั่ง
-node scripts/render.mjs ../tai-kadai-war/story.yaml --workers 4 --out clip   # MP4 + .srt
+node scripts/render.mjs ../tai-kadai-war/story.yaml --workers 4 --out clip   # MP4 + .srt อยู่ใน out/render-* ใหม่ ดูตำแหน่งจากผลคำสั่ง
 ```
 
 | ไฟล์ | หน้าที่ |

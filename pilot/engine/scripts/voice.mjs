@@ -6,10 +6,11 @@
 //   node scripts/voice.mjs story.yaml --mp3 voice.mp3 # the voice track alone, same timing as the clip
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { muxOutput, newOutputDirectory, withExclusiveOutput } from './output-files.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = join(ROOT, '.cache/tts');
@@ -45,14 +46,24 @@ async function synth(text, tempo = TEMPO) {
       const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=th&client=tw-ob&q=${encodeURIComponent(c)}`;
       const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       if (!res.ok) throw new Error(`TTS ${res.status} for: ${c}`);
-      writeFileSync(part, Buffer.from(await res.arrayBuffer()));
+      const data = Buffer.from(await res.arrayBuffer());
+      try { withExclusiveOutput(part, fd => writeFileSync(fd, data)); }
+      catch (error) { if (error.code !== 'EEXIST') throw error; }
       await new Promise((r) => setTimeout(r, 400));
     }
     parts.push(part);
   }
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', `concat:${parts.join('|')}`,
-    '-af', `atempo=${tempo},silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse`,
-    '-ar', '44100', '-ac', '1', file]);
+  const dir = newOutputDirectory(CACHE, 'synth-');
+  const tempFile = join(dir, 'voice.wav');
+  try {
+    execFileSync('ffmpeg', ['-v', 'error', '-n', '-i', `concat:${parts.join('|')}`,
+      '-af', `atempo=${tempo},silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse`,
+      '-ar', '44100', '-ac', '1', tempFile]);
+    try { linkSync(tempFile, file); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  } finally {
+    if (existsSync(tempFile)) unlinkSync(tempFile);
+    rmdirSync(dir);
+  }
   return file;
 }
 
@@ -70,7 +81,7 @@ console.log(`clip ${t}s · fitted ${total.toFixed(1)}s`);
 
 if (opt('fit')) {
   story.scenes.forEach((s, i) => { if (rows[i].need > s.dur) s.dur = Math.ceil(rows[i].need * 4) / 4; });
-  writeFileSync(resolve(opt('fit')), YAML.stringify(story, { lineWidth: 0 }));
+  withExclusiveOutput(opt('fit'), fd => writeFileSync(fd, YAML.stringify(story, { lineWidth: 0 })));
   console.log('wrote', opt('fit'));
 }
 
@@ -93,8 +104,8 @@ function schedule() {
 if (opt('mux')) {
   const clip = resolve(opt('mux'));
   const { inputs, mix } = schedule();
-  const out = clip.replace(/\.mp4$/, '-voice.mp4');
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', clip, ...inputs, '-filter_complex', mix(1), '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', out]);
+  const out = muxOutput(clip);
+  execFileSync('ffmpeg', ['-v', 'error', '-n', '-i', clip, ...inputs, '-filter_complex', mix(1), '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', out]);
   console.log('wrote', out);
 }
 
@@ -102,6 +113,6 @@ if (opt('mux')) {
 if (opt('mp3')) {
   const out = resolve(opt('mp3'));
   const { inputs, mix } = schedule();
-  execFileSync('ffmpeg', ['-v', 'error', '-y', ...inputs, '-filter_complex', mix(0), '-map', '[aout]', '-t', String(t), '-c:a', 'libmp3lame', '-b:a', '160k', '-ar', '44100', out]);
+  withExclusiveOutput(out, fd => execFileSync('ffmpeg', ['-v', 'error', ...inputs, '-filter_complex', mix(0), '-map', '[aout]', '-t', String(t), '-c:a', 'libmp3lame', '-b:a', '160k', '-ar', '44100', '-f', 'mp3', 'pipe:1'], { stdio: ['ignore', fd, 'inherit'] }));
   console.log('wrote', out);
 }

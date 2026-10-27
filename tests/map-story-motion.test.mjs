@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { request } from 'node:http';
@@ -84,5 +85,86 @@ for (const engine of engines) {
     const result = await renderStills({ out, scenes:[{ id:'a',start:0,end:1 },{ id:'b',start:1,end:2 }], page, at:0.8, stage:{},
       buildSheet: async (dir,sheet,count) => { const run=spawnSync('ffmpeg',contactSheetArgs(dir,sheet,count),{encoding:'utf8'});assert.equal(run.status,0,run.stderr); } });
     assert.deepEqual([...readFileSync(result.sheet).subarray(0,8)], [137,80,78,71,13,10,26,10]);
+  });
+
+  test(`${engine}: video and voice outputs never replace existing files`, async () => {
+    const { safeOutputName, videoOutput, muxOutput, withExclusiveOutput } = await import(pathToFileURL(join(root, engine, 'scripts/output-files.mjs')));
+    const parent = mkdtempSync(join(tmpdir(), 'map-output-test-'));
+    const out = join(parent, 'out'); mkdirSync(out);
+    for (const name of ['clip.mp4','clip.srt','.seg-0.mp4','.segs.txt']) writeFileSync(join(out,name), `original ${name}`);
+    for (const bad of ['../clip','../../existing','/absolute','a\\b','C:foo','..','CON','clip.mp4',true]) {
+      assert.throws(() => videoOutput(out,bad), /simple filename/);
+    }
+    assert.equal(safeOutputName('ข่าว_1'), 'ข่าว_1');
+    const a=videoOutput(out,'clip'), b=videoOutput(out,'clip');assert.notEqual(a.dir,b.dir);
+    writeFileSync(a.mp4,'first video',{flag:'wx'});writeFileSync(a.srt,'first subtitles',{flag:'wx'});
+    writeFileSync(b.mp4,'second video',{flag:'wx'});writeFileSync(b.srt,'second subtitles',{flag:'wx'});
+    for (const name of ['clip.mp4','clip.srt','.seg-0.mp4','.segs.txt']) assert.equal(readFileSync(join(out,name),'utf8'),`original ${name}`);
+    const clip=join(parent,'original.mp4');const oldVoice=join(parent,'original-voice.mp4');writeFileSync(clip,'input');writeFileSync(oldVoice,'old voice');
+    const one=muxOutput(clip),two=muxOutput(clip);assert.notEqual(dirname(one),dirname(two));
+    writeFileSync(one,'new voice',{flag:'wx'});assert.equal(readFileSync(clip,'utf8'),'input');assert.equal(readFileSync(oldVoice,'utf8'),'old voice');
+    assert.throws(()=>muxOutput(join(parent,'input.wav')),/MP4/);
+    const fit=join(parent,'story.yaml'),mp3=join(parent,'voice.mp3');writeFileSync(fit,'original story');writeFileSync(mp3,'original audio');
+    assert.throws(()=>withExclusiveOutput(fit,()=>{}),error=>error.code==='EEXIST');
+    assert.throws(()=>withExclusiveOutput(mp3,()=>{}),error=>error.code==='EEXIST');
+    assert.equal(readFileSync(fit,'utf8'),'original story');assert.equal(readFileSync(mp3,'utf8'),'original audio');
+    const fresh=join(parent,'new.yaml');withExclusiveOutput(fresh,fd=>writeFileSync(fd,'new story'));
+    assert.equal(readFileSync(fresh,'utf8'),'new story');
+    const link=join(parent,'linked-output');symlinkSync(out,link,process.platform==='win32'?'junction':'dir');
+    assert.throws(()=>videoOutput(link,'clip'),/symlink/);
+  });
+
+  test(`${engine}: exclusive MP3 output works with FFmpeg`, async t => {
+    const version=spawnSync('ffmpeg',['-version'],{encoding:'utf8'});
+    if(version.error?.code==='ENOENT')return t.skip('ffmpeg is not installed');
+    const { withExclusiveOutput }=await import(pathToFileURL(join(root,engine,'scripts/output-files.mjs')));
+    const parent=mkdtempSync(join(tmpdir(),'map-mp3-test-')), output=join(parent,'voice.mp3');
+    withExclusiveOutput(output,fd=>{
+      const run=spawnSync('ffmpeg',['-v','error','-f','lavfi','-i','sine=frequency=440:duration=0.1','-c:a','libmp3lame','-f','mp3','pipe:1'],{stdio:['ignore',fd,'pipe']});
+      assert.equal(run.status,0,run.stderr?.toString());
+    });
+    assert.ok(readFileSync(output).length>0);
+    assert.throws(()=>withExclusiveOutput(output,()=>{}),error=>error.code==='EEXIST');
+  });
+
+  test(`${engine}: real render and voice commands preserve existing files`, async t => {
+    const version=spawnSync('ffmpeg',['-version'],{encoding:'utf8'});
+    if(version.error?.code==='ENOENT')return t.skip('ffmpeg is not installed');
+    const tmp=mkdtempSync(join(tmpdir(),'map-cli-test-')), work=join(tmp,'engine'), scripts=join(work,'scripts');
+    const story=join(tmp,'story.yaml'), out=join(tmp,'out'), modules=join(work,'node_modules');
+    mkdirSync(scripts,{recursive:true});mkdirSync(join(modules,'playwright'),{recursive:true});mkdirSync(join(modules,'yaml'),{recursive:true});mkdirSync(out);
+    for(const name of ['serve.mjs','safe-path.mjs','stills.mjs','output-files.mjs','render.mjs','voice.mjs']) copyFileSync(join(root,engine,'scripts',name),join(scripts,name));
+    writeFileSync(join(work,'package.json'),'{"type":"module"}');
+    writeFileSync(join(modules,'playwright','package.json'),'{"main":"index.cjs"}');
+    writeFileSync(join(modules,'playwright','index.cjs'),`const fs=require('fs');exports.chromium={launch:async()=>({newPage:async()=>({on(){},goto:async()=>{},waitForFunction:async()=>{},evaluate:async(fn)=>String(fn).includes('window.TOTAL')?{TOTAL:1,FPS:1,SCENES:[{id:'a',start:0,end:1,sub:'fixture'}]}:undefined,screenshot:async()=>fs.readFileSync(process.env.TEST_FRAME)}),close:async()=>{}})};`);
+    writeFileSync(join(modules,'yaml','package.json'),'{"main":"index.cjs"}');
+    writeFileSync(join(modules,'yaml','index.cjs'),"module.exports={parse:()=>({scenes:[{id:'a',dur:1,voice:'fixture'}]}),stringify:()=> 'fixture'};");
+    writeFileSync(story,'original story');
+    for(const name of ['clip.mp4','clip.srt','.seg-0.mp4','.segs.txt'])writeFileSync(join(out,name),`original ${name}`);
+    const frame=join(tmp,'frame.jpg');
+    const create=spawnSync('ffmpeg',['-v','error','-f','lavfi','-i','color=c=blue:s=16x16','-frames:v','1',frame],{encoding:'utf8'});
+    assert.equal(create.status,0,create.stderr);
+    const env={...process.env,TEST_FRAME:frame};
+    const bad=spawnSync(process.execPath,[join(scripts,'render.mjs'),story,'--out','../../existing'],{env,encoding:'utf8',timeout:20000});
+    assert.notEqual(bad.status,0);assert.match(bad.stderr,/simple filename/);
+    for(let i=0;i<2;i++){const run=spawnSync(process.execPath,[join(scripts,'render.mjs'),story,'--workers','1','--fps','1','--out','clip'],{env,encoding:'utf8',timeout:30000});assert.equal(run.status,0,run.stderr);}
+    const runs=readdirSync(out).filter(n=>n.startsWith('render-'));assert.equal(runs.length,2);
+    for(const dir of runs){assert.ok(readFileSync(join(out,dir,'clip.mp4')).length>0);assert.ok(readFileSync(join(out,dir,'clip.srt')).length>0);}
+    for(const name of ['clip.mp4','clip.srt','.seg-0.mp4','.segs.txt'])assert.equal(readFileSync(join(out,name),'utf8'),`original ${name}`);
+    const probe=spawnSync('ffprobe',['-version'],{encoding:'utf8'});if(probe.error?.code==='ENOENT')return t.skip('ffprobe is not installed');
+    const cache=join(work,'.cache','tts');mkdirSync(cache,{recursive:true});
+    const key=createHash('sha1').update('1.5|fixture').digest('hex').slice(0,16),wav=join(cache,key+'.wav');
+    const wavRun=spawnSync('ffmpeg',['-v','error','-f','lavfi','-i','sine=frequency=440:duration=0.2','-ar','44100','-ac','1',wav],{encoding:'utf8'});assert.equal(wavRun.status,0,wavRun.stderr);
+    const fit=spawnSync(process.execPath,[join(scripts,'voice.mjs'),story,'--fit',story],{env,encoding:'utf8',timeout:20000});
+    assert.notEqual(fit.status,0);assert.equal(readFileSync(story,'utf8'),'original story');
+    const mp3=join(tmp,'existing.mp3');writeFileSync(mp3,'original audio');
+    const voice=spawnSync(process.execPath,[join(scripts,'voice.mjs'),story,'--mp3',mp3],{env,encoding:'utf8',timeout:20000});
+    assert.notEqual(voice.status,0);assert.equal(readFileSync(mp3,'utf8'),'original audio');
+    const newMp3=join(tmp,'new.mp3');const mp3Run=spawnSync(process.execPath,[join(scripts,'voice.mjs'),story,'--mp3',newMp3],{env,encoding:'utf8',timeout:20000});assert.equal(mp3Run.status,0,mp3Run.stderr);assert.ok(readFileSync(newMp3).length>0);
+    const clip=join(out,runs[0],'clip.mp4'), oldVoice=join(out,runs[0],'clip-voice.mp4');writeFileSync(oldVoice,'old voice');
+    for(let i=0;i<2;i++){const mux=spawnSync(process.execPath,[join(scripts,'voice.mjs'),story,'--mux',clip],{env,encoding:'utf8',timeout:20000});assert.equal(mux.status,0,mux.stderr);}
+    assert.equal(readFileSync(oldVoice,'utf8'),'old voice');
+    const voiceRuns=readdirSync(dirname(clip)).filter(n=>n.startsWith('voice-'));assert.equal(voiceRuns.length,2);
+    for(const dir of voiceRuns)assert.ok(readFileSync(join(dirname(clip),dir,'clip-voice.mp4')).length>0);
   });
 }

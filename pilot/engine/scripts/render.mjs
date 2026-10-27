@@ -4,9 +4,10 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { startServer } from './serve.mjs';
 import { renderStills, contactSheetArgs } from './stills.mjs';
+import { safeOutputName, videoOutput } from './output-files.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -14,6 +15,8 @@ const { chromium } = require('playwright');
 const args = process.argv.slice(2);
 const storyPath = resolve(args[0]);
 const opt = (name, def) => { const i = args.indexOf(`--${name}`); return i < 0 ? def : (args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : true); };
+const stills = opt('stills', false);
+const name = stills ? null : safeOutputName(opt('out', 'clip'));
 const OUT = join(dirname(storyPath), 'out');
 mkdirSync(OUT, { recursive: true });
 
@@ -44,7 +47,7 @@ console.log(`story: ${SCENES.length} scenes, ${TOTAL}s @ ${FPS}fps`);
 
 const stage = { x: 0, y: 0, width: 1080, height: 1920 };
 
-if (opt('stills', false)) {
+if (stills) {
   const at = Number(opt('at', 0.8)); // fraction into each scene; a list `sub:` shows the part playing then
   const { dir, sheet } = await renderStills({ out: OUT, scenes: SCENES, page: first, at, stage, buildSheet: async (dir, sheet, count) => {
     await run('ffmpeg', contactSheetArgs(dir, sheet, count));
@@ -54,7 +57,7 @@ if (opt('stills', false)) {
 } else {
   const from = Number(opt('from', 0)); const to = Math.min(TOTAL, Number(opt('to', TOTAL)));
   const workers = Number(opt('workers', 2));
-  const name = opt('out', 'clip');
+  const output = videoOutput(OUT, name);
   const frames = Math.round((to - from) * FPS);
   const per = Math.ceil(frames / workers);
   const pages = [first];
@@ -63,9 +66,9 @@ if (opt('stills', false)) {
   const timer = setInterval(() => console.log(`  ${done}/${frames} frames, ${((Date.now() - t0) / 1000).toFixed(0)}s`), 30000);
   const segs = await Promise.all(pages.map(async (page, w) => {
     const a = w * per; const b = Math.min(frames, a + per);
-    const file = join(OUT, `.seg-${w}.mp4`);
+    const file = join(output.dir, `.seg-${w}.mp4`);
     if (a >= b) return null;
-    await run('ffmpeg', ['-v', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
+    await run('ffmpeg', ['-v', 'error', '-n', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p', '-r', String(FPS), file], async (stdin) => {
       for (let f = a; f < b; f++) {
         await page.evaluate((tt) => window.seek(tt), from + f / FPS);
@@ -82,10 +85,10 @@ if (opt('stills', false)) {
     return file;
   }));
   clearInterval(timer);
-  const list = join(OUT, '.segs.txt');
-  writeFileSync(list, segs.filter(Boolean).map((f) => `file '${f}'`).join('\n'));
-  const mp4 = join(OUT, `${name}.mp4`);
-  await run('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', mp4]);
+  const list = join(output.dir, '.segs.txt');
+  writeFileSync(list, segs.filter(Boolean).map((f) => `file '${basename(f)}'`).join('\n'), { flag: 'wx' });
+  const mp4 = output.mp4;
+  await run('ffmpeg', ['-v', 'error', '-n', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', mp4]);
 
   // Subtitles: one cue per scene (or per part when a scene has several).
   const ts = (x) => { const ms = Math.round((x - from) * 1000); const p = (n, l = 2) => String(n).padStart(l, '0'); return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`; };
@@ -98,7 +101,7 @@ if (opt('stills', false)) {
       cues.push(`${cues.length + 1}\n${ts(Math.max(a, from))} --> ${ts(Math.min(b, to))}\n${p.replace(/\*\*/g, '')}\n`);
     });
   }
-  writeFileSync(join(OUT, `${name}.srt`), cues.join('\n'));
+  writeFileSync(output.srt, cues.join('\n'), { flag: 'wx' });
   console.log(`${mp4} — ${frames} frames in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 }
 
