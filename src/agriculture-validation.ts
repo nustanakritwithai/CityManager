@@ -141,7 +141,7 @@ export function validateAgriculture(c: City): void {
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
     } else if (e.kind === 'market-deposit') {
       requireThat(e.to === 'market-server' && e.reason === `Market escrow deposit #${e.id}` && e.toValue === e.fromValue && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
-      role(e.from, 'T'); release(e); const deposited = holding(e.to); deposited.quantity = safeAdd(deposited.quantity, e.quantity); deposited.value = safeAdd(deposited.value, e.toValue);
+      role(e.from, 'F'); release(e); const deposited = holding(e.to); deposited.quantity = safeAdd(deposited.quantity, e.quantity); deposited.value = safeAdd(deposited.value, e.toValue);
     } else if (e.kind === 'market-refund') {
       requireThat(e.from === 'market-server' && e.reason === `Market escrow refund #${e.id}` && e.toValue === e.fromValue && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
       release(e); role(e.to, 'T'); receive(e.to, e.quantity, e.toValue);

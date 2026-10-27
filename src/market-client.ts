@@ -1,5 +1,6 @@
-import { firmCapacity, isMarket, type City } from './sim.ts';
+import { isMarket, type City } from './sim.ts';
 import { CROP_STOCK_CAPS, releaseCropCost } from './agriculture.ts';
+import { RECIPE } from './goods.ts';
 
 export const MARKET_SAVE_KEY = 'citymanager.market.v10';
 export const MARKET_RULES = 'chain-5' as const;
@@ -13,6 +14,10 @@ export type MarketReceipt = { receipt_id: string; item_code: string; quantity: n
 const uuid = () => crypto.randomUUID();
 const readCsrf = () => document.cookie.split('; ').find(v => v.startsWith('cm_csrf='))?.slice(8) ?? '';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Retail inventory is a goods stock, not worker capacity: the live engine can
+// legitimately hold more goods than its staffing capacity. Keep a separate
+// bounded receipt cap so a malformed server quantity still fails closed.
+const PRODUCT_STOCK_CAP = 1024;
 const safeJournal = (raw: string | null): MarketJournal => {
   if (!raw) return { version: 10, rulesVersion: MARKET_RULES, guestId: null, cityId: uuid(), operations: [], escrow: [], receipts: {}, seq: '0' };
   let v: unknown; try { v = JSON.parse(raw); } catch { throw new Error('Invalid market journal'); }
@@ -57,7 +62,7 @@ export class MarketClient {
   async createGuest() { const me = await this.request('/v1/auth/guest', { method: 'POST', body: '{}' }); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me; }
   quarantine() { const old = JSON.stringify(this.journal); if (globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine.${this.journal.cityId}.${Date.now()}`, old); this.journal = safeJournal(null); this.guestId = null; this.save(); }
   resetCity() { const old = JSON.stringify(this.journal); if (globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.city-${this.journal.cityId}`, old); this.journal = safeJournal(null); this.guestId = null; this.save(); }
-  private stock(firmId: number, itemId: MarketItem) { const product = itemId.startsWith('product:'); const f = this.city().firms.find(f => f.id === firmId && (isMarket(f) || product && (f.zone === 'I' || f.commercialKind === 'retail'))); if (!f) throw new Error('typed destination firm required'); const bucket = (product ? f.products : f.crops) as Record<string, number>; return { f, bucket, key: itemId.slice(itemId.indexOf(':') + 1) } as const; }
+  private stock(firmId: number, itemId: MarketItem) { const product = itemId.startsWith('product:'), key = itemId.slice(itemId.indexOf(':') + 1); const f = this.city().firms.find(f => f.id === firmId && (product ? f.zone === 'I' && !!f.recipe && RECIPE[f.recipe].product === key : f.zone === 'F')); if (!f) throw new Error('typed source firm required'); const bucket = (product ? f.products : f.crops) as Record<string, number>; return { f, bucket, key } as const; }
   async deposit(firmId: number, itemId: MarketItem, quantity: number, saveCity: () => void) {
     if (!MARKET_ITEMS.includes(itemId) || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error('invalid typed deposit');
     const { f, bucket, key } = this.stock(firmId, itemId); const current = bucket[key as keyof typeof bucket]; if (!Number.isSafeInteger(current) || current < quantity) throw new Error('insufficient typed firm stock');
@@ -87,8 +92,8 @@ export class MarketClient {
     if (record.state === 'applied') return this.recoverReceipt(receipt.receipt_id, saveCity);
     if (record.state === 'delivered') return { state: 'delivered', idempotent: true };
     if (!MARKET_ITEMS.includes(receipt.item_code as MarketItem) || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1) throw new Error('invalid typed market receipt');
-    const wantsProduct = receipt.item_code.startsWith('product:'); const firm = this.city().firms.filter(f => wantsProduct ? (f.zone === 'I' || f.commercialKind === 'retail') : isMarket(f)).map(f => ({ f, b: this.city().buildings.find(b => b.id === f.building) })).find(({ f, b }) => {
-      if (!b) return false; const total = Object.values(f.crops).reduce((a, n) => a + n, 0) + Object.values(f.products).reduce((a, n) => a + n, 0); return total + receipt.quantity <= (wantsProduct ? firmCapacity(b) : CROP_STOCK_CAPS.T);
+    const wantsProduct = receipt.item_code.startsWith('product:'); const firm = this.city().firms.filter(f => wantsProduct ? f.commercialKind === 'retail' : isMarket(f)).map(f => ({ f, b: this.city().buildings.find(b => b.id === f.building) })).find(({ f, b }) => {
+      if (!b) return false; const total = Object.values(f.crops).reduce((a, n) => a + n, 0) + Object.values(f.products).reduce((a, n) => a + n, 0); return total + receipt.quantity <= (wantsProduct ? PRODUCT_STOCK_CAP : CROP_STOCK_CAPS.T);
     });
     if (!firm) throw new Error('no typed market firm capacity');
     const oldCrops = { ...firm.f.crops }, oldProducts = { ...firm.f.products }, oldCropInventory = firm.f.cropInventory, oldCropCost = firm.f.cropCost;

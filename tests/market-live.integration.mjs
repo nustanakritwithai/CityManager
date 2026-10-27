@@ -39,25 +39,26 @@ globalThis.fetch = async (url, init = {}) => {
 
 async function as(storage, fn) { const old = activeStorage; activeStorage = storage; globalThis.localStorage = storage; try { return await fn(); } finally { activeStorage = old; globalThis.localStorage = old; } }
 async function fixture(storage) { return as(storage, async () => { const csrf = (jars.get(storage) ?? '').match(/(?:^|; )cm_csrf=([^;]+)/)?.[1] ?? ''; const r = await fetch(`${base}/v1/sandbox/fixture`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify({ fixture_version: 'fixture-v1' }) }); assert.equal(r.status, 200); return r.json(); }); }
-function cityFixture(emptyMarket = false, full = false) { const c = createCity(61025, { starter: true }); for (let i = 0; i < 360 && (full || !c.firms.some(f => isMarket(f) && f.cropInventory > 0)); i++) step(c); const firm = c.firms.find(f => isMarket(f) && f.cropInventory > 0); assert.ok(firm, 'real simulation must produce a stocked market firm'); if (emptyMarket) for (const f of c.firms.filter(isMarket)) assert.equal(writeOffCrops(c, f, {}), true); return c; }
+function cityFixture(emptyMarket = false, full = false, seed = 61025) { const c = createCity(seed, { starter: true }); for (let i = 0; i < 360 && (full || !c.firms.some(f => isMarket(f) && f.cropInventory > 0)); i++) step(c); const firm = c.firms.find(f => isMarket(f) && f.cropInventory > 0); assert.ok(firm, 'real simulation must produce a stocked market firm'); if (emptyMarket) for (const f of c.firms.filter(isMarket)) assert.equal(writeOffCrops(c, f, {}), true); return c; }
+function prepareProduct(c, item) { const key = item.slice(8), recipe = { 'milled-rice': 'rice-mill', 'canned-food': 'cannery', sugar: 'sugar-mill' }[key]; const retail = c.firms.find(f => f.commercialKind === 'retail' && f.products[key] > 0), factory = c.firms.find(f => f.zone === 'I' && f.recipe === recipe); assert.ok(retail && factory, `real engine product fixture for ${item}`); retail.products[key]--; retail.inventory--; factory.products[key]++; factory.inventory++; c.goodsLedger.push({ tick: c.tick, from: retail.wallet, to: factory.wallet, quantity: 1, reason: 'Wholesale stock delivery', product: key }); return factory; }
 
 try {
   const sellerStore = new Storage(), buyerStore = new Storage(), productBuyerStore = new Storage();
-  const sellerCity = cityFixture(false, true), buyerCity = cityFixture(), productBuyerCity = cityFixture(false, true);
+  const sellerCity = cityFixture(false, true), buyerCity = cityFixture(false, false), productBuyerCity = cityFixture(false, true);
   const seller = new MarketClient(() => sellerCity, base), buyer = new MarketClient(() => buyerCity, base), productBuyer = new MarketClient(() => productBuyerCity, base);
   const sellerGuest = await as(sellerStore, () => seller.createGuest());
   const buyerGuest = await as(buyerStore, () => buyer.createGuest());
-  await as(productBuyerStore, () => productBuyer.createGuest());
-  assert.notEqual(sellerGuest.guest_id, buyerGuest.guest_id);
+  const productBuyerGuest = await as(productBuyerStore, () => productBuyer.createGuest());
+  assert.notEqual(sellerGuest.guest_id, buyerGuest.guest_id); assert.notEqual(buyerGuest.guest_id, productBuyerGuest.guest_id);
   await fixture(sellerStore); await fixture(buyerStore); await fixture(productBuyerStore);
-  const sellerMarket = sellerCity.firms.find(isMarket); assert.ok(sellerMarket);
-  const beforeStock = sellerMarket.crops.rice;
+  const sellerMarket = sellerCity.firms.find(isMarket); const sellerFarm = sellerCity.firms.find(f => f.zone === 'F' && f.crops.rice > 0); assert.ok(sellerMarket && sellerFarm);
+  const beforeStock = sellerFarm.crops.rice;
   const saveSeller = () => { const round = deserialize(serialize(sellerCity, seller.exportSave())); assert.equal(round.market?.version, 10); };
   dropPath = '/v1/deposits';
-  await assert.rejects(as(sellerStore, () => seller.deposit(sellerMarket.id, 'crop:rice', 1, saveSeller)), /test-response-dropped/);
+  await assert.rejects(as(sellerStore, () => seller.deposit(sellerFarm.id, 'crop:rice', 1, saveSeller)), /test-response-dropped/);
   const depositOp = seller.exportSave().operations.find(o => o.kind === 'deposit' && o.state === 'pending'); assert.ok(depositOp);
   await as(sellerStore, () => seller.recoverDeposit(depositOp.opId, saveSeller));
-  assert.equal(sellerMarket.crops.rice, beforeStock - 1);
+  assert.equal(sellerFarm.crops.rice, beforeStock - 1);
   dropPath = '/v1/listings';
   await assert.rejects(as(sellerStore, () => seller.list('crop:rice', 10, 1)), /test-response-dropped/);
   const listingOp = seller.exportSave().operations.find(o => o.kind === 'listing' && o.state === 'pending'); assert.ok(listingOp);
@@ -71,15 +72,31 @@ try {
   await as(buyerStore, () => buyer.claim(receipt.receipt_id));
   const saveBuyer = () => { const raw = serialize(buyerCity, buyer.exportSave()); const loaded = deserialize(raw); assert.equal(loaded.market?.version, 10); };
   await as(buyerStore, () => buyer.applyAndAck(receipt, saveBuyer));
-  const productSource = sellerCity.firms.find(f => f.inventory > 0 && f.products['milled-rice'] > 0); assert.ok(productSource, 'real simulation must produce a product source firm');
+  const productSource = prepareProduct(sellerCity, 'product:milled-rice'); prepareProduct(productBuyerCity, 'product:milled-rice');
   await as(sellerStore, () => seller.deposit(productSource.id, 'product:milled-rice', 1, saveSeller));
   const productListing = await as(sellerStore, () => seller.list('product:milled-rice', 11, 1));
-  const productRow = (await as(buyerStore, () => buyer.listings())).find(x => x.id === productListing.id); assert.ok(productRow);
+  const saveProductBuyer = () => { const raw = serialize(productBuyerCity, productBuyer.exportSave()); const loaded = deserialize(raw); assert.equal(loaded.market?.version, 10); };
+  const productRow = (await as(productBuyerStore, () => productBuyer.listings())).find(x => x.id === productListing.id); assert.ok(productRow);
   const productPurchase = await as(productBuyerStore, () => productBuyer.buy(productRow.id, 1));
   const productReceipt = (await as(productBuyerStore, () => productBuyer.receipts())).find(x => x.operation_id === productPurchase.operation_id); assert.ok(productReceipt);
   await as(productBuyerStore, () => productBuyer.claim(productReceipt.receipt_id));
-  const saveProductBuyer = () => { const raw = serialize(productBuyerCity, productBuyer.exportSave()); const loaded = deserialize(raw); assert.equal(loaded.market?.version, 10); };
   await as(productBuyerStore, () => productBuyer.applyAndAck(productReceipt, saveProductBuyer));
-  const saved = deserialize(serialize(buyerCity, buyer.exportSave())); assert.equal(saved.market?.rulesVersion, 'chain-5');
-  console.log(JSON.stringify({ suite: 'market-live-node-e2e', server: 'real-http-postgresql', guests: 2, canonicalItems: 6, testedItems: ['crop:rice', 'product:milled-rice'], flow: ['guest-create', 'typed-deposit', 'deposit-recover-after-response-drop', 'listing-retry-after-response-drop', 'buy-retry-after-response-drop', 'claim', 'typed-apply', 'ack', 'v10-save-reload'], assertions: 'passed', policyFixtureMode: true, productionPolicyDefault: false }));
+  const saved = deserialize(serialize(productBuyerCity, productBuyer.exportSave())); assert.equal(saved.market?.rulesVersion, 'chain-5');
+  const matrix = [{ item: 'crop:vegetables', seed: 17 }, { item: 'crop:sugarcane', seed: 206 }, { item: 'product:canned-food', seed: 17 }, { item: 'product:sugar', seed: 206 }];
+  const seller17Store = new Storage(), seller206Store = new Storage(), product17Store = new Storage(), product206Store = new Storage(), seller17City = cityFixture(false, true, 17), seller206City = cityFixture(false, true, 206), product17City = cityFixture(false, true, 17), product206City = cityFixture(false, true, 206);
+  const seller17 = new MarketClient(() => seller17City, base), seller206 = new MarketClient(() => seller206City, base), product17 = new MarketClient(() => product17City, base), product206 = new MarketClient(() => product206City, base);
+  await as(seller17Store, () => seller17.createGuest()); await as(seller206Store, () => seller206.createGuest()); await as(product17Store, () => product17.createGuest()); await as(product206Store, () => product206.createGuest()); await fixture(seller17Store); await fixture(seller206Store); await fixture(product17Store); await fixture(product206Store);
+  const testedItems = ['crop:rice', 'product:milled-rice'];
+  for (const { item } of matrix) {
+    const buyer2 = item.startsWith('crop:') ? buyer : item.includes('canned-food') ? product17 : product206, buyerStore2 = item.startsWith('crop:') ? buyerStore : item.includes('canned-food') ? product17Store : product206Store, buyerCity2 = item.startsWith('crop:') ? buyerCity : item.includes('canned-food') ? product17City : product206City;
+    const seller2 = item.includes('vegetables') || item.includes('canned-food') ? seller17 : seller206, sellerStore2 = item.includes('vegetables') || item.includes('canned-food') ? seller17Store : seller206Store, sellerCity2 = item.includes('vegetables') || item.includes('canned-food') ? seller17City : seller206City;
+    const key = item.slice(item.indexOf(':') + 1), source = item.startsWith('crop:') ? sellerCity2.firms.find(f => f.zone === 'F' && f.crops[key] > 0) : prepareProduct(sellerCity2, item); assert.ok(source, `real simulation source for ${item}`);
+    if (item.startsWith('product:')) prepareProduct(buyerCity2, item);
+    const saveBuyer2 = () => deserialize(serialize(buyerCity2, buyer2.exportSave()));
+    const saveSeller2 = () => deserialize(serialize(sellerCity2, seller2.exportSave()));
+    await as(sellerStore2, () => seller2.deposit(source.id, item, 1, saveSeller2)); const listed = await as(sellerStore2, () => seller2.list(item, 13, 1)); const visible = (await as(buyerStore2, () => buyer2.listings())).find(x => x.id === listed.id); assert.ok(visible);
+    const bought = await as(buyerStore2, () => buyer2.buy(visible.id, 1)); const delivered = (await as(buyerStore2, () => buyer2.receipts())).find(x => x.operation_id === bought.operation_id); assert.ok(delivered); await as(buyerStore2, () => buyer2.claim(delivered.receipt_id)); console.log('matrix-item', item); await as(buyerStore2, () => buyer2.applyAndAck(delivered, saveBuyer2));
+    assert.equal(deserialize(serialize(buyerCity2, buyer2.exportSave())).market?.version, 10); testedItems.push(item);
+  }
+  console.log(JSON.stringify({ suite: 'market-live-node-e2e', server: 'real-http-postgresql', guests: 7, canonicalItems: 6, testedItems, flow: ['guest-create', 'typed-deposit', 'deposit-recover-after-response-drop', 'listing-retry-after-response-drop', 'buy-retry-after-response-drop', 'claim', 'typed-apply', 'ack', 'v10-save-reload'], assertions: 'passed', policyFixtureMode: true, productionPolicyDefault: false }));
 } finally { server.kill(); }
