@@ -18,9 +18,9 @@ test('all six item labels leave listing prices and buy quantities unchanged', as
   globalThis.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(String(init?.body)) }); return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }); };
   try {
     const c = new MarketClient(() => createCity(1, { starter: false }), 'http://127.0.0.1:4317'); c.guestId = '00000000-0000-4000-8000-000000000003'; c.journal.guestId = c.guestId;
-    for (const item of MARKET_ITEMS) { assert.equal(marketUnit(item), item.startsWith('crop:') ? 'ล็อต' : 'หน่วย'); await c.list(item, 37, 3); await c.buy('listing-id', 2); }
+    for (const item of MARKET_ITEMS) { assert.equal(marketUnit(item), item.startsWith('crop:') ? 'ล็อต' : 'หน่วย'); await c.list(item, 37, 3); await c.buy('00000000-0000-4000-8000-000000000008', 2); }
     assert.equal(requests.length, 12);
-    for (let i = 0; i < MARKET_ITEMS.length; i++) { assert.deepEqual(requests[2 * i].body, { item_code: MARKET_ITEMS[i], unit_price: 37, quantity: 3 }); assert.match(requests[2 * i].url, /\/v1\/listings$/); assert.deepEqual(requests[2 * i + 1].body, { quantity: 2 }); assert.match(requests[2 * i + 1].url, /\/v1\/listings\/listing-id\/buy$/); }
+    for (let i = 0; i < MARKET_ITEMS.length; i++) { assert.deepEqual(requests[2 * i].body, { item_code: MARKET_ITEMS[i], unit_price: 37, quantity: 3 }); assert.match(requests[2 * i].url, /\/v1\/listings$/); assert.deepEqual(requests[2 * i + 1].body, { quantity: 2 }); assert.match(requests[2 * i + 1].url, /\/v1\/listings\/00000000-0000-4000-8000-000000000008\/buy$/); }
   } finally { globalThis.fetch = priorFetch; if (priorStorage) Object.defineProperty(globalThis, 'localStorage', priorStorage); else Reflect.deleteProperty(globalThis, 'localStorage'); if (priorDocument) Object.defineProperty(globalThis, 'document', priorDocument); else Reflect.deleteProperty(globalThis, 'document'); }
 });
 
