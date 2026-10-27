@@ -6,7 +6,7 @@ export const MARKET_ITEMS = ['crop:rice', 'crop:vegetables', 'crop:sugarcane', '
 export type MarketItem = typeof MARKET_ITEMS[number];
 export type MarketOperation = { opId: string; guestId: string; cityId: string; kind: 'deposit' | 'listing' | 'buy' | 'claim' | 'ack'; payload: Record<string, unknown>; state: 'pending' | 'confirmed' | 'quarantined'; createdAt: string };
 export type MarketEscrow = { opId: string; cityId: string; firmId: number; itemId: MarketItem; quantity: number; state: 'pending' | 'confirmed' | 'cancelled' };
-export type MarketJournal = { version: 10; rulesVersion: typeof MARKET_RULES; guestId: string | null; cityId: string; operations: MarketOperation[]; escrow: MarketEscrow[]; receipts: Record<string, { claimId: string; state: 'claimed' | 'applied' | 'delivered'; firmId?: number }>; seq: string };
+export type MarketJournal = { version: 10; rulesVersion: typeof MARKET_RULES; guestId: string | null; cityId: string; operations: MarketOperation[]; escrow: MarketEscrow[]; receipts: Record<string, { claimId: string; state: 'claimed' | 'applied' | 'delivered'; firmId?: number; itemId?: MarketItem; quantity?: number }>; seq: string };
 export type MarketReceipt = { receipt_id: string; item_code: string; quantity: number; state?: string };
 
 const uuid = () => crypto.randomUUID();
@@ -19,7 +19,7 @@ const safeJournal = (raw: string | null): MarketJournal => {
   const j = v as MarketJournal;
   if (j.guestId !== null && !UUID.test(j.guestId) || j.operations.some(o => !o || !UUID.test(o.opId) || !UUID.test(o.guestId) || !UUID.test(o.cityId) || o.cityId !== j.cityId || !['deposit', 'listing', 'buy', 'claim', 'ack'].includes(o.kind) || !['pending', 'confirmed', 'quarantined'].includes(o.state) || !o.payload || typeof o.payload !== 'object' || Number.isNaN(Date.parse(o.createdAt)))) throw new Error('Invalid market journal operation');
   if (j.escrow.some(e => !e || !UUID.test(e.opId) || e.cityId !== j.cityId || !Number.isSafeInteger(e.firmId) || !MARKET_ITEMS.includes(e.itemId) || !Number.isSafeInteger(e.quantity) || e.quantity < 1 || !['pending', 'confirmed', 'cancelled'].includes(e.state))) throw new Error('Invalid market escrow');
-  for (const [receiptId, r] of Object.entries(j.receipts)) if (!UUID.test(receiptId) || !r || !UUID.test(r.claimId) || !['claimed', 'applied', 'delivered'].includes(r.state) || (r.firmId !== undefined && !Number.isSafeInteger(r.firmId))) throw new Error('Invalid market journal receipt');
+  for (const [receiptId, r] of Object.entries(j.receipts)) if (!UUID.test(receiptId) || !r || !UUID.test(r.claimId) || !['claimed', 'applied', 'delivered'].includes(r.state) || (r.firmId !== undefined && !Number.isSafeInteger(r.firmId)) || (r.itemId !== undefined && !MARKET_ITEMS.includes(r.itemId)) || (r.quantity !== undefined && (!Number.isSafeInteger(r.quantity) || r.quantity < 1))) throw new Error('Invalid market journal receipt');
   return j;
 };
 const persist = (j: MarketJournal) => localStorage.setItem(MARKET_SAVE_KEY, JSON.stringify(j));
@@ -50,8 +50,8 @@ export class MarketClient {
   }
   async resume() {
     if (!this.enabled) return null;
-    try { const me = await this.request('/v1/me'); if (this.guestId && me.guest_id !== this.guestId) this.quarantine(); if (BigInt(me.seq) < BigInt(this.journal.seq)) throw new Error('market sequence rollback'); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.journal.seq = String(me.seq); this.save(); return me; }
-    catch (e) { if ((e as any).status === 401 && this.journal.operations.some(o => o.state === 'pending')) this.quarantine(); return null; }
+    try { const me = await this.request('/v1/me'); const previous = BigInt(this.journal.seq), incoming = BigInt(me.seq); if (this.guestId && me.guest_id !== this.guestId) this.quarantine(); if (incoming < previous) throw new Error('market sequence rollback'); if (incoming > previous && this.guestId && !this.journal.operations.some(o => o.state === 'pending')) throw new Error('market sequence gap requires reconciliation'); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.journal.seq = String(me.seq); this.save(); return me; }
+    catch (e) { if ((e as any).status === 401) { if (this.journal.operations.some(o => o.state === 'pending')) this.quarantine(); return null; } throw e; }
   }
   async createGuest() { const me = await this.request('/v1/auth/guest', { method: 'POST', body: '{}' }); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me; }
   quarantine() { for (const o of this.journal.operations) if (o.state === 'pending') o.state = 'quarantined'; this.guestId = null; this.journal.guestId = null; this.save(); }
@@ -65,6 +65,7 @@ export class MarketClient {
     try { const result = await this.request('/v1/deposits', { method: 'POST', body: JSON.stringify({ opId: o.opId, itemId, qty: quantity }) }); escrow.state = 'confirmed'; o.state = 'confirmed'; this.journal.seq = String(result.seq ?? this.journal.seq); saveCity(); return result; } catch (e) { throw e; }
   }
   async fenceDeposit(opId: string, saveCity: () => void) { const e = this.journal.escrow.find(x => x.opId === opId); if (!e || e.state !== 'pending') throw new Error('deposit-not-pending'); const status = await this.request(`/v1/op/${encodeURIComponent(opId)}`); if (status.state !== 'cancelled') throw new Error('deposit-not-fenced'); const { bucket, key } = this.stock(e.firmId, e.itemId); bucket[key as keyof typeof bucket] += e.quantity; e.state = 'cancelled'; const o = this.journal.operations.find(x => x.opId === opId); if (o) o.state = 'confirmed'; saveCity(); return status; }
+  async recoverDeposit(opId: string, saveCity: () => void) { const e = this.journal.escrow.find(x => x.opId === opId); if (!e || e.state !== 'pending') throw new Error('deposit-not-pending'); const status = await this.request(`/v1/op/${encodeURIComponent(opId)}`); const o = this.journal.operations.find(x => x.opId === opId); if (status.state === 'done') { e.state = 'confirmed'; if (o) o.state = 'confirmed'; this.journal.seq = String(status.seq ?? this.journal.seq); saveCity(); return status; } if (status.state === 'cancelled') return this.fenceDeposit(opId, saveCity); throw new Error('deposit-reconciliation-required'); }
   async listings() { return this.request('/v1/listings'); }
   async wallet() { return this.request('/v1/wallet'); }
   async inventory() { return this.request('/v1/inventory'); }
@@ -75,9 +76,11 @@ export class MarketClient {
   async receipts(state = '') { return this.request(`/v1/receipts${state ? `?state=${encodeURIComponent(state)}` : ''}`); }
   async claim(receiptId: string) { const existing = this.journal.receipts[receiptId]; const claimId = existing?.claimId ?? uuid(); this.journal.receipts[receiptId] = { claimId, state: 'claimed' }; this.save(); return this.request(`/v1/receipts/${encodeURIComponent(receiptId)}/claim`, { method: 'POST', body: JSON.stringify({ claimId }) }); }
   async ack(receiptId: string) { const r = this.journal.receipts[receiptId]; if (!r) throw new Error('claim-required'); const result = await this.request(`/v1/receipts/${encodeURIComponent(receiptId)}/ack`, { method: 'POST', body: JSON.stringify({ claimId: r.claimId }) }); r.state = 'delivered'; this.save(); return result; }
+  async recoverReceipt(receiptId: string, saveCity: () => void) { const r = this.journal.receipts[receiptId]; if (!r || (r.state !== 'applied' && r.state !== 'delivered')) throw new Error('receipt-not-recoverable'); const result = await this.request(`/v1/receipts/${encodeURIComponent(receiptId)}/ack`, { method: 'POST', body: JSON.stringify({ claimId: r.claimId }) }); r.state = 'delivered'; this.save(); saveCity(); return result; }
   /** Apply only a canonical item to a real level-one market, save the city, then ACK the same claim. */
   async applyAndAck(receipt: MarketReceipt, saveCity: () => void) {
     const record = this.journal.receipts[receipt.receipt_id]; if (!record) throw new Error('claim-required');
+    if (record.state === 'applied') return this.recoverReceipt(receipt.receipt_id, saveCity);
     if (record.state === 'delivered') return { state: 'delivered', idempotent: true };
     if (!MARKET_ITEMS.includes(receipt.item_code as MarketItem) || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1) throw new Error('invalid typed market receipt');
     const firm = this.city().firms.filter(isMarket).map(f => ({ f, b: this.city().buildings.find(b => b.id === f.building) })).find(({ f, b }) => {
@@ -88,7 +91,7 @@ export class MarketClient {
     const item = receipt.item_code as MarketItem;
     if (item.startsWith('crop:')) firm.f.crops[item.slice(5) as keyof typeof firm.f.crops] += receipt.quantity;
     else firm.f.products[item.slice(8) as keyof typeof firm.f.products] += receipt.quantity;
-    const oldRecord = { ...record }; record.state = 'applied'; record.firmId = firm.f.id;
+    const oldRecord = { ...record }; record.state = 'applied'; record.firmId = firm.f.id; record.itemId = item; record.quantity = receipt.quantity;
     try { saveCity(); } catch (e) { firm.f.crops = oldCrops; firm.f.products = oldProducts; Object.assign(record, oldRecord); try { this.save(); } catch { /* preserve in-memory recovery state */ } throw e; }
     try { const result = await this.ack(receipt.receipt_id); saveCity(); return result; } catch (e) { throw e; }
   }
