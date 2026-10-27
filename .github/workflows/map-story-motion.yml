@@ -25,6 +25,7 @@ permissions:
 jobs:
   safety:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -40,10 +41,12 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          npm install --prefix "$RUNNER_TEMP/media-tools" --no-save --ignore-scripts --no-audit --no-fund @ffmpeg-installer/linux-x64@4.1.0 @ffprobe-installer/linux-x64@5.2.0
-          chmod +x "$RUNNER_TEMP/media-tools/node_modules/@ffmpeg-installer/linux-x64/ffmpeg" "$RUNNER_TEMP/media-tools/node_modules/@ffprobe-installer/linux-x64/ffprobe"
-          echo "$RUNNER_TEMP/media-tools/node_modules/@ffmpeg-installer/linux-x64" >> "$GITHUB_PATH"
+          npm install --prefix "$RUNNER_TEMP/media-tools" --no-save --no-audit --no-fund ffmpeg-static@5.2.0 @ffprobe-installer/linux-x64@5.2.0
+          chmod +x "$RUNNER_TEMP/media-tools/node_modules/ffmpeg-static/ffmpeg" "$RUNNER_TEMP/media-tools/node_modules/@ffprobe-installer/linux-x64/ffprobe"
+          echo "$RUNNER_TEMP/media-tools/node_modules/ffmpeg-static" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/media-tools/node_modules/@ffprobe-installer/linux-x64" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/media-tools/node_modules/ffmpeg-static/ffmpeg" -version
+          "$RUNNER_TEMP/media-tools/node_modules/ffmpeg-static/ffmpeg" -hide_banner -h filter=adelay | grep -E "^[[:space:]]*all[[:space:]]"
       - name: Install FFmpeg (Chocolatey)
         if: runner.os == 'Windows'
         shell: pwsh

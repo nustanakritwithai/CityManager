@@ -1,5 +1,5 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { newOutputDirectory } from './output-files.mjs';
 
 // Each run owns a fresh directory. No prior still or contact sheet is replaced.
@@ -17,12 +17,16 @@ export async function renderStills({ out, scenes, page, at, stage, buildSheet })
   writeFileSync(join(dir, 'scenes.json'), JSON.stringify(manifest, null, 2), { flag: 'wx' });
   const sheet = join(dir, 'contact-sheet.png');
   await buildSheet(dir, sheet, scenes.length);
+  let stat;
+  try { stat = lstatSync(sheet); } catch (error) { if (error.code === 'ENOENT') throw new Error('contact sheet was not created'); throw error; }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) throw new Error('contact sheet was not created');
   return { dir, sheet };
 }
 
 export function contactSheetArgs(dir, sheet, count) {
   if (!Number.isSafeInteger(count) || count < 1) throw new Error('no scenes to render');
   const cols = Math.min(7, count), rows = Math.ceil(count / cols);
-  const pattern = join(dir.replaceAll('%', '%%'), '%06d.png');
-  return ['-v', 'error', '-n', '-start_number', '1', '-i', pattern, '-vf', `scale=270:480,tile=${cols}x${rows}:padding=6:color=black`, '-frames:v', '1', sheet];
+  if (resolve(dirname(sheet)) !== resolve(dir)) throw new Error('contact sheet must be in the stills directory');
+  // Run FFmpeg with cwd=dir so percent characters in a parent path cannot be read as sequence tokens.
+  return ['-v', 'error', '-n', '-start_number', '1', '-i', '%06d.png', '-vf', `scale=270:480,tile=${cols}x${rows}:padding=6:color=black`, '-frames:v', '1', '-update', '1', basename(sheet)];
 }

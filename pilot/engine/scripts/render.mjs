@@ -20,8 +20,8 @@ const name = stills ? null : safeOutputName(opt('out', 'clip'));
 const OUT = join(dirname(storyPath), 'out');
 mkdirSync(OUT, { recursive: true });
 
-const run = (cmd, a, input) => new Promise((ok, fail) => {
-  const p = spawn(cmd, a, { stdio: [input ? 'pipe' : 'ignore', 'ignore', 'inherit'] });
+const run = (cmd, a, input, options = {}) => new Promise((ok, fail) => {
+  const p = spawn(cmd, a, { cwd: options.cwd, stdio: [input ? 'pipe' : 'ignore', 'ignore', 'inherit'] });
   p.on('exit', (c) => (c === 0 ? ok() : fail(new Error(`${cmd} exited ${c}`))));
   if (input) input(p.stdin);
 });
@@ -54,7 +54,7 @@ const stage = { x: 0, y: 0, width: 1080, height: 1920 };
 if (stills) {
   const at = Number(opt('at', 0.8)); // fraction into each scene; a list `sub:` shows the part playing then
   const { dir, sheet } = await renderStills({ out: OUT, scenes: SCENES, page: first, at, stage, buildSheet: async (dir, sheet, count) => {
-    await run('ffmpeg', contactSheetArgs(dir, sheet, count));
+    await run('ffmpeg', contactSheetArgs(dir, sheet, count), null, { cwd: dir });
   } });
   console.log();
   console.log(`stills in ${dir}; contact sheet: ${sheet} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);

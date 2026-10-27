@@ -83,7 +83,7 @@ for (const engine of engines) {
     assert.equal(create.status, 0, create.stderr);
     const page = { evaluate: async () => {}, screenshot: async ({ path }) => copyFileSync(source, path) };
     const result = await renderStills({ out, scenes:[{ id:'a',start:0,end:1 },{ id:'b',start:1,end:2 }], page, at:0.8, stage:{},
-      buildSheet: async (dir,sheet,count) => { const run=spawnSync('ffmpeg',contactSheetArgs(dir,sheet,count),{encoding:'utf8'});assert.equal(run.status,0,run.stderr); } });
+      buildSheet: async (dir,sheet,count) => { const run=spawnSync('ffmpeg',contactSheetArgs(dir,sheet,count),{cwd:dir,encoding:'utf8'});assert.equal(run.status,0,run.stderr); } });
     assert.deepEqual([...readFileSync(result.sheet).subarray(0,8)], [137,80,78,71,13,10,26,10]);
   });
 
@@ -361,5 +361,15 @@ test('render CLI runs with real Playwright Chromium and FFmpeg', async t => {
     const run=spawnSync(process.execPath,[join(scripts,'render.mjs'),story,'--workers','1','--fps','1','--out','clip'],{encoding:'utf8',timeout:120000});
     assert.equal(run.status,0,run.stdout+'\n'+run.stderr);const dirs=readdirSync(out).filter(n=>n.startsWith('render-'));assert.equal(dirs.length,1);
     assert.ok(readFileSync(join(out,dirs[0],'clip.mp4')).length>0);assert.equal(readFileSync(join(out,'clip.mp4'),'utf8'),'sentinel');
+  }
+});
+
+
+test('missing contact sheet is an error even if FFmpeg reports success', async () => {
+  for(const engine of engines){
+    const {renderStills}=await import(pathToFileURL(join(root,engine,'scripts/stills.mjs')));
+    const out=mkdtempSync(join(tmpdir(),'map-missing-sheet-'));
+    const page={evaluate:async()=>{},screenshot:async({path})=>writeFileSync(path,'fixture')};
+    await assert.rejects(renderStills({out,scenes:[{id:'one',start:0,end:1}],page,at:0.5,stage:{},buildSheet:async()=>{}}),/contact sheet was not created/);
   }
 });
