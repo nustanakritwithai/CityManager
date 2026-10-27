@@ -14,7 +14,7 @@ test('seeded cities that win stay self-reliant for three years: farms pay their 
       if (wonAt && d >= wonAt + 90 && d % 30 === 0) assert.equal(cityGoals(c).level, 5, `seed ${seed} stays at level 5 on day ${d}`);
     }
     // Plants cost the treasury one month's growth, so the three-month treasury goal restarts once (chain-4).
-    assert.ok(wonAt > 0 && wonAt < 480, `seed ${seed} won on day ${wonAt}`);
+    assert.ok(wonAt > 0 && wonAt < 420, `seed ${seed} won on day ${wonAt}`);
     const s = summary(c);
     assert.equal(s.employed, s.workforce, 'everyone who can work has a job');
     assert.deepEqual(c.firms.filter(f => c.accounts[f.wallet] === 0).map(f => f.id), [], 'no business sits broke');
