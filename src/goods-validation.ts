@@ -48,9 +48,11 @@ export function validateTypes(c: City): void {
     else if (e.kind === 'consumption') take(e.from);
     else if (e.kind === 'export') { grows(e.from); take(e.from); }
     else if (e.kind === 'process') { mills(e.from); take(e.from); recipeCrop.set(e.reason, crop); }
+    else if (e.kind === 'market-deposit' || e.kind === 'market-refund') { take(e.from); give(e.to); }
+    else if (e.kind === 'market-receipt') { give(e.to); }
     else fail();
   }
-  for (const [wallet, h] of crops) { const f = firms.get(wallet); if (CROPS.some(k => (f ? f.crops[k] : 0) !== h[k])) fail(); }
+  for (const [wallet, h] of crops) { if (wallet === 'market-server') continue; const f = firms.get(wallet); if (CROPS.some(k => (f ? f.crops[k] : 0) !== h[k])) fail(); }
   for (const f of c.firms) { const h = crops.get(f.wallet) ?? emptyCrops(); if (CROPS.some(k => f.crops[k] !== h[k])) fail(); }
 
   // Finished goods, from the baseline forward; a recipe's output is that recipe's product.
