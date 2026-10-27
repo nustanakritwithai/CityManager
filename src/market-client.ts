@@ -59,8 +59,8 @@ export class MarketClient {
   }
   async resume() {
     if (!this.enabled) return null;
-    try { const me = await this.request('/v1/me'); const previous = BigInt(this.journal.seq), incoming = BigInt(me.seq); if (this.guestId && me.guest_id !== this.guestId) this.quarantine(); const pending = this.journal.operations.filter(o => o.state === 'pending' && (o.kind === 'deposit' || o.kind === 'buy')); if (incoming < previous) throw new Error('market sequence rollback'); if (incoming > previous && this.guestId) { if (!pending.length) throw new Error('market sequence gap requires reconciliation'); let attributable = previous; for (const o of pending) { const status = await this.request(`/v1/op/${encodeURIComponent(o.opId)}`); if (!['done', 'cancelled'].includes(status.state) || !/^\d+$/.test(String(status.seq ?? ''))) throw new Error('market sequence gap requires reconciliation'); attributable = attributable > BigInt(status.seq) ? attributable : BigInt(status.seq); } if (attributable !== incoming) throw new Error('market sequence gap requires reconciliation'); } this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.journal.seq = String(me.seq); this.save(); return me; }
-    catch (e) { if ((e as any).status === 401) { if (this.guestId || this.journal.operations.length || Object.keys(this.journal.receipts).length || this.journal.escrow.length) this.quarantine(); return null; } throw e; }
+    try { return await this.reconcileSession(await this.request('/v1/me')); }
+    catch (e) { if ((e as any).status === 401 && !(this.guestId || this.journal.operations.length || Object.keys(this.journal.receipts).length || this.journal.escrow.length)) return null; throw e; }
   }
   async checkSession() {
     try { return await this.request('/v1/me'); }
