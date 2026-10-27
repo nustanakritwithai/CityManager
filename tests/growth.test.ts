@@ -5,6 +5,7 @@ import { createCity as legacyCity, step as legacyStep, serialize as legacySerial
 import { createCity as agricultureCity, step as agricultureStep, serialize as agricultureSerialize } from '../src/legacy-v4.ts';
 import { untyped } from './untyped.ts';
 import { SAVE_KEY, COMMERCIAL_SAVE_KEY, COMMERCIAL_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
+import { keepSupplied } from './plants.ts';
 
 function oldCity(day: number) { const c = legacyCity(61025); for (let n = 0; n < day; n++) legacyStep(c); return c; }
 const legacy388 = oldCity(388), legacy251 = oldCity(251);
@@ -86,7 +87,7 @@ test('two-generation funded sponsors retain later estate receipts in either same
   const c = current(251); step(c); const b = c.firms.find(f => f.fundedBy)!, a = c.firms.find(f => f.id === b.fundedBy!.firmId)!, oldSite = c.buildings.find(home => home.id === a.building)!.cell;
   assert.equal(bulldoze(c, oldSite).ok, true); assert.equal(zoneCell(c, oldSite, 'I').ok, true);
   let child = c.firms.find(f => f.fundedBy?.firmId === b.id);
-  for (let n = 0; n < 1500 && !child; n++) { step(c); child = c.firms.find(f => f.fundedBy?.firmId === b.id); }
+  for (let n = 0; n < 1500 && !child; n++) { step(c); keepSupplied(c); child = c.firms.find(f => f.fundedBy?.firmId === b.id); }
   assert.ok(child, 'Actual profitable funded B can later sponsor C from accumulated operating cash'); conservation(c);
   for (const parentFirst of [true, false]) {
     const state = clone(c), parent = state.firms.find(f => f.id === b.id)!, offspring = state.firms.find(f => f.id === child!.id)!;

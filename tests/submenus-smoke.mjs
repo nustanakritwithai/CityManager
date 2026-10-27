@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {deserialize,serialize} from '../src/sim.ts';
 const legacyRaw=await readFile(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),legacy=JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const fixture=deserialize(legacyRaw),fixtureJson=serialize(fixture);assert.equal(fixture.version, 8);
+const fixture=deserialize(legacyRaw),fixtureJson=serialize(fixture);assert.equal(fixture.version, 9);
 for(const key of ['accounts','ledger','goodsLedger','goods'])assert.deepEqual(fixture[key],legacy[key]);
 for(const key of ['seed','rng','tick','nextId'])assert.equal(fixture[key],legacy[key]);
 const output=resolve('.test-output'), shots=resolve(process.env.CITYMANAGER_SCREENSHOT_DIR||'docs/submenu-preview');

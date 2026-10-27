@@ -15,7 +15,7 @@ const oldRaw = await readFile(new URL('./fixtures/legacy-v2-day65.json', import.
 const v1Raw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 assert.equal(hash(oldRaw), '7062ffb3c6628b1a62ae7d9c548e497ab87e70d3b57bb715d34e0a9194eba3a5');
 const imported = deserialize(oldRaw), importedRaw = serialize(imported);
-assert.equal(imported.version, 8); assert.equal(imported.rulesVersion, 'chain-3');
+assert.equal(imported.version, 9); assert.equal(imported.rulesVersion, 'chain-4');
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods', 'seed', 'rng', 'tick', 'nextId', 'migration']) assert.deepEqual(imported[key], old[key], `Strict v2 import preserves ${key}`);
 assert.deepEqual(imported.employment, old.employment.map(e => ({ ...e, skill: 'general' })));
 for (const h of imported.households) { assert.deepEqual(h.workerSkills, { general: h.workforce, manufacturing: 0, retail: 0 }); assert.equal(h.skillSource, 'legacy-assumed'); }

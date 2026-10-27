@@ -26,7 +26,7 @@ test('seeded cities that win stay self-reliant for three years: farms pay their 
 test('a business left with no cash and no workers is flagged, and a rebuild brings the chain back', async () => {
   const { bulldoze, zoneCell, firmWorkerCount } = await import('../src/sim.ts');
   const { buildingIssues } = await import('../src/map-overlay.ts');
-  const c = createCity(61025); for (let d = 0; d < 300; d++) step(c);
+  const c = createCity(61025); for (let d = 0; d < 300; d++) { step(c); keepSupplied(c); }
   const farmCell = c.buildings.find(b => b.id === c.firms.find(f => f.zone === 'F')!.building)!.cell;
   assert.equal(bulldoze(c, farmCell).ok, true); for (let d = 0; d < 60; d++) step(c);
   assert.equal(zoneCell(c, farmCell, 'F').ok, true); for (let d = 0; d < 60; d++) step(c);
