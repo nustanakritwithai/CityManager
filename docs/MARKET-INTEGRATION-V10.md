@@ -8,9 +8,11 @@ Use `VITE_MARKET_URL=http://127.0.0.1:4317` with the market server's safe loopba
 
 The six accepted item IDs are `crop:rice`, `crop:vegetables`, `crop:sugarcane`, `product:milled-rice`, `product:canned-food`, and `product:sugar`. Market credits are not city money. Listing and buy operations use durable UUID idempotency keys; a pending operation is retried only for the same guest and city fingerprint. Guest expiry or a city change quarantines unresolved operations instead of recreating a guest and replaying them.
 
-Market state is stored separately under `citymanager.market.v10` with `version: 10` and `rulesVersion: chain-5`. It contains only guest-scoped operation metadata, claims, and sequence data; it never stores the guest cookie or a token. The journal validator rejects unknown versions, rules, operation kinds, or states.
+Market state is stored under `citymanager.market.v10` while the market-enabled city save also carries the same validated envelope as `version: 10` and `rulesVersion: chain-5`. It contains only guest-scoped operation metadata, typed escrow records, claims, and sequence data; it never stores the guest cookie or a token. The journal validator rejects unknown versions, rules, operation kinds, states, item IDs, or malformed receipts. Legacy v9 and v1-v8 saves remain supported.
 
-Receipt claims are fail-closed. The panel claims a receipt but does not ACK it automatically: the game adapter must validate the item ID, destination firm type, capacity, and save quota, persist the typed city journal, then ACK the same claim ID. A lost response or a save quota failure is a pending recovery case, not permission to restore escrow or claim exactly-once offline delivery.
+Deposits reserve typed crop/product stock from a real market firm, persist a pending escrow journal before sending `POST /v1/deposits`, and confirm only from the server response. An unknown deposit can restore stock only after the server's cancellation fence is confirmed. Errors never authorize restoration.
+
+Receipt claims are fail-closed. The panel validates the item ID, destination market firm, and capacity, persists the typed city journal and applied claim state in the v10 save, then ACKs the same claim ID. A lost response or a save quota failure is a pending recovery case, not permission to restore escrow or claim exactly-once offline delivery.
 
 ## Local run
 
