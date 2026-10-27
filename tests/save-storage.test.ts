@@ -9,7 +9,7 @@ function memory(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial)), writes: string[] = [];
   return { data, writes, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { writes.push(key); data.set(key, value); } };
 }
-const old = JSON.stringify({ version: 1, tick: 65 }), household = JSON.stringify({ version: 2, tick: 180 }), worker = JSON.stringify({ version: 3, tick: 180 }), agriculture = JSON.stringify({ version: 4, tick: 180 }), commercial = JSON.stringify({ version: 5, tick: 388 }), current = JSON.stringify({ version: 8, tick: 180 });
+const old = JSON.stringify({ version: 1, tick: 65 }), household = JSON.stringify({ version: 2, tick: 180 }), worker = JSON.stringify({ version: 3, tick: 180 }), agriculture = JSON.stringify({ version: 4, tick: 180 }), commercial = JSON.stringify({ version: 5, tick: 388 }), current = JSON.stringify({ version: 9, tick: 180 });
 test('read v6, then v5/v4/v3/v2/v1 and explicit old sources without changing storage', () => {
   const s = memory({ [LEGACY_SAVE_KEY]: old }); assert.deepEqual(readStoredCity(s), { raw: old, key: LEGACY_SAVE_KEY });
   s.data.set(HOUSEHOLD_SAVE_KEY, household); assert.deepEqual(readStoredCity(s), { raw: household, key: HOUSEHOLD_SAVE_KEY });
@@ -50,7 +50,7 @@ test('backup quota failure prevents primary overwrite; failed primary retains a 
 });
 test('fresh saves add no legacy data; bad versions and full backups preserve all bytes', () => {
   const s = memory(); saveStoredCity(s, current, null); assert.deepEqual(s.writes, [SAVE_KEY]);
-  for (const raw of [old, household, worker, agriculture, commercial, JSON.stringify({ version: 6, tick: 1 }), '{broken', JSON.stringify({ version: 7 }), JSON.stringify({ version: 9 })]) assert.throws(() => saveStoredCity(s, raw, null));
+  for (const raw of [old, household, worker, agriculture, commercial, JSON.stringify({ version: 6, tick: 1 }), '{broken', JSON.stringify({ version: 7 }), JSON.stringify({ version: 8 }), JSON.stringify({ version: 10 })]) assert.throws(() => saveStoredCity(s, raw, null));
   for (const raw of [current, '{broken', JSON.stringify({ version: 0 })]) assert.throws(() => saveStoredCity(s, current, raw));
   for (let i = 0; i < 8; i++) s.data.set(i ? `${LEGACY_BACKUP_KEY}.${i}` : LEGACY_BACKUP_KEY, JSON.stringify({ version: 1, tick: i }));
   const before = [...s.data]; assert.throws(() => saveStoredCity(s, current, old), /full/); assert.deepEqual([...s.data], before);
@@ -236,14 +236,24 @@ test('v5 backup/full-slot/metadata/primary quota failures preserve old bytes and
   assert.deepEqual(saveStoredCity(s, current, commercial), { backup: exact }); assert.equal(s.data.get(COMMERCIAL_SAVE_KEY), commercial);
 });
 
-test('a 1.x (v7) save in the main slot is copied once, untouched, before the first v8 write', async () => {
+test('a 1.x (v7) save in the main slot is copied once, untouched, before the first v9 write', async () => {
   const { CHAIN2_BACKUP_KEY } = await import('../src/save-storage.ts');
-  const chain2 = JSON.stringify({ version: 7, tick: 400 }), next = JSON.stringify({ version: 8, tick: 401 }), later = JSON.stringify({ version: 8, tick: 402 });
+  const chain2 = JSON.stringify({ version: 7, tick: 400 }), next = JSON.stringify({ version: 9, tick: 401 }), later = JSON.stringify({ version: 9, tick: 402 });
   const s = memory({ [SAVE_KEY]: chain2 });
   saveStoredCity(s, next, null);
   assert.equal(s.data.get(CHAIN2_BACKUP_KEY), chain2); assert.equal(s.data.get(SAVE_KEY), next);
   saveStoredCity(s, later, null);
-  assert.equal(s.data.get(CHAIN2_BACKUP_KEY), chain2, 'the copy is never replaced by a v8 save');
+  assert.equal(s.data.get(CHAIN2_BACKUP_KEY), chain2, 'the copy is never replaced by a v9 save');
   assert.deepEqual(readStoredCity(s, 'backup'), { raw: chain2, key: CHAIN2_BACKUP_KEY }, 'restore can find it');
   const fresh = memory(); saveStoredCity(fresh, next, null); assert.equal(fresh.data.has(CHAIN2_BACKUP_KEY), false, 'a new player gets no backup');
+});
+
+test('a 2.0 (v8) save in the main slot is copied once, untouched, before the first v9 write', async () => {
+  const { CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY } = await import('../src/save-storage.ts');
+  const chain3 = JSON.stringify({ version: 8, tick: 500 }), next = JSON.stringify({ version: 9, tick: 501 }), later = JSON.stringify({ version: 9, tick: 502 });
+  const s = memory({ [SAVE_KEY]: chain3 });
+  saveStoredCity(s, next, null); saveStoredCity(s, later, null);
+  assert.equal(s.data.get(CHAIN3_BACKUP_KEY), chain3, 'the 2.0 bytes are kept once'); assert.equal(s.data.has(CHAIN2_BACKUP_KEY), false); assert.equal(s.data.get(SAVE_KEY), later);
+  assert.deepEqual(readStoredCity(s, 'backup'), { raw: chain3, key: CHAIN3_BACKUP_KEY }, 'restore can find it');
+  assert.throws(() => saveStoredCity(memory(), chain3, null), /version 9/, 'only v9 is written');
 });

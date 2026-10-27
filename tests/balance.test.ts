@@ -2,17 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, deserialize, serialize, step, summary } from '../src/sim.ts';
 import { cityGoals } from '../src/city-goals.ts';
+import { keepSupplied } from './plants.ts';
 
 test('seeded cities that win stay self-reliant for three years: farms pay their wages and no firm runs dry', { timeout: 120_000 }, () => {
   for (const seed of [61025, 2026]) {
     let c = createCity(seed), wonAt = 0;
     for (let d = 1; d <= 1080; d++) {
-      step(c);
+      step(c); keepSupplied(c);
       if (!wonAt && cityGoals(c).won) wonAt = d;
       if (d % 180 === 0) c = deserialize(serialize(c));
       if (wonAt && d >= wonAt + 90 && d % 30 === 0) assert.equal(cityGoals(c).level, 5, `seed ${seed} stays at level 5 on day ${d}`);
     }
-    assert.ok(wonAt > 0 && wonAt < 400, `seed ${seed} won on day ${wonAt}`);
+    // Plants cost the treasury one month's growth, so the three-month treasury goal restarts once (chain-4).
+    assert.ok(wonAt > 0 && wonAt < 480, `seed ${seed} won on day ${wonAt}`);
     const s = summary(c);
     assert.equal(s.employed, s.workforce, 'everyone who can work has a job');
     assert.deepEqual(c.firms.filter(f => c.accounts[f.wallet] === 0).map(f => f.id), [], 'no business sits broke');

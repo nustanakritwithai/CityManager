@@ -18,7 +18,7 @@ export const PLANTS: Readonly<Record<UtilityKind, { capacity: number; cost: numb
   water: Object.freeze({ capacity: 40, cost: 300_000, upkeep: 6_000 }),
 });
 /** The outside contract a new city starts with at the gateway, in units. */
-export const OUTSIDE_SUPPLY: Readonly<Need> = Object.freeze({ power: 24, water: 24 });
+export const OUTSIDE_SUPPLY: Readonly<Need> = Object.freeze({ power: 20, water: 20 });
 /** What a served user pays the city per unit each month (satang). */
 export const TARIFF: Readonly<Need> = Object.freeze({ power: 500, water: 300 });
 /** What the city pays outside per gateway unit actually used each month (satang). */

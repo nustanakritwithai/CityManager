@@ -65,7 +65,7 @@ test('real cash, housing, road, utility and crop shortages remain blockers rathe
   assert.equal(industryGrowthStatus(housing).code, 'growth.housing-unavailable'); conservation(housing);
   const road = current(); for (const [i, p] of road.cells.entries()) if (p.zone === 'I' && p.building === null) assert.equal(zoneCell(road, i, null).ok, true);
   assert.equal(industryGrowthStatus(road).code, 'growth.no-industrial-parcel');
-  const utilities = current(); utilities.utilities.water = false; assert.equal(industryGrowthStatus(utilities).code, 'growth.utilities-unavailable');
+  const utilities = current(); utilities.utilities.outside.water = 0; assert.equal(industryGrowthStatus(utilities).code, 'growth.utilities-unavailable');
   const crop = current(); for (const f of [...crop.firms].filter(f => f.zone === 'F' || f.commercialKind === 'market')) assert.equal(bulldoze(crop, crop.buildings.find(b => b.id === f.building)!.cell).ok, true);
   assert.equal(industryGrowthStatus(crop).ready, false); assert.ok(['growth.no-crop-buffer', 'growth.vacancies-remain'].includes(industryGrowthStatus(crop).code));
   const before = crop.firms.length; for (let n = 0; n < 9; n++) step(crop); assert.equal(crop.firms.some(f => f.fundedBy), false); assert.ok(crop.firms.length >= before); conservation(crop);
@@ -112,5 +112,5 @@ test('v5 bytes remain immutable through v6 repeated loading/saving and quota fai
   const migrated = deserialize(item.raw); saveStoredCity(store, serialize(migrated), item.raw); assert.equal(map.get(COMMERCIAL_SAVE_KEY), oldRaw); assert.equal(map.get(COMMERCIAL_BACKUP_KEY), oldRaw);
   const count = map.size; saveStoredCity(store, serialize(deserialize(readStoredCity(store)!.raw)), oldRaw); assert.equal(map.size, count); assert.equal(map.get(COMMERCIAL_BACKUP_KEY), oldRaw);
   const saved = map.get(SAVE_KEY); assert.throws(() => saveStoredCity({ ...store, setItem: (k: string, v: string) => { if (k === SAVE_KEY) throw Error('quota'); store.setItem(k, v); } }, serialize(migrated), oldRaw)); assert.equal(map.get(SAVE_KEY), saved);
-  const v4 = agricultureCity(61025); for (let n = 0; n < 90; n++) agricultureStep(v4); const loaded = deserialize(agricultureSerialize(v4)); assert.equal(loaded.version, 8); assert.equal(loaded.tick, 90); assert.deepEqual(loaded.accounts, v4.accounts); conservation(loaded);
+  const v4 = agricultureCity(61025); for (let n = 0; n < 90; n++) agricultureStep(v4); const loaded = deserialize(agricultureSerialize(v4)); assert.equal(loaded.version, 9); assert.equal(loaded.tick, 90); assert.deepEqual(loaded.accounts, v4.accounts); conservation(loaded);
 });

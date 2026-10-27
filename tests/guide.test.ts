@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY, ROAD_COST, SIZE, access, buildRoad, createCity, deserialize, serialize, step, zoneCell } from '../src/sim.ts';
+import { GATEWAY, ROAD_COST, SIZE, access, buildPlant, buildRoad, createCity, deserialize, plantAt, serialize, step, zoneCell } from '../src/sim.ts';
 import { guideState, guideSteps } from '../src/guide-steps.ts';
 import { WinLatch, cityGoals } from '../src/city-goals.ts';
 
@@ -27,7 +27,11 @@ test('following the guide from an empty map walks every step and leaves a city t
   for (const x of [4, 7]) assert.equal(zoneCell(c, 13 * SIZE + x, 'C').ok, true); now();
   for (let d = 0; d < 120 && guideState(c).step?.id !== 'grow'; d++) { step(c); now(); }
   for (const x of [8, 10]) zoneCell(c, 11 * SIZE + x, 'R'); zoneCell(c, 13 * SIZE + 10, 'I'); now();
-  assert.deepEqual(seen, ['road', 'homes', 'farm', 'factory', 'commerce', 'play', 'chain', 'grow', 'done']);
+  assert.equal(guideState(c).step?.tool, 'power', 'the utilities step picks the power plant first');
+  const sites = c.cells.map((cell, i) => !cell.road && cell.zone === null && cell.building === null && !plantAt(c, i) && access(c, i) ? i : -1).filter(i => i >= 0);
+  assert.equal(buildPlant(c, sites[0], 'power').ok, true); now(); assert.equal(guideState(c).step?.tool, 'water');
+  assert.equal(buildPlant(c, sites[1], 'water').ok, true); now();
+  assert.deepEqual(seen, ['road', 'homes', 'farm', 'factory', 'commerce', 'play', 'chain', 'grow', 'utilities', 'done']);
   assert.ok(cityGoals(c).level >= 3);
   for (let d = 0; d < 420 && !cityGoals(c).won; d++) step(c);
   assert.equal(cityGoals(c).won, true, 'a guided city can win');

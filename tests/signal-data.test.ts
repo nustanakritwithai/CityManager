@@ -14,7 +14,7 @@ const expected = () => JSON.parse(readFileSync(new URL('./fixtures/signal-respon
 test('initial actual aggregates preserve household semantics and include actual grant without mutating the city', () => {
   const city = createCity(61025), before = serialize(city), capture = captureCitySignals(city);
   assert.deepEqual(capture.metrics.map(value => value.id), ['population', 'households', 'businesses', 'employed', 'unemployed', 'treasury', 'incomePerTick', 'expensesPerTick', 'housingCapacity']);
-  assert.equal(city.version, 8);
+  assert.equal(city.version, 9);
   assert.equal(metric(capture, 'population').value, 0, 'no households means an observed zero population');
   assert.equal(metric(capture, 'population').unit, 'people');
   assert.equal(metric(capture, 'households').value, city.households.length);

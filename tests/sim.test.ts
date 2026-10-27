@@ -27,8 +27,8 @@ test('disconnected zoned parcels do not grow; utilities give numerical/explicit 
   zoneCell(c, 1, 'R'); advance(c, 90);
   assert.equal(c.buildings.length, 0); assert.match(explainCell(c, 1).join(' '), /No connected road frontage/);
   buildRoad(c, GATEWAY, 0); advance(c, 3); assert.equal(c.buildings.length, 1);
-  const d = createCity(); d.utilities.power = false; advance(d, 30);
-  assert.equal(d.buildings.length, 0); assert.match(explainCell(d, 11 * SIZE + 2).join(' '), /No power/);
+  const d = createCity(); d.utilities.outside.power = 0; advance(d, 30);
+  assert.equal(d.buildings.length, 0); assert.match(explainCell(d, 11 * SIZE + 2).join(' '), /Not enough power: a new household here needs 1 unit\(s\); the network has 0 spare/);
 });
 test('individual employment, stock, purchases and monthly settlements reconcile', () => {
   const c = advance(createCity(42), 180), s = summary(c);
