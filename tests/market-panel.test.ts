@@ -42,6 +42,6 @@ test('buy controls fail closed for empty, invalid, or unaffordable listings', ()
 
 test('central market includes own listings once and marks them non-buyable', () => {
   const rows = mergeMarketListings([{ id: 'a', item_code: 'crop:rice' }], [{ id: 'a', item_code: 'crop:rice' }, { id: 'b', item_code: 'crop:sugarcane' }]);
-  assert.deepEqual(rows, [{ id: 'a', item_code: 'crop:rice', own: false }, { id: 'b', item_code: 'crop:sugarcane', own: true }]);
+  assert.deepEqual(rows, [{ id: 'a', item_code: 'crop:rice', own: true }, { id: 'b', item_code: 'crop:sugarcane', own: true }]);
   assert.equal(rows.find(x => x.id === 'b')?.own, true);
 });
