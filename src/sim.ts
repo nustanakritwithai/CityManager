@@ -21,7 +21,7 @@ export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; le
 export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
-export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
+export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 /** `crop` names the lots moved (every kind but a write-off); a write-off carries the whole `mix`. Untyped only before `typeBaseline.tick`. */
 export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
@@ -322,22 +322,7 @@ export function bulldoze(c: City, i: number): Result {
     const displacedIds = new Set(displaced.map(h => h.id));
     c.employment = c.employment.filter(e => !displacedIds.has(e.householdId));
     c.ownerLabor = c.ownerLabor.filter(e => !displacedIds.has(e.householdId));
-    for (const f of closing) {
-      payWages(c, f);
-      const paidTax = transfer(c, f.wallet, 'treasury', Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense) / 5), 'Closing firm profit tax');
-      if (f.owner) {
-        f.owner.taxPaid += paidTax;
-        const h = c.households.find(h => h.id === f.owner!.householdId)!;
-        const capital = Math.min(balance(c, f.wallet), f.owner.capitalContributed - f.owner.capitalReturned);
-        f.owner.capitalReturned += transfer(c, f.wallet, h.wallet, capital, 'Closing owner capital return');
-        f.owner.withdrawn += transfer(c, f.wallet, h.wallet, balance(c, f.wallet), 'Closing owner profit distribution');
-      } else if (f.fundedBy) transfer(c, f.wallet, `firm:${f.fundedBy.firmId}`, balance(c, f.wallet), `Industry expansion residual return #${f.id}`);
-      else transfer(c, f.wallet, 'outside', balance(c, f.wallet), 'Firm liquidation');
-      for (const product of PRODUCTS) { const n = f.products[product]; goodsTransfer(c, f.wallet, 'outside', n, 'Demolition stock write-off to outside', product); moveProduct(c, f, null, product, n); c.goods.exported += n; }
-      c.employment = c.employment.filter(e => e.firmId !== f.id);
-      c.ownerLabor = c.ownerLabor.filter(e => e.firmId !== f.id);
-    }
-    c.firms = c.firms.filter(f => f.building !== b.id);
+    for (const f of closing) closeFirm(c, f);
     c.buildings = c.buildings.filter(v => v.id !== b.id);
   }
   cell.road = false; cell.zone = null; cell.building = null;
@@ -361,6 +346,57 @@ export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
   cell.zone = null; c.plants.push({ id, cell: i, kind, tick: c.tick });
   c.lastEvent = `${PLANT_NAMES[kind]} #${id} built: +${plant.capacity} ${kind} units along connected roads; upkeep ${plant.upkeep / 100} credits/month.`;
   return { ok: true, message: c.lastEvent };
+}
+
+/** Settle and remove one firm (its crops are already written off): wages, current tax, owner or sponsor capital, stock to outside. */
+function closeFirm(c: City, f: Firm) {
+  payWages(c, f);
+  const paidTax = transfer(c, f.wallet, 'treasury', Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense) / 5), 'Closing firm profit tax');
+  if (f.owner) {
+    f.owner.taxPaid += paidTax;
+    const h = c.households.find(h => h.id === f.owner!.householdId)!;
+    const capital = Math.min(balance(c, f.wallet), f.owner.capitalContributed - f.owner.capitalReturned);
+    f.owner.capitalReturned += transfer(c, f.wallet, h.wallet, capital, 'Closing owner capital return');
+    f.owner.withdrawn += transfer(c, f.wallet, h.wallet, balance(c, f.wallet), 'Closing owner profit distribution');
+  } else if (f.fundedBy) transfer(c, f.wallet, `firm:${f.fundedBy.firmId}`, balance(c, f.wallet), `Industry expansion residual return #${f.id}`);
+  else transfer(c, f.wallet, 'outside', balance(c, f.wallet), 'Firm liquidation');
+  for (const product of PRODUCTS) { const n = f.products[product]; goodsTransfer(c, f.wallet, 'outside', n, 'Demolition stock write-off to outside', product); moveProduct(c, f, null, product, n); c.goods.exported += n; }
+  c.employment = c.employment.filter(e => e.firmId !== f.id);
+  c.ownerLabor = c.ownerLabor.filter(e => e.firmId !== f.id);
+  c.firms = c.firms.filter(x => x !== f);
+}
+/** A dead business: no cash left and nobody working. */
+export const deadFirm = (c: City, f: Firm): boolean => balance(c, f.wallet) === 0 && firmWorkerCount(c, f.id) === 0;
+/** What a new owner pays to refit taken-over premises (outside equity); a household owner pays the usual 100-credit opening. */
+export const TAKEOVER_REFIT = 20_000;
+/**
+ * At month end a dead business closes and a new one takes over the same premises, so the player
+ * never has to bulldoze and rezone: a saving household takes a market or shop (outside equity takes
+ * a shop when no household can), outside investors take a farm or factory. The building keeps its
+ * parcel and level; the new firm has a new id and wallet, and a factory picks a fresh recipe. It
+ * waits while the premises lack a connected road, water or power, or a market finds no owner.
+ */
+function takeOver(c: City) {
+  const taken: string[] = [];
+  for (const old of [...c.firms].sort((a, b) => a.id - b.id)) {
+    if (!c.firms.includes(old) || !deadFirm(c, old)) continue;
+    const b = building(c, old.building), owner = old.zone === 'C' ? ownerCandidate(c) : undefined;
+    if (!access(c, b.cell) || !utilities(c).ok(b.id) || !canAllocateIds(c, 1) || isMarket(old) && !owner) continue;
+    if (!writeOffCrops(c, old, agricultureHooks(c))) continue;
+    const funded = old.fundedBy, retail = isRetail(old);
+    closeFirm(c, old);
+    const fid = c.nextId++, wallet = `firm:${fid}`;
+    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: chooseRecipe(c) } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
+      wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
+      owner: owner ? { householdId: owner.id, capitalContributed: OWNER_STARTUP_CAPITAL, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
+      profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
+    const capital = owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL;
+    if (transfer(c, owner ? owner.wallet : 'outside', wallet, capital, owner ? 'Owner capital contribution' : old.zone === 'F' ? 'Outside farm equity investment' : old.zone === 'I' ? `Outside industry equity #${fid}` : 'Outside firm equity investment') !== capital) throw new Error('Takeover capital invariant violated.');
+    transfer(c, wallet, 'construction', owner ? 10_000 : TAKEOVER_REFIT, owner ? retail ? 'Self-employed shop construction' : 'Self-employed market construction' : funded ? `Funded industry takeover #${old.id}` : `Business takeover refit #${fid}`);
+    if (owner) reserveOwnerLabor(c);
+    taken.push(`#${old.id} → #${fid} (${owner ? `household #${owner.id}` : 'outside investors'})`);
+  }
+  if (taken.length) c.lastEvent = `Dead business taken over: ${taken.join(', ')}. The premises stay; the new owner starts with fresh capital.`;
 }
 
 export function summary(c: City) {
@@ -756,7 +792,7 @@ export function step(c: City): void {
   c.tick++; for (const b of c.buildings) b.age++;
   rehouse(c); employ(c); admitHousehold(c); trade(c);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
-  if (c.tick % MONTH === 0) settleMonth(c);
+  if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
   if (c.tick % 3 === 0) grow(c);
   else if (c.tick % 3 === 1) openShop(c);
 }
@@ -864,6 +900,10 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7): City {
     if (!f || !int(f.id, 1) || ids.has(f.id) || !['C', 'I', 'F'].includes(f.zone) || !c.buildings.some(b => b.id === f.building && b.zone === f.zone) || f.wallet !== `firm:${f.id}` || !int(c.accounts[f.wallet]) || Object.hasOwn(f, 'employees') || !int(f.inventory) || !int(f.profit, Number.MIN_SAFE_INTEGER) || !int(f.lastMonthProfit, Number.MIN_SAFE_INTEGER) || !int(f.monthlyRevenue) || !int(f.monthlyExpense)) fail();
     const premise = c.buildings.find(b => b.id === f.building)!;
     if (f.zone === 'C' ? !['market', 'retail'].includes(f.commercialKind!) || (isMarket(f) ? premise.level !== 1 : premise.level < 2) : f.commercialKind !== undefined) fail();
+    if (f.takenOverAt !== undefined) {
+      const opened = c.ledger.filter(e => e.from === f.wallet && e.to === 'construction' && e.tick === f.takenOverAt && (/^Self-employed (?:shop|market) construction$/.test(e.reason) ? !!f.owner && e.amount === 10_000 : !f.owner && e.amount === TAKEOVER_REFIT && (e.reason === `Business takeover refit #${f.id}` || /^Funded industry takeover #[1-9]\d*$/.test(e.reason))));
+      if (version < 9 || !int(f.takenOverAt, 1) || f.takenOverAt > c.tick || f.takenOverAt < c.tick - premise.age || f.fundedBy !== undefined || f.convertedAt !== undefined || opened.length !== 1) fail();
+    }
     if (f.convertedAt !== undefined && (!isRetail(f) || !f.owner || !int(f.convertedAt, 1) || f.convertedAt > c.tick || premise.level < 2)) fail();
     if (f.fundedBy !== undefined && (f.zone !== 'I' || !f.fundedBy || typeof f.fundedBy !== 'object' || Array.isArray(f.fundedBy) || Object.keys(f.fundedBy).length !== 2 || !int(f.fundedBy.firmId, 1) || f.fundedBy.firmId >= f.id || f.fundedBy.capital !== INDUSTRY_STARTUP_CAPITAL || !Object.hasOwn(c.accounts, `firm:${f.fundedBy.firmId}`))) fail();
     if (!f.workDays || typeof f.workDays !== 'object' || Array.isArray(f.workDays) || !Object.entries(f.workDays).every(([wallet, days]) => { const h = c.households.find(h => h.wallet === wallet); return h && int(days, 1) && days <= h.workforce * (c.tick % MONTH); }) || !int(payroll(f)) || payroll(f) > balance(c, f.wallet)) fail();
@@ -926,7 +966,8 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7): City {
   }
   if ([...expansionFunding.keys()].some(id => bootstrapFunding.has(id)) || [...outsideFunding.keys()].some(id => bootstrapFunding.has(id) || expansionFunding.has(id))) fail();
   for (const f of c.firms) {
-    const funding = expansionFunding.get(f.id), born = c.tick - building(c, f.building).age;
+    // A taken-over business opened on its takeover day, not when its building went up.
+    const funding = expansionFunding.get(f.id), born = f.takenOverAt ?? c.tick - building(c, f.building).age;
     if (f.fundedBy) {
       if (!funding || funding.from !== `firm:${f.fundedBy.firmId}` || funding.to !== f.wallet || funding.tick !== born) fail();
     } else if (funding) fail();
@@ -936,9 +977,10 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7): City {
   }
   const closureMarkers = new Map<number, number>();
   c.ledger.forEach((e, index) => {
-    const match = /^Funded industry demolition #([1-9]\d*)$/.exec(e.reason); if (!match) return;
-    const id = Number(match[1]), funding = expansionFunding.get(id);
-    if (!funding || closureMarkers.has(id) || e.from !== 'treasury' || e.to !== 'construction' || e.amount !== 2_000 || e.tick < funding.tick || c.firms.some(f => f.id === id)) fail();
+    const match = /^Funded industry (demolition|takeover) #([1-9]\d*)$/.exec(e.reason); if (!match) return;
+    // A funded factory closes by demolition (the treasury pays) or by a takeover (the new firm pays its refit).
+    const id = Number(match[2]), funding = expansionFunding.get(id), takeover = match[1] === 'takeover';
+    if (!funding || closureMarkers.has(id) || (takeover ? !/^firm:\d+$/.test(e.from) || e.amount !== TAKEOVER_REFIT : e.from !== 'treasury' || e.amount !== 2_000) || e.to !== 'construction' || e.tick < funding.tick || c.firms.some(f => f.id === id)) fail();
     closureMarkers.set(id, index);
   });
   for (const [id, funding] of expansionFunding) {

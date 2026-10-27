@@ -50,6 +50,7 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Plant limit \((\d+)\) reached\.$/, m => `มีโรงน้ำไฟครบ ${m[1]} แห่งแล้ว`],
   [/^Need (\d+) credits for a (power plant|water pump)\.$/, m => `เงินคลังไม่พอ ${PLANT[m[2]]}ต้องใช้ ${Number(m[1]).toLocaleString('th-TH')} ฿`],
   [/^Invalid parcel or plant\.$/, () => 'แปลงหรือชนิดโรงไม่ถูกต้อง'],
+  [/^Dead business taken over: (.*)\. The premises stay;/, m => `กิจการที่เจ๊งมีเจ้าใหม่รับช่วง: ${m[1].replace(/household #(\d+)/g, 'ครัวเรือน #$1').replace(/outside investors/g, 'ผู้ลงทุนภายนอก')} ใช้อาคารเดิม เริ่มด้วยทุนใหม่`],
 ];
 const PLANT: Record<string, string> = { 'power plant': 'โรงไฟฟ้า', 'water pump': 'โรงสูบน้ำ' };
 

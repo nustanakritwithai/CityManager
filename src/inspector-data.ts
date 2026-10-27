@@ -59,6 +59,10 @@ const reasonLabels: Record<string, string> = {
   'New household arrival savings': 'เงินติดตัวครัวเรือนที่ย้ายเข้า',
   'Outside firm equity investment': 'เงินทุนบริษัทจากภายนอก',
   'Firm building investment': 'เงินลงทุนสร้างอาคารบริษัท',
+  'Monthly water and power bill': 'ค่าน้ำไฟรายเดือนของกิจการ',
+  'Monthly household water and power bill': 'ค่าน้ำไฟรายเดือนของครัวเรือน',
+  'Outside power supply': 'ซื้อไฟจากประตูเมือง',
+  'Outside water supply': 'ซื้อน้ำจากประตูเมือง',
   'Local wholesale goods': 'ซื้อสินค้าขายส่งในเมือง',
   'Outside goods import': 'นำเข้าสินค้าจากภายนอก',
   'Outside market goods export': 'รายรับจากการส่งออกสินค้า',
@@ -93,6 +97,14 @@ export function reasonLabel(reason: string): string {
   if (industryBootstrap) return `ทุนเริ่มอุตสาหกรรม #${industryBootstrap[1]} จากภายนอก`;
   const fundedDemolition = /^Funded industry demolition #(\d+)$/.exec(reason);
   if (fundedDemolition) return `ค่ารื้อโรงงานที่รับทุน #${fundedDemolition[1]}`;
+  const takeover = /^(?:Business takeover refit|Funded industry takeover) #(\d+)$/.exec(reason);
+  if (takeover) return `ค่าปรับปรุงอาคารเมื่อเจ้าใหม่รับช่วงกิจการ #${takeover[1]}`;
+  const outsideEquity = /^Outside industry equity #(\d+)$/.exec(reason);
+  if (outsideEquity) return `ทุนผู้ลงทุนภายนอกเปิดโรงงาน #${outsideEquity[1]}`;
+  const plant = /^(Build|Demolish) (power plant|water pump) #(\d+)$/.exec(reason);
+  if (plant) return `${plant[1] === 'Build' ? 'สร้าง' : 'รื้อ'}${plant[2] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${plant[3]}`;
+  const upkeep = /^Monthly (power plant|water pump) upkeep #(\d+)$/.exec(reason);
+  if (upkeep) return `ค่าบำรุง${upkeep[1] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${upkeep[2]} รายเดือน`;
   const road = /^Build (\d+) road cells$/.exec(reason);
   if (road) return `สร้างถนน ${road[1]} ช่อง`;
   const purchase = /^Household #(\d+) purchase$/.exec(reason);

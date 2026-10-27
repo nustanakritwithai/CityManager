@@ -29,7 +29,7 @@ export const ISSUE_TEXT: Readonly<Record<IssueKind, string>> = Object.freeze({
   'no-input': 'ขาดพืชผลวัตถุดิบ', 'stock-cap': 'คลังพืชผลเต็ม', 'no-buyer': 'ไม่มีผู้ซื้อ', 'no-stock': 'ไม่มีสินค้าขาย',
   'unsuitable-fertility': 'ดินไม่พอปลูก', 'empty-home': 'บ้านว่าง ยังไม่มีครัวเรือน',
   'importing': 'นำเข้าสินค้าจากนอกเมือง · โรงงานในเมืองผลิตไม่ทัน',
-  'broke': 'เงินกิจการหมดและไม่มีคนงาน · รื้อแล้ววางโซนเดิมใหม่ ให้เปิดกิจการใหม่',
+  'broke': 'เงินกิจการหมดและไม่มีคนงาน · สิ้นเดือนเจ้าใหม่จะรับช่วงอาคารนี้เอง',
 });
 
 export function mapOverlay(city: City, mode: OverlayMode): Overlay {
