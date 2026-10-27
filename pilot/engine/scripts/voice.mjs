@@ -3,6 +3,7 @@
 //   node scripts/voice.mjs story.yaml                 # synthesise + report how each line fits its scene
 //   node scripts/voice.mjs story.yaml --fit out.yaml  # write a copy whose scene durations fit the voice
 //   node scripts/voice.mjs story.yaml --mux clip.mp4  # mix the voice track into an already rendered clip
+//   node scripts/voice.mjs story.yaml --mp3 voice.mp3 # the voice track alone, same timing as the clip
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -16,7 +17,7 @@ mkdirSync(CACHE, { recursive: true });
 const args = process.argv.slice(2);
 const storyPath = resolve(args[0]);
 const opt = (n) => { const i = args.indexOf(`--${n}`); return i < 0 ? null : args[i + 1]; };
-const TEMPO = Number(opt('tempo') || 1.2);
+const TEMPO = Number(opt('tempo') || 1.5); // Google's Thai voice is slow; 1.5× sounded natural in review
 const LEAD = 0.35; // seconds of silence before the line starts in its scene
 const TAIL = 0.45; // breathing room before the next scene
 
@@ -73,10 +74,9 @@ if (opt('fit')) {
   console.log('wrote', opt('fit'));
 }
 
-if (opt('mux')) {
-  const clip = resolve(opt('mux'));
-  // Each line starts LEAD into its scene, or just after the previous line ends, and may spill
-  // into the next scene's opening as long as it never overlaps the next line.
+// Each line starts LEAD into its scene, or just after the previous line ends, and may spill
+// into the next scene's opening as long as it never overlaps the next line.
+function schedule() {
   const voiced = rows.filter((r) => r.file);
   let prevEnd = 0;
   for (const r of voiced) {
@@ -85,9 +85,23 @@ if (opt('mux')) {
     if (spill > 0.8) console.warn(`warning: ${r.id} runs ${spill.toFixed(2)}s past its scene`);
   }
   const inputs = voiced.flatMap((r) => ['-i', r.file]);
-  const filt = voiced.map((r, i) => `[${i + 1}:a]adelay=${Math.round(r.at * 1000)}:all=1[a${i}]`).join(';')
-    + `;${voiced.map((_, i) => `[a${i}]`).join('')}amix=inputs=${voiced.length}:normalize=0,apad[aout]`;
+  const mix = (first) => voiced.map((r, i) => `[${i + first}:a]adelay=${Math.round(r.at * 1000)}:all=1[a${i}]`).join(';')
+    + `;${voiced.map((_, i) => `[a${i}]`).join('')}amix=inputs=${voiced.length}:normalize=0,apad=whole_dur=${t}[aout]`;
+  return { inputs, mix };
+}
+
+if (opt('mux')) {
+  const clip = resolve(opt('mux'));
+  const { inputs, mix } = schedule();
   const out = clip.replace(/\.mp4$/, '-voice.mp4');
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', clip, ...inputs, '-filter_complex', filt, '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', out]);
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', clip, ...inputs, '-filter_complex', mix(1), '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', out]);
+  console.log('wrote', out);
+}
+
+// --mp3 out.mp3: the narration alone, timed to the clip, for editing apps or podcasts.
+if (opt('mp3')) {
+  const out = resolve(opt('mp3'));
+  const { inputs, mix } = schedule();
+  execFileSync('ffmpeg', ['-v', 'error', '-y', ...inputs, '-filter_complex', mix(0), '-map', '[aout]', '-t', String(t), '-c:a', 'libmp3lame', '-b:a', '160k', '-ar', '44100', out]);
   console.log('wrote', out);
 }
