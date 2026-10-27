@@ -8,6 +8,20 @@ ARCHIVE = ROOT / "skills" / "map-story-motion.skill"
 
 
 class PackagedSafetyFiles(unittest.TestCase):
+    def test_bundled_files_match_source_and_all_engine_scripts_are_included(self):
+        with ZipFile(ARCHIVE) as archive:
+            names = set(archive.namelist())
+            for script in (SKILL / "engine" / "scripts").glob("*.mjs"):
+                self.assertIn("map-story-motion/" + script.relative_to(SKILL).as_posix(), names)
+            for name in names:
+                if name.endswith("/"):
+                    continue
+                self.assertTrue(name.startswith("map-story-motion/"))
+                source = SKILL / name.removeprefix("map-story-motion/")
+                self.assertTrue(source.is_file(), name)
+                self.assertEqual(archive.read(name).replace(b"\r\n", b"\n"),
+                                 source.read_bytes().replace(b"\r\n", b"\n"), name)
+
     def test_archive_contains_current_safety_code_and_instructions(self):
         paths = [
             "SKILL.md",
@@ -15,6 +29,7 @@ class PackagedSafetyFiles(unittest.TestCase):
             "engine/scripts/safe-path.mjs",
             "engine/scripts/render.mjs",
             "engine/scripts/stills.mjs",
+            "engine/scripts/voice.mjs",
         ]
         with ZipFile(ARCHIVE) as archive:
             for path in paths:
