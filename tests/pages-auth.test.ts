@@ -6,7 +6,7 @@ import { createCity } from '../src/sim.ts';
 
 const guest = '00000000-0000-4000-8000-000000000003', other = '00000000-0000-4000-8000-000000000004', code = 'c'.repeat(43), token = 't'.repeat(43);
 class Host extends EventTarget {
-  location = { origin: PAGES_ORIGIN }; popup = { closed: false, close() { this.closed = true; } }; blocked = false; url = '';
+  location = { origin: PAGES_ORIGIN }; messages: Array<{data: unknown; origin: string}> = []; popup = { closed: false, close() { this.closed = true; }, postMessage: (data: unknown, origin: string) => this.messages.push({data, origin}) }; blocked = false; url = '';
   open(url: string) { this.url = url; return this.blocked ? null : this.popup; }
   message(origin: string, source: unknown, data: unknown) { const event = new Event('message'); Object.defineProperties(event, { origin: { value: origin }, source: { value: source }, data: { value: data } }); this.dispatchEvent(event); }
 }
@@ -16,6 +16,21 @@ async function harness(run: (host: Host, store: Map<string,string>) => Promise<v
   try { await run(host, store); } finally { pagesSession.clear(); globalThis.fetch = oldFetch; names.forEach((name, i) => previous[i] ? Object.defineProperty(globalThis, name, previous[i]!) : Reflect.deleteProperty(globalThis, name)); }
 }
 const send = (host: Host, state: string, source: unknown = host.popup, origin = MARKET_ORIGIN) => host.message(origin, source, { type: 'citymanager-auth-code', state, code });
+
+test('one-click intent is sent only to the exact popup after a matching ready message', async () => {
+  for (const expectedGuest of [guest, null]) await harness(async host => {
+    const session = new PagesSession(); await session.prepare();
+    globalThis.fetch = async () => new Response(JSON.stringify({ access_token: token, token_type: 'Bearer', expires_in: 900, guest_id: guest }), { status: 200 });
+    const pending = session.connect(expectedGuest), login = new URL(host.url), state = login.searchParams.get('state')!;
+    assert.equal(login.searchParams.get('auto'), '1');
+    const ready = (origin: string, source: unknown, value: string) => host.message(origin, source, { type: 'citymanager-auth-ready', state: value });
+    ready('https://evil.example', host.popup, state); ready(MARKET_ORIGIN, {}, state); ready(MARKET_ORIGIN, host.popup, 'wrong');
+    assert.equal(host.messages.length, 0);
+    ready(MARKET_ORIGIN, host.popup, state);
+    assert.deepEqual(host.messages, [{ origin: MARKET_ORIGIN, data: { type: 'citymanager-auth-intent', state, expectedGuest } }]);
+    send(host, state); assert.equal(await pending, guest);
+  });
+});
 
 test('popup opens synchronously and accepts only matching origin, source, state and one code', async () => harness(async host => {
   const session = new PagesSession(); await session.prepare(); let calls = 0, verifier = ''; globalThis.fetch = async (url, init) => { calls++; assert.equal(String(url), `${PAGES_MARKET_BASE}/v1/pages/exchange`); assert.equal(init?.credentials, 'omit'); const b = JSON.parse(String(init?.body)); assert.equal(b.code, code); verifier = b.verifier; return new Response(JSON.stringify({ access_token: token, token_type: 'Bearer', expires_in: 900, guest_id: guest }), { status: 200 }); };
