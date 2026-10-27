@@ -66,9 +66,25 @@ export class MarketClient {
     try { return await this.request('/v1/me'); }
     catch (e) { if ((e as any).status === 401) return null; throw e; }
   }
+  async reconcileSession(me: { guest_id: string; seq?: string }) {
+    if (!UUID.test(String(me?.guest_id)) || !/^\d+$/.test(String(me.seq ?? ''))) throw new Error('invalid guest session');
+    if (this.guestId && this.guestId !== me.guest_id) throw new Error('market guest identity mismatch');
+    const previous = BigInt(this.journal.seq), incoming = BigInt(me.seq!);
+    if (incoming < previous) throw new Error('market sequence rollback');
+    if (this.guestId && incoming > previous) {
+      const pending = this.journal.operations.filter(o => o.state === 'pending' && (o.kind === 'deposit' || o.kind === 'buy'));
+      if (!pending.length) throw new Error('market sequence gap requires reconciliation');
+      let attributable = previous;
+      for (const o of pending) { const result = await this.request(`/v1/op/${encodeURIComponent(o.opId)}`); if (!['done', 'cancelled'].includes(result.state) || !/^\d+$/.test(String(result.seq ?? ''))) throw new Error('market sequence gap requires reconciliation'); attributable = attributable > BigInt(result.seq) ? attributable : BigInt(result.seq); }
+      if (attributable !== incoming) throw new Error('market sequence gap requires reconciliation');
+    }
+    this.guestId = me.guest_id; this.journal.guestId = me.guest_id; this.journal.seq = String(me.seq); this.save(); return me;
+  }
   acceptSession(me: { guest_id: string; seq?: string }) {
+    if (!UUID.test(String(me?.guest_id))) throw new Error('invalid guest session');
     if (this.guestId && me.guest_id !== this.guestId) throw new Error('market guest identity mismatch');
-    this.guestId = me.guest_id; this.journal.guestId = this.guestId; if (me.seq !== undefined) this.journal.seq = String(me.seq); this.save(); return me;
+    if (this.guestId) return me; // Keep the saved sequence and pending operations for normal reconciliation.
+    this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me;
   }
   async createGuest() { const me = await this.request('/v1/auth/guest', { method: 'POST', body: '{}' }); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me; }
   quarantine() { const old = JSON.stringify(this.journal); if (globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine.${this.journal.cityId}.${Date.now()}`, old); this.journal = safeJournal(null); this.guestId = null; this.save(); }

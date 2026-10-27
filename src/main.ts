@@ -67,8 +67,8 @@ let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
 let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | undefined;
 // A first game starts on an empty map with the guide; `?starter=1` opens the sample city instead.
 const STARTER = new URLSearchParams(location.search).get('starter') === '1';
-let city: City = createCity(61025, { starter: STARTER });
-const ownerDecisionSession = createOwnerDecisionSession(city);
+let city: City;
+let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
 let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, guide: Guide | undefined, minimap: Minimap | undefined, cityNetwork: CityNetworkView | undefined;
 let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined, audioPanel: { sync(): void } | undefined;
@@ -364,6 +364,8 @@ function updateMapInfo(placement: Preview | null) {
 async function boot() {
   const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
+  city = createCity(61025, { starter: STARTER });
+  ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
   $('#signal-entry').hidden = !signalsEnabled();
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
