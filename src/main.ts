@@ -53,6 +53,8 @@ import { CueLimiter, cityCues, cueSnapshot } from './audio-cues.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
+import { requireGuestEntry } from './entry-gate.ts';
+import { MarketClient } from './market-client.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -360,6 +362,8 @@ function updateMapInfo(placement: Preview | null) {
 }
 
 async function boot() {
+  const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
+  if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
   setupSubmenus(); setupSubmenuNavigation(cancel);
   $('#signal-entry').hidden = !signalsEnabled();
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
