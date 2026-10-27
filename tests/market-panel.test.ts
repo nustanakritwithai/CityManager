@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canBuyListing, depositSourceLabel, depositSourceStock, eligibleDepositFirms } from '../src/market-panel.ts';
+import { canBuyListing, depositSourceLabel, depositSourceStock, eligibleDepositFirms, mergeMarketListings } from '../src/market-panel.ts';
 import type { City, Firm } from '../src/sim.ts';
 
 const firm = (patch: Partial<Firm>): Firm => ({
@@ -38,4 +38,10 @@ test('buy controls fail closed for empty, invalid, or unaffordable listings', ()
   assert.equal(canBuyListing(1, 100n, Number.NaN), false);
   assert.equal(canBuyListing(1, 100n, Number.MAX_SAFE_INTEGER + 1), false);
   assert.equal(canBuyListing(1, 100n, 'not-a-price'), false);
+});
+
+test('central market includes own listings once and marks them non-buyable', () => {
+  const rows = mergeMarketListings([{ id: 'a', item_code: 'crop:rice' }], [{ id: 'a', item_code: 'crop:rice' }, { id: 'b', item_code: 'crop:sugarcane' }]);
+  assert.deepEqual(rows, [{ id: 'a', item_code: 'crop:rice', own: false }, { id: 'b', item_code: 'crop:sugarcane', own: true }]);
+  assert.equal(rows.find(x => x.id === 'b')?.own, true);
 });
