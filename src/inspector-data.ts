@@ -124,6 +124,7 @@ export function reasonLabel(reason: string): string {
 
 export function cropFlowRows(city: City): CropFlowRow[] {
   const labels: Record<City['cropLedger'][number]['kind'], string> = {
+    'market-deposit': 'Market escrow deposit', 'market-refund': 'Market escrow refund', 'market-receipt': 'Market receipt',
     harvest: 'เก็บเกี่ยวพืชผล', trade: 'ซื้อขายพืชผล', export: 'ส่งออกพืชผลส่วนเกิน', process: 'ใช้พืชผลแปรรูป', writeoff: 'ตัดพืชผลออกจากบัญชี', consumption: 'ครัวเรือนบริโภคพืชผล',
   };
   return city.cropLedger.map((entry, index): CropFlowRow => ({
