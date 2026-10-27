@@ -25,6 +25,23 @@ html,body {
 body {
   font-size:13px
 }
+.guest-entry-gate { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:24px; background:linear-gradient(145deg,#101a31 0%,#17223a 58%,#263d5a 100%); }
+.guest-entry-card { width:min(100%,420px); padding:32px 26px; border:1px solid #deecdf3d; border-radius:20px; background:#162038f7; box-shadow:0 20px 60px #08122699; text-align:center; }
+.guest-entry-card h1 { margin:0 0 12px; color:#f3c46b; font-size:clamp(30px,8vw,48px); letter-spacing:.08em; }
+.guest-entry-card p { margin:10px 0; color:#d4deee; line-height:1.6; }
+.guest-entry-card .guest-entry-note { color:#a7b3cd; font-size:12px; }
+.guest-entry-card button { width:100%; min-height:48px; margin-top:18px; border:1px solid #f3c46b99; border-radius:12px; background:#355b75; color:#fff8e8; font:600 16px inherit; cursor:pointer; }
+.guest-entry-card button:disabled { opacity:.58; cursor:wait; }
+.guest-entry-status { min-height:24px; color:#f3c46b !important; }
+.market-game-panel { margin-top:16px; padding:14px; border:1px solid #80b9db66; border-radius:12px; background:#182946; }
+.market-game-panel h3, .market-game-panel h4 { margin:0 0 8px; color:#f3c46b; }
+.market-game-panel p { margin:6px 0; color:#c4d0e4; }
+.market-controls, .market-listing-form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+.market-listing-form input, .market-listing-form select { min-width:90px; max-width:150px; padding:6px; background:#101c32; color:#f2efe2; border:1px solid #deecdf44; border-radius:6px; }
+.market-card { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; padding:9px 0; border-top:1px solid #deecdf24; }
+.market-card button, .market-controls button, .market-listing-form button { padding:7px 10px; border:1px solid #80b9db99; border-radius:7px; background:#244766; color:#f2efe2; cursor:pointer; }
+.market-game-panel button:disabled, .market-game-panel select:disabled, .market-game-panel input:disabled { opacity:.48; cursor:not-allowed; }
+@media (max-width:600px) { .market-listing-form { display:grid; grid-template-columns:1fr 1fr; } .market-listing-form input, .market-listing-form select, .market-listing-form button { max-width:none; width:100%; } }
 h1,h2,h3,p,dl,dd {
   margin:0
 }

@@ -48,9 +48,11 @@ export function validateTypes(c: City): void {
     else if (e.kind === 'consumption') take(e.from);
     else if (e.kind === 'export') { grows(e.from); take(e.from); }
     else if (e.kind === 'process') { mills(e.from); take(e.from); recipeCrop.set(e.reason, crop); }
+    else if (e.kind === 'market-deposit') { if (e.from !== 'market-server') take(e.from); }
+    else if (e.kind === 'market-refund' || e.kind === 'market-receipt') { if (e.to.startsWith('firm:')) give(e.to); }
     else fail();
   }
-  for (const [wallet, h] of crops) { const f = firms.get(wallet); if (CROPS.some(k => (f ? f.crops[k] : 0) !== h[k])) fail(); }
+  for (const [wallet, h] of crops) { if (wallet === 'market-server') continue; const f = firms.get(wallet); if (CROPS.some(k => (f ? f.crops[k] : 0) !== h[k])) fail(); }
   for (const f of c.firms) { const h = crops.get(f.wallet) ?? emptyCrops(); if (CROPS.some(k => f.crops[k] !== h[k])) fail(); }
 
   // Finished goods, from the baseline forward; a recipe's output is that recipe's product.
@@ -64,6 +66,6 @@ export function validateTypes(c: City): void {
     if (e.from.startsWith('firm:')) { const h = productsOf(e.from); if (h[product] < e.quantity) fail(); h[product] -= e.quantity; }
     if (e.to.startsWith('firm:')) productsOf(e.to)[product] += e.quantity;
   }
-  for (const [wallet, h] of products) { const f = firms.get(wallet); if (PRODUCTS.some(p => (f ? f.products[p] : 0) !== h[p])) fail(); }
+  for (const [wallet, h] of products) { if (wallet === 'market-server') continue; const f = firms.get(wallet); if (PRODUCTS.some(p => (f ? f.products[p] : 0) !== h[p])) fail(); }
   for (const f of c.firms) { const h = products.get(f.wallet) ?? emptyProducts(); if (PRODUCTS.some(p => f.products[p] !== h[p])) fail(); }
 }

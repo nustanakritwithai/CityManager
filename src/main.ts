@@ -53,6 +53,9 @@ import { installAudioPanel } from './audio-panel.ts';
 import { CueLimiter, cityCues, cueSnapshot } from './audio-cues.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
+import { installMarketPanel } from './market-panel.ts';
+import { requireGuestEntry } from './entry-gate.ts';
+import { MarketClient } from './market-client.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -65,11 +68,12 @@ let signalPanel: ReturnType<typeof createSignalPanel> | undefined;
 let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | undefined;
 // A first game starts on an empty map with the guide; `?starter=1` opens the sample city instead.
 const STARTER = new URLSearchParams(location.search).get('starter') === '1';
-let city: City = createCity(61025, { starter: STARTER });
-const ownerDecisionSession = createOwnerDecisionSession(city);
+let city: City;
+let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
 let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undefined, cityHud: CityHud | undefined, dashboard: OverviewDashboard | undefined, cityStatsPanel: CityStatsPanel | undefined, guide: Guide | undefined, minimap: Minimap | undefined, cityNetwork: CityNetworkView | undefined;
 let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined, audioPanel: { sync(): void } | undefined;
+let marketPanel: ReturnType<typeof installMarketPanel> | undefined;
 const audio = new AudioEngine(BASE + 'assets/audio/'), cueLimiter = new CueLimiter();
 const sound = (name: EffectName) => audio.play(name);
 /** A map command's result gets its own sound: the action on success, a soft refusal otherwise. */
@@ -363,6 +367,10 @@ function updateMapInfo(placement: Preview | null) {
 }
 
 async function boot() {
+  const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
+  if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
+  city = createCity(61025, { starter: STARTER });
+  ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
   $('#signal-entry').hidden = !signalsEnabled();
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
@@ -446,14 +454,17 @@ async function boot() {
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
-  $('#save').addEventListener('click', () => {
-    try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); sound('ui-save'); status(`บันทึกรุ่น 7 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
+  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
+  $('#save').addEventListener('click', async () => {
+    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v10/chain-5 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
   });
-  const loadStored = (source: SaveSource) => {
+  const loadStored = async (source: SaveSource) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
       const loaded = deserialize(saved.raw), oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
-      city = loaded; importedLegacyRaw = legacy ? saved.raw : null;
+      if (loaded.market) marketPanel?.client.validateSave(loaded.market);
+      if (marketPanel?.client.enabled) await marketPanel.client.bindLoadedCity(loaded.market, () => { city = loaded; }); else city = loaded;
+      importedLegacyRaw = legacy ? saved.raw : null;
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
       status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว${oldVersion === 7 ? ' · เซฟรุ่น 1.x แปลงเป็นสินค้า 3 สายแล้ว (เก็บสำเนาเดิมไว้ตอนบันทึก)' : ''} · หยุดเวลาให้ตรวจข้อมูล`);
@@ -474,7 +485,8 @@ async function boot() {
     const back = document.createElement('button'); back.textContent = 'กลับสู่เมือง'; back.autofocus = true;
     const empty = document.createElement('button'); empty.textContent = 'เริ่มจากที่ว่าง (มีผู้ช่วยสอน)';
     const sample = document.createElement('button'); sample.textContent = 'เมืองตัวอย่าง (มีถนนและโซนให้แล้ว)';
-    const restart = (starter: boolean) => {
+    const restart = async (starter: boolean) => {
+      try { if (marketPanel?.client.enabled) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
       city = createCity(61025, { starter }); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();

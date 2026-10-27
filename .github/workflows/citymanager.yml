@@ -51,9 +51,54 @@ jobs:
 
       - name: Type check and build static game
         env:
+          VITE_MARKET_URL: 'https://citymanager.157-85-96-139.sslip.io/citymanager-api'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
         run: npm run build
+
+      - name: Upload Pages market verification artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: citymanager-pages-market-verification-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Build loopback market verification artifact
+        if: github.event_name == 'pull_request'
+        env:
+          VITE_MARKET_URL: 'http://127.0.0.1:4317'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
+        run: node node_modules/vite/bin/vite.js build --outDir .test-output/market-sandbox-dist
+
+      - name: Upload loopback market verification artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: citymanager-market-sandbox-dist
+          path: .test-output/market-sandbox-dist
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Build same-origin public market test artifact
+        if: github.event_name == 'pull_request'
+        env:
+          VITE_MARKET_URL: '/citymanager-api'
+          VITE_BASE_PATH: '/citymanager/'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
+        run: node node_modules/vite/bin/vite.js build --outDir .test-output/citymanager-public-test-dist
+
+      - name: Upload same-origin public market test artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: citymanager-public-test-dist
+          path: .test-output/citymanager-public-test-dist
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Verify the built game in installed Edge
         run: |

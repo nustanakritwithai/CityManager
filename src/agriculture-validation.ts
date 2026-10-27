@@ -1,6 +1,7 @@
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
+import { RECIPE } from './goods.ts';
 
 const invalid = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture state.'); };
 function requireThat(value: unknown): asserts value { if (!value) invalid(); }
@@ -67,6 +68,12 @@ export function validateAgriculture(c: City): void {
     const result = expected ?? known ?? (currentRole as Role | undefined);
     if (result) roles.set(wallet, result);
     return result;
+  };
+  const cropDestinationRole = (wallet: string, crop: string): Role => {
+    const f = firms.get(wallet); requireThat(f);
+    if (isMarket(f)) return 'T';
+    requireThat(f.zone === 'I' && f.recipe !== undefined && RECIPE[f.recipe].crop === crop);
+    return 'I';
   };
   const holding = (wallet: string): Holding => { const value = holdings.get(wallet) ?? { quantity: 0, value: 0 }; holdings.set(wallet, value); return value; };
   const receive = (wallet: string, qty: number, value: number) => {
@@ -139,6 +146,15 @@ export function validateAgriculture(c: City): void {
       role(e.from, 'F'); requireThat(holding(e.from).quantity - e.quantity === CROP_EXPORT.keep);
       const index = cash(e, 'outside', e.from); release(e); totals.exported = safeAdd(totals.exported, e.quantity);
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
+    } else if (e.kind === 'market-deposit') {
+      requireThat(e.to === 'market-server' && e.reason === `Market escrow deposit #${e.id}` && e.toValue === e.fromValue && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
+      role(e.from, 'F'); release(e); const deposited = holding(e.to); deposited.quantity = safeAdd(deposited.quantity, e.quantity); deposited.value = safeAdd(deposited.value, e.toValue);
+    } else if (e.kind === 'market-refund') {
+      requireThat(e.from === 'market-server' && e.reason === `Market escrow refund #${e.id}` && e.toValue === e.fromValue && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
+      const crop = e.crop; requireThat(crop !== undefined); release(e); role(e.to, cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
+    } else if (e.kind === 'market-receipt') {
+      requireThat(e.from === 'market-server' && e.reason === `Market receipt #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
+      const crop = e.crop; requireThat(crop !== undefined); role(e.to, cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
     } else {
       requireThat(e.kind === 'writeoff' && e.to === 'outside' && e.reason === `Crop write-off #${e.id}` && e.toValue === 0 && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
       role(e.from); requireThat(e.quantity === holding(e.from).quantity); release(e);
@@ -149,6 +165,7 @@ export function validateAgriculture(c: City): void {
   for (const key of ['harvested', 'processed', 'consumed', 'writtenOff'] as const) requireThat(totals[key] === c.crops[key]);
   requireThat(totals.exported === (c.crops.exported ?? 0) && (c.crops.exported === undefined || isSafeCount(c.crops.exported)));
   for (const [wallet, h] of holdings) {
+    if (wallet === 'market-server') continue;
     const f = firms.get(wallet); requireThat(f ? f.cropInventory === h.quantity && f.cropCost === h.value : h.quantity === 0 && h.value === 0);
   }
   for (const f of c.firms) { const h = holdings.get(f.wallet); requireThat(f.cropInventory === (h?.quantity ?? 0) && f.cropCost === (h?.value ?? 0)); }
