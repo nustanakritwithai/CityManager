@@ -180,8 +180,8 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
         const retry=button('ตรวจสอบรายการเดิม',async()=>{
           if(busy||loading)return;busy=true;retry.disabled=true;
           try{await client.retry(op.opId,saveCity);if(!pending())gate.reconciled();setNotice('ตรวจสอบรายการเดิมสำเร็จ');onChanged();}
-          catch(e){setNotice(`ยังตรวจสอบรายการไม่ได้: ${errorText(e)} · ไม่ได้สร้างรายการใหม่`);}
-          finally{busy=false;if(dialog.open)void render();}
+          catch(e){if((e as {definitiveTradeRejection?:boolean})?.definitiveTradeRejection){setNotice('ตลาดยืนยันว่ารายการนี้ไม่สำเร็จ คุณสามารถทำรายการใหม่ได้');onChanged();}else setNotice(`ยังตรวจสอบรายการไม่ได้: ${errorText(e)} · ไม่ได้สร้างรายการใหม่`);}
+          finally{if(['buy','listing','cancel'].includes(op.kind)&&op.state==='quarantined'&&!pending())gate.reconciled();busy=false;if(dialog.open)void render();}
         });row.append(retry);
         if(recoveryApiEnabled && (op.kind==='buy'||op.kind==='listing'||(op.kind==='cancel'&&op.payload.recovery_keyed===true))) {
           const check=button('ตรวจสอบผลกับเซิร์ฟเวอร์',async()=>{if(busy||loading)return;busy=true;check.disabled=true;try{const result=await client.reconcileOperation(op.opId,'status');if(!pending())gate.reconciled();setNotice(result.state==='done'&&pending()?'ตลาดยืนยันการซื้อแล้ว แต่บัญชียังต้องตรวจสอบเพิ่มเติม':result.state==='unknown'?'ยังไม่ทราบผล รายการเดิมยังค้างอยู่':result.state==='reconciliation_required'?'ต้องตรวจสอบเพิ่มเติม รายการเดิมยังค้างอยู่':'ตรวจสอบรายการเดิมแล้ว');onChanged();}catch(e){setNotice(`ยังตรวจสอบผลไม่ได้: ${errorText(e)} · เก็บรายการเดิมไว้`)}finally{busy=false;if(dialog.open)void render()}});
