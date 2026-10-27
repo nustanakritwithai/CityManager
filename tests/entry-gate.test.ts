@@ -27,8 +27,10 @@ test('returning session preserves saved sequence, operations and receipt', () =>
 });
 
 test('entry reconciliation rejects rollback and unexplained sequence advance without changing journal', async () => {
-  const client = new MarketClient(() => createCity(1, { starter: false }), 'http://127.0.0.1:4317'); client.guestId = '00000000-0000-4000-8000-000000000003'; client.journal.guestId = client.guestId; client.journal.seq = '4';
-  const before = JSON.stringify(client.journal); await assert.rejects(client.reconcileSession({ guest_id: client.guestId, seq: '3' }), /rollback/); await assert.rejects(client.reconcileSession({ guest_id: client.guestId, seq: '5' }), /gap/); assert.equal(JSON.stringify(client.journal), before);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage'), store = new Map<string, string>(); Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => store.set(key, value) } });
+  try { const client = new MarketClient(() => createCity(1, { starter: false }), 'http://127.0.0.1:4317'); client.guestId = '00000000-0000-4000-8000-000000000003'; client.journal.guestId = client.guestId; client.journal.seq = '4';
+    const before = JSON.stringify(client.journal); await assert.rejects(client.reconcileSession({ guest_id: client.guestId, seq: '3' }), /rollback/); await assert.rejects(client.reconcileSession({ guest_id: client.guestId, seq: '5' }), /gap/); assert.equal(JSON.stringify(client.journal), before);
+  } finally { if (previous) Object.defineProperty(globalThis, 'localStorage', previous); else Reflect.deleteProperty(globalThis, 'localStorage'); }
 });
 
 test('entry gate waits for auth, blocks double click and leaves existing state on error', async () => {
@@ -44,7 +46,7 @@ test('entry gate waits for auth, blocks double click and leaves existing state o
     client.checkSession = async () => ({ guest_id: journal.guestId, seq: '4' }); button.handler!(); await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(started, 1); assert.equal(game.inert, false); assert.equal(journal.seq, '4');
     const citySave = JSON.stringify({ version: 10, market: journal }); const oldStorage = globalThis.localStorage;
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key: string) => key === 'citymanager.save.v7' ? citySave : null } });
-    try { let creations = 0; const fresh = { ...client, guestId: null, journal: marketJournalForTest(null), checkSession: async () => null, createGuest: async () => { creations++; throw new Error('unexpected creation'); } } as unknown as MarketClient; await requireGuestEntry(fresh, () => { started++; }); const second = body.children[1].children[0].children[3]; second.handler!(); await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(creations, 0); assert.equal(started, 1); assert.equal(game.inert, true); assert.equal(globalThis.localStorage.getItem('citymanager.save.v7'), citySave); }
+    try { let creations = 0; const fresh = { ...client, guestId: null, journal: marketJournalForTest(null), checkSession: async () => null, createGuest: async () => { creations++; throw new Error('unexpected creation'); } } as unknown as MarketClient; await requireGuestEntry(fresh, () => { started++; }); const second = body.children[1].children[0].children[3]; second.handler!(); await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(creations, 0); assert.equal(started, 1); assert.equal(game.inert, true); assert.equal(globalThis.localStorage.getItem('citymanager.save.v7'), citySave); const offline = body.children[1].children[0].children[4]; offline.handler!(); await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(started, 2); assert.equal(game.inert, false); assert.equal(creations, 0); assert.equal(globalThis.localStorage.getItem('citymanager.save.v7'), citySave); }
     finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: oldStorage }); } }
   finally { Object.defineProperty(globalThis, 'document', { configurable: true, value: oldDocument }); Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: oldHTMLElement }); }
 });

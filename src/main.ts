@@ -449,16 +449,17 @@ async function boot() {
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
-  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); });
-  $('#save').addEventListener('click', () => {
-    try { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); sound('ui-save'); status(market ? `บันทึกเมือง v10/chain-5 และตลาดแยกแล้ว · Saved day ${city.tick}` : `บันทึกเมืองรุ่น 7 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
+  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
+  $('#save').addEventListener('click', async () => {
+    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v10/chain-5 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
   });
-  const loadStored = (source: SaveSource) => {
+  const loadStored = async (source: SaveSource) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
       const loaded = deserialize(saved.raw), oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       if (loaded.market) marketPanel?.client.validateSave(loaded.market);
-      city = loaded; if (city.market) marketPanel?.client.importSave(city.market); importedLegacyRaw = legacy ? saved.raw : null;
+      if (marketPanel?.client.enabled) await marketPanel.client.bindLoadedCity(loaded.market, () => { city = loaded; }); else city = loaded;
+      importedLegacyRaw = legacy ? saved.raw : null;
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; accumulator = 0; render();
       status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว${oldVersion === 7 ? ' · เซฟรุ่น 1.x แปลงเป็นสินค้า 3 สายแล้ว (เก็บสำเนาเดิมไว้ตอนบันทึก)' : ''} · หยุดเวลาให้ตรวจข้อมูล`);
@@ -479,8 +480,9 @@ async function boot() {
     const back = document.createElement('button'); back.textContent = 'กลับสู่เมือง'; back.autofocus = true;
     const empty = document.createElement('button'); empty.textContent = 'เริ่มจากที่ว่าง (มีผู้ช่วยสอน)';
     const sample = document.createElement('button'); sample.textContent = 'เมืองตัวอย่าง (มีถนนและโซนให้แล้ว)';
-    const restart = (starter: boolean) => {
-      city = createCity(61025, { starter }); marketPanel?.client.resetCity(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select');
+    const restart = async (starter: boolean) => {
+      try { if (marketPanel?.client.enabled) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
+      city = createCity(61025, { starter }); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
     };
