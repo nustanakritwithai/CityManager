@@ -443,7 +443,7 @@ async function boot() {
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
-  marketPanel = installMarketPanel(() => city, () => render());
+  marketPanel = installMarketPanel(() => city, () => render(), () => saveStoredCity(localStorage, serialize(city), importedLegacyRaw));
   $('#save').addEventListener('click', () => {
     try { saveStoredCity(localStorage, serialize(city), importedLegacyRaw); sound('ui-save'); status(`บันทึกรุ่น 7 ในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: พื้นที่หรือสำเนากู้คืนไม่พร้อม เซฟเดิมยังอยู่'); }
   });
@@ -473,7 +473,7 @@ async function boot() {
     const empty = document.createElement('button'); empty.textContent = 'เริ่มจากที่ว่าง (มีผู้ช่วยสอน)';
     const sample = document.createElement('button'); sample.textContent = 'เมืองตัวอย่าง (มีถนนและโซนให้แล้ว)';
     const restart = (starter: boolean) => {
-      city = createCity(61025, { starter }); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select');
+      city = createCity(61025, { starter }); marketPanel?.client.resetCity(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); accumulator = 0; paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
     };
