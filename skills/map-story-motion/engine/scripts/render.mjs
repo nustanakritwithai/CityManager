@@ -1,11 +1,12 @@
 // Render a story to MP4 (or stills) by seeking the player frame by frame in headless Chromium.
-//   node scripts/render.mjs story.yaml --stills [--at 0.8]        one PNG per scene + contact-sheet.png
+//   node scripts/render.mjs story.yaml --stills [--at 0.8]        scene PNGs and contact sheet in a new out/stills-*/ directory
 //   node scripts/render.mjs story.yaml [--workers 2] [--from 0 --to 30] [--fps 24] [--out name]
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { startServer } from './serve.mjs';
+import { renderStills } from './stills.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -44,20 +45,13 @@ console.log(`story: ${SCENES.length} scenes, ${TOTAL}s @ ${FPS}fps`);
 const stage = { x: 0, y: 0, width: 1080, height: 1920 };
 
 if (opt('stills', false)) {
-  // Stills are numbered in scene order so any scene id works and the sheet keeps the timeline order.
-  const dir = join(OUT, 'stills');
-  rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
   const at = Number(opt('at', 0.8)); // fraction into each scene; a list `sub:` shows the part playing then
-  for (const [i, s] of SCENES.entries()) {
-    const t = s.start + (s.end - s.start) * at;
-    await first.evaluate((tt) => window.seek(tt), t);
-    await first.screenshot({ path: join(dir, `${String(i + 1).padStart(2, '0')}-${s.id}.png`), clip: stage });
-    process.stdout.write(`${s.id} `);
-  }
+  const { dir, sheet } = await renderStills({ out: OUT, scenes: SCENES, page: first, at, stage, buildSheet: async (dir, sheet, count) => {
+    const cols = Math.min(7, count); const rows = Math.ceil(count / cols);
+    await run('ffmpeg', ['-v', 'error', '-y', '-pattern_type', 'glob', '-i', join(dir, '*.png'), '-vf', `scale=270:480,tile=${cols}x${rows}:padding=6:color=black`, '-frames:v', '1', sheet]);
+  } });
   console.log();
-  const cols = Math.min(7, SCENES.length); const rows = Math.ceil(SCENES.length / cols);
-  await run('ffmpeg', ['-v', 'error', '-y', '-pattern_type', 'glob', '-i', join(dir, '*.png'), '-vf', `scale=270:480,tile=${cols}x${rows}:padding=6:color=black`, '-frames:v', '1', join(OUT, 'contact-sheet.png')]);
-  console.log(`stills + contact sheet in ${OUT} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+  console.log(`stills in ${dir}; contact sheet: ${sheet} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
 } else {
   const from = Number(opt('from', 0)); const to = Math.min(TOTAL, Number(opt('to', TOTAL)));
   const workers = Number(opt('workers', 2));

@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import YAML from 'yaml';
+import { safeFile } from './safe-path.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // EOX WMTS layers: bluemarble_3857 (NASA, public domain) or s2cloudless_3857 (Sentinel-2 2016, CC BY 4.0).
@@ -48,6 +48,7 @@ export function startServer(storyPath, port = 0) {
       const url = new URL(req.url, 'http://x');
       let m;
       if (url.pathname === '/story.json') {
+        const { default: YAML } = await import('yaml');
         const story = YAML.parse(readFileSync(storyFile, 'utf8'));
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify(story));
@@ -65,9 +66,10 @@ export function startServer(storyPath, port = 0) {
         return res.end(buf);
       }
       // /media/* comes from the story folder, everything else from the engine folder.
-      const base = url.pathname.startsWith('/media/') ? storyDir : ROOT;
-      const path = join(base, decodeURIComponent(url.pathname === '/' ? '/player/index.html' : url.pathname));
-      if (!path.startsWith(base) || !existsSync(path)) { res.writeHead(404); return res.end('not found'); }
+      const pathname = decodeURIComponent(url.pathname === '/' ? '/player/index.html' : url.pathname);
+      const base = pathname.startsWith('/media/') ? storyDir : ROOT;
+      const path = safeFile(base, pathname);
+      if (!path) { res.writeHead(404); return res.end('not found'); }
       res.writeHead(200, { 'content-type': TYPES[extname(path)] || 'application/octet-stream' });
       res.end(readFileSync(path));
     } catch (err) {
