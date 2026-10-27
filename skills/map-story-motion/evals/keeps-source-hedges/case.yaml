@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: keeps-source-hedges
+expected_outcome: |
+  Subtitles and any voice lines keep the hedged wording (อาจ, น่าจะ, บางส่วน, หลักฐานยังไม่ชัดเจน) instead of stating the migration as fact.

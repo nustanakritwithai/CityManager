@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>map-story-motion player</title>
+<link rel="stylesheet" href="/node_modules/maplibre-gl/dist/maplibre-gl.css">
+<link rel="stylesheet" href="/node_modules/@fontsource/kanit/500.css">
+<link rel="stylesheet" href="/node_modules/@fontsource/kanit/700.css">
+<link rel="stylesheet" href="/node_modules/@fontsource/kanit/800.css">
+<link rel="stylesheet" href="/node_modules/@fontsource/ibm-plex-sans-thai/500.css">
+<link rel="stylesheet" href="/node_modules/@fontsource/noto-serif-sc/700.css">
+<link rel="stylesheet" href="/player/style.css">
+</head>
+<body>
+<div id="stage">
+  <div id="shake"><div id="map"></div></div>
+  <div id="night"></div>
+  <div id="vignette"></div>
+  <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="labels"></div>
+  <div id="cards"></div>
+  <div id="title"></div>
+  <div id="era"></div>
+  <div id="credits"></div>
+  <div id="hud"></div>
+  <div id="callout"></div>
+  <div id="sub"></div>
+</div>
+<div id="scrub" hidden>
+  <input id="scrub-t" type="range" min="0" step="0.0333" value="0">
+  <span id="scrub-label"></span>
+</div>
+<script src="/node_modules/maplibre-gl/dist/maplibre-gl.js"></script>
+<script type="module" src="/player/app.js"></script>
+</body>
+</html>

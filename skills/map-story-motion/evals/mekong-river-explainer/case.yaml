@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: mekong-river-explainer
+expected_outcome: |
+  A storyboard, a story.yaml that passes validate.mjs with 0 errors, built Mekong river geometry, and a contact sheet of stills. Facts limited to the six countries, the Tibetan source and the Vietnamese delta.

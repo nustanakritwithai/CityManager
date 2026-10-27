@@ -29,6 +29,7 @@ import { CityHud } from './city-hud.ts';
 import { thaiMessage } from './event-text.ts';
 import { PLANTS, PLANT_LABELS } from './utilities.ts';
 import { parcelChecklist, roadFacts, type ParcelChecklist } from './place-checklist.ts';
+import { gatewayRoadDistance } from './road-network.ts';
 import { OverviewDashboard } from './overview-panels.ts';
 import { CityStatsPanel } from './city-stats-panel.ts';
 import { decoratePanels, watchPanels } from './panel-decor.ts';
@@ -268,6 +269,10 @@ function renderPlace() {
       const fertility = city.resources.fertility[cellIndex];
       if (!building) metrics.push(metric('ความอุดมสมบูรณ์', `${fertility}%`, false, 'พืชผลหมุนเวียน ไม่ใช่แหล่งที่หมดลง', fertility));
       tags.push(tag(fertility >= 50 ? 'เหมาะสำหรับปลูกพืช' : 'ความอุดมสมบูรณ์ไม่ถึง 50%', fertility >= 50 ? 'good' : 'bad'));
+    }
+    if (!cell.road) {
+      const distance = gatewayRoadDistance(city, cellIndex);
+      if (distance !== null) reasons.push(`ระยะจากประตูเมืองผ่านถนน ${distance} ช่อง รวมทางเข้าแปลง (ไม่ใช่เวลาเดินทาง)`);
     }
     const parcel = parcelChecklist(city, cellIndex);
     if (parcel) checklist = parcelChecklistView(parcel);
