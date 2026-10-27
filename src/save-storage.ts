@@ -46,7 +46,9 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   return null;
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
-  if (![9, 10].includes(JSON.parse(raw)?.version)) throw new Error('Expected a version 9 or market version 10 snapshot.');
+  const parsed = JSON.parse(raw);
+  const market10 = parsed?.version === 10 && parsed?.rulesVersion === 'chain-5' && parsed?.market?.version === 10 && parsed?.market?.rulesVersion === 'chain-5' && typeof parsed.market.cityId === 'string' && typeof parsed.market.seq === 'string' && Array.isArray(parsed.market.operations) && parsed.market.receipts && typeof parsed.market.receipts === 'object';
+  if (parsed?.version !== 9 && !market10) throw new Error('Expected a version 9 or validated market version 10 snapshot.');
   let backup: string | null = null;
   if (importedLegacy !== null) {
     const version: unknown = JSON.parse(importedLegacy)?.version;
