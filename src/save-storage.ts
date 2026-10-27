@@ -46,7 +46,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   return null;
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
-  if (JSON.parse(raw)?.version !== 9) throw new Error('Expected a version 9 snapshot.');
+  if (![9, 10].includes(JSON.parse(raw)?.version)) throw new Error('Expected a version 9 or market version 10 snapshot.');
   let backup: string | null = null;
   if (importedLegacy !== null) {
     const version: unknown = JSON.parse(importedLegacy)?.version;

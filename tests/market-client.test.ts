@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { marketJournalForTest, MARKET_RULES } from '../src/market-client.ts';
+import { createCity, deserialize, serialize } from '../src/sim.ts';
 
 test('market journal starts at v10/chain-5 and has no guest token field', () => {
   const j = marketJournalForTest(null);
@@ -20,4 +21,18 @@ test('market journal preserves unrelated fields only through explicit schema', (
   assert.equal(j.guestId, '00000000-0000-4000-8000-000000000003');
   assert.equal(j.operations[0].state, 'pending');
   assert.equal(j.seq, '4');
+});
+
+test('city save v10 envelope round-trips market journal without putting cookies in the city', () => {
+  const city = createCity(61025, { starter: false });
+  const market = marketJournalForTest(null);
+  const raw = serialize(city, market);
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.version, 10);
+  assert.equal(parsed.rulesVersion, 'chain-5');
+  assert.equal(parsed.market.cityId, market.cityId);
+  assert.equal('cm_guest' in parsed, false);
+  const loaded = deserialize(raw);
+  assert.equal(loaded.market?.version, 10);
+  assert.equal(loaded.market?.rulesVersion, 'chain-5');
 });

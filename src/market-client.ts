@@ -29,6 +29,8 @@ export class MarketClient {
   private readonly city: () => City;
   constructor(city: () => City, baseUrl = '') { this.city = city; this.baseUrl = baseUrl.replace(/\/$/, ''); const raw = globalThis.localStorage?.getItem(MARKET_SAVE_KEY) ?? null; try { this.journal = safeJournal(raw); } catch { if (raw && globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine`, raw); this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
   get enabled() { return Boolean(this.baseUrl); }
+  exportSave() { return structuredClone(this.journal); }
+  importSave(value: unknown) { const imported = safeJournal(JSON.stringify(value)); this.journal = imported; this.guestId = imported.guestId; this.save(); }
   private save() { if (globalThis.localStorage) persist(this.journal); }
   private async request(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers); headers.set('Accept', 'application/json');

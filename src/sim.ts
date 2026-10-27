@@ -38,6 +38,8 @@ export type City = {
   cells: Cell[]; buildings: Building[]; households: Household[]; firms: Firm[];
   accounts: Record<string, number>; ledger: Entry[]; goodsLedger: GoodsEntry[];
   goods: { produced: number; imported: number; consumed: number; exported: number };
+  /** Optional v10 market envelope; the city simulator never reads or trusts its server token. */
+  market?: { version: 10; rulesVersion: 'chain-5'; cityId: string; guestId: string | null; operations: unknown[]; receipts: Record<string, unknown>; seq: string };
   /** The gateway's outside water/power contract in units; plants add the rest (see utilities.ts). */
   utilities: { outside: Need }; plants: Plant[]; lastEvent: string;
 };
@@ -822,8 +824,8 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   c.lastEvent = 'Starter road and zones are funded by the recorded grant. Unpause and watch one seeded development review every 3 days.';
   return c;
 }
-export function serialize(c: City): string {
-  const json = JSON.stringify(c);
+export function serialize(c: City, market?: City['market']): string {
+  const json = JSON.stringify(market ? { ...c, version: 10, rulesVersion: 'chain-5', market } : c);
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1040,6 +1042,14 @@ export function deserialize(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 10) {
+    const envelope = parsed as City & { market?: City['market'] };
+    if (!envelope.market || envelope.market.version !== 10 || envelope.market.rulesVersion !== 'chain-5') throw new Error('Unsupported or corrupt CityManager market save.');
+    const { market, ...base } = envelope;
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9);
+    loaded.market = market;
+    return loaded;
+  }
   if (typeof version === 'number' && [1, 2, 3, 4, 5, 6].includes(version)) return validateV7(migrateV8(validateV7(migrateV7(validateV7(migrateV6(deserializeV6(json)))), 8)), 9);
   // A 1.x (chain-2) save is validated by its own rules, then typed; a 2.0 (chain-3) save gets plants.
   if (version === 7) return validateV7(migrateV8(validateV7(migrateV7(validateV7(parsed as City)), 8)), 9);
