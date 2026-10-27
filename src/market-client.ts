@@ -93,6 +93,10 @@ export class MarketClient {
     this.ensurePagesAccess();
     if (!this.guestId) throw new Error('guest-required');
     if (this.journal.operations.some(o => o.state === 'pending')) throw new Error('operation-requires-reconciliation');
+    const validAmount = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n > 0 && n <= 1_000_000;
+    if (kind === 'listing' && (!MARKET_ITEMS.includes(payload.item_code as MarketItem) || !validAmount(payload.unit_price) || !validAmount(payload.quantity) || BigInt(payload.unit_price) * BigInt(payload.quantity) > 9_000_000_000_000_000n)) throw new Error('invalid-market-listing');
+    if (kind === 'buy' && (typeof payload.listing_id !== 'string' || !UUID.test(payload.listing_id) || !validAmount(payload.quantity))) throw new Error('invalid-market-buy');
+    if (kind === 'cancel' && (typeof payload.listing_id !== 'string' || !UUID.test(payload.listing_id))) throw new Error('invalid-market-cancel');
     const operation: MarketOperation = { opId: uuid(), guestId: this.guestId, cityId: this.journal.cityId, kind, payload, state: 'pending', createdAt: new Date().toISOString() };
     this.journal.operations.push(operation); try { this.save(); } catch (e) { this.journal.operations.pop(); throw new Error(`market journal unavailable: ${e instanceof Error ? e.message : 'storage failure'}`); } return operation;
   }
