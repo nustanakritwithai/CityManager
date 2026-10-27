@@ -151,10 +151,10 @@ export function validateAgriculture(c: City): void {
       role(e.from, 'F'); release(e); const deposited = holding(e.to); deposited.quantity = safeAdd(deposited.quantity, e.quantity); deposited.value = safeAdd(deposited.value, e.toValue);
     } else if (e.kind === 'market-refund') {
       requireThat(e.from === 'market-server' && e.reason === `Market escrow refund #${e.id}` && e.toValue === e.fromValue && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
-      release(e); role(e.to, cropDestinationRole(e.to, e.crop)); receive(e.to, e.quantity, e.toValue);
+      const crop = e.crop; requireThat(crop !== undefined); release(e); role(e.to, cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
     } else if (e.kind === 'market-receipt') {
       requireThat(e.from === 'market-server' && e.reason === `Market receipt #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
-      role(e.to, cropDestinationRole(e.to, e.crop)); receive(e.to, e.quantity, e.toValue);
+      const crop = e.crop; requireThat(crop !== undefined); role(e.to, cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
     } else {
       requireThat(e.kind === 'writeoff' && e.to === 'outside' && e.reason === `Crop write-off #${e.id}` && e.toValue === 0 && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
       role(e.from); requireThat(e.quantity === holding(e.from).quantity); release(e);
