@@ -8,7 +8,7 @@ import { cityStats, BUILDING_KINDS, STATS_WINDOW, type BuildingKind, type CitySt
 
 const KIND_LABEL: Record<BuildingKind, string> = { R: 'บ้าน', market: 'ตลาด', shop: 'ร้าน', I: 'โรงงาน', F: 'ฟาร์ม' };
 const SKILL_LABEL: Record<SkillKey, string> = { general: 'ทั่วไป', manufacturing: 'การผลิต', retail: 'ค้าปลีก' };
-const JOB_LABEL = { I: 'โรงงาน', F: 'ฟาร์ม', shop: 'ร้านค้า', market: 'ตลาด' } as const;
+const JOB_LABEL = { park: 'สวนสาธารณะ', I: 'โรงงาน', F: 'ฟาร์ม', shop: 'ร้านค้า', market: 'ตลาด' } as const;
 const n = (value: number) => value.toLocaleString('th-TH');
 const baht = (satang: number) => `${Math.round(satang / 100).toLocaleString('th-TH')} ฿`;
 const signedBaht = (satang: number) => (satang > 0 ? '+' : satang < 0 ? '−' : '') + baht(Math.abs(satang));

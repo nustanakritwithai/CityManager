@@ -103,6 +103,8 @@ export function reasonLabel(reason: string): string {
   if (outsideEquity) return `ทุนผู้ลงทุนภายนอกเปิดโรงงาน #${outsideEquity[1]}`;
   const park = /^(Build|Demolish) park #(\d+)$/.exec(reason);
   if (park) return `${park[1] === 'Build' ? 'สร้าง' : 'รื้อ'}สวนสาธารณะ #${park[2]}`;
+  const parkWage = /^Monthly park wages #(\d+)$/.exec(reason);
+  if (parkWage) return `ค่าจ้างเจ้าหน้าที่สวน #${parkWage[1]} ตามวันทำงานจริง`;
   const parkUpkeep = /^Monthly park upkeep #(\d+)$/.exec(reason);
   if (parkUpkeep) return `ค่าบำรุงสวนสาธารณะ #${parkUpkeep[1]} รายเดือน`;
   const plant = /^(Build|Demolish) (power plant|water pump) #(\d+)$/.exec(reason);

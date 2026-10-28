@@ -1,15 +1,15 @@
 /** Disjoint worker-count pools belong to households; there are no person agents. */
-export type Occupation = 'manufacturing' | 'retail';
+export type Occupation = 'manufacturing' | 'retail' | 'park-maintenance';
 export type EmploymentRank = 'entry';
 export type WorkerSkill = 'general' | 'manufacturing' | 'retail';
 export type WorkerSkills = { general: number; manufacturing: number; retail: number };
 export type EmploymentAllocation = { householdId: number; firmId: number; occupation: Occupation; rank: EmploymentRank; skill: WorkerSkill; workers: number };
 export type LaborHousehold = { id: number; workforce: number; workerSkills: WorkerSkills; accessible: boolean };
-export type LaborOffer = { id: number; zone: 'I' | 'C'; slots: number; budgetWorkers: number };
-export const OCCUPATION_BY_ZONE = Object.freeze({ I: 'manufacturing', C: 'retail' } as const);
+export type LaborOffer = { id: number; zone: 'I' | 'C' | 'P'; slots: number; budgetWorkers: number };
+export const OCCUPATION_BY_ZONE = Object.freeze({ I: 'manufacturing', C: 'retail', P: 'park-maintenance' } as const);
 export const EMPLOYMENT_RANKS = Object.freeze(['entry'] as const);
 export const WORKER_SKILLS = Object.freeze(['general', 'manufacturing', 'retail'] as const);
-export const skillEligible = (skill: WorkerSkill, occupation: Occupation): boolean => skill === 'general' || skill === occupation;
+export const skillEligible = (skill: WorkerSkill, occupation: Occupation): boolean => occupation === 'park-maintenance' || skill === 'general' || skill === occupation;
 /**
  * Career change for one household: idle specialists whose own trade has no funded opening, while
  * the other trade has some, retrain as general workers (who can take either). Returns how many
@@ -74,13 +74,13 @@ export function allocateEmployment(households: readonly LaborHousehold[], offers
   const offerById = new Map<number, OfferState>();
   for (const f of offers) {
     record(f, 'Offer'); count(f.id, 'Firm ID', 1); count(f.slots, 'Offer slots'); count(f.budgetWorkers, 'Offer budgetWorkers');
-    if (f.zone !== 'I' && f.zone !== 'C') throw new TypeError('Offer zone must be I or C');
+    if (f.zone !== 'I' && f.zone !== 'C' && f.zone !== 'P') throw new TypeError('Offer zone must be I, C or P');
     if (offerById.has(f.id)) throw new TypeError('Duplicate firm ID ' + f.id);
     offerById.set(f.id, { id: f.id, occupation: OCCUPATION_BY_ZONE[f.zone], remaining: Math.min(f.slots, f.budgetWorkers) });
   }
   for (const a of previous) {
     record(a, 'Prior allocation'); count(a.householdId, 'Prior household ID', 1); count(a.firmId, 'Prior firm ID', 1); count(a.workers, 'Prior workers', 1);
-    if (a.occupation !== 'manufacturing' && a.occupation !== 'retail') throw new TypeError('Prior occupation must be manufacturing or retail');
+    if (a.occupation !== 'manufacturing' && a.occupation !== 'retail' && a.occupation !== 'park-maintenance') throw new TypeError('Prior occupation is invalid');
     if (a.rank !== 'entry') throw new TypeError('Prior rank must be entry');
     if (!WORKER_SKILLS.includes(a.skill)) throw new TypeError('Prior worker skill is invalid');
   }

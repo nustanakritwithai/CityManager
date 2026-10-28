@@ -1,3 +1,4 @@
+import { assertSavedCity } from './park-session-assertions.mjs';
 // Measured compact/tall GUI acceptance. Root runs this sequentially on CDP 9349.
 // Baseline mode captures deployed d40; candidate mode reads that frozen JSON only.
 import { spawn } from 'node:child_process';
@@ -34,7 +35,7 @@ async function send(method, params = {}) { const key = ++id; const p = new Promi
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(80); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15){c.version=9;c.rulesVersion="chain-4"}return c})()');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) { if (await reachTouch(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`); assert.ok(r.w && r.h && !r.disabled, selector); assert.equal(await evaluate(`!!document.elementFromPoint(${r.x},${r.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}`); await click(r.x, r.y); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
@@ -180,7 +181,7 @@ async function candidateAssertions() {
   await liveRow(); assert.deepEqual(await state(), city); checks.push('Actual trusted mouse and touch ledger presses survive 200ms live refreshes with the same DOM, exact journal identity and preserved native expansion');
   await page('game');
   for (const id of ['save', 'load', 'new-city', 'inspector-status']) assert.equal(await evaluate(`!!document.querySelector('#${id}')?.closest('#game-content')`), true, `${id} belongs only to explicit Game page`);
-  await tall('s22-game'); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), fixture); await shot('game-menu.png');
+  await tall('s22-game'); await button('#save'); await assertSavedCity(evaluate, fixture); await shot('game-menu.png');
   await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
   await key('Escape'); assert.notEqual((await route()).open, 'true'); await mapRestored(); checks.push('Game menu owns persistence/status; actual Save, confirmation Cancel and Back/Escape preserve state and restore the map');
   for (const item of [

@@ -1,3 +1,4 @@
+import { assertSavedCity } from './park-session-assertions.mjs';
 // Household/housing acceptance on worker schema v6. Root runs suites sequentially.
 // The browser receives only strict-valid public-simulation fixtures via real Load.
 import { spawn } from 'node:child_process';
@@ -90,7 +91,7 @@ async function send(method, params = {}) {
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out: ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) { if (await reachTouch(evaluate, button, selector)) return;
@@ -160,7 +161,7 @@ try {
   await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v1"))throw new DOMException("Acceptance backup quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), beforeImport); assert.deepEqual(await state(), migrated); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
   finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }
-  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], legacyRaw); assert.equal(backed['citymanager.backup.v1'], legacyRaw); assert.equal(backed['citymanager.save.v7'], migratedRaw);
+  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], legacyRaw); assert.equal(backed['citymanager.backup.v1'], legacyRaw); await assertSavedCity(evaluate, migrated);
   assert.equal(Object.entries(backed).filter(([key, raw]) => key.startsWith('citymanager.backup.v1') && raw !== null).length, 1);
   await button('#save'); assert.deepEqual(await storage(), backed); checks.push('Actual Save backs original v1 bytes immutably before v6; backup quota preserves old primary and repeated Save creates no duplicate backups');
 
@@ -204,7 +205,7 @@ try {
   await close(); await button('[data-speed="1"]'); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}`); await button('#pause'); assert.deepEqual(await state(), expectedRehoused);
   for (const old of displaced) { const h = expectedRehoused.households.find(h => h.id === old.id); assert.notEqual(h.home, null); assert.equal(h.members, old.members); assert.equal(h.wallet, old.wallet); assert.equal(expectedRehoused.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1); }
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
-  await page('game'); await button('#save'); const savedV3 = await evaluate('localStorage.getItem("citymanager.save.v7")'); assert.equal(savedV3, serialize(expectedRehoused)); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
+  await page('game'); await button('#save'); await assertSavedCity(evaluate, expectedRehoused); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
   checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact v6 Save/Load retains original v1 and backup');
 
   await load(fixtureRaw);

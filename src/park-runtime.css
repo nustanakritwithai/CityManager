@@ -1,0 +1,10 @@
+#park-recreation { padding: 12px 0; border-top: 1px solid #ffffff25; }
+#park-recreation h2 { font-size: 1rem; margin: 12px 0 8px; }
+#park-recreation p { font-size: .8rem; line-height: 1.6; margin: 6px 0; }
+#park-recreation > button { width: 100%; min-height: 44px; white-space: normal; }
+#park-recreation > button.active { outline: 2px solid #69c9a4; }
+#park-recreation details { overflow-x: auto; padding: 8px 0; }
+#park-recreation summary { min-height: 32px; cursor: pointer; }
+#park-recreation table { font-size: .75rem; border-collapse: collapse; }
+#park-recreation th, #park-recreation td { padding: 6px; text-align: left; white-space: nowrap; }
+#park-recreation caption { text-align: left; padding-bottom: 8px; }

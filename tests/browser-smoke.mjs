@@ -5,8 +5,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { access, deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
-import { PARK } from '../src/parks.ts';
+import { access, createCity, step, buildPark, bulldoze, GATEWAY, deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+import { PARK, PARK_STAFF } from '../src/parks.ts';
+import { createParkRuntime, advanceParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
@@ -20,14 +21,16 @@ const root = process.cwd(), output = resolve(root, '.test-output');
 const screenshots = resolve(root, process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/screenshots');
 const targetUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 await mkdir(output, { recursive: true }); await mkdir(screenshots, { recursive: true });
+const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT || 9349);
 const edge = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
-const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${resolve(output, 'edge-profile')}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+const softwareFlags = process.env.CITYMANAGER_SOFTWARE_WEBGL === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [];
+const child = spawn(edge, ['--headless=new', ...softwareFlags, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${resolve(output, `edge-profile-${debugPort}`)}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
   const result = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 30000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method} ${String(params.expression ?? '').slice(0, 160)}`)); }, 60000);
     pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject });
   });
   ws.send(JSON.stringify({ id, method, params })); return result;
@@ -42,7 +45,7 @@ async function until(expression, timeout = 15000) {
   while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); }
   throw new Error(`Condition timed out: ${expression}`);
 }
-const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const text = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
 const paused = () => evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"');
 async function game() {
@@ -76,7 +79,7 @@ async function screenshot(name) {
 try {
   let targets;
   for (let i = 0; i < 100; i++) {
-    try { targets = await (await fetch('http://127.0.0.1:9349/json/list')).json(); break; } catch { await sleep(100); }
+    try { targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json(); break; } catch { await sleep(100); }
   }
   assert.ok(targets?.length, 'Installed Edge started');
   ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
@@ -97,7 +100,9 @@ try {
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: targetUrl + '?starter=1' });
+  console.log('Edge navigated; awaiting game startup');
   await until('!!window.cityManager');
+  console.log('Game started; awaiting admitted models');
   await until('window.cityManager.visuals().ready');
   const visualStatus = await evaluate('window.cityManager.visuals()');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(visualStatus.failed.length, 41);
@@ -105,6 +110,7 @@ try {
   assert.equal(await evaluate('window.cityManager.engine'), 'PlayCanvas 2.23.3');
   await button('#pause'); assert.equal(await paused(), true);
   checks.push('Real Edge WebGL2 startup and pause');
+  console.log('Edge WebGL startup, models and pause passed');
   const groundState = await evaluate('window.cityManager.ground()');
   assert.equal(groundState.buildGrid, false, 'Observation starts without the construction grid');
   assert.equal(groundState.textureSize, 512); assert.equal(groundState.textureCount, 3);
@@ -187,6 +193,69 @@ try {
   await game(); await button('#load'); assert.deepEqual(await state(), withPark);
   await closeInspector(); await button('[data-tool="select"]');
   checks.push('Off-road one-cell park: real UI construction, duplicate click, detail, save, demolition and load');
+  const staffFixture = createCity(61025);
+  for (let day = 0; day < 45; day++) step(staffFixture);
+  for (let i = 0; i < staffFixture.cells.length; i++) if (staffFixture.cells[i].road && i !== GATEWAY) bulldoze(staffFixture, i);
+  buildPark(staffFixture, parkCell);
+  await game(); await evaluate('localStorage.setItem("citymanager.save.v7",' + JSON.stringify(serialize(staffFixture)) + ')'); await button('#load'); await closeInspector();
+  await button('[data-speed="10"]'); await button('#pause');
+  await until('JSON.parse(window.cityManager.snapshot()).tick>=46'); await button('#pause');
+  const staffed = await state(), staffedPark = staffed.parks[0];
+  assert.equal(staffedPark.staffing.allocations.reduce((n, a) => n + a.workers, 0), 1);
+  assert.equal(staffed.employment.length, 0);
+  await button('[data-tool="select"]'); await cell(parkCell);
+  assert.match(await text('#place-metrics'), /เจ้าหน้าที่สวน/);
+  assert.match(await text('#place-metrics'), /1 \/ 1 คน/);
+  assert.match(await text('#place-metrics'), /420/);
+  assert.match(await text('#place-metrics'), /100%/);
+  await screenshot('desktop-park-workforce.png');
+  const staffOwed = Object.values(staffedPark.staffing.workDays).reduce((n, d) => n + d * PARK_STAFF.dailyWage, 0);
+  await game(); await button('#save'); await closeInspector();
+  await button('[data-tool="bulldoze"]'); await cell(parkCell);
+  const staffRemoved = await state(); assert.equal(staffRemoved.parks.length, 0);
+  assert.equal(staffRemoved.ledger.filter(e => e.reason === 'Monthly park wages #' + staffedPark.id).reduce((n, e) => n + e.amount, 0), staffOwed);
+  await game(); await button('#load'); assert.deepEqual(await state(), staffed); await closeInspector();
+  checks.push('Real park staffing after a browser day without roads: staffing/capacity/wage UI, earned payroll on removal and exact save/load');
+
+  // A valid real economy supplies the people and paid municipal allocation. Only
+  // the saved minute is staged; browser controls drive all subsequent activity.
+  const activityCity = deserialize(serialize(staffFixture)); step(activityCity);
+  const activityRuntime = createParkRuntime(activityCity);
+  for (let minute = 0; minute < 1200; minute++) {
+    advanceParkRuntime(activityCity, activityRuntime, 1, () => step(activityCity));
+    if (activityRuntime.activity.visitors.some(v => v.phase === 'sit' || v.phase === 'meet') && Object.keys(activityRuntime.recreation.citizens).length) break;
+  }
+  assert.ok(activityRuntime.activity.visitors.length > 0 && Object.keys(activityRuntime.recreation.citizens).length > 0);
+  const activitySave = serializeParkSession(activityCity, activityRuntime);
+  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(activitySave)})`); await button('#load');
+  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), activitySave);
+  await closeInspector(); await button('#toggle-inspector');
+  await button('#park-recreation > button');
+  assert.equal(await evaluate('window.cityManager.parks().speed'), 1 / 1440);
+  const realPeople = await evaluate('window.cityManager.parks()');
+  assert.ok(realPeople.renderedVisitors > 0);
+  assert.equal(new Set(realPeople.citizenIds).size, realPeople.renderedVisitors);
+  assert.ok(realPeople.citizenIds.every(id => activityRuntime.activity.visitors.some(v => v.citizenId === id)));
+  const frozenSession = await evaluate('window.cityManager.sessionSnapshot()'); await sleep(400);
+  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), frozenSession);
+  await button('#park-recreation-data summary');
+  await closeInspector(); await button('#pause');
+  await until(`window.cityManager.parks().minute > ${activityRuntime.activity.minute}`, 8000); await button('#pause');
+  assert.equal((await state()).tick, activityCity.tick);
+  await button('#toggle-inspector');
+  assert.equal(await evaluate('document.querySelector("#park-recreation-data details").open'), true);
+  await screenshot('desktop-park-recreation.png');
+  await game(); await button('#save'); const sessionSaved = await evaluate('window.cityManager.sessionSnapshot()');
+  await closeInspector(); await button('#pause');
+  await sleep(1200); await button('#pause'); await game(); await button('#load');
+  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
+  const corruptSession = JSON.parse(sessionSaved); corruptSession.parkRuntime.recreation.minute++;
+  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(JSON.stringify(corruptSession))})`);
+  await button('#load'); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
+  assert.match(await text('#inspector-status'), /โหลดไม่สำเร็จ.*sidecar clock mismatch/);
+  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await closeInspector();
+  checks.push('Real citizen identities, staffed visit benefit, citizen-speed pause, persistent provenance table, atomic fractional save/load, corrupt-sidecar rejection');
+
   await button('[data-camera="reset"]');
   await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
   await button('[data-speed="10"]'); await button('#pause');
@@ -336,6 +405,15 @@ try {
   assert.match(await text('#place-metrics'), /1 ช่อง/);
   await screenshot('mobile-park.png');
   checks.push('Mobile 390px park tool and one-cell placement/detail are reachable');
+  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await button('#load');
+  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
+  await closeInspector(); await button('#toggle-inspector');
+  if (!await evaluate('document.querySelector("#park-recreation-data details").open')) await button('#park-recreation-data summary');
+  assert.ok(await evaluate('document.querySelector("#park-recreation-data table").getBoundingClientRect().width > 0'));
+  assert.ok(await evaluate('document.querySelector("#inspector-body").scrollWidth <= document.querySelector("#inspector-body").clientWidth'));
+  assert.ok((await evaluate('window.cityManager.parks()')).renderedVisitors > 0);
+  await screenshot('mobile-park-recreation.png');
+  checks.push('390px mobile real citizens, atomic reload and bounded horizontally scrolling recreation table');
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 41, 'Only the 41 deliberately blocked model requests failed');
   const version = await send('Browser.getVersion');

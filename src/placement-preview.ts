@@ -3,7 +3,7 @@
  * up-front checks in buildRoad / zoneCell / bulldoze (sim.ts) without mutating City;
  * tests compare every preview against the real action on a cloned city.
  */
-import { GATEWAY, ROAD_COST, SIZE, access, parkAt, plantAt, roadPath, type City, type Zone } from './sim.ts';
+import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, type City, type Zone } from './sim.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
 import { MAX_PARKS, PARK } from './parks.ts';
 import { FERTILITY_THRESHOLD } from './agriculture.ts';
@@ -17,7 +17,7 @@ const inMap = (cell: number) => Number.isInteger(cell) && cell >= 0 && cell < SI
 
 export function previewPlacement(city: City, tool: string, start: number | null, hover: number | null): Preview | null {
   if (hover === null || !inMap(hover)) return null;
-  const treasury = city.accounts.treasury ?? 0;
+  const treasury = treasurySpendable(city);
   if (tool === 'road') {
     const path = start === null ? [hover] : roadPath(start, hover);
     if (!path.length) return null;

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, isMarket, buildRoad } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
+import { deserializeParkSession } from '../src/park-runtime.ts';
 import { captureOwnerSnapshot, proposeOwnerDecision, executeOwnerProposal, ownerStateHash } from '../src/owner-decision.ts';
 import { createOwnerDecisionSession } from '../src/owner-decision-session.ts';
 import { reachTouch } from './touch-reach.mjs';
@@ -73,7 +74,7 @@ async function until(expression, timeoutMs = 20000) {
   throw Error(`Condition timeout: ${safePrefix(expression)}`);
 }
 const paints = () => evaluate('new Promise(r=>{const t=setTimeout(r,100);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(t);r()}))})');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const hostState = () => evaluate('({...document.querySelector("#owner-decisions").dataset})');
 const selector = (key, value) => `[${key}=${JSON.stringify(value)}]`;
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); await paints(); }
@@ -245,10 +246,13 @@ try {
   assert.deepEqual(await state(), expectedRoad, 'Replay verification leaves the canonical city unchanged');
   await close(); await button('#toggle-game-menu'); await button('#save');
   const savedRoad = await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`);
-  assert.equal(savedRoad, serialize(expectedRoad), 'The normal save stores the exact city after the road mutation');
-  assert.deepEqual(deserialize(savedRoad), expectedRoad, 'The saved road ledger and wallet balances round-trip unchanged');
+  assert.equal(savedRoad, await evaluate('window.cityManager.sessionSnapshot()'), 'The normal save stores the exact atomic city/activity/recreation session');
+  const restoredRoad = deserializeParkSession(savedRoad);
+  assert.equal(serialize(restoredRoad.city), serialize(expectedRoad), 'The saved city bytes preserve the exact road mutation');
+  assert.deepEqual(restoredRoad.city, expectedRoad, 'The saved road ledger and wallet balances round-trip unchanged');
+  assert.equal(restoredRoad.runtime.recreation.minute, restoredRoad.city.tick * 1440 + restoredRoad.runtime.activity.minute, 'Saved park clocks agree with the city');
   assertConservation(roadActual); await openPanel();
-  checks.push('A real paused drag-built road records cash and ledger exactly, keeps explicit auto mode and replay verification active, and saves as ordinary v6 city state');
+  checks.push('A real paused drag-built road records cash and ledger exactly, keeps explicit auto mode and replay verification active, and saves atomically with matching park clocks');
 
   stage('5 replay export and readable S22 normal/wide evidence');
   await load(manualFixture); await button('#owner-evaluate'); const stable = await state(); await button('#owner-export');

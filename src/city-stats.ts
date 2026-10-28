@@ -3,6 +3,7 @@
  * population and labour by skill, and crop and goods stocks. Nothing here mutates the city.
  */
 import { MONTH, WAGES, access, connectedRoads, firmCapacity, firmWorkerCount, isMarket, summary, utilityStatus, type City, type Firm } from './sim.ts';
+import { PARK_STAFF, parkWorkers } from './parks.ts';
 import { cityOverview } from './context-data.ts';
 
 export type BuildingKind = 'R' | 'market' | 'shop' | 'I' | 'F';
@@ -16,7 +17,7 @@ export type CityStats = {
   buildings: { levels: number[]; rows: Record<number, Record<BuildingKind, number>>; totals: Record<BuildingKind, number>; all: number };
   people: { population: number; households: number; workforce: number; dependents: number; employed: number; unemployed: number; homeless: number; homelessPersons: number; occupiedPersons: number; personCapacity: number; occupiedHomes: number; homeSlots: number };
   labour: { skill: SkillKey; supply: number; employed: number; owners: number; idle: number }[];
-  jobs: { kind: 'I' | 'F' | 'shop' | 'market'; firms: number; capacity: number; workers: number; wage: number }[];
+  jobs: { kind: 'I' | 'F' | 'shop' | 'market' | 'park'; firms: number; capacity: number; workers: number; wage: number }[];
   stocks: { crops: { farm: number; market: number; factory: number }; goods: { factory: number; shop: number }; harvested: number; processed: number; produced: number; consumed: number; imported: number; exported: number };
 };
 
@@ -32,11 +33,11 @@ export function cityStats(city: City): CityStats {
   }
   const labour = SKILLS.map(skill => {
     const supply = city.households.reduce((n, h) => n + h.workerSkills[skill], 0);
-    const employed = city.employment.filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0);
+    const employed = [...city.employment, ...city.parks.flatMap(p => p.staffing?.allocations ?? [])].filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0);
     const owners = city.ownerLabor.filter(e => e.skill === skill).length;
     return { skill, supply, employed, owners, idle: Math.max(0, supply - employed - owners) };
   });
-  const jobs = (['I', 'F', 'shop', 'market'] as const).map(kind => {
+  const jobs: CityStats['jobs'] = (['I', 'F', 'shop', 'market'] as const).map(kind => {
     const firms = city.firms.filter(f => kindOf(f, f.zone) === kind);
     const buildings = firms.map(f => city.buildings.find(b => b.id === f.building)!).filter(Boolean);
     return {
@@ -44,6 +45,7 @@ export function cityStats(city: City): CityStats {
       workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: kind === 'market' ? 0 : WAGES[kind === 'shop' ? 'C' : kind],
     };
   });
+  if (city.parks.length) jobs.push({ kind: 'park', firms: city.parks.length, capacity: city.parks.length * PARK_STAFF.slots, workers: city.parks.reduce((n, p) => n + parkWorkers(p), 0), wage: PARK_STAFF.monthlyWage });
   const crop = { farm: 0, market: 0, factory: 0 }, goods = { factory: 0, shop: 0 };
   for (const f of city.firms) {
     if (f.zone === 'F') crop.farm += f.cropInventory; else if (f.zone === 'I') { crop.factory += f.cropInventory; goods.factory += f.inventory; }
