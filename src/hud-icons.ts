@@ -2,7 +2,7 @@
 import { ICONS } from './ui-icons.ts';
 
 const svg = (name: string) => `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${ICONS[name]}</svg>`;
-const TOOLS: Record<string, string> = { select: 'cursor', road: 'road', R: 'R', C: 'shop', I: 'I', F: 'F', power: 'power', water: 'water', bulldoze: 'bulldoze', pan: 'move' };
+const TOOLS: Record<string, string> = { select: 'cursor', road: 'road', R: 'R', C: 'shop', I: 'I', F: 'F', power: 'power', water: 'water', park: 'park', bulldoze: 'bulldoze', pan: 'move' };
 const CAMERA: Record<string, string> = { 'rotate-left': 'rotate-left', 'rotate-right': 'rotate-right', 'zoom-in': 'zoom-in', 'zoom-out': 'zoom-out', reset: 'home', up: 'arrow-up', down: 'arrow-down', left: 'arrow-left', right: 'arrow-right' };
 const PAGES: Record<string, string> = { 'toggle-stats': 'chart', 'toggle-network': 'network', 'toggle-inspector': 'overview', 'toggle-help': 'help', 'toggle-game-menu': 'menu' };
 

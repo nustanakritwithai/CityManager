@@ -1,5 +1,6 @@
 /** Shared 24×24 inline SVG icon set for panels and overlays; colour follows `currentColor`. */
 export const ICONS: Record<string, string> = {
+  park: '<path d="M7 21V12m-4 9h18" stroke="currentColor" stroke-width="2"/><circle cx="7" cy="8" r="5" fill="currentColor"/><path d="M14 14h7v3h-7zm1 3v4m5-4v4" stroke="currentColor" stroke-width="1.5" fill="none"/>',
   power: '<path d="M13 2 5 13h6l-1 9 8-11h-6z" fill="currentColor"/>',
   water: '<path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z" fill="currentColor"/>',
   road: '<path d="M8 2h8l3 20H5z" fill="currentColor" opacity=".5"/><path d="M12 4v3m0 4v3m0 4v3" stroke="currentColor" stroke-width="2"/>',

@@ -394,7 +394,7 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'bulldoze'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'bulldoze'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), online = utilityService(city, connected).online;
@@ -407,8 +407,8 @@ export class CityView {
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
       // Buildings without connected frontage are suspended in the sim, so they render faded.
       const reach = !!b && access(city, i);
-      const park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${plant?.kind}:${plantOn}`;
+      const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -441,6 +441,8 @@ export class CityView {
             pool.setLocalPosition(px, .16, pz); pool.setLocalScale(1.7, 1, 1.7); tile.addChild(pool);
           }
         }
+      } else if (municipalPark) {
+        this.municipalPark(tile);
       } else if (plant) {
         this.plant(tile, plant.kind, plantOn);
       } else if (park) {
@@ -499,6 +501,23 @@ export class CityView {
       for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, this.material(color, true));
     }
   }
+  /** The complete garden stays inside one 2-unit tile, independently of roads. */
+  private municipalPark(tile: Entity) {
+    this.box(tile, 0, .06, 0, 1.8, .08, 1.8, '#87a96b', false);
+    this.box(tile, 0, .11, 0, .3, .025, 1.65, '#d4c7a5', false);
+    this.box(tile, 0, .12, .25, 1.65, .025, .25, '#d4c7a5', false);
+    for (const [x, z] of [[-.5, -.45], [.48, -.43]]) {
+      this.box(tile, x, .36, z, .09, .5, .09, '#795b42');
+      this.box(tile, x, .66, z, .52, .5, .52, '#4b7d4a');
+      this.box(tile, x, .94, z, .35, .15, .35, '#679751');
+    }
+    for (const x of [-.48, .48]) {
+      this.box(tile, x, .25, .58, .48, .07, .18, '#a8794d');
+      this.box(tile, x, .36, .68, .48, .2, .05, '#a8794d');
+      for (const dx of [-.17, .17]) this.box(tile, x + dx, .17, .58, .04, .2, .12, '#535c50');
+    }
+  }
+
   /** A city water pump or power plant: simple massing in its utility colour; it glows while it supplies the network. */
   private plant(tile: Entity, kind: UtilityKind, on: boolean) {
     this.box(tile, 0, .06, 0, 1.78, .08, 1.78, '#9ea6a0', false);

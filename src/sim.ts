@@ -6,6 +6,7 @@ import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RE
 import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
+import { MAX_PARKS, PARK, type Park } from './parks.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
@@ -42,7 +43,7 @@ export type City = {
   /** Optional v10 market envelope; the city simulator never reads or trusts its server token. */
   market?: { version: 10; rulesVersion: 'chain-5'; cityId: string; guestId: string | null; operations: unknown[]; escrow: unknown[]; receipts: Record<string, unknown>; seq: string };
   /** The gateway's outside water/power contract in units; plants add the rest (see utilities.ts). */
-  utilities: { outside: Need }; plants: Plant[]; lastEvent: string;
+  utilities: { outside: Need }; plants: Plant[]; parks: Park[]; lastEvent: string;
 };
 export type Result = { ok: boolean; message: string };
 const validIndex = (i: number) => Number.isInteger(i) && i >= 0 && i < SIZE * SIZE;
@@ -82,6 +83,7 @@ export function utilityAt(c: City, cell: number): boolean {
   return b ? svc.ok(b.id) : access(c, cell) && fits(svc.spare, HOUSEHOLD_NEED);
 }
 export const plantAt = (c: City, i: number): Plant | undefined => c.plants.find(p => p.cell === i);
+export const parkAt = (c: City, i: number): Park | undefined => c.parks.find(p => p.cell === i);
 
 /** Proposed prototype finance policy, in integer satang; no credit or outside grant. */
 export const INDUSTRY_STARTUP_CAPITAL = 300_000;
@@ -305,6 +307,7 @@ export function roadPath(a: number, b: number): number[] {
 export function buildRoad(c: City, a: number, b: number): Result {
   const path = roadPath(a, b);
   if (!path.length) return { ok: false, message: 'Road is outside the bounded map.' };
+  if (path.some(i => parkAt(c, i))) return { ok: false, message: 'มีสวนสาธารณะขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => c.cells[i].building !== null || plantAt(c, i))) return { ok: false, message: 'A building or plant blocks this road. Bulldoze it first.' };
   const added = path.filter(i => !c.cells[i].road), cost = added.length * ROAD_COST;
   if (balance(c, 'treasury') < cost) return { ok: false, message: `Need ${(cost / 100).toFixed(0)} credits for this road.` };
@@ -319,6 +322,7 @@ export function zoneCell(c: City, i: number, zone: Zone): Result {
   if (!validIndex(i) || ![null, 'R', 'C', 'I', 'F'].includes(zone)) return { ok: false, message: 'Invalid parcel or zone.' };
   const cell = c.cells[i];
   if (cell.road) return { ok: false, message: 'Road cells cannot be zoned.' };
+  if (parkAt(c, i)) return { ok: false, message: 'มีสวนสาธารณะอยู่ ต้องรื้อก่อนวางโซน' };
   if (plantAt(c, i)) return { ok: false, message: 'A water or power plant stands here. Bulldoze it before zoning.' };
   if (cell.building !== null && cell.zone !== zone) return { ok: false, message: 'Bulldoze the existing building before rezoning.' };
   cell.zone = zone;
@@ -329,9 +333,15 @@ export function zoneCell(c: City, i: number, zone: Zone): Result {
 export function bulldoze(c: City, i: number): Result {
   if (!validIndex(i)) return { ok: false, message: 'Outside the map.' };
   if (i === GATEWAY) return { ok: false, message: 'The outside gateway is reserved.' };
-  const cell = c.cells[i], b = c.buildings.find(v => v.id === cell.building), plant = plantAt(c, i);
-  const cost = b || cell.road || plant ? 2_000 : 0;
+  const cell = c.cells[i], b = c.buildings.find(v => v.id === cell.building), plant = plantAt(c, i), park = parkAt(c, i);
+  const cost = b || cell.road || plant || park ? 2_000 : 0;
   if (balance(c, 'treasury') < cost) return { ok: false, message: 'Need 20 credits for demolition.' };
+  if (park) {
+    transfer(c, 'treasury', 'construction', cost, `Demolish park #${park.id}`);
+    c.parks = c.parks.filter(p => p !== park);
+    c.lastEvent = `รื้อสวนสาธารณะ #${park.id} แล้ว · ค่ารื้อ 20 · หยุดค่าบำรุงของสวนนี้`;
+    return { ok: true, message: c.lastEvent };
+  }
   if (plant) {
     transfer(c, 'treasury', 'construction', cost, `Demolish ${PLANT_NAMES[plant.kind]} #${plant.id}`);
     c.plants = c.plants.filter(p => p !== plant);
@@ -367,7 +377,7 @@ export function bulldoze(c: City, i: number): Result {
 export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
   if (!validIndex(i) || !UTILITY_KINDS.includes(kind)) return { ok: false, message: 'Invalid parcel or plant.' };
   const cell = c.cells[i], plant = PLANTS[kind];
-  if (cell.road || cell.building !== null || plantAt(c, i)) return { ok: false, message: 'A plant needs an empty parcel; roads, buildings and other plants stay where they are.' };
+  if (cell.road || cell.building !== null || plantAt(c, i) || parkAt(c, i)) return { ok: false, message: 'A plant needs an empty parcel; roads, buildings and other plants stay where they are.' };
   if (!access(c, i)) return { ok: false, message: 'A plant needs road frontage connected to the west gateway; its supply travels along the roads.' };
   if (c.plants.length >= MAX_PLANTS || !canAllocateIds(c, 1)) return { ok: false, message: `Plant limit (${MAX_PLANTS}) reached.` };
   if (balance(c, 'treasury') < plant.cost) return { ok: false, message: `Need ${plant.cost / 100} credits for a ${PLANT_NAMES[kind]}.` };
@@ -375,6 +385,20 @@ export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
   transfer(c, 'treasury', 'construction', plant.cost, `Build ${PLANT_NAMES[kind]} #${id}`);
   cell.zone = null; c.plants.push({ id, cell: i, kind, tick: c.tick });
   c.lastEvent = `${PLANT_NAMES[kind]} #${id} built: +${plant.capacity} ${kind} units along connected roads; upkeep ${plant.upkeep / 100} credits/month.`;
+  return { ok: true, message: c.lastEvent };
+}
+
+/** One empty, unzoned parcel. Parks need neither roads nor utility supply. */
+export function buildPark(c: City, i: number): Result {
+  if (!validIndex(i)) return { ok: false, message: 'ตำแหน่งสวนอยู่นอกแผนที่' };
+  const cell = c.cells[i];
+  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i)) return { ok: false, message: 'สวนต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน' };
+  if (c.parks.length >= MAX_PARKS || !canAllocateIds(c, 1)) return { ok: false, message: `สร้างสวนเพิ่มไม่ได้ (สูงสุด ${MAX_PARKS} แห่ง)` };
+  if (balance(c, 'treasury') < PARK.cost) return { ok: false, message: `เงินคลังไม่พอ สวนใช้ ${PARK.cost / 100}` };
+  const id = c.nextId++;
+  transfer(c, 'treasury', 'construction', PARK.cost, `Build park #${id}`);
+  c.parks.push({ id, cell: i, tick: c.tick, level: 1 });
+  c.lastEvent = `สร้างสวนสาธารณะ #${id} แล้ว · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน`;
   return { ok: true, message: c.lastEvent };
 }
 
@@ -494,6 +518,8 @@ function blockers(c: City, i: number): string[] {
   return reasons;
 }
 export function explainCell(c: City, i: number): string[] {
+  const park = parkAt(c, i);
+  if (park) return [`สวนสาธารณะ #${park.id} · เลเวล ${park.level} · พื้นที่ 1 ช่อง`, `ค่าบำรุง ${PARK.upkeep / 100} ต่อเดือนจากคลังเมือง · ไม่ต้องติดถนน`, 'รุ่นแรกยังไม่มีพื้นที่บริการหรือโบนัสเศรษฐกิจ'];
   if (!validIndex(i)) return ['Select a parcel inside the 24 × 24 map.'];
   const cell = c.cells[i];
   if (cell.road) return [i === GATEWAY ? 'Reserved outside gateway.' : 'Grid road.', connectedRoads(c).has(i) ? 'Connected to outside market.' : 'Disconnected: no route to the west outside gateway.', 'Road construction 50 credits/cell; upkeep 0.10 credits/day/cell.'];
@@ -668,6 +694,7 @@ function settleMonth(c: City) {
   // The city buys what the gateway delivered and keeps its plants running.
   for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
   for (const p of c.plants) transfer(c, 'treasury', 'upkeep', PLANTS[p.kind].upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
+  for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
   const { retrained, departed } = reviewLabour(c);
   c.lastEvent = 'Month settled: actual firm wages, household rent, water/power bills and taxes are in the money ledger.'
     + (retrained ? ` ${retrained} idle specialist worker(s) retrained as general workers for open jobs in the other trade.` : '')
@@ -865,7 +892,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
     buildings: [], households: [], firms: [], accounts: { outside: 0, treasury: 0, construction: 0, roadworks: 0, upkeep: 0, landlord: 0 }, ledger: [], goodsLedger: [],
-    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], lastEvent: '' };
+    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], parks: [], lastEvent: '' };
   transfer(c, 'outside', 'treasury', 3_000_000, 'Initial municipal grant');
   if (options.starter === false) {
     buildRoad(c, GATEWAY, GATEWAY);
@@ -884,7 +911,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, version: 13, rulesVersion: 'chain-8', ...(market ? { market } : {}) });
+  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, version: 14, rulesVersion: 'chain-9', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -929,11 +956,13 @@ function migrateV8(old: City): City {
 }
 const RULES = { 7: 'chain-2', 8: 'chain-3', 9: 'chain-4' } as const;
 /** Every rule of a chain-2 (v7) save; chain-3 (v8) also reconciles typed stock, chain-4 (v9) its plants. */
-function validateV7(c: City, version: 7 | 8 | 9 = 7): City {
+function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false): City {
   const typed = version >= 8;
   const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${version} / ${RULES[version]}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
   if (!c || (c.version as number) !== version || (c.rulesVersion as string) !== RULES[version] || !int(c.growthStartTick) || c.growthStartTick > c.tick || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
+  if (withParks ? !Array.isArray(c.parks) || c.parks.length > MAX_PARKS : c.parks !== undefined && (!Array.isArray(c.parks) || c.parks.length !== 0)) fail();
+  if (!withParks) c.parks = [];
   if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > 192 || !Array.isArray(c.households) || c.households.length > 128 || !Array.isArray(c.firms) || c.firms.length > 64) fail();
   if (!c.migration || !int(c.migration.arrivals) || !int(c.migration.legacyHouseholds) || !Array.isArray(c.employment) || c.employment.length > 256) fail();
   if (!Array.isArray(c.ownerLabor) || c.ownerLabor.length > 64 || c.ownerLabor.some(e => !e || !int(e.householdId, 1) || !int(e.firmId, 1) || e.workers !== 1 || !['general', 'retail'].includes(e.skill)) || !Array.isArray(c.cropLedger) || !c.crops || !['harvested', 'processed', 'consumed', 'writtenOff'].every(k => int(c.crops[k as keyof typeof c.crops])) || !int(c.agricultureStartTick) || c.agricultureStartTick > c.tick || !isCanonicalResourceMap(c.resources, c.seed)) fail();
@@ -977,6 +1006,29 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7): City {
     if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PLANTS[p.kind].cost || built[0].tick !== p.tick) fail();
     ids.add(p.id);
   }
+  for (const p of c.parks) {
+    if (!p || Object.keys(p).length !== 4 || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell) || p.level !== 1 || !int(p.tick) || p.tick > c.tick) fail();
+    const cell = c.cells[p.cell], built = c.ledger.filter(e => e.reason === `Build park #${p.id}`);
+    if (cell.road || cell.zone !== null || cell.building !== null || c.plants.some(q => q.cell === p.cell) || c.parks.some(q => q !== p && q.cell === p.cell)) fail();
+    if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PARK.cost || built[0].tick !== p.tick || c.ledger.some(e => e.reason === `Demolish park #${p.id}`)) fail();
+    ids.add(p.id);
+  }
+  const parkBuilds = new Map<number, number>(), parkRemoved = new Set<number>(), parkBills = new Set<string>();
+  for (const e of c.ledger) {
+    const event = /^(Build|Demolish|Monthly park upkeep) (?:park )?#([1-9]\d*)$/.exec(e.reason);
+    if (!event) continue;
+    const id = Number(event[2]);
+    if (!withParks || !int(id, 1) || id >= c.nextId || e.from !== 'treasury') fail();
+    if (event[1] === 'Build') {
+      if (parkBuilds.has(id) || e.to !== 'construction' || e.amount !== PARK.cost) fail();
+      parkBuilds.set(id, e.tick);
+    } else {
+      if (!parkBuilds.has(id) || parkRemoved.has(id) || e.tick < parkBuilds.get(id)!) fail();
+      if (event[1] === 'Demolish') { if (e.to !== 'construction' || e.amount !== 2_000) fail(); parkRemoved.add(id); }
+      else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > PARK.upkeep || parkBills.has(key)) fail(); parkBills.add(key); }
+    }
+  }
+  for (const id of parkBuilds.keys()) if (!parkRemoved.has(id) && !c.parks.some(p => p.id === id)) fail();
   const retainedAccountIds = Object.keys(c.accounts).flatMap(key => {
     const match = /^(?:household|firm):(\d+)$/.exec(key);
     if (!match) return [];
@@ -1101,13 +1153,13 @@ function deserializeVersioned(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
-  if (version !== 13 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
-  if (version === 13) {
+  if (version !== 13 && version !== 14 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
+  if (version === 13 || version === 14) {
     const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
-    if (envelope.rulesVersion !== 'chain-8' || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
+    if (envelope.rulesVersion !== (version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
-    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9);
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version === 14);
     if (market) loaded.market = market;
     return loaded;
   }

@@ -56,11 +56,11 @@ test('saving the food version first preserves the previous version 12 bytes', as
   const { SAVE_KEY, FOOD_BACKUP_KEY, saveStoredCity } = await import('../src/save-storage.ts');
   const { serialize, deserialize } = await import('../src/sim.ts');
   // Build the legacy fixture from a city before any per-person purchases are recorded.
-  const empty = createCity(61025); const old = JSON.parse(serialize(empty)); old.version = 12; old.rulesVersion = 'chain-7'; delete old.foodDemandStartTick;
+  const empty = createCity(61025); const old = JSON.parse(serialize(empty)); old.version = 12; old.rulesVersion = 'chain-7'; delete old.foodDemandStartTick; delete old.parks;
   const raw = JSON.stringify(old), loaded = deserialize(raw); assert.equal(loaded.tick, empty.tick);
   const values = new Map([[SAVE_KEY, raw]]);
   const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
   saveStoredCity(storage, serialize(loaded), null);
-  assert.equal(values.get(FOOD_BACKUP_KEY), raw); assert.equal(JSON.parse(values.get(SAVE_KEY)!).version, 13);
+  assert.equal(values.get(FOOD_BACKUP_KEY), raw); assert.equal(JSON.parse(values.get(SAVE_KEY)!).version, 14);
   assert.equal(deserialize(values.get(SAVE_KEY)!).tick, empty.tick);
 });

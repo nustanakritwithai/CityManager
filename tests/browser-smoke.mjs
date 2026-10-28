@@ -5,7 +5,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+import { access, deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+import { PARK } from '../src/parks.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
@@ -41,7 +42,7 @@ async function until(expression, timeout = 15000) {
   while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); }
   throw new Error(`Condition timed out: ${expression}`);
 }
-const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const text = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
 const paused = () => evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"');
 async function game() {
@@ -108,7 +109,7 @@ try {
   assert.equal(groundState.buildGrid, false, 'Observation starts without the construction grid');
   assert.equal(groundState.textureSize, 512); assert.equal(groundState.textureCount, 3);
   const beforeGridTools = await state();
-  for (const tool of ['road', 'R', 'C', 'I', 'F', 'bulldoze', 'select']) {
+  for (const tool of ['road', 'R', 'C', 'I', 'F', 'park', 'bulldoze', 'select']) {
     await button(`[data-tool="${tool}"]`);
     assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, tool !== 'select', `Grid follows ${tool} mode`);
   }
@@ -165,6 +166,27 @@ try {
   await screenshot('desktop-disconnected.png'); checks.push('Drag road, zoning, picking and disconnected explanation');
   await game(); await button('#load'); assert.deepEqual(await state(), saved); assert.equal(await paused(), true); await closeInspector();
   checks.push('Save/load round trip restores exact paused simulation');
+  const parkCell = 16 * 24 + 12, beforePark = await state();
+  assert.equal(access(beforePark, parkCell), false, 'test garden is isolated from roads');
+  await button('[data-tool="park"]'); await cell(parkCell);
+  const withPark = await state();
+  assert.equal(withPark.parks.length, beforePark.parks.length + 1);
+  assert.deepEqual(withPark.cells, beforePark.cells, 'no neighbouring or zoned cells are changed');
+  assert.equal(withPark.accounts.treasury, beforePark.accounts.treasury - PARK.cost);
+  await cell(parkCell); assert.deepEqual(await state(), withPark, 'duplicate click cannot charge again');
+  await button('[data-tool="select"]'); await cell(parkCell);
+  assert.match(await text('#selection-title'), /สวนสาธารณะ/);
+  assert.match(await text('#place-tags'), /ไม่ต้องติดถนน/);
+  assert.doesNotMatch(await text('#explanation'), /ต้องเชื่อมถนน|เครือข่ายไม่พอ|ยังไม่มีโซน/);
+  await screenshot('desktop-park.png');
+  await game(); await button('#save'); await closeInspector();
+  await button('[data-tool="bulldoze"]'); await cell(parkCell);
+  const removedPark = await state(); assert.equal(removedPark.parks.length, beforePark.parks.length);
+  assert.equal(removedPark.accounts.treasury, withPark.accounts.treasury - 2000);
+  await cell(parkCell); assert.deepEqual((await state()).accounts, removedPark.accounts);
+  await game(); await button('#load'); assert.deepEqual(await state(), withPark);
+  await closeInspector(); await button('[data-tool="select"]');
+  checks.push('Off-road one-cell park: real UI construction, duplicate click, detail, save, demolition and load');
   await button('[data-camera="reset"]');
   await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
   await button('[data-speed="10"]'); await button('#pause');
@@ -301,10 +323,23 @@ try {
   if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
   assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, false);
   await screenshot('mobile-city.png'); checks.push('390x844 DPR2 layout, unobstructed gateway, >=44px buttons and pinch without construction (emulated)');
+  const mobileParkBefore = await state();
+  await button('[data-tool="park"]');
+  assert.equal(await evaluate('document.querySelector("[data-tool=park]").getAttribute("aria-pressed")'), 'true');
+  assert.deepEqual(await state(), mobileParkBefore, 'mobile tool selection does not charge');
+  const mobileParkPoint = await evaluate(`(()=>{const c=JSON.parse(window.cityManager.snapshot());for(let i=0;i<c.cells.length;i++){const t=c.cells[i];if(t.road||t.zone||t.building!==null||c.plants.some(p=>p.cell===i)||c.parks.some(p=>p.cell===i))continue;const p=window.cityManager.cellScreen(i);if(p.y>100&&p.y<innerHeight-250&&p.x>30&&p.x<innerWidth-30&&document.elementFromPoint(p.x,p.y)?.id==='city-canvas')return {cell:i,...p}}return null})()`);
+  assert.ok(mobileParkPoint, 'an empty one-cell garden site is reachable on mobile');
+  await clickAt(mobileParkPoint.x, mobileParkPoint.y);
+  assert.equal((await state()).parks.length, mobileParkBefore.parks.length + 1);
+  await button('[data-tool="select"]'); await cell(mobileParkPoint.cell);
+  assert.match(await text('#selection-title'), /สวนสาธารณะ/);
+  assert.match(await text('#place-metrics'), /1 ช่อง/);
+  await screenshot('mobile-park.png');
+  checks.push('Mobile 390px park tool and one-cell placement/detail are reachable');
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 41, 'Only the 41 deliberately blocked model requests failed');
   const version = await send('Browser.getVersion');
-  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, ground: groundState, checks, errors, expectedAssetErrors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png', 'desktop-build-grid.png'] : []), 'mobile-inspector.png', 'mobile-ledger.png', 'mobile-firm.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
+  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, ground: groundState, checks, errors, expectedAssetErrors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'desktop-park.png', 'mobile-park.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png', 'desktop-build-grid.png'] : []), 'mobile-inspector.png', 'mobile-ledger.png', 'mobile-firm.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
   await writeFile(resolve(output, 'browser-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {

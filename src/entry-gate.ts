@@ -30,7 +30,7 @@ export async function requireGuestEntry(client: MarketClient, onAuthenticated: (
       const savedCity = globalThis.localStorage?.getItem(SAVE_KEY);
       const cityData = savedCity ? JSON.parse(savedCity) : null;
       if ((cityData?.version === 10 || cityData?.version === 11) && !cityData.market) throw new Error('saved market identity requires recovery');
-      const savedMarket = (cityData?.version === 10 || cityData?.version === 11 || (cityData?.version === 12 || cityData?.version === 13) && cityData.market) ? marketJournalForTest(JSON.stringify(cityData.market)) : null;
+      const savedMarket = (cityData?.version === 10 || cityData?.version === 11 || (cityData?.version === 12 || cityData?.version === 13 || cityData?.version === 14) && cityData.market) ? marketJournalForTest(JSON.stringify(cityData.market)) : null;
       const priorState = Boolean(client.guestId || client.journal.operations.length || client.journal.escrow.length || Object.keys(client.journal.receipts).length || savedMarket?.guestId || savedMarket?.operations.length || savedMarket?.escrow.length || Object.keys(savedMarket?.receipts ?? {}).length);
       const session = client.usesPagesAuth ? await client.connectPages() : await client.checkSession();
       if (session) {

@@ -101,6 +101,10 @@ export function reasonLabel(reason: string): string {
   if (takeover) return `ค่าปรับปรุงอาคารเมื่อเจ้าใหม่รับช่วงกิจการ #${takeover[1]}`;
   const outsideEquity = /^Outside industry equity #(\d+)$/.exec(reason);
   if (outsideEquity) return `ทุนผู้ลงทุนภายนอกเปิดโรงงาน #${outsideEquity[1]}`;
+  const park = /^(Build|Demolish) park #(\d+)$/.exec(reason);
+  if (park) return `${park[1] === 'Build' ? 'สร้าง' : 'รื้อ'}สวนสาธารณะ #${park[2]}`;
+  const parkUpkeep = /^Monthly park upkeep #(\d+)$/.exec(reason);
+  if (parkUpkeep) return `ค่าบำรุงสวนสาธารณะ #${parkUpkeep[1]} รายเดือน`;
   const plant = /^(Build|Demolish) (power plant|water pump) #(\d+)$/.exec(reason);
   if (plant) return `${plant[1] === 'Build' ? 'สร้าง' : 'รื้อ'}${plant[2] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${plant[3]}`;
   const upkeep = /^Monthly (power plant|water pump) upkeep #(\d+)$/.exec(reason);
