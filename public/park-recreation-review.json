@@ -1,0 +1,273 @@
+{
+  "provenance": {
+    "source": "Real park-activity candidate, sampled before every actual minute; no synthetic visits",
+    "leisureSourceSHA256": "10efd44b0159ff590a3b2d309740e6bcd84dfd1a6b7256d91a23074c8236fe77",
+    "recreationSourceSHA256": "ec12d5f34c2739b339e85d4d1dedabf3e742a6722f0069ec0e11776a4c279958",
+    "adapterSourceSHA256": "ea92f50a3988827f4d5c953fdba817fde7913534a2f092b8e77e8ca6ccca3ffb",
+    "seed": 61025,
+    "startEconomicDay": 180,
+    "endEconomicDay": 182,
+    "elapsedMinutes": 2880,
+    "observedEligibleMinutes": 1072,
+    "completedReturns": 34,
+    "maximumOccupancy": 6,
+    "phases": {
+      "travel": 228,
+      "enter": 136,
+      "stroll": 408,
+      "wait": 112,
+      "meet": 336,
+      "sit": 216,
+      "leave": 412
+    },
+    "verified": [
+      "real visit benefit",
+      "ongoing eligible duration only",
+      "batch 1 = 37",
+      "save/reload at minute 1087 = uninterrupted",
+      "pause no change",
+      "economy byte equality",
+      "no parks / no visits / no score",
+      "no-road one-tile park"
+    ]
+  },
+  "residents": [
+    "h:4:m:0",
+    "h:4:m:1",
+    "h:4:m:2",
+    "h:6:m:0",
+    "h:6:m:1",
+    "h:6:m:2",
+    "h:10:m:0",
+    "h:14:m:0",
+    "h:18:m:0",
+    "h:19:m:0",
+    "h:19:m:1",
+    "h:19:m:2",
+    "h:20:m:0",
+    "h:23:m:0",
+    "h:24:m:0",
+    "h:24:m:1",
+    "h:24:m:2"
+  ],
+  "recreation": {
+    "version": 1,
+    "minute": 262080,
+    "tuning": {
+      "gainUnitsPerMinute": 250,
+      "dailyCapUnits": 15000,
+      "decayUnitsPerDay": 5000
+    },
+    "citizens": {
+      "h:10:m:0": {
+        "scoreUnits": 7530,
+        "decayRemainder": 1120,
+        "dailyGainedUnits": 7557,
+        "day": 181,
+        "earnedMinutes": 57,
+        "lastBenefitMinute": 261771,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 187,
+        "lastCrowdingPermille": 750,
+        "lastQualityPermille": 1000
+      },
+      "h:14:m:0": {
+        "scoreUnits": 8910,
+        "decayRemainder": 440,
+        "dailyGainedUnits": 10059,
+        "day": 181,
+        "earnedMinutes": 67,
+        "lastBenefitMinute": 261790,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      },
+      "h:18:m:0": {
+        "scoreUnits": 7984,
+        "decayRemainder": 600,
+        "dailyGainedUnits": 5937,
+        "day": 181,
+        "earnedMinutes": 66,
+        "lastBenefitMinute": 261794,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      },
+      "h:19:m:0": {
+        "scoreUnits": 8091,
+        "decayRemainder": 760,
+        "dailyGainedUnits": 3712,
+        "day": 181,
+        "earnedMinutes": 67,
+        "lastBenefitMinute": 261691,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 125,
+        "lastCrowdingPermille": 500,
+        "lastQualityPermille": 1000
+      },
+      "h:19:m:1": {
+        "scoreUnits": 7689,
+        "decayRemainder": 880,
+        "dailyGainedUnits": 3462,
+        "day": 181,
+        "earnedMinutes": 66,
+        "lastBenefitMinute": 261691,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 125,
+        "lastCrowdingPermille": 500,
+        "lastQualityPermille": 1000
+      },
+      "h:19:m:2": {
+        "scoreUnits": 7719,
+        "decayRemainder": 600,
+        "dailyGainedUnits": 9427,
+        "day": 181,
+        "earnedMinutes": 73,
+        "lastBenefitMinute": 261289,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      },
+      "h:20:m:0": {
+        "scoreUnits": 8844,
+        "decayRemainder": 1120,
+        "dailyGainedUnits": 9996,
+        "day": 181,
+        "earnedMinutes": 66,
+        "lastBenefitMinute": 261789,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      },
+      "h:23:m:0": {
+        "scoreUnits": 2285,
+        "decayRemainder": 440,
+        "dailyGainedUnits": 3684,
+        "day": 181,
+        "earnedMinutes": 52,
+        "lastBenefitMinute": 261700,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      },
+      "h:24:m:0": {
+        "scoreUnits": 3169,
+        "decayRemainder": 320,
+        "dailyGainedUnits": 4521,
+        "day": 181,
+        "earnedMinutes": 54,
+        "lastBenefitMinute": 261698,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 187,
+        "lastCrowdingPermille": 750,
+        "lastQualityPermille": 1000
+      },
+      "h:24:m:1": {
+        "scoreUnits": 4641,
+        "decayRemainder": 1000,
+        "dailyGainedUnits": 5809,
+        "day": 181,
+        "earnedMinutes": 50,
+        "lastBenefitMinute": 261736,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 187,
+        "lastCrowdingPermille": 750,
+        "lastQualityPermille": 1000
+      },
+      "h:24:m:2": {
+        "scoreUnits": 1789,
+        "decayRemainder": 1280,
+        "dailyGainedUnits": 4677,
+        "day": 181,
+        "earnedMinutes": 48,
+        "lastBenefitMinute": 261271,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 187,
+        "lastCrowdingPermille": 750,
+        "lastQualityPermille": 1000
+      },
+      "h:4:m:0": {
+        "scoreUnits": 6024,
+        "decayRemainder": 360,
+        "dailyGainedUnits": 7430,
+        "day": 181,
+        "earnedMinutes": 66,
+        "lastBenefitMinute": 261716,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 187,
+        "lastCrowdingPermille": 750,
+        "lastQualityPermille": 1000
+      },
+      "h:4:m:1": {
+        "scoreUnits": 9381,
+        "decayRemainder": 360,
+        "dailyGainedUnits": 7805,
+        "day": 181,
+        "earnedMinutes": 86,
+        "lastBenefitMinute": 261718,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      },
+      "h:4:m:2": {
+        "scoreUnits": 10994,
+        "decayRemainder": 840,
+        "dailyGainedUnits": 9429,
+        "day": 181,
+        "earnedMinutes": 84,
+        "lastBenefitMinute": 261296,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      },
+      "h:6:m:0": {
+        "scoreUnits": 4348,
+        "decayRemainder": 440,
+        "dailyGainedUnits": 5622,
+        "day": 181,
+        "earnedMinutes": 48,
+        "lastBenefitMinute": 261736,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 187,
+        "lastCrowdingPermille": 750,
+        "lastQualityPermille": 1000
+      },
+      "h:6:m:1": {
+        "scoreUnits": 4271,
+        "decayRemainder": 1000,
+        "dailyGainedUnits": 5496,
+        "day": 181,
+        "earnedMinutes": 49,
+        "lastBenefitMinute": 261750,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 187,
+        "lastCrowdingPermille": 750,
+        "lastQualityPermille": 1000
+      },
+      "h:6:m:2": {
+        "scoreUnits": 7712,
+        "decayRemainder": 520,
+        "dailyGainedUnits": 6177,
+        "day": 181,
+        "earnedMinutes": 73,
+        "lastBenefitMinute": 261278,
+        "lastCreditedParkId": 25,
+        "lastGainUnits": 250,
+        "lastCrowdingPermille": 1000,
+        "lastQualityPermille": 1000
+      }
+    }
+  },
+  "summary": {
+    "average": 6.551823529411766,
+    "positiveResidents": 17,
+    "totalResidents": 17
+  }
+}
