@@ -564,15 +564,23 @@ function summarize(c: City) {
   const incoming = Math.min(128 - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2)));
   // Open jobs people can take now (a seat and a wage the firm can pay) vs seats a firm cannot fund.
   const seats = c.firms.filter(f => !isMarket(f) && access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + Math.max(0, capacity(building(c, f.building)) - firmWorkerCount(c, f.id)), 0);
+  const farms = c.firms.filter(f => f.zone === 'F');
+  // Once expanded farms can cover aggregate demand, an absent crop can still
+  // leave a product unavailable to real customers. Only the new-tier path
+  // adds this signal; existing farm choices and the old-tier rules stay intact.
+  const missingCropForBuyers = farms.some(f => building(c, f.building).level > 3) &&
+    c.households.some(h => householdAccess(c, h) && balance(c, h.wallet) >= 800) &&
+    c.firms.some(f => isRetail(f) && access(c, building(c, f.building).cell) && svc.ok(f.building) && firmWorkerCount(c, f.id) > 0) &&
+    CROPS.some(crop => !farms.some(f => farmCrop(c, f) === crop));
   return { population: c.households.reduce((n, h) => n + h.members, 0), households: c.households.length, workforce, openJobs: admission.vacancies + c.parks.reduce((n, p) => n + parkStaffingStatus(c, p).fundedVacancies, 0), unfundedJobs: Math.max(0, seats - admission.vacancies) + c.parks.reduce((n, p) => n + parkStaffingStatus(c, p).unfundedVacancies, 0),
     dependents: c.households.reduce((n, h) => n + h.dependents, 0), jobs, employed, unemployed: workforce - employed,
     homeless, homeSlots: homes.reduce((n, b) => n + housingCapacity(b).households, 0),
     personCapacity: homes.reduce((n, b) => n + housingCapacity(b).persons, 0), treasury: balance(c, 'treasury'), net,
     demand: { R: Math.max(0, homeless + incoming - vacantSlots), C: marketDemand(c) + retailDemand(c),
       I: industryGrowthStatus(c).ready ? 1 : 0,
-      F: (c.firms.some(f => f.zone === 'I' || isMarket(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!c.firms.some(f => f.zone === 'F') ||
+      F: (c.firms.some(f => f.zone === 'I' || isMarket(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || missingCropForBuyers ||
         c.households.reduce((n, h) => n + h.members, 0) + c.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(c, f.id) * 2, 0) >
-        c.firms.filter(f => f.zone === 'F').reduce((n, f) => n + Math.floor(24 * Math.max(50, c.resources.fertility[building(c, f.building).cell]) / 100) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0)) ? 1 : 0 } };
+        farms.reduce((n, f) => n + Math.floor(24 * Math.max(50, c.resources.fertility[building(c, f.building).cell]) / 100) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0)) ? 1 : 0 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
 function blockers(c: City, i: number): string[] {

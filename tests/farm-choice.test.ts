@@ -1,7 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { automaticFarmCrop, createCity, deserialize, farmCrop, selectFarmCrop, serialize, step, zoneCell } from '../src/sim.ts';
+import { access, automaticFarmCrop, createCity, deserialize, farmCrop, firmWorkerCount, isMarket, selectFarmCrop, serialize, step, summary, zoneCell } from '../src/sim.ts';
 import { CROPS } from '../src/goods.ts';
+
+test('farm demand retains published accounting before any farm reaches a new tier', () => {
+  const city = createCity(61025); let checked = 0;
+  for (let day = 0; day < 120; day++) {
+    const farms = city.firms.filter(f => f.zone === 'F');
+    if (farms.some(f => city.buildings.find(b => b.id === f.building)!.level > 3)) break;
+    const buyers = city.firms.some(f => f.zone === 'I' || isMarket(f)) ||
+      city.households.some(h => h.home !== null && access(city, city.buildings.find(b => b.id === h.home)!.cell)) && city.cells.some((cell, i) => cell.zone === 'C' && access(city, i));
+    const needed = city.households.reduce((n, h) => n + h.members, 0) + city.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(city, f.id) * 2, 0);
+    const oldCapacity = farms.reduce((n, f) => { const b = city.buildings.find(b => b.id === f.building)!; return n + Math.floor(24 * Math.max(50, city.resources.fertility[b.cell]) / 100); }, 0);
+    assert.equal(summary(city).demand.F, buyers && (!farms.length || needed > oldCapacity) ? 1 : 0);
+    checked++; step(city);
+  }
+  assert.ok(checked >= 30, 'compared old-tier behavior across multiple simulated days');
+});
 
 test('automatic choice balances farm types and manual override can return to auto', () => {
   const city = createCity(61025);
