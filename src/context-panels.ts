@@ -4,7 +4,7 @@ import './building-cards.css';
 import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -562,6 +562,17 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
   } else if (data.kind === 'shop') {
     output.push(cardGroup('สินค้าสำเร็จรูปพร้อมขาย', 'stock', takeCards(parts, ['stock'])), cardTrade(data), cardCash(data, parts));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
+    const firm = city.firms.find(f => f.id === data.identity.firmId && isRetail(f));
+    if (firm) {
+      const s = retailGrowthStatus(city, firm), panel = section('ระดับร้านและการขยาย');
+      panel.dataset.retailGrowth = String(firm.id);
+      panel.append(el('p', 'cx-detail-note', `ระดับ ${s.level} · คนทำงาน ${s.workers}/${s.current.workers} · พื้นที่สินค้า ${s.current.stock} หน่วย · เป้าเติมตามคนทำงานสูงสุด ${s.staffed.stock} หน่วย`));
+      panel.append(el('p', 'cx-detail-note', `ความครอบคลุมที่ใช้วางแผนร้านใหม่สูงสุด ${s.staffed.householdCoverage} ครัวเรือนเมื่อมีสินค้า ถนน และสาธารณูปโภคครบ; ร้านเดิมยังนับอย่างน้อย 8 ครัวเรือน`));
+      panel.append(el('p', 'cx-detail-note', 'ไม่มีเพดานลูกค้ารายวันตายตัว ยอดขายขึ้นกับสินค้าที่มี คนทำงาน ลูกค้า และเงินซื้อจริง'));
+      panel.append(el('p', 'cx-detail-note', s.next ? `ระดับถัดไป ${s.level + 1}: คนทำงาน ${s.next.workers} คน · พื้นที่สินค้า ${s.next.stock} หน่วย · ทบทวนอัตโนมัติทุกเดือน` : 'ถึงระดับสูงสุดแล้ว'));
+      if (s.next) panel.append(el('p', 'cx-detail-note', s.reasons.length ? `เงื่อนไขที่ยังขาด: ${s.reasons.join(' · ')}` : 'เงื่อนไขปัจจุบันครบ; ไฟฟ้าและน้ำสำรองอาจถูกใช้งานก่อนถึงรอบทบทวน'));
+      output.push(panel);
+    }
   } else if (data.kind === 'market') {
     const marketKpis = takeCards(parts, ['crop-stock', 'crop-cost', 'realised-profit', 'workers', 'cash']);
     const ownerWork = marketKpis.find(card => card.dataset.contextMetric === 'workers'); if (ownerWork) ownerWork.querySelector('dt')!.textContent = 'เจ้าของทำงาน / รับได้';

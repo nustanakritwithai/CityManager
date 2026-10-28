@@ -3,6 +3,7 @@ import {
   type AppBase, type ContainerResource, type RenderComponent
 } from 'playcanvas';
 import type { RoadTile } from './road-tiles.ts';
+import { retailCapacity } from './retail-capacity.ts';
 
 const MODEL_NAMES = [
   'house-a', 'house-b', 'house-c', 'house-d', 'house-e', 'house-f', 'house-g', 'house-h', 'house-i',
@@ -218,7 +219,8 @@ export class CityAssets {
   building(zone: 'R' | 'C' | 'I', level: number, cell: number, lit = false): Entity | null {
     const family = LEVEL_VARIANTS[zone][Math.max(1, Math.min(3, level)) - 1];
     const name = family[cellHash(cell) % family.length];
-    return this.instantiate(name, name.startsWith('tower-') ? 1.35 : 1.55, 1, lit, false, zone === 'R' ? cellHash(cell, 7) % ROOF_PALETTES.length : undefined);
+    // Commercial model tiers are one below persisted shop levels: tier 1 is retail level 2.
+    return this.instantiate(name, name.startsWith('tower-') ? 1.35 : 1.55, zone === 'C' ? retailCapacity(level + 1).heightFactor : 1, lit, false, zone === 'R' ? cellHash(cell, 7) % ROOF_PALETTES.length : undefined);
   }
 
   road(tile: RoadTile, connected: boolean): Entity | null { return this.instantiate(tile, 2, 1, false, !connected); }
