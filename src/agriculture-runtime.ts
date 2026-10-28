@@ -279,7 +279,14 @@ export function agricultureDiagnostic(c: City, f: Firm, hooks: AgricultureHooks)
   }
   if (f.zone === 'I') return result(!f.recipe || f.crops[RECIPE[f.recipe].crop] < 2 ? 'agriculture.no-input' : 'agriculture.recipe-ready');
   if (isMarket(f)) {
-    const buyers = c.firms.some(i => i.zone === 'I' && operational(c, i, hooks)) || c.households.some(h => accessibleHousehold(c, h, hooks) && h.lastPurchaseTick < c.tick && c.accounts[h.wallet] >= CROP_PRICES.householdCrop);
+    // Diagnostics are normally read after trade: a completed purchase must not
+    // make its buyer disappear from today's market status.
+    let soldToday = false;
+    for (let i = c.cropLedger.length - 1; i >= 0 && c.cropLedger[i].tick >= c.tick; i--) {
+      const e = c.cropLedger[i];
+      if (e.tick === c.tick && e.kind === 'consumption' && e.from === f.wallet && e.quantity > 0) { soldToday = true; break; }
+    }
+    const buyers = soldToday || c.firms.some(i => i.zone === 'I' && operational(c, i, hooks)) || c.households.some(h => accessibleHousehold(c, h, hooks) && h.lastPurchaseTick < c.tick && c.accounts[h.wallet] >= CROP_PRICES.householdCrop);
     if (!buyers) return result('agriculture.no-buyer');
     return result(f.cropInventory === 0 ? 'agriculture.no-stock' : 'agriculture.market-ready');
   }
