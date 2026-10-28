@@ -8,7 +8,7 @@ import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } fr
 import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
-import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
+import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity, harvestYield } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
@@ -284,9 +284,9 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
     metric('cash', 'เงินกิจการ', cash(wallet), wallet, true), metric('reserved', 'สำรองค่าจ้าง', cash(reserved), reserved, true), metric('spendable', 'เงินพ้นสำรองค่าจ้าง', cash(spendable), spendable, true), metric('stock', 'สำเร็จรูปคงคลัง', `${count(firm.inventory)} หน่วย`, firm.inventory), workerMetric, metric('household-count', 'บัญชีครัวเรือนของผู้ทำงาน', count(labor.householdCount), labor.householdCount), metric('profit', 'กำไรรอบก่อนภาษี', cash(firm.lastMonthProfit, true), firm.lastMonthProfit, true)
   ]), ...renderAgriculture(city, building, firm, labor.workers), ...funding, employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), ...(firm.zone === 'I' || isRetail(firm) ? [activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)] : []), ...(!isRetail(firm) ? [cropActivity(city, firm.wallet, `${businessName(firm)} #${firm.id}`)] : [])];
 }
-function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
+export function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
   if (isRetail(firm)) return [];
-  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : isMarket(firm) ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = firm.zone === 'I' ? factoryCropCapacity(building.level) : CROP_STOCK_CAPS[isMarket(firm) ? 'T' : 'F'];
+  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : isMarket(firm) ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = firm.zone === 'I' ? factoryCropCapacity(building.level) : isMarket(firm) ? CROP_STOCK_CAPS.T : farmStockCapacity(building.level);
   body.classList.add('cx-agriculture'); body.dataset.firmId = String(firm.id);
   const cards = [capacityMetric('crop-stock', 'พืชผลคงคลัง / เก็บได้', firm.cropInventory, cap, 'ล็อต'), metric('crop-cost', 'มูลค่าพืชผลตามบัญชี', cash(firm.cropCost), firm.cropCost, true), metric('production-tick', 'วันประมวลผลล่าสุด', String(firm.productionTick), firm.productionTick)];
   if (firm.zone === 'F') {
