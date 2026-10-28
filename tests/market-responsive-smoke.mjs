@@ -2,7 +2,7 @@
 // Requires the PLAYWRIGHT_MODULE environment variable and an installed Edge.
 import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { resolve, extname } from 'node:path';
+import { resolve, extname, sep } from 'node:path';
 import { stripTypeScriptTypes, createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 
@@ -27,7 +27,7 @@ const server = createServer(async (req, res) => {
     if (path === '/') { res.setHeader('Content-Type','text/html; charset=utf-8'); return res.end(html); }
     if (!path.startsWith('/src/')) { res.statusCode=404; return res.end(); }
     const file = resolve(root, '.' + path);
-    if (!file.startsWith(resolve(root, 'src') + '\\')) { res.statusCode=403; return res.end(); }
+    if (!file.startsWith(resolve(root, 'src') + sep)) { res.statusCode=403; return res.end(); }
     const source = await readFile(file, 'utf8');
     if (extname(file)==='.ts') { res.setHeader('Content-Type','text/javascript; charset=utf-8'); return res.end(`import.meta.env={VITE_MARKET_URL:'http://127.0.0.1:4317'};\n` + stripTypeScriptTypes(source, {mode:'transform'})); }
     if (extname(file)==='.css') { if (req.headers['sec-fetch-dest']==='script') { res.setHeader('Content-Type','text/javascript'); return res.end('export default {};'); } res.setHeader('Content-Type','text/css; charset=utf-8'); return res.end(source); }
