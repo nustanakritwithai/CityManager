@@ -1,12 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { factoryCropCapacity } from '../src/factory-levels.ts';
+import { factoryCropCapacity, factoryLevel } from '../src/factory-levels.ts';
 import { proposeCropPurchase, proposeRecipe } from '../src/agriculture.ts';
 import { createCity, deserialize, serialize, step } from '../src/sim.ts';
 
 test('factory capacity retains old tiers and adds two days of input storage per funded job', () => {
   assert.deepEqual(Array.from({length:9}, (_, i) => factoryCropCapacity(i + 1)), [24,24,24,28,32,36,40,44,48]);
   assert.throws(() => factoryCropCapacity(10));
+});
+
+test('published factory levels one to three retain their paid jobs and utility needs', () => {
+  assert.deepEqual([1, 2, 3].map(level => {
+    const { jobs, crops, power, water } = factoryLevel(level);
+    return { jobs, crops, power, water };
+  }), [
+    { jobs: 4, crops: 24, power: 3, water: 2 },
+    { jobs: 5, crops: 24, power: 4, water: 3 },
+    { jobs: 6, crops: 24, power: 5, water: 4 },
+  ]);
 });
 
 test('expanded factory buys real input and processes once per worker with no extra multiplier', () => {
