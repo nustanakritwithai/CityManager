@@ -9,6 +9,20 @@ export const marketUnit = (item: string) => item.startsWith('crop:') ? 'ล็�
 const stateLabel = (value: string) => ({ open: 'เปิดขาย', sold: 'ขายหมด', sold_out: 'ขายหมด', cancelled: 'ยกเลิกแล้ว', expired: 'หมดอายุ', ready: 'พร้อมรับ', claimed: 'กำลังรับ', 'claim-timeout': 'รอตรวจสอบ', delivered: 'รับแล้ว', applied: 'รับเข้าเมืองแล้ว' } as Record<string, string>)[value] ?? value;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '') => { const n = document.createElement(tag); n.textContent = text; return n; };
 const button = (text: string, action: () => void) => { const b = el('button', text); b.type = 'button'; b.addEventListener('click', action); return b; };
+// Illustrations identify the six supported goods without inventing market data.
+const productArtwork: Record<string, string> = {
+  'crop:rice': '<path d="M23 53C24 39 27 28 35 12M28 38C18 38 15 32 15 28c8 0 13 3 13 10Zm3-10c-7-2-9-7-8-11 6 1 9 5 8 11Zm2-7c1-7 5-10 9-11 0 6-3 10-9 11Z"/>',
+  'crop:vegetables': '<path d="M32 52C17 46 12 34 17 25c4-7 10-5 15 1 5-6 11-8 15-1 5 9 0 21-15 27ZM32 26c-1-8 2-12 8-14M30 24c-4-6-8-8-13-7"/>',
+  'crop:sugarcane': '<path d="M23 54 34 12M31 54 42 12M22 44l12 3m-10-13 12 3m-9-13 12 3M34 12c-7-6-12-5-16-2m24 2c4-6 8-7 13-5"/>',
+  'product:milled-rice': '<path d="M21 20h22l4 32H17l4-32Zm2 0-3-8h24l-3 8M24 37c0-6 3-9 8-12 5 3 8 6 8 12-4 7-12 7-16 0Z"/>',
+  'product:canned-food': '<path d="M19 17c0-6 26-6 26 0v32c0 6-26 6-26 0V17Zm0 0c0 6 26 6 26 0M19 43c0 6 26 6 26 0M25 29h14m-7-7v14"/>',
+  'product:sugar': '<path d="M22 19h20l5 34H17l5-34Zm2 0-3-7h22l-3 7M27 30h10v10H27z"/>'
+};
+const productIcon = (id: string) => {
+  const icon = el('span'); icon.className = 'market-product-icon'; icon.setAttribute('aria-hidden', 'true');
+  icon.innerHTML = `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${productArtwork[id] ?? ''}</svg>`;
+  return icon;
+};
 const errorText = (e: unknown) => { const m = e instanceof Error ? e.message : ''; const status=Number((e as {status?:unknown}|null)?.status??0); if(status===401)return 'เซสชัน Guest หมดอายุ กรุณาเข้าสู่ Guest เดิม';if(status>=500)return 'เซิร์ฟเวอร์ไม่พร้อม ผลรายการอาจยังไม่แน่นอน';return ({'insufficient inventory':'สต็อกตลาดของ Guest ไม่พอ','insufficient wallet':'เครดิตตลาดไม่พอ','policy-disabled':'นโยบายฝากของยังปิดอยู่ในการทดสอบนี้','guest-required':'กรุณาเข้าสู่ Guest ก่อน','guest session required':'กรุณาเข้าสู่ Guest ก่อน','csrf check failed':'เซสชันหมดอายุ กรุณาเข้าสู่ Guest เดิม','listing not found':'ไม่พบรายการขายนี้','unknown item':'ไม่มีสินค้านี้ในตลาด','unknown-item':'ไม่มีสินค้านี้ในตลาด'} as Record<string,string>)[m] ?? (m || 'เชื่อมต่อไม่ได้หรือเกิดข้อผิดพลาด'); };
 const blocksMutations = (e: unknown) => { const s = Number((e as {status?:unknown} | null)?.status ?? 0); return s === 0 || s === 401 || s >= 500; };
 const itemKey = (item: MarketItem) => item.slice(item.indexOf(':') + 1);
@@ -51,7 +65,24 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
   let tab: 'buy'|'sell'|'orders'|'history' = 'buy';
   let category = '', query = '', sort = '', cursor = '', offerCursor = '', minPrice = '', maxPrice = '', minQuantity = '';
   let historyRole: 'buyer'|'seller' = 'buyer';
-  let selected = '', selectedOffer = '', view: 'grid'|'list' = matchMedia('(max-width: 650px)').matches ? 'list' : 'grid';
+  const compactViewport = () => {
+    const touch = matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+    return innerWidth <= 650 || (touch && ((screen.width > 0 && Math.min(screen.width, innerWidth) <= 650) || (innerWidth < innerHeight && innerWidth <= 1200)));
+  };
+  const updateLayout = () => {
+    const compact = compactViewport();
+    const touch = matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+    const screenWidth = innerWidth > innerHeight ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    const scale = compact && touch && innerWidth > 700 && screenWidth > 0 ? Math.min(2.75, Math.max(1, innerWidth / Math.max(320, Math.min(screenWidth, innerWidth)))) : 1;
+    dialog.dataset.compact = String(compact);
+    dialog.style.setProperty('--market-unit', `${scale}px`);
+    const shell = dialog.querySelector<HTMLElement>('.market-shell')!;
+    const header = dialog.querySelector<HTMLElement>('.market-header')!;
+    if (!compact && innerWidth > 1100) header.insertBefore(tabs, account);
+    else shell.insertBefore(tabs, notice);
+  };
+  updateLayout(); window.addEventListener('resize', updateLayout); window.visualViewport?.addEventListener('resize', updateLayout);
+  let selected = '', selectedOffer = '', view: 'grid'|'list' = compactViewport() ? 'list' : 'grid';
   let busy = false, loading = false, uncertainReceiptId: string | null = null;
   let credits = 0n;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -113,7 +144,10 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
     const toggle=button(view==='grid'?'☰ รายการ':'▦ ตาราง',()=>{view=view==='grid'?'list':'grid';void render()});
     const range=el('div');range.className='market-range';
     for(const [name,value,set] of [['ราคาต่ำสุด',minPrice,(v:string)=>minPrice=v],['ราคาสูงสุด',maxPrice,(v:string)=>maxPrice=v],['จำนวนอย่างน้อย',minQuantity,(v:string)=>minQuantity=v]] as Array<[string,string,(v:string)=>void]>){const input=numberInput(value);input.placeholder=name;input.setAttribute('aria-label',name);input.addEventListener('change',()=>{set(input.value);cursor='';offerCursor='';void render()});range.append(input);}
-    tools.append(search,categorySelect,sortSelect,toggle); center.append(el('h3','เลือกสินค้า'),tools,range);
+    tools.append(search,categorySelect,sortSelect,toggle);
+    const advanced = el('details'); advanced.className = 'market-advanced';
+    advanced.append(el('summary','ตัวกรองราคาและจำนวน'), range);
+    center.append(el('h3','เลือกสินค้า'),tools,advanced);
     const chips=el('div');chips.className='market-filter-chips';
     for(const [label,value,clear] of [['ค้นหา',query,()=>query=''],['หมวด',category,()=>category=''],['ราคาขั้นต่ำ',minPrice,()=>minPrice=''],['ราคาสูงสุด',maxPrice,()=>maxPrice=''],['จำนวนขั้นต่ำ',minQuantity,()=>minQuantity='']] as Array<[string,string,()=>void]>){if(value)chips.append(button(`${label}: ${value} ×`,()=>{clear();cursor='';offerCursor='';selected='';void render()}));}
     if(chips.childElementCount){chips.append(button('ล้างตัวกรองทั้งหมด',()=>{query='';category='';minPrice='';maxPrice='';minQuantity='';cursor='';selected='';void render()}));center.append(chips);}
@@ -123,8 +157,8 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
     for(const product of products) {
       const id=String(product.item_id ?? ''); if (!id) continue;
       const tile=button('',()=>{selected=id;selectedOffer='';offerCursor='';void render()});tile.className='market-product '+(selected===id?'is-selected':'');
-      const symbol=el('span',id.startsWith('crop:')?'🌾':'📦'); symbol.className='market-product-icon';
-      tile.append(symbol,el('strong',labels[id]??product.name??id),el('small',product.min_price == null?'ยังไม่มีผู้ขาย':`เริ่มต้น ${product.min_price} เครดิต`),el('small',`มี ${product.total_quantity ?? '0'} · ${product.offer_count ?? '0'} รายการ`)); grid.append(tile);
+      const symbol=productIcon(id);
+      tile.append(symbol,el('strong',labels[id]??product.name??id),el('small',product.min_price == null?'ยังไม่มีผู้ขาย':`เริ่มต้น ${product.min_price} เครดิต`),el('small',`มี ${product.total_quantity ?? '—'} · ${product.offer_count ?? '—'} รายการ`)); grid.append(tile);
     }
     if (!products.length) {const empty=el('div');empty.append(el('p','ไม่พบสินค้าตามเงื่อนไข'),button('ล้างตัวกรอง',()=>{query='';category='';sort='';minPrice='';maxPrice='';minQuantity='';cursor='';selected='';void render()}));grid.append(empty);} center.append(grid);
     const next=data.products?.next_cursor; if(next)center.append(button('หน้าถัดไป →',()=>{cursor=String(next);selected='';void render()}));if(data.products?.pagination_truncated)center.append(el('p','ผลลัพธ์เกินขอบเขตการแบ่งหน้า · โปรดจำกัดคำค้นหาหรือตัวกรอง'));
@@ -156,6 +190,8 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
       if(data.offers?.next_cursor)detail.append(button('ข้อเสนอถัดไป →',()=>{offerCursor=String(data.offers.next_cursor);selectedOffer='';void render()}));if(data.offers?.pagination_truncated)detail.append(el('p','ข้อเสนอเกินขอบเขตการแบ่งหน้า · โปรดใช้ตัวกรอง'));
       if(offerCursor)detail.append(button('← ข้อเสนอหน้าแรก',()=>{offerCursor='';void render()}));
     }
+    const quickSell = button('ขายสินค้าของฉัน', () => { tab = 'sell'; selected = ''; void render(); }); quickSell.className = 'market-quick-sell';
+    center.append(quickSell);
     layout.append(aside,center,detail);content.replaceChildren(layout);
   };
   const drawSell = (data: any) => {
@@ -165,7 +201,8 @@ export function installMarketPanel(city: () => City, onChanged: () => void, save
     for(const row of mine){const card=listCard(labels[row.item_code]??row.item_code,`${row.quantity} ${marketUnit(row.item_code)} · ${row.unit_price} เครดิต/${marketUnit(row.item_code)}`);card.append(actionButton('ยกเลิกและคืนสต็อก',()=>void mutate(()=>client.cancelListing(row.id),'ยกเลิกรายการแล้ว')));wrap.append(card)}
     const stock=new Map<string,number>(data.inventory.items.filter((x:{item_code:string})=>(MARKET_ITEMS as readonly string[]).includes(x.item_code)).map((x:{item_code:string;quantity:number})=>[x.item_code,Number(x.quantity)]));
     const form=el('form');form.className='market-form';const item=selectItems(),qty=numberInput('1'),price=numberInput('10');const available=el('small');const submit=el('button','ลงขาย');submit.type='submit';submit.dataset.mutation='true';
-    const update=()=>{const have=stock.get(item.value)??0,n=Number(qty.value),p=Number(price.value);available.textContent=`สต็อกในคลังตลาด ${have} ${marketUnit(item.value)}`;submit.disabled=unsafe()||!Number.isSafeInteger(n)||n<1||n>have||!Number.isSafeInteger(p)||p<1;};item.addEventListener('change',update);qty.addEventListener('input',update);price.addEventListener('input',update);update();
+    qty.max='1000000'; price.max='1000000';
+    const update=()=>{const have=stock.get(item.value)??0,n=Number(qty.value),p=Number(price.value);const quantityValid=Number.isSafeInteger(n)&&n>=1&&n<=1_000_000&&n<=have, priceValid=Number.isSafeInteger(p)&&p>=1&&p<=1_000_000;available.textContent=`สต็อกในคลังตลาด ${have} ${marketUnit(item.value)} · จำนวนและราคาต่อหน่วยต้องเป็นจำนวนเต็ม 1–1,000,000`;submit.disabled=unsafe()||!quantityValid||!priceValid;};item.addEventListener('change',update);qty.addEventListener('input',update);price.addEventListener('input',update);update();
     form.append(labeled('สินค้า',item),labeled('จำนวน',qty),labeled('ราคาต่อล็อตหรือหน่วย',price),available,submit);form.addEventListener('submit',e=>{e.preventDefault();if(!submit.disabled)void mutate(()=>client.list(item.value as MarketItem,Number(price.value),Number(qty.value)),'ลงขายสำเร็จ')});wrap.append(el('h3','ลงขายจากคลังตลาด'),form);
     const deposit=el('form');deposit.className='market-form';const dItem=selectItems(),firm=document.createElement('select'),dQty=numberInput('1'),send=el('button','ฝากเข้าคลังตลาด');send.type='submit';send.dataset.mutation='true';
     const updateSources=()=>{const firms=eligibleDepositFirms(city(),dItem.value as MarketItem);const prior=firm.value;firm.replaceChildren(...firms.map(f=>{const o=el('option',depositSourceLabel(f,dItem.value as MarketItem));o.value=String(f.id);return o}));if(firms.some(f=>String(f.id)===prior))firm.value=prior;const chosen=firms.find(f=>String(f.id)===firm.value);const have=chosen?depositSourceStock(chosen,dItem.value as MarketItem):0;const n=Number(dQty.value);send.disabled=unsafe()||!data.inventory.imports_enabled||!Number.isSafeInteger(n)||n<1||n>have;};dItem.addEventListener('change',updateSources);firm.addEventListener('change',updateSources);dQty.addEventListener('input',updateSources);updateSources();
