@@ -26,6 +26,9 @@ All integration uses its own checkout and preserves the main backup/utility chan
   second. A separate citizen-view control slows the whole city to one minute per
   second (24 real minutes/day); it does not run the economy and residents on
   different clocks. Rendering quality changes only the visible subset.
+  A frame budget stops work at a completed minute under load, slowing playback
+  without skipping game time or accumulating background catch-up debt. A single
+  bounded admission/pathfinding step and one daily economic step remain indivisible.
 - Decorative pedestrians are disabled; decorative vehicles remain. Every park
   figure is a current, uniquely identified activity visitor. Renderer limits do
   not affect service, reservations, benefit or money.

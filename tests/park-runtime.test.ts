@@ -79,6 +79,21 @@ test('unfunded or unstaffed parks can be visited but give no staffed-service ben
   assert.ok(r.activity.completed > 0); assert.deepEqual(Object.keys(r.recreation.citizens), []);
 });
 
+test('frame budget slows playback at real minute boundaries without skipped activity or catch-up debt', () => {
+  const c = fresh(), r = createParkRuntime(c), ref = fresh(), expected = createParkRuntime(ref);
+  let checks = 0;
+  advanceParkRuntime(c, r, 1300.75, () => step(c), undefined, () => ++checks < 620);
+  assert.equal(r.activity.minute, 620); assert.equal(r.minuteRemainder, 0);
+  advanceParkRuntime(ref, expected, 620, () => step(ref));
+  assert.equal(serializeParkSession(c, r), serializeParkSession(ref, expected));
+  const saved = serializeParkSession(c, r);
+  advanceParkRuntime(c, r, 0, () => assert.fail('pause'));
+  assert.equal(serializeParkSession(c, r), saved);
+  advanceParkRuntime(c, r, 820, () => step(c));
+  advanceParkRuntime(ref, expected, 820, () => step(ref));
+  assert.equal(serializeParkSession(c, r), serializeParkSession(ref, expected));
+});
+
 test('synchronous owner automation observes a complete boundary and can pause the remaining frame', () => {
   const c = fresh(), r = createParkRuntime(c), start = c.tick;
   const days = advanceParkRuntime(c, r, 2880.5, () => step(c), () => {

@@ -30,12 +30,12 @@ export function reconcileParkRuntime(city: City, runtime: ParkRuntime): void {
 /** One economic day per 1440 actual minutes. A zero advance is a true pause.
  * Normal playback still requests 1440 minutes/second; citizen view requests one.
  */
-export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void): number {
+export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean): number {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440 * 120) throw new RangeError('Invalid park clock advance');
   if (minutes === 0) return 0;
   if (runtime.activity.day !== city.tick || runtime.recreation.minute !== parkActivityAbsoluteMinute(runtime.activity)) throw new Error('Park clocks differ');
   const total = runtime.minuteRemainder + minutes;
-  let remaining = Math.floor(total), days = 0;
+  let remaining = Math.floor(total), days = 0, processed = 0;
   runtime.minuteRemainder = total - remaining;
   reconcileParkRuntime(city, runtime);
   const prepare = () => {
@@ -48,11 +48,15 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
   let context = prepare();
   const offDuty = new Set<string>();
   while (remaining > 0) {
+    // Application-only pacing budget: stop at an observed minute, never jump the
+    // game clock or accumulate catch-up debt. Heavy frames slow playback.
+    if (processed > 0 && continueFrame?.() === false) { runtime.minuteRemainder = 0; break; }
     // With neither parks nor any earned benefit there are no observations to miss.
     // Preserve the no-park economy's cost and byte-for-byte behavior.
     if (!city.parks.length && !runtime.activity.visitors.length && !Object.keys(runtime.recreation.citizens).length) {
       const count = Math.min(remaining, GAME_MINUTES_PER_DAY - runtime.activity.minute);
       runtime.activity.minute += count; remaining -= count;
+      processed += count;
       runtime.recreation = createParkRecreation(parkActivityAbsoluteMinute(runtime.activity), runtime.recreation.tuning);
     } else {
       reconcileParkActivity(city, runtime.activity, context.activity);
@@ -62,6 +66,7 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
       advanceParkActivity(city, runtime.activity, 1, context.activity);
       runtime.recreation = nextRecreation;
       remaining--;
+      processed++;
     }
     if (runtime.activity.minute === GAME_MINUTES_PER_DAY) {
       const before = city.tick;

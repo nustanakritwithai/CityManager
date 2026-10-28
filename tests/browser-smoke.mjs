@@ -23,13 +23,14 @@ const targetUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityMana
 await mkdir(output, { recursive: true }); await mkdir(screenshots, { recursive: true });
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT || 9349);
 const edge = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
-const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${resolve(output, `edge-profile-${debugPort}`)}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+const softwareFlags = process.env.CITYMANAGER_SOFTWARE_WEBGL === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [];
+const child = spawn(edge, ['--headless=new', ...softwareFlags, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${resolve(output, `edge-profile-${debugPort}`)}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
   const result = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 60000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method} ${String(params.expression ?? '').slice(0, 160)}`)); }, 60000);
     pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject });
   });
   ws.send(JSON.stringify({ id, method, params })); return result;
@@ -99,7 +100,9 @@ try {
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: targetUrl + '?starter=1' });
+  console.log('Edge navigated; awaiting game startup');
   await until('!!window.cityManager');
+  console.log('Game started; awaiting admitted models');
   await until('window.cityManager.visuals().ready');
   const visualStatus = await evaluate('window.cityManager.visuals()');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(visualStatus.failed.length, 41);
@@ -107,6 +110,7 @@ try {
   assert.equal(await evaluate('window.cityManager.engine'), 'PlayCanvas 2.23.3');
   await button('#pause'); assert.equal(await paused(), true);
   checks.push('Real Edge WebGL2 startup and pause');
+  console.log('Edge WebGL startup, models and pause passed');
   const groundState = await evaluate('window.cityManager.ground()');
   assert.equal(groundState.buildGrid, false, 'Observation starts without the construction grid');
   assert.equal(groundState.textureSize, 512); assert.equal(groundState.textureCount, 3);

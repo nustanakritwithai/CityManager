@@ -93,6 +93,7 @@ const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: ''
 let view: CityView;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
+let parkFrameMs = 0, parkFramePeakMs = 0;
 let pausedByTyphoonAuto = false;
 let importedLegacyRaw: string | null = null;
 type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
@@ -600,11 +601,13 @@ async function boot() {
     const before = parkRuntime.activity.minute + minutes >= 1440 ? cueSnapshot(city) : null;
     let days = 0;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
+    const frameStarted = performance.now(), frameDeadline = frameStarted + 8;
     try {
       days = advanceParkRuntime(city, parkRuntime, minutes, () => {
         dayOutcomes = ownerDecisionSession.advance(city);
-      }, () => { ownerDecisionPanel?.noteOutcomes(dayOutcomes); return !paused; });
+      }, () => { ownerDecisionPanel?.noteOutcomes(dayOutcomes); return !paused; }, () => performance.now() < frameDeadline);
     } catch (error) { paused = true; console.error(error); status('หยุดเวลา: ไม่สามารถประมวลผลกิจกรรมประชาชนได้'); }
+    parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
     if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city), performance.now())) sound(cue);
@@ -612,7 +615,7 @@ async function boot() {
     else if (route?.page === 'city') renderParkPanel();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });
