@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
-import { FACTORY_PROGRESS_BACKUP_KEY, SAVE_KEY, saveStoredCity } from '../src/save-storage.ts';
+import { RETAIL_BACKUP_KEY, SAVE_KEY, saveStoredCity } from '../src/save-storage.ts';
 
 test('actual v16 housing session preserves populated park state and backups on factory migration', () => {
   // Produced by the housing integration at 982d44a from the observed v15 park fixture.
@@ -19,12 +19,12 @@ test('actual v16 housing session preserves populated park state and backups on f
   assert.equal(factoryProgressionStartTick, old.tick);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.runtime)), parkRuntime);
   const next = serializeParkSession(loaded.city, loaded.runtime);
-  assert.equal(JSON.parse(next).version, 17);
+  assert.equal(JSON.parse(next).version, 18);
   assert.deepEqual(deserializeParkSession(next), loaded);
   const values = new Map([[SAVE_KEY, raw]]);
   const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
   saveStoredCity(storage, next, null);
-  assert.equal(values.get(FACTORY_PROGRESS_BACKUP_KEY), raw);
+  assert.equal(values.get(RETAIL_BACKUP_KEY), raw);
   const forged = JSON.parse(raw); forged.factoryProgressionStartTick = 0;
   assert.throws(() => deserializeParkSession(JSON.stringify(forged)), /boundary/);
   // v16 can contain apartments but cannot contain the later factory tier.

@@ -85,7 +85,7 @@ test('park upkeep follows existing treasury clipping without negative funds or d
 });
 
 test('v15 validates one-tile level-1 park ownership and construction evidence; old v13 remains intact', () => {
-  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 17);
+  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 18);
   for (const change of [
     (x: any) => { x.parks[0].width = 2; }, (x: any) => { x.parks[0].cells = [0, 1]; },
     (x: any) => { x.parks[0].level = 0; }, (x: any) => { x.parks[0].level = 2; },

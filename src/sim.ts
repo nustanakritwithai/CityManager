@@ -9,6 +9,7 @@ import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic
 import { validateTypes } from './goods-validation.ts';
 import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from './parks.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
+import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
 import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
 export type { EmploymentAllocation } from './labor.ts';
@@ -73,7 +74,7 @@ export function parkStaffingStatus(c: City, p: Park) {
 }
 export const isMarket = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'market';
 export const isRetail = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'retail';
-export const firmCapacity = (b: Building) => b.zone === 'I' ? factoryLevel(b.level).jobs : b.zone === 'F' ? b.level : b.zone === 'C' ? Math.max(1, b.level - 1) : 0;
+export const firmCapacity = (b: Building) => b.zone === 'I' ? factoryLevel(b.level).jobs : b.zone === 'F' ? b.level : b.zone === 'C' ? b.level === 1 ? 1 : retailCapacity(b.level).workers : 0;
 const capacity = firmCapacity;
 export const firmWage = (f: Firm) => isMarket(f) ? 0 : WAGES[f.zone];
 export const firmRent = (f: Firm) => isMarket(f) ? 3_000 : 10_000;
@@ -220,7 +221,19 @@ function marketDemand(c: City): number {
 export function retailDemand(c: City): number {
   const producing = c.firms.some(f => f.zone === 'I' && access(c, building(c, f.building).cell) && firmWorkerCount(c, f.id) > 0);
   const buyers = c.households.filter(h => householdAccess(c, h)).length;
-  return producing && buyers >= 4 ? Math.max(0, Math.ceil(buyers / 8) - c.firms.filter(isRetail).length) : 0;
+  if (!producing || buyers < 4) return 0;
+  const shops = c.firms.filter(isRetail);
+  const expanded = shops.filter(f => building(c, f.building).level > RETAIL_LEGACY_MAX_LEVEL);
+  if (!expanded.length) return Math.max(0, Math.ceil(buyers / 8) - shops.length);
+  // Each existing shop still counts as one even if closed, as in the original rule.
+  // Additional coverage is credited only when the shop is supplied and stocked, and
+  // only for employed workers above the legacy level-four staff.
+  const svc = utilities(c);
+  const extra = expanded.reduce((n, f) => {
+    const b = building(c, f.building), workers = f.inventory > 0 && access(c, b.cell) && svc.ok(b.id) ? firmWorkerCount(c, f.id) : 0;
+    return n + Math.max(0, staffedRetailCapacity(b.level, workers).householdCoverage - 8);
+  }, 0);
+  return Math.max(0, Math.ceil((buyers - 8 * shops.length - extra) / 8));
 }
 /** The lowest-id connected household with 600 credits of savings and a general/retail worker that owns nothing yet. */
 function ownerCandidate(c: City): Household | undefined {
@@ -608,6 +621,11 @@ export function explainCell(c: City, i: number): string[] {
     f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale and outside export 3.50 credits.` : 'Buys goods locally at 3.50 credits or imports at 4.50; competes with crop markets for food at 8 credits per unit.',
     isMarket(f) ? 'Owner labour earns no fabricated salary; explicit distributions use realised profit after tax and working-cash reserves.' : 'Wages accrue per allocated worker-day and are paid each 30-day month. Reserved wages cannot fund stock or expansion.',
     `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax 20%. Self-employed market stalls stay small; farms grow to level 3 from their own profit.`);
+  if (f && isRetail(f)) {
+    const s = retailGrowthStatus(c, f);
+    output.push(`Retail level ${s.level}: ${s.workers}/${s.current.workers} workers; shelf ${f.inventory}/${s.current.stock}, staffed refill limit ${s.staffed.stock}; sales have no fixed daily customer cap.`,
+      s.next ? `Next level ${s.level + 1}: ${s.next.workers} workers and ${s.next.stock} stock capacity. ${s.reasons.length ? `Currently unmet: ${s.reasons.join('; ')}.` : 'Current conditions met; reviewed monthly, subject to remaining utility supply.'}` : 'Maximum retail level reached.');
+  }
   if (f && retailDemand(c) > 0 && marketToConvert(c)?.id === f.id) output.push(`Shop conversion: the city wants a shop and this profitable stall can pay the ${MARKET_CONVERSION_COST / 100}-credit refit, so it becomes a shop on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)). Leftover fresh crops are written off.`);
   if (f?.convertedAt !== undefined) output.push(`Converted from a crop market on day ${f.convertedAt}.`);
   return output;
@@ -691,7 +709,7 @@ function trade(c: City) {
   // Shops stock every product the city makes, an even share of the shelf each, local wholesale first.
   const made = PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
   for (const shop of active.filter(f => isRetail(f) && firmWorkerCount(c, f.id) > 0)) {
-    const target = Math.min(24, Math.max(4, c.households.reduce((n, h) => n + h.members, 0) * 2)), share = Math.ceil(target / Math.max(1, made.length));
+    const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id)).stock, Math.max(4, c.households.reduce((n, h) => n + h.members, 0) * 2)), share = Math.ceil(target / Math.max(1, made.length));
     for (const product of made) {
       for (const producer of active.filter(f => f.zone === 'I' && f.products[product] > 0)) {
         const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 350));
@@ -938,6 +956,24 @@ export function marketToConvert(c: City): Firm | undefined {
     return svc.ok(b.id) && svc.spare.power >= extra && !!f.owner && b.age >= MONTH && access(c, b.cell) && c.ownerLabor.some(e => e.firmId === f.id) && f.lastMonthProfit > 0 && spendable(c, f) >= MARKET_CONVERSION_COST + 20_000;
   });
 }
+/** Current conditions are a preview: other buildings may use spare utilities first at review. */
+export function retailGrowthStatus(c: City, f: Firm) {
+  if (!isRetail(f)) throw new TypeError('Expected a retail firm');
+  const b = building(c, f.building), current = retailCapacity(b.level), workers = firmWorkerCount(c, f.id);
+  const next = b.level < RETAIL_MAX_LEVEL ? retailCapacity(b.level + 1) : null;
+  const reasons: string[] = [];
+  if (next) {
+    const svc = utilities(c), before = svc.need.get(b.id)!, after = buildingNeed('C', b.level + 1);
+    if (b.age < MONTH) reasons.push(`อาคารต้องมีอายุอย่างน้อย ${MONTH} วัน`);
+    if (!access(c, b.cell)) reasons.push('ต้องเชื่อมถนน');
+    if (!svc.ok(b.id)) reasons.push('ต้องมีไฟฟ้าและน้ำ');
+    if (!fits(svc.spare, { power: after.power - before.power, water: after.water - before.water })) reasons.push('ไฟฟ้าหรือน้ำสำรองไม่พอสำหรับระดับถัดไป');
+    if (f.lastMonthProfit <= (f.owner ? firmWage(f) : 0)) reasons.push('กำไรรอบก่อนยังไม่ถึงเกณฑ์');
+    if (workers === 0) reasons.push('ต้องมีคนทำงานจริงอย่างน้อย 1 คน');
+    if (balance(c, f.wallet) < 20_000) reasons.push('เงินกิจการต้องมีอย่างน้อย 200 เครดิต');
+  }
+  return { level: b.level, current, staffed: staffedRetailCapacity(b.level, workers), workers, next, reasons };
+}
 /** The stall's leftover fresh crops are written off at book value (a shop holds no crops), then the owner pays the refit. */
 function convertMarket(c: City, f: Firm) {
   if (!writeOffCrops(c, f, agricultureHooks(c))) return;
@@ -960,7 +996,7 @@ function grow(c: City) {
   // A taller building draws more water and power; it grows only while the network can supply it.
   const svc = utilities(c), spare = { ...svc.spare };
   for (const b of c.buildings) {
-    if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? 4 : b.zone === 'I' ? FACTORY_MAX_LEVEL : 3) || b.age < MONTH || !access(c, b.cell) || !svc.ok(b.id)) continue;
+    if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : 3) || b.age < MONTH || !access(c, b.cell) || !svc.ok(b.id)) continue;
     const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1, c.households.filter(h => h.home === b.id).length), extra = { power: after.power - before.power, water: after.water - before.water };
     if (!fits(spare, extra)) continue;
     const residents = c.households.filter(h => h.home === b.id), f = c.firms.find(f => f.building === b.id);
@@ -1010,7 +1046,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, version: 17, rulesVersion: 'chain-12', ...(market ? { market } : {}) });
+  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, version: 18, rulesVersion: 'chain-13', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1055,7 +1091,7 @@ function migrateV8(old: City): City {
 }
 const RULES = { 7: 'chain-2', 8: 'chain-3', 9: 'chain-4' } as const;
 /** Every rule of a chain-2 (v7) save; chain-3 (v8) also reconciles typed stock, chain-4 (v9) its plants. */
-function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false, extendedFactories = false): City {
+function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false, extendedFactories = false, retailMaxLevel = RETAIL_LEGACY_MAX_LEVEL): City {
   const typed = version >= 8;
   const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${version} / ${RULES[version]}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
@@ -1074,7 +1110,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   if (!c.cells[GATEWAY].road) fail();
   const ids = new Set<number>();
   for (const b of c.buildings) {
-    if (!b || !int(b.id, 1) || ids.has(b.id) || !validIndex(b.cell) || !['R', 'C', 'I', 'F'].includes(b.zone) || !int(b.level, 1) || b.level > (b.zone === 'R' && withDensity ? HOUSING_LEVELS.length : b.zone === 'C' ? 4 : b.zone === 'I' && extendedFactories ? FACTORY_MAX_LEVEL : 3) || !int(b.age) || b.age > c.tick || c.cells[b.cell].building !== b.id || c.cells[b.cell].zone !== b.zone || (b.zone === 'R' ? b.housingType !== (withDensity ? HOUSING_LEVELS[b.level - 1]?.type : 'cottage') : b.housingType !== undefined)) fail();
+    if (!b || !int(b.id, 1) || ids.has(b.id) || !validIndex(b.cell) || !['R', 'C', 'I', 'F'].includes(b.zone) || !int(b.level, 1) || b.level > (b.zone === 'R' && withDensity ? HOUSING_LEVELS.length : b.zone === 'C' ? retailMaxLevel : b.zone === 'I' && extendedFactories ? FACTORY_MAX_LEVEL : 3) || !int(b.age) || b.age > c.tick || c.cells[b.cell].building !== b.id || c.cells[b.cell].zone !== b.zone || (b.zone === 'R' ? b.housingType !== (withDensity ? HOUSING_LEVELS[b.level - 1]?.type : 'cottage') : b.housingType !== undefined)) fail();
     ids.add(b.id);
   }
   for (let i = 0; i < c.cells.length; i++) if (c.cells[i].building !== null && !c.buildings.some(b => b.id === c.cells[i].building && b.cell === i)) fail();
@@ -1282,15 +1318,15 @@ function deserializeVersioned(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
-  if (version !== 17 && parsed && typeof parsed === 'object' && 'factoryProgressionStartTick' in parsed) throw new Error('Unexpected factory progression boundary.');
-  if (version !== 13 && version !== 14 && version !== 15 && version !== 16 && version !== 17 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
-  if (version === 13 || version === 14 || version === 15 || version === 16 || version === 17) {
+  if (version !== 17 && version !== 18 && parsed && typeof parsed === 'object' && 'factoryProgressionStartTick' in parsed) throw new Error('Unexpected factory progression boundary.');
+  if (version !== 13 && version !== 14 && version !== 15 && version !== 16 && version !== 17 && version !== 18 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
+  if (version === 13 || version === 14 || version === 15 || version === 16 || version === 17 || version === 18) {
     const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
-    if (version === 17 && (!Number.isSafeInteger(envelope.factoryProgressionStartTick) || envelope.factoryProgressionStartTick! < 0 || envelope.factoryProgressionStartTick! > envelope.tick)) throw new Error('Invalid factory progression boundary.');
-    if (envelope.rulesVersion !== (version === 17 ? 'chain-12' : version === 16 ? 'chain-11' : version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
+    if ((version === 17 || version === 18) && (!Number.isSafeInteger(envelope.factoryProgressionStartTick) || envelope.factoryProgressionStartTick! < 0 || envelope.factoryProgressionStartTick! > envelope.tick)) throw new Error('Invalid factory progression boundary.');
+    if (envelope.rulesVersion !== (version === 18 ? 'chain-13' : version === 17 ? 'chain-12' : version === 16 ? 'chain-11' : version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
-    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version >= 15, version >= 16, version === 17);
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version >= 15, version >= 16, version >= 17, version === 18 ? RETAIL_MAX_LEVEL : RETAIL_LEGACY_MAX_LEVEL);
     if (market) loaded.market = market;
     return loaded;
   }
