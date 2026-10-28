@@ -12,7 +12,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
@@ -110,7 +110,7 @@ function status(message: string) {
 function farmHint(index: number | null): string {
   if (index === null) return help.F;
   const fertility = city.resources.fertility[index];
-  return `ฟาร์ม · ความอุดมสมบูรณ์ ${fertility}% · ${fertility < 50 ? 'ต้องอย่างน้อย 50%' : access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
+  return `ฟาร์ม · ความอุดมสมบูรณ์ ${fertility}% · ${access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
 }
 function setTool(next: string) {
   tool = next; roadStart = null; hover = null;
@@ -229,6 +229,14 @@ function ownerFinanceAction(action: 'contribute' | 'withdraw', firmId: number) {
   status(result.message); render();
   showOwnerFinanceResult(firmId, result.message);
 }
+function farmCropAction(firmId: number, crop: 'rice' | 'vegetables' | 'sugarcane') {
+  const firm = city.firms.find(f => f.id === firmId && f.zone === 'F');
+  if (!firm || route?.page !== 'place' || city.cells[route.cell]?.building !== firm.building) return;
+  ownerDecisionSession.beforeExternal(city);
+  const result = selectFarmCrop(city, firmId, crop);
+  if (result.ok) ownerDecisionSession.syncExternal(city, 'manual-farm-crop');
+  status(result.message); render();
+}
 function renderPlace() {
   const metrics: HTMLElement[] = [], tags: HTMLElement[] = [], reasons: string[] = [];
   let checklist: HTMLElement | null = null;
@@ -264,11 +272,11 @@ function renderPlace() {
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, !!firm && isMarket(firm));
     const connected = access(city, cellIndex); tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
-    if (cell.zone === 'F' && !building) { const crop = cropForFertility(city.resources.fertility[cellIndex]); if (crop) tags.push(tag(`ปลูก${CROP_LABELS[crop]}ได้`, 'good')); }
+    if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
     if (cell.zone === 'F') {
       const fertility = city.resources.fertility[cellIndex];
       if (!building) metrics.push(metric('ความอุดมสมบูรณ์', `${fertility}%`, false, 'พืชผลหมุนเวียน ไม่ใช่แหล่งที่หมดลง', fertility));
-      tags.push(tag(fertility >= 50 ? 'เหมาะสำหรับปลูกพืช' : 'ความอุดมสมบูรณ์ไม่ถึง 50%', fertility >= 50 ? 'good' : 'bad'));
+      tags.push(tag('เลือกชนิดพืชได้เอง', 'good'));
     }
     if (!cell.road) {
       const distance = gatewayRoadDistance(city, cellIndex);
@@ -309,7 +317,7 @@ function renderPlace() {
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
   $('#explanation').replaceChildren(...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
-  renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction);
+  renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction);
   if (page === 'city') { renderCityOverview(city); dashboard?.update(city); }
   decoratePanels($('#inspector'));
 }
@@ -457,7 +465,7 @@ async function boot() {
   marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
   installHudRow();
   $('#save').addEventListener('click', async () => {
-    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v10/chain-5 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
+    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v11/chain-6 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
   });
   const loadStored = async (source: SaveSource) => {
     try {

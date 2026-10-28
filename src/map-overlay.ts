@@ -18,7 +18,7 @@ export type Issue = { cell: number; kind: IssueKind; text: string };
 export const TOOL_OVERLAY: Readonly<Record<string, OverlayMode | undefined>> = Object.freeze({ road: 'roads', F: 'fertility', R: 'housing', C: 'growth', I: 'growth', power: 'utilities', water: 'utilities' });
 export const OVERLAY_LEGENDS: Readonly<Record<OverlayMode, [Tone, string][]>> = Object.freeze({
   // The land decides the crop: a farm grows what its fertility band suits.
-  fertility: [...(['rice', 'vegetables', 'sugarcane'] as const).map(k => [k, `${CROP_LABELS[k]} ${CROP_BANDS[k][0]}–${CROP_BANDS[k][1]}%`] as [Tone, string]), ['bad', `ต่ำกว่า ${FERTILITY_THRESHOLD}% ปลูกไม่ได้`]],
+  fertility: [['good', 'ดินอุดมสมบูรณ์สูง'], ['warn', 'ดินอุดมสมบูรณ์ปานกลาง'], ['bad', 'ดินอุดมสมบูรณ์ต่ำ · ปลูกได้']],
   roads: [['good', 'เชื่อมประตูเมือง'], ['bad', 'ไม่เชื่อม · โซน/อาคารไม่โต']],
   growth: [['good', 'พร้อมเกิดอาคาร'], ['warn', 'มีอาคารแล้ว'], ['bad', 'ติดเงื่อนไข · แตะดูเหตุผล']],
   housing: [['good', 'มีที่ว่างรับครัวเรือน'], ['warn', 'เต็มแล้ว'], ['bad', 'บ้านว่าง / แปลงบ้านติดเงื่อนไข']],
@@ -48,7 +48,7 @@ export function mapOverlay(city: City, mode: OverlayMode): Overlay {
     if (mode === 'fertility') {
       if (cell.road || cell.building !== null && cell.zone !== 'F') continue;
       const f = city.resources.fertility[i];
-      cells.push({ cell: i, tone: cropForFertility(f) ?? 'bad', strength: .35 + f / 200 });
+      cells.push({ cell: i, tone: f >= 84 ? 'good' : f >= 50 ? 'warn' : 'bad', strength: .35 + f / 200 });
     } else if (mode === 'roads') {
       if (cell.road) cells.push({ cell: i, tone: roads.has(i) ? 'good' : 'bad', strength: .7 });
       else if (cell.zone || cell.building !== null) cells.push({ cell: i, tone: access(city, i) ? 'good' : 'bad', strength: .45 });

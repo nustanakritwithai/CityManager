@@ -17,6 +17,7 @@ export const LATEST_BACKUP_KEY = 'citymanager.backup.latest';
 export const CHAIN2_BACKUP_KEY = 'citymanager.backup.chain-2';
 /** The 2.0 (v8 / chain-3) bytes in the main slot, copied once before the first v9 write replaces them. */
 export const CHAIN3_BACKUP_KEY = 'citymanager.backup.chain-3';
+export const FARM_CHOICE_BACKUP_KEY = 'citymanager.backup.before-farm-choice';
 const BACKUP_SLOTS = 8;
 type Reader = Pick<Storage, 'getItem'>;
 type Writer = Pick<Storage, 'getItem' | 'setItem'>;
@@ -36,7 +37,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY];
+    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -48,7 +49,8 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
   const parsed = JSON.parse(raw);
   const market10 = parsed?.version === 10 && parsed?.rulesVersion === 'chain-5' && parsed?.market?.version === 10 && parsed?.market?.rulesVersion === 'chain-5' && typeof parsed.market.cityId === 'string' && typeof parsed.market.seq === 'string' && Array.isArray(parsed.market.operations) && Array.isArray(parsed.market.escrow) && parsed.market.receipts && typeof parsed.market.receipts === 'object';
-  if (parsed?.version !== 9 && !market10) throw new Error('Expected a version 9 or validated market version 10 snapshot.');
+  const farm11 = parsed?.version === 11 && parsed?.rulesVersion === 'chain-6' && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  if (parsed?.version !== 9 && !market10 && !farm11) throw new Error('Expected a version 9 or validated market version 10 snapshot.');
   let backup: string | null = null;
   if (importedLegacy !== null) {
     const version: unknown = JSON.parse(importedLegacy)?.version;
@@ -69,6 +71,7 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const current = storage.getItem(SAVE_KEY);
   if (current !== null) {
     let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
+    if (farm11 && (version === 9 || version === 10) && storage.getItem(FARM_CHOICE_BACKUP_KEY) === null) { storage.setItem(FARM_CHOICE_BACKUP_KEY, current); storage.setItem(LATEST_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY); }
     if (version === 7 && storage.getItem(CHAIN2_BACKUP_KEY) === null) storage.setItem(CHAIN2_BACKUP_KEY, current);
     if (version === 8 && storage.getItem(CHAIN3_BACKUP_KEY) === null) storage.setItem(CHAIN3_BACKUP_KEY, current);
   }

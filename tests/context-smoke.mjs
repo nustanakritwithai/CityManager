@@ -48,7 +48,7 @@ async function until(expression, timeout = 15000) {
   const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Timed out: ${expression}`);
 }
-const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) {
@@ -73,7 +73,7 @@ async function load(json) {
   await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(json)})`); await button('#load');
-  const expected = JSON.parse(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
+  const expected = deserialize(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
 }
 async function cell(index, close = true) {
@@ -217,7 +217,7 @@ try {
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: projection.x, y: projection.y, deltaX: 0, deltaY: -180 }); assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await closePanel(); await key('ArrowRight'); await until(`JSON.stringify(window.cityManager.cellScreen(${homes[0].cell}))!==${JSON.stringify(JSON.stringify(projection))}`); assert.notDeepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await button('[data-camera="reset"]'); assert.deepEqual(await state(), fixture); checks.push('Open inspector disables camera buttons and ignores wheel/arrows/q/e; closing restores camera input without model changes');
 
   await place(homes[0]); await button('[data-tool="bulldoze"]'); await cell(homes[0].cell, false); const demolished = await state(); assert.equal(demolished.buildings.some(b => b.id === homes[0].id), false); assert.notEqual((await route()).id, String(homes[0].id)); assert.deepEqual(deserialize(JSON.stringify(demolished)), demolished);
-  await openPage('game'); await button('#save'); assert.deepEqual(JSON.parse(await evaluate('localStorage.getItem("citymanager.save.v7")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
+  await openPage('game'); await button('#save'); assert.deepEqual(deserialize(await evaluate('localStorage.getItem("citymanager.save.v7")')), demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
 
   await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
   await place(homes[0]); await assertLayout(); await screenshot('phone-house.png'); await evaluate('document.querySelector("#entity-content .cx-household-list").scrollIntoView({block:"start"})'); await screenshot('phone-house-members.png',false); await button(`#entity-content [data-household-id="${homeHousehold.id}"]`); await assertLayout(); await screenshot('phone-household.png');

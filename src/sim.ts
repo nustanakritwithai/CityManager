@@ -21,7 +21,7 @@ export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; le
 export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
-export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
+export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; cropChoices?: { at: number; crop: CropId }[]; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 /** `crop` names the lots moved (every kind but a write-off); a write-off carries the whole `mix`. Untyped only before `typeBaseline.tick`. */
 export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export' | 'market-deposit' | 'market-refund' | 'market-receipt'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
@@ -233,8 +233,16 @@ function moveProduct(c: City, from: Firm | null, to: Firm | null, product: Produ
   if (to) { to.products[product] += quantity; to.inventory += quantity; }
 }
 /** The crop a farm grows: set by its parcel's fertility band. */
-export function farmCrop(c: City, f: Pick<Firm, 'building'>): CropId {
-  return cropForFertility(c.resources.fertility[building(c, f.building).cell]) ?? 'rice';
+export function farmCrop(c: City, f: Pick<Firm, 'building'> & Partial<Pick<Firm, 'cropChoices'>>): CropId {
+  return f.cropChoices?.at(-1)?.crop ?? cropForFertility(c.resources.fertility[building(c, f.building).cell]) ?? 'rice';
+}
+/** Change future harvests without altering stock or the financial journal. */
+export function selectFarmCrop(c: City, firmId: number, crop: CropId): Result {
+  const f = c.firms.find(f => f.id === firmId && f.zone === 'F');
+  if (!f || !CROPS.includes(crop)) return { ok: false, message: 'ไม่พบฟาร์มหรือชนิดพืชไม่ถูกต้อง' };
+  if (farmCrop(c, f) === crop) return { ok: true, message: 'เลือกพืชชนิดนี้อยู่แล้ว' };
+  (f.cropChoices ??= []).push({ at: c.cropLedger.length, crop });
+  return { ok: true, message: 'เปลี่ยนพืชสำหรับการเก็บเกี่ยวครั้งถัดไปแล้ว' };
 }
 /** Lots a day a new four-worker factory needs. */
 const NEW_FACTORY_LOTS = 8;
@@ -246,7 +254,7 @@ const NEW_FACTORY_LOTS = 8;
  */
 export function chooseRecipe(c: City, factories: readonly Firm[] = c.firms.filter(f => f.zone === 'I' && f.recipe)): RecipeId {
   const spare = emptyCrops(), making = emptyCrops();
-  for (const f of c.firms) if (f.zone === 'F' && access(c, building(c, f.building).cell)) spare[farmCrop(c, f)] += Math.floor(24 * c.resources.fertility[building(c, f.building).cell] / 100) * building(c, f.building).level;
+  for (const f of c.firms) if (f.zone === 'F' && access(c, building(c, f.building).cell)) spare[farmCrop(c, f)] += Math.floor(24 * Math.max(50, c.resources.fertility[building(c, f.building).cell]) / 100) * building(c, f.building).level;
   for (const f of factories) if (f.recipe) { spare[RECIPE[f.recipe].crop] -= capacity(building(c, f.building)) * 2; making[RECIPE[f.recipe].crop]++; }
   const order = (a: CropId, b: CropId) => spare[b] - spare[a] || CROPS.indexOf(a) - CROPS.indexOf(b);
   const fed = CROPS.filter(k => spare[k] >= NEW_FACTORY_LOTS).sort((a, b) => making[a] - making[b] || order(a, b));
@@ -290,7 +298,6 @@ export function buildRoad(c: City, a: number, b: number): Result {
 }
 export function zoneCell(c: City, i: number, zone: Zone): Result {
   if (!validIndex(i) || ![null, 'R', 'C', 'I', 'F'].includes(zone)) return { ok: false, message: 'Invalid parcel or zone.' };
-  if (zone === 'F' && c.resources.fertility[i] < FERTILITY_THRESHOLD) return { ok: false, message: `Farm needs fertility ${FERTILITY_THRESHOLD}% or more; parcel fertility ${c.resources.fertility[i]}%.` };
   const cell = c.cells[i];
   if (cell.road) return { ok: false, message: 'Road cells cannot be zoned.' };
   if (plantAt(c, i)) return { ok: false, message: 'A water or power plant stands here. Bulldoze it before zoning.' };
@@ -390,7 +397,7 @@ function takeOver(c: City) {
     const funded = old.fundedBy, retail = isRetail(old);
     closeFirm(c, old);
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: chooseRecipe(c) } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
+    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: chooseRecipe(c) } : old.zone === 'F' ? { cropChoices: [{ at: c.cropLedger.length, crop: farmCrop(c, old) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
       wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: OWNER_STARTUP_CAPITAL, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
@@ -431,7 +438,7 @@ export function summary(c: City) {
       I: industryGrowthStatus(c).ready ? 1 : 0,
       F: (c.firms.some(f => f.zone === 'I' || isMarket(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!c.firms.some(f => f.zone === 'F') ||
         c.households.length + c.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(c, f.id) * 2, 0) >
-        c.firms.filter(f => f.zone === 'F').reduce((n, f) => n + Math.floor(24 * c.resources.fertility[building(c, f.building).cell] / 100), 0)) ? 1 : 0 } };
+        c.firms.filter(f => f.zone === 'F').reduce((n, f) => n + Math.floor(24 * Math.max(50, c.resources.fertility[building(c, f.building).cell]) / 100), 0)) ? 1 : 0 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
 function blockers(c: City, i: number): string[] {
@@ -449,7 +456,6 @@ function blockers(c: City, i: number): string[] {
     if (WAGES.C * .9 - 30 * 800 - 10_000 - HOUSEHOLD_BILL <= 0) reasons.push('Expected income cannot cover purchases, rent and the water/power bill.');
   } else {
     if (c.firms.length >= 64) reasons.push('Firm limit (64) reached.');
-    if (cell.zone === 'F' && c.resources.fertility[i] < FERTILITY_THRESHOLD) reasons.push(`Farm needs fertility ${FERTILITY_THRESHOLD}%; this parcel has ${c.resources.fertility[i]}%.`);
     if (cell.zone === 'C' && !ownerCandidate(c)) reasons.push('Raw market needs a connected household owner with one general/retail worker and 600 credits of actual capital.');
     if ((cell.zone === 'C' ? marketDemand(c) : s.demand[cell.zone]) <= 0) reasons.push(cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Raw market needs an actual farm, reachable buyers and a household owner with real capital and labour.' : 'No retail demand: existing shops cover the household market.');
   }
@@ -501,7 +507,7 @@ function createBuilding(c: City, i: number, shop = false) {
     transfer(c, 'outside', 'construction', 40_000, 'Outside residential developer investment');
   } else {
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
+    c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : zone === 'F' ? { cropChoices: [{ at: c.cropLedger.length, crop: 'rice' as const }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: 60_000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
     const paidCapital = transfer(c, sponsor ? sponsor.wallet : owner ? owner.wallet : 'outside', wallet, owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL, sponsor ? `Industry expansion capital #${fid}` : owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : retail ? 'Outside firm equity investment' : industry?.outside ? `Outside industry equity #${fid}` : `Outside industry bootstrap equity #${fid}`);
@@ -836,7 +842,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify(market ? { ...c, version: 10, rulesVersion: 'chain-5', market } : c);
+  const json = JSON.stringify({ ...c, version: 11, rulesVersion: 'chain-6', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1053,6 +1059,15 @@ export function deserialize(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 11) {
+    const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
+    if (envelope.rulesVersion !== 'chain-6') throw new Error('Unsupported or corrupt CityManager save.');
+    const { market, ...base } = envelope;
+    if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9);
+    if (market) loaded.market = market;
+    return loaded;
+  }
   if (version === 10) {
     const envelope = parsed as City & { market?: City['market'] };
     if (!envelope.market || envelope.market.version !== 10 || envelope.market.rulesVersion !== 'chain-5') throw new Error('Unsupported or corrupt CityManager market save.');

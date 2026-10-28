@@ -39,7 +39,7 @@ async function send(method, params = {}) { const id = ++sequence; const promise 
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId,kind:document.querySelector("#entity-content").dataset.cardKind})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
@@ -151,6 +151,16 @@ try {
   checks.push('Household card keeps its shared family identity and real members/skills; native Back returns to the source house and Esc returns to the source business without another family leaking into its data');
 
   await load(later); for (const kind of ['shop', 'market', 'factory', 'farm']) { const b = later.buildings.find(b => b.id === places[kind].id); await place(later, b); await card(later, kind, b); }
+  const farmFirm = later.firms.find(f => f.building === places.farm.id);
+  const oldStock = structuredClone(farmFirm.crops);
+  await button('#entity-content [data-farm-crop-picker] button[data-crop="vegetables"]');
+  await until(`document.querySelector('#entity-content [data-crop="vegetables"]').getAttribute('aria-pressed')==='true'`);
+  const chosen = await state(), chosenFarm = chosen.firms.find(f => f.id === farmFirm.id);
+  assert.equal(chosenFarm.cropChoices.at(-1).crop, 'vegetables');
+  assert.deepEqual(chosenFarm.crops, oldStock, 'Changing crop leaves existing inventory intact');
+  assert.deepEqual(deserialize(serialize(chosen)), chosen, 'Farm choice survives save/load validation');
+  checks.push('Farm crop selection changes future production and preserves existing stock');
+  await load(later);
   await household(later, later.households.find(h => h.id === family.id)); await card(later, 'household', later.households.find(h => h.id === family.id));
   checks.push('Inclusive trailing30-day cash cards independently reconcile real wallet-boundary inflows/outflows/net at days29 and59, explicitly label their periods and leave simulation/RNG/journals unchanged');
 

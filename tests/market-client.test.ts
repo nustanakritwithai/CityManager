@@ -37,13 +37,13 @@ test('market journal preserves unrelated fields only through explicit schema', (
   assert.equal(j.seq, '4');
 });
 
-test('city save v10 envelope round-trips market journal without putting cookies in the city', () => {
+test('city save v11 envelope round-trips market journal without putting cookies in the city', () => {
   const city = createCity(61025, { starter: false });
   const market = marketJournalForTest(null);
   const raw = serialize(city, market);
   const parsed = JSON.parse(raw);
-  assert.equal(parsed.version, 10);
-  assert.equal(parsed.rulesVersion, 'chain-5');
+  assert.equal(parsed.version, 11);
+  assert.equal(parsed.rulesVersion, 'chain-6');
   assert.equal(parsed.market.cityId, market.cityId);
   assert.equal('cm_guest' in parsed, false);
   const loaded = deserialize(raw);
@@ -59,7 +59,7 @@ test('deposit reserves typed firm stock before the request and confirms server e
   city.firms.push({ id: 2, building: 1, zone: 'F', crops: { rice: 4, vegetables: 0, sugarcane: 0 }, products: { 'milled-rice': 0, 'canned-food': 0, sugar: 0 }, wallet: 'firm:2', workDays: {}, inventory: 0, cropInventory: 4, cropCost: 0, productionTick: 0, owner: null, profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
   const store = new Map<string, string>(); Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } }); Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'cm_csrf=test' } });
   const originalFetch = globalThis.fetch; globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => { if (String(input).endsWith('/v1/me')) return new Response('{}', { status: 401 }); if (String(input).endsWith('/v1/auth/guest')) return new Response(JSON.stringify({ guest_id: '00000000-0000-4000-8000-000000000003' }), { status: 201, headers: { 'content-type': 'application/json' } }); assert.equal(JSON.parse(String(init?.body)).itemId, 'crop:rice'); return new Response(JSON.stringify({ state: 'done', seq: '1' }), { status: 201, headers: { 'content-type': 'application/json' } }); };
-  try { const client = new MarketClient(() => city, 'http://127.0.0.1:4317'); await client.createGuest(); let saves = 0; await client.deposit(2, 'crop:rice', 2, () => { saves++; const raw = serialize(city, client.exportSave()); assert.equal(JSON.parse(raw).version, 10); }); assert.equal(city.firms[0].crops.rice, 2); assert.equal(client.journal.escrow[0].state, 'confirmed'); assert.ok(saves >= 2); } finally { globalThis.fetch = originalFetch; }
+  try { const client = new MarketClient(() => city, 'http://127.0.0.1:4317'); await client.createGuest(); let saves = 0; await client.deposit(2, 'crop:rice', 2, () => { saves++; const raw = serialize(city, client.exportSave()); assert.equal(JSON.parse(raw).version, 11); }); assert.equal(city.firms[0].crops.rice, 2); assert.equal(client.journal.escrow[0].state, 'confirmed'); assert.ok(saves >= 2); } finally { globalThis.fetch = originalFetch; }
 });
 
 test('committed deposit response loss reconciles done without subtracting stock twice', async () => {
@@ -118,7 +118,7 @@ test('unknown deposit is fenced and restores exact stock once; done deposit neve
   const city = createCity(61025, { starter: false }); city.buildings.push({ id: 1, cell: 0, zone: 'F', level: 1, age: 0 }); city.firms.push({ id: 2, building: 1, zone: 'F', crops: { rice: 4, vegetables: 0, sugarcane: 0 }, products: { 'milled-rice': 0, 'canned-food': 0, sugar: 0 }, wallet: 'firm:2', workDays: {}, inventory: 0, cropInventory: 4, cropCost: 0, productionTick: 0, owner: null, profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
   const store = new Map<string, string>(); Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } }); Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'cm_csrf=test' } });
   const originalFetch = globalThis.fetch; let op = ''; let cancelled = false; globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => { const url = String(input); if (url.endsWith('/v1/me')) return new Response('{}', { status: 401 }); if (url.endsWith('/v1/auth/guest')) return new Response(JSON.stringify({ guest_id: '00000000-0000-4000-8000-000000000003' }), { status: 201 }); if (url.endsWith('/v1/deposits')) { op = JSON.parse(String(init?.body)).opId; throw new Error('unknown response'); } if (url.endsWith(`/v1/op/${op}/cancel`)) { cancelled = true; return new Response(JSON.stringify({ state: 'cancelled', opId: op }), { status: 200 }); } if (url.endsWith(`/v1/op/${op}`)) return new Response(JSON.stringify({ state: cancelled ? 'cancelled' : 'unknown', opId: op }), { status: 200 }); throw new Error('unexpected request'); };
-  try { const client = new MarketClient(() => city, 'http://127.0.0.1:4317'); await client.createGuest(); await assert.rejects(client.deposit(2, 'crop:rice', 2, () => undefined)); assert.equal(city.firms[0].crops.rice, 2); await assert.rejects(client.fenceDeposit(op, () => { throw new Error('save failed'); }), /save failed/); assert.equal(city.firms[0].crops.rice, 2); assert.equal(client.journal.escrow[0].state, 'pending'); await client.fenceDeposit(op, () => { const parsed = JSON.parse(serialize(city, client.exportSave())); assert.equal(parsed.version, 10); }); assert.equal(city.firms[0].crops.rice, 4); await assert.rejects(client.fenceDeposit(op)); } finally { globalThis.fetch = originalFetch; }
+  try { const client = new MarketClient(() => city, 'http://127.0.0.1:4317'); await client.createGuest(); await assert.rejects(client.deposit(2, 'crop:rice', 2, () => undefined)); assert.equal(city.firms[0].crops.rice, 2); await assert.rejects(client.fenceDeposit(op, () => { throw new Error('save failed'); }), /save failed/); assert.equal(city.firms[0].crops.rice, 2); assert.equal(client.journal.escrow[0].state, 'pending'); city.firms[0].crops.vegetables = 93; city.firms[0].cropInventory = 95; await assert.rejects(client.fenceDeposit(op, () => undefined), /farm-stock-full-for-refund/); assert.equal(city.firms[0].cropInventory, 95); assert.equal(client.journal.escrow[0].state, 'pending'); city.firms[0].crops.vegetables = 0; city.firms[0].cropInventory = 2; await client.fenceDeposit(op, () => { const parsed = JSON.parse(serialize(city, client.exportSave())); assert.equal(parsed.version, 11); }); assert.equal(city.firms[0].crops.rice, 4); await assert.rejects(client.fenceDeposit(op)); } finally { globalThis.fetch = originalFetch; }
 });
 
 test('expired guest preserves its journal and receipts across a panel resume and retry', async () => {

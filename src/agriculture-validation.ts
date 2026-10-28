@@ -28,7 +28,7 @@ export function validateAgriculture(c: City): void {
     if (f.zone === 'F' || isMarket(f)) requireThat(f.inventory === 0 && (f.zone === 'F' || c.buildings.find(b => b.id === f.building)?.level === 1));
     if (f.zone === 'F') {
       const b = c.buildings.find(b => b.id === f.building);
-      requireThat(b && isViableFarmland(c.resources.fertility[b.cell]) && f.cropCost === 0);
+      requireThat(b && f.cropCost === 0);
     }
     if (!isMarket(f) && !(isRetail(f) && f.owner !== null)) { requireThat(f.owner === null); continue; }
     const owner = f.owner;
@@ -72,6 +72,7 @@ export function validateAgriculture(c: City): void {
   const cropDestinationRole = (wallet: string, crop: string): Role => {
     const f = firms.get(wallet); requireThat(f);
     if (isMarket(f)) return 'T';
+    if (f.zone === 'F') return 'F';
     requireThat(f.zone === 'I' && f.recipe !== undefined && RECIPE[f.recipe].crop === crop);
     return 'I';
   };
@@ -111,7 +112,7 @@ export function validateAgriculture(c: City): void {
       requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= 3 && e.batches === 0 && e.outputQuantity === 0);
       role(e.to, 'F'); const before = holding(e.to), current = firms.get(e.to), b = current && c.buildings.find(b => b.id === current.building);
       if (b) requireThat(e.workers <= b.level);
-      const maximum = Math.min(96 - before.quantity, b ? harvestYield(c.resources.fertility[b.cell], e.workers) : 24 * e.workers);
+      const maximum = Math.min(96 - before.quantity, b ? harvestYield(Math.max(50, c.resources.fertility[b.cell]), e.workers) : 24 * e.workers);
       requireThat(e.quantity <= maximum && (!b || e.quantity === maximum));
       const key = e.tick + ':' + e.to; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);
       receive(e.to, e.quantity, 0); totals.harvested = safeAdd(totals.harvested, e.quantity);
@@ -143,7 +144,7 @@ export function validateAgriculture(c: City): void {
     } else if (e.kind === 'export') {
       // A farm sells only what it holds above the local reserve, at the outside price.
       requireThat(e.to === 'outside' && e.reason === `Crop export #${e.id}` && e.cash === e.quantity * CROP_EXPORT.price && e.toValue === e.cash && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
-      role(e.from, 'F'); requireThat(holding(e.from).quantity - e.quantity === CROP_EXPORT.keep);
+      role(e.from, 'F'); requireThat(holding(e.from).quantity - e.quantity >= CROP_EXPORT.keep);
       const index = cash(e, 'outside', e.from); release(e); totals.exported = safeAdd(totals.exported, e.quantity);
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
     } else if (e.kind === 'market-deposit') {

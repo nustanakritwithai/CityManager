@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY, access, buildRoad, chooseRecipe, createCity, deserialize, farmCrop, serialize, step, zoneCell, type City } from '../src/sim.ts';
+import { GATEWAY, access, buildRoad, chooseRecipe, createCity, deserialize, farmCrop, selectFarmCrop, serialize, step, zoneCell, type City } from '../src/sim.ts';
 import { CROPS, CROP_BANDS, PRODUCTS, RECIPE, RECIPES, cropForFertility, freshPreference, mixTotal, productPreference, takeLargest } from '../src/goods.ts';
 import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '../src/legacy-v6.ts';
 import { untyped } from './untyped.ts';
@@ -17,7 +17,9 @@ function threeCropCity(): City {
   for (const i of take(frontage, 4)) zoneCell(c, i, 'I');
   for (const i of take(frontage, 3)) zoneCell(c, i, 'C');
   for (let d = 1; d <= 600; d++) {
-    step(c); keepSupplied(c);
+    step(c);
+    for (const farm of c.firms.filter(f => f.zone === 'F')) { const parcel = c.buildings.find(b => b.id === farm.building)!; selectFarmCrop(c, farm.id, cropForFertility(c.resources.fertility[parcel.cell])!); }
+    keepSupplied(c);
     if (d === 400) for (const i of take(frontage.filter(i => !c.cells[i].zone), 2)) zoneCell(c, i, 'I');
   }
   return c;

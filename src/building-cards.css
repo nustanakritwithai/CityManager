@@ -317,3 +317,7 @@
   #entity-content[data-card-kind] .cx-metric,
   #entity-content[data-card-kind] .bc-chain-step { border: 1px solid CanvasText; }
 }
+
+.farm-crop-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.farm-crop-choices button { min-height: 44px; min-width: 70px; }
+.farm-crop-choices button[aria-pressed="true"] { background: #a87927; color: #fff; border-color: #ffd27a; }

@@ -20,7 +20,15 @@ export function validateTypes(c: City): void {
   for (const f of c.firms) {
     if (!validMix(f.crops, CROPS) || mixTotal(f.crops) !== f.cropInventory || !validMix(f.products, PRODUCTS) || mixTotal(f.products) !== f.inventory) fail();
     if (f.zone === 'I' ? !RECIPES.includes(f.recipe!) : f.recipe !== undefined) fail();
-    const onlyCrop: CropId | null = f.zone === 'F' ? farmCrop(c, f) : f.zone === 'I' ? RECIPE[f.recipe!].crop : null;
+    if (f.cropChoices !== undefined) {
+      if (f.zone !== 'F' || !Array.isArray(f.cropChoices) || f.cropChoices.length === 0) fail();
+      let last = -1;
+      for (const choice of f.cropChoices) {
+        if (!record(choice) || Object.keys(choice).length !== 2 || !count(choice.at) || choice.at < last || choice.at > c.cropLedger.length || !CROPS.includes(choice.crop)) fail();
+        last = choice.at;
+      }
+    }
+    const onlyCrop: CropId | null = f.zone === 'I' ? RECIPE[f.recipe!].crop : null;
     if (onlyCrop && CROPS.some(k => k !== onlyCrop && f.crops[k] > 0)) fail();
     if (f.zone === 'I' && PRODUCTS.some(p => p !== RECIPE[f.recipe!].product && f.products[p] > 0)) fail();
     if (!isMarket(f) && !isRetail(f) && f.zone === 'C') fail();
@@ -41,12 +49,12 @@ export function validateTypes(c: City): void {
     const crop = e.crop!, now = (w: string) => firms.get(w);
     const take = (w: string) => { const h = cropsOf(w); if (h[crop] < e.quantity) fail(); h[crop] -= e.quantity; };
     const give = (w: string) => { cropsOf(w)[crop] += e.quantity; };
-    const grows = (w: string) => { const f = now(w); if (f && f.zone === 'F' && farmCrop(c, f) !== crop) fail(); };
+    const grows = (w: string) => { const f = now(w); if (f && f.zone === 'F') { const selected = [...(f.cropChoices ?? [])].reverse().find(choice => choice.at <= i)?.crop ?? farmCrop(c, { building: f.building }); if (selected !== crop) fail(); } };
     const mills = (w: string) => { const f = now(w); if (f && f.zone === 'I' && RECIPE[f.recipe!].crop !== crop) fail(); };
     if (e.kind === 'harvest') { grows(e.to); give(e.to); }
-    else if (e.kind === 'trade') { grows(e.from); take(e.from); mills(e.to); give(e.to); }
+    else if (e.kind === 'trade') { take(e.from); mills(e.to); give(e.to); }
     else if (e.kind === 'consumption') take(e.from);
-    else if (e.kind === 'export') { grows(e.from); take(e.from); }
+    else if (e.kind === 'export') { take(e.from); }
     else if (e.kind === 'process') { mills(e.from); take(e.from); recipeCrop.set(e.reason, crop); }
     else if (e.kind === 'market-deposit') { if (e.from !== 'market-server') take(e.from); }
     else if (e.kind === 'market-refund' || e.kind === 'market-receipt') { if (e.to.startsWith('firm:')) give(e.to); }

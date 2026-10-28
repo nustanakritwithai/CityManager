@@ -104,7 +104,7 @@ function exchange(c: City, seller: Firm, buyer: Firm, crop: CropId, quantity: nu
 function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
   const building = c.buildings.find(b => b.id === f.building), count = workers(f, hooks);
   if (!building || count === null) return;
-  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: c.resources.fertility[building.cell], operational: operational(c, f, hooks) });
+  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: Math.max(50, c.resources.fertility[building.cell]), operational: operational(c, f, hooks) });
   if (!proposal.ok) return;
   if (!proposal.quantity) { f.productionTick = proposal.next.productionTick; return; }
   let event: CropEntry, harvested: number;
@@ -162,7 +162,7 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
   for (const farm of farms) harvest(c, farm, hooks);
   const activeFarms = farms.filter(f => operational(c, f, hooks)), activeTraders = traders.filter(f => operational(c, f, hooks)), activeFactories = factories.filter(f => operational(c, f, hooks));
   // Each factory buys only its recipe's crop: market stock first (ID order), then farms growing it.
-  const sellersFor = new Map(CROPS.map(crop => [crop, [...activeTraders.map(f => ({ firm: f, price: CROP_PRICES.traderToFactory })), ...activeFarms.filter(f => farmCrop(c, f) === crop).map(f => ({ firm: f, price: CROP_PRICES.farmToFactory }))]]));
+  const sellersFor = new Map(CROPS.map(crop => [crop, [...activeTraders.map(f => ({ firm: f, price: CROP_PRICES.traderToFactory })), ...activeFarms.filter(f => f.crops[crop] > 0).map(f => ({ firm: f, price: CROP_PRICES.farmToFactory }))]]));
   const sourceFor = new Map(CROPS.map(crop => [crop, 0]));
   for (const factory of activeFactories) {
     if (!isSafeCount(factory.productionTick) || factory.productionTick >= c.tick || !factory.recipe) continue;
@@ -185,23 +185,17 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
   for (const h of c.households) if (accessibleHousehold(c, h, hooks) && isSafeCount(c.accounts[h.wallet]) && c.accounts[h.wallet] >= CROP_PRICES.householdCrop && h.lastPurchaseTick < c.tick) demand++;
   const target = Number(demand * 2n > BigInt(CROP_STOCK_CAPS.T) ? BigInt(CROP_STOCK_CAPS.T) : demand * 2n);
   // A market stocks an even share of each crop the city grows, then fills any gap from whatever is left.
-  const grown = CROPS.filter(k => activeFarms.some(f => farmCrop(c, f) === k)), farmIndex = new Map<CropId | 'any', number>();
-  const buyFrom = (trader: Firm, farms: Firm[], key: CropId | 'any', limit: (crop: CropId) => number) => {
-    let i = farmIndex.get(key) ?? 0;
-    while (i < farms.length && trader.cropInventory < target) {
-      const farm = farms[i], crop = farmCrop(c, farm); if (!isSafeCount(farm.cropInventory, 1) || limit(crop) <= 0) { i++; continue; }
-      const budget = hooks.spendable(trader); if (!isSafeCount(budget) || budget < CROP_PRICES.farmToTrader) break;
-      const qty = Math.min(farm.cropInventory, target - trader.cropInventory, limit(crop), Math.floor(budget / CROP_PRICES.farmToTrader));
-      if (!exchange(c, farm, trader, crop, qty, sellable, hooks)) { i++; continue; }
-      if (farm.cropInventory === 0) i++;
-    }
-    farmIndex.set(key, i);
-  };
+  const grown = CROPS.filter(k => activeFarms.some(f => f.crops[k] > 0 || farmCrop(c, f) === k));
   for (const trader of activeTraders) {
     if (!isSafeCount(trader.productionTick) || trader.productionTick >= c.tick || !validCropHolding(trader, CROP_STOCK_CAPS.T)) continue;
     const share = Math.ceil(target / Math.max(1, grown.length));
-    for (const crop of grown) buyFrom(trader, activeFarms.filter(f => farmCrop(c, f) === crop), crop, k => share - trader.crops[k]);
-    buyFrom(trader, activeFarms, 'any', () => target - trader.cropInventory);
+    for (const balanced of [true, false]) for (const crop of grown) for (const farm of activeFarms) {
+      const budget = hooks.spendable(trader), room = target - trader.cropInventory;
+      const desired = balanced ? Math.min(room, Math.max(0, share - trader.crops[crop])) : room;
+      if (!isSafeCount(budget) || budget < CROP_PRICES.farmToTrader || desired <= 0) continue;
+      const qty = Math.min(farm.crops[crop], desired, Math.floor(budget / CROP_PRICES.farmToTrader));
+      if (qty > 0) exchange(c, farm, trader, crop, qty, sellable, hooks);
+    }
     trader.productionTick = c.tick;
   }
   // What local buyers left above each farm's reserve goes out through the gateway.
@@ -211,19 +205,21 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
 }
 
 function exportSurplus(c: City, farm: Firm, hooks: AgricultureHooks): void {
+  for (const crop of CROPS) {
   const account = cropAccount(c, farm, hooks); if (!account) return;
-  const proposal = proposeCropExport(account); if (!proposal.ok) return;
+  const proposal = proposeCropExport(account, farm.crops[crop]); if (!proposal.ok) continue;
   let event: CropEntry, exported: number, revenue: number, expense: number;
   try {
     exported = safeAdd(c.crops.exported ?? 0, proposal.quantity); revenue = safeAdd(farm.monthlyRevenue, proposal.cash); expense = safeAdd(farm.monthlyExpense, proposal.fromValue);
     const id = nextEntry(c);
-    event = entry(c, { kind: 'export', from: farm.wallet, to: 'outside', quantity: proposal.quantity, fromValue: proposal.fromValue, toValue: proposal.cash, cash: proposal.cash, workers: 0, batches: 0, outputQuantity: 0, reason: `Crop export #${id}`, crop: farmCrop(c, farm) });
+    event = entry(c, { kind: 'export', from: farm.wallet, to: 'outside', quantity: proposal.quantity, fromValue: proposal.fromValue, toValue: proposal.cash, cash: proposal.cash, workers: 0, batches: 0, outputQuantity: 0, reason: `Crop export #${id}`, crop });
   } catch { return; }
   commit(c, [farm], null, null, () => {
     cashPayment(hooks, 'outside', farm.wallet, proposal.cash, event.reason);
     farm.cropInventory = proposal.nextFarm.cropInventory; farm.cropCost = proposal.nextFarm.cropCost; farm.crops[event.crop!] -= proposal.quantity; farm.monthlyRevenue = revenue; farm.monthlyExpense = expense;
     c.crops.exported = exported; c.cropLedger.push(event);
   });
+  }
 }
 
 /** Fulfils the same ONE daily basket as generic retail, from canonical T stock. */
@@ -270,7 +266,7 @@ export function agricultureDiagnostic(c: City, f: Firm, hooks: AgricultureHooks)
   if (!hooks.served(b.id)) return result('agriculture.no-utilities');
   if (!workers(f, hooks) || !operational(c, f, hooks)) return result('agriculture.no-workers');
   if (f.zone === 'F') {
-    const fertility = c.resources.fertility[b.cell];
+    const fertility = Math.max(50, c.resources.fertility[b.cell]);
     if (!isViableFarmland(fertility)) return result('agriculture.unsuitable-fertility');
     if (f.cropInventory >= CROP_STOCK_CAPS.F) return result('agriculture.stock-cap');
     return result('agriculture.harvest-ready', Math.min(CROP_STOCK_CAPS.F - f.cropInventory, harvestYield(fertility, workers(f, hooks)!)));
