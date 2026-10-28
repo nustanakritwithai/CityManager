@@ -26,7 +26,7 @@ test('factory recipe can change without losing existing stocks and survives save
 
 test('v11 save is preserved before the first v12 save and can be recovered', () => {
   const city = createCity(61025), current = serialize(city);
-  const prior = JSON.parse(current); delete prior.foodDemandStartTick; delete prior.factoryProgressionStartTick;
+  const prior = JSON.parse(current); delete prior.foodDemandStartTick; delete prior.factoryProgressionStartTick; delete prior.farmLevelStartTick;
   const old = JSON.stringify({ ...prior, version: 11, rulesVersion: 'chain-6' });
   const data = new Map([[SAVE_KEY, old]]);
   const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } };
