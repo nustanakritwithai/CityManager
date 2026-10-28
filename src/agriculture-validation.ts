@@ -1,7 +1,7 @@
 import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
-import { CROP_EXPORT, CROP_STOCK_CAPS, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
+import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 
 const invalid = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture state.'); };
@@ -12,7 +12,7 @@ type Holding = { quantity: number; value: number };
 type Operating = { tick: number; revenue: number; expense: number; moneyIndex?: number };
 
 /** No repair, allocation, time advance or writes occur here. Historical roads are not inferred. */
-export function validateAgriculture(c: City, extendedFactories = false): void {
+export function validateAgriculture(c: City, extendedFactories = false, withFarmLevels = true): void {
   requireThat(isCanonicalResourceMap(c.resources, c.seed));
   requireThat(isSafeCount(c.agricultureStartTick) && c.agricultureStartTick <= c.tick);
   requireThat(object(c.crops) && ['harvested', 'processed', 'consumed', 'writtenOff'].every(key => isSafeCount(c.crops[key as keyof City['crops']])));
@@ -21,11 +21,11 @@ export function validateAgriculture(c: City, extendedFactories = false): void {
   const households = new Map(c.households.map(h => [h.id, h]));
   const ownerIds = new Set<number>();
   for (const f of c.firms) {
-    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'I' && extendedFactories ? factoryCropCapacity(c.buildings.find(b => b.id === f.building)!.level) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
+    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'F' && withFarmLevels ? farmStockCapacity(c.buildings.find(b => b.id === f.building)!.level) : f.zone === 'I' && extendedFactories ? factoryCropCapacity(c.buildings.find(b => b.id === f.building)!.level) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
     requireThat(isSafeCount(f.cropInventory) && f.cropInventory <= capacity && isSafeCount(f.cropCost) && (f.cropInventory > 0 || f.cropCost === 0));
     requireThat(isSafeCount(f.productionTick) && f.productionTick >= c.agricultureStartTick && f.productionTick <= c.tick);
     if (isRetail(f)) requireThat(f.cropCost === 0);
-    // Farms grow up to level 3 (one worker per level); crop markets stay single-stall.
+    // Farms have one worker per level; crop markets stay single-stall.
     if (f.zone === 'F' || isMarket(f)) requireThat(f.inventory === 0 && (f.zone === 'F' || c.buildings.find(b => b.id === f.building)?.level === 1));
     if (f.zone === 'F') {
       const b = c.buildings.find(b => b.id === f.building);
@@ -103,7 +103,7 @@ export function validateAgriculture(c: City, extendedFactories = false): void {
   const receive = (wallet: string, qty: number, value: number) => {
     const h = holding(wallet); h.quantity = safeAdd(h.quantity, qty); h.value = safeAdd(h.value, value);
     const known = role(wallet), f = firms.get(wallet), b = f && c.buildings.find(b => b.id === f.building);
-    if (known) requireThat(h.quantity <= (known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? factoryCropCapacity(b?.level ?? 9) : CROP_STOCK_CAPS[known]));
+    if (known) requireThat(h.quantity <= (known === 'F' && withFarmLevels ? farmStockCapacity(b?.level ?? FARM_MAX_LEVEL) : known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? factoryCropCapacity(b?.level ?? 9) : CROP_STOCK_CAPS[known]));
     // A deleted market-receipt recipient may not have left enough history to
     // distinguish a market from a factory. Both are bounded by 48 lots.
     else if (extendedFactories) requireThat(h.quantity <= CROP_STOCK_CAPS.T);
@@ -131,6 +131,9 @@ export function validateAgriculture(c: City, extendedFactories = false): void {
   let previousTick = c.agricultureStartTick, day = -1;
   let sellable = new Map<string, number>();
   const dailyProduction = new Set<string>();
+  // Farms never lose levels; the smallest level compatible with the journal so far
+  // must remain possible at every subsequent harvest for the same firm.
+  const farmMinimumLevels = new Map<string, number>();
   const totals = { harvested: 0, processed: 0, consumed: 0, writtenOff: 0, exported: 0 };
   for (let i = 0; i < c.cropLedger.length; i++) {
     const e = c.cropLedger[i];
@@ -139,11 +142,24 @@ export function validateAgriculture(c: City, extendedFactories = false): void {
     previousTick = e.tick;
     if (day !== e.tick) { day = e.tick; sellable = new Map([...holdings].map(([wallet, h]) => [wallet, h.quantity])); }
     if (e.kind === 'harvest') {
-      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= 3 && e.batches === 0 && e.outputQuantity === 0);
+      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? FARM_MAX_LEVEL : 3) && e.batches === 0 && e.outputQuantity === 0);
       role(e.to, 'F'); const before = holding(e.to), current = firms.get(e.to), b = current && c.buildings.find(b => b.id === current.building);
       if (b) requireThat(e.workers <= b.level);
-      const maximum = Math.min(96 - before.quantity, b ? harvestYield(Math.max(50, c.resources.fertility[b.cell]), e.workers) : 24 * e.workers);
-      requireThat(e.quantity <= maximum && (!b || e.quantity === maximum));
+      const oldRules = !withFarmLevels || e.tick <= (c.farmLevelStartTick ?? 0);
+      const maxLevel = Math.min(b?.level ?? FARM_MAX_LEVEL, oldRules ? 3 : FARM_MAX_LEVEL);
+      const minLevel = Math.max(e.workers, farmMinimumLevels.get(e.to) ?? 1);
+      let feasible = 0;
+      for (let level = minLevel; level <= maxLevel; level++) {
+        const room = FARM_STOCK_BY_LEVEL[level] - before.quantity;
+        if (room < 0) continue;
+        // Removed farms have no remaining cell; preserve historical v15 validation,
+        // while new events must be possible at some actual effective fertility.
+        const matches = b ? e.quantity === Math.min(room, harvestYield(Math.max(50, c.resources.fertility[b.cell]), e.workers)) : oldRules
+          ? e.quantity <= Math.min(room, 24 * e.workers)
+          : Array.from({ length: 51 }, (_, i) => 50 + i).some(fertility => e.quantity === Math.min(room, harvestYield(fertility, e.workers)));
+        if (matches) { feasible = level; break; }
+      }
+      requireThat(feasible > 0); farmMinimumLevels.set(e.to, feasible);
       const key = e.tick + ':' + e.to; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);
       receive(e.to, e.quantity, 0); totals.harvested = safeAdd(totals.harvested, e.quantity);
     } else if (e.kind === 'trade') {

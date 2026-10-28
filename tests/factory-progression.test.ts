@@ -28,7 +28,7 @@ test('new level save roundtrip preserves firm identity and old envelope still re
   const loaded = deserialize(JSON.stringify(saved));
   assert.deepEqual(loaded.firms.find(x=>x.id===f.id),before);
   assert.equal(loaded.buildings.find(x=>x.id===b.id)?.level,9);
-  saved.version=15; saved.rulesVersion='chain-10'; delete saved.factoryProgressionStartTick;
+  saved.version=15; saved.rulesVersion='chain-10'; delete saved.factoryProgressionStartTick; delete saved.farmLevelStartTick;
   assert.throws(()=>deserialize(JSON.stringify(saved)));
 });
 
@@ -116,7 +116,7 @@ test('new upgrades retain working capital while old level-two economics stay unc
 
 test('legacy v15 migration preserves records and applies old worker limits before the boundary', () => {
   const source=createCity(61025); for(let day=0;day<89;day++)step(source);
-  const old=JSON.parse(serialize(source)); old.version=15; old.rulesVersion='chain-10'; delete old.factoryProgressionStartTick;
+  const old=JSON.parse(serialize(source)); old.version=15; old.rulesVersion='chain-10'; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
   const raw=JSON.stringify(old), loaded=deserialize(raw);
   assert.equal(loaded.factoryProgressionStartTick,old.tick);
   assert.deepEqual(loaded.cropLedger,old.cropLedger); assert.deepEqual(loaded.goodsLedger,old.goodsLedger); assert.deepEqual(loaded.accounts,old.accounts);

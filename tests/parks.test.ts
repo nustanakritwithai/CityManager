@@ -85,7 +85,7 @@ test('park upkeep follows existing treasury clipping without negative funds or d
 });
 
 test('v15 validates one-tile level-1 park ownership and construction evidence; old v13 remains intact', () => {
-  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 18);
+  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 19);
   for (const change of [
     (x: any) => { x.parks[0].width = 2; }, (x: any) => { x.parks[0].cells = [0, 1]; },
     (x: any) => { x.parks[0].level = 0; }, (x: any) => { x.parks[0].level = 2; },
@@ -95,13 +95,13 @@ test('v15 validates one-tile level-1 park ownership and construction evidence; o
     (x: any) => { delete x.parks; },
   ]) { const invalid = structuredClone(raw); change(invalid); assert.throws(() => deserialize(JSON.stringify(invalid)), /corrupt/i); }
   const oldCity = createCity(61025); run(oldCity, 60); const old = JSON.parse(serialize(oldCity));
-  old.version = 13; old.rulesVersion = 'chain-8'; delete old.parks; delete old.factoryProgressionStartTick;
+  old.version = 13; old.rulesVersion = 'chain-8'; delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
   const loaded = deserialize(JSON.stringify(old)); assert.deepEqual(loaded.parks, []);
   for (const key of ['accounts', 'ledger', 'buildings', 'households', 'firms', 'rng', 'tick', 'nextId']) assert.deepEqual((loaded as any)[key], old[key]);
 });
 
 test('first park save keeps exact pre-park bytes and backup failure preserves primary save', () => {
-  const c = city(), old = JSON.parse(serialize(c)); delete old.parks; delete old.factoryProgressionStartTick; old.version = 13; old.rulesVersion = 'chain-8';
+  const c = city(), old = JSON.parse(serialize(c)); delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick; old.version = 13; old.rulesVersion = 'chain-8';
   const previous = JSON.stringify(old), map = new Map([[SAVE_KEY, previous]]);
   const storage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); } };
   buildPark(c, 0); const next = serialize(c); saveStoredCity(storage, next, null);
@@ -117,5 +117,5 @@ test('no-park city matches the pre-density engine until residential progression 
   // frozen pre-density hash cannot hold once those requested upgrades occur;
   // park-runtime.test.ts separately checks 360-day no-park session parity.
   const baselines = [[61025, '8ab2c8203f2778feee35432a10f3ca910db5215c1ea188750e3d0b0f1654c82f'], [20261023, '3a5d3cc45efd4950df4a3304e9c31134ee6c582561d5a513354dee1b586eddc7']] as const;
-  for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 119); const { parks, factoryProgressionStartTick: _factory, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3)); run(c, 1); assert.ok(c.buildings.some(b => b.zone === 'R' && b.level === 4 && b.housingType === 'apartment')); }
+  for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 119); const { parks, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3)); run(c, 1); assert.ok(c.buildings.some(b => b.zone === 'R' && b.level === 4 && b.housingType === 'apartment')); }
 });

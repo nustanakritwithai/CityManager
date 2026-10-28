@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createCity, deserialize, firmWorkerCount, isRetail, retailDemand, serialize, step, type City } from '../src/sim.ts';
 import { retailCapacity, staffedRetailCapacity } from '../src/retail-capacity.ts';
 import { keepSupplied } from './plants.ts';
-import { RETAIL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
+import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 
 function grown(): City {
@@ -31,14 +31,14 @@ test('legacy state migrates intact; only the new envelope admits extended levels
   // Produced by the published v15 engine from an actual converted shop.
   const old = readFileSync(new URL('./fixtures/retail-v15.json', import.meta.url), 'utf8'), raw = JSON.parse(old);
   assert.equal(raw.version, 15);
-  const loaded = deserialize(old), original = { ...raw, version: 9, rulesVersion: 'chain-4', factoryProgressionStartTick: raw.tick };
+  const loaded = deserialize(old), original = { ...raw, version: 9, rulesVersion: 'chain-4', factoryProgressionStartTick: raw.tick, farmLevelStartTick: raw.tick };
   assert.deepEqual(loaded, original);
   const firm = loaded.firms.find(f => f.convertedAt !== undefined)!;
   const premise = loaded.buildings.find(b => b.id === firm.building)!;
   premise.level = 7;
   const upgraded = serialize(loaded);
   assert.deepEqual(deserialize(upgraded), loaded);
-  const forged = JSON.parse(upgraded); forged.version = 15; forged.rulesVersion = 'chain-10'; delete forged.factoryProgressionStartTick;
+  const forged = JSON.parse(upgraded); forged.version = 15; forged.rulesVersion = 'chain-10'; delete forged.factoryProgressionStartTick; delete forged.farmLevelStartTick;
   assert.throws(() => deserialize(JSON.stringify(forged)), /corrupt/);
   assert.equal(deserialize(upgraded).firms.find(f => f.id === firm.id)!.convertedAt, firm.convertedAt);
   assert.deepEqual(deserialize(upgraded).firms.find(f => f.id === firm.id)!.owner, firm.owner);
@@ -49,7 +49,7 @@ test('legacy state migrates intact; only the new envelope admits extended levels
   const items = new Map<string, string>([[SAVE_KEY, old]]);
   const storage = { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v); } };
   saveStoredCity(storage, upgraded, null);
-  assert.equal(items.get(RETAIL_BACKUP_KEY), old);
+  assert.equal(items.get(FARM_LEVEL_BACKUP_KEY), old);
   assert.equal(readStoredCity(storage, 'backup')?.raw, old);
 });
 
