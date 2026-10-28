@@ -85,7 +85,7 @@ test('park upkeep follows existing treasury clipping without negative funds or d
 });
 
 test('v15 validates one-tile level-1 park ownership and construction evidence; old v13 remains intact', () => {
-  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 15);
+  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 17);
   for (const change of [
     (x: any) => { x.parks[0].width = 2; }, (x: any) => { x.parks[0].cells = [0, 1]; },
     (x: any) => { x.parks[0].level = 0; }, (x: any) => { x.parks[0].level = 2; },
@@ -95,13 +95,13 @@ test('v15 validates one-tile level-1 park ownership and construction evidence; o
     (x: any) => { delete x.parks; },
   ]) { const invalid = structuredClone(raw); change(invalid); assert.throws(() => deserialize(JSON.stringify(invalid)), /corrupt/i); }
   const oldCity = createCity(61025); run(oldCity, 60); const old = JSON.parse(serialize(oldCity));
-  old.version = 13; old.rulesVersion = 'chain-8'; delete old.parks;
+  old.version = 13; old.rulesVersion = 'chain-8'; delete old.parks; delete old.factoryProgressionStartTick;
   const loaded = deserialize(JSON.stringify(old)); assert.deepEqual(loaded.parks, []);
   for (const key of ['accounts', 'ledger', 'buildings', 'households', 'firms', 'rng', 'tick', 'nextId']) assert.deepEqual((loaded as any)[key], old[key]);
 });
 
 test('first park save keeps exact pre-park bytes and backup failure preserves primary save', () => {
-  const c = city(), old = JSON.parse(serialize(c)); delete old.parks; old.version = 13; old.rulesVersion = 'chain-8';
+  const c = city(), old = JSON.parse(serialize(c)); delete old.parks; delete old.factoryProgressionStartTick; old.version = 13; old.rulesVersion = 'chain-8';
   const previous = JSON.stringify(old), map = new Map([[SAVE_KEY, previous]]);
   const storage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); } };
   buildPark(c, 0); const next = serialize(c); saveStoredCity(storage, next, null);
@@ -115,5 +115,5 @@ test('no-park city is byte-for-byte equivalent to pre-change engine after 360 da
   // Generated from main 8723b447f521a59d3939b2aeeb6a851c61cc1fb1, not the candidate.
   // Its src/sim.ts blob is ede8baa32a5336ac84750c1d1d33b0546b937a93.
   const baselines = [[61025, '84e9e5121867459c00bedc893d556e05dd69047aa7f32905d4878c6ecd74e0de'], [20261023, '4656620f57ee1768ea3c1a88d9836bcb798f5e4084719aff9d935bc65babef9d']] as const;
-  for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 360); const { parks, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); }
+  for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 360); const { parks, factoryProgressionStartTick: _factory, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); }
 });

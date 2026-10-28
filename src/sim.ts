@@ -1,5 +1,5 @@
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
-import { FACTORY_MAX_LEVEL } from './factory-levels.ts';
+import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
 import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
 import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
@@ -73,7 +73,7 @@ export function parkStaffingStatus(c: City, p: Park) {
 }
 export const isMarket = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'market';
 export const isRetail = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'retail';
-export const firmCapacity = (b: Building) => b.zone === 'I' ? b.level + 3 : b.zone === 'F' ? b.level : b.zone === 'C' ? Math.max(1, b.level - 1) : 0;
+export const firmCapacity = (b: Building) => b.zone === 'I' ? factoryLevel(b.level).jobs : b.zone === 'F' ? b.level : b.zone === 'C' ? Math.max(1, b.level - 1) : 0;
 const capacity = firmCapacity;
 export const firmWage = (f: Firm) => isMarket(f) ? 0 : WAGES[f.zone];
 export const firmRent = (f: Firm) => isMarket(f) ? 3_000 : 10_000;
@@ -935,7 +935,7 @@ function grow(c: City) {
     const residents = c.households.filter(h => h.home === b.id), f = c.firms.find(f => f.building === b.id);
     if (b.zone === 'R' && residents.some(h => householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && balance(c, h.wallet) >= 20_000)) {
       transfer(c, 'outside', 'construction', 20_000, 'Outside residential height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
-    } else if (f && !isMarket(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && balance(c, f.wallet) >= 20_000 && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + (b.level + 4) * (firmWage(f) / MONTH + 2 * 350))) {
+    } else if (f && !isMarket(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && balance(c, f.wallet) >= 20_000 && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f) / MONTH + 2 * 350))) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
     }
   }
@@ -1248,11 +1248,11 @@ function deserializeVersioned(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version !== 17 && parsed && typeof parsed === 'object' && 'factoryProgressionStartTick' in parsed) throw new Error('Unexpected factory progression boundary.');
   if (version !== 13 && version !== 14 && version !== 15 && version !== 17 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
   if (version === 13 || version === 14 || version === 15 || version === 17) {
     const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
     if (version === 17 && (!Number.isSafeInteger(envelope.factoryProgressionStartTick) || envelope.factoryProgressionStartTick! < 0 || envelope.factoryProgressionStartTick! > envelope.tick)) throw new Error('Invalid factory progression boundary.');
-    if (version !== 17 && 'factoryProgressionStartTick' in envelope) throw new Error('Unexpected factory progression boundary.');
     if (envelope.rulesVersion !== (version === 17 ? 'chain-12' : version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');

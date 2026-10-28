@@ -202,7 +202,9 @@ export class MarketClient {
     const product = receipt.item_code.startsWith('product:'), cropKey = receipt.item_code.slice(5);
     return this.city().firms.filter(f => product ? f.commercialKind === 'retail' : isMarket(f) || (f.zone === 'I' && f.recipe !== undefined && RECIPE[f.recipe].crop === cropKey)).map(f => {
       const building = this.city().buildings.find(b => b.id === f.building); const holdings = [...Object.values(f.crops), ...Object.values(f.products)];
-      const total = holdings.reduce((a, n) => a + n, 0); const capacity = product ? PRODUCT_STOCK_CAP : isMarket(f) ? CROP_STOCK_CAPS.T : building ? factoryCropCapacity(building.level) : CROP_STOCK_CAPS.I;
+      // Keep the historical receipt rule at levels 1–3. Expanded factories
+      // measure crop storage independently of their finished-goods inventory.
+      const total = !product && f.zone === 'I' && building && building.level > 3 ? Object.values(f.crops).reduce((a, n) => a + n, 0) : holdings.reduce((a, n) => a + n, 0); const capacity = product ? PRODUCT_STOCK_CAP : isMarket(f) ? CROP_STOCK_CAPS.T : building ? factoryCropCapacity(building.level) : CROP_STOCK_CAPS.I;
       return { firmId: f.id, kind: product ? 'retail' : isMarket(f) ? 'market' : 'factory', available: capacity - total, eligible: Boolean(building) && holdings.every(n => Number.isSafeInteger(n) && n >= 0) && Number.isSafeInteger(total) && total + receipt.quantity <= capacity };
     }).filter(x => x.eligible).map(({ firmId, kind, available }) => ({ firmId, kind, available }));
   }

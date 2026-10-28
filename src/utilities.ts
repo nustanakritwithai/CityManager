@@ -5,6 +5,7 @@
  * (by road distance, then id) are served first, so the farthest go dark. Pure functions of the city.
  */
 import { GATEWAY, SIZE, type Building, type City } from './sim.ts';
+import { factoryLevel } from './factory-levels.ts';
 
 export const UTILITY_KINDS = ['power', 'water'] as const;
 export type UtilityKind = typeof UTILITY_KINDS[number];
@@ -42,7 +43,7 @@ const neighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i
 export function buildingNeed(zone: Building['zone'], level: number, households = 0): Need {
   if (zone === 'R') return { power: households * HOUSEHOLD_NEED.power, water: households * HOUSEHOLD_NEED.water };
   if (zone === 'C') return { power: level, water: 1 };
-  if (zone === 'I') return { power: level + 2, water: level + 1 };
+  if (zone === 'I') { const { power, water } = factoryLevel(level); return { power, water }; }
   return { power: 0, water: level };
 }
 export const fits = (spare: Need, need: Need) => spare.power >= need.power && spare.water >= need.water;
