@@ -21,7 +21,7 @@ export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; le
 export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
-export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; cropMode?: 'auto' | 'manual'; cropChoices?: { at: number; crop: CropId }[]; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
+export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; recipeMode?: 'auto' | 'manual'; recipeChoices?: { at: number; recipe: RecipeId }[]; cropMode?: 'auto' | 'manual'; cropChoices?: { at: number; crop: CropId }[]; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 /** `crop` names the lots moved (every kind but a write-off); a write-off carries the whole `mix`. Untyped only before `typeBaseline.tick`. */
 export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export' | 'market-deposit' | 'market-refund' | 'market-receipt'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
@@ -267,6 +267,16 @@ export function chooseRecipe(c: City, factories: readonly Firm[] = c.firms.filte
   const order = (a: CropId, b: CropId) => spare[b] - spare[a] || CROPS.indexOf(a) - CROPS.indexOf(b);
   const fed = CROPS.filter(k => spare[k] >= NEW_FACTORY_LOTS).sort((a, b) => making[a] - making[b] || order(a, b));
   return recipeForCrop(fed[0] ?? [...CROPS].sort(order)[0]);
+}
+
+/** Select a recipe for future processing while retaining all existing stocks. */
+export function selectFactoryRecipe(c: City, firmId: number, choice: RecipeId | 'auto'): Result {
+  const f = c.firms.find(f => f.id === firmId && f.zone === 'I');
+  if (!f || !f.recipe || (choice !== 'auto' && !RECIPES.includes(choice))) return { ok: false, message: 'ไม่พบโรงงานหรือสูตรไม่ถูกต้อง' };
+  const recipe = choice === 'auto' ? chooseRecipe(c, c.firms.filter(other => other.zone === 'I' && other.id !== f.id && other.recipe)) : choice;
+  if (recipe !== f.recipe) { (f.recipeChoices ??= [{ at: 0, recipe: f.recipe }]).push({ at: c.cropLedger.length, recipe }); f.recipe = recipe; }
+  f.recipeMode = choice === 'auto' ? 'auto' : 'manual';
+  return { ok: true, message: choice === 'auto' ? 'เลือกสูตรอัตโนมัติแล้ว' : 'เลือกสูตรโรงงานแล้ว' };
 }
 
 export function connectedRoads(c: City): Set<number> {
@@ -569,11 +579,11 @@ function trade(c: City) {
   const active = c.firms.filter(f => access(c, building(c, f.building).cell));
   const hooks = agricultureHooks(c), sellable = runAgriculture(c, hooks);
   // Shops stock every product the city makes, an even share of the shelf each, local wholesale first.
-  const made = PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && RECIPE[f.recipe].product === p));
+  const made = PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
   for (const shop of active.filter(f => isRetail(f) && firmWorkerCount(c, f.id) > 0)) {
     const target = Math.min(24, Math.max(4, c.households.length * 2)), share = Math.ceil(target / Math.max(1, made.length));
     for (const product of made) {
-      for (const producer of active.filter(f => f.zone === 'I' && f.recipe && RECIPE[f.recipe].product === product)) {
+      for (const producer of active.filter(f => f.zone === 'I' && f.products[product] > 0)) {
         const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 300));
         if (qty <= 0) continue;
         transfer(c, shop.wallet, producer.wallet, qty * 300, 'Local wholesale goods', true);
@@ -863,7 +873,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify({ ...c, version: 11, rulesVersion: 'chain-6', ...(market ? { market } : {}) });
+  const json = JSON.stringify({ ...c, version: 12, rulesVersion: 'chain-7', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1080,9 +1090,9 @@ export function deserialize(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
-  if (version === 11) {
+  if (version === 11 || version === 12) {
     const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
-    if (envelope.rulesVersion !== 'chain-6') throw new Error('Unsupported or corrupt CityManager save.');
+    if (envelope.rulesVersion !== (version === 11 ? 'chain-6' : 'chain-7')) throw new Error('Unsupported or corrupt CityManager save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
     const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9);

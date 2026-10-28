@@ -122,8 +122,8 @@ test('invalid daily inputs return unchanged copies with zero physical/value outp
 });
 
 test('only admitted posted-price channels can purchase crops; no trader arbitrage or input imports', () => {
-  assert.equal(cropPrice('F', 'T'), 150); assert.equal(cropPrice('T', 'I'), 300); assert.equal(cropPrice('F', 'I'), 350);
-  for (const [a, b] of [['F', 'F'], ['T', 'T'], ['T', 'F'], ['I', 'T'], ['I', 'F'], ['I', 'I']] as const) assert.equal(cropPrice(a, b), null);
+  assert.equal(cropPrice('I', 'T'), 150); assert.equal(cropPrice('F', 'T'), 150); assert.equal(cropPrice('T', 'I'), 300); assert.equal(cropPrice('F', 'I'), 350);
+  for (const [a, b] of [['F', 'F'], ['T', 'T'], ['T', 'F'], ['I', 'F'], ['I', 'I']] as const) assert.equal(cropPrice(a, b), null);
   assert.equal(proposeCropPurchase(farm(), trader(), { quantity: 4 }).cash, 600);
   assert.equal(proposeCropPurchase(trader(8, 1200), factory(), { quantity: 4 }).cash, 1200);
   assert.equal(proposeCropPurchase(farm(), factory(), { quantity: 4 }).cash, 1400);

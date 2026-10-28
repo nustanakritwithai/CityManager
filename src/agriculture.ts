@@ -132,7 +132,7 @@ export function validCropAccount(value: unknown): value is CropAccount {
   return record(value) && walletValid(value.wallet, 'firm') && isSafeCount(value.cash) && isSafeCount(value.reservedCash) && value.reservedCash <= value.cash && (value.zone === 'F' || value.zone === 'T' || value.zone === 'I') && validCropHolding(value, CROP_STOCK_CAPS[value.zone]);
 }
 export function cropPrice(from: CropZone, to: CropZone, prices: CropPrices = CROP_PRICES): number | null {
-  if (from === 'F' && to === 'T') return prices.farmToTrader;
+  if ((from === 'F' || from === 'I') && to === 'T') return prices.farmToTrader;
   if (from === 'T' && to === 'I') return prices.traderToFactory;
   if (from === 'F' && to === 'I') return prices.farmToFactory;
   return null;

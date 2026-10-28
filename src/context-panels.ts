@@ -1,7 +1,7 @@
 import './context-panels.css';
 import './building-cards.css';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
-import { CROPS, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
+import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
 import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
@@ -13,13 +13,14 @@ import { iconElement } from './ui-icons.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
 type HouseholdAction = (id: number, sourceBuildingId: number, sourceCell: number) => void;
+type FactoryRecipeAction = (firmId: number, recipe: typeof RECIPES[number] | 'auto') => void;
 type FarmCropAction = (firmId: number, crop: typeof CROPS[number] | 'auto') => void;
 type OwnerFinanceAction = (action: 'contribute' | 'withdraw', firmId: number) => void;
 let latestCity: City | null = null;
 const activityLimits = new Map<string, number>();
 const expandedActivity = new Set<string>(), expandedFacts = new Set<string>();
 const ownerFeedback = new Map<number, string>();
-type ContextRequest = { city: City; selection: ContextSelection; onHousehold: HouseholdAction; onOwnerFinance?: OwnerFinanceAction; onFarmCrop?: FarmCropAction };
+type ContextRequest = { city: City; selection: ContextSelection; onHousehold: HouseholdAction; onOwnerFinance?: OwnerFinanceAction; onFarmCrop?: FarmCropAction; onFactoryRecipe?: FactoryRecipeAction };
 let latestRequest: ContextRequest | null = null, queuedRequest: ContextRequest | null = null;
 let renderedCity: City | null = null, renderedScope = '', renderedRevision = '';
 let guardedHost: HTMLElement | null = null, releaseBarrier = false;
@@ -49,7 +50,7 @@ function flushAfterActivation(waitForClick = false) {
     flushTimer = null; releaseBarrier = false;
     if (heldPointers.size || heldKeys.size) return;
     const request = queuedRequest; queuedRequest = null;
-    if (request && request === latestRequest) renderContext(request.city, request.selection, request.onHousehold, request.onOwnerFinance, request.onFarmCrop);
+    if (request && request === latestRequest) renderContext(request.city, request.selection, request.onHousehold, request.onOwnerFinance, request.onFarmCrop, request.onFactoryRecipe);
   }, waitForClick ? 750 : 0);
 }
 function installInputGuard(host: HTMLElement) {
@@ -283,10 +284,10 @@ function renderAgriculture(city: City, building: Building, firm: Firm, workers: 
   if (firm.zone === 'F') {
     const fertility = city.resources.fertility[building.cell], actualHarvest = city.cropLedger.filter(entry => entry.tick === city.tick && entry.kind === 'harvest' && entry.to === firm.wallet).reduce((sum, entry) => sum + entry.quantity, 0);
     cards.push(metric('fertility', 'ความอุดมสมบูรณ์', `${fertility}%`, fertility), metric('yield-per-worker', 'กำลังเก็บเกี่ยว / แรงงาน', `${harvestYield(Math.max(50, fertility), 1)} ล็อต/วัน`, harvestYield(Math.max(50, fertility), 1)), metric('harvest-today', 'เก็บเกี่ยวจริงวันนี้', `${actualHarvest} ล็อต`, actualHarvest));
-  } else if (firm.zone === 'I') cards.push(metric('recipe-input', 'พืชผล / ชุด', `${CROP_RECIPE.crop} ล็อต`, CROP_RECIPE.crop), metric('recipe-output', 'สำเร็จรูป / ชุด', `${CROP_RECIPE.goods} หน่วย`, CROP_RECIPE.goods), metric('available-batches', 'ชุดที่แรงงานและสต็อกรองรับ', String(Math.min(workers, Math.floor(firm.cropInventory / CROP_RECIPE.crop))), Math.min(workers, Math.floor(firm.cropInventory / CROP_RECIPE.crop))));
+  } else if (firm.zone === 'I') cards.push(metric('recipe-input', 'พืชผล / ชุด', `${CROP_RECIPE.crop} ล็อต`, CROP_RECIPE.crop), metric('recipe-output', 'สำเร็จรูป / ชุด', `${CROP_RECIPE.goods} หน่วย`, CROP_RECIPE.goods), metric('available-batches', 'ชุดที่แรงงานและสต็อกรองรับ', String(Math.min(workers, Math.floor((firm.recipe ? firm.crops[RECIPE[firm.recipe].crop] : 0) / CROP_RECIPE.crop))), Math.min(workers, Math.floor((firm.recipe ? firm.crops[RECIPE[firm.recipe].crop] : 0) / CROP_RECIPE.crop))));
   else cards.push(metric('crop-buy-price', 'ซื้อจากฟาร์ม / ล็อต', cash(CROP_PRICES.farmToTrader), CROP_PRICES.farmToTrader, true), metric('crop-factory-price', 'ขายให้โรงงาน / ล็อต', cash(CROP_PRICES.traderToFactory), CROP_PRICES.traderToFactory, true), metric('crop-household-price', 'ตะกร้าครัวเรือน / ล็อต', cash(CROP_PRICES.householdCrop), CROP_PRICES.householdCrop, true), metric('rent', 'ค่าเช่าตลาด / เดือน', cash(firmRent(firm)), firmRent(firm), true));
   body.append(metrics(cards), el('p', 'cx-detail-note', firm.zone === 'F' ? 'พืชผลเก็บเกี่ยวตั้งมูลค่าคงคลังเริ่มต้นเป็นศูนย์ ค่าจ้างและค่าเช่ายังเป็นค่าใช้จ่ายงวด ไม่ได้เป็นผลตอบแทนรับประกัน' : firm.zone === 'I' ? `แต่ละวันใช้ ${CROP_RECIPE.crop} ล็อตจริงต่อ ${CROP_RECIPE.goods} หน่วยสำเร็จรูป ขาดวัตถุดิบผลิตไม่ได้ และไม่ประมวลผลซ้ำวันเดิม` : 'ตลาดไม่ผลิตหรือแปรรูป ซื้อพืชผลเข้าสต็อกก่อน ขายล็อตที่มีตั้งแต่ต้นวันเท่านั้น สต็อกที่โรงงานและครัวเรือนซื้อเป็นกองเดียวกัน'));
-  if (firm.zone === 'I' && firm.cropInventory < CROP_RECIPE.crop) body.append(chip('ขาดพืชผลสำหรับแปรรูป', false));
+  if (firm.zone === 'I' && firm.recipe && firm.crops[RECIPE[firm.recipe].crop] < CROP_RECIPE.crop) body.append(chip('ขาดพืชผลสำหรับแปรรูป', false));
   if (firm.zone === 'I' && deadFirm(city, firm) && !factoryTakeoverRecipe(city, firm)) body.append(el('p', 'cx-detail-note', 'รอวัตถุดิบที่เข้าถึงได้ก่อนผู้ลงทุนรายใหม่รับช่วงโรงงาน ตรวจฟาร์ม แรงงาน น้ำไฟ และถนนที่เชื่อมต่อ'));
   const output = [body];
   if (isMarket(firm) || isRetail(firm) && firm.owner) output.push(renderOwnerFinance(city, firm)); return output;
@@ -564,6 +565,21 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     if (parts.owner) { parts.owner.firstElementChild?.after(cardKpis(takeCards(parts, ['drawable', 'owner-household']))); output.push(cardSection(parts.owner, 'owner')); }
     output.push(cardCash(data, parts)); const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
   } else if (data.kind === 'factory') {
+    const firm = city.firms.find(f => f.id === data.identity.firmId && f.zone === 'I');
+    if (firm && firm.recipe) {
+      const picker = section('สินค้าที่ผลิต'); picker.dataset.factoryRecipePicker = String(firm.id);
+      const controls = el('div', 'farm-crop-choices');
+      for (const choice of ['auto', ...RECIPES] as const) {
+        const label = choice === 'auto' ? 'อัตโนมัติ' : RECIPE_LABELS[choice];
+        const button = el('button', 'cx-button', label); button.type = 'button'; button.dataset.recipe = choice;
+        button.setAttribute('aria-pressed', String(choice === 'auto' ? (firm.recipeMode ?? 'auto') === 'auto' : firm.recipeMode === 'manual' && firm.recipe === choice));
+        button.disabled = !latestRequest?.onFactoryRecipe; button.addEventListener('click', () => latestRequest?.onFactoryRecipe?.(firm.id, choice)); controls.append(button);
+      }
+      picker.append(el('p', 'cx-detail-note', `กำลังผลิต ${RECIPE_LABELS[firm.recipe]} · ${firm.recipeMode === 'manual' ? 'ผู้เล่นเลือกเอง' : 'อัตโนมัติ'}`), controls,
+        el('p', 'cx-detail-note', `วัตถุดิบ: ${CROPS.map(k => `${CROP_LABELS[k]} ${firm.crops[k]}`).join(' · ')} ล็อต`),
+        el('p', 'cx-detail-note', `สินค้าคงคลัง: ${Object.entries(firm.products).map(([k, n]) => `${PRODUCT_LABELS[k as keyof typeof PRODUCT_LABELS]} ${n}`).join(' · ')} หน่วย`));
+      output.push(cardSection(picker, 'recipe-choice'));
+    }
     const production = section('วัตถุดิบ → สูตรแปรรูป → ผลผลิต'), chain = el('div', 'bc-chain');
     for (const [stage, title, keys] of [['input', 'วัตถุดิบพืชผล', ['crop-stock', 'crop-cost']], ['recipe', 'สูตรและกำลังแปรรูป', ['recipe-input', 'recipe-output', 'available-batches']], ['output', 'สินค้าสำเร็จรูป', ['stock']]] as const) {
       const step = el('div', 'bc-chain-step'); step.dataset.stage = stage;
@@ -598,10 +614,10 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
 }
 
 /** Entity-only content. Parent owns modes, headings, parcel explanations and navigation. */
-export function renderContext(city: City, selection: ContextSelection, onHousehold: HouseholdAction, onOwnerFinance?: OwnerFinanceAction, onFarmCrop?: FarmCropAction): void {
+export function renderContext(city: City, selection: ContextSelection, onHousehold: HouseholdAction, onOwnerFinance?: OwnerFinanceAction, onFarmCrop?: FarmCropAction, onFactoryRecipe?: FactoryRecipeAction): void {
   const host = document.getElementById('entity-content'); if (!host) return; host.classList.add('cx-content');
   installInputGuard(host);
-  const request: ContextRequest = { city, selection: selection ? { ...selection } : null, onHousehold, onOwnerFinance, onFarmCrop }; latestRequest = request;
+  const request: ContextRequest = { city, selection: selection ? { ...selection } : null, onHousehold, onOwnerFinance, onFarmCrop, onFactoryRecipe }; latestRequest = request;
   const scope = scopeOf(city, selection), revision = contextRevision(city);
   const changedScope = renderedCity !== city || renderedScope !== scope;
   if (changedScope) ownerFeedback.clear();
