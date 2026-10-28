@@ -31,6 +31,8 @@ test('deposit source selection is item-dependent and stock-aware', () => {
   assert.deepEqual(eligibleDepositFirms(city(farm, wrongFactory, riceFactory), 'crop:rice').map(x => x.id), [1]);
   assert.deepEqual(eligibleDepositFirms(city(farm, wrongFactory, riceFactory), 'product:milled-rice').map(x => x.id), [3]);
   assert.equal(depositSourceStock(wrongFactory, 'product:milled-rice'), 0);
+  const converted = firm({ id: 4, zone: 'I', recipe: 'sugar-mill', recipeChoices: [{ at: 0, recipe: 'rice-mill' }, { at: 1, recipe: 'sugar-mill' }], products: { 'milled-rice': 2, 'canned-food': 0, sugar: 0 } });
+  assert.equal(depositSourceStock(converted, 'product:milled-rice'), 2, 'products produced under a previous recipe remain depositable');
   assert.equal(depositSourceLabel(farm, 'crop:rice'), 'ฟาร์มข้าว #1 · มี 2 ล็อต');
   assert.equal(depositSourceLabel(riceFactory, 'product:milled-rice'), 'โรงสีข้าว #3 · มี 3 หน่วย');
   assert.equal(marketUnit('crop:vegetables'), 'ล็อต'); assert.equal(marketUnit('product:sugar'), 'หน่วย');

@@ -73,7 +73,7 @@ export function validateAgriculture(c: City): void {
     const f = firms.get(wallet); requireThat(f);
     if (isMarket(f)) return 'T';
     if (f.zone === 'F') return 'F';
-    requireThat(f.zone === 'I' && f.recipe !== undefined && RECIPE[f.recipe].crop === crop);
+    requireThat(f.zone === 'I' && f.recipe !== undefined && (f.recipeChoices !== undefined || RECIPE[f.recipe].crop === crop));
     return 'I';
   };
   const holding = (wallet: string): Holding => { const value = holdings.get(wallet) ?? { quantity: 0, value: 0 }; holdings.set(wallet, value); return value; };
@@ -123,7 +123,7 @@ export function validateAgriculture(c: City): void {
       requireThat(e.workers === 0 && e.batches === 0 && e.outputQuantity === 0 && e.toValue === e.cash && e.reason === `Crop exchange #${e.id}`);
       const unitPrice = e.cash / e.quantity;
       // 1.50 before chain-2 farm prices, 2.00 after; both are farm-to-market lots.
-      if (unitPrice === 150 || unitPrice === 200) { role(e.from, 'F'); role(e.to, 'T'); }
+      if (unitPrice === 150 || unitPrice === 200) { const sellerRole = role(e.from); requireThat(sellerRole === 'F' || sellerRole === 'I'); role(e.to, 'T'); }
       else if (unitPrice === 350) { role(e.from, 'F'); role(e.to, 'I'); }
       else { requireThat(unitPrice === 300); role(e.from, 'T'); role(e.to, 'I'); }
       if (role(e.from) === 'T') { const limit = sellable.get(e.from) ?? 0; requireThat(e.quantity <= limit); sellable.set(e.from, limit - e.quantity); }

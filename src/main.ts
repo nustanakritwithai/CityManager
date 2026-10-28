@@ -12,7 +12,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, deserialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
@@ -237,6 +237,14 @@ function farmCropAction(firmId: number, crop: 'rice' | 'vegetables' | 'sugarcane
   if (result.ok) ownerDecisionSession.syncExternal(city, 'manual-farm-crop');
   status(result.message); render();
 }
+function factoryRecipeAction(firmId: number, recipe: 'rice-mill' | 'cannery' | 'sugar-mill' | 'auto') {
+  const firm = city.firms.find(f => f.id === firmId && f.zone === 'I');
+  if (!firm || route?.page !== 'place' || city.cells[route.cell]?.building !== firm.building) return;
+  ownerDecisionSession.beforeExternal(city);
+  const result = selectFactoryRecipe(city, firmId, recipe);
+  if (result.ok) ownerDecisionSession.syncExternal(city, 'manual-factory-recipe');
+  status(result.message); render();
+}
 function renderPlace() {
   const metrics: HTMLElement[] = [], tags: HTMLElement[] = [], reasons: string[] = [];
   let checklist: HTMLElement | null = null;
@@ -317,7 +325,7 @@ function renderPlace() {
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
   $('#explanation').replaceChildren(...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
-  renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction);
+  renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction, factoryRecipeAction);
   if (page === 'city') { renderCityOverview(city); dashboard?.update(city); }
   decoratePanels($('#inspector'));
 }
@@ -465,7 +473,7 @@ async function boot() {
   marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
   installHudRow();
   $('#save').addEventListener('click', async () => {
-    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v12/chain-7 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
+    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v13/chain-8 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
   });
   const loadStored = async (source: SaveSource) => {
     try {
