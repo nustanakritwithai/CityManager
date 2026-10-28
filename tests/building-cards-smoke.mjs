@@ -39,7 +39,7 @@ async function send(method, params = {}) { const id = ++sequence; const promise 
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId,kind:document.querySelector("#entity-content").dataset.cardKind})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
@@ -151,6 +151,19 @@ try {
   checks.push('Household card keeps its shared family identity and real members/skills; native Back returns to the source house and Esc returns to the source business without another family leaking into its data');
 
   await load(later); for (const kind of ['shop', 'market', 'factory', 'farm']) { const b = later.buildings.find(b => b.id === places[kind].id); await place(later, b); await card(later, kind, b); }
+  const factoryFirm = later.firms.find(f => f.building === places.factory.id);
+  const factoryBefore = { crops: structuredClone(factoryFirm.crops), products: structuredClone(factoryFirm.products) };
+  const requestedRecipe = ['rice-mill', 'cannery', 'sugar-mill'].find(value => value !== factoryFirm.recipe);
+  await place(later, later.buildings.find(b => b.id === places.factory.id));
+  await button(`#entity-content [data-factory-recipe-picker] button[data-recipe="${requestedRecipe}"]`);
+  await until(`document.querySelector('#entity-content [data-recipe="${requestedRecipe}"]').getAttribute('aria-pressed')==='true'`);
+  const selectedFactory = (await state()).firms.find(f => f.id === factoryFirm.id);
+  assert.equal(selectedFactory.recipe, requestedRecipe);
+  assert.deepEqual(selectedFactory.crops, factoryBefore.crops); assert.deepEqual(selectedFactory.products, factoryBefore.products);
+  await button('#entity-content [data-factory-recipe-picker] button[data-recipe="auto"]');
+  await until(`document.querySelector('#entity-content [data-recipe="auto"]').getAttribute('aria-pressed')==='true'`);
+  assert.equal((await state()).firms.find(f => f.id === factoryFirm.id).recipeMode, 'auto');
+  await load(later); await place(later, later.buildings.find(b => b.id === places.farm.id));
   const farmFirm = later.firms.find(f => f.building === places.farm.id);
   const oldStock = structuredClone(farmFirm.crops);
   await button('#entity-content [data-farm-crop-picker] button[data-crop="vegetables"]');

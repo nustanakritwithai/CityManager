@@ -20,6 +20,12 @@ export function validateTypes(c: City): void {
   for (const f of c.firms) {
     if (!validMix(f.crops, CROPS) || mixTotal(f.crops) !== f.cropInventory || !validMix(f.products, PRODUCTS) || mixTotal(f.products) !== f.inventory) fail();
     if (f.zone === 'I' ? !RECIPES.includes(f.recipe!) : f.recipe !== undefined) fail();
+    if (f.recipeMode !== undefined && (f.zone !== 'I' || !['auto', 'manual'].includes(f.recipeMode))) fail();
+    if (f.recipeChoices !== undefined) {
+      if (f.zone !== 'I' || !Array.isArray(f.recipeChoices) || f.recipeChoices.length < 2 || f.recipeChoices[0]?.at !== 0 || f.recipeChoices.at(-1)?.recipe !== f.recipe) fail();
+      let last = -1;
+      for (const choice of f.recipeChoices) { if (!record(choice) || Object.keys(choice).length !== 2 || !count(choice.at) || choice.at < last || choice.at > c.cropLedger.length || !RECIPES.includes(choice.recipe)) fail(); last = choice.at; }
+    }
     if (f.cropMode !== undefined && (f.zone !== 'F' || (f.cropMode !== 'auto' && f.cropMode !== 'manual'))) fail();
     if (f.cropChoices !== undefined) {
       if (f.zone !== 'F' || !Array.isArray(f.cropChoices) || f.cropChoices.length === 0) fail();
@@ -29,9 +35,7 @@ export function validateTypes(c: City): void {
         last = choice.at;
       }
     }
-    const onlyCrop: CropId | null = f.zone === 'I' ? RECIPE[f.recipe!].crop : null;
-    if (onlyCrop && CROPS.some(k => k !== onlyCrop && f.crops[k] > 0)) fail();
-    if (f.zone === 'I' && PRODUCTS.some(p => p !== RECIPE[f.recipe!].product && f.products[p] > 0)) fail();
+    if (f.zone === 'I' && !f.recipeChoices && (CROPS.some(k => k !== RECIPE[f.recipe!].crop && f.crops[k] > 0) || PRODUCTS.some(p => p !== RECIPE[f.recipe!].product && f.products[p] > 0))) fail();
     if (!isMarket(f) && !isRetail(f) && f.zone === 'C') fail();
   }
 
@@ -51,7 +55,7 @@ export function validateTypes(c: City): void {
     const take = (w: string) => { const h = cropsOf(w); if (h[crop] < e.quantity) fail(); h[crop] -= e.quantity; };
     const give = (w: string) => { cropsOf(w)[crop] += e.quantity; };
     const grows = (w: string) => { const f = now(w); if (f && f.zone === 'F') { const selected = [...(f.cropChoices ?? [])].reverse().find(choice => choice.at <= i)?.crop ?? farmCrop(c, { building: f.building }); if (selected !== crop) fail(); } };
-    const mills = (w: string) => { const f = now(w); if (f && f.zone === 'I' && RECIPE[f.recipe!].crop !== crop) fail(); };
+    const mills = (w: string) => { const f = now(w); if (f && f.zone === 'I') { const recipe = [...(f.recipeChoices ?? [])].reverse().find(choice => choice.at <= i)?.recipe ?? f.recipe!; if (RECIPE[recipe].crop !== crop) fail(); } };
     if (e.kind === 'harvest') { grows(e.to); give(e.to); }
     else if (e.kind === 'trade') { take(e.from); mills(e.to); give(e.to); }
     else if (e.kind === 'consumption') take(e.from);
