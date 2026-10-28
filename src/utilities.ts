@@ -66,26 +66,41 @@ export function utilityService(c: City, roads: ReadonlySet<number>): Service {
   const plants = none();
   for (const p of c.plants) if (online.has(p.id)) plants[p.kind] += PLANTS[p.kind].capacity;
   const capacity = { power: c.utilities.outside.power + plants.power, water: c.utilities.outside.water + plants.water };
-  // Multi-source search along connected roads from the gateway and every online plant's frontage.
-  const roadDistance = new Map<number, number>(), queue: number[] = [];
-  const seed = (i: number) => { if (roads.has(i) && !roadDistance.has(i)) { roadDistance.set(i, 0); queue.push(i); } };
-  seed(GATEWAY);
-  for (const p of c.plants) if (online.has(p.id)) for (const n of neighbors(p.cell)) seed(n);
-  for (let q = 0; q < queue.length; q++) for (const n of neighbors(queue[q])) if (roads.has(n) && !roadDistance.has(n)) { roadDistance.set(n, roadDistance.get(queue[q])! + 1); queue.push(n); }
+  // A water source cannot give a building priority for power, or vice versa.
+  const roadDistances = (kind: UtilityKind) => {
+    const distances = new Map<number, number>(), queue: number[] = [];
+    const seed = (i: number) => { if (roads.has(i) && !distances.has(i)) { distances.set(i, 0); queue.push(i); } };
+    // A gateway with no contract for this utility is not an active source.
+    // With no source at all, retain the gateway seed so connected zero-need
+    // buildings still have a network distance and can be marked served.
+    if (c.utilities.outside[kind] > 0 || plants[kind] === 0) seed(GATEWAY);
+    for (const p of c.plants) if (p.kind === kind && online.has(p.id)) for (const n of neighbors(p.cell)) seed(n);
+    for (let q = 0; q < queue.length; q++) for (const n of neighbors(queue[q])) if (roads.has(n) && !distances.has(n)) { distances.set(n, distances.get(queue[q])! + 1); queue.push(n); }
+    return distances;
+  };
+  const roadsByKind = { power: roadDistances('power'), water: roadDistances('water') };
   const households = new Map<number, number>();
   for (const h of c.households) if (h.home !== null) households.set(h.home, (households.get(h.home) ?? 0) + 1);
-  const distance = new Map<number, number>(), need = new Map<number, Need>(), served = new Map<number, Record<UtilityKind, boolean>>();
+  const distance = new Map<number, number>(), distanceByKind = { power: new Map<number, number>(), water: new Map<number, number>() }, need = new Map<number, Need>(), served = new Map<number, Record<UtilityKind, boolean>>();
   for (const b of c.buildings) {
     need.set(b.id, buildingNeed(b.zone, b.level, households.get(b.id) ?? 0));
-    const d = Math.min(...neighbors(b.cell).map(n => roadDistance.get(n) ?? Infinity), roadDistance.get(b.cell) ?? Infinity);
+    for (const kind of UTILITY_KINDS) {
+      const roadDistance = roadsByKind[kind];
+      const d = Math.min(...neighbors(b.cell).map(n => roadDistance.get(n) ?? Infinity), roadDistance.get(b.cell) ?? Infinity);
+      if (d < Infinity) distanceByKind[kind].set(b.id, d);
+    }
+    const d = Math.min(distanceByKind.power.get(b.id) ?? Infinity, distanceByKind.water.get(b.id) ?? Infinity);
     if (d < Infinity) distance.set(b.id, d);
   }
   const used = none(), remaining = { ...capacity };
-  const order = [...c.buildings].filter(b => distance.has(b.id)).sort((a, b) => distance.get(a.id)! - distance.get(b.id)! || a.id - b.id);
   for (const b of c.buildings) served.set(b.id, { power: false, water: false });
-  for (const b of order) {
-    const n = need.get(b.id)!, s = served.get(b.id)!;
-    for (const kind of UTILITY_KINDS) if (n[kind] <= remaining[kind]) { s[kind] = true; remaining[kind] -= n[kind]; used[kind] += n[kind]; }
+  for (const kind of UTILITY_KINDS) {
+    const d = distanceByKind[kind];
+    const order = [...c.buildings].filter(b => d.has(b.id)).sort((a, b) => d.get(a.id)! - d.get(b.id)! || a.id - b.id);
+    for (const b of order) {
+      const n = need.get(b.id)!, s = served.get(b.id)!;
+      if (n[kind] <= remaining[kind]) { s[kind] = true; remaining[kind] -= n[kind]; used[kind] += n[kind]; }
+    }
   }
   const outside = { power: Math.max(0, used.power - plants.power), water: Math.max(0, used.water - plants.water) };
   return { capacity, plants, used, spare: remaining, outside, served, need, distance, online,

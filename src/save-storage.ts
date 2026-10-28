@@ -22,6 +22,7 @@ export const FACTORY_CHOICE_BACKUP_KEY = 'citymanager.backup.before-factory-choi
 export const FARM_CHOICE_BACKUP_KEY = 'citymanager.backup.before-farm-choice';
 const BACKUP_SLOTS = 8;
 const factoryBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${FACTORY_CHOICE_BACKUP_KEY}.${i}` : FACTORY_CHOICE_BACKUP_KEY);
+const foodBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${FOOD_BACKUP_KEY}.${i}` : FOOD_BACKUP_KEY);
 type Reader = Pick<Storage, 'getItem'>;
 type Writer = Pick<Storage, 'getItem' | 'setItem'>;
 export type SaveSource = 'current' | 'growth' | 'commercial' | 'agriculture' | 'worker' | 'household' | 'legacy' | 'backup';
@@ -40,7 +41,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, FOOD_BACKUP_KEY, ...factoryBackupKeys()];
+    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys()];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -76,7 +77,12 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const current = storage.getItem(SAVE_KEY);
   if (current !== null) {
     let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
-    if (food13 && version === 12 && storage.getItem(FOOD_BACKUP_KEY) === null) { storage.setItem(FOOD_BACKUP_KEY, current); storage.setItem(LATEST_BACKUP_KEY, FOOD_BACKUP_KEY); }
+    if (food13 && version === 12) {
+      const keys = foodBackupKeys();
+      let slot = keys.find(key => storage.getItem(key) === current);
+      if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Food demand backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
+      if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
+    }
     if ((factory12 || food13) && version === 11) {
       const keys = factoryBackupKeys();
       let slot = keys.find(key => storage.getItem(key) === current);
