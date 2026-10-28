@@ -1,3 +1,4 @@
+import { factoryCropCapacity } from './factory-levels.ts';
 import { PARK_STAFF } from './parks.ts';
 import './context-panels.css';
 import './building-cards.css';
@@ -280,7 +281,7 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
 }
 function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
   if (isRetail(firm)) return [];
-  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : isMarket(firm) ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = CROP_STOCK_CAPS[isMarket(firm) ? 'T' : firm.zone === 'F' ? 'F' : 'I'];
+  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : isMarket(firm) ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = firm.zone === 'I' ? factoryCropCapacity(building.level) : CROP_STOCK_CAPS[isMarket(firm) ? 'T' : 'F'];
   body.classList.add('cx-agriculture'); body.dataset.firmId = String(firm.id);
   const cards = [capacityMetric('crop-stock', 'พืชผลคงคลัง / เก็บได้', firm.cropInventory, cap, 'ล็อต'), metric('crop-cost', 'มูลค่าพืชผลตามบัญชี', cash(firm.cropCost), firm.cropCost, true), metric('production-tick', 'วันประมวลผลล่าสุด', String(firm.productionTick), firm.productionTick)];
   if (firm.zone === 'F') {

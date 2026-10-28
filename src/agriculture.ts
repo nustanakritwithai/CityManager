@@ -1,3 +1,4 @@
+import { factoryCropCapacity } from './factory-levels.ts';
 /** Pure agriculture arithmetic. The simulation owns atomic journal/account commits. */
 export const RESOURCE_VERSION = 'fertility-1' as const;
 export const RESOURCE_CELL_COUNT = 24 * 24;
@@ -23,7 +24,7 @@ export type CropZone = keyof typeof CROP_STOCK_CAPS;
 export type CropHolding = { cropInventory: number; cropCost: number };
 export type HarvestState = CropHolding & { productionTick: number };
 export type RecipeState = HarvestState & { inventory: number };
-export type CropAccount = CropHolding & { wallet: string; zone: CropZone; cash: number; reservedCash: number };
+export type CropAccount = CropHolding & { wallet: string; zone: CropZone; cash: number; reservedCash: number; cropCapacity?: number };
 export type HouseholdAccount = { wallet: string; cash: number; lastPurchaseTick: number };
 export type CommodityDefinition = { id: 'crop' | 'goods'; unit: 'crop lot' | 'generic basket'; industrialInput: boolean; directConsumable: boolean };
 export const COMMODITIES = Object.freeze({
@@ -110,8 +111,10 @@ export function proposeHarvest(state: HarvestState, options: { tick: number; wor
   next.cropInventory += quantity;
   return daily(next, true, 'harvested', quantity);
 }
-export function proposeRecipe(state: RecipeState, options: { tick: number; workers: number; operational: boolean }): DailyProposal<RecipeState> {
-  const failure = dailyInput(state, options, CROP_STOCK_CAPS.I);
+export function proposeRecipe(state: RecipeState, options: { tick: number; workers: number; operational: boolean; cropCapacity?: number }): DailyProposal<RecipeState> {
+  const capacity = options.cropCapacity ?? CROP_STOCK_CAPS.I;
+  if (!isSafeCount(capacity) || capacity < 24 || capacity > factoryCropCapacity(9)) return daily({ ...state }, false, 'invalid-input');
+  const failure = dailyInput(state, options, capacity);
   if (failure || !isSafeCount(state.inventory)) return daily({ ...state }, false, failure ?? 'invalid-input');
   const next = { ...state, productionTick: options.tick };
   if (!options.operational) return daily(next, true, 'not-operational');
@@ -129,7 +132,7 @@ function walletValid(wallet: unknown, kind: 'firm' | 'household'): wallet is str
   return isSafeCount(Number(wallet.slice(kind.length + 1)), 1);
 }
 export function validCropAccount(value: unknown): value is CropAccount {
-  return record(value) && walletValid(value.wallet, 'firm') && isSafeCount(value.cash) && isSafeCount(value.reservedCash) && value.reservedCash <= value.cash && (value.zone === 'F' || value.zone === 'T' || value.zone === 'I') && validCropHolding(value, CROP_STOCK_CAPS[value.zone]);
+  return record(value) && walletValid(value.wallet, 'firm') && isSafeCount(value.cash) && isSafeCount(value.reservedCash) && value.reservedCash <= value.cash && (value.zone === 'F' || value.zone === 'T' || value.zone === 'I') && (value.cropCapacity === undefined || value.zone === 'I' && isSafeCount(value.cropCapacity) && value.cropCapacity >= 24 && value.cropCapacity <= factoryCropCapacity(9)) && validCropHolding(value, value.cropCapacity ?? CROP_STOCK_CAPS[value.zone]);
 }
 export function cropPrice(from: CropZone, to: CropZone, prices: CropPrices = CROP_PRICES): number | null {
   if ((from === 'F' || from === 'I') && to === 'T') return prices.farmToTrader;
@@ -154,7 +157,7 @@ export function proposeCropPurchase(seller: CropAccount, buyer: CropAccount, opt
   if (price === null) return fail('invalid-channel');
   if (options.quantity > seller.cropInventory) return fail('insufficient-stock');
   if (options.quantity > (options.sellableLimit ?? seller.cropInventory)) return fail('sellable-limit');
-  if (options.quantity > CROP_STOCK_CAPS[buyer.zone] - buyer.cropInventory) return fail('capacity');
+  if (options.quantity > (buyer.cropCapacity ?? CROP_STOCK_CAPS[buyer.zone]) - buyer.cropInventory) return fail('capacity');
   let cash: number, buyerCost: number, sellerCash: number;
   try { cash = safeMultiply(options.quantity, price); buyerCost = safeAdd(buyer.cropCost, cash); sellerCash = safeAdd(seller.cash, cash); } catch { return fail('overflow'); }
   if (cash > buyer.cash - buyer.reservedCash) return fail('insufficient-cash');

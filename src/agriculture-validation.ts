@@ -1,3 +1,4 @@
+import { FACTORY_MAX_WORKERS, factoryCropCapacity } from './factory-levels.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
@@ -11,7 +12,7 @@ type Holding = { quantity: number; value: number };
 type Operating = { tick: number; revenue: number; expense: number; moneyIndex?: number };
 
 /** No repair, allocation, time advance or writes occur here. Historical roads are not inferred. */
-export function validateAgriculture(c: City): void {
+export function validateAgriculture(c: City, extendedFactories = false): void {
   requireThat(isCanonicalResourceMap(c.resources, c.seed));
   requireThat(isSafeCount(c.agricultureStartTick) && c.agricultureStartTick <= c.tick);
   requireThat(object(c.crops) && ['harvested', 'processed', 'consumed', 'writtenOff'].every(key => isSafeCount(c.crops[key as keyof City['crops']])));
@@ -20,7 +21,7 @@ export function validateAgriculture(c: City): void {
   const households = new Map(c.households.map(h => [h.id, h]));
   const ownerIds = new Set<number>();
   for (const f of c.firms) {
-    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
+    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'I' && extendedFactories ? factoryCropCapacity(c.buildings.find(b => b.id === f.building)!.level) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
     requireThat(isSafeCount(f.cropInventory) && f.cropInventory <= capacity && isSafeCount(f.cropCost) && (f.cropInventory > 0 || f.cropCost === 0));
     requireThat(isSafeCount(f.productionTick) && f.productionTick >= c.agricultureStartTick && f.productionTick <= c.tick);
     if (isRetail(f)) requireThat(f.cropCost === 0);
@@ -79,7 +80,8 @@ export function validateAgriculture(c: City): void {
   const holding = (wallet: string): Holding => { const value = holdings.get(wallet) ?? { quantity: 0, value: 0 }; holdings.set(wallet, value); return value; };
   const receive = (wallet: string, qty: number, value: number) => {
     const h = holding(wallet); h.quantity = safeAdd(h.quantity, qty); h.value = safeAdd(h.value, value);
-    const known = role(wallet); if (known) requireThat(h.quantity <= CROP_STOCK_CAPS[known]);
+    const known = role(wallet), f = firms.get(wallet), b = f && c.buildings.find(b => b.id === f.building);
+    if (known) requireThat(h.quantity <= (known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? factoryCropCapacity(b?.level ?? 9) : CROP_STOCK_CAPS[known]));
   };
   const release = (e: CropEntry) => {
     const h = holding(e.from); requireThat(e.quantity <= h.quantity && e.fromValue === releaseCropCost(h.quantity, h.value, e.quantity));
@@ -136,7 +138,7 @@ export function validateAgriculture(c: City): void {
       const index = cash(e, e.to, e.from); release(e); totals.consumed = safeAdd(totals.consumed, 1);
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
     } else if (e.kind === 'process') {
-      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= 6 && e.batches >= 1 && e.batches <= e.workers && e.quantity === 2 * e.batches && e.outputQuantity === 8 * e.batches);
+      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= (extendedFactories && e.tick > (c.factoryProgressionStartTick ?? c.tick) ? FACTORY_MAX_WORKERS : 6) && e.batches >= 1 && e.batches <= e.workers && e.quantity === 2 * e.batches && e.outputQuantity === 8 * e.batches);
       role(e.from, 'I'); release(e);
       const current = firms.get(e.from), b = current && c.buildings.find(b => b.id === current.building); if (b) requireThat(e.workers <= b.level + 3);
       const key = e.tick + ':' + e.from; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);
