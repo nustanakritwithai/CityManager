@@ -25,7 +25,7 @@ const kindOf = (firm: Firm | undefined, zone: string): BuildingKind => zone === 
 const zeroRow = (): Record<BuildingKind, number> => ({ R: 0, market: 0, shop: 0, I: 0, F: 0 });
 
 export function cityStats(city: City): CityStats {
-  const s = summary(city), o = cityOverview(city), connected = connectedRoads(city), roads = city.cells.filter(c => c.road).length;
+  const s = summary(city), o = cityOverview(city, s), connected = connectedRoads(city), roads = city.cells.filter(c => c.road).length;
   const rows: Record<number, Record<BuildingKind, number>> = {}, totals = zeroRow();
   for (const b of city.buildings) {
     const kind = kindOf(city.firms.find(f => f.building === b.id), b.zone);

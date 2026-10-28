@@ -312,7 +312,20 @@ export function selectFactoryRecipe(c: City, firmId: number, choice: RecipeId | 
   return { ok: true, message: choice === 'auto' ? 'เลือกสูตรอัตโนมัติแล้ว' : 'เลือกสูตรโรงงานแล้ว' };
 }
 
+// Road topology does not change during a synchronous simulation step or summary.
+// Scope this cache to those operations rather than the lifetime of a mutable City:
+// callers may directly edit cells or replace a loaded city between operations.
+const roadScopes = new WeakMap<City, Set<number>>();
+/** Use only for synchronous work that does not modify road topology. */
+export function withRoadScope<T>(c: City, run: () => T): T {
+  if (roadScopes.has(c)) return run();
+  roadScopes.set(c, connectedRoads(c));
+  try { return run(); } finally { roadScopes.delete(c); }
+}
 export function connectedRoads(c: City): Set<number> {
+  const scoped = roadScopes.get(c);
+  // Public callers own their Set and cannot corrupt the shared scope.
+  if (scoped) return new Set(scoped);
   const seen = new Set<number>();
   if (!c.cells[GATEWAY].road) return seen;
   const queue = [GATEWAY]; seen.add(GATEWAY);
@@ -323,7 +336,7 @@ export function connectedRoads(c: City): Set<number> {
 }
 export function access(c: City, i: number): boolean {
   if (!validIndex(i)) return false;
-  const connected = connectedRoads(c);
+  const connected = roadScopes.get(c) ?? connectedRoads(c);
   return connected.has(i) || neighbors(i).some(n => connected.has(n));
 }
 export function roadPath(a: number, b: number): number[] {
@@ -498,6 +511,9 @@ function takeOver(c: City) {
 }
 
 export function summary(c: City) {
+  return withRoadScope(c, () => summarize(c));
+}
+function summarize(c: City) {
   const svc = utilities(c);
   const jobs = c.firms.filter(f => access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + capacity(building(c, f.building)), 0) + c.parks.length * PARK_STAFF.slots;
   const employed = c.employment.reduce((n, e) => n + e.workers, 0) + c.ownerLabor.length + parkEmployment(c).reduce((n, a) => n + a.workers, 0);
@@ -939,6 +955,9 @@ function grow(c: City) {
   }
 }
 export function step(c: City): void {
+  withRoadScope(c, () => stepWithRoads(c));
+}
+function stepWithRoads(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
   rehouse(c); employ(c); admitHousehold(c); trade(c);

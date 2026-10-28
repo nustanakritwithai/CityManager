@@ -2,7 +2,7 @@
  * Read-only map layers and building issue markers. Every value comes from the
  * simulator's own state or explanation functions; nothing is mutated or saved.
  */
-import { access, connectedRoads, economicSignals, utilities, explainCell, firmWorkerCount, homeOccupancy, housingCapacity, isRetail, type City } from './sim.ts';
+import { access, connectedRoads, economicSignals, utilities, explainCell, firmWorkerCount, homeOccupancy, housingCapacity, isRetail, withRoadScope, type City } from './sim.ts';
 import { FERTILITY_THRESHOLD } from './agriculture.ts';
 import { CROP_BANDS, CROP_LABELS, cropForFertility, type CropId } from './goods.ts';
 
@@ -80,6 +80,9 @@ const SIGNAL_ISSUES: Readonly<Record<string, IssueKind>> = {
 
 /** Problems worth a marker above a building, from economicSignals() and real occupancy. */
 export function buildingIssues(city: City): Issue[] {
+  return withRoadScope(city, () => collectBuildingIssues(city));
+}
+function collectBuildingIssues(city: City): Issue[] {
   const issues: Issue[] = [], seen = new Set<number>();
   const add = (cell: number, kind: IssueKind) => { if (!seen.has(cell)) { seen.add(cell); issues.push({ cell, kind, text: ISSUE_TEXT[kind] }); } };
   for (const b of city.buildings) if (!access(city, b.cell)) add(b.cell, 'no-road');

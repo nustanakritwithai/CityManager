@@ -156,7 +156,7 @@ export function relatedFlows(city: City, kind: FlowKind, wallet: string): FlowRo
 }
 
 /** Current people/housing stocks are separate from inclusive 30-day journal flows. */
-export function cityOverview(city: City): CityOverview {
+export function cityOverview(city: City, current = summary(city)): CityOverview {
   const fromTick = Math.max(0, city.tick - MONTH + 1), toTick = city.tick;
   const inPeriod = (tick: number) => tick >= fromTick && tick <= toTick;
   let income = 0, expense = 0, produced = 0, imported = 0, consumed = 0, exported = 0;
@@ -175,7 +175,7 @@ export function cityOverview(city: City): CityOverview {
       default: if (/^Crop recipe #\d+$/.test(entry.reason)) produced += entry.quantity;
     }
   }
-  const current = summary(city), warnings: string[] = [];
+  const warnings: string[] = [];
   let cropHarvested = 0, cropProcessed = 0, cropConsumed = 0, cropWrittenOff = 0;
   for (const entry of city.cropLedger) {
     if (!inPeriod(entry.tick)) continue;

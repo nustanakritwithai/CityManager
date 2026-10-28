@@ -116,7 +116,7 @@ export const EDGES: readonly NetEdge[] = Object.freeze([
 export type NetValues = Record<string, number>;
 /** Live value of every node; flows are 30-day totals so a quiet day does not read as zero. */
 export function networkValues(city: City): NetValues {
-  const s = summary(city), o = cityOverview(city), from = Math.max(0, city.tick - MONTH + 1);
+  const s = summary(city), o = cityOverview(city, s), from = Math.max(0, city.tick - MONTH + 1);
   let taxes = 0, upkeep = 0;
   for (const e of city.ledger) {
     if (e.tick < from) continue;
