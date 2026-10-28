@@ -2,7 +2,7 @@
 import { farmCrop, isMarket, isRetail, type City, type Firm, type Household, type CropEntry } from './sim.ts';
 import { CROPS, RECIPE, emptyCrops, freshPreference, type CropId } from './goods.ts';
 import {
-  CHAIN_CROP_PRICES as CROP_PRICES, CROP_STOCK_CAPS, isSafeCount, isViableFarmland,
+  CHAIN_CROP_PRICES as CROP_PRICES, CROP_STOCK_CAPS, farmStockCapacity, isSafeCount, isViableFarmland,
   proposeHarvest, proposeRecipe, proposeCropPurchase, proposeCropConsumption, proposeCropExport,
   validCropAccount, validCropHolding, safeAdd, releaseCropCost, harvestYield,
   type CropAccount,
@@ -40,7 +40,7 @@ function cropAccount(c: City, f: Firm, hooks: AgricultureHooks): CropAccount | n
   if (f.zone !== 'F' && !isMarket(f) && f.zone !== 'I') return null;
   const cash = c.accounts[f.wallet], available = hooks.spendable(f);
   if (!isSafeCount(cash) || !isSafeCount(available) || available > cash) return null;
-  const account: CropAccount = { wallet: f.wallet, zone: isMarket(f) ? 'T' : f.zone as 'F' | 'I', cropInventory: f.cropInventory, cropCost: f.cropCost, cash, reservedCash: cash - available };
+  const account: CropAccount = { wallet: f.wallet, zone: isMarket(f) ? 'T' : f.zone as 'F' | 'I', cropInventory: f.cropInventory, cropCost: f.cropCost, cash, reservedCash: cash - available, ...(f.zone === 'F' ? { capacity: farmStockCapacity(c.buildings.find(b => b.id === f.building)?.level ?? 0) } : {}) };
   return validCropAccount(account) ? account : null;
 }
 function nextEntry(c: City): number {
@@ -104,7 +104,7 @@ function exchange(c: City, seller: Firm, buyer: Firm, crop: CropId, quantity: nu
 function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
   const building = c.buildings.find(b => b.id === f.building), count = workers(f, hooks);
   if (!building || count === null) return;
-  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: Math.max(50, c.resources.fertility[building.cell]), operational: operational(c, f, hooks) });
+  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: Math.max(50, c.resources.fertility[building.cell]), operational: operational(c, f, hooks), capacity: farmStockCapacity(building.level) });
   if (!proposal.ok) return;
   if (!proposal.quantity) { f.productionTick = proposal.next.productionTick; return; }
   let event: CropEntry, harvested: number;
@@ -252,7 +252,7 @@ export function consumeMarketCrop(c: City, h: Household, firm: Firm, sellable: M
 /** Demolition may write off disconnected stock; it never creates a cash receipt. */
 export function writeOffCrops(c: City, firm: Firm, _hooks: AgricultureHooks): boolean {
   if (!c.firms.includes(firm)) return false;
-  const cap = isRetail(firm) ? 0 : isMarket(firm) ? CROP_STOCK_CAPS.T : CROP_STOCK_CAPS[firm.zone as 'F' | 'I'];
+  const cap = isRetail(firm) ? 0 : isMarket(firm) ? CROP_STOCK_CAPS.T : firm.zone === 'F' ? farmStockCapacity(c.buildings.find(b => b.id === firm.building)?.level ?? 0) : CROP_STOCK_CAPS.I;
   if (!validCropHolding(firm, cap)) return false;
   if (!firm.cropInventory) return true;
   let event: CropEntry, writtenOff: number, expense: number;
@@ -274,8 +274,9 @@ export function agricultureDiagnostic(c: City, f: Firm, hooks: AgricultureHooks)
   if (f.zone === 'F') {
     const fertility = Math.max(50, c.resources.fertility[b.cell]);
     if (!isViableFarmland(fertility)) return result('agriculture.unsuitable-fertility');
-    if (f.cropInventory >= CROP_STOCK_CAPS.F) return result('agriculture.stock-cap');
-    return result('agriculture.harvest-ready', Math.min(CROP_STOCK_CAPS.F - f.cropInventory, harvestYield(fertility, workers(f, hooks)!)));
+    const cap = farmStockCapacity(b.level);
+    if (f.cropInventory >= cap) return result('agriculture.stock-cap');
+    return result('agriculture.harvest-ready', Math.min(cap - f.cropInventory, harvestYield(fertility, workers(f, hooks)!)));
   }
   if (f.zone === 'I') return result(!f.recipe || f.crops[RECIPE[f.recipe].crop] < 2 ? 'agriculture.no-input' : 'agriculture.recipe-ready');
   if (isMarket(f)) {

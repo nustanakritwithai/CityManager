@@ -133,7 +133,7 @@ export class CityView {
     parent.addChild(entity);
     return entity;
   }
-  private farm(tile: Entity, fertility: number) {
+  private farm(tile: Entity, fertility: number, level: number) {
     const plot = new Entity('Original farm plot'); tile.addChild(plot);
     this.box(plot, 0, .09, 0, 1.68, .035, 1.68, this.ground.soilMaterial);
     this.box(plot, -.17, .12, .12, 1.2, .035, 1.24, '#725b3e');
@@ -141,6 +141,9 @@ export class CityView {
     for (const [row, x] of [-.62, -.36, -.1, .16].entries()) {
       const crop = this.box(plot, x, .15 + cropHeight / 2, .12, .17, cropHeight, 1.14, row % 2 ? '#86ad58' : '#b0bc61');
       crop.name = 'Renewable crop row';
+    }
+    for (let tier = 4; tier <= level; tier++) {
+      const marker = this.box(plot, .4 + (tier - 4) * .15, .69, -.46, .1, .1, .1, '#e3bd55'); marker.name = `Farm level ${tier} marker`;
     }
     const shed = this.box(plot, .55, .32, -.46, .5, .43, .48, '#d7dec9'); shed.name = 'Original farm shed';
     this.box(plot, .55, .58, -.46, .6, .13, .57, '#4c7056');
@@ -461,7 +464,7 @@ export class CityView {
         for (const dz of [-.86, .86]) this.box(tile, 0, .075, dz, 1.8, .03, .08, color, false);
         for (const dx of [-.86, .86]) this.box(tile, dx, .075, 0, .08, .03, 1.8, color, false);
         if (b) {
-          if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
+          if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level); continue; }
           if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
           // Retained shops move up one commercial tier; their geometry stays unchanged.

@@ -69,6 +69,29 @@ function reconciles(c: City): void {
 }
 const day = (c: City) => { c.tick++; for (const b of c.buildings) b.age++; };
 
+test('higher farms harvest with workers and conserve crop and cash through trade and export', () => {
+  const { c, hooks, farm } = fixture();
+  c.buildings.find(b => b.id === farm.building)!.level = 6;
+  c.employment.find(e => e.firmId === farm.id)!.workers = 6;
+  runAgriculture(c, hooks);
+  const harvest = c.cropLedger.find(e => e.kind === 'harvest')!;
+  assert.equal(harvest.workers, 6); assert.equal(harvest.quantity, 144);
+  assert.ok(c.cropLedger.some(e => e.kind === 'export' && e.from === farm.wallet));
+  reconciles(c);
+  const before = JSON.stringify(c); runAgriculture(c, hooks); assert.equal(JSON.stringify(c), before);
+});
+
+test('higher farms cannot harvest without workers or water', () => {
+  for (const missing of ['labor', 'water'] as const) {
+    const { c, hooks, farm, unserved } = fixture();
+    c.buildings.find(b => b.id === farm.building)!.level = 6;
+    if (missing === 'labor') c.employment = c.employment.filter(e => e.firmId !== farm.id);
+    else unserved.add(farm.building);
+    runAgriculture(c, hooks);
+    assert.equal(c.crops.harvested, 0); assert.equal(farm.cropInventory, 0); reconciles(c);
+  }
+});
+
 test('farm harvest, real direct inputs, capitalized trader purchase and recipe reconcile in pipeline order', () => {
   const { c, hooks, farm, factory, trader } = fixture(), quota = runAgriculture(c, hooks);
   assert.equal(c.crops.harvested, 24); assert.equal(c.crops.processed, 2); assert.equal(c.goods.produced, 8);
