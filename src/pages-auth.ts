@@ -34,13 +34,20 @@ export class PagesSession {
     if (expectedGuest !== null && !UUID.test(expectedGuest)) throw new Error('invalid-expected-guest');
     if (this.connecting) throw new Error('pages-login-busy');
     const prepared = this.prepared; if (!prepared) throw new Error('pages-login-not-ready'); this.prepared = null;
-    const login = new URL('/citymanager-api/v1/pages/login', MARKET_ORIGIN); login.searchParams.set('challenge', prepared.challenge); login.searchParams.set('state', prepared.state);
+    const login = new URL('/citymanager-api/v1/pages/login', MARKET_ORIGIN); login.searchParams.set('challenge', prepared.challenge); login.searchParams.set('state', prepared.state); login.searchParams.set('auto', '1');
     const popup = window.open(login.href, 'citymanager-market-login', 'popup=yes,width=480,height=720'); if (!popup) throw new Error('pages-popup-blocked'); this.connecting = true;
     return new Promise<string>((resolve, reject) => {
       let settled = false; const finish = () => { if (settled) return false; settled = true; clearTimeout(timeout); clearInterval(poll); window.removeEventListener('message', listener); return true; };
       const listener = (event: MessageEvent) => {
         const data = event.data as { type?: unknown; state?: unknown; code?: unknown } | null;
-        if (event.origin !== MARKET_ORIGIN || event.source !== popup || !data || data.type !== 'citymanager-auth-code' || data.state !== prepared.state || typeof data.code !== 'string' || !TOKEN.test(data.code) || !finish()) return;
+        if (event.origin !== MARKET_ORIGIN || event.source !== popup || !data || data.state !== prepared.state) return;
+        if (data.type === 'citymanager-auth-ready') {
+          // The first-party popup may request the expected identity only after
+          // the explicit Guest click and only through this origin-bound channel.
+          popup.postMessage({ type: 'citymanager-auth-intent', state: prepared.state, expectedGuest }, MARKET_ORIGIN);
+          return;
+        }
+        if (data.type !== 'citymanager-auth-code' || typeof data.code !== 'string' || !TOKEN.test(data.code) || !finish()) return;
         try { popup.close(); } catch { /* already closed */ }
         void (async () => {
           try {
