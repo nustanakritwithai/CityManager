@@ -120,6 +120,20 @@ test('no actual buyers means no market replenishment or made-up sales', () => {
   assert.equal(agricultureDiagnostic(c, trader, hooks).reasonId, 'agriculture.no-buyer'); reconciles(c);
 });
 
+test('a market that sold food today does not report no buyers after households finish purchasing', () => {
+  const { c, hooks, factory, trader, h, owner } = fixture();
+  c.employment = c.employment.filter(e => e.firmId !== factory.id);
+  runAgriculture(c, hooks); day(c);
+  const quota = runAgriculture(c, hooks);
+  assert.equal(consumeMarketCrop(c, h, trader, quota, hooks), true);
+  assert.equal(consumeMarketCrop(c, owner, trader, quota, hooks), true);
+  assert.ok(c.cropLedger.some(e => e.tick === c.tick && e.kind === 'consumption' && e.from === trader.wallet));
+  assert.notEqual(agricultureDiagnostic(c, trader, hooks).reasonId, 'agriculture.no-buyer');
+  day(c);
+  for (const household of c.households) hooks.transfer(household.wallet, 'outside', c.accounts[household.wallet], 'Test remove purchasing power');
+  assert.equal(agricultureDiagnostic(c, trader, hooks).reasonId, 'agriculture.no-buyer', 'yesterday’s sale does not mask a lack of current buyers');
+});
+
 test('wage reserve cash cannot buy crop inputs and a factory with no inputs creates no goods', () => {
   const { c, hooks, factory, h } = fixture(); factory.workDays[h.wallet] = 1;
   hooks.transfer(factory.wallet, 'outside', c.accounts[factory.wallet] - 2100, 'Test cash reduction');
