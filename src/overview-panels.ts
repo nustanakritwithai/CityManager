@@ -160,7 +160,7 @@ export class OverviewDashboard {
     for (const line of goodsLines(city)) {
       const active = line.farms + line.factories > 0, item = el('li', active ? '' : 'idle'); item.dataset.recipe = line.recipe;
       item.append(el('span', `dash-key ${active ? 'goods' : 'idle'}`, `${CROP_LABELS[line.crop]} → ${PRODUCT_LABELS[line.product]}`),
-        el('strong', '', active ? `ฟาร์ม ${line.farms} · ${RECIPE_LABELS[line.recipe]} ${line.factories} · เก็บ ${line.harvested} · ผลิต ${line.produced} · ขาย ${line.sold + line.freshSold}${line.imported ? ` · นำเข้า ${line.imported}` : ''}${line.exportedCrops ? ` · ส่งออกพืช ${line.exportedCrops}` : ''}` : `ยังไม่มี · วางฟาร์มบนดิน${CROP_LABELS[line.crop]}`));
+        el('strong', '', active ? `ฟาร์ม ${line.farms} · ${RECIPE_LABELS[line.recipe]} ${line.factories} · เก็บ ${line.harvested} · ผลิต ${line.produced} · ขาย ${line.sold + line.freshSold}${line.imported ? ` · นำเข้า ${line.imported}` : ''}${line.exportedCrops ? ` · ส่งออกพืช ${line.exportedCrops}` : ''}` : `ยังไม่มี · เลือกปลูก${CROP_LABELS[line.crop]}ที่ฟาร์ม`));
       lines.append(item);
     }
     this.chain.replaceChildren(this.head('ห่วงโซ่สินค้า 30 วัน', 'จากบันทึกพืชผลและสินค้าจริง'), diagram, legend, summary, lines, list, this.chart('crops', series), this.chart('goods', series));

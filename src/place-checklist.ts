@@ -16,7 +16,6 @@ const RULES: readonly Rule[] = [
   { key: 'firm-limit', label: 'จำนวนกิจการไม่เกิน 64', zones: '', match: /^Firm limit/, detail: () => 'ถึงจำนวนกิจการสูงสุดที่ต้นแบบรองรับแล้ว' },
   { key: 'housing-demand', label: 'มีความต้องการบ้านเพิ่ม', zones: 'R', match: /^No housing demand/, detail: () => 'บ้านว่างที่มีอยู่รองรับผู้ย้ายเข้าและครัวเรือนไร้บ้านได้แล้ว' },
   { key: 'income', label: 'รายได้คาดหมายพอซื้อของและจ่ายค่าเช่า', zones: 'R', match: /^Expected income/, detail: () => 'รายได้คาดหมายยังไม่พอซื้อสินค้าและจ่ายค่าเช่า' },
-  { key: 'fertility', label: 'ดินอุดมสมบูรณ์พอปลูกพืช', zones: 'F', match: /^Farm needs fertility/, detail: r => { const m = r.match(/(\d+)%; this parcel has (\d+)%/); return m ? `ต้องมีอย่างน้อย ${m[1]}% แปลงนี้มี ${m[2]}%` : 'ดินยังไม่อุดมสมบูรณ์พอ'; } },
   { key: 'crop-demand', label: 'มีผู้ซื้อพืชผลเพิ่ม', zones: 'F', match: /^No additional crop demand/, detail: () => 'ฟาร์มเดิมผลิตพอสำหรับโรงงานและครัวเรือนแล้ว' },
   { key: 'owner', label: 'มีครัวเรือนเจ้าของที่มีทุน 600 ฿ และแรงงานค้าปลีก', zones: 'C', match: /^Raw market needs a connected household owner/, detail: () => 'ยังไม่มีครัวเรือนที่เชื่อมถนน มีเงินทุนจริง 600 ฿ และสมาชิกทักษะทั่วไปหรือค้าปลีกว่าง' },
   { key: 'market-demand', label: 'มีฟาร์มและผู้ซื้อที่เข้าถึงได้', zones: 'C', match: /^Raw market needs an actual farm|^No retail demand/, detail: r => /^No retail/.test(r) ? 'ร้านค้าที่มีอยู่รองรับความต้องการแล้ว' : 'ตลาดต้องมีฟาร์มจริง ผู้ซื้อที่เข้าถึงได้ และเจ้าของที่มีทุน' },

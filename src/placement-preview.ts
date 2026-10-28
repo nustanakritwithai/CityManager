@@ -32,7 +32,6 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     const cell = city.cells[hover], fertility = city.resources.fertility[hover];
     const reason = cell.road ? 'ถนนวางโซนไม่ได้'
       : cell.building !== null && cell.zone !== tool ? 'มีอาคารอื่นอยู่ ต้องรื้อก่อน'
-      : tool === 'F' && fertility < FERTILITY_THRESHOLD ? `ความอุดมสมบูรณ์ ${fertility}% ต่ำกว่า ${FERTILITY_THRESHOLD}%`
       : null;
     const label = reason ?? (cell.zone === tool ? `เป็นโซน${ZONE_NAMES[tool]}อยู่แล้ว` : `วางโซน${ZONE_NAMES[tool]} · ไม่เสียเงิน${tool === 'F' ? ` · ดิน ${fertility}%` : ''}`);
     return { ok: !reason, cost: 0, label, cells: [{ cell: hover, ok: !reason }] };

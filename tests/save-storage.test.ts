@@ -4,12 +4,22 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { deserializeV2 } from '../src/legacy-v2.ts';
 import { deserializeV3 } from '../src/legacy-v3.ts';
-import { readStoredCity, saveStoredCity, SAVE_KEY, COMMERCIAL_SAVE_KEY, COMMERCIAL_BACKUP_KEY, AGRICULTURE_SAVE_KEY, AGRICULTURE_BACKUP_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY, LEGACY_BACKUP_KEY, HOUSEHOLD_BACKUP_KEY, WORKER_BACKUP_KEY, LATEST_BACKUP_KEY } from '../src/save-storage.ts';
+import { readStoredCity, saveStoredCity, SAVE_KEY, FARM_CHOICE_BACKUP_KEY, COMMERCIAL_SAVE_KEY, COMMERCIAL_BACKUP_KEY, AGRICULTURE_SAVE_KEY, AGRICULTURE_BACKUP_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY, LEGACY_BACKUP_KEY, HOUSEHOLD_BACKUP_KEY, WORKER_BACKUP_KEY, LATEST_BACKUP_KEY } from '../src/save-storage.ts';
 function memory(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial)), writes: string[] = [];
   return { data, writes, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { writes.push(key); data.set(key, value); } };
 }
 const old = JSON.stringify({ version: 1, tick: 65 }), household = JSON.stringify({ version: 2, tick: 180 }), worker = JSON.stringify({ version: 3, tick: 180 }), agriculture = JSON.stringify({ version: 4, tick: 180 }), commercial = JSON.stringify({ version: 5, tick: 388 }), current = JSON.stringify({ version: 9, tick: 180 });
+test('first farm-choice save preserves v9/v10 bytes and exposes the backup', () => {
+  const next = JSON.stringify({ version: 11, rulesVersion: 'chain-6' });
+  for (const previous of [current, JSON.stringify({ version: 10, rulesVersion: 'chain-5', market: { cityId: 'city' } })]) {
+    const s = memory({ [SAVE_KEY]: previous });
+    saveStoredCity(s, next, null);
+    assert.equal(s.data.get(FARM_CHOICE_BACKUP_KEY), previous);
+    assert.deepEqual(readStoredCity(s, 'backup'), { raw: previous, key: FARM_CHOICE_BACKUP_KEY });
+    assert.equal(s.data.get(SAVE_KEY), next);
+  }
+});
 test('read v6, then v5/v4/v3/v2/v1 and explicit old sources without changing storage', () => {
   const s = memory({ [LEGACY_SAVE_KEY]: old }); assert.deepEqual(readStoredCity(s), { raw: old, key: LEGACY_SAVE_KEY });
   s.data.set(HOUSEHOLD_SAVE_KEY, household); assert.deepEqual(readStoredCity(s), { raw: household, key: HOUSEHOLD_SAVE_KEY });

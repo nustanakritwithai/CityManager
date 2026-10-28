@@ -151,6 +151,16 @@ try {
   checks.push('Household card keeps its shared family identity and real members/skills; native Back returns to the source house and Esc returns to the source business without another family leaking into its data');
 
   await load(later); for (const kind of ['shop', 'market', 'factory', 'farm']) { const b = later.buildings.find(b => b.id === places[kind].id); await place(later, b); await card(later, kind, b); }
+  const farmFirm = later.firms.find(f => f.building === places.farm.id);
+  const oldStock = structuredClone(farmFirm.crops);
+  await button('#entity-content [data-farm-crop-picker] button[data-crop="vegetables"]');
+  await until(`document.querySelector('#entity-content [data-crop="vegetables"]').getAttribute('aria-pressed')==='true'`);
+  const chosen = await state(), chosenFarm = chosen.firms.find(f => f.id === farmFirm.id);
+  assert.equal(chosenFarm.cropChoices.at(-1).crop, 'vegetables');
+  assert.deepEqual(chosenFarm.crops, oldStock, 'Changing crop leaves existing inventory intact');
+  assert.deepEqual(deserialize(serialize(chosen)), chosen, 'Farm choice survives save/load validation');
+  checks.push('Farm crop selection changes future production and preserves existing stock');
+  await load(later);
   await household(later, later.households.find(h => h.id === family.id)); await card(later, 'household', later.households.find(h => h.id === family.id));
   checks.push('Inclusive trailing30-day cash cards independently reconcile real wallet-boundary inflows/outflows/net at days29 and59, explicitly label their periods and leave simulation/RNG/journals unchanged');
 

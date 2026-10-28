@@ -191,11 +191,12 @@ export function proposeCropConsumption(trader: CropAccount, household: Household
 }
 export type CropExportProposal = { ok: boolean; reason: AgricultureReason; nextFarm: CropAccount; quantity: number; cash: number; fromValue: number };
 /** Sell a farm's stock above the local reserve to outside at the export price. */
-export function proposeCropExport(farm: CropAccount): CropExportProposal {
+export function proposeCropExport(farm: CropAccount, limit = Number.MAX_SAFE_INTEGER): CropExportProposal {
   const fail = (reason: AgricultureReason): CropExportProposal => ({ ok: false, reason, nextFarm: { ...farm }, quantity: 0, cash: 0, fromValue: 0 });
   if (!validCropAccount(farm)) return fail('invalid-input');
   if (farm.zone !== 'F') return fail('invalid-channel');
-  const quantity = farm.cropInventory - CROP_EXPORT.keep;
+  if (!isSafeCount(limit)) return fail('invalid-input');
+  const quantity = Math.min(farm.cropInventory - CROP_EXPORT.keep, limit);
   if (quantity <= 0) return fail('insufficient-stock');
   let cash: number, nextCash: number; try { cash = safeMultiply(quantity, CROP_EXPORT.price); nextCash = safeAdd(farm.cash, cash); } catch { return fail('overflow'); }
   const fromValue = releaseCropCost(farm.cropInventory, farm.cropCost, quantity);
