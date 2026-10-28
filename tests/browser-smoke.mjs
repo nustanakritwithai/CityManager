@@ -106,9 +106,9 @@ try {
   assert.equal(groundState.buildGrid, false, 'Observation starts without the construction grid');
   assert.equal(groundState.textureSize, 512); assert.equal(groundState.textureCount, 3);
   const beforeGridTools = await state();
-  for (const tool of ['road', 'R', 'C', 'I', 'F', 'bulldoze', 'pan', 'select']) {
+  for (const tool of ['road', 'R', 'C', 'I', 'F', 'bulldoze', 'select']) {
     await button(`[data-tool="${tool}"]`);
-    assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, !['select', 'pan'].includes(tool), `Grid follows ${tool} mode`);
+    assert.equal((await evaluate('window.cityManager.ground()')).buildGrid, tool !== 'select', `Grid follows ${tool} mode`);
   }
   assert.deepEqual(await state(), beforeGridTools, 'Ground and grid modes never mutate the city');
   checks.push('Original bounded ground textures and construction-only grid do not mutate simulation');
@@ -225,7 +225,23 @@ try {
   const household = beforeMobileSelection.households.find(h => h.home === homeBuilding.id);
   const homePoint = await cellPoint(homeBuilding.cell);
   assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`), 'city-canvas', 'Town remains visible above mobile controls');
-  await cell(homeBuilding.cell);
+  assert.equal(await evaluate('!!document.querySelector("[data-tool=pan]")'), false, 'No pan/inspect mode switch');
+  // Emulated touch events in a mobile viewport, followed by a fresh tap.
+  const beforeDragPoint = await cellPoint(homeBuilding.cell);
+  const start = { x: beforeDragPoint.x - 35, y: beforeDragPoint.y };
+  assert.equal(await evaluate(`document.elementFromPoint(${start.x},${start.y})?.id`), 'city-canvas');
+  await send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[{...start,id:1}]});
+  await send('Input.dispatchTouchEvent', {type:'touchMove', touchPoints:[{...beforeDragPoint,id:1}]});
+  await send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]});
+  assert.notDeepEqual(await cellPoint(homeBuilding.cell), beforeDragPoint, 'Drag moves the camera');
+  assert.notEqual(await evaluate('document.querySelector("#inspector").dataset.open'), 'true', 'Drag never opens details');
+  assert.deepEqual(await state(), beforeMobileSelection, 'Drag does not mutate the city');
+  await button('#toggle-camera'); await button('[data-camera="reset"]'); await button('#toggle-camera');
+  const tap = await cellPoint(homeBuilding.cell);
+  await send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[{...tap,id:1}]});
+  await send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]});
+  await until('document.querySelector("#inspector").dataset.open==="true"');
+  checks.push('Mobile touch drag pans without inspecting; a fresh tap opens building details');
   assert.ok((await text('#selection-title')).replaceAll(' ', '').includes(`${homeBuilding.cell % 24 + 1},${Math.floor(homeBuilding.cell / 24) + 1}`));
   assert.match(await text('#explanation'), /ระยะจากประตูเมืองผ่านถนน \d+ ช่อง รวมทางเข้าแปลง \(ไม่ใช่เวลาเดินทาง\)/, 'Connected building shows actual gateway road distance');
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'), beforeMobileSelection.households.filter(h=>h.home===homeBuilding.id).map(h=>h.id), 'House lists only its actual households');

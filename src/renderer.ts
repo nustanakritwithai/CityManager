@@ -313,6 +313,7 @@ export class CityView {
       const previous = this.pointers.get(e.pointerId);
       if (!previous) { this.onHover(this.pick(e.clientX, e.clientY)); return; }
       const dx = e.clientX - previous.x, dy = e.clientY - previous.y;
+      const wasMoved = this.down?.moved;
       if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 7) this.down.moved = true;
       if (!this.cameraBlocked && this.pointers.size === 2) {
         const other = [...this.pointers.entries()].find(([id]) => id !== e.pointerId)![1];
@@ -322,21 +323,27 @@ export class CityView {
         this.pan(dx / 2, dy / 2); this.updateCamera();
       } else if (!this.cameraBlocked && (this.down?.button === 2 || e.altKey)) {
         this.yaw -= dx * 0.007; this.updateCamera();
-      } else if (!this.cameraBlocked && (this.mode === 'pan' || this.down?.button === 1)) this.pan(dx, dy);
+      } else if (!this.cameraBlocked && this.down?.button === 1) this.pan(dx, dy);
+      else if (!this.cameraBlocked && this.mode === 'select' && this.down?.button === 0 && this.down.moved && !this.down.multi) {
+        // Apply the full displacement when the threshold is crossed, then incremental moves.
+        this.pan(wasMoved ? dx : e.clientX - this.down.x, wasMoved ? dy : e.clientY - this.down.y);
+      }
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.onHover(this.pick(e.clientX, e.clientY));
     });
     c.addEventListener('pointerup', e => {
+      if (!this.pointers.has(e.pointerId)) return;
       this.dragStart = null;
-      if (this.down && !this.down.moved && !this.down.multi && this.down.button === 0 && this.mode !== 'pan') {
+      if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 7) this.down.moved = true;
+      if (this.down && !this.down.moved && !this.down.multi && this.down.button === 0) {
         const index = this.pick(e.clientX, e.clientY); if (index !== null) this.onCell(index);
-      } else if (this.down && this.down.moved && !this.down.multi && this.down.button === 0 && this.mode === 'road') {
+      } else if (!this.cameraBlocked && this.down && this.down.moved && !this.down.multi && this.down.button === 0 && this.mode === 'road') {
         const end = this.pick(e.clientX, e.clientY);
         if (this.down.cell !== null && end !== null) this.onRoad(this.down.cell, end);
       }
       this.pointers.delete(e.pointerId); if (!this.pointers.size) this.down = null;
     });
-    c.addEventListener('pointercancel', e => { this.pointers.delete(e.pointerId); this.down = null; this.dragStart = null; this.onHover(null); });
+    c.addEventListener('pointercancel', e => { if (!this.pointers.has(e.pointerId)) return; this.pointers.delete(e.pointerId); this.down = null; this.dragStart = null; this.onHover(null); });
   }
   /** Swap every material under `entity` for a greyed clone (cached per source material). */
   private fade(entity: Entity) {
