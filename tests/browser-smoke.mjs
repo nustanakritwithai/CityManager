@@ -252,7 +252,7 @@ try {
   const corruptSession = JSON.parse(sessionSaved); corruptSession.parkRuntime.recreation.minute++;
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(JSON.stringify(corruptSession))})`);
   await button('#load'); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
-  assert.match(await text('#inspector-status'), /โหลดไม่ได้/);
+  assert.match(await text('#inspector-status'), /โหลดไม่สำเร็จ.*sidecar clock mismatch/);
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await closeInspector();
   checks.push('Real citizen identities, staffed visit benefit, citizen-speed pause, persistent provenance table, atomic fractional save/load, corrupt-sidecar rejection');
 
