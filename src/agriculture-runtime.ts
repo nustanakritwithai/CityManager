@@ -182,7 +182,7 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
   // affordable household baskets. No buyers means no speculative replenishment.
   let demand = 0n;
   for (const factory of activeFactories) demand += BigInt(workers(factory, hooks)!) * 2n;
-  for (const h of c.households) if (accessibleHousehold(c, h, hooks) && isSafeCount(c.accounts[h.wallet]) && c.accounts[h.wallet] >= CROP_PRICES.householdCrop && h.lastPurchaseTick < c.tick) demand++;
+  for (const h of c.households) if (accessibleHousehold(c, h, hooks) && isSafeCount(c.accounts[h.wallet]) && c.accounts[h.wallet] >= CROP_PRICES.householdCrop && h.lastPurchaseTick < c.tick) demand += BigInt(c.foodDemandStartTick === undefined ? 1 : Math.min(h.members, Math.floor(c.accounts[h.wallet] / CROP_PRICES.householdCrop)));
   const target = Number(demand * 2n > BigInt(CROP_STOCK_CAPS.T) ? BigInt(CROP_STOCK_CAPS.T) : demand * 2n);
   // A market stocks an even share of each crop the city grows, then fills any gap from whatever is left.
   const grown = CROPS.filter(k => activeFarms.some(f => f.crops[k] > 0 || farmCrop(c, f) === k));
@@ -223,12 +223,12 @@ function exportSurplus(c: City, farm: Firm, hooks: AgricultureHooks): void {
 }
 
 /** Fulfils the same ONE daily basket as generic retail, from canonical T stock. */
-export function consumeMarketCrop(c: City, h: Household, firm: Firm, sellable: Map<number, number>, hooks: AgricultureHooks): boolean {
+export function consumeMarketCrop(c: City, h: Household, firm: Firm, sellable: Map<number, number>, hooks: AgricultureHooks, allowRepeat = false): boolean {
   if (!isMarket(firm) || !operational(c, firm, hooks) || !accessibleHousehold(c, h, hooks)) return false;
   const trader = cropAccount(c, firm, hooks), limit = sellable.get(firm.id) ?? 0;
   const crop = freshPreference(h.id, c.tick).find(k => firm.crops[k] > 0);
   if (!trader || !crop) return false;
-  const proposal = proposeCropConsumption(trader, { wallet: h.wallet, cash: c.accounts[h.wallet], lastPurchaseTick: h.lastPurchaseTick }, { tick: c.tick, sellableLimit: limit, commodity: 'crop' });
+  const proposal = proposeCropConsumption(trader, { wallet: h.wallet, cash: c.accounts[h.wallet], lastPurchaseTick: h.lastPurchaseTick }, { tick: c.tick, sellableLimit: limit, commodity: 'crop', allowRepeat });
   if (!proposal.ok) return false;
   let event: CropEntry, consumed: number, revenue: number, expense: number;
   try {

@@ -197,8 +197,11 @@ export function cityOverview(city: City): CityOverview {
   if (!utility.water) warnings.push(`น้ำไม่พอ อาคาร ${utility.unserved.water} แห่งที่ไกลสุดไม่มีน้ำ งาน การผลิต และการเติบโตของอาคารเหล่านั้นหยุด สร้างโรงสูบน้ำริมถนน`);
   if (current.unemployed) warnings.push(`มีแรงงาน ${current.unemployed} คนที่ยังไม่ได้รับการจัดสรรงาน`);
   if (displaced.length) warnings.push(`มี ${displaced.length} ครัวเรือน รวม ${homelessPersons} คนที่ยังไม่มีบ้านพัก`);
-  const noPurchase = city.households.filter(household => household.lastPurchaseTick !== city.tick).length;
-  if (noPurchase) warnings.push(`มี ${noPurchase} ครัวเรือนที่ยังไม่ได้ซื้อสินค้าในวันนี้`);
+  const foodByHousehold = new Map<string, number>();
+  for (const e of city.goodsLedger) if (e.tick === city.tick && e.reason === 'Household final consumption') foodByHousehold.set(e.to, (foodByHousehold.get(e.to) ?? 0) + e.quantity);
+  for (const e of city.cropLedger) if (e.tick === city.tick && e.kind === 'consumption') foodByHousehold.set(e.to, (foodByHousehold.get(e.to) ?? 0) + e.quantity);
+  const missingFood = city.households.reduce((sum, h) => sum + Math.max(0, h.members - (foodByHousehold.get(h.wallet) ?? 0)), 0);
+  if (city.tick > 0 && missingFood) warnings.push(`วันนี้ยังขาดอาหาร ${missingFood} หน่วยสำหรับสมาชิกครัวเรือน`);
   const disconnected = city.buildings.filter(building => !access(city, building.cell)).length;
   if (disconnected) warnings.push(`มี ${disconnected} อาคารที่ไม่มีถนนเชื่อมถึงทางออกเมือง`);
   if (city.accounts.treasury === 0) warnings.push('เงินคลังเมืองหมด การลงทุนใหม่ต้องมีเงินเพียงพอ');

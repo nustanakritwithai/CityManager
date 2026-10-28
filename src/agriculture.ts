@@ -171,7 +171,7 @@ export function canHouseholdConsume(value: unknown): boolean {
   return value.directConsumable === true && value.industrialInput === canonical.industrialInput && value.unit === canonical.unit;
 }
 export type CropConsumptionProposal = { ok: boolean; reason: AgricultureReason; nextTrader: CropAccount; nextHousehold: HouseholdAccount; quantity: number; cash: number; fromValue: number; toValue: 0; sellerRevenue: number; sellerExpense: number; margin: number };
-export function proposeCropConsumption(trader: CropAccount, household: HouseholdAccount, options: { tick: number; sellableLimit: number; commodity?: unknown }): CropConsumptionProposal {
+export function proposeCropConsumption(trader: CropAccount, household: HouseholdAccount, options: { tick: number; sellableLimit: number; commodity?: unknown; allowRepeat?: boolean }): CropConsumptionProposal {
   const result = (ok: boolean, reason: AgricultureReason, quantity = 0, cash = 0, fromValue = 0): CropConsumptionProposal => ({ ok, reason, nextTrader: { ...trader }, nextHousehold: { ...household }, quantity, cash, fromValue, toValue: 0, sellerRevenue: cash, sellerExpense: fromValue, margin: cash - fromValue });
   const fail = (reason: AgricultureReason) => result(false, reason);
   if (!validCropAccount(trader) || !record(household) || !record(options) || !walletValid(household.wallet, 'household') || !isSafeCount(household.cash) || !isSafeCount(household.lastPurchaseTick, -1) || !isSafeCount(options.tick) || household.lastPurchaseTick > options.tick || !isSafeCount(options.sellableLimit)) return fail('invalid-input');
@@ -179,7 +179,7 @@ export function proposeCropConsumption(trader: CropAccount, household: Household
   const commodity = options.commodity === undefined ? 'crop' : options.commodity;
   if (!canHouseholdConsume(commodity)) return fail('not-consumable');
   if ((typeof commodity === 'string' ? commodity : (commodity as CommodityDefinition).id) !== 'crop') return fail('wrong-commodity');
-  if (household.lastPurchaseTick === options.tick) return fail('already-consumed');
+  if (household.lastPurchaseTick === options.tick && !options.allowRepeat) return fail('already-consumed');
   if (!trader.cropInventory) return fail('insufficient-stock');
   if (!options.sellableLimit) return fail('sellable-limit');
   if (household.cash < CROP_PRICES.householdCrop) return fail('insufficient-cash');

@@ -1,5 +1,6 @@
 import './context-panels.css';
 import './building-cards.css';
+import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
 import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
@@ -340,6 +341,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
   const household = city.households.find(value => value.id === selected.id);
   if (!household) return [empty('ไม่พบครัวเรือนนี้', 'ครัวเรือนนี้ไม่อยู่ในข้อมูลเมืองปัจจุบัน ข้อมูลเดิมจึงไม่ถูกแสดงแทนข้อมูลปัจจุบัน')];
   const home = household.home === null ? null : city.buildings.find(value => value.id === household.home), wallet = city.accounts[household.wallet] ?? 0, labor = householdLabor(city, household.id)!, allocations = labor.allocations, employed = labor.employed, employers = labor.employers;
+  const food = householdFoodToday(city, household);
   const origin = el('p', 'cx-backref', `เปิดจากอาคาร #${selected.sourceBuildingId} · บ้านพักปัจจุบัน ${household.home === null ? 'ยังไม่มีที่พัก' : home ? `#${home.id}` : `ไม่พบ #${household.home}`}`);
   Object.assign(origin.dataset, { sourceBuildingId: String(selected.sourceBuildingId), sourceCell: String(selected.sourceCell) });
   const output: HTMLElement[] = [el('p', 'cx-context-meta', `ครัวเรือน #${household.id} · ${household.wallet}`)];
@@ -349,7 +351,8 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     metric('workforce', 'แรงงานที่ทำงานได้', `${household.workforce} คน`, household.workforce), metric('dependents', 'ผู้พึ่งพิง', `${household.dependents} คน`, household.dependents),
     metric('employed', 'แรงงานที่ทำงาน', `${employed} คน`, employed), metric('unemployed', 'แรงงานว่าง', `${Math.max(0, household.workforce - employed)} คน`, Math.max(0, household.workforce - employed)),
     metric('employers', 'ที่ทำงาน / กิจการตนเอง', `${employers} แห่ง`, employers), metric('home', 'บ้านพักปัจจุบัน', household.home === null ? 'ยังไม่มีที่พัก' : home ? `อาคาร #${home.id}` : 'ไม่พบอาคาร', household.home === null ? 'null' : household.home),
-    metric('needs', 'ยังไม่ได้ซื้อสินค้า', `${household.needs} วัน`, household.needs), metric('last-purchase', 'ซื้อครั้งล่าสุด', purchaseText(city, household), household.lastPurchaseTick)
+    metric('food-today', 'อาหารที่ซื้อวันนี้', `${food.purchased} / ${food.required} หน่วย`, food.purchased), metric('food-missing', 'อาหารที่ยังขาดวันนี้', `${food.missing} หน่วย`, food.missing),
+    metric('needs', 'วันต่อเนื่องที่อาหารไม่ครบ', `${household.needs} วัน`, household.needs), metric('last-purchase', 'ซื้อครั้งล่าสุด', purchaseText(city, household), household.lastPurchaseTick)
   ]));
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
   const leaves = departureDay(city, household.id);
@@ -366,7 +369,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     el('p', '', `สมาชิก ${household.members} = กำลังแรงงาน ${household.workforce} + ผู้พึ่งพิง ${household.dependents} คน เป็นจำนวนรวมระดับครัวเรือน ไม่มีรายชื่อหรือตัวแทนรายบุคคล`),
     el('p', '', 'แต่ละกลุ่มความสามารถนับแรงงานคนละชุด ไม่ซ้ำกัน แรงงานรับจ้างกับแรงงานทำกิจการเองใช้เพดานคนชุดเดียวกัน ผู้พึ่งพิงไม่เข้าตลาดแรงงาน ค่าจ้างเข้าบัญชีร่วมของครัวเรือน ส่วนยอดขายของตลาดอยู่บัญชีกิจการจนถอนกำไรที่มีสิทธิ์ งานต้นแบบยังมีเพียงระดับเริ่มต้น ไม่มีการจำลองการศึกษา เลื่อนตำแหน่ง หรือการฝึกทักษะ'),
     el('p', '', household.home === null ? 'การรื้อบ้านทำให้รอที่พักใหม่ ครัวเรือนและเงินออมยังอยู่ ระบบจัดหาที่พักให้ผู้ถูกย้ายออกจากบ้านก่อนรับผู้ย้ายเข้าใหม่' : 'การย้ายที่พักคง ID กระเป๋าเงิน สมาชิก และค่าจ้างที่มีสิทธิ์รับเดิม ไม่ใช่การรับครัวเรือนใหม่'),
-    el('p', '', 'หนึ่งครัวเรือนต้องการหนึ่งตะกร้ารวมต่อวัน: พืชผล 1 ล็อตจากตลาด หรือสินค้าสำเร็จรูป 1 หน่วยจากร้านค้า ไม่ซื้อทั้งสองซ้ำในวันเดียว และไม่คูณตามจำนวนสมาชิก')),
+    el('p', '', 'สมาชิกแต่ละคนต้องการอาหารวันละ 1 หน่วย จากพืชผลในตลาดหรือสินค้าสำเร็จรูปในร้านค้า ครัวเรือนใช้เงินร่วมกันและซื้อได้เท่าที่มีเงินและสินค้า')),
     activity(city, 'money', household.wallet, `ครัวเรือน #${household.id}`), activity(city, 'goods', household.wallet, `ครัวเรือน #${household.id}`), cropActivity(city, household.wallet, `ครัวเรือน #${household.id}`)); return output;
 }
 

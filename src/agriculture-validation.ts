@@ -91,10 +91,13 @@ export function validateAgriculture(c: City): void {
     requireThat(!matchedCash.has(index) && payment.tick === e.tick && payment.from === from && payment.to === to && payment.amount === e.cash);
     matchedCash.add(index); return index;
   };
-  const baskets = new Set<string>(), latestPurchase = new Map<string, number>();
+  const baskets = new Map<string, number>(), latestPurchase = new Map<string, number>();
   const basket = (tick: number, wallet: string, quantity: number) => {
-    requireThat(quantity === 1 && /^household:[1-9][0-9]*$/.test(wallet) && Object.hasOwn(c.accounts, wallet));
-    const key = tick + ':' + wallet; requireThat(!baskets.has(key)); baskets.add(key);
+    requireThat(isSafeCount(quantity, 1) && /^household:[1-9][0-9]*$/.test(wallet) && Object.hasOwn(c.accounts, wallet));
+    const key = tick + ':' + wallet, count = (baskets.get(key) ?? 0) + quantity;
+    const household = households.get(Number(wallet.slice(10)));
+    const limit = c.foodDemandStartTick !== undefined && tick > c.foodDemandStartTick ? household?.members ?? 3 : 1;
+    requireThat(count <= limit); baskets.set(key, count);
     latestPurchase.set(wallet, Math.max(tick, latestPurchase.get(wallet) ?? -1));
   };
   for (const e of c.goodsLedger) if (e.tick > c.agricultureStartTick && e.to.startsWith('household:')) basket(e.tick, e.to, e.quantity);
