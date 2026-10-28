@@ -2,6 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, step } from '../src/sim.ts';
 
+test('a small city with two people buys food and its market does not falsely show no buyers', async () => {
+  const { buildRoad, zoneCell, GATEWAY, SIZE, isMarket } = await import('../src/sim.ts');
+  const { buildingIssues } = await import('../src/map-overlay.ts');
+  const city = createCity(61025, { starter: false });
+  buildRoad(city, GATEWAY, GATEWAY + 5);
+  for (const [x, zone] of [[1, 'R'], [2, 'R'], [3, 'C'], [4, 'F']] as const) zoneCell(city, 11 * SIZE + x, zone);
+  for (let i = 0; i < 21; i++) step(city);
+  assert.equal(city.households.reduce((n, h) => n + h.members, 0), 2);
+  const market = city.firms.find(isMarket); assert.ok(market);
+  const sales = city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'consumption' && e.from === market.wallet);
+  assert.equal(sales.reduce((n, e) => n + e.quantity, 0), 2);
+  for (const sale of sales) assert.ok(city.ledger.some(e => e.tick === sale.tick && e.from === sale.to && e.to === sale.from && e.amount === sale.cash && e.reason === sale.reason));
+  const cell = city.buildings.find(b => b.id === market.building)!.cell;
+  assert.ok(!buildingIssues(city).some(issue => issue.cell === cell && issue.kind === 'no-buyer'));
+});
+
 test('a family can purchase one food unit for each member on the same day', () => {
   const city = createCity(61025);
   let observed = false;
