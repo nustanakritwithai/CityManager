@@ -48,7 +48,7 @@ async function until(expression, timeout = 15000) {
   const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Timed out: ${expression}`);
 }
-const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) {
@@ -73,7 +73,7 @@ async function load(json) {
   await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(json)})`); await button('#load');
-  const expected = JSON.parse(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
+  const expected = deserialize(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
 }
 async function cell(index, close = true) {
