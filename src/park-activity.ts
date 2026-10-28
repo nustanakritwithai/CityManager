@@ -71,6 +71,18 @@ function walkable(city: City): Set<number> {
   return new Set(city.cells.flatMap((c, i) => c.building === null && !blocked.has(i) ? [i] : []));
 }
 
+/** Read-only cache for one synchronous advance. Never retain across city edits,
+ * economic days or asynchronous work. Identity allocation still has one owner.
+ */
+export type ParkActivityContext = { city: City; day: number; citizens: Citizen[]; people: ReadonlyMap<string, Citizen>; open: ReadonlySet<number> };
+export function prepareParkActivity(city: City): ParkActivityContext {
+  const citizens = parkActivityCitizens(city);
+  return { city, day: city.tick, citizens, people: new Map(citizens.map(p => [p.citizenId, p])), open: walkable(city) };
+}
+function checkContext(city: City, context: ParkActivityContext) {
+  if (context.city !== city || context.day !== city.tick) throw new Error('Expired park activity context');
+}
+
 /** Bounded orthogonal BFS. Only the home/target endpoints may be occupied.
  * There is no water terrain in canonical City; all routing stays inside the map.
  */
@@ -110,9 +122,10 @@ export function startParkActivityDay(city: City, state: ParkActivityState): void
 /** Removes invalid reservations immediately; it never teleports actors through a
  * new obstacle. Cancellation is exposed separately from completed home returns.
  */
-export function reconcileParkActivity(city: City, state: ParkActivityState): void {
+export function reconcileParkActivity(city: City, state: ParkActivityState, context?: ParkActivityContext): void {
   assertDay(city, state);
-  const people = new Map(parkActivityCitizens(city).map(p => [p.citizenId, p])), open = walkable(city);
+  if (context) checkContext(city, context);
+  const { people, open } = context ?? prepareParkActivity(city);
   state.visited = state.visited.filter(id => people.has(id));
   state.visitors = state.visitors.filter(v => {
     const p = people.get(v.citizenId), home = city.buildings.find(b => b.id === v.homeId), park = city.parks.find(p => p.id === v.parkId);
@@ -130,9 +143,9 @@ export function reconcileParkActivity(city: City, state: ParkActivityState): voi
 
 const duration = (v: ParkVisitor) => v.phase === 'travel' ? (v.route.length - 1) * 2 : v.phase === 'leave' ? (v.route.length + 2) * 2 : v.phase === 'enter' ? 4 : v.phase === 'stroll' ? 12 : v.phase === 'sit' ? 18 : 12;
 const setPhase = (v: ParkVisitor, phase: ParkActivityPhase) => { v.phase = phase; v.phaseMinute = 0; v.partnerId = null; };
-function admit(city: City, state: ParkActivityState): void {
+function admit(city: City, state: ParkActivityState, context?: ParkActivityContext): void {
   if (state.minute < 600 || state.minute > 1140 || state.minute % 15) return;
-  const visited = new Set(state.visited), people = parkActivityCitizens(city).filter(p => p.homeId !== null && !visited.has(p.citizenId) && (!p.employed || state.minute >= WORK_END_MINUTE));
+  const visited = new Set(state.visited), people = (context?.citizens ?? parkActivityCitizens(city)).filter(p => p.homeId !== null && !visited.has(p.citizenId) && (!p.employed || state.minute >= WORK_END_MINUTE));
   // Per-admission cache shares even failed searches across all residents of a
   // building. It cannot become stale across construction edits or another minute.
   const routesByHome = new Map<number, { park: City['parks'][number]; route: number[] }[]>();
@@ -172,11 +185,11 @@ function admit(city: City, state: ParkActivityState): void {
 /** Integer stepping makes batched, single-minute and save/resume execution equal.
  * Zero minutes is a true pause. Reconciliation while paused is an explicit call.
  */
-export function advanceParkActivity(city: City, state: ParkActivityState, minutes: number): void {
+export function advanceParkActivity(city: City, state: ParkActivityState, minutes: number, context?: ParkActivityContext): void {
   assertDay(city, state);
   if (!integer(minutes, 0, 1440 - state.minute)) throw new RangeError('Advance must use whole game minutes within the current economic day');
   if (!minutes) return;
-  reconcileParkActivity(city, state);
+  reconcileParkActivity(city, state, context);
   for (let i = 0; i < minutes; i++) {
     state.minute++;
     for (const v of state.visitors) {
@@ -194,7 +207,7 @@ export function advanceParkActivity(city: City, state: ParkActivityState, minute
       const waiting = state.visitors.filter(v => v.parkId === park.id && v.phase === 'wait').sort((a, b) => a.slot - b.slot);
       for (let j = 0; j + 1 < waiting.length; j += 2) { const a = waiting[j], b = waiting[j + 1]; setPhase(a, 'meet'); setPhase(b, 'meet'); a.partnerId = b.citizenId; b.partnerId = a.citizenId; }
     }
-    admit(city, state);
+    admit(city, state, context);
   }
 }
 

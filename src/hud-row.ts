@@ -40,9 +40,9 @@ export function installHudRow() {
   // One speed button that steps 1× → 3× → 10×; the three original buttons keep their handlers.
   const speeds = [...document.querySelectorAll<HTMLButtonElement>('.time-buttons [data-speed]')];
   const cycle = document.createElement('button'); cycle.type = 'button'; cycle.id = 'speed-cycle'; cycle.className = 'hud-row-only';
-  const current = () => Math.max(0, speeds.findIndex(b => b.getAttribute('aria-pressed') === 'true'));
-  const syncSpeed = () => { const b = speeds[current()]; cycle.textContent = b?.textContent ?? ''; cycle.setAttribute('aria-label', `ความเร็ว ${b?.textContent ?? ''} · แตะเพื่อเปลี่ยน`); };
+  const current = () => speeds.findIndex(b => b.getAttribute('aria-pressed') === 'true');
+  const syncSpeed = () => { const b = speeds[current()]; cycle.textContent = b?.textContent ?? 'ชม'; cycle.setAttribute('aria-label', b ? `ความเร็ว ${b.textContent} · แตะเพื่อเปลี่ยน` : 'ดูชีวิตประชาชน 1 นาทีเกมต่อวินาที · แตะเพื่อกลับ 1×'); };
   cycle.addEventListener('click', () => speeds[(current() + 1) % speeds.length]?.click());
-  const watch = new MutationObserver(syncSpeed); for (const b of speeds) watch.observe(b, { attributes: true, attributeFilter: ['aria-pressed'] });
+  const watch = new MutationObserver(syncSpeed); for (const b of document.querySelectorAll('[data-speed]')) watch.observe(b, { attributes: true, attributeFilter: ['aria-pressed'] });
   speeds.at(-1)?.after(cycle); syncSpeed();
 }

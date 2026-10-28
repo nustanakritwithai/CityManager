@@ -19,11 +19,16 @@ export function parkRecreationPanelData(state: ParkRecreationState, residentIds:
 }
 
 export function renderParkRecreationPanel(host: HTMLElement, state: ParkRecreationState, residentIds: readonly string[]): void {
+  const expanded = host.querySelector('details')?.open ?? false;
+  const scrollLeft = host.querySelector('details')?.scrollLeft ?? 0;
+  const summaryFocused = host.ownerDocument.activeElement === host.querySelector('summary');
   const data = parkRecreationPanelData(state, residentIds), doc = host.ownerDocument;
   const element = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
     const node = doc.createElement(tag); if (text !== undefined) node.textContent = text; return node;
   };
   const section = element('section'); section.setAttribute('aria-label', 'ความพึงพอใจจากการพักผ่อนในสวน');
+  const minute = state.minute % 1440;
+  section.append(element('p', `เวลากิจกรรม ${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')} · วันที่ ${Math.floor(state.minute / 1440)}`));
   section.append(element('h2', 'ความพึงพอใจจากการพักผ่อนในสวน'));
   section.append(element('p', 'วัดเฉพาะประโยชน์ที่ได้รับจากเวลาพักผ่อนจริงในสวน ไม่ใช่ความสุขโดยรวมของประชาชน'));
   section.append(element('p', `เฉลี่ย ${data.average.toFixed(2)} / 100 · มีผลคงเหลือ ${data.withBenefit} จาก ${data.population} คน`));
@@ -38,6 +43,7 @@ export function renderParkRecreationPanel(host: HTMLElement, state: ParkRecreati
     const th = element('th', label); th.scope = 'col'; header.append(th);
   }
   head.append(header); table.append(head);
+  details.open = expanded;
   const body = element('tbody');
   for (const row of data.rows) {
     const tr = element('tr'), who = element('th', row.citizenId); who.scope = 'row'; tr.append(who);
@@ -48,4 +54,6 @@ export function renderParkRecreationPanel(host: HTMLElement, state: ParkRecreati
     body.append(tr);
   }
   table.append(body); details.append(table); section.append(details); host.replaceChildren(section);
+  details.scrollLeft = scrollLeft;
+  if (summaryFocused) summary.focus({ preventScroll: true });
 }

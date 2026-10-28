@@ -34,6 +34,7 @@ export class SceneTraffic {
   private readonly lightMaterial = new StandardMaterial();
   private signature = '';
   private enabled = true;
+  private walkersEnabled = true;
   private clock = 0;
   private lastCity: City | null = null;
 
@@ -67,6 +68,17 @@ export class SceneTraffic {
     this.view.app.renderNextFrame = true;
   }
 
+  /** Real park citizens replace decorative people; vehicles remain independent. */
+  setWalkersEnabled(enabled: boolean) {
+    if (enabled === this.walkersEnabled) return;
+    this.walkersEnabled = enabled;
+    if (!enabled) for (const [id, actor] of this.actors) if (actor.kind === 'walker') {
+      actor.entity.destroy(); this.actors.delete(id);
+    }
+    this.signature = '';
+    if (this.lastCity) this.sync(this.lastCity);
+  }
+
   private clear() {
     for (const actor of this.actors.values()) actor.entity.destroy();
     for (const plume of this.smoke.values()) plume.destroy();
@@ -85,6 +97,7 @@ export class SceneTraffic {
   }
 
   private apply(plan: TrafficPlan, city: City) {
+    if (!this.walkersEnabled) plan = { ...plan, walkers: [] };
     const wanted = new Map([...plan.cars, ...plan.trucks, ...plan.walkers].map(v => [v.key, v.route] as const));
     // Gone from the plan: finish the trip, then leave. A changed road network re-routes at once.
     for (const actor of this.actors.values()) {
