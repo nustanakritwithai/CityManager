@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
@@ -57,6 +58,7 @@ async function clickAt(x, y) {
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
 }
 async function button(selector) {
+  if (await reachTouch(evaluate, button, selector)) return;
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
   await clickAt(p.x, p.y);
 }

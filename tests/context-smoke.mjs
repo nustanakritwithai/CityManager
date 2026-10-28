@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { firmWage, createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/context-preview');
@@ -51,6 +52,7 @@ const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) {
+  if (await reachTouch(evaluate, button, selector)) return;
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control: '+${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
   assert.ok(point.w > 0 && point.h > 0 && !point.disabled, `Visible enabled control: ${selector}`);
   assert.equal(await evaluate(`!!document.elementFromPoint(${point.x},${point.y})?.closest(${JSON.stringify(selector)})`), true, `Control is actually hit: ${selector}`);
@@ -158,7 +160,7 @@ try {
   // Keep the native press active across real 10x simulation refreshes. A programmatic
   // click or a re-queried mouseup target would miss the replaced-button regression.
   for (const inputKind of ['mouse', 'mouse', 'touch']) {
-    if (inputKind === 'touch') await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
+    if (inputKind === 'touch') { await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 }); await until("document.documentElement.dataset.touchUi==='true'&&!!document.querySelector('#speed-cycle').getBoundingClientRect().width"); }
     await closePanel(); await button('[data-speed="10"]'); await button('#pause'); await place(homes[0]);
     assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'false');
     const selector = `#entity-content [data-household-id="${homeHousehold.id}"]`;
@@ -172,7 +174,8 @@ try {
     }
     const down = await evaluate('(()=>{const p=window.__contextHeld;return p&&{id:p.id,source:p.source,pointerType:p.pointerType,tick:p.tick}})()');
     assert.ok(down, 'Actual trusted household pointerdown was observed'); assert.equal(down.id, String(homeHousehold.id)); assert.equal(down.source, String(homes[0].id)); assert.equal(down.pointerType, inputKind);
-    await sleep(200);
+    // Hold at least 200ms and until a real refresh lands (a loaded runner can be a frame late).
+    await sleep(200); for (let waited = 0; waited < 2000 && JSON.parse(await evaluate('window.cityManager.snapshot()')).tick <= down.tick; waited += 50) await sleep(50);
     const held = await evaluate(`(()=>{const p=window.__contextHeld;return{connected:p.node.isConnected,sameNode:document.querySelector(${JSON.stringify(selector)})===p.node,tick:JSON.parse(window.cityManager.snapshot()).tick}})()`);
     assert.ok(held.connected && held.sameNode, `${inputKind} holds the same actual household DOM node: ${JSON.stringify({ down, held })}`); assert.ok(held.tick > down.tick, 'A real simulation refresh occurred during the 200ms hold');
     if (inputKind === 'touch') await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });

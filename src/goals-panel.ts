@@ -30,7 +30,7 @@ export class GoalPill {
     const name = goals.level ? goals.stages[goals.level - 1].name : 'เริ่มสร้างเมือง', key = `${goals.level}:${goals.next?.id}`;
     if (key === this.key) return;
     this.key = key;
-    const face = el('span', 'goal-pill-face'); face.append(dots(goals), el('span', 'goal-pill-level', `ระดับ ${goals.level}/5`), el('span', 'goal-pill-name', ` · ${name}`));
+    const face = el('span', 'goal-pill-face'); face.append(dots(goals), el('span', 'goal-pill-word', 'ระดับ'), el('span', 'goal-pill-level', `${goals.level}/5`), el('span', 'goal-pill-name', ` · ${name}`));
     this.button.replaceChildren(face);
     this.button.title = goals.next ? `เป้าหมายถัดไป: ${goals.next.name}` : 'เมืองพึ่งพาตนเองได้แล้ว';
     this.button.setAttribute('aria-label', `ระดับเมือง ${goals.level} จาก 5 · ${name} · ดูเป้าหมาย`);

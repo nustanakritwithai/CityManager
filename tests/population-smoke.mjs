@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { firmWage, createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, WAGES, MONTH } from '../src/sim.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/population-preview');
@@ -92,7 +93,7 @@ const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestA
 const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
-async function button(selector) {
+async function button(selector) { if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,physicalWidth:r.width*k,physicalHeight:r.height*k,touch:navigator.maxTouchPoints>0,disabled:e.disabled}})()`);
   assert.ok(p.width && p.height && !p.disabled, `Visible enabled ${selector}`);

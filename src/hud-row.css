@@ -1,0 +1,78 @@
+/* Touch UI: the whole top HUD is one 44px row (see hud-row.ts). Loaded after the other
+   HUD sheets; `body` in each selector outranks their touch and media-query rules. */
+.hud-row-only { display: none; }
+html:not([data-touch-ui=true]) .hud-row-only { display: none !important; }
+html[data-touch-ui=true] {
+  --row-u: var(--reader-unit, 1px);
+  --row-top: max(calc(6 * var(--row-u)), env(safe-area-inset-top));
+  --row-left: max(calc(6 * var(--row-u)), env(safe-area-inset-left));
+  --row-right: max(calc(6 * var(--row-u)), env(safe-area-inset-right));
+  --row-h: calc(44 * var(--row-u));
+  --row-gap: calc(5 * var(--row-u));
+}
+
+/* Row frame: level on the left, menu on the right. */
+html[data-touch-ui=true] body .top-hud { inset: var(--row-top) var(--row-right) auto var(--row-left); height: var(--row-h); gap: 0; justify-content: space-between; }
+html[data-touch-ui=true] body .wordmark { padding: 0; }
+html[data-touch-ui=true] body .wordmark .brand-symbol, html[data-touch-ui=true] body .wordmark h1, html[data-touch-ui=true] body .wordmark p { display: none; }
+html[data-touch-ui=true] body .goal-pill { width: var(--row-h); min-width: var(--row-h); height: var(--row-h); min-height: var(--row-h); margin: 0; }
+html[data-touch-ui=true] body .goal-pill-face {
+  flex-direction: column; justify-content: center; gap: calc(3 * var(--row-u)); width: 100%; height: 100%; padding: 0;
+  border-radius: calc(8 * var(--row-u)); background: var(--glass); box-shadow: var(--glass-shadow);
+  font-size: calc(12 * var(--row-u)); font-weight: 700;
+}
+html[data-touch-ui=true] body .goal-pill .goal-pill-word, html[data-touch-ui=true] body .goal-pill .goal-pill-name { display: none; }
+html[data-touch-ui=true] body .goal-dots { gap: calc(2 * var(--row-u)); }
+html[data-touch-ui=true] body .goal-dots i { width: calc(5 * var(--row-u)); height: calc(5 * var(--row-u)); }
+
+html[data-touch-ui=true] body #hud-more {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(1 * var(--row-u));
+  width: var(--row-h); min-width: var(--row-h); height: var(--row-h); min-height: var(--row-h); margin-left: auto; padding: 0;
+  border-radius: calc(8 * var(--row-u)); font-size: calc(10 * var(--row-u)); line-height: 1.1;
+}
+html[data-touch-ui=true] body #hud-more > span:first-child { font-size: calc(15 * var(--row-u)); line-height: 1; }
+html[data-touch-ui=true] body #hud-more[aria-expanded=true] { border-color: var(--c-accent); color: var(--c-accent); }
+
+/* City summary: money, people and the month ring in one chip between level and time. */
+html[data-touch-ui=true] body .city-kpis {
+  top: var(--row-top); left: calc(var(--row-left) + var(--row-h) + var(--row-gap));
+  width: max-content; max-width: calc(100% - var(--row-left) - var(--row-right) - 4 * var(--row-h) - 3 * var(--row-gap));
+  height: var(--row-h); translate: none; overflow: hidden;
+  align-items: center; justify-content: space-evenly; gap: calc(6 * var(--row-u)); padding: 0 calc(6 * var(--row-u));
+  border: 1px solid var(--glass-edge); border-radius: calc(8 * var(--row-u)); background: var(--glass); box-shadow: var(--glass-shadow);
+}
+html[data-touch-ui=true] body .city-kpis .kpi { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-touch-ui=true] body .city-kpis .kpi-label, html[data-touch-ui=true] body .city-kpis .kpi small { display: none; }
+html[data-touch-ui=true] body .city-kpis .kpi strong { font-size: calc(14 * var(--row-u)); }
+html[data-touch-ui=true] body .city-kpis .kpi-month { display: block; }
+html[data-touch-ui=true] body .city-kpis .kpi-month .kpi-ring { display: block; width: calc(30 * var(--row-u)); height: calc(30 * var(--row-u)); }
+
+/* Time: pause and one speed button. The clock, day and atmosphere live in the menu. */
+html[data-touch-ui=true] body .time-hud {
+  top: var(--row-top); left: auto; right: calc(var(--row-right) + var(--row-h) + var(--row-gap));
+  width: auto; min-height: var(--row-h); height: var(--row-h); padding: 0; gap: 0; border-radius: calc(8 * var(--row-u));
+}
+html[data-touch-ui=true] body .time-hud .time-label, html[data-touch-ui=true] body .time-hud .atmosphere-toggle, html[data-touch-ui=true] body .time-buttons [data-speed] { display: none; }
+html[data-touch-ui=true] body .time-buttons { gap: 0; }
+html[data-touch-ui=true] body .time-buttons #speed-cycle { display: block; font-size: calc(13 * var(--row-u)); font-weight: 700; color: var(--c-accent); }
+
+/* Menu: one compact row of icon buttons under the top row, with the day above them. */
+html[data-touch-ui=true] body .page-buttons {
+  display: none; position: fixed; z-index: 41; top: calc(var(--row-top) + var(--row-h) + var(--row-gap)); right: var(--row-right); margin: 0;
+  align-items: center; gap: calc(3 * var(--row-u)); max-width: calc(100% - var(--row-left) - var(--row-right));
+  padding: calc(4 * var(--row-u)); border: 1px solid var(--glass-edge); border-radius: calc(8 * var(--row-u)); background: var(--glass-solid); box-shadow: var(--glass-shadow);
+}
+html[data-touch-ui=true] body .top-hud[data-more=true] .page-buttons { display: flex; }
+html[data-touch-ui=true] body .page-buttons .inspector-toggle { width: var(--row-h); min-width: var(--row-h); height: var(--row-h); min-height: var(--row-h); padding: calc(2 * var(--row-u)); gap: calc(1 * var(--row-u)); border-radius: calc(6 * var(--row-u)); }
+html[data-touch-ui=true] body .page-buttons .inspector-toggle > span:first-child { font-size: calc(16 * var(--row-u)); line-height: 1; }
+html[data-touch-ui=true] body .page-buttons .inspector-toggle::after { font-size: calc(9 * var(--row-u)); white-space: nowrap; }
+html[data-touch-ui=true] body .page-buttons .hud-more-sky { display: flex; }
+html[data-touch-ui=true] body .page-buttons .hud-more-sky::after { content: 'บรรยากาศ'; }
+html[data-touch-ui=true] body .page-buttons .hud-more-sky > span:first-child { color: var(--c-accent); }
+html[data-touch-ui=true] body .page-buttons .hud-more-day { display: block; flex: none; width: var(--row-h); margin: 0; color: var(--c-muted, #b9c3d8); font-size: calc(10 * var(--row-u)); font-weight: 600; line-height: 1.35; text-align: center; white-space: pre-line; }
+/* Atmosphere settings open under the row, not at their desktop spot. */
+html[data-touch-ui=true] body .atmosphere-menu { top: calc(var(--row-top) + var(--row-h) + var(--row-gap)); left: auto; right: var(--row-right); }
+
+/* Camera: a map control above the build dock, off the top row. */
+html[data-touch-ui=true] body .camera-hud { top: auto; left: auto; right: var(--row-right); bottom: calc(var(--dock-clear, 132px)); }
+html[data-touch-ui=true] body .camera-hud .camera-grid { top: auto; bottom: calc(50 * var(--row-u)); }

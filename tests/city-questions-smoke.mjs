@@ -9,6 +9,7 @@ import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } 
 import { deserialize } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { buildLocalSignalReport } from '../src/signal-data.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const workspaceOutput = resolve(root, '.test-output');
@@ -51,6 +52,7 @@ async function until(expression) {
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
 async function button(selector) {
+  if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
   assert(point.w > 0 && point.h > 0 && !point.disabled, `Visible active control ${selector}`);

@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, summary, housingCapacity } from '../src/sim.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
 const profile = resolve(output, 'edge-signals');
@@ -43,6 +44,7 @@ const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestA
 const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
 const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 async function button(selector) {
+  if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`);
   await paints();
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
