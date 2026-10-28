@@ -407,7 +407,8 @@ try {
   checks.push('Mobile 390px park tool and one-cell placement/detail are reachable');
   await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await button('#load');
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
-  await closeInspector(); await button('#toggle-inspector'); await button('#park-recreation-data summary');
+  await closeInspector(); await button('#toggle-inspector');
+  if (!await evaluate('document.querySelector("#park-recreation-data details").open')) await button('#park-recreation-data summary');
   assert.ok(await evaluate('document.querySelector("#park-recreation-data table").getBoundingClientRect().width > 0'));
   assert.ok(await evaluate('document.querySelector("#inspector-body").scrollWidth <= document.querySelector("#inspector-body").clientWidth'));
   assert.ok((await evaluate('window.cityManager.parks()')).renderedVisitors > 0);
