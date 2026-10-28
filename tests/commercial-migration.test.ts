@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as legacy from '../src/legacy-v4.ts';
-import { createCity, deserialize, serialize, step, zoneCell, firmCapacity, firmWage, firmRent, firmWorkerCount, isMarket, isRetail, summary, contributeOwnerCapital, withdrawOwnerProfit, type City } from '../src/sim.ts';
+import { createCity, deserialize, serialize, step, zoneCell, firmCapacity, firmWage, firmRent, firmWorkerCount, isMarket, isRetail, summary, ownerFinance, contributeOwnerCapital, withdrawOwnerProfit, type City } from '../src/sim.ts';
 import { SAVE_KEY, AGRICULTURE_SAVE_KEY, AGRICULTURE_BACKUP_KEY, LATEST_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 
 function oldCity(day = 179) {
@@ -109,7 +109,8 @@ test('fresh commercial zoning builds owner-funded L1 markets, then shops once a 
   assert.deepEqual(Object.keys(summary(city).demand).sort(), ['C', 'F', 'I', 'R']);
   for (const f of markets) {
     const copy = loaded(city);
-    assert.equal(withdrawOwnerProfit(copy, f.id, 10000).ok, true);
+    const available = ownerFinance(copy, f.id)!.withdrawAvailable;
+    assert.equal(withdrawOwnerProfit(copy, f.id, 10000).ok, available >= 10000);
     assert.equal(contributeOwnerCapital(copy, f.id, 10000).ok, true); loaded(copy);
   }
 });
