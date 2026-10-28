@@ -6,7 +6,7 @@ import { ownerDecisionCandidates, validateOwnerDecisionSelection } from '../serv
 
 function fixture() {
   const city = createCity(61025);
-  for (let day = 0; day < 30; day++) step(city);
+  for (let day = 0; day < 210; day++) step(city);
   const firm = city.firms.find(f => f.commercialKind === 'market')!;
   assert(firm?.owner, 'Real seeded market has its actual household owner');
   const household = city.households.find(h => h.id === firm.owner!.householdId)!;

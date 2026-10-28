@@ -5,7 +5,7 @@ import { createCity as createLegacy, serialize as serializeLegacy, step as stepL
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 import { captureOwnerSnapshot, ownerProposalForCandidate } from '../src/owner-decision.ts';
 
-function town(day = 30): City { const c = createCity(61025); for (let n = 0; n < day; n++) step(c); return c; }
+function town(day = 210): City { const c = createCity(61025); for (let n = 0; n < day; n++) step(c); return c; }
 function market(c: City) { const f = c.firms.find(isMarket); assert(f?.owner); return f; }
 function replay(c: City, session: ReturnType<typeof createOwnerDecisionSession>) {
   const exported = JSON.parse(JSON.stringify(session.exportJournal()));
@@ -65,9 +65,9 @@ test('an explicit Typhoon hold is journaled, replayed and remains a no-transfer 
 });
 
 test('Typhoon auto executes one validated existing transfer after the monthly choice and replays without a model call', () => {
-  const c = town(29), session = createOwnerDecisionSession(c);
+  const c = town(209), session = createOwnerDecisionSession(c);
   session.setMode('typhoon-auto');
-  assert.deepEqual(session.advance(c), []); assert.equal(c.tick, 30);
+  assert.deepEqual(session.advance(c), []); assert.equal(c.tick, 210);
   const f = market(c), [ruleProposal] = session.evaluateTyphoonAutoMonthly(c, f.id);
   assert(ruleProposal); const snapshot = captureOwnerSnapshot(c, f.id); assert(snapshot);
   const aiProposal = ownerProposalForCandidate(snapshot, 'safe-transfer');
@@ -87,7 +87,7 @@ test('Typhoon auto executes one validated existing transfer after the monthly ch
 
 test('Typhoon quarter and half choices execute their exact finite amounts once and replay from the journal', () => {
   for (const [candidateId, amountSatang] of [['safe-transfer-quarter', 2_500], ['safe-transfer-half', 5_000]] as const) {
-    const c = town(29), session = createOwnerDecisionSession(c);
+    const c = town(209), session = createOwnerDecisionSession(c);
     session.setMode('typhoon-auto'); assert.deepEqual(session.advance(c), []);
     const firm = market(c), [ruleProposal] = session.evaluateTyphoonAutoMonthly(c, firm.id); assert(ruleProposal);
     const snapshot = captureOwnerSnapshot(c, firm.id); assert(snapshot);
@@ -108,7 +108,7 @@ test('Typhoon quarter and half choices execute their exact finite amounts once a
 });
 
 test('invalid or stale Typhoon auto suggestions are rejected without a transfer', () => {
-  const c = town(29), session = createOwnerDecisionSession(c);
+  const c = town(209), session = createOwnerDecisionSession(c);
   session.setMode('typhoon-auto'); session.advance(c);
   const f = market(c), [baseline] = session.evaluateTyphoonAutoMonthly(c, f.id); assert(baseline);
   const snapshot = captureOwnerSnapshot(c, f.id); assert(snapshot);

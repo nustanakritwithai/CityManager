@@ -85,6 +85,8 @@ export const plantAt = (c: City, i: number): Plant | undefined => c.plants.find(
 /** Proposed prototype finance policy, in integer satang; no credit or outside grant. */
 export const INDUSTRY_STARTUP_CAPITAL = 300_000;
 export const OWNER_STARTUP_CAPITAL = 60_000;
+/** Monthly owner income cap (400 credits), paid only from distributable profit. */
+export const OWNER_MONTHLY_INCOME = 40_000;
 export const MARKET_CONVERSION_COST = 20_000;
 const INDUSTRY_WORKING_RESERVE = 20_000;
 /**
@@ -602,6 +604,13 @@ function settleMonth(c: City) {
     const taxPaid = transfer(c, f.wallet, 'treasury', Math.max(0, Math.floor(f.lastMonthProfit * .2)), 'Monthly firm profit tax');
     if (f.owner) f.owner.taxPaid += taxPaid;
     f.monthlyRevenue = 0; f.monthlyExpense = 0;
+    // Income is a distribution, not a new wage or expense. Pay after taxes and
+    // protect earned payroll and the existing working-cash reserve.
+    if (f.owner) {
+      const available = ownerFinance(c, f.id)?.withdrawAvailable ?? 0;
+      const amount = Math.min(OWNER_MONTHLY_INCOME, available);
+      if (amount > 0 && !withdrawOwnerProfit(c, f.id, amount).ok) throw new Error('Monthly owner income invariant violated.');
+    }
   }
   for (const h of c.households) if (h.home !== null) {
     transfer(c, h.wallet, 'landlord', 10_000, 'Monthly household rent');

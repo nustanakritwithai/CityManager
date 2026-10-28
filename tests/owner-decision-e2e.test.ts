@@ -9,12 +9,12 @@ import type { OwnerDecisionRequest } from '../server/city-advisor/src/owner-cont
 
 test('a provider-selected half-safe transfer crosses the client and journal boundary once, then replays without another request', async () => {
   const city = createCity(61025);
-  for (let day = 0; day < 29; day++) step(city);
+  for (let day = 0; day < 209; day++) step(city);
 
   const session = createOwnerDecisionSession(city);
   session.setMode('typhoon-auto');
   assert.deepEqual(session.advance(city), []);
-  assert.equal(city.tick, 30);
+  assert.equal(city.tick, 210);
 
   const firm = city.firms.find(isMarket);
   assert(firm);
