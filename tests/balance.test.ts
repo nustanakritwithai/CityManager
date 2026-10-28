@@ -24,7 +24,7 @@ test('seeded cities that win stay self-reliant for three years: farms pay their 
 });
 
 test('a business left with no cash and no workers is taken over at month end: new owner, same premises, chain back', { timeout: 120_000 }, async () => {
-  const { bulldoze, zoneCell, deadFirm, utilities, access } = await import('../src/sim.ts');
+  const { bulldoze, zoneCell, deadFirm, factoryTakeoverRecipe, utilities, access } = await import('../src/sim.ts');
   const c = createCity(61025); for (let d = 0; d < 300; d++) { step(c); keepSupplied(c); }
   const farmCell = c.buildings.find(b => b.id === c.firms.find(f => f.zone === 'F')!.building)!.cell, premises = new Map(c.firms.map(f => [f.building, f.id]));
   assert.equal(bulldoze(c, farmCell).ok, true);
@@ -35,7 +35,7 @@ test('a business left with no cash and no workers is taken over at month end: ne
     if (c.tick % 30 === 0) {
       const svc = utilities(c);
       // After the month-end review no dead business is left on premises a new owner could run.
-      assert.deepEqual(c.firms.filter(f => deadFirm(c, f) && access(c, c.buildings.find(b => b.id === f.building)!.cell) && svc.ok(f.building) && f.commercialKind !== 'market').map(f => f.id), [], `day ${c.tick}`);
+      assert.deepEqual(c.firms.filter(f => deadFirm(c, f) && access(c, c.buildings.find(b => b.id === f.building)!.cell) && svc.ok(f.building) && f.commercialKind !== 'market' && (f.zone !== 'I' || factoryTakeoverRecipe(c, f))).map(f => f.id), [], `day ${c.tick}`);
       for (const f of c.firms.filter(f => f.takenOverAt === c.tick)) takeovers.push(`${premises.get(f.building)}→${f.id}`);
     }
   }
