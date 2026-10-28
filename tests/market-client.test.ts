@@ -121,6 +121,44 @@ test('unknown deposit is fenced and restores exact stock once; done deposit neve
   try { const client = new MarketClient(() => city, 'http://127.0.0.1:4317'); await client.createGuest(); await assert.rejects(client.deposit(2, 'crop:rice', 2, () => undefined)); assert.equal(city.firms[0].crops.rice, 2); await assert.rejects(client.fenceDeposit(op, () => { throw new Error('save failed'); }), /save failed/); assert.equal(city.firms[0].crops.rice, 2); assert.equal(client.journal.escrow[0].state, 'pending'); city.firms[0].crops.vegetables = 93; city.firms[0].cropInventory = 95; await assert.rejects(client.fenceDeposit(op, () => undefined), /farm-stock-full-for-refund/); assert.equal(city.firms[0].cropInventory, 95); assert.equal(client.journal.escrow[0].state, 'pending'); city.firms[0].crops.vegetables = 0; city.firms[0].cropInventory = 2; await client.fenceDeposit(op, () => { const parsed = JSON.parse(serialize(city, client.exportSave())); assert.equal(parsed.version, 19); }); assert.equal(city.firms[0].crops.rice, 4); await assert.rejects(client.fenceDeposit(op)); } finally { globalThis.fetch = originalFetch; }
 });
 
+test('cancelled farm deposits use level 4–6 capacity, roll back on save failure and refund exactly once', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [level, capacity] of [[4, 120], [5, 144], [6, 168]]) {
+      const city = createCity(61025, { starter: false });
+      city.buildings.push({ id: 1, cell: 0, zone: 'F', level, age: 0 });
+      city.firms.push({ id: 2, building: 1, zone: 'F', crops: { rice: 4, vegetables: 0, sugarcane: 0 }, products: { 'milled-rice': 0, 'canned-food': 0, sugar: 0 }, wallet: 'firm:2', workDays: {}, inventory: 0, cropInventory: 4, cropCost: 0, productionTick: 0, owner: null, profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
+      const store = new Map<string, string>();
+      Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } });
+      Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'cm_csrf=test' } });
+      let op = '', cancelled = false;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/v1/me')) return new Response('{}', { status: 401 });
+        if (url.endsWith('/v1/auth/guest')) return new Response(JSON.stringify({ guest_id: '00000000-0000-4000-8000-000000000003' }), { status: 201 });
+        if (url.endsWith('/v1/deposits')) { op = JSON.parse(String(init?.body)).opId; throw new Error('unknown response'); }
+        if (url.endsWith(`/v1/op/${op}/cancel`)) { cancelled = true; return new Response(JSON.stringify({ state: 'cancelled', opId: op }), { status: 200 }); }
+        if (url.endsWith(`/v1/op/${op}`)) return new Response(JSON.stringify({ state: cancelled ? 'cancelled' : 'unknown', opId: op }), { status: 200 });
+        throw new Error('unexpected request');
+      };
+      const client = new MarketClient(() => city, 'http://127.0.0.1:4317'); await client.createGuest();
+      await assert.rejects(client.deposit(2, 'crop:rice', 2, () => undefined), /unknown response/);
+      const farm = city.firms[0]; farm.crops.vegetables = capacity - 3; farm.cropInventory = capacity - 1;
+      const ledgerBefore = city.cropLedger.length;
+      await assert.rejects(client.fenceDeposit(op, () => undefined), /farm-stock-full-for-refund/);
+      assert.equal(farm.cropInventory, capacity - 1); assert.equal(city.cropLedger.length, ledgerBefore); assert.equal(client.journal.escrow[0].state, 'pending');
+      farm.crops.vegetables--; farm.cropInventory--;
+      await assert.rejects(client.fenceDeposit(op, () => { throw Error('save failed'); }), /save failed/);
+      assert.equal(farm.cropInventory, capacity - 2); assert.equal(farm.crops.rice, 2); assert.equal(city.cropLedger.length, ledgerBefore); assert.equal(client.journal.escrow[0].state, 'pending');
+      let saves = 0; await client.fenceDeposit(op, () => { saves++; });
+      assert.equal(farm.cropInventory, capacity); assert.ok(farm.cropInventory > 96); assert.equal(farm.crops.rice, 4); assert.equal(city.cropLedger.length, ledgerBefore + 1);
+      assert.equal(client.journal.escrow[0].state, 'cancelled'); assert.equal(saves, 1);
+      await assert.rejects(client.fenceDeposit(op, () => { saves++; }), /deposit-not-pending/);
+      assert.equal(farm.cropInventory, capacity); assert.equal(city.cropLedger.length, ledgerBefore + 1); assert.equal(saves, 1);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('a pending product deposit can be refunded after its factory changes recipe', async () => {
   const city = createCity(61025, { starter: false });
   city.buildings.push({ id: 1, cell: 0, zone: 'I', level: 1, age: 0 });

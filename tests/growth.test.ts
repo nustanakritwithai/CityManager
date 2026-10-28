@@ -103,6 +103,23 @@ test('funded factory closes only after claims and returns residual cash to its s
   assert.equal(bulldoze(estate, estate.buildings.find(b => b.id === offspring.building)!.cell).ok, true); assert.equal(estate.accounts[source.wallet], sourceCash + residue); conservation(estate);
 });
 
+test('a locally funded factory cannot create a new parcel or free capital after outside investment takes the last site', () => {
+  const city = current(251); step(city);
+  const funded = city.firms.find(f => f.fundedBy)!, parent = city.firms.find(f => f.id === funded.fundedBy!.firmId)!;
+  const site = city.buildings.find(b => b.id === parent.building)!.cell;
+  assert.equal(bulldoze(city, site).ok, true); assert.equal(zoneCell(city, site, 'I').ok, true);
+  const zones = city.cells.map(cell => cell.zone);
+  for (let n = 0; n < 500; n++) { step(city); keepSupplied(city); }
+  const status = industryGrowthStatus(city);
+  assert.equal(status.code, 'growth.no-industrial-parcel'); assert.equal(status.sponsorFirmId, funded.id); assert.ok(status.availableCapital >= 300_000);
+  assert.deepEqual(city.cells.map(cell => cell.zone), zones, 'no industrial zoning is invented');
+  assert.ok(city.ledger.some(e => /^Outside industry equity #/.test(e.reason) && e.from === 'outside' && e.amount === 300_000));
+  assert.equal(city.firms.some(f => f.fundedBy?.firmId === funded.id), false);
+  const capital = city.ledger.filter(e => e.reason === `Industry expansion capital #${funded.id}`);
+  assert.equal(capital.length, 1); assert.equal(capital[0].from, parent.wallet); assert.equal(capital[0].amount, 300_000);
+  conservation(city);
+});
+
 test('two-generation funded sponsors retain later estate receipts in either same-tick closure order', () => {
   const c = current(251); step(c); const b = c.firms.find(f => f.fundedBy)!, a = c.firms.find(f => f.id === b.fundedBy!.firmId)!, oldSite = c.buildings.find(home => home.id === a.building)!.cell;
   assert.equal(bulldoze(c, oldSite).ok, true); assert.equal(zoneCell(c, oldSite, 'I').ok, true);
