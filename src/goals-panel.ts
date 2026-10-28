@@ -2,7 +2,7 @@
  * Goal UI: the level pill under the wordmark, the goals card at the top of the city overview and
  * the win screen. Everything reads cityGoals(); nothing is saved.
  */
-import { WinLatch, cityGoals, cityRecord, type CityGoals } from './city-goals.ts';
+import { WinLatch, cityGoals, cityRecord, type CityGoals, type SideMission } from './city-goals.ts';
 import type { City } from './sim.ts';
 import './goals.css';
 
@@ -39,7 +39,7 @@ export class GoalPill {
 }
 
 /** The five stages as a stepper, with the open checks of the next stage spelled out. */
-export function renderGoalsCard(host: HTMLElement, goals: CityGoals) {
+export function renderGoalsCard(host: HTMLElement, goals: CityGoals, missions: readonly SideMission[] = []) {
   const head = el('div', 'dash-head'); head.append(el('h3', '', 'เป้าหมายเมือง'), el('span', 'dash-note', goals.won ? 'ชนะแล้ว · เล่นต่อได้' : `ระดับ ${goals.level}/5`));
   const steps = el('ol', 'goal-steps');
   for (const stage of goals.stages) {
@@ -59,6 +59,25 @@ export function renderGoalsCard(host: HTMLElement, goals: CityGoals) {
     }
     next.append(list, el('p', 'dash-note-line', goals.next.hint)); parts.push(next);
   } else parts.push(el('p', 'dash-note-line', 'เมืองผลิตสินค้าพอขายเอง ไม่ต้องนำเข้า และเงินคลังเติบโต เล่นต่อแบบอิสระได้ หรือเริ่มเมืองใหม่จากเมนูเกม'));
+  if (missions.length) {
+    const completed = missions.filter(m => m.done).length;
+    const side = el('section', 'goal-missions');
+    const top = el('div', 'goal-missions-head');
+    top.append(el('h4', '', 'ภารกิจเสริม · เศรษฐกิจหลากหลาย'), el('span', '', `${completed}/${missions.length} สำเร็จ`));
+    const list = el('ul', 'goal-mission-list');
+    for (const mission of missions) {
+      const item = el('li', mission.done ? 'done' : ''); item.dataset.mission = mission.id;
+      const line = el('div', 'goal-mission-line');
+      line.append(el('strong', '', mission.done ? `✓ ${mission.name}` : mission.name),
+        el('span', '', `${mission.current}/${mission.target} ชนิด`));
+      const meter = el('progress', 'goal-mission-meter');
+      meter.max = Math.max(1, mission.target); meter.value = Math.min(meter.max, mission.current);
+      meter.setAttribute('aria-label', `${mission.name}: ${mission.current} จาก ${mission.target} ชนิด`);
+      item.append(line, meter, el('p', '', mission.hint)); list.append(item);
+    }
+    side.append(top, list, el('p', 'goal-missions-note', 'อ่านจากข้อมูลเมืองจริง · ไม่มีรางวัลเงิน · สถานะเปลี่ยนได้เมื่อเมืองเปลี่ยน'));
+    parts.push(side);
+  }
   host.replaceChildren(...parts);
 }
 
