@@ -1,3 +1,4 @@
+import { factoryCropCapacity } from './factory-levels.ts';
 import { deserialize, isMarket, type City } from './sim.ts';
 import { withMarketWriter, type MarketWriterLocks } from './market-writer.ts';
 import { SAVE_KEY } from './save-storage.ts';
@@ -50,7 +51,7 @@ export class MarketClient {
   get pagesAuthenticated() { return this.usesPagesAuth && Boolean(pagesSession.verifiedGuest); }
   preparePagesLogin() { if (!this.usesPagesAuth || this.journalUnavailable) throw new Error('pages-auth-unavailable'); return pagesSession.prepare(); }
 
-  private expectedPagesGuest() { const raw = globalThis.localStorage?.getItem(SAVE_KEY); let saved: MarketJournal | null = null; if (raw) { const city = JSON.parse(raw); if ((city?.version === 10 || city?.version === 11 || (city?.version === 12 || city?.version === 13 || city?.version === 14 || city?.version === 15 || city?.version === 16) && city.market)) { if (!city.market) throw new Error('saved market identity requires recovery'); saved = safeJournal(JSON.stringify(city.market)); } } const hasState = (j: MarketJournal) => Boolean(j.operations.length || j.escrow.length || Object.keys(j.receipts).length); if ((!this.journal.guestId && hasState(this.journal)) || (saved && !saved.guestId && hasState(saved))) throw new Error('saved market identity requires recovery'); if (saved?.guestId && this.guestId && saved.guestId !== this.guestId) throw new Error('market guest identity mismatch'); return this.guestId ?? saved?.guestId ?? null; }
+  private expectedPagesGuest() { const raw = globalThis.localStorage?.getItem(SAVE_KEY); let saved: MarketJournal | null = null; if (raw) { const city = JSON.parse(raw); if ((city?.version === 10 || city?.version === 11 || (city?.version === 12 || city?.version === 13 || city?.version === 14 || city?.version === 15 || city?.version === 16 || city?.version === 17) && city.market)) { if (!city.market) throw new Error('saved market identity requires recovery'); saved = safeJournal(JSON.stringify(city.market)); } } const hasState = (j: MarketJournal) => Boolean(j.operations.length || j.escrow.length || Object.keys(j.receipts).length); if ((!this.journal.guestId && hasState(this.journal)) || (saved && !saved.guestId && hasState(saved))) throw new Error('saved market identity requires recovery'); if (saved?.guestId && this.guestId && saved.guestId !== this.guestId) throw new Error('market guest identity mismatch'); return this.guestId ?? saved?.guestId ?? null; }
   connectPages() { if (!this.usesPagesAuth || this.journalUnavailable) throw new Error('pages-auth-unavailable'); const expected = this.expectedPagesGuest(); const exchange = pagesSession.connect(expected); return exchange.then(async guest => { try { const me = await this.request('/v1/me'); if (me?.guest_id !== guest) throw new Error('market guest identity mismatch'); return me; } catch (error) { pagesSession.clear(); throw error; } }); }
   exportSave() { return structuredClone(this.journal); }
   validateSave(value: unknown) { safeJournal(JSON.stringify(value)); }
@@ -201,7 +202,9 @@ export class MarketClient {
     const product = receipt.item_code.startsWith('product:'), cropKey = receipt.item_code.slice(5);
     return this.city().firms.filter(f => product ? f.commercialKind === 'retail' : isMarket(f) || (f.zone === 'I' && f.recipe !== undefined && RECIPE[f.recipe].crop === cropKey)).map(f => {
       const building = this.city().buildings.find(b => b.id === f.building); const holdings = [...Object.values(f.crops), ...Object.values(f.products)];
-      const total = holdings.reduce((a, n) => a + n, 0); const capacity = product ? PRODUCT_STOCK_CAP : isMarket(f) ? CROP_STOCK_CAPS.T : CROP_STOCK_CAPS.I;
+      // Keep the historical receipt rule at levels 1–3. Expanded factories
+      // measure crop storage independently of their finished-goods inventory.
+      const total = !product && f.zone === 'I' && building && building.level > 3 ? Object.values(f.crops).reduce((a, n) => a + n, 0) : holdings.reduce((a, n) => a + n, 0); const capacity = product ? PRODUCT_STOCK_CAP : isMarket(f) ? CROP_STOCK_CAPS.T : building ? factoryCropCapacity(building.level) : CROP_STOCK_CAPS.I;
       return { firmId: f.id, kind: product ? 'retail' : isMarket(f) ? 'market' : 'factory', available: capacity - total, eligible: Boolean(building) && holdings.every(n => Number.isSafeInteger(n) && n >= 0) && Number.isSafeInteger(total) && total + receipt.quantity <= capacity };
     }).filter(x => x.eligible).map(({ firmId, kind, available }) => ({ firmId, kind, available }));
   }

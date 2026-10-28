@@ -83,7 +83,7 @@ test('monthly bills: users pay the city, the city pays outside units and plant u
 
 test('a 2.0 (v8) save loads with a contract that covers what it already drew, and never shrinks', () => {
   const old = oldCity(61025); for (let day = 0; day < 400; day++) oldStep(old);
-  const raw = JSON.parse(serialize(deserialize(oldSerialize(old)))); delete raw.foodDemandStartTick; delete raw.plants; raw.utilities = { power: true, water: true }; raw.version = 8; raw.rulesVersion = 'chain-3';
+  const raw = JSON.parse(serialize(deserialize(oldSerialize(old)))); delete raw.foodDemandStartTick; delete raw.factoryProgressionStartTick; delete raw.plants; raw.utilities = { power: true, water: true }; raw.version = 8; raw.rulesVersion = 'chain-3';
   const loaded = deserialize(JSON.stringify(raw)), drawn = utilities(loaded);
   assert.equal(loaded.version, 9); assert.deepEqual(loaded.plants, []);
   assert.ok(loaded.utilities.outside.power >= OUTSIDE_SUPPLY.power && loaded.utilities.outside.water >= OUTSIDE_SUPPLY.water);

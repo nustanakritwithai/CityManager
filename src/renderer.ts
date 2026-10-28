@@ -4,6 +4,7 @@ import {
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
+import { factoryLevel } from './factory-levels.ts';
 import { utilityService, type UtilityKind } from './utilities.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
@@ -476,12 +477,14 @@ export class CityView {
           }
           // Retained shops move up one commercial tier; their geometry stays unchanged.
           const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
-          const model = this.assets?.building(b.zone, visualLevel, i, lit);
+          const model = this.assets?.building(b.zone, b.zone === 'I' ? factoryLevel(b.level).model : visualLevel, i, lit);
           if (model) {
             model.setLocalPosition(0, .1, 0); tile.addChild(model);
             // Bigger factories show their scale with a chimney and an input tank.
             if (b.zone === 'I' && b.level >= 2) { const chimney = this.assets?.detail('chimney', .32); if (chimney) { chimney.setLocalPosition(.68, .1, -.62); tile.addChild(chimney); } }
             if (b.zone === 'I' && b.level >= 3) { const tank = this.assets?.detail('tank', .6); if (tank) { tank.setLocalPosition(-.6, .1, .66); tile.addChild(tank); } }
+            // One inset marker per level above three, contained within the same parcel.
+            if (b.zone === 'I') for (let n = 0; n < factoryLevel(b.level).markers; n++) this.box(tile, -.7 + n * .23, .12, .82, .13, .06, .09, '#f1c267', false);
             if (b.zone === 'R' && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
             // A lived-in house gets a front-yard bench; some also a second bush (decoration only).
             if (b.zone === 'R' && lit && hashCell(i + 5) % 2 === 0) this.bench(tile, -.62, .7);

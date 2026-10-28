@@ -112,7 +112,7 @@ export function deserializeParkSession(json: string): { city: City; runtime: Par
   const parsed = JSON.parse(json);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid city save');
   const { parkRuntime, ...citySave } = parsed;
-  if (parkRuntime !== undefined && !((parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11'))) throw new Error('Park runtime requires save v15/chain-10 or v16/chain-11');
+  if (parkRuntime !== undefined && !((parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12'))) throw new Error('Park runtime requires save v15, v16 or v17 with matching rules');
   const city = deserialize(JSON.stringify(citySave));
   const runtime = parkRuntime === undefined ? createParkRuntime(city) : restoreRuntime(city, parkRuntime);
   return { city, runtime };
