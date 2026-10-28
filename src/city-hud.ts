@@ -42,7 +42,7 @@ export class CityHud {
   get events(): readonly CityEvent[] { return this.log; }
 
   update(city: City, paused: boolean) {
-    if (city !== this.city) { this.city = city; this.log = []; this.lastEvent = ''; }
+    if (city !== this.city) { this.city = city; this.log = []; this.lastEvent = ''; this.key = ''; this.issueKey = ''; }
     if (city.lastEvent && city.lastEvent !== this.lastEvent) { this.lastEvent = city.lastEvent; this.log = appendEvent(this.log, city.tick, city.lastEvent); this.renderLog(); }
     const key = `${city.tick}:${paused}:${city.ledger.length}:${city.buildings.length}:${city.households.length}`;
     if (key === this.key) return;
