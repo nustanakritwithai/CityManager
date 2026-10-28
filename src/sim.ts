@@ -21,7 +21,7 @@ export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; le
 export type Household = { id: number; home: number | null; members: number; workforce: number; dependents: number; workerSkills: WorkerSkills; skillSource: 'legacy-assumed' | 'arrival-profile'; profile: 'legacy-worker' | 'single-worker' | 'family'; origin: 'legacy-v1' | 'arrival'; wallet: string; lastPurchaseTick: number; needs: number };
 export type Owner = { householdId: number; capitalContributed: number; capitalReturned: number; withdrawn: number; taxPaid: number };
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
-export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; cropChoices?: { at: number; crop: CropId }[]; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
+export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; cropMode?: 'auto' | 'manual'; cropChoices?: { at: number; crop: CropId }[]; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 /** `crop` names the lots moved (every kind but a write-off); a write-off carries the whole `mix`. Untyped only before `typeBaseline.tick`. */
 export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export' | 'market-deposit' | 'market-refund' | 'market-receipt'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
@@ -232,17 +232,25 @@ function moveProduct(c: City, from: Firm | null, to: Firm | null, product: Produ
   if (from) { from.products[product] -= quantity; from.inventory -= quantity; }
   if (to) { to.products[product] += quantity; to.inventory += quantity; }
 }
-/** The crop a farm grows: set by its parcel's fertility band. */
+/** Existing saves without a mode retain their current crop as a manual choice. */
+export const farmCropMode = (f: Pick<Firm, 'cropMode'>): 'auto' | 'manual' => f.cropMode ?? 'manual';
 export function farmCrop(c: City, f: Pick<Firm, 'building'> & Partial<Pick<Firm, 'cropChoices'>>): CropId {
   return f.cropChoices?.at(-1)?.crop ?? cropForFertility(c.resources.fertility[building(c, f.building).cell]) ?? 'rice';
 }
-/** Change future harvests without altering stock or the financial journal. */
-export function selectFarmCrop(c: City, firmId: number, crop: CropId): Result {
+/** Choose the least represented crop, ties resolved in catalog order; never mutate the city. */
+export function automaticFarmCrop(c: City, excludeFirmId?: number): CropId {
+  const counts = Object.fromEntries(CROPS.map(crop => [crop, 0])) as Record<CropId, number>;
+  for (const f of c.firms) if (f.zone === 'F' && f.id !== excludeFirmId) counts[farmCrop(c, f)]++;
+  return [...CROPS].sort((a, b) => counts[a] - counts[b] || CROPS.indexOf(a) - CROPS.indexOf(b))[0];
+}
+/** Selecting auto makes a fresh automatic choice; selecting a crop fixes it manually. */
+export function selectFarmCrop(c: City, firmId: number, choice: CropId | 'auto'): Result {
   const f = c.firms.find(f => f.id === firmId && f.zone === 'F');
-  if (!f || !CROPS.includes(crop)) return { ok: false, message: 'ไม่พบฟาร์มหรือชนิดพืชไม่ถูกต้อง' };
-  if (farmCrop(c, f) === crop) return { ok: true, message: 'เลือกพืชชนิดนี้อยู่แล้ว' };
-  (f.cropChoices ??= []).push({ at: c.cropLedger.length, crop });
-  return { ok: true, message: 'เปลี่ยนพืชสำหรับการเก็บเกี่ยวครั้งถัดไปแล้ว' };
+  if (!f || (choice !== 'auto' && !CROPS.includes(choice))) return { ok: false, message: 'ไม่พบฟาร์มหรือชนิดพืชไม่ถูกต้อง' };
+  const crop = choice === 'auto' ? automaticFarmCrop(c, firmId) : choice;
+  if (farmCrop(c, f) !== crop) (f.cropChoices ??= []).push({ at: c.cropLedger.length, crop });
+  f.cropMode = choice === 'auto' ? 'auto' : 'manual';
+  return { ok: true, message: choice === 'auto' ? 'เลือกพืชอัตโนมัติแล้ว' : 'เลือกพืชสำหรับการเก็บเกี่ยวครั้งถัดไปแล้ว' };
 }
 /** Lots a day a new four-worker factory needs. */
 const NEW_FACTORY_LOTS = 8;
@@ -410,7 +418,7 @@ function takeOver(c: City) {
     const funded = old.fundedBy, retail = isRetail(old);
     closeFirm(c, old);
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: recipe! } : old.zone === 'F' ? { cropChoices: [{ at: c.cropLedger.length, crop: farmCrop(c, old) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
+    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: recipe! } : old.zone === 'F' ? { cropMode: farmCropMode(old), cropChoices: [{ at: c.cropLedger.length, crop: farmCrop(c, old) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
       wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: OWNER_STARTUP_CAPITAL, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
@@ -520,7 +528,7 @@ function createBuilding(c: City, i: number, shop = false) {
     transfer(c, 'outside', 'construction', 40_000, 'Outside residential developer investment');
   } else {
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : zone === 'F' ? { cropChoices: [{ at: c.cropLedger.length, crop: 'rice' as const }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
+    c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : zone === 'F' ? { cropMode: 'auto' as const, cropChoices: [{ at: c.cropLedger.length, crop: automaticFarmCrop(c) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: 60_000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
     const paidCapital = transfer(c, sponsor ? sponsor.wallet : owner ? owner.wallet : 'outside', wallet, owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL, sponsor ? `Industry expansion capital #${fid}` : owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : retail ? 'Outside firm equity investment' : industry?.outside ? `Outside industry equity #${fid}` : `Outside industry bootstrap equity #${fid}`);

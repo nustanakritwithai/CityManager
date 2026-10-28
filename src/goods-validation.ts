@@ -20,6 +20,7 @@ export function validateTypes(c: City): void {
   for (const f of c.firms) {
     if (!validMix(f.crops, CROPS) || mixTotal(f.crops) !== f.cropInventory || !validMix(f.products, PRODUCTS) || mixTotal(f.products) !== f.inventory) fail();
     if (f.zone === 'I' ? !RECIPES.includes(f.recipe!) : f.recipe !== undefined) fail();
+    if (f.cropMode !== undefined && (f.zone !== 'F' || (f.cropMode !== 'auto' && f.cropMode !== 'manual'))) fail();
     if (f.cropChoices !== undefined) {
       if (f.zone !== 'F' || !Array.isArray(f.cropChoices) || f.cropChoices.length === 0) fail();
       let last = -1;
