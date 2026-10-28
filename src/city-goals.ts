@@ -2,7 +2,8 @@
  * City goals: five stages from first household to a self-reliant city. Read-only over the
  * canonical state and its ledgers; nothing here is saved, so a loaded city shows its real stage.
  */
-import { MONTH, isRetail, summary, type City } from './sim.ts';
+import { CROPS, PRODUCTS, RECIPES } from './goods.ts';
+import { MONTH, farmCrop, isRetail, summary, type City } from './sim.ts';
 
 export type GoalCheck = { label: string; done: boolean; value?: string };
 export type GoalStage = { level: number; id: string; name: string; hint: string; checks: GoalCheck[]; done: boolean };
@@ -70,6 +71,35 @@ export function cityGoals(c: City): CityGoals {
   let level = 0;
   const done = stages.map(stage => { const ok = stage.checks.every(check => check.done) && level === stage.level - 1; if (ok) level = stage.level; return { ...stage, done: ok }; });
   return { level, stages: done, next: done.find(stage => !stage.done) ?? null, won: level === stages.length };
+}
+
+/**
+ * Optional, reversible city-development missions. Read-only projections: no rewards,
+ * ledger writes, RNG draws or save-schema changes.
+ */
+export type SideMission = {
+  id: 'crop-diversity' | 'recipe-diversity' | 'basket-diversity';
+  name: string;
+  hint: string;
+  current: number;
+  target: number;
+  done: boolean;
+};
+
+export function citySideMissions(c: City): SideMission[] {
+  const crops = new Set(c.firms.filter(f => f.zone === 'F').map(f => farmCrop(c, f))).size;
+  const recipes = new Set(c.firms.filter(f => f.zone === 'I' && f.recipe !== undefined).map(f => f.recipe)).size;
+  const bought = new Set<string>();
+  const since = c.tick - MONTH;
+  for (let i = c.goodsLedger.length - 1; i >= 0 && c.goodsLedger[i].tick > since; i--) {
+    const e = c.goodsLedger[i];
+    if (e.tick <= c.tick && e.reason === 'Household final consumption' && e.product && e.quantity > 0) bought.add(e.product);
+  }
+  return [
+    { id: 'crop-diversity', name: 'ปลูกพืชให้ครบทุกชนิด', hint: 'เพิ่มฟาร์มบนดินที่เหมาะกับข้าว ผัก และอ้อย', current: crops, target: CROPS.length },
+    { id: 'recipe-diversity', name: 'เปิดโรงงานหลายสูตร', hint: 'จัดหาวัตถุดิบต่างชนิด แล้วเพิ่มโรงงานเพื่อแปรรูป', current: recipes, target: RECIPES.length },
+    { id: 'basket-diversity', name: 'ครัวเรือนซื้อสินค้าหลากหลาย', hint: 'ให้ร้านขายข้าวสาร อาหารกระป๋อง และน้ำตาลใน 30 วันล่าสุด', current: bought.size, target: PRODUCTS.length },
+  ].map(m => ({ ...m, done: m.current >= m.target }));
 }
 
 /**
