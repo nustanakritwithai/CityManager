@@ -10,6 +10,10 @@ test('actual v18 retail session migrates to farm levels with populated park stat
   assert.equal(old.version, 18); assert.equal(old.rulesVersion, 'chain-13');
   assert.equal(old.parkRuntime.activity.visitors.length, 6); assert.equal(Object.keys(old.parkRuntime.recreation.citizens).length, 6);
   const loaded = deserializeParkSession(raw), next = serializeParkSession(loaded.city, loaded.runtime);
+  const { version: _oldVersion, rulesVersion: _oldRules, parkRuntime: _parkRuntime, ...expectedCity } = old;
+  const { version, rulesVersion, farmLevelStartTick, ...actualCity } = loaded.city;
+  assert.deepEqual(actualCity, expectedCity); assert.equal(version, 9); assert.equal(rulesVersion, 'chain-4');
+  assert.equal(farmLevelStartTick, old.tick);
   assert.equal(loaded.city.factoryProgressionStartTick, old.factoryProgressionStartTick); assert.equal(loaded.city.farmLevelStartTick, old.tick);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.runtime)), old.parkRuntime);
   assert.equal(JSON.parse(next).version, 19); assert.deepEqual(deserializeParkSession(next), loaded);
