@@ -45,7 +45,7 @@ async function until(expression, timeout = 15000) {
   while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); }
   throw new Error(`Condition timed out: ${expression}`);
 }
-const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15||c.version===16){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const text = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
 const paused = () => evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"');
 async function game() {

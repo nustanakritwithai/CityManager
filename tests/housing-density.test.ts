@@ -1,0 +1,91 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { HOUSING_LEVELS, getHousingCapacity } from '../src/housing.ts';
+import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount } from '../src/sim.ts';
+import { advanceParkRuntime, createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
+import { SAVE_KEY, HOUSING_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
+
+function fixture() {
+  const city = createCity(61025); for (let n = 0; n < 119; n++) step(city);
+  const home = city.buildings.find(b => b.zone === 'R' && homeOccupancy(city, b.id).households === 1 && city.households.some(h => h.home === b.id && householdWorkerCount(city, h.id) > 0 && city.tick - h.lastPurchaseTick <= 3))!;
+  assert.ok(home); return { city, home };
+}
+
+test('all residential levels have explicit monotonic dual capacities and strict type pairings', () => {
+  assert.deepEqual(HOUSING_LEVELS.map(x => [x.type, x.tierLevel, x.households, x.persons]), [
+    ['cottage', 1, 1, 4], ['cottage', 2, 2, 8], ['cottage', 3, 3, 12],
+    ['apartment', 1, 5, 20], ['apartment', 2, 8, 32], ['apartment', 3, 12, 48],
+    ['condo', 1, 16, 64], ['condo', 2, 24, 96], ['condo', 3, 32, 128],
+  ]);
+  for (const [i, x] of HOUSING_LEVELS.entries()) assert.deepEqual(getHousingCapacity(x.type, i + 1), { households: x.households, persons: x.persons });
+  assert.throws(() => getHousingCapacity('cottage', 4)); assert.throws(() => getHousingCapacity('apartment', 7));
+});
+
+test('each autonomous upgrade keeps the same parcel, identity, households and actual funding', () => {
+  for (let level = 1; level < 9; level++) {
+    const { city, home } = fixture(); home.level = level; home.housingType = HOUSING_LEVELS[level - 1].type;
+    const id = home.id, cell = home.cell, residents = city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]);
+    const before = city.ledger.filter(e => e.reason === 'Outside residential height investment').length;
+    step(city);
+    assert.equal(home.level, level + 1, `upgrade ${level}`); assert.equal(home.housingType, HOUSING_LEVELS[level].type);
+    assert.equal(home.id, id); assert.equal(home.cell, cell); assert.equal(city.cells[cell].building, id);
+    assert.deepEqual(city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]), residents);
+    assert.equal(city.ledger.filter(e => e.reason === 'Outside residential height investment' && e.tick === city.tick).length > 0, true);
+    assert.ok(city.ledger.filter(e => e.reason === 'Outside residential height investment').length > before);
+    assert.equal(Object.values(city.accounts).reduce((a, b) => a + b, 0), 0);
+    assert.deepEqual(deserialize(serialize(city)), city);
+  }
+});
+
+test('upgrade explains and respects road, utility and resident financial conditions', () => {
+  const { city, home } = fixture(); home.level = 3; home.housingType = 'cottage';
+  assert.equal(housingUpgradeStatus(city, home).next?.type, 'apartment');
+  city.households.filter(h => h.home === home.id).forEach(h => { city.accounts[h.wallet] = 0; });
+  assert.ok(housingUpgradeStatus(city, home).blocked.some(x => x.includes('200')));
+  // Prevent the imminent month-end from paying a wage and making the household eligible.
+  city.firms.forEach(f => { city.accounts[f.wallet] = 0; f.workDays = {}; });
+  step(city); assert.equal(home.level, 3);
+  const other = fixture(); other.home.level = 3; other.city.utilities.outside = { power: 0, water: 0 };
+  assert.ok(housingUpgradeStatus(other.city, other.home).blocked.some(x => x.includes('น้ำและไฟ')));
+  step(other.city); assert.equal(other.home.level, 3);
+});
+
+test('v15 park session migrates without changing state, rejects new housing under old version and keeps backup', () => {
+  const { city, home } = fixture(); assert.equal(buildPark(city, 0).ok, true);
+  const runtime = createParkRuntime(city); advanceParkRuntime(city, runtime, 650.5, () => step(city));
+  const session = JSON.parse(serializeParkSession(city, runtime));
+  session.version = 15; session.rulesVersion = 'chain-10'; const old = JSON.stringify(session);
+  const restored = deserializeParkSession(old);
+  assert.deepEqual(restored.city, city); assert.deepEqual(restored.runtime, runtime);
+  const saved = serializeParkSession(restored.city, restored.runtime);
+  assert.deepEqual(deserializeParkSession(saved), restored);
+  const bad = structuredClone(session); const b = bad.buildings.find((x: { id: number }) => x.id === home.id); b.level = 4; b.housingType = 'apartment';
+  assert.throws(() => deserializeParkSession(JSON.stringify(bad)));
+  const data = new Map([[SAVE_KEY, old]]), storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
+  saveStoredCity(storage, saved, null); assert.equal(data.get(HOUSING_BACKUP_KEY), old); assert.equal(readStoredCity(storage, 'backup')?.raw, old);
+});
+
+test('future and mismatched housing schemas are rejected without changing the saved snapshot', () => {
+  const { city, home } = fixture(), original = serialize(city), parsed = JSON.parse(original);
+  for (const edit of [
+    (v: any) => { v.version = 17; },
+    (v: any) => { v.rulesVersion = 'chain-10'; },
+    (v: any) => { const b = v.buildings.find((item: any) => item.id === home.id); b.level = 4; b.housingType = 'cottage'; },
+    (v: any) => { const b = v.buildings.find((item: any) => item.id === home.id); b.level = 10; b.housingType = 'condo'; },
+  ]) { const bad = structuredClone(parsed); edit(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
+  assert.equal(serialize(city), original);
+});
+
+test('full or failed v15 backup prevents replacement of the original save', () => {
+  const { city } = fixture(), current = JSON.parse(serialize(city)); current.version = 15; current.rulesVersion = 'chain-10';
+  const old = JSON.stringify(current), next = serialize(deserialize(old));
+  const data = new Map<string, string>([[SAVE_KEY, old]]);
+  for (let i = 0; i < 8; i++) data.set(i ? `${HOUSING_BACKUP_KEY}.${i}` : HOUSING_BACKUP_KEY, `prior-${i}`);
+  const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
+  assert.throws(() => saveStoredCity(storage, next, null), /Housing backup slots are full/);
+  assert.equal(data.get(SAVE_KEY), old);
+  const blocked = new Map<string, string>([[SAVE_KEY, old]]);
+  const failing = { getItem: (k: string) => blocked.get(k) ?? null, setItem: (k: string, v: string) => { if (k === HOUSING_BACKUP_KEY) throw new Error('quota'); blocked.set(k, v); } };
+  assert.throws(() => saveStoredCity(failing, next, null), /quota/);
+  assert.equal(blocked.get(SAVE_KEY), old);
+});

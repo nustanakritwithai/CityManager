@@ -59,6 +59,7 @@ import { installHudRow } from './hud-row.ts';
 import { requireGuestEntry } from './entry-gate.ts';
 import { MarketClient } from './market-client.ts';
 import { createParkRuntime, advanceParkRuntime, reconcileParkRuntime, serializeParkSession, deserializeParkSession, type ParkRuntime } from './park-runtime.ts';
+import { housingLevel } from './housing.ts';
 import { parkActivityDiagnostics } from './park-activity.ts';
 import { parkRecreationResidentIds } from './park-recreation-activity.ts';
 import { renderParkRecreationPanel } from './park-recreation-panel.ts';
@@ -291,6 +292,7 @@ function renderPlace() {
     const name = park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? firm && isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาด' : building ? 'พาณิชย์ · ร้านค้าสำเร็จรูป' : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (cellIndex % SIZE + 1) + ',' + (Math.floor(cellIndex / SIZE) + 1);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, !!firm && isMarket(firm), !!park);
+    if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
@@ -521,7 +523,7 @@ async function boot() {
   marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
   installHudRow();
   $('#save').addEventListener('click', async () => {
-    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v15/chain-10 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
+    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v16/chain-11 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
   });
   const loadStored = async (source: SaveSource) => {
     try {

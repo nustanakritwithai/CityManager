@@ -50,7 +50,7 @@ async function untilRequests(count) {
   assert.equal(apiRequests.length, count, 'Exactly one mock request per explicit action');
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15||c.version===16){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 const visible = selector => evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e&&!e.hidden&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0})()`);
 async function button(selector) {

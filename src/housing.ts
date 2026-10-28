@@ -1,12 +1,27 @@
 /** Proposed household-1 game balance; these capacities are not CSII facts. */
-export type HousingType = 'cottage';
+export type HousingType = 'cottage' | 'apartment' | 'condo';
 export type HousingCapacity = { households: number; persons: number };
 
-const cottageCapacities: readonly Readonly<HousingCapacity>[] = Object.freeze([
-  Object.freeze({ households: 1, persons: 4 }),
-  Object.freeze({ households: 2, persons: 8 }),
-  Object.freeze({ households: 3, persons: 12 }),
-]);
+// Absolute building levels preserve v1–v15 cottage levels. New capacities are
+// provisional balance values, not existing rules or a promise of immigration.
+export const HOUSING_LEVELS = Object.freeze([
+  { type: 'cottage', tierLevel: 1, households: 1, persons: 4 },
+  { type: 'cottage', tierLevel: 2, households: 2, persons: 8 },
+  { type: 'cottage', tierLevel: 3, households: 3, persons: 12 },
+  { type: 'apartment', tierLevel: 1, households: 5, persons: 20 },
+  { type: 'apartment', tierLevel: 2, households: 8, persons: 32 },
+  { type: 'apartment', tierLevel: 3, households: 12, persons: 48 },
+  { type: 'condo', tierLevel: 1, households: 16, persons: 64 },
+  { type: 'condo', tierLevel: 2, households: 24, persons: 96 },
+  { type: 'condo', tierLevel: 3, households: 32, persons: 128 },
+].map(item => Object.freeze(item))) as readonly Readonly<{ type: HousingType; tierLevel: number; households: number; persons: number }>[];
+
+export function housingLevel(type: HousingType, level: number) {
+  safeCount(level, 'Housing level', 1);
+  const entry = HOUSING_LEVELS[level - 1];
+  if (!entry || entry.type !== type) throw new RangeError('Invalid housing type and level.');
+  return entry;
+}
 
 function safeCount(value: unknown, label: string, minimum = 0): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) < minimum) throw new RangeError(`${label} must be a safe integer >= ${minimum}.`);
@@ -19,10 +34,8 @@ function validateCapacity(value: Readonly<HousingCapacity>, label: string): void
 
 /** Returns an independent capacity object; callers cannot modify the balance table. */
 export function getHousingCapacity(type: HousingType, level: number): HousingCapacity {
-  if (type !== 'cottage') throw new TypeError('Unknown housing type.');
-  safeCount(level, 'Housing level', 1);
-  if (level > cottageCapacities.length) throw new RangeError('Cottage housing level must be 1, 2 or 3.');
-  return { ...cottageCapacities[level - 1] };
+  const { households, persons } = housingLevel(type, level);
+  return { households, persons };
 }
 
 /**

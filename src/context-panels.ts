@@ -4,7 +4,7 @@ import './building-cards.css';
 import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -229,19 +229,24 @@ function legacyAssumption(household: Household): HTMLElement | null {
 }
 function renderHouse(city: City, building: Building, households: Household[], onHousehold: HouseholdAction): HTMLElement[] {
   const occupied = homeOccupancy(city, building.id), capacity = housingCapacity(building);
+  const upgrade = housingUpgradeStatus(city, building), labels = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' } as const;
   const residents = section('ครัวเรือนที่พักอาศัย', `${households.length} ครัวเรือน · ${occupied.persons} คน`), list = el('div', 'cx-household-list');
   residents.classList.add('bc-residents-source');
   for (const household of households) list.append(householdButton(city, household, building, onHousehold));
   if (!households.length) list.append(empty('บ้านว่าง', 'ยังไม่มีครัวเรือนพักอาศัย การรับผู้ย้ายเข้าแยกจากการสร้างอาคารและเริ่มได้ในวันถัดไปเมื่อผ่านเงื่อนไข'));
   residents.append(list);
   const conditions = explainMigration(city, building.id).map(reason => el('p', '', reason));
+  const progression = upgrade.next ? [
+    el('p', '', `ถัดไป: ${labels[upgrade.next.type]} ระดับ ${upgrade.next.tierLevel} · ความจุ ${upgrade.next.households} ครัวเรือน / ${upgrade.next.persons} คน · ทุนภายนอก 200 เครดิต`),
+    el('p', '', upgrade.blocked.length ? `ยังขาด: ${upgrade.blocked.join(' · ')}` : 'ครบเงื่อนไขแล้ว รอตรวจอัตโนมัติสิ้นเดือน'),
+  ] : [el('p', '', 'ถึงระดับสูงสุดแล้ว')];
   return [status(city, building.cell), metrics([
     capacityMetric('households', 'พักอยู่ / รับได้', occupied.households, capacity.households, 'ครัวเรือน'),
     capacityMetric('persons', 'สมาชิก / รับได้', occupied.persons, capacity.persons, 'คน'),
     metric('vacant-households', 'ช่องครัวเรือนว่าง', count(Math.max(0, capacity.households - occupied.households)), Math.max(0, capacity.households - occupied.households)),
     metric('vacant-persons', 'ความจุสมาชิกว่าง', `${count(Math.max(0, capacity.persons - occupied.persons))} คน`, Math.max(0, capacity.persons - occupied.persons)),
-    metric('level', 'ระดับอาคาร', String(building.level), building.level), metric('age', 'อายุอาคาร', `${building.age} วัน`, building.age)
-  ]), residents, facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือนและความจุ', ...conditions, el('p', '', `ความจุบ้านเป็นค่าที่เกมกำหนด ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
+    metric('level', 'ระดับอาคาร', `${labels[upgrade.current.type]} ${upgrade.current.tierLevel}`, building.level), metric('age', 'อายุอาคาร', `${building.age} วัน`, building.age)
+  ]), residents, facts(`house:${building.id}`, 'การเติบโตและเงื่อนไขรับครัวเรือน', ...progression, ...conditions, el('p', '', `ความจุระดับใหม่เป็นค่าทดลอง ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
   const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building);

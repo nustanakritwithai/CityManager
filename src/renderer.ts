@@ -464,6 +464,16 @@ export class CityView {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
           if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
+          // Code-native apartment/condo silhouettes fit the same tile even when assets fail.
+          if (b.zone === 'R' && b.level > 3) {
+            const condo = b.level >= 7, tier = condo ? b.level - 6 : b.level - 3;
+            const height = (condo ? 3.8 : 2.1) + tier * .6;
+            this.box(tile, 0, height / 2 + .1, 0, 1.3, height, 1.25, condo ? '#9fbcc8' : '#d5d6c5');
+            this.box(tile, 0, height + .16, 0, 1.4, .12, 1.35, condo ? '#667c8b' : '#aa8270');
+            for (let floor = 0; floor < (condo ? tier + 4 : tier + 2); floor++)
+              for (const x of [-.36, .12]) this.box(tile, x, .48 + floor * .58, .635, .25, .25, .025, lit ? this.windowLit : '#718a97', false);
+            continue;
+          }
           // Retained shops move up one commercial tier; their geometry stays unchanged.
           const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
           const model = this.assets?.building(b.zone, visualLevel, i, lit);

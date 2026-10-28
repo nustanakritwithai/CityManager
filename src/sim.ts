@@ -1,5 +1,5 @@
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
-import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
+import { HOUSING_LEVELS, housingLevel, getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
 import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
 import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RECIPE, type ResourceMap } from './agriculture.ts';
@@ -87,6 +87,20 @@ export const firmWorkerCount = (c: City, id: number): number => employmentForFir
 export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length + parkEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0);
 export const housingCapacity = (b: Building): HousingCapacity => b.zone === 'R' ? getHousingCapacity(b.housingType!, b.level) : { households: 0, persons: 0 };
 export const homeOccupancy = (c: City, id: number): HousingCapacity => buildOccupancyIndex(c.households).get(id) ?? { households: 0, persons: 0 };
+const residentialInvestorEligible = (c: City, h: Household) => householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && balance(c, h.wallet) >= 20_000;
+/** Uses the same conditions as autonomous residential growth. */
+export function housingUpgradeStatus(c: City, b: Building) {
+  if (b.zone !== 'R') throw new Error('Not a residential building.');
+  const current = housingLevel(b.housingType!, b.level), next = HOUSING_LEVELS[b.level] ?? null;
+  const blocked: string[] = [];
+  if (next) {
+    if (b.age < MONTH) blocked.push('อาคารต้องมีอายุอย่างน้อย 30 วัน');
+    if (!access(c, b.cell)) blocked.push('ต้องมีถนนเชื่อมถึงประตูเมือง');
+    if (!utilities(c).ok(b.id)) blocked.push('ต้องมีน้ำและไฟเพียงพอสำหรับผู้อยู่อาศัยปัจจุบัน');
+    if (!c.households.some(h => h.home === b.id && residentialInvestorEligible(c, h))) blocked.push('ต้องมีครัวเรือนที่ทำงาน ซื้อสินค้าใน 3 วัน และมีเงินอย่างน้อย 200 เครดิต');
+  }
+  return { current, next, blocked };
+}
 const householdAccess = (c: City, h: Household) => h.home !== null && access(c, building(c, h.home).cell);
 /** Today's water and power along the connected roads (see utilities.ts). */
 export const utilities = (c: City): Service => utilityService(c, connectedRoads(c));
@@ -866,7 +880,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
   const b = c.buildings.find(b => b.id === buildingId && b.zone === 'R');
   if (!b) return ['ไม่พบบ้านพักที่เลือก'];
   const used = homeOccupancy(c, b.id), room = housingCapacity(b), facts = admissionFacts(c), reasons = [
-    `พักจริง ${used.households}/${room.households} ครัวเรือน และ ${used.persons}/${room.persons} คน ตามกฎบ้านหลังเล็ก`,
+    `พักจริง ${used.households}/${room.households} ครัวเรือน และ ${used.persons}/${room.persons} คน ตามความจุระดับปัจจุบัน`,
     `มีตำแหน่งว่างที่สำรองค่าจ้างได้ ${facts.vacancies} ตำแหน่ง และแรงงานเดิมที่ยังไม่ได้งาน ${facts.existingUnemployed} คน`,
   ];
   if (b.age < 1) reasons.push('บ้านใหม่ยังว่างในวันที่สร้าง ต้องรออย่างน้อยหนึ่งวันจำลอง');
@@ -874,6 +888,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (!homeSupplied(c, b)) reasons.push('บ้านนี้ต้องมีน้ำและไฟ และเครือข่ายต้องเหลืออย่างละ 1 หน่วยต่อครัวเรือนใหม่ สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน');
   if (used.households >= room.households || used.persons >= room.persons) reasons.push('ความจุครัวเรือนหรือจำนวนคนเต็มแล้ว การเพิ่มระดับเพิ่มเฉพาะความจุ');
   if (c.households.some(h => h.home === null)) reasons.push('ครัวเรือนที่ไร้บ้านจะได้รับการจัดบ้านก่อนรับครัวเรือนใหม่');
+  if (c.households.length >= 128) reasons.push('ถึงขีดจำกัดเมือง 128 ครัวเรือนแล้ว แม้อาคารยังมีพื้นที่ว่าง');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
@@ -943,12 +958,12 @@ function grow(c: City) {
   // A taller building draws more water and power; it grows only while the network can supply it.
   const svc = utilities(c), spare = { ...svc.spare };
   for (const b of c.buildings) {
-    if (b.level >= (b.zone === 'C' ? 4 : 3) || b.age < MONTH || !access(c, b.cell) || !svc.ok(b.id)) continue;
+    if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? 4 : 3) || b.age < MONTH || !access(c, b.cell) || !svc.ok(b.id)) continue;
     const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1, c.households.filter(h => h.home === b.id).length), extra = { power: after.power - before.power, water: after.water - before.water };
     if (!fits(spare, extra)) continue;
     const residents = c.households.filter(h => h.home === b.id), f = c.firms.find(f => f.building === b.id);
-    if (b.zone === 'R' && residents.some(h => householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && balance(c, h.wallet) >= 20_000)) {
-      transfer(c, 'outside', 'construction', 20_000, 'Outside residential height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
+    if (b.zone === 'R' && residents.some(h => residentialInvestorEligible(c, h))) {
+      transfer(c, 'outside', 'construction', 20_000, 'Outside residential height investment'); b.level++; b.housingType = HOUSING_LEVELS[b.level - 1].type; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && !isMarket(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && balance(c, f.wallet) >= 20_000) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
     }
@@ -993,7 +1008,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, version: 15, rulesVersion: 'chain-10', ...(market ? { market } : {}) });
+  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, version: 16, rulesVersion: 'chain-11', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1038,7 +1053,7 @@ function migrateV8(old: City): City {
 }
 const RULES = { 7: 'chain-2', 8: 'chain-3', 9: 'chain-4' } as const;
 /** Every rule of a chain-2 (v7) save; chain-3 (v8) also reconciles typed stock, chain-4 (v9) its plants. */
-function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false): City {
+function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false): City {
   const typed = version >= 8;
   const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${version} / ${RULES[version]}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
@@ -1057,7 +1072,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   if (!c.cells[GATEWAY].road) fail();
   const ids = new Set<number>();
   for (const b of c.buildings) {
-    if (!b || !int(b.id, 1) || ids.has(b.id) || !validIndex(b.cell) || !['R', 'C', 'I', 'F'].includes(b.zone) || !int(b.level, 1) || b.level > (b.zone === 'C' ? 4 : 3) || !int(b.age) || b.age > c.tick || c.cells[b.cell].building !== b.id || c.cells[b.cell].zone !== b.zone || (b.zone === 'R' ? b.housingType !== 'cottage' : b.housingType !== undefined)) fail();
+    if (!b || !int(b.id, 1) || ids.has(b.id) || !validIndex(b.cell) || !['R', 'C', 'I', 'F'].includes(b.zone) || !int(b.level, 1) || b.level > (b.zone === 'R' && withDensity ? HOUSING_LEVELS.length : b.zone === 'C' ? 4 : 3) || !int(b.age) || b.age > c.tick || c.cells[b.cell].building !== b.id || c.cells[b.cell].zone !== b.zone || (b.zone === 'R' ? b.housingType !== (withDensity ? HOUSING_LEVELS[b.level - 1]?.type : 'cottage') : b.housingType !== undefined)) fail();
     ids.add(b.id);
   }
   for (let i = 0; i < c.cells.length; i++) if (c.cells[i].building !== null && !c.buildings.some(b => b.id === c.cells[i].building && b.cell === i)) fail();
@@ -1265,13 +1280,13 @@ function deserializeVersioned(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
-  if (version !== 13 && version !== 14 && version !== 15 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
-  if (version === 13 || version === 14 || version === 15) {
+  if (version !== 13 && version !== 14 && version !== 15 && version !== 16 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
+  if (version === 13 || version === 14 || version === 15 || version === 16) {
     const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
-    if (envelope.rulesVersion !== (version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
+    if (envelope.rulesVersion !== (version === 16 ? 'chain-11' : version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
-    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version === 15);
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version >= 15, version === 16);
     if (market) loaded.market = market;
     return loaded;
   }
