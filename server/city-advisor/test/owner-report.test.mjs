@@ -8,7 +8,7 @@ import { ENTITY_MODEL, ENTITY_UPSTREAM } from '../src/entity-report.mjs';
 
 const fixture = () => {
   const city = createCity(61025);
-  for (let day = 0; day < 30; day++) step(city);
+  for (let day = 0; day < 210; day++) step(city);
   const firm = city.firms.find(row => row.commercialKind === 'market');
   assert(firm);
   const snapshot = captureOwnerSnapshot(city, firm.id);
