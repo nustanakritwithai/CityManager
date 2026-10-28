@@ -5,6 +5,7 @@ import { farmStockCapacity, harvestYield, proposeHarvest } from '../src/agricult
 import { buildingNeed } from '../src/utilities.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
+import { validateAgriculture } from '../src/agriculture-validation.ts';
 
 test('farm levels preserve old capacities and add worker, water and storage slots', () => {
   assert.deepEqual([1,2,3,4,5,6].map(farmStockCapacity), [96,96,96,120,144,168]);
@@ -33,10 +34,12 @@ test('upgraded farm keeps identity, selection and historical journal through par
   assert.deepEqual({ id: f.id, building: f.building, wallet: f.wallet, owner: f.owner, cell: b.cell }, identity);
   assert.equal(farmCrop(c, f), 'sugarcane');
   const migrated = JSON.parse(serialize(c)); migrated.version = 15; migrated.rulesVersion = 'chain-10';
+  delete migrated.farmLevelStartTick;
   assert.throws(() => deserialize(JSON.stringify(migrated)), /corrupt/);
   const old = createCity(61025); for (let i = 0; i < 60; i++) step(old);
   const oldEnvelope = JSON.parse(serialize(old)); oldEnvelope.version = 15; oldEnvelope.rulesVersion = 'chain-10';
-  assert.deepEqual(deserialize(JSON.stringify(oldEnvelope)), old);
+  delete oldEnvelope.farmLevelStartTick;
+  assert.deepEqual(deserialize(JSON.stringify(oldEnvelope)), { ...old, farmLevelStartTick: old.tick });
   const runtime = createParkRuntime(c), session = deserializeParkSession(serializeParkSession(c, runtime));
   assert.deepEqual(session.city, c); assert.deepEqual(session.runtime, runtime);
   assert.equal(selectFarmCrop(c, f.id, 'auto').ok, true);
@@ -92,8 +95,54 @@ test('six actual allocations harvest once and replay survives later demolition',
   assert.deepEqual(deserialize(serialize(c)), c);
 });
 
+test('replay rejects a six-worker harvest truncated to the three-worker store', () => {
+  const c = createCity(61025); for (let i = 0; i < 120; i++) step(c);
+  const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
+  b.level = 6;
+  const needed = 6 - firmWorkerCount(c, f.id);
+  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed)) a.firmId = f.id;
+  step(c);
+  const bad = structuredClone(c), harvest = bad.cropLedger.find(e => e.tick === bad.tick && e.kind === 'harvest' && e.to === f.wallet)!;
+  const exported = bad.cropLedger.find(e => e.tick === bad.tick && e.kind === 'export' && e.from === f.wallet)!;
+  assert.equal(harvest.quantity, 120); assert.equal(exported.quantity, 120);
+  // Rebalance the journal, money and totals so only the level/worker combination is impossible.
+  harvest.quantity = 48; exported.quantity = 48; exported.cash = exported.toValue = 48 * 120;
+  const payment = bad.ledger.find(e => e.reason === exported.reason)!; payment.amount = exported.cash;
+  const difference = 72 * 120;
+  bad.accounts[f.wallet] -= difference; bad.accounts.outside += difference;
+  bad.firms.find(item => item.id === f.id)!.monthlyRevenue -= difference;
+  bad.crops.harvested -= 72; bad.crops.exported! -= 72;
+  assert.equal(Object.values(bad.accounts).reduce((a, value) => a + value, 0), 0);
+  assert.equal(bad.crops.harvested - bad.crops.processed - bad.crops.consumed - bad.crops.writtenOff - (bad.crops.exported ?? 0), bad.firms.reduce((n, firm) => n + firm.cropInventory, 0));
+  assert.throws(() => validateAgriculture(bad));
+  harvest.workers = 3; assert.doesNotThrow(() => validateAgriculture(bad));
+  const earlier = structuredClone(c); earlier.farmLevelStartTick = earlier.tick;
+  assert.throws(() => deserialize(serialize(earlier)), /corrupt/);
+  assert.deepEqual(deserialize(serialize(c)), c);
+});
+
+test('v15 migration fixes the boundary and admits valid pre- and post-upgrade harvests', () => {
+  const original = createCity(61025); for (let i = 0; i < 119; i++) step(original);
+  const old = JSON.parse(serialize(original)); old.version = 15; old.rulesVersion = 'chain-10'; delete old.farmLevelStartTick;
+  const c = deserialize(JSON.stringify(old)); assert.equal(c.farmLevelStartTick, 119);
+  assert.deepEqual(c.cropLedger, original.cropLedger);
+  step(c);
+  const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
+  assert.equal(b.level, 4); b.level = 6;
+  const needed = 6 - firmWorkerCount(c, f.id);
+  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed)) a.firmId = f.id;
+  step(c);
+  assert.ok(c.cropLedger.some(e => e.kind === 'harvest' && e.tick === c.tick && e.workers === 6));
+  assert.deepEqual(deserialize(serialize(c)), c);
+  const bad = JSON.parse(serialize(c)); delete bad.farmLevelStartTick;
+  assert.throws(() => deserialize(JSON.stringify(bad)), /corrupt/);
+  bad.farmLevelStartTick = c.tick + 1;
+  assert.throws(() => deserialize(JSON.stringify(bad)), /corrupt/);
+});
+
 test('v15 bytes are backed up before the first new save and survive a backup failure', () => {
   const c = createCity(61025), old = JSON.parse(serialize(c)); old.version = 15; old.rulesVersion = 'chain-10';
+  delete old.farmLevelStartTick;
   const raw = JSON.stringify(old), fresh = serialize(c), values = new Map([[SAVE_KEY, raw]]);
   const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
   saveStoredCity(storage, fresh, null);

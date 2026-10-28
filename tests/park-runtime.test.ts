@@ -127,6 +127,7 @@ test('save rejects mismatched clocks or malformed sidecars before replacing live
   ]) { const bad = structuredClone(parsed); edit(bad); assert.throws(() => deserializeParkSession(JSON.stringify(bad))); }
   assert.equal(serializeParkSession(c, r), saved);
   const old = JSON.parse(serialize(c)); old.version = 14; old.rulesVersion = 'chain-9';
+  delete old.farmLevelStartTick;
   for (const p of old.parks) delete p.staffing;
   const raw = JSON.stringify(old), restored = deserializeParkSession(raw);
   assert.equal(restored.runtime.recreation.minute, c.tick * 1440);

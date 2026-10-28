@@ -34,6 +34,8 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = {
   foodDemandStartTick?: number;
+  /** Earlier harvests were produced under the level 1–3 farm rules. */
+  farmLevelStartTick?: number;
   version: 9; rulesVersion: 'chain-4'; typeBaseline: TypeBaseline; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number; departures?: number }; employment: EmploymentAllocation[];
   ownerLabor: OwnerLabor[]; resources: ResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number; exported?: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
   seed: number; rng: number; tick: number; nextId: number;
@@ -950,7 +952,7 @@ export function step(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { foodDemandStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { foodDemandStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -974,7 +976,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, version: 16, rulesVersion: 'chain-11', ...(market ? { market } : {}) });
+  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: 16, rulesVersion: 'chain-11', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1246,9 +1248,11 @@ function deserializeVersioned(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version !== 16 && parsed && typeof parsed === 'object' && 'farmLevelStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
   if (version !== 13 && version !== 14 && version !== 15 && version !== 16 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
   if (version === 13 || version === 14 || version === 15 || version === 16) {
     const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
+    if (version === 16 && (!Number.isSafeInteger(envelope.farmLevelStartTick) || envelope.farmLevelStartTick! < 0 || envelope.farmLevelStartTick! > envelope.tick)) throw new Error('Unsupported or corrupt CityManager farm progression save.');
     if (envelope.rulesVersion !== (version === 16 ? 'chain-11' : version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
@@ -1284,5 +1288,6 @@ function deserializeVersioned(json: string): City {
 export function deserialize(json: string): City {
   const city = deserializeVersioned(json);
   if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
+  if (city.farmLevelStartTick === undefined) city.farmLevelStartTick = city.tick;
   return city;
 }
