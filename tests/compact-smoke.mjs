@@ -1,3 +1,4 @@
+import { assertSavedCity } from './park-session-assertions.mjs';
 // Measured compact/tall GUI acceptance. Root runs this sequentially on CDP 9349.
 // Baseline mode captures deployed d40; candidate mode reads that frozen JSON only.
 import { spawn } from 'node:child_process';
@@ -180,7 +181,7 @@ async function candidateAssertions() {
   await liveRow(); assert.deepEqual(await state(), city); checks.push('Actual trusted mouse and touch ledger presses survive 200ms live refreshes with the same DOM, exact journal identity and preserved native expansion');
   await page('game');
   for (const id of ['save', 'load', 'new-city', 'inspector-status']) assert.equal(await evaluate(`!!document.querySelector('#${id}')?.closest('#game-content')`), true, `${id} belongs only to explicit Game page`);
-  await tall('s22-game'); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), fixture); await shot('game-menu.png');
+  await tall('s22-game'); await button('#save'); await assertSavedCity(evaluate, fixture); await shot('game-menu.png');
   await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
   await key('Escape'); assert.notEqual((await route()).open, 'true'); await mapRestored(); checks.push('Game menu owns persistence/status; actual Save, confirmation Cancel and Back/Escape preserve state and restore the map');
   for (const item of [

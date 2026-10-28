@@ -1,3 +1,4 @@
+import { assertSavedCity } from './park-session-assertions.mjs';
 // Household/housing acceptance on worker schema v6. Root runs suites sequentially.
 // The browser receives only strict-valid public-simulation fixtures via real Load.
 import { spawn } from 'node:child_process';
@@ -204,7 +205,7 @@ try {
   await close(); await button('[data-speed="1"]'); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}`); await button('#pause'); assert.deepEqual(await state(), expectedRehoused);
   for (const old of displaced) { const h = expectedRehoused.households.find(h => h.id === old.id); assert.notEqual(h.home, null); assert.equal(h.members, old.members); assert.equal(h.wallet, old.wallet); assert.equal(expectedRehoused.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1); }
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
-  await page('game'); await button('#save'); const savedV3 = await evaluate('localStorage.getItem("citymanager.save.v7")'); assert.equal(savedV3, serialize(expectedRehoused)); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
+  await page('game'); await button('#save'); await assertSavedCity(evaluate, expectedRehoused); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
   checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact v6 Save/Load retains original v1 and backup');
 
   await load(fixtureRaw);

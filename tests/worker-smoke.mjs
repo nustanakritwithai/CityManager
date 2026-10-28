@@ -1,3 +1,4 @@
+import { assertSavedCity } from './park-session-assertions.mjs';
 // Real browser acceptance for worker-count/skill hiring. Root runs CDP sequentially.
 // Fixtures are frozen old saves or replayed public simulation states, never forged jobs.
 import { spawn } from 'node:child_process';
@@ -131,7 +132,7 @@ try {
     await viewport(metric); await household(after, familyId); await layout(); if (metric.width === 360) await screenshot('worker-phone.png');
     const b = after.buildings.find(b => b.id === family.home), camera = await evaluate(`window.cityManager.cellScreen(${b.cell})`); await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: camera.x, y: camera.y, deltaX: 0, deltaY: -180 }); assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${b.cell})`), camera);
     await key('Escape'); assert.equal((await route()).scope, 'place'); assert.equal((await route()).id, String(family.home)); await key('Escape'); assert.notEqual((await route()).open, 'true');
-    await page('game'); await layout(); await button('#save'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), serialize(after)); await button('#load'); assert.deepEqual(await state(), after); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), oldRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), v1Raw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v2")'), oldRaw); await close();
+    await page('game'); await layout(); await button('#save'); await assertSavedCity(evaluate, after); await button('#load'); assert.deepEqual(await state(), after); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), oldRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), v1Raw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v2")'), oldRaw); await close();
   }
   assert.deepEqual(errors, []); const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 41); assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
   checks.push('360 phone, landscape and 980-layout/screen390 keep exact capability rows and 44px navigation contained; open-panel camera isolation, Back/Escape, v4 roundtrip and old-save preservation pass without unexpected errors');
