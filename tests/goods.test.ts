@@ -77,7 +77,7 @@ test('1.x saves load typed: v6 and chain-2 v7 cities keep every fact and keep ru
   assert.equal(fromV6.version, 9); assert.equal(fromV6.typeBaseline.tick, 200); assert.equal(fromV6.typeBaseline.cropEntries, fromV6.cropLedger.length);
   for (const f of fromV6.firms) { assert.equal(mixTotal(f.crops), f.cropInventory); assert.equal(mixTotal(f.products), f.inventory); }
   // A 1.3 city saved as chain-2 v7: the same facts without typing.
-  const current = createCity(2026); for (let d = 0; d < 300; d++) step(current);
+  const current = fromV6; // This v7 fixture must contain only transactions valid under v7.
   const chain2 = JSON.stringify(untyped(serialize(current))), loaded = deserialize(chain2);
   assert.equal(loaded.version, 9); assert.deepEqual(untyped(serialize(loaded)), JSON.parse(chain2), 'typing is the only change a load makes');
   for (const f of loaded.firms.filter(f => f.zone === 'I')) assert.ok(RECIPES.includes(f.recipe!));

@@ -265,5 +265,5 @@ test('a 2.0 (v8) save in the main slot is copied once, untouched, before the fir
   saveStoredCity(s, next, null); saveStoredCity(s, later, null);
   assert.equal(s.data.get(CHAIN3_BACKUP_KEY), chain3, 'the 2.0 bytes are kept once'); assert.equal(s.data.has(CHAIN2_BACKUP_KEY), false); assert.equal(s.data.get(SAVE_KEY), later);
   assert.deepEqual(readStoredCity(s, 'backup'), { raw: chain3, key: CHAIN3_BACKUP_KEY }, 'restore can find it');
-  assert.throws(() => saveStoredCity(memory(), chain3, null), /version 9/, 'only v9 is written');
+  assert.throws(() => saveStoredCity(memory(), chain3, null), /supported CityManager snapshot/, 'only v9 is written');
 });

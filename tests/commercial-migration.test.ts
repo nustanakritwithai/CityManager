@@ -11,7 +11,7 @@ function oldCity(day = 179) {
   return legacy.deserializeV4(legacy.serialize(c));
 }
 function preserved(c: City | legacy.City) {
-  const { version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, ...state } = c as City;
+  const { version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, foodDemandStartTick: _food, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, ...state } = c as City;
   // Water and power changed shape in chain-4 (an outside contract and plants); the facts below did not.
   return state;
 }

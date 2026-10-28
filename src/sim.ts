@@ -506,7 +506,7 @@ export function explainCell(c: City, i: number): string[] {
   if (f) output.push(`Firm #${f.id}: ${firmWorkerCount(c, f.id)}/${capacity(b)} workers; finished inventory ${f.inventory}; crop inventory ${f.cropInventory}; wallet ${(balance(c, f.wallet) / 100).toFixed(2)} credits; earned wages reserved ${(payroll(f) / 100).toFixed(2)}.`, `Last monthly operating profit ${(f.lastMonthProfit / 100).toFixed(2)} credits.`,
     f.zone === 'F' ? `Renewable crops require actual labour, roads, utilities and fertility; this parcel ${c.resources.fertility[i]}%. Single-worker plot, crop cap 96; no manufactured goods.` :
     isMarket(f) ? 'Owner-operated crop trading only: capital and cash remain separate from household savings. Opening stock can supply factories or one household basket; new purchases cannot resell this tick. Unsold stock ties up capital, never creates profit.' :
-    f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale 3 credits; outside export 3.50.` : 'Buys generic goods locally at 3 credits or imports at 4.50; competes with crop markets for one household basket/day at 8 credits.',
+    f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale and outside export 3.50 credits.` : 'Buys goods locally at 3.50 credits or imports at 4.50; competes with crop markets for food at 8 credits per unit.',
     isMarket(f) ? 'Owner labour earns no fabricated salary; explicit distributions use realised profit after tax and working-cash reserves.' : 'Wages accrue per allocated worker-day and are paid each 30-day month. Reserved wages cannot fund stock or expansion.',
     `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax 20%. Self-employed market stalls stay small; farms grow to level 3 from their own profit.`);
   if (f && retailDemand(c) > 0 && marketToConvert(c)?.id === f.id) output.push(`Shop conversion: the city wants a shop and this profitable stall can pay the ${MARKET_CONVERSION_COST / 100}-credit refit, so it becomes a shop on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)). Leftover fresh crops are written off.`);
@@ -575,9 +575,9 @@ function trade(c: City) {
     const target = Math.min(24, Math.max(4, c.households.reduce((n, h) => n + h.members, 0) * 2)), share = Math.ceil(target / Math.max(1, made.length));
     for (const product of made) {
       for (const producer of active.filter(f => f.zone === 'I' && f.recipe && RECIPE[f.recipe].product === product)) {
-        const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 300));
+        const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 350));
         if (qty <= 0) continue;
-        transfer(c, shop.wallet, producer.wallet, qty * 300, 'Local wholesale goods', true);
+        transfer(c, shop.wallet, producer.wallet, qty * 350, 'Local wholesale goods', true);
         moveProduct(c, producer, shop, product, qty); goodsTransfer(c, producer.wallet, shop.wallet, qty, 'Wholesale stock delivery', product);
       }
       const imported = Math.min(share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 450));
@@ -1085,7 +1085,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7): City {
 }
 
 /** Validate old saves before migration; never advance time, RNG, money or admission history on load. */
-export function deserialize(json: string): City {
+function deserializeVersioned(json: string): City {
   if (typeof json !== 'string' || json.length > 12_000_000) throw new Error('Save is too large or invalid.');
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
@@ -1123,4 +1123,11 @@ export function deserialize(json: string): City {
   if (version === 7) return validateV7(migrateV8(validateV7(migrateV7(validateV7(parsed as City)), 8)), 9);
   if (version === 8) return validateV7(migrateV8(validateV7(parsed as City, 8)), 9);
   return validateV7(parsed as City, 9);
+}
+
+/** Mark the transition at the loaded day without changing historical transactions. */
+export function deserialize(json: string): City {
+  const city = deserializeVersioned(json);
+  if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
+  return city;
 }

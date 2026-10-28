@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { keepSupplied } from './plants.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -63,7 +64,8 @@ test('an actual home upgrade increases room without adding members or households
 });
 
 test('moves enforce both capacities and preserve household identity, savings, claims and admission count', () => {
-  const c = populated(185), h = c.households.find(h => h.profile === 'family')!;
+  const c = populated(185); keepSupplied(c);
+  const h = c.households.find(h => h.profile === 'family')!;
   const destination = c.buildings.find(b => b.zone === 'R' && b.id !== h.home && housingCapacity(b).households > homeOccupancy(c, b.id).households && housingCapacity(b).persons - homeOccupancy(c, b.id).persons >= h.members)!;
   const before = { ...h }, accounts = JSON.stringify(c.accounts), ledger = JSON.stringify(c.ledger), claims = JSON.stringify(c.firms.map(f => f.workDays)), arrivals = c.migration.arrivals;
   assert.equal(moveHousehold(c, h.id, destination.id).ok, true);
