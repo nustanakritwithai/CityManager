@@ -49,3 +49,18 @@ html[data-touch-ui] .goal-pill { min-width: 44px; min-height: 44px; margin: -12p
 .win-stats dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .win-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .win-actions .win-continue { background: var(--c-accent); color: #1a2640; border-color: var(--c-accent); font-weight: 700; }
+
+/* Optional economy-diversity missions inside the goals dashboard card. */
+#inspector .goal-missions { margin-top: calc(15 * var(--u)); padding-top: calc(12 * var(--u)); border-top: 1px solid var(--pnl-line); }
+#inspector .goal-missions-head { display: flex; gap: calc(8 * var(--u)); flex-wrap: wrap; align-items: baseline; justify-content: space-between; margin-bottom: calc(9 * var(--u)); }
+#inspector .goal-missions-head h4 { margin: 0; color: var(--pnl-text); font-size: calc(14 * var(--u)); }
+#inspector .goal-missions-head span { color: var(--pnl-muted); font-size: calc(12 * var(--u)); }
+#inspector .goal-mission-list { display: grid; gap: calc(9 * var(--u)); margin: 0; padding: 0; list-style: none; }
+#inspector .goal-mission-list li { min-width: 0; }
+#inspector .goal-mission-line { display: flex; gap: calc(8 * var(--u)); flex-wrap: wrap; align-items: baseline; justify-content: space-between; color: var(--pnl-text); font-size: calc(13 * var(--u)); }
+#inspector .goal-mission-line strong { font-weight: 650; }
+#inspector .goal-mission-line span { color: var(--pnl-muted); font-variant-numeric: tabular-nums; }
+#inspector .goal-mission-list li.done .goal-mission-line strong { color: var(--pnl-good); }
+#inspector .goal-mission-meter { display: block; width: 100%; height: calc(7 * var(--u)); margin: calc(5 * var(--u)) 0; accent-color: var(--pnl-accent); }
+#inspector .goal-mission-list p, #inspector .goal-missions-note { margin: 0; font-size: calc(12 * var(--u)); color: var(--pnl-muted); line-height: 1.4; }
+#inspector .goal-missions-note { margin-top: calc(10 * var(--u)); }
