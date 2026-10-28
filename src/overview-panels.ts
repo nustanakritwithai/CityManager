@@ -11,6 +11,7 @@ import { renderChart, ChartModal } from './chart-modal.ts';
 import { mixBar, statTile } from './charts.ts';
 import { iconElement } from './ui-icons.ts';
 import { cityGoals, renderGoalsCard } from './goals-panel.ts';
+import { citySideMissions } from './city-goals.ts';
 import type { City } from './sim.ts';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -64,13 +65,14 @@ export class OverviewDashboard {
   /** Rebuild once per simulated day; the navigation stays put so a press is never detached. */
   update(city: City) {
     const key = `${city.tick}:${city.ledger.length}:${city.cropLedger.length}:${city.goodsLedger.length}`;
+    if (city !== this.city) this.key = ''; // A loaded city may share day and ledger sizes.
     this.city = city; this.modal.update(city);
     if (key === this.key) return;
     this.key = key;
     // Measure once before rebuilding, so building six charts does not force a layout each.
     this.chartWidth = this.width();
     const series = dailySeries(city, 30);
-    renderGoalsCard(this.goals, cityGoals(city));
+    renderGoalsCard(this.goals, cityGoals(city), citySideMissions(city));
     this.renderKpis(city, series); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
