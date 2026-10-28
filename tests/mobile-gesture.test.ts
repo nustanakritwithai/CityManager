@@ -46,3 +46,8 @@ test('intentional placement and road drag remain available; mouse middle pans an
   const m = harness(); m.event('pointerdown', 10, 10, {button: 1}); m.event('pointermove', 30, 10, {button: -1}); m.event('pointerup', 30, 10, {button: 1}); assert.ok(m.calls.pan.length); assert.deepEqual(m.calls.cell, []);
   const q = harness(); q.event('pointerdown', 10, 10, {button: 2}); q.event('pointermove', 30, 10, {button: -1}); q.event('pointerup', 30, 10, {button: 2}); assert.notEqual(q.view.yaw, 0); assert.deepEqual(q.calls.cell, []);
 });
+
+test('open inspector blocks camera movement but allows selection on exposed map', () => {
+  const tap = harness(); tap.view.cameraBlocked = true; tap.event('pointerdown', 10, 10); tap.event('pointerup', 10, 10); assert.deepEqual(tap.calls.cell, [20]);
+  const drag = harness(); drag.view.cameraBlocked = true; drag.event('pointerdown', 10, 10); drag.event('pointermove', 30, 10); drag.event('pointerup', 30, 10); assert.deepEqual(drag.calls.pan, []); assert.deepEqual(drag.calls.cell, []);
+});

@@ -334,7 +334,7 @@ export class CityView {
     c.addEventListener('pointerup', e => {
       this.dragStart = null;
       if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 7) this.down.moved = true;
-      if (!this.cameraBlocked && this.down && !this.down.moved && !this.down.multi && this.down.button === 0) {
+      if (this.down && !this.down.moved && !this.down.multi && this.down.button === 0) {
         const index = this.pick(e.clientX, e.clientY); if (index !== null) this.onCell(index);
       } else if (!this.cameraBlocked && this.down && this.down.moved && !this.down.multi && this.down.button === 0 && this.mode === 'road') {
         const end = this.pick(e.clientX, e.clientY);
