@@ -95,11 +95,12 @@ export function citySideMissions(c: City): SideMission[] {
     const e = c.goodsLedger[i];
     if (e.tick <= c.tick && e.reason === 'Household final consumption' && e.product && e.quantity > 0) bought.add(e.product);
   }
-  return [
+  const missions: Omit<SideMission, 'done'>[] = [
     { id: 'crop-diversity', name: 'ปลูกพืชให้ครบทุกชนิด', hint: 'เพิ่มฟาร์มบนดินที่เหมาะกับข้าว ผัก และอ้อย', current: crops, target: CROPS.length },
     { id: 'recipe-diversity', name: 'เปิดโรงงานหลายสูตร', hint: 'จัดหาวัตถุดิบต่างชนิด แล้วเพิ่มโรงงานเพื่อแปรรูป', current: recipes, target: RECIPES.length },
     { id: 'basket-diversity', name: 'ครัวเรือนซื้อสินค้าหลากหลาย', hint: 'ให้ร้านขายข้าวสาร อาหารกระป๋อง และน้ำตาลใน 30 วันล่าสุด', current: bought.size, target: PRODUCTS.length },
-  ].map(m => ({ ...m, done: m.current >= m.target }));
+  ];
+  return missions.map(m => ({ ...m, done: m.current >= m.target }));
 }
 
 /**
