@@ -5,7 +5,7 @@
  */
 export function untyped(json: string): Record<string, unknown> {
   const city = JSON.parse(json);
-  delete city.typeBaseline; delete city.plants; city.utilities = { power: true, water: true };
+  delete city.foodDemandStartTick; delete city.typeBaseline; delete city.plants; city.utilities = { power: true, water: true };
   for (const f of city.firms) { delete f.crops; delete f.products; delete f.recipe; delete f.recipeMode; delete f.recipeChoices; delete f.cropChoices; delete f.cropMode; }
   for (const e of city.cropLedger) { delete e.crop; delete e.mix; }
   for (const e of city.goodsLedger) delete e.product;

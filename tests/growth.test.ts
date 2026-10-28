@@ -50,7 +50,7 @@ test('midmonth expansion preserves all earned wages, tax/rent/working reserves a
 test('fresh deterministic cities pass initial tier population/job capacity without arbitrary people or outside expansion money', () => {
   for (const seed of [61025, 20261023]) {
     const c = createCity(seed), twin = createCity(seed); let firstExpansion = 0;
-    for (let day = 1; day <= 388; day++) { step(c); step(twin); if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day; if (day % 30 === 0) conservation(c); }
+    for (let day = 1; day <= 388; day++) { step(c); step(twin); keepSupplied(c); keepSupplied(twin); if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day; if (day % 30 === 0) conservation(c); }
     // Levelled farms add crop jobs that fill before a factory sponsors expansion, and markets pay farms more for
     // the crops factories buy, so chain-2 expands later than growth-1 (294) but still inside the first 13 months.
     assert.ok(firstExpansion > 120 && firstExpansion < 390, String(firstExpansion)); assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8); assert.deepEqual(c, twin);

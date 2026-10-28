@@ -4,7 +4,7 @@ import { ownerDecisionCandidates, validateOwnerDecisionSelection, type OwnerCand
 
 export const OWNER_POLICY_VERSION = 'owner-rule-1' as const;
 export const OWNER_MAX_TRANSFER = 10_000;
-// Current growth-1 consumes one 800-satang basket per HOUSEHOLD per day, not per person.
+// Reserve one 800-satang food unit per household member per day.
 // This is an explicit next-month policy reserve, not a claimed past expense or balance sheet.
 const FOOD_PER_HOUSEHOLD_DAY = 800;
 const HOUSEHOLD_MONTHLY_RENT = 10_000;
@@ -88,7 +88,7 @@ export function captureOwnerSnapshot(city: City, firmId: number): OwnerSnapshot 
     if (Object.hasOwn(city.accounts, firm.wallet) && money(city.accounts[firm.wallet])) facts.firmCash = city.accounts[firm.wallet];
     else mark('invalid-firm-budget');
     if (!missing.includes('unsupported-rules')) {
-      facts.householdFoodReserve = MONTH * FOOD_PER_HOUSEHOLD_DAY;
+      facts.householdFoodReserve = MONTH * FOOD_PER_HOUSEHOLD_DAY * household.members;
       if (home) {
         facts.householdRentReserve = HOUSEHOLD_MONTHLY_RENT;
         facts.householdEssentialReserve = facts.householdFoodReserve + facts.householdRentReserve;

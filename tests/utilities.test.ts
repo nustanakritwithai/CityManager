@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createCity as oldCity, step as oldStep, serialize as oldSerialize } from '../src/legacy-v6.ts';
 import assert from 'node:assert/strict';
 import { GATEWAY, SIZE, access, buildPlant, buildRoad, bulldoze, createCity, deserialize, explainCell, plantAt, serialize, step, summary, utilities, zoneCell, type City } from '../src/sim.ts';
 import { HOUSEHOLD_BILL, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, TARIFF, buildingNeed } from '../src/utilities.ts';
@@ -81,8 +82,8 @@ test('monthly bills: users pay the city, the city pays outside units and plant u
 });
 
 test('a 2.0 (v8) save loads with a contract that covers what it already drew, and never shrinks', () => {
-  const v9 = createCity(61025); run(v9, 400);
-  const raw = JSON.parse(serialize(v9)); delete raw.plants; raw.utilities = { power: true, water: true }; raw.version = 8; raw.rulesVersion = 'chain-3';
+  const old = oldCity(61025); for (let day = 0; day < 400; day++) oldStep(old);
+  const raw = JSON.parse(serialize(deserialize(oldSerialize(old)))); delete raw.foodDemandStartTick; delete raw.plants; raw.utilities = { power: true, water: true }; raw.version = 8; raw.rulesVersion = 'chain-3';
   const loaded = deserialize(JSON.stringify(raw)), drawn = utilities(loaded);
   assert.equal(loaded.version, 9); assert.deepEqual(loaded.plants, []);
   assert.ok(loaded.utilities.outside.power >= OUTSIDE_SUPPLY.power && loaded.utilities.outside.water >= OUTSIDE_SUPPLY.water);

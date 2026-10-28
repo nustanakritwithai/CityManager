@@ -41,12 +41,12 @@ test('published v3 retail opening still splits workers after migration while new
   assert.equal(c.goods.produced,previous.goods.produced);assert.equal(c.goods.exported,previous.goods.exported);assert.deepEqual(c.cropLedger,[]);
   const shop=c.firms.find(f=>f.zone==='C')!,factory=c.firms.find(f=>f.zone==='I')!;
   assert.equal(factory.cropInventory,0);assert.equal(factory.inventory,0);assert.equal(c.accounts[factory.wallet],previous.accounts[factory.wallet]);
-  const imports=c.ledger.filter(e=>e.tick===97&&e.reason==='Outside goods import');assert.deepEqual(imports,[{tick:97,from:shop.wallet,to:'outside',amount:3600,reason:'Outside goods import'}]);
+  const imports=c.ledger.filter(e=>e.tick===97&&e.reason==='Outside goods import');assert.deepEqual(imports,[{tick:97,from:shop.wallet,to:'outside',amount:7200,reason:'Outside goods import'}]);
   const purchases=c.ledger.filter(e=>e.tick===97&&e.from.startsWith('household:')&&e.reason.includes('purchase'));
-  assert.deepEqual(purchases.map(e=>[e.from,e.to,e.amount]),previous.households.map((h:any)=>[h.wallet,shop.wallet,800]));
-  assert.equal(c.accounts[shop.wallet],previous.accounts[shop.wallet]-3600+3200);assert.equal(shop.inventory,4);
-  assert.equal(c.goods.imported,previous.goods.imported+8);assert.equal(c.goods.consumed,previous.goods.consumed+4);
-  assert.deepEqual(c.goodsLedger.filter(e=>e.tick===97).map(e=>[e.from,e.to,e.quantity,e.reason]),[['outside',shop.wallet,8,'Imported shop stock'],...previous.households.map((h:any)=>[shop.wallet,h.wallet,1,'Household final consumption'])]);
+  assert.deepEqual(purchases.map(e=>[e.from,e.to,e.amount]),previous.households.map((h:any)=>[h.wallet,shop.wallet,800*h.members]));
+  assert.equal(c.accounts[shop.wallet],previous.accounts[shop.wallet]-7200+6400);assert.equal(shop.inventory,8);
+  assert.equal(c.goods.imported,previous.goods.imported+16);assert.equal(c.goods.consumed,previous.goods.consumed+8);
+  assert.deepEqual(c.goodsLedger.filter(e=>e.tick===97).map(e=>[e.from,e.to,e.quantity,e.reason]),[['outside',shop.wallet,16,'Imported shop stock'],...previous.households.map((h:any)=>[shop.wallet,h.wallet,h.members,'Household final consumption'])]);
   assert.doesNotThrow(()=>deserialize(serialize(c)));
  }
 });

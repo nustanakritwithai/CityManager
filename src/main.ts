@@ -473,7 +473,7 @@ async function boot() {
   marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
   installHudRow();
   $('#save').addEventListener('click', async () => {
-    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v12/chain-7 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
+    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serialize(city, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serialize(city, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v13/chain-8 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
   });
   const loadStored = async (source: SaveSource) => {
     try {
