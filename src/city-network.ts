@@ -178,7 +178,7 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
     const e = city.ledger[i], road = /^Build (\d+) road cells$/.exec(e.reason);
     if (road) out.push({ node: 'roads', icon: 'road', text: `สร้างถนน ${road[1]} ช่อง · ${baht(e.amount)}`, tick: e.tick });
     else if (e.reason === 'New household arrival savings') out.push({ node: 'households', icon: 'people', text: 'ครัวเรือนใหม่ย้ายเข้า', tick: e.tick });
-    else if (e.reason === 'Monthly wages') add(wages, e.tick, e.amount);
+    else if ((e.reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(e.reason))) add(wages, e.tick, e.amount);
     else if (e.to === 'treasury' && /tax/i.test(e.reason)) add(taxes, e.tick, e.amount);
     else if (e.reason === 'Outside residential height investment') out.push({ node: 'capacity', icon: 'level', text: 'บ้านเพิ่มชั้น รับคนได้มากขึ้น', tick: e.tick });
     else if (e.reason === 'Market to shop conversion') out.push({ node: 'shops', icon: 'shop', text: `ตลาดยกระดับเป็นร้านค้า · ${baht(e.amount)}`, tick: e.tick });

@@ -5,8 +5,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { access, deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
-import { PARK } from '../src/parks.ts';
+import { access, createCity, step, buildPark, bulldoze, GATEWAY, deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+import { PARK, PARK_STAFF } from '../src/parks.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
@@ -20,14 +20,15 @@ const root = process.cwd(), output = resolve(root, '.test-output');
 const screenshots = resolve(root, process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/screenshots');
 const targetUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 await mkdir(output, { recursive: true }); await mkdir(screenshots, { recursive: true });
+const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT || 9349);
 const edge = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
-const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${resolve(output, 'edge-profile')}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${resolve(output, `edge-profile-${debugPort}`)}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
   const result = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 30000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 60000);
     pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject });
   });
   ws.send(JSON.stringify({ id, method, params })); return result;
@@ -42,7 +43,7 @@ async function until(expression, timeout = 15000) {
   while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); }
   throw new Error(`Condition timed out: ${expression}`);
 }
-const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14){c.version=9;c.rulesVersion="chain-4"}return c})()');
+const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version===11||c.version===12||c.version===13||c.version===14||c.version===15){c.version=9;c.rulesVersion="chain-4"}return c})()');
 const text = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
 const paused = () => evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"');
 async function game() {
@@ -76,7 +77,7 @@ async function screenshot(name) {
 try {
   let targets;
   for (let i = 0; i < 100; i++) {
-    try { targets = await (await fetch('http://127.0.0.1:9349/json/list')).json(); break; } catch { await sleep(100); }
+    try { targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json(); break; } catch { await sleep(100); }
   }
   assert.ok(targets?.length, 'Installed Edge started');
   ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
@@ -187,6 +188,30 @@ try {
   await game(); await button('#load'); assert.deepEqual(await state(), withPark);
   await closeInspector(); await button('[data-tool="select"]');
   checks.push('Off-road one-cell park: real UI construction, duplicate click, detail, save, demolition and load');
+  const staffFixture = createCity(61025);
+  for (let day = 0; day < 45; day++) step(staffFixture);
+  for (let i = 0; i < staffFixture.cells.length; i++) if (staffFixture.cells[i].road && i !== GATEWAY) bulldoze(staffFixture, i);
+  buildPark(staffFixture, parkCell);
+  await game(); await evaluate('localStorage.setItem("citymanager.save.v7",' + JSON.stringify(serialize(staffFixture)) + ')'); await button('#load'); await closeInspector();
+  await button('[data-speed="10"]'); await button('#pause');
+  await until('JSON.parse(window.cityManager.snapshot()).tick>=46'); await button('#pause');
+  const staffed = await state(), staffedPark = staffed.parks[0];
+  assert.equal(staffedPark.staffing.allocations.reduce((n, a) => n + a.workers, 0), 1);
+  assert.equal(staffed.employment.length, 0);
+  await button('[data-tool="select"]'); await cell(parkCell);
+  assert.match(await text('#place-metrics'), /เจ้าหน้าที่สวน/);
+  assert.match(await text('#place-metrics'), /1 \/ 1 คน/);
+  assert.match(await text('#place-metrics'), /420/);
+  assert.match(await text('#place-metrics'), /100%/);
+  await screenshot('desktop-park-workforce.png');
+  const staffOwed = Object.values(staffedPark.staffing.workDays).reduce((n, d) => n + d * PARK_STAFF.dailyWage, 0);
+  await game(); await button('#save'); await closeInspector();
+  await button('[data-tool="bulldoze"]'); await cell(parkCell);
+  const staffRemoved = await state(); assert.equal(staffRemoved.parks.length, 0);
+  assert.equal(staffRemoved.ledger.filter(e => e.reason === 'Monthly park wages #' + staffedPark.id).reduce((n, e) => n + e.amount, 0), staffOwed);
+  await game(); await button('#load'); assert.deepEqual(await state(), staffed); await closeInspector();
+  checks.push('Real park staffing after a browser day without roads: staffing/capacity/wage UI, earned payroll on removal and exact save/load');
+
   await button('[data-camera="reset"]');
   await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
   await button('[data-speed="10"]'); await button('#pause');

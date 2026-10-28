@@ -14,7 +14,7 @@ function storage(initial: Record<string, string>, fail?: string) {
   return { data, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { if (key === fail) throw new Error('quota'); data.set(key, value); } };
 }
 
-test('v14 saves retain distinct food and park migration backups and recover the latest exact bytes', () => {
+test('current park saves retain distinct food and park migration backups and recover the latest exact bytes', () => {
   const foodFirst = oldCity(12, 1), parkFirst = oldCity(13, 2), foodNext = oldCity(12, 3), parkNext = oldCity(13, 4);
   const s = storage({ [SAVE_KEY]: foodNext, [FOOD_BACKUP_KEY]: foodFirst, [PARKS_BACKUP_KEY]: parkFirst });
   saveStoredCity(s, serialize(deserialize(foodNext)), null);

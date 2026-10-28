@@ -34,7 +34,7 @@ test('actual two-worker matching splits factory/shop rather than greedily hiring
 });
 
 test('explicit exclusive skill groups enter only their eligible occupation', () => {
-  assert.deepEqual(OCCUPATION_BY_ZONE, { I: 'manufacturing', C: 'retail' });
+  assert.deepEqual(OCCUPATION_BY_ZONE, { I: 'manufacturing', C: 'retail', P: 'park-maintenance' });
   assert.deepEqual(EMPLOYMENT_RANKS, ['entry']);
   assert.deepEqual(WORKER_SKILLS, ['general', 'manufacturing', 'retail']);
   const hs = [household(1, 2, true, skills(0, 1, 1))], fs = [offer(8, 5), offer(9, 5, 5, 'C')];

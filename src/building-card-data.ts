@@ -1,5 +1,5 @@
 /** Read-only card projections. Wallet flows are cash movements, never a profit-and-loss claim. */
-import { MONTH, housingCapacity, isMarket, type City, type Building, type Household, type Firm } from './sim.ts';
+import { MONTH, parkEmploymentForHousehold, housingCapacity, isMarket, type City, type Building, type Household, type Firm } from './sim.ts';
 
 export type BuildingCardKind = 'house' | 'shop' | 'market' | 'factory' | 'farm';
 export type CardKind = BuildingCardKind | 'household';
@@ -79,7 +79,8 @@ function workforce(city: City, households: Household[] | null, firm: Firm | null
   const byHouseholds = households !== null, ids = new Set(households?.map(h => h.id));
   const employee = city.employment.filter(e => byHouseholds ? ids.has(e.householdId) : firm !== null && e.firmId === firm.id);
   const owner = city.ownerLabor.filter(e => byHouseholds ? ids.has(e.householdId) : firm !== null && e.firmId === firm.id);
-  const employeeWorkers = total(employee.map(e => e.workers)), ownerWorkers = total(owner.map(e => e.workers));
+  const parkWorkers = byHouseholds ? households!.flatMap(h => parkEmploymentForHousehold(city, h.id)) : [];
+  const employeeWorkers = total([...employee, ...parkWorkers].map(e => e.workers)), ownerWorkers = total(owner.map(e => e.workers));
   const employed = employeeWorkers === null || ownerWorkers === null ? null : total([employeeWorkers, ownerWorkers]);
   return {
     members: households === null ? null : total(households.map(h => h.members)),

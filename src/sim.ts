@@ -6,7 +6,7 @@ import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RE
 import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
-import { MAX_PARKS, PARK, type Park } from './parks.ts';
+import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from './parks.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
@@ -49,6 +49,26 @@ export type Result = { ok: boolean; message: string };
 const validIndex = (i: number) => Number.isInteger(i) && i >= 0 && i < SIZE * SIZE;
 const neighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(validIndex);
 const balance = (c: City, id: string) => c.accounts[id] ?? 0;
+export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - c.parks.reduce((n, p) => n + parkPayroll(p), 0));
+export const parkEmploymentForHousehold = (c: City, id: number) => c.parks.flatMap(p => p.staffing?.allocations ?? []).filter(a => a.householdId === id);
+const parkEmployment = (c: City) => c.parks.flatMap(p => p.staffing?.allocations ?? []);
+/** ID-ordered funding shares prevent several parks promising the same treasury money. */
+function parkFundedSeats(c: City): Map<number, number> {
+  let budget = treasurySpendable(c);
+  return new Map([...c.parks].sort((a, b) => a.id - b.id).map(p => {
+    const seats = Math.min(PARK_STAFF.slots, Math.floor(budget / PARK_STAFF.dailyWage));
+    budget -= seats * PARK_STAFF.dailyWage; return [p.id, seats];
+  }));
+}
+export function parkStaffingStatus(c: City, p: Park) {
+  const employed = parkWorkers(p), vacancies = PARK_STAFF.slots - employed;
+  const funded = parkFundedSeats(c).get(p.id) ?? 0;
+  const applicants = c.households.reduce((n, h) => n + Math.max(0, h.workforce - householdWorkerCount(c, h.id)), 0);
+  return { employed, vacancies, slots: PARK_STAFF.slots, staffedCapacity: employed / PARK_STAFF.slots,
+    fundedVacancies: Math.min(vacancies, funded), unfundedVacancies: Math.max(0, vacancies - funded),
+    status: employed === PARK_STAFF.slots ? 'staffed' : funded < vacancies ? 'inadequate-budget' : applicants ? 'recruiting' : 'no-applicants',
+    monthlyWages: employed * PARK_STAFF.monthlyWage, earnedWages: parkPayroll(p) };
+}
 export const isMarket = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'market';
 export const isRetail = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'retail';
 export const firmCapacity = (b: Building) => b.zone === 'I' ? b.level + 3 : b.zone === 'F' ? b.level : b.zone === 'C' ? Math.max(1, b.level - 1) : 0;
@@ -64,7 +84,7 @@ function random(c: City): number { c.rng = (Math.imul(c.rng, 1664525) + 10139042
 export const employmentForHousehold = (c: City, id: number): EmploymentAllocation[] => c.employment.filter(e => e.householdId === id);
 export const employmentForFirm = (c: City, id: number): EmploymentAllocation[] => c.employment.filter(e => e.firmId === id);
 export const firmWorkerCount = (c: City, id: number): number => employmentForFirm(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.firmId === id).length;
-export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length;
+export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length + parkEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0);
 export const housingCapacity = (b: Building): HousingCapacity => b.zone === 'R' ? getHousingCapacity(b.housingType!, b.level) : { households: 0, persons: 0 };
 export const homeOccupancy = (c: City, id: number): HousingCapacity => buildOccupancyIndex(c.households).get(id) ?? { households: 0, persons: 0 };
 const householdAccess = (c: City, h: Household) => h.home !== null && access(c, building(c, h.home).cell);
@@ -209,12 +229,22 @@ function reserveOwnerLabor(c: City): void {
     }
   }
   c.employment = c.employment.filter(e => e.workers > 0);
+  if (!c.parks.length) return;
+  // New owners may claim a worker after today's park shift. Keep earned pay, release
+  // only the assignment that conflicts with the real remaining skill pool.
+  for (const h of c.households) for (const skill of ['general', 'manufacturing', 'retail'] as const) {
+    let left = h.workerSkills[skill] - [...c.employment, ...c.ownerLabor].filter(a => a.householdId === h.id && a.skill === skill).reduce((n, a) => n + a.workers, 0);
+    for (const p of [...c.parks].sort((a, b) => a.id - b.id)) if (p.staffing) {
+      for (const a of p.staffing.allocations.filter(a => a.householdId === h.id && a.skill === skill)) { a.workers = Math.min(a.workers, Math.max(0, left)); left -= a.workers; }
+      p.staffing.allocations = p.staffing.allocations.filter(a => a.workers > 0);
+    }
+  }
 }
 
 /** Every transfer has a debit and credit. Outside is the sole permitted negative source account. */
 function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false): number {
   const firm = c.firms.find(f => f.wallet === from);
-  const available = from === 'outside' ? amount : firm ? spendable(c, firm) : balance(c, from);
+  const available = from === 'outside' ? amount : from === 'treasury' ? treasurySpendable(c) : firm ? spendable(c, firm) : balance(c, from);
   const paid = Math.max(0, Math.min(Math.round(amount), available));
   if (!Number.isSafeInteger(paid) || paid === 0) return 0;
   c.accounts[from] = balance(c, from) - paid;
@@ -310,7 +340,7 @@ export function buildRoad(c: City, a: number, b: number): Result {
   if (path.some(i => parkAt(c, i))) return { ok: false, message: 'มีสวนสาธารณะขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => c.cells[i].building !== null || plantAt(c, i))) return { ok: false, message: 'A building or plant blocks this road. Bulldoze it first.' };
   const added = path.filter(i => !c.cells[i].road), cost = added.length * ROAD_COST;
-  if (balance(c, 'treasury') < cost) return { ok: false, message: `Need ${(cost / 100).toFixed(0)} credits for this road.` };
+  if (treasurySpendable(c) < cost) return { ok: false, message: `Need ${(cost / 100).toFixed(0)} credits for this road.` };
   if (!added.length) return { ok: true, message: 'Road already exists; no charge.' };
   transfer(c, 'treasury', 'roadworks', cost, `Build ${added.length} road cells`);
   for (const i of added) { c.cells[i].road = true; c.cells[i].zone = null; }
@@ -335,8 +365,9 @@ export function bulldoze(c: City, i: number): Result {
   if (i === GATEWAY) return { ok: false, message: 'The outside gateway is reserved.' };
   const cell = c.cells[i], b = c.buildings.find(v => v.id === cell.building), plant = plantAt(c, i), park = parkAt(c, i);
   const cost = b || cell.road || plant || park ? 2_000 : 0;
-  if (balance(c, 'treasury') < cost) return { ok: false, message: 'Need 20 credits for demolition.' };
+  if (treasurySpendable(c) < cost) return { ok: false, message: 'Need 20 credits for demolition.' };
   if (park) {
+    payParkWages(c, park);
     transfer(c, 'treasury', 'construction', cost, `Demolish park #${park.id}`);
     c.parks = c.parks.filter(p => p !== park);
     c.lastEvent = `รื้อสวนสาธารณะ #${park.id} แล้ว · ค่ารื้อ 20 · หยุดค่าบำรุงของสวนนี้`;
@@ -380,7 +411,7 @@ export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
   if (cell.road || cell.building !== null || plantAt(c, i) || parkAt(c, i)) return { ok: false, message: 'A plant needs an empty parcel; roads, buildings and other plants stay where they are.' };
   if (!access(c, i)) return { ok: false, message: 'A plant needs road frontage connected to the west gateway; its supply travels along the roads.' };
   if (c.plants.length >= MAX_PLANTS || !canAllocateIds(c, 1)) return { ok: false, message: `Plant limit (${MAX_PLANTS}) reached.` };
-  if (balance(c, 'treasury') < plant.cost) return { ok: false, message: `Need ${plant.cost / 100} credits for a ${PLANT_NAMES[kind]}.` };
+  if (treasurySpendable(c) < plant.cost) return { ok: false, message: `Need ${plant.cost / 100} credits for a ${PLANT_NAMES[kind]}.` };
   const id = c.nextId++;
   transfer(c, 'treasury', 'construction', plant.cost, `Build ${PLANT_NAMES[kind]} #${id}`);
   cell.zone = null; c.plants.push({ id, cell: i, kind, tick: c.tick });
@@ -394,7 +425,7 @@ export function buildPark(c: City, i: number): Result {
   const cell = c.cells[i];
   if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i)) return { ok: false, message: 'สวนต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน' };
   if (c.parks.length >= MAX_PARKS || !canAllocateIds(c, 1)) return { ok: false, message: `สร้างสวนเพิ่มไม่ได้ (สูงสุด ${MAX_PARKS} แห่ง)` };
-  if (balance(c, 'treasury') < PARK.cost) return { ok: false, message: `เงินคลังไม่พอ สวนใช้ ${PARK.cost / 100}` };
+  if (treasurySpendable(c) < PARK.cost) return { ok: false, message: `เงินคลังไม่พอ สวนใช้ ${PARK.cost / 100}` };
   const id = c.nextId++;
   transfer(c, 'treasury', 'construction', PARK.cost, `Build park #${id}`);
   c.parks.push({ id, cell: i, tick: c.tick, level: 1 });
@@ -468,8 +499,8 @@ function takeOver(c: City) {
 
 export function summary(c: City) {
   const svc = utilities(c);
-  const jobs = c.firms.filter(f => access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + capacity(building(c, f.building)), 0);
-  const employed = c.employment.reduce((n, e) => n + e.workers, 0) + c.ownerLabor.length;
+  const jobs = c.firms.filter(f => access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + capacity(building(c, f.building)), 0) + c.parks.length * PARK_STAFF.slots;
+  const employed = c.employment.reduce((n, e) => n + e.workers, 0) + c.ownerLabor.length + parkEmployment(c).reduce((n, a) => n + a.workers, 0);
   const workforce = c.households.reduce((n, h) => n + h.workforce, 0);
   const availableWorkers = c.households.filter(h => householdAccess(c, h)).reduce((n, h) => n + h.workforce - householdWorkerCount(c, h.id), 0);
   const recent = c.ledger.filter(e => e.tick > Math.max(0, c.tick - MONTH) && !e.reason.includes('grant'));
@@ -486,7 +517,7 @@ export function summary(c: City) {
   const incoming = Math.min(128 - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2)));
   // Open jobs people can take now (a seat and a wage the firm can pay) vs seats a firm cannot fund.
   const seats = c.firms.filter(f => !isMarket(f) && access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + Math.max(0, capacity(building(c, f.building)) - firmWorkerCount(c, f.id)), 0);
-  return { population: c.households.reduce((n, h) => n + h.members, 0), households: c.households.length, workforce, openJobs: admission.vacancies, unfundedJobs: Math.max(0, seats - admission.vacancies),
+  return { population: c.households.reduce((n, h) => n + h.members, 0), households: c.households.length, workforce, openJobs: admission.vacancies + c.parks.reduce((n, p) => n + parkStaffingStatus(c, p).fundedVacancies, 0), unfundedJobs: Math.max(0, seats - admission.vacancies) + c.parks.reduce((n, p) => n + parkStaffingStatus(c, p).unfundedVacancies, 0),
     dependents: c.households.reduce((n, h) => n + h.dependents, 0), jobs, employed, unemployed: workforce - employed,
     homeless, homeSlots: homes.reduce((n, b) => n + housingCapacity(b).households, 0),
     personCapacity: homes.reduce((n, b) => n + housingCapacity(b).persons, 0), treasury: balance(c, 'treasury'), net,
@@ -591,6 +622,26 @@ function employ(c: City) {
     const h = c.households.find(h => h.id === allocation.householdId)!, f = c.firms.find(f => f.id === allocation.firmId)!;
     f.workDays[h.wallet] = (f.workDays[h.wallet] ?? 0) + allocation.workers;
   }
+  employParks(c);
+}
+/** Same allocator, residual disjoint skill counts; no park/home road or utility test. */
+function employParks(c: City): void {
+  if (!c.parks.length) return;
+  const prior = parkEmployment(c).map(a => ({ ...a, firmId: a.parkId, occupation: 'park-maintenance' as const, rank: 'entry' as const }));
+  const funding = parkFundedSeats(c);
+  const allocations = allocateEmployment(c.households.map(h => {
+    const workerSkills = { ...h.workerSkills };
+    for (const a of [...c.employment, ...c.ownerLabor].filter(a => a.householdId === h.id)) workerSkills[a.skill] -= a.workers;
+    return { id: h.id, workforce: Object.values(workerSkills).reduce((a, b) => a + b, 0), workerSkills, accessible: true };
+  }), c.parks.map(p => ({ id: p.id, zone: 'P' as const, slots: PARK_STAFF.slots, budgetWorkers: funding.get(p.id)! })), prior);
+  for (const p of c.parks) {
+    p.staffing ??= { allocations: [], workDays: {} };
+    p.staffing.allocations = allocations.filter(a => a.firmId === p.id).map(a => ({ parkId: p.id, householdId: a.householdId, skill: a.skill, workers: a.workers }));
+    for (const a of p.staffing.allocations) {
+      const wallet = c.households.find(h => h.id === a.householdId)!.wallet;
+      p.staffing.workDays[wallet] = (p.staffing.workDays[wallet] ?? 0) + a.workers;
+    }
+  }
 }
 function agricultureHooks(c: City) {
   const roads = connectedRoads(c), svc = utilityService(c, roads);
@@ -666,6 +717,16 @@ function payWages(c: City, f: Firm, onlyWallet?: string) {
     transfer(c, wallet, 'treasury', Math.floor(wage / 10), 'Monthly household wage tax');
   }
 }
+function payParkWages(c: City, p: Park, onlyWallet?: string): void {
+  for (const [wallet, days] of Object.entries(p.staffing?.workDays ?? {})) {
+    if (onlyWallet && wallet !== onlyWallet) continue;
+    const owed = days * PARK_STAFF.dailyWage;
+    delete p.staffing!.workDays[wallet];
+    if (transfer(c, 'treasury', wallet, owed, `Monthly park wages #${p.id}`) !== owed) throw new Error('Park payroll reserve invariant violated.');
+    transfer(c, wallet, 'treasury', Math.floor(owed / 10), 'Monthly household wage tax');
+  }
+}
+const isWage = (reason: string): boolean => reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(reason);
 function settleMonth(c: City) {
   const svc = utilities(c);
   for (const f of c.firms) {
@@ -687,6 +748,7 @@ function settleMonth(c: City) {
       if (amount > 0 && !withdrawOwnerProfit(c, f.id, amount).ok) throw new Error('Monthly owner income invariant violated.');
     }
   }
+  for (const p of c.parks) payParkWages(c, p);
   for (const h of c.households) if (h.home !== null) {
     transfer(c, h.wallet, 'landlord', 10_000, 'Monthly household rent');
     transfer(c, h.wallet, 'treasury', householdBill(svc, h.home), 'Monthly household water and power bill');
@@ -712,7 +774,7 @@ export function departureDay(c: City, householdId: number): number | null {
   let last = 0;
   for (let i = c.ledger.length - 1; i >= 0; i--) {
     const e = c.ledger[i];
-    if (e.to === h.wallet && (e.reason === 'Monthly wages' || e.reason === 'New household arrival savings')) { last = e.tick; break; }
+    if (e.to === h.wallet && (isWage(e.reason) || e.reason === 'New household arrival savings')) { last = e.tick; break; }
   }
   return Math.max(c.tick % MONTH ? c.tick - c.tick % MONTH + MONTH : c.tick + MONTH, Math.ceil((last + DEPARTURE_MONTHS * MONTH) / MONTH) * MONTH);
 }
@@ -736,7 +798,7 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   const open = { ...admissionFacts(c).vacanciesByZone };
   let retrained = 0;
   for (const h of [...c.households].sort((a, b) => a.id - b.id)) {
-    const working = (skill: 'manufacturing' | 'retail') => employmentForHousehold(c, h.id).filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length;
+    const working = (skill: 'manufacturing' | 'retail') => [...employmentForHousehold(c, h.id), ...parkEmploymentForHousehold(c, h.id)].filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length;
     const moves = retrainingMoves(h.workerSkills, { manufacturing: working('manufacturing'), retail: working('retail') }, open);
     h.workerSkills.manufacturing -= moves.manufacturing; h.workerSkills.retail -= moves.retail; h.workerSkills.general += moves.manufacturing + moves.retail;
     open.C -= moves.manufacturing; open.I -= moves.retail; retrained += moves.manufacturing + moves.retail;
@@ -744,13 +806,14 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   const since = c.tick - DEPARTURE_MONTHS * MONTH, paid = new Set<string>(), recent = new Set<string>();
   for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick > since; i--) {
     const e = c.ledger[i];
-    if (e.reason === 'Monthly wages') paid.add(e.to);
+    if (isWage(e.reason)) paid.add(e.to);
     else if (e.reason === 'New household arrival savings') recent.add(e.to);
   }
   const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
   const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet))
     .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
   for (const h of leaving) {
+    for (const p of c.parks) payParkWages(c, p, h.wallet);
     for (const f of c.firms) payWages(c, f, h.wallet); // no claim should remain after settlement; pay any that does
     transfer(c, h.wallet, 'outside', balance(c, h.wallet), 'Emigration savings');
     c.households = c.households.filter(x => x.id !== h.id);
@@ -911,7 +974,7 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, version: 14, rulesVersion: 'chain-9', ...(market ? { market } : {}) });
+  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, version: 15, rulesVersion: 'chain-10', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -956,7 +1019,7 @@ function migrateV8(old: City): City {
 }
 const RULES = { 7: 'chain-2', 8: 'chain-3', 9: 'chain-4' } as const;
 /** Every rule of a chain-2 (v7) save; chain-3 (v8) also reconciles typed stock, chain-4 (v9) its plants. */
-function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false): City {
+function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false): City {
   const typed = version >= 8;
   const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${version} / ${RULES[version]}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
@@ -1007,14 +1070,43 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false): City {
     ids.add(p.id);
   }
   for (const p of c.parks) {
-    if (!p || Object.keys(p).length !== 4 || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell) || p.level !== 1 || !int(p.tick) || p.tick > c.tick) fail();
+    if (!p || Object.keys(p).length !== (withStaffing && p.staffing !== undefined ? 5 : 4) || (!withStaffing && p.staffing !== undefined) || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell) || p.level !== 1 || !int(p.tick) || p.tick > c.tick) fail();
     const cell = c.cells[p.cell], built = c.ledger.filter(e => e.reason === `Build park #${p.id}`);
     if (cell.road || cell.zone !== null || cell.building !== null || c.plants.some(q => q.cell === p.cell) || c.parks.some(q => q !== p && q.cell === p.cell)) fail();
     if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PARK.cost || built[0].tick !== p.tick || c.ledger.some(e => e.reason === `Demolish park #${p.id}`)) fail();
     ids.add(p.id);
   }
   const parkBuilds = new Map<number, number>(), parkRemoved = new Set<number>(), parkBills = new Set<string>();
+  for (const p of c.parks) if (p.staffing !== undefined) {
+    const s = p.staffing;
+    if (!s || Object.keys(s).length !== 2 || !Array.isArray(s.allocations) || s.allocations.length > PARK_STAFF.slots || !s.workDays || typeof s.workDays !== 'object' || Array.isArray(s.workDays)) fail();
+    const pairs = new Set<string>();
+    for (const a of s.allocations) {
+      if (!a || Object.keys(a).length !== 4 || a.parkId !== p.id || !int(a.householdId, 1) || !int(a.workers, 1) || !['general', 'manufacturing', 'retail'].includes(a.skill) || !c.households.some(h => h.id === a.householdId)) fail();
+      const key = `${a.householdId}:${a.skill}`; if (pairs.has(key)) fail(); pairs.add(key);
+    }
+    if (parkWorkers(p) > PARK_STAFF.slots || !int(parkPayroll(p))) fail();
+    for (const [wallet, days] of Object.entries(s.workDays)) if (!c.households.some(h => h.wallet === wallet) || !int(days, 1)) fail();
+    if (Object.values(s.workDays).reduce((n, days) => n + days, 0) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH)) fail();
+  }
+  if (c.parks.reduce((n, p) => n + parkPayroll(p), 0) > balance(c, 'treasury')) fail();
+  const parkPaid = new Map<string, number>();
+  const parkPayments = new Set<string>();
   for (const e of c.ledger) {
+    const wage = /^Monthly park wages #([1-9]\d*)$/.exec(e.reason);
+    if (wage) {
+      const id = Number(wage[1]), built = parkBuilds.get(id), key = `${id}:${Math.ceil(e.tick / MONTH)}`;
+      if (!withStaffing || built === undefined || parkRemoved.has(id) || e.tick <= built || e.from !== 'treasury' || !/^household:[1-9]\d*$/.test(e.to) || !int(e.amount, 1) || e.amount % PARK_STAFF.dailyWage !== 0) fail();
+      // A claim is settled once per wallet. Mid-month settlements only occur on
+      // demolition; accepting one on a live park would leave already-paid days owed.
+      const payment = `${id}:${e.tick}:${e.to}`;
+      if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !c.ledger.some(row => row.tick === e.tick && row.reason === `Demolish park #${id}`)) fail();
+      parkPayments.add(payment);
+      const paid = (parkPaid.get(key) ?? 0) + e.amount;
+      if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * PARK_STAFF.dailyWage) fail();
+      parkPaid.set(key, paid);
+      continue;
+    }
     const event = /^(Build|Demolish|Monthly park upkeep) (?:park )?#([1-9]\d*)$/.exec(e.reason);
     if (!event) continue;
     const id = Number(event[2]);
@@ -1028,6 +1120,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false): City {
       else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > PARK.upkeep || parkBills.has(key)) fail(); parkBills.add(key); }
     }
   }
+  for (const p of c.parks) if (c.tick % MONTH !== 0 && (parkPaid.get(`${p.id}:${Math.ceil(c.tick / MONTH)}`) ?? 0) + parkPayroll(p) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH) * PARK_STAFF.dailyWage) fail();
   for (const id of parkBuilds.keys()) if (!parkRemoved.has(id) && !c.parks.some(p => p.id === id)) fail();
   const retainedAccountIds = Object.keys(c.accounts).flatMap(key => {
     const match = /^(?:household|firm):(\d+)$/.exec(key);
@@ -1050,8 +1143,8 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false): City {
     pairs.add(pair);
   }
   for (const h of c.households) {
-    if (householdWorkerCount(c, h.id) > h.workforce || c.firms.reduce((n, f) => n + (f.workDays[h.wallet] ?? 0), 0) > h.workforce * (c.tick % MONTH)) fail();
-    for (const skill of ['general', 'manufacturing', 'retail'] as const) if (employmentForHousehold(c, h.id).filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) > h.workerSkills[skill]) fail();
+    if (householdWorkerCount(c, h.id) > h.workforce || c.firms.reduce((n, f) => n + (f.workDays[h.wallet] ?? 0), 0) + c.parks.reduce((n, p) => n + (p.staffing?.workDays[h.wallet] ?? 0), 0) > h.workforce * (c.tick % MONTH)) fail();
+    for (const skill of ['general', 'manufacturing', 'retail'] as const) if ([...employmentForHousehold(c, h.id), ...parkEmploymentForHousehold(c, h.id), ...c.ownerLabor.filter(a => a.householdId === h.id)].filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) > h.workerSkills[skill]) fail();
   }
   for (const f of c.firms) if (firmWorkerCount(c, f.id) > capacity(building(c, f.building)) || Object.values(f.workDays).reduce((n, days) => n + days, 0) > capacity(building(c, f.building)) * (c.tick % MONTH)) fail();
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();
@@ -1153,13 +1246,13 @@ function deserializeVersioned(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
-  if (version !== 13 && version !== 14 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
-  if (version === 13 || version === 14) {
+  if (version !== 13 && version !== 14 && version !== 15 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');
+  if (version === 13 || version === 14 || version === 15) {
     const envelope = parsed as Omit<City, 'version' | 'rulesVersion'> & { version: number; rulesVersion: string };
-    if (envelope.rulesVersion !== (version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
+    if (envelope.rulesVersion !== (version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
-    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version === 14);
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version === 15);
     if (market) loaded.market = market;
     return loaded;
   }
