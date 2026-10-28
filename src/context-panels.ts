@@ -2,7 +2,7 @@ import './context-panels.css';
 import './building-cards.css';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -287,6 +287,7 @@ function renderAgriculture(city: City, building: Building, firm: Firm, workers: 
   else cards.push(metric('crop-buy-price', 'ซื้อจากฟาร์ม / ล็อต', cash(CROP_PRICES.farmToTrader), CROP_PRICES.farmToTrader, true), metric('crop-factory-price', 'ขายให้โรงงาน / ล็อต', cash(CROP_PRICES.traderToFactory), CROP_PRICES.traderToFactory, true), metric('crop-household-price', 'ตะกร้าครัวเรือน / ล็อต', cash(CROP_PRICES.householdCrop), CROP_PRICES.householdCrop, true), metric('rent', 'ค่าเช่าตลาด / เดือน', cash(firmRent(firm)), firmRent(firm), true));
   body.append(metrics(cards), el('p', 'cx-detail-note', firm.zone === 'F' ? 'พืชผลเก็บเกี่ยวตั้งมูลค่าคงคลังเริ่มต้นเป็นศูนย์ ค่าจ้างและค่าเช่ายังเป็นค่าใช้จ่ายงวด ไม่ได้เป็นผลตอบแทนรับประกัน' : firm.zone === 'I' ? `แต่ละวันใช้ ${CROP_RECIPE.crop} ล็อตจริงต่อ ${CROP_RECIPE.goods} หน่วยสำเร็จรูป ขาดวัตถุดิบผลิตไม่ได้ และไม่ประมวลผลซ้ำวันเดิม` : 'ตลาดไม่ผลิตหรือแปรรูป ซื้อพืชผลเข้าสต็อกก่อน ขายล็อตที่มีตั้งแต่ต้นวันเท่านั้น สต็อกที่โรงงานและครัวเรือนซื้อเป็นกองเดียวกัน'));
   if (firm.zone === 'I' && firm.cropInventory < CROP_RECIPE.crop) body.append(chip('ขาดพืชผลสำหรับแปรรูป', false));
+  if (firm.zone === 'I' && deadFirm(city, firm) && !factoryTakeoverRecipe(city, firm)) body.append(el('p', 'cx-detail-note', 'รอวัตถุดิบที่เข้าถึงได้ก่อนผู้ลงทุนรายใหม่รับช่วงโรงงาน ตรวจฟาร์ม แรงงาน น้ำไฟ และถนนที่เชื่อมต่อ'));
   const output = [body];
   if (isMarket(firm) || isRetail(firm) && firm.owner) output.push(renderOwnerFinance(city, firm)); return output;
 }

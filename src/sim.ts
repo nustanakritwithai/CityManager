@@ -2,7 +2,7 @@
 import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
 import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
-import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, type ResourceMap } from './agriculture.ts';
+import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RECIPE, type ResourceMap } from './agriculture.ts';
 import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
@@ -388,6 +388,17 @@ function closeFirm(c: City, f: Firm) {
 export const deadFirm = (c: City, f: Firm): boolean => balance(c, f.wallet) === 0 && firmWorkerCount(c, f.id) === 0;
 /** What a new owner pays to refit taken-over premises (outside equity); a household owner pays the usual 100-credit opening. */
 export const TAKEOVER_REFIT = 20_000;
+/** Choose a recipe only when an operating supplier has matching stock or can grow it. */
+export function factoryTakeoverRecipe(c: City, old: Firm): RecipeId | null {
+  if (old.zone !== 'I' || !deadFirm(c, old)) return null;
+  const service = utilities(c);
+  const suppliers = c.firms.filter(f => (f.zone === 'F' || isMarket(f)) && access(c, building(c, f.building).cell) && service.ok(f.building) && firmWorkerCount(c, f.id) > 0);
+  const available = (crop: CropId) => suppliers.reduce((sum, f) => sum + f.crops[crop], 0) >= CROP_RECIPE.crop || suppliers.some(f => f.zone === 'F' && farmCrop(c, f) === crop);
+  const preferred = chooseRecipe(c, c.firms.filter(f => f.zone === 'I' && f.id !== old.id && f.recipe));
+  if (available(RECIPE[preferred].crop)) return preferred;
+  const crop = CROPS.find(available);
+  return crop ? recipeForCrop(crop) : null;
+}
 /**
  * At month end a dead business closes and a new one takes over the same premises, so the player
  * never has to bulldoze and rezone: a saving household takes a market or shop (outside equity takes
@@ -401,11 +412,13 @@ function takeOver(c: City) {
     if (!c.firms.includes(old) || !deadFirm(c, old)) continue;
     const b = building(c, old.building), owner = old.zone === 'C' ? ownerCandidate(c) : undefined;
     if (!access(c, b.cell) || !utilities(c).ok(b.id) || !canAllocateIds(c, 1) || isMarket(old) && !owner) continue;
+    const recipe = old.zone === 'I' ? factoryTakeoverRecipe(c, old) : null;
+    if (old.zone === 'I' && !recipe) continue;
     if (!writeOffCrops(c, old, agricultureHooks(c))) continue;
     const funded = old.fundedBy, retail = isRetail(old);
     closeFirm(c, old);
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: chooseRecipe(c) } : old.zone === 'F' ? { cropMode: farmCropMode(old), cropChoices: [{ at: c.cropLedger.length, crop: farmCrop(c, old) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
+    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: recipe! } : old.zone === 'F' ? { cropMode: farmCropMode(old), cropChoices: [{ at: c.cropLedger.length, crop: farmCrop(c, old) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
       wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: OWNER_STARTUP_CAPITAL, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
