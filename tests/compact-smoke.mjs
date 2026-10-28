@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
 import { deserialize, serialize, firmWorkerCount, householdWorkerCount, homeOccupancy, housingCapacity, firmWage, MONTH } from '../src/sim.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const mode = process.env.CITYMANAGER_COMPACT_MODE || 'candidate';
 const referenceCommit = 'd40cd6982ce644ed1e555565d48cf2c1efbdc047';
@@ -35,7 +36,7 @@ async function until(expression) { const start = Date.now(); while (Date.now() -
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
-async function button(selector) { await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`); assert.ok(r.w && r.h && !r.disabled, selector); assert.equal(await evaluate(`!!document.elementFromPoint(${r.x},${r.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}`); await click(r.x, r.y); }
+async function button(selector) { if (await reachTouch(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`); assert.ok(r.w && r.h && !r.disabled, selector); assert.equal(await evaluate(`!!document.elementFromPoint(${r.x},${r.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}`); await click(r.x, r.y); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu})');
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); }

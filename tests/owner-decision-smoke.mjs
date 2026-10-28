@@ -9,6 +9,7 @@ import { createCity, step, serialize, deserialize, isMarket, buildRoad } from '.
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { captureOwnerSnapshot, proposeOwnerDecision, executeOwnerProposal, ownerStateHash } from '../src/owner-decision.ts';
 import { createOwnerDecisionSession } from '../src/owner-decision-session.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const url = process.env.CITYMANAGER_OWNER_URL || 'http://127.0.0.1:4191/CityManager/';
@@ -91,6 +92,7 @@ async function reveal(target) {
   throw Error('Too many disclosure ancestors');
 }
 async function button(target, allowDisabled = false) {
+  if (await reachTouch(evaluate, button, target)) return;
   await reveal(target); await evaluate(`document.querySelector(${JSON.stringify(target)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(target)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
   assert(point.w > 0 && point.h > 0 && (allowDisabled || !point.disabled), `Visible control ${target}`);

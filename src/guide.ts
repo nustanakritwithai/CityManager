@@ -57,7 +57,7 @@ export class Guide {
     const { index, total, step } = guideState(city);
     if (!step) {
       // One closing line, then the goal pill takes over.
-      if (!this.finishedAt) { this.finishedAt = performance.now(); this.render('done', `ครบ ${total} ขั้นแล้ว`, 'เยี่ยม! เมืองพร้อมโตต่อ', 'ต่อจากนี้ดูป้ายระดับใต้ชื่อเกม เป้าหมายคือระดับ 5 เมืองพึ่งพาตนเองได้', '', null); }
+      if (!this.finishedAt) { this.finishedAt = performance.now(); this.render('done', `ครบ ${total} ขั้นแล้ว`, 'เยี่ยม! เมืองพร้อมโตต่อ', 'ต่อจากนี้ดูป้ายระดับมุมซ้ายบน เป้าหมายคือระดับ 5 เมืองพึ่งพาตนเองได้', '', null); }
       else if (performance.now() - this.finishedAt > 8000) this.stop('done');
       return;
     }

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createCity, step, serialize } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
 const profile = resolve(output, 'edge-signal-reading');
@@ -53,6 +54,7 @@ const state = () => evaluate('JSON.parse(window.cityManager.snapshot())');
 const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 const visible = selector => evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e&&!e.hidden&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0})()`);
 async function button(selector) {
+  if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`);
   await paints();
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);

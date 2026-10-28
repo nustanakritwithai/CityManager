@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
 import {deserialize,serialize} from '../src/sim.ts';
+import { reachTouch } from './touch-reach.mjs';
 const legacyRaw=await readFile(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),legacy=JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
 const fixture=deserialize(legacyRaw),fixtureJson=serialize(fixture);assert.equal(fixture.version, 9);
@@ -20,7 +21,7 @@ async function send(method,params={}) {const key=++id; const promise=new Promise
 async function evaluate(expression){const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
 async function until(expression,timeout=15000){const started=Date.now();while(Date.now()-started<timeout){if(await evaluate(expression))return;await sleep(80);}throw Error('Timed out '+expression);}
 async function click(x,y){for(const type of ['mouseMoved','mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',clickCount:1});}
-async function button(selector){
+async function button(selector){ if (await reachTouch(evaluate, button, selector)) return;
  await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control');e.scrollIntoView({block:'nearest'})})()`);
  await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
  const p=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);

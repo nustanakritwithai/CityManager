@@ -8,6 +8,7 @@ import { createCity, step, serialize, deserialize, bulldoze, contributeOwnerCapi
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { captureEntityExplanation, buildLocalEntityExplanation } from '../src/entity-explanation-data.ts';
 import { buildLocalSignalReport } from '../src/signal-data.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const output = resolve(process.env.CITYMANAGER_ENTITY_ARTIFACTS || resolve(process.cwd(), '.test-output/entity-explanation'));
@@ -67,6 +68,7 @@ async function reveal(selector) {
   throw Error(`Too many hidden disclosure ancestors: ${selector}`);
 }
 async function button(selector) {
+  if (await reachTouch(evaluate, button, selector)) return;
   await reveal(selector); await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
   assert(p.w > 0 && p.h > 0 && !p.disabled, `Visible enabled ${selector}`);
