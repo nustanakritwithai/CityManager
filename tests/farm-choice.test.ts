@@ -1,7 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, deserialize, farmCrop, selectFarmCrop, serialize, step, zoneCell } from '../src/sim.ts';
+import { automaticFarmCrop, createCity, deserialize, farmCrop, selectFarmCrop, serialize, step, zoneCell } from '../src/sim.ts';
 import { CROPS } from '../src/goods.ts';
+
+test('automatic choice balances farm types and manual override can return to auto', () => {
+  const city = createCity(61025);
+  for (let i = 0; i < 60; i++) step(city);
+  const farm = city.firms.find(f => f.zone === 'F')!;
+  assert.ok(farm);
+  assert.equal(farm.cropMode, 'auto');
+  const stock = structuredClone(farm.crops);
+  const crop = farmCrop(city, farm);
+  const remaining = CROPS.filter(value => value !== crop);
+  assert.equal(automaticFarmCrop(city), remaining[0], 'new farms prefer an underrepresented crop');
+  assert.equal(selectFarmCrop(city, farm.id, crop).ok, true);
+  assert.equal(farm.cropMode, 'manual', 'selecting the current crop still opts out of automation');
+  const proposed = automaticFarmCrop(city, farm.id);
+  assert.equal(selectFarmCrop(city, farm.id, 'auto').ok, true);
+  assert.equal(farm.cropMode, 'auto');
+  assert.equal(farmCrop(city, farm), proposed);
+  assert.deepEqual(farm.crops, stock);
+  assert.deepEqual(deserialize(serialize(city)), city);
+  const malformed = JSON.parse(serialize(city));
+  malformed.firms.find((f: { id: number }) => f.id === farm.id).cropMode = 'unknown';
+  assert.throws(() => deserialize(JSON.stringify(malformed)), /corrupt/);
+});
 
 test('choose a farm crop while preserving stock and history across save and future ticks', () => {
   const city = createCity(61025);

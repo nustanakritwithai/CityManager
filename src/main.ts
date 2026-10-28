@@ -229,7 +229,7 @@ function ownerFinanceAction(action: 'contribute' | 'withdraw', firmId: number) {
   status(result.message); render();
   showOwnerFinanceResult(firmId, result.message);
 }
-function farmCropAction(firmId: number, crop: 'rice' | 'vegetables' | 'sugarcane') {
+function farmCropAction(firmId: number, crop: 'rice' | 'vegetables' | 'sugarcane' | 'auto') {
   const firm = city.firms.find(f => f.id === firmId && f.zone === 'F');
   if (!firm || route?.page !== 'place' || city.cells[route.cell]?.building !== firm.building) return;
   ownerDecisionSession.beforeExternal(city);

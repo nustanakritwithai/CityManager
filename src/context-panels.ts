@@ -2,7 +2,7 @@ import './context-panels.css';
 import './building-cards.css';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
-import { MONTH, access, departureDay, farmCrop, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
@@ -13,7 +13,7 @@ import { iconElement } from './ui-icons.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
 type HouseholdAction = (id: number, sourceBuildingId: number, sourceCell: number) => void;
-type FarmCropAction = (firmId: number, crop: typeof CROPS[number]) => void;
+type FarmCropAction = (firmId: number, crop: typeof CROPS[number] | 'auto') => void;
 type OwnerFinanceAction = (action: 'contribute' | 'withdraw', firmId: number) => void;
 let latestCity: City | null = null;
 const activityLimits = new Map<string, number>();
@@ -577,12 +577,13 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     if (firm) {
       const picker = section('พืชที่ผลิต'); picker.dataset.farmCropPicker = String(firm.id);
       const controls = el('div', 'farm-crop-choices');
+      const auto = el('button', 'cx-button', 'อัตโนมัติ'); auto.type = 'button'; auto.dataset.crop = 'auto'; auto.setAttribute('aria-pressed', String(farmCropMode(firm) === 'auto')); auto.disabled = !latestRequest?.onFarmCrop; auto.addEventListener('click', () => latestRequest?.onFarmCrop?.(firm.id, 'auto')); controls.append(auto);
       for (const crop of CROPS) {
         const button = el('button', 'cx-button', CROP_LABELS[crop]); button.type = 'button';
-        button.dataset.crop = crop; button.setAttribute('aria-pressed', String(farmCrop(city, firm) === crop));
+        button.dataset.crop = crop; button.setAttribute('aria-pressed', String(farmCropMode(firm) === 'manual' && farmCrop(city, firm) === crop));
         button.disabled = !latestRequest?.onFarmCrop; button.addEventListener('click', () => latestRequest?.onFarmCrop?.(firm.id, crop)); controls.append(button);
       }
-      picker.append(controls, el('p', 'cx-detail-note', `คงคลัง: ${CROPS.map(crop => `${CROP_LABELS[crop]} ${firm.crops[crop]}`).join(' · ')} ล็อต · พืชเดิมยังอยู่เมื่อเปลี่ยน`));
+      picker.append(el('p', 'cx-detail-note', `กำลังปลูก${CROP_LABELS[farmCrop(city, firm)]} · ${farmCropMode(firm) === 'auto' ? 'เลือกอัตโนมัติเมื่อฟาร์มเริ่มหรือเมื่อกดอัตโนมัติ' : 'ผู้เล่นเลือกเอง'}`), controls, el('p', 'cx-detail-note', `คงคลัง: ${CROPS.map(crop => `${CROP_LABELS[crop]} ${firm.crops[crop]}`).join(' · ')} ล็อต · พืชเดิมยังอยู่เมื่อเปลี่ยน`));
       output.push(cardSection(picker, 'crop-choice'));
     }
     output.push(cardGroup('พื้นที่เพาะปลูก', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง'), ...takeCards(parts, ['fertility'])], 'bc-plot'));

@@ -158,6 +158,10 @@ try {
   const chosen = await state(), chosenFarm = chosen.firms.find(f => f.id === farmFirm.id);
   assert.equal(chosenFarm.cropChoices.at(-1).crop, 'vegetables');
   assert.deepEqual(chosenFarm.crops, oldStock, 'Changing crop leaves existing inventory intact');
+  assert.equal(chosenFarm.cropMode, 'manual');
+  await button('#entity-content [data-farm-crop-picker] button[data-crop="auto"]');
+  await until(`document.querySelector('#entity-content [data-crop="auto"]').getAttribute('aria-pressed')==='true'`);
+  assert.equal((await state()).firms.find(f => f.id === farmFirm.id).cropMode, 'auto');
   assert.deepEqual(deserialize(serialize(chosen)), chosen, 'Farm choice survives save/load validation');
   checks.push('Farm crop selection changes future production and preserves existing stock');
   await load(later);
