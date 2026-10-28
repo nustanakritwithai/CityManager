@@ -332,6 +332,7 @@ export class CityView {
       this.onHover(this.pick(e.clientX, e.clientY));
     });
     c.addEventListener('pointerup', e => {
+      if (!this.pointers.has(e.pointerId)) return;
       this.dragStart = null;
       if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 7) this.down.moved = true;
       if (this.down && !this.down.moved && !this.down.multi && this.down.button === 0) {
@@ -342,7 +343,7 @@ export class CityView {
       }
       this.pointers.delete(e.pointerId); if (!this.pointers.size) this.down = null;
     });
-    c.addEventListener('pointercancel', e => { this.pointers.delete(e.pointerId); this.down = null; this.dragStart = null; this.onHover(null); });
+    c.addEventListener('pointercancel', e => { if (!this.pointers.has(e.pointerId)) return; this.pointers.delete(e.pointerId); this.down = null; this.dragStart = null; this.onHover(null); });
   }
   /** Swap every material under `entity` for a greyed clone (cached per source material). */
   private fade(entity: Entity) {

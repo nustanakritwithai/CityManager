@@ -51,3 +51,18 @@ test('open inspector blocks camera movement but allows selection on exposed map'
   const tap = harness(); tap.view.cameraBlocked = true; tap.event('pointerdown', 10, 10); tap.event('pointerup', 10, 10); assert.deepEqual(tap.calls.cell, [20]);
   const drag = harness(); drag.view.cameraBlocked = true; drag.event('pointerdown', 10, 10); drag.event('pointermove', 30, 10); drag.event('pointerup', 30, 10); assert.deepEqual(drag.calls.pan, []); assert.deepEqual(drag.calls.cell, []);
 });
+
+test('untracked releases and cancels cannot activate or disrupt a tracked gesture', () => {
+  for (const mode of ['select', 'R', 'bulldoze', 'road']) {
+    const h = harness(mode);
+    h.event('pointerdown', 10, 10);
+    if (mode === 'road') h.event('pointermove', 30, 10);
+    h.event('pointerup', mode === 'road' ? 30 : 10, 10, {pointerId: 99});
+    h.event('pointercancel', 30, 10, {pointerId: 99});
+    assert.deepEqual(h.calls.cell, [], mode + ' ignores stray release');
+    assert.deepEqual(h.calls.road, [], mode + ' ignores stray release');
+    h.event('pointerup', mode === 'road' ? 30 : 10, 10);
+    assert.deepEqual(h.calls.cell, mode === 'road' ? [] : [20], mode + ' retains tracked tap');
+    assert.deepEqual(h.calls.road, mode === 'road' ? [[20,40]] : [], mode + ' retains tracked road drag');
+  }
+});
