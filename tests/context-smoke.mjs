@@ -160,7 +160,7 @@ try {
   // Keep the native press active across real 10x simulation refreshes. A programmatic
   // click or a re-queried mouseup target would miss the replaced-button regression.
   for (const inputKind of ['mouse', 'mouse', 'touch']) {
-    if (inputKind === 'touch') await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
+    if (inputKind === 'touch') { await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 }); await until("document.documentElement.dataset.touchUi==='true'&&!!document.querySelector('#speed-cycle').getBoundingClientRect().width"); }
     await closePanel(); await button('[data-speed="10"]'); await button('#pause'); await place(homes[0]);
     assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'false');
     const selector = `#entity-content [data-household-id="${homeHousehold.id}"]`;
