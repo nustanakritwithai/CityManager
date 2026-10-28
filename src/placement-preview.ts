@@ -3,8 +3,9 @@
  * up-front checks in buildRoad / zoneCell / bulldoze (sim.ts) without mutating City;
  * tests compare every preview against the real action on a cloned city.
  */
-import { GATEWAY, ROAD_COST, SIZE, access, plantAt, roadPath, type City, type Zone } from './sim.ts';
+import { GATEWAY, ROAD_COST, SIZE, access, parkAt, plantAt, roadPath, type City, type Zone } from './sim.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
+import { MAX_PARKS, PARK } from './parks.ts';
 import { FERTILITY_THRESHOLD } from './agriculture.ts';
 
 export type PreviewCell = { cell: number; ok: boolean };
@@ -20,7 +21,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
   if (tool === 'road') {
     const path = start === null ? [hover] : roadPath(start, hover);
     if (!path.length) return null;
-    const blocked = new Set(path.filter(i => city.cells[i].building !== null));
+    const blocked = new Set(path.filter(i => city.cells[i].building !== null || plantAt(city, i) || parkAt(city, i)));
     const added = path.filter(i => !city.cells[i].road), cost = added.length * ROAD_COST;
     const affordable = cost <= treasury, ok = !blocked.size && affordable;
     const label = blocked.size ? 'มีอาคารขวางทาง ต้องรื้อก่อน'
@@ -30,7 +31,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
   }
   if (tool === 'R' || tool === 'C' || tool === 'I' || tool === 'F') {
     const cell = city.cells[hover], fertility = city.resources.fertility[hover];
-    const reason = cell.road ? 'ถนนวางโซนไม่ได้'
+    const reason = parkAt(city, hover) || plantAt(city, hover) ? 'มีสวนหรือโรงน้ำไฟอยู่ ต้องรื้อก่อน' : cell.road ? 'ถนนวางโซนไม่ได้'
       : cell.building !== null && cell.zone !== tool ? 'มีอาคารอื่นอยู่ ต้องรื้อก่อน'
       : null;
     const label = reason ?? (cell.zone === tool ? `เป็นโซน${ZONE_NAMES[tool]}อยู่แล้ว` : `วางโซน${ZONE_NAMES[tool]} · ไม่เสียเงิน${tool === 'F' ? ` · ดิน ${fertility}%` : ''}`);
@@ -38,17 +39,24 @@ export function previewPlacement(city: City, tool: string, start: number | null,
   }
   if (tool === 'power' || tool === 'water') {
     const cell = city.cells[hover], plant = PLANTS[tool], name = PLANT_LABELS[tool];
-    const reason = cell.road || cell.building !== null || plantAt(city, hover) ? 'วางโรงได้เฉพาะแปลงว่าง'
+    const reason = cell.road || cell.building !== null || plantAt(city, hover) || parkAt(city, hover) ? 'วางโรงได้เฉพาะแปลงว่าง'
       : !access(city, hover) ? 'ต้องมีถนนเชื่อมประตูเมืองข้างแปลง'
       : city.plants.length >= MAX_PLANTS ? `มีโรงครบ ${MAX_PLANTS} แห่งแล้ว`
       : plant.cost > treasury ? 'เงินคลังไม่พอ' : null;
     const label = reason ?? `${name} · ${credits(plant.cost)} ฿ · +${plant.capacity} หน่วย · บำรุง ${credits(plant.upkeep)} ฿/เดือน`;
     return { ok: !reason, cost: reason ? 0 : plant.cost, label, cells: [{ cell: hover, ok: !reason }] };
   }
+  if (tool === 'park') {
+    const cell = city.cells[hover];
+    const reason = cell.road || cell.zone !== null || cell.building !== null || plantAt(city, hover) || parkAt(city, hover) ? 'สวนต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน'
+      : city.parks.length >= MAX_PARKS || !Number.isSafeInteger(city.nextId) || city.nextId < 1 || city.nextId > Number.MAX_SAFE_INTEGER - 3 ? `สร้างสวนเพิ่มไม่ได้ (สูงสุด ${MAX_PARKS} แห่ง)`
+      : treasury < PARK.cost ? 'เงินคลังไม่พอ' : null;
+    return { ok: !reason, cost: reason ? 0 : PARK.cost, label: reason ?? `สวนสาธารณะ · ${credits(PARK.cost)} ฿ · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ${credits(PARK.upkeep)} ฿/เดือน`, cells: [{ cell: hover, ok: !reason }] };
+  }
   if (tool === 'bulldoze') {
-    const cell = city.cells[hover], target = cell.building !== null || cell.road || plantAt(city, hover) !== undefined, cost = target ? DEMOLITION_COST : 0;
+    const cell = city.cells[hover], target = cell.building !== null || cell.road || plantAt(city, hover) !== undefined || parkAt(city, hover) !== undefined, cost = target ? DEMOLITION_COST : 0;
     const reason = hover === GATEWAY ? 'ประตูเมืองรื้อไม่ได้' : cost > treasury ? 'เงินคลังไม่พอค่ารื้อ' : null;
-    const label = reason ?? (cell.building !== null ? `รื้ออาคาร · ${credits(cost)} ฿` : cell.road ? `รื้อถนน · ${credits(cost)} ฿` : plantAt(city, hover) ? `รื้อ${PLANT_LABELS[plantAt(city, hover)!.kind]} · ${credits(cost)} ฿` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
+    const label = reason ?? (parkAt(city, hover) ? `รื้อสวนสาธารณะ · ${credits(cost)} ฿` : cell.building !== null ? `รื้ออาคาร · ${credits(cost)} ฿` : cell.road ? `รื้อถนน · ${credits(cost)} ฿` : plantAt(city, hover) ? `รื้อ${PLANT_LABELS[plantAt(city, hover)!.kind]} · ${credits(cost)} ฿` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
     return { ok: !reason, cost, label, cells: [{ cell: hover, ok: !reason }] };
   }
   return null;
