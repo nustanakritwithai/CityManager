@@ -29,8 +29,8 @@ export function treasuryAtMonthEnds(c: City, months: number): number[] | null {
   return out;
 }
 
-export function cityGoals(c: City): CityGoals {
-  const since = c.tick - MONTH, s = summary(c);
+export function cityGoals(c: City, s = summary(c)): CityGoals {
+  const since = c.tick - MONTH;
   const recentCrops = c.cropLedger.filter(e => e.tick > since);
   const shops = new Set(c.firms.filter(isRetail).map(f => f.wallet));
   let wholesale = 0, sold = 0, imported = 0;

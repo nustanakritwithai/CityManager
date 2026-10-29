@@ -379,7 +379,7 @@ function render() {
   signalPanel?.sync();
   validateRoute(); const s = summary(city);
   // Before the pause button is drawn: reaching stage 5 while running pauses for the win screen.
-  const goals = cityGoals(city); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
+  const goals = cityGoals(city, s); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;
   $('#pause').textContent = paused ? '▶' : 'Ⅱ'; $('#pause').setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา'); $('#pause').title = paused ? 'เล่นต่อ (Space)' : 'หยุดเวลา (Space)'; $('#pause').setAttribute('aria-pressed', String(paused));
   ($('#pause') as HTMLButtonElement).disabled = ownerDecisionPanel?.isAutoPending() ?? false;
@@ -397,7 +397,7 @@ function render() {
   const placement = route ? null : previewPlacement(city, tool, start, hover);
   view.render(city, selected, preview, new Set(placement?.cells.filter(cell => !cell.ok).map(cell => cell.cell)));
   updateMapInfo(placement);
-  cityHud?.update(city, paused);
+  cityHud?.update(city, paused, s);
 }
 
 /** Tool-matched map layer, issue badges and the placement tip; recomputed at most twice a second while time runs. */
@@ -592,7 +592,7 @@ async function boot() {
     view.traffic.update(dt, !paused && !document.hidden);
     if (city.tick !== soundTick) {
       soundTick = city.tick;
-      traffic = Math.min(1, summary(city).population / 40);
+      traffic = Math.min(1, city.households.reduce((n, h) => n + h.members, 0) / 40);
       factories = Math.min(1, new Set(city.cropLedger.filter(e => e.kind === 'process' && e.tick === city.tick).map(e => e.from)).size / 3);
     }
     audio.updateAmbience({ ...visual.soundscape, traffic, factories, closeness: Math.min(1, Math.max(0, (130 - view.radius) / 100)) });

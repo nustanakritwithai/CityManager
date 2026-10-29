@@ -81,6 +81,8 @@ export class OwnerDecisionSession {
   private issue: string | null = null;
   private boundaryState = '';
   private pendingTicks: { fromTick: number; toTick: number; beforeHash: string } | null = null;
+  // Replay the pending range incrementally. It is never exposed to consumers or saved.
+  private replayShadow: City | null = null;
   private tickStart: { city: City; tick: number; hash: string } | null = null;
 
   constructor(city: City, options: { maxEvents?: number } = {}) {
@@ -109,7 +111,7 @@ export class OwnerDecisionSession {
     if (size + MAX_EVENT_BYTES + 32768 > MAX_JOURNAL_BYTES || checkpoint.processedIds.length > 4096) throw new Error('Owner checkpoint capacity unavailable.');
     this.checkpoint = checkpoint; this.events = []; this.stats = nextStats; this.retired = summaries.slice(-8);
     this.expectedHash = hash; this.expectedTick = city.tick; this.activeBytes = size; this.tickStart = null;
-    this.boundaryState = state; this.pendingTicks = null;
+    this.boundaryState = state; this.pendingTicks = null; this.replayShadow = null;
   }
   private reserve(city: City, count = 1): boolean {
     if (this.issue) return false;
@@ -137,15 +139,14 @@ export class OwnerDecisionSession {
       return true;
     } catch { this.fail('state-unavailable'); return false; }
   }
-  /** Seal a bounded owned tick range by replaying it before any owner action. */
+  /** Seal a bounded owned tick range after its independently replayed state has caught up. */
   private sealTicks(city: City): boolean {
     const range = this.pendingTicks;
     if (!range) return true;
     try {
       if (city.tick !== range.toTick || range.toTick <= range.fromTick || range.toTick - range.fromTick > MONTH) throw new Error();
-      const shadow = deserialize(this.boundaryState);
-      if (shadow.tick !== range.fromTick || ownerStateHash(shadow) !== range.beforeHash) throw new Error();
-      while (shadow.tick < range.toTick) step(shadow);
+      const shadow = this.replayShadow;
+      if (!shadow || shadow.tick !== range.toTick) throw new Error();
       const actual = serialize(city);
       if (serialize(shadow) !== actual) { this.fail('unnotified-state-change'); return false; }
       const hash = ownerStateHash(city);
@@ -153,14 +154,14 @@ export class OwnerDecisionSession {
         this.anchor(city, 'event-retention', true); return true;
       }
       this.append({ kind: 'step', fromTick: range.fromTick, tick: range.toTick, beforeHash: range.beforeHash, afterHash: hash });
-      this.boundaryState = actual; this.pendingTicks = null;
+      this.boundaryState = actual; this.pendingTicks = null; this.replayShadow = null;
       return true;
     } catch { this.fail('tick-replay-unavailable'); return false; }
   }
   reset(city: City): void {
     this.city = city; this.selectedMode = 'proposal'; this.events = []; this.retired = []; this.stats = emptyStats();
     this.pending.clear(); this.proposalSources.clear(); this.processed.clear(); this.nextSequence = 1; this.issue = null; this.checkpoint = null;
-    this.expectedTick = city.tick; this.expectedHash = 'unavailable'; this.pendingTicks = null; this.boundaryState = '';
+    this.expectedTick = city.tick; this.expectedHash = 'unavailable'; this.pendingTicks = null; this.replayShadow = null; this.boundaryState = '';
     this.monthlyTick = Math.floor(city.tick / MONTH) * MONTH;
     try { this.anchor(city, 'new-or-loaded-city', false); } catch { this.fail('checkpoint-unavailable'); }
   }
@@ -195,6 +196,18 @@ export class OwnerDecisionSession {
     const before = this.tickStart; this.tickStart = null;
     if (this.issue) return [];
     if (!before || before.city !== city || city.tick !== before.tick + 1) { this.selectedMode = 'proposal'; this.syncExternal(city, 'unpaired-tick-checkpoint'); return []; }
+    try {
+      // Starting from the same validated boundary as the former batch replay,
+      // execute each replayed day immediately rather than all at month end.
+      if (!this.pendingTicks) {
+        const shadow = deserialize(this.boundaryState);
+        if (shadow.tick !== before.tick || ownerStateHash(shadow) !== before.hash) throw new Error();
+        this.replayShadow = shadow;
+      }
+      if (!this.replayShadow || this.replayShadow.tick !== before.tick) throw new Error();
+      step(this.replayShadow);
+      if (this.replayShadow.tick !== city.tick) throw new Error();
+    } catch { this.fail('tick-replay-unavailable'); return []; }
     try {
       this.processed.clear();
       if (this.pendingTicks) this.pendingTicks.toTick = city.tick;

@@ -156,6 +156,21 @@ test('unpaired external ticks never masquerade as replayed steps or trigger auto
   assert.equal(session.exportJournal().checkpoint.reason, 'unpaired-tick-checkpoint'); replay(c, session);
 });
 
+test('incremental replay seals identical ordered ranges at exports and month boundaries', () => {
+  const c = createCity(61025), baseline = deserialize(serialize(c)), session = createOwnerDecisionSession(c);
+  session.setMode('off');
+  for (let day = 1; day <= 60; day++) {
+    session.advance(c); step(baseline);
+    if (day === 7 || day === 47 || day === 60) {
+      assert.equal(serialize(c), serialize(baseline));
+      replay(c, session);
+    }
+  }
+  const ranges = session.exportJournal().events.filter(e => e.kind === 'step').map(e => [e.fromTick, e.tick]);
+  assert.deepEqual(ranges, [[0, 7], [7, 30], [30, 47], [47, 60]]);
+  assert.equal(session.getStats().recording, true);
+});
+
 test('bounded tick ranges seal at decisions and reject unnotified external mutations before auto execution', () => {
   const c = town(), baseline = deserialize(serialize(c)), session = createOwnerDecisionSession(c); session.setMode('auto');
   session.advance(c); step(baseline);

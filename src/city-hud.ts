@@ -41,13 +41,13 @@ export class CityHud {
 
   get events(): readonly CityEvent[] { return this.log; }
 
-  update(city: City, paused: boolean) {
+  update(city: City, paused: boolean, current?: ReturnType<typeof summary>) {
     if (city !== this.city) { this.city = city; this.log = []; this.lastEvent = ''; this.key = ''; this.issueKey = ''; }
     if (city.lastEvent && city.lastEvent !== this.lastEvent) { this.lastEvent = city.lastEvent; this.log = appendEvent(this.log, city.tick, city.lastEvent); this.renderLog(); }
     const key = `${city.tick}:${paused}:${city.ledger.length}:${city.buildings.length}:${city.households.length}`;
     if (key === this.key) return;
     this.key = key;
-    const s = summary(city), o = cityOverview(city), u = utilityStatus(city), untilPay = MONTH - city.tick % MONTH;
+    const s = current ?? summary(city), o = cityOverview(city, s), u = utilityStatus(city), untilPay = MONTH - city.tick % MONTH;
     const vacancies = s.openJobs, issues = buildingIssues(city);
     this.renderIssues(city, issues);
     this.strip.dataset.paused = String(paused);
