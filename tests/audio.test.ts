@@ -39,10 +39,16 @@ test('a load or a new city (time going back) plays nothing', () => {
   assert.deepEqual(cityCues(cueSnapshot(c), c), [], 'no time passed');
 });
 
-test('the limiter keeps 10× speed calm but never drops a jingle', () => {
+test('the limiter keeps 10× speed calm but never drops a jingle or a month coin', () => {
   const limiter = new CueLimiter(3, 900);
   assert.deepEqual(limiter.admit(['ev-build-home', 'ev-month', 'ev-arrival', 'ev-shop'], 0), ['ev-build-home', 'ev-month', 'ev-arrival']);
   assert.deepEqual(limiter.admit(['ev-build-home', 'jingle-level'], 100), ['jingle-level'], 'same cue within the gap and a full second are held back');
   assert.deepEqual(limiter.admit(['ev-build-home'], 1200), ['ev-build-home']);
   assert.deepEqual(limiter.admit(['jingle-win'], 1210), ['jingle-win']);
+  const busy = new CueLimiter(3, 900);
+  assert.deepEqual(busy.admit(['ev-build-home', 'ev-arrival', 'ev-issue'], 0), ['ev-build-home', 'ev-arrival', 'ev-issue']);
+  assert.deepEqual(busy.admit(['ev-month'], 100), ['ev-month'], 'month end still plays when the second is already full');
+  assert.deepEqual(busy.admit(['ev-month'], 200), [], 'the same coin still waits out its gap');
+  busy.reset();
+  assert.deepEqual(busy.admit(['ev-month'], 200), ['ev-month'], 'a loaded city starts with a clear limiter');
 });
