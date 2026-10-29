@@ -58,3 +58,8 @@ test('corrupt primary recovery preserves the valid legacy-backup pointer',()=>{
 test('primary quota preserves current bytes and existing recovery pointer',()=>{
  const c=fresh(),s=memory(),old=snapshot(c);s.setItem(SAVE_KEY,old);s.setItem('citymanager.backup.latest','citymanager.backup.v1');const g=createSaveGuard({...s,setItem:(k,v)=>{if(k===SAVE_KEY)throw Error('primary quota');s.setItem(k,v);}});g.acceptLoaded(old);step(c);assert.throws(()=>g.write(snapshot(c),null),/primary quota/);assert.equal(s.getItem(SAVE_KEY),old);assert.equal(s.getItem('citymanager.backup.latest'),'citymanager.backup.v1');
 });
+
+test('stale-work recovery is separate from the legacy migration backup selection',()=>{
+ const s=memory(),c=fresh(),g=createSaveGuard(s);g.write(snapshot(c),null);s.setItem('citymanager.backup.latest','citymanager.backup.v1');const other=snapshot(createCity(2));s.setItem(SAVE_KEY,other);
+ const work=snapshot(c);assert.throws(()=>g.write(work,null),/อีกแท็บ/);assert.equal(s.getItem('citymanager.backup.latest'),'citymanager.backup.v1');assert.equal(readStoredCity(s,'conflict')?.raw,work);assert.equal(s.getItem(SAVE_KEY),other);
+});

@@ -1,6 +1,6 @@
 import {deserializeParkSession} from './park-runtime.ts';
 /** Existing formats are unchanged. The new checkpoint is independent of old tabs. */
-import {readStoredCity,saveStoredCity,SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP,saveConflictBackupKeys,LATEST_BACKUP_KEY} from './save-storage.ts';
+import {readStoredCity,saveStoredCity,SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP,saveConflictBackupKeys,LATEST_BACKUP_KEY,SAVE_CONFLICT_LATEST_KEY} from './save-storage.ts';
 type Store=Pick<Storage,'getItem'|'setItem'>;
 export function createSaveGuard(storage:Store){
  let expected:string|null=null,checkpoint:string|null=null,armed=false,replacement=false,generation=0;let pendingArchive:string[]=[];
@@ -10,7 +10,7 @@ export function createSaveGuard(storage:Store){
   const keys=saveConflictBackupKeys();let key=keys.find(k=>storage.getItem(k)===raw);
   if(!key){key=keys.find(k=>storage.getItem(k)===null);if(!key)throw Error('สำเนากู้คืนเต็ม กรุณาส่งออกไฟล์ก่อน เซฟเดิมยังอยู่');storage.setItem(key,raw);}
   let valid=true;try{deserializeParkSession(raw);}catch{valid=false;}
-  if(valid&&publishPointer)storage.setItem(LATEST_BACKUP_KEY,key);return valid?key:undefined;
+  if(valid&&publishPointer)storage.setItem(SAVE_CONFLICT_LATEST_KEY,key);return valid?key:undefined;
  };
  const preserveOriginal=()=>{const current=storage.getItem(SAVE_KEY);if(current!==null&&storage.getItem(PRE_AUTOSAVE_BACKUP)===null)storage.setItem(PRE_AUTOSAVE_BACKUP,current);};
  return {
@@ -46,7 +46,7 @@ export function createSaveGuard(storage:Store){
    storage.setItem(SAVE_KEY,staged.get(SAVE_KEY)!);expected=storage.getItem(SAVE_KEY);replacement=false;pendingArchive=[];
    // Supplemental pointer publication is not the commit point. Its raw backup
    // already exists; a metadata quota cannot undo a successful primary write.
-   if(!latest&&pointer)try{storage.setItem(LATEST_BACKUP_KEY,pointer);}catch{/* primary and immutable copy remain durable */}
+   if(pointer)try{storage.setItem(SAVE_CONFLICT_LATEST_KEY,pointer);}catch{/* primary and immutable copy remain durable */}
   },
  };
 }

@@ -1,3 +1,4 @@
+export const SAVE_CONFLICT_LATEST_KEY='citymanager.backup.save-conflict.latest';
 export const AUTOSAVE_CHECKPOINT_KEY='citymanager.checkpoint.latest';
 export const PRE_AUTOSAVE_BACKUP='citymanager.backup.before-autosave';
 export const saveConflictBackupKeys=()=>Array.from({length:8},(_,i)=>`citymanager.backup.save-conflict.${i}`);
@@ -47,7 +48,7 @@ const factoryBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i
 const foodBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${FOOD_BACKUP_KEY}.${i}` : FOOD_BACKUP_KEY);
 type Reader = Pick<Storage, 'getItem'>;
 type Writer = Pick<Storage, 'getItem' | 'setItem'>;
-export type SaveSource = 'current' | 'growth' | 'commercial' | 'agriculture' | 'worker' | 'household' | 'legacy' | 'backup' | 'checkpoint';
+export type SaveSource = 'current' | 'growth' | 'commercial' | 'agriculture' | 'worker' | 'household' | 'legacy' | 'backup' | 'checkpoint' | 'conflict';
 const backupKey = (version: 1 | 2 | 3 | 4 | 5 | 6, i: number) => {
   const base = version === 1 ? LEGACY_BACKUP_KEY : version === 2 ? HOUSEHOLD_BACKUP_KEY : version === 3 ? WORKER_BACKUP_KEY : version === 4 ? AGRICULTURE_BACKUP_KEY : version === 5 ? COMMERCIAL_BACKUP_KEY : GROWTH_BACKUP_KEY;
   return i === 0 ? base : `${base}.${i}`;
@@ -57,6 +58,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   let keys: string[];
   if (source === 'current') keys = [SAVE_KEY, GROWTH_SAVE_KEY, COMMERCIAL_SAVE_KEY, AGRICULTURE_SAVE_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY];
   else if (source === 'checkpoint') keys=[AUTOSAVE_CHECKPOINT_KEY];
+  else if (source === 'conflict') {keys=saveConflictBackupKeys();const latest=storage.getItem(SAVE_CONFLICT_LATEST_KEY);if(latest&&keys.includes(latest))keys=[latest,...keys.filter(key=>key!==latest)];}
   else if (source === 'growth') keys = [GROWTH_SAVE_KEY];
   else if (source === 'commercial') keys = [COMMERCIAL_SAVE_KEY];
   else if (source === 'agriculture') keys = [AGRICULTURE_SAVE_KEY];
