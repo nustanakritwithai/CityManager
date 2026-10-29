@@ -5,14 +5,23 @@ import { bulldoze, deserialize, serialize } from '../src/sim.ts';
 // CDP validates maxTouchPoints even when disabled; zero is not an accepted value.
 export const selectorTouchEmulation = touch => touch ? { enabled: true, maxTouchPoints: 2 } : { enabled: false };
 
+// Native button activation needs Enter's character event, not only a key name.
+// Match Chromium automation: character keys use keyDown + text; others use rawKeyDown.
+export function selectorKeyEvents(value) {
+  const text = value === 'Enter' ? '\r' : value.length === 1 ? value : '';
+  const code = value === ' ' ? 'Space' : value.length === 1 ? `Key${value.toUpperCase()}` : value;
+  const windowsVirtualKeyCode = ({ Escape: 27, Enter: 13, ' ': 32 })[value] ?? value.toUpperCase().charCodeAt(0);
+  const key = { key: value, code, windowsVirtualKeyCode };
+  return [{ ...key, type: text ? 'keyDown' : 'rawKeyDown', text, unmodifiedText: text }, { ...key, type: 'keyUp' }];
+}
+
 export async function checkSelectMenu({ evaluate, button, click, send, screenshot, load, close, paints, fixture, cell, setTouch }) {
   const checks = [], layouts = [];
   const state = () => evaluate('window.cityManager.snapshot()');
   const open = () => evaluate('!document.querySelector("#select-submenu").hidden');
   const selected = tool => evaluate(`document.querySelector('[data-tool="${tool}"]').getAttribute('aria-pressed')==='true'`);
   const key = async value => {
-    const codes = { Escape: 27, Enter: 13, ' ': 32 };
-    for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value.length === 1 ? `Key${value.toUpperCase()}` : value, windowsVirtualKeyCode: codes[value] });
+    for (const event of selectorKeyEvents(value)) await send('Input.dispatchKeyEvent', event);
     await paints();
   };
   const viewport = async (width, height, touch, screenWidth = width) => {
@@ -49,8 +58,11 @@ export async function checkSelectMenu({ evaluate, button, click, send, screensho
   checks.push('Opening/repeating/outside/cancel/Escape/other-tool menu actions are read-only and menus exclude each other');
 
   // Keyboard activation uses native Enter, then returns focus on Escape without arming.
-  await evaluate('document.querySelector("[data-tool=select]").focus()'); await key('Enter');
-  assert.equal(await open(), true); assert.equal(await evaluate('document.activeElement.dataset.tool'), 'bulldoze');
+  await evaluate(`(()=>{window.__selectorKeys=[];window.__selectorRecord=e=>window.__selectorKeys.push({type:e.type,key:e.key,tool:e.target.dataset?.tool,trusted:e.isTrusted,detail:e.detail});for(const type of ['keydown','keypress','keyup','click'])document.addEventListener(type,window.__selectorRecord,true);document.querySelector('[data-tool=select]').focus()})()`);
+  await key('Enter');
+  const keyboard = await evaluate(`(()=>{for(const type of ['keydown','keypress','keyup','click'])document.removeEventListener(type,window.__selectorRecord,true);const result={events:window.__selectorKeys,open:!document.querySelector('#select-submenu').hidden,focus:document.activeElement.dataset.tool};delete window.__selectorKeys;delete window.__selectorRecord;return result})()`);
+  assert.ok(keyboard.events.some(event => event.type === 'click' && event.tool === 'select' && event.trusted && event.detail === 0), JSON.stringify(keyboard));
+  assert.equal(keyboard.open, true, JSON.stringify(keyboard)); assert.equal(keyboard.focus, 'bulldoze', JSON.stringify(keyboard));
   assert.equal(await selected('select'), true); await key('Escape');
   assert.equal(await evaluate('document.activeElement.dataset.tool'), 'select'); assert.equal(await state(), baseline);
   for (const exit of ['Escape', 'v', 'p']) {

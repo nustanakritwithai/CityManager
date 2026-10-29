@@ -125,3 +125,14 @@ test('integration retains shortcuts and command dispatch; demolition has no stan
   assert.match(main, /selectMenu\?\.close\(\); selectMenu\?\.sync\(next\)/);
   assert.match(main, /if \(selectMenu\?\.isOpen\(\)\) \{ selectMenu.close\(true\); return; \}/);
 });
+
+test('selector browser input delivers native Enter character activation and unchanged shortcut keys', async () => {
+  const { selectorKeyEvents } = await import('./select-menu-browser.mjs');
+  assert.deepEqual(selectorKeyEvents('Enter'), [
+    { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, type: 'keyDown', text: '\r', unmodifiedText: '\r' },
+    { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, type: 'keyUp' },
+  ]);
+  assert.equal(selectorKeyEvents('Escape')[0].type, 'rawKeyDown');
+  assert.deepEqual(selectorKeyEvents('b')[0], { key: 'b', code: 'KeyB', windowsVirtualKeyCode: 66, type: 'keyDown', text: 'b', unmodifiedText: 'b' });
+  assert.equal(selectorKeyEvents(' ')[0].code, 'Space');
+});
