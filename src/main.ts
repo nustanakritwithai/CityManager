@@ -581,12 +581,12 @@ async function boot() {
   let autosaveFailed = false;
   const autosave = createAutosave({ save: writeLocalSave, tick: () => city.tick, onResult: r => {
     saveBadge.textContent = describeAutosave(r); saveBadge.style.color = r.ok ? '' : '#e5484d';
-    if (!r.ok) { console.error('Autosave failed', r.message); if (!autosaveFailed) { sound('ui-error'); status(describeAutosave(r)); } }
+    if (!r.ok) { if (!autosaveFailed) { sound('ui-error'); status(describeAutosave(r)); } }
     autosaveFailed = !r.ok;
   } });
   installAutosave(document, window, autosave, () => document.hidden);
   $('#save').addEventListener('click', async () => {
-    try { await writeLocalSave(); autosave.markSaved(city.tick); saveBadge.textContent = describeAutosave({ ok: true, at: Date.now() }); saveBadge.style.color = ''; sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { console.error(error); sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
+    try { await writeLocalSave(); autosave.markSaved(city.tick); saveBadge.textContent = describeAutosave({ ok: true, at: Date.now() }); saveBadge.style.color = ''; sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
   });
   const loadStored = async (source: SaveSource) => {
     try {
