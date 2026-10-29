@@ -53,7 +53,7 @@ import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
 import { advancedEnabled, storeAdvanced } from './advanced.ts';
 import { AudioEngine, type EffectName } from './audio-engine.ts';
 import { installAudioPanel } from './audio-panel.ts';
-import { CueLimiter, cityCues, cueSnapshot } from './audio-cues.ts';
+import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from './audio-cues.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
@@ -664,7 +664,8 @@ async function boot() {
     audio.updateAmbience({ ...visual.soundscape, traffic, factories, closeness: Math.min(1, Math.max(0, (130 - view.radius) / 100)) });
     if (paused || document.hidden) return;
     const minutes = Math.min(dt, 0.25) * speed * 1440;
-    const before = parkRuntime.activity.minute + minutes >= 1440 ? cueSnapshot(city) : null;
+    const tickBefore = city.tick;
+    const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
     let days = 0;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
     const frameStarted = performance.now(), frameDeadline = frameStarted + 8;
@@ -676,7 +677,8 @@ async function boot() {
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
-    if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city), performance.now())) sound(cue);
+    if (monthEnded(tickBefore, city.tick)) sound('ev-month');
+    if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
   });

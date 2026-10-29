@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AUDIO_DEFAULTS, AUDIO_KEY, busGain, loadAudioSettings, parseAudioSettings, saveAudioSettings } from '../src/audio-settings.ts';
-import { CueLimiter, cityCues, cueSnapshot } from '../src/audio-cues.ts';
+import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from '../src/audio-cues.ts';
 import { MONTH, createCity, serialize, step } from '../src/sim.ts';
 import { keepSupplied } from './plants.ts';
 
@@ -37,6 +37,15 @@ test('a load or a new city (time going back) plays nothing', () => {
   const c = createCity(61025); for (let d = 0; d < 90; d++) step(c);
   assert.deepEqual(cityCues(cueSnapshot(c), createCity(61025)), []);
   assert.deepEqual(cityCues(cueSnapshot(c), c), [], 'no time passed');
+});
+
+test('a leftover minute fraction still counts as the day boundary, and the month coin follows the tick', () => {
+  assert.equal(dayBoundaryReached(1439, 0.8, 0.3), true);
+  assert.equal(dayBoundaryReached(1439, 0, 0.4), false);
+  assert.equal(monthEnded(59, 60), true);
+  assert.equal(monthEnded(58, 61), true);
+  assert.equal(monthEnded(60, 61), false);
+  assert.equal(monthEnded(61, 58), false);
 });
 
 test('the limiter keeps 10× speed calm but never drops a jingle or a month coin', () => {
