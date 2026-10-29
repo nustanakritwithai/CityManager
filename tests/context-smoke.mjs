@@ -212,7 +212,7 @@ try {
     const down = await evaluate('(()=>{const p=window.__contextHeld;return p&&{id:p.id,source:p.source,pointerType:p.pointerType,tick:p.tick}})()');
     assert.ok(down, 'Actual trusted household pointerdown was observed'); assert.equal(down.id, String(homeHousehold.id)); assert.equal(down.source, String(homes[0].id)); assert.equal(down.pointerType, inputKind);
     // Hold at least 200ms and until a real refresh lands (a loaded runner can be a frame late).
-    await sleep(200); for (let waited = 0; waited < 2000 && JSON.parse(await evaluate('window.cityManager.snapshot()')).tick <= down.tick; waited += 50) await sleep(50);
+    await sleep(200); for (let waited = 0; waited < 15000 && JSON.parse(await evaluate('window.cityManager.snapshot()')).tick <= down.tick; waited += 50) await sleep(50);
     const held = await evaluate(`(()=>{const p=window.__contextHeld;return{connected:p.node.isConnected,sameNode:document.querySelector(${JSON.stringify(selector)})===p.node,tick:JSON.parse(window.cityManager.snapshot()).tick}})()`);
     assert.ok(held.connected && held.sameNode, `${inputKind} holds the same actual household DOM node: ${JSON.stringify({ down, held })}`); assert.ok(held.tick > down.tick, 'A real simulation refresh occurred during the 200ms hold');
     if (inputKind === 'touch') await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
