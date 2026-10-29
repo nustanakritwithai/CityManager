@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, isRetail, firmCapacity, housingCapacity, farmCrop } from '../src/sim.ts';
+import { createCity, step, serialize, isRetail, firmCapacity, housingCapacity, farmCrop, homeOccupancy, HOUSING_OCCUPANCY_GATE_LEVEL } from '../src/sim.ts';
 import { farmStockCapacity } from '../src/agriculture.ts';
 import { factoryCropCapacity } from '../src/factory-levels.ts';
 import { retailCapacity } from '../src/retail-capacity.ts';
@@ -38,6 +38,10 @@ const findUpgrade = (day, zone, predicate = () => true) => {
 const home = findUpgrade(120, 'R'), factory = findUpgrade(120, 'I'), farm = findUpgrade(120, 'F'), shop = findUpgrade(180, 'C', f => f && isRetail(f));
 assert.deepEqual([home.previous.level,home.building.level,factory.previous.level,factory.building.level,farm.previous.level,farm.building.level,shop.previous.level,shop.building.level], [3,4,3,4,3,4,4,5]);
 assert.deepEqual(housingCapacity(home.building), { households: 5, persons: 20 });
+// Occupancy gate: from level 3 a house only rises after every household slot is taken.
+assert.equal(HOUSING_OCCUPANCY_GATE_LEVEL, 3);
+{ const { before } = snapshots.get(120); assert.ok(home.previous.level >= HOUSING_OCCUPANCY_GATE_LEVEL);
+  assert.equal(homeOccupancy(before, home.previous.id).households, housingCapacity(home.previous).households, 'House 3->4 upgrade needs full household occupancy first'); }
 assert.equal(firmCapacity(factory.building), 7); assert.equal(factoryCropCapacity(factory.building.level), 28);
 assert.equal(firmCapacity(farm.building), 4); assert.equal(farmStockCapacity(farm.building.level), 120);
 assert.equal(firmCapacity(shop.building), 4); assert.equal(retailCapacity(shop.building.level).stock, 48);
