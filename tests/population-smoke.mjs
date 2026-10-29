@@ -1,3 +1,4 @@
+import { populationFixture } from './population-capacity-fixture.ts';
 import { assertSavedCity } from './park-session-assertions.mjs';
 // Household/housing acceptance on worker schema v6. Root runs suites sequentially.
 // The browser receives only strict-valid public-simulation fixtures via real Load.
@@ -91,7 +92,7 @@ async function send(method, params = {}) {
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out: ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===21&&c.rulesVersion==="chain-16"&&c.populationCapacityVersion===1)))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) { if (await reachTouch(evaluate, button, selector)) return;
@@ -221,6 +222,16 @@ try {
     }
     await key('Escape'); assert.notEqual((await route()).open, 'true');
   }
+  // Synthetic high-density fixture uses explicit accounts/contracts, not fabricated gameplay growth.
+  const high = populationFixture(334, true); step(high); deserialize(serialize(high));
+  await viewport({width:390,height:844,screenWidth:390,screenHeight:844,mobile:true});
+  await load(serialize(high)); await cityMetrics(high); await layout();
+  await page('game'); await button('#save'); await assertSavedCity(evaluate,high);
+  await button('#load'); assert.deepEqual(await state(),high);
+  await cityMetrics(high); await screenshot('phone-population-1000.png');
+  assert.ok(summary(high).population>=1002); assert.ok(high.employment.length>256);
+  checks.push('Synthetic 1000+ actual people and 256+ job allocations load, show exact city metrics and round-trip through real mobile Save/Load; no natural-growth or FPS claim');
+
   // Restore the intended v4 test city after recovery-button layout exercises.
   await load(fixtureRaw); assert.deepEqual(await state(), fixture); assert.deepEqual(errors, []);
   const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 41); assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }

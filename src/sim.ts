@@ -15,6 +15,8 @@ import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPP
 export type { Plant, UtilityKind } from './utilities.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
+/** Structural save bound: 192 residential parcels at the largest 32-household tier. */
+export const MAX_CITY_HOUSEHOLDS = 192 * Math.max(...HOUSING_LEVELS.map(level => level.households));
 export const GATEWAY = 12 * SIZE;
 export const MONTH = 30;
 export const ROAD_COST = 5_000;
@@ -36,6 +38,7 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
  */
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = {
+  populationCapacityVersion?: 1;
   roadTopology?: RoadTopology;
   foodDemandStartTick?: number;
   factoryProgressionStartTick?: number;
@@ -581,7 +584,7 @@ function summarize(c: City) {
     return n + Math.max(0, Math.min(room.households - used.households, Math.floor((room.persons - used.persons) / 3)));
   }, 0);
   const homeless = c.households.filter(h => h.home === null).length;
-  const incoming = Math.min(128 - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2)));
+  const incoming = Math.min(MAX_CITY_HOUSEHOLDS - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2)));
   // Open jobs people can take now (a seat and a wage the firm can pay) vs seats a firm cannot fund.
   const seats = c.firms.filter(f => !isMarket(f) && access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + Math.max(0, capacity(building(c, f.building)) - firmWorkerCount(c, f.id)), 0);
   const farms = c.firms.filter(f => f.zone === 'F');
@@ -938,7 +941,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (!homeSupplied(c, b)) reasons.push('บ้านนี้ต้องมีน้ำและไฟ และเครือข่ายต้องเหลืออย่างละ 1 หน่วยต่อครัวเรือนใหม่ สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน');
   if (used.households >= room.households || used.persons >= room.persons) reasons.push('ความจุครัวเรือนหรือจำนวนคนเต็มแล้ว การเพิ่มระดับเพิ่มเฉพาะความจุ');
   if (c.households.some(h => h.home === null)) reasons.push('ครัวเรือนที่ไร้บ้านจะได้รับการจัดบ้านก่อนรับครัวเรือนใหม่');
-  if (c.households.length >= 128) reasons.push('ถึงขีดจำกัดเมือง 128 ครัวเรือนแล้ว แม้อาคารยังมีพื้นที่ว่าง');
+  if (c.households.length >= MAX_CITY_HOUSEHOLDS) reasons.push('ถึงความจุสูงสุดตามจำนวนแปลงและระดับที่อยู่อาศัยของแผนที่แล้ว');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
@@ -947,7 +950,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
 }
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
-  if (c.households.length >= 128 || c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
+  if (c.households.length >= MAX_CITY_HOUSEHOLDS || c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
   const facts = admissionFacts(c);
   if (!facts.bootstrap && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
   const family = facts.vacancies >= 2 && facts.existingUnemployed === 0;
@@ -963,6 +966,7 @@ function admitHousehold(c: City) {
   // in a currently funded role. Counts are disjoint; no per-person agents exist.
   const workerSkills: WorkerSkills = { general: 1, manufacturing: family && facts.vacanciesByZone.I > 0 ? 1 : 0, retail: family && facts.vacanciesByZone.I === 0 ? 1 : 0 };
   c.households.push({ id, home: home.id, members, workforce, dependents: family ? 1 : 0, workerSkills, skillSource: 'arrival-profile', profile: family ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
+  if (c.households.length > 128) c.populationCapacityVersion = 1;
   c.migration.arrivals++;
   c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}`;
 }
@@ -1102,7 +1106,8 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
 }
 export function serialize(c: City, market?: City['market']): string {
   if (c.roadTopology) validateRoadTopology(c, c.roadTopology);
-  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: c.roadTopology ? 20 : 19, rulesVersion: c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
+  const expanded = c.populationCapacityVersion === 1 || c.households.length > 128 || c.employment.length > 256;
+  const json = JSON.stringify({ ...c, ...(expanded ? {populationCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1147,15 +1152,15 @@ function migrateV8(old: City): City {
 }
 const RULES = { 7: 'chain-2', 8: 'chain-3', 9: 'chain-4' } as const;
 /** Every rule of a chain-2 (v7) save; chain-3 (v8) also reconciles typed stock, chain-4 (v9) its plants. */
-function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false, extendedFactories = false, retailMaxLevel = RETAIL_LEGACY_MAX_LEVEL, withFarmLevels = false): City {
+function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false, extendedFactories = false, retailMaxLevel = RETAIL_LEGACY_MAX_LEVEL, withFarmLevels = false, expandedPopulation = false): City {
   const typed = version >= 8;
   const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${version} / ${RULES[version]}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
   if (!c || (c.version as number) !== version || (c.rulesVersion as string) !== RULES[version] || !int(c.growthStartTick) || c.growthStartTick > c.tick || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
   if (withParks ? !Array.isArray(c.parks) || c.parks.length > MAX_PARKS : c.parks !== undefined && (!Array.isArray(c.parks) || c.parks.length !== 0)) fail();
   if (!withParks) c.parks = [];
-  if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > 192 || !Array.isArray(c.households) || c.households.length > 128 || !Array.isArray(c.firms) || c.firms.length > 64) fail();
-  if (!c.migration || !int(c.migration.arrivals) || !int(c.migration.legacyHouseholds) || !Array.isArray(c.employment) || c.employment.length > 256) fail();
+  if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > 192 || !Array.isArray(c.households) || c.households.length > (expandedPopulation ? MAX_CITY_HOUSEHOLDS : 128) || !Array.isArray(c.firms) || c.firms.length > 64) fail();
+  if (!c.migration || !int(c.migration.arrivals) || !int(c.migration.legacyHouseholds) || !Array.isArray(c.employment) || c.employment.length > (expandedPopulation ? MAX_CITY_HOUSEHOLDS * 2 : 256)) fail();
   if (!Array.isArray(c.ownerLabor) || c.ownerLabor.length > 64 || c.ownerLabor.some(e => !e || !int(e.householdId, 1) || !int(e.firmId, 1) || e.workers !== 1 || !['general', 'retail'].includes(e.skill)) || !Array.isArray(c.cropLedger) || !c.crops || !['harvested', 'processed', 'consumed', 'writtenOff'].every(k => int(c.crops[k as keyof typeof c.crops])) || !int(c.agricultureStartTick) || c.agricultureStartTick > c.tick || !isCanonicalResourceMap(c.resources, c.seed)) fail();
   const legacyUtilities = c.utilities as unknown as { power: unknown; water: unknown } | undefined, outside = c.utilities?.outside;
   if (version < 9 ? !legacyUtilities || typeof legacyUtilities.power !== 'boolean' || typeof legacyUtilities.water !== 'boolean'
@@ -1368,17 +1373,27 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
 }
 
 /** Validate old saves before migration; never advance time, RNG, money or admission history on load. */
-function deserializeVersioned(json: string): City {
+function deserializeVersioned(json: string, expandedPopulation = false): City {
   if (typeof json !== 'string' || json.length > 12_000_000) throw new Error('Save is too large or invalid.');
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 21) {
+    const envelope = parsed as Record<string, unknown>;
+    if (envelope.rulesVersion !== 'chain-16' || envelope.populationCapacityVersion !== 1) throw Error('Invalid population save version');
+    const {populationCapacityVersion, ...base} = envelope;
+    const hasRoads = 'roadTopology' in base;
+    const city = deserializeVersioned(JSON.stringify({...base, version: hasRoads ? 20 : 19, rulesVersion: hasRoads ? 'chain-15' : 'chain-14'}), true);
+    city.populationCapacityVersion = 1;
+    return city;
+  }
+  if (parsed && typeof parsed === 'object' && 'populationCapacityVersion' in parsed) throw Error('Expanded population requires save v21');
   if (version === 20) {
     const envelope = parsed as Record<string, unknown>;
     if(envelope.rulesVersion !== 'chain-15') throw Error('Invalid road save version');
     const {roadTopology,...base}=envelope;
-    const city=deserializeVersioned(JSON.stringify({...base,version:19,rulesVersion:'chain-14'}));
+    const city=deserializeVersioned(JSON.stringify({...base,version:19,rulesVersion:'chain-14'}), expandedPopulation);
     validateRoadTopology(city,roadTopology); city.roadTopology=roadTopology; return city;
   }
   if(parsed && typeof parsed==='object' && 'roadTopology' in parsed) throw Error('Road topology requires save v20');
@@ -1392,7 +1407,7 @@ function deserializeVersioned(json: string): City {
     if (envelope.rulesVersion !== (version === 19 ? 'chain-14' : version === 18 ? 'chain-13' : version === 17 ? 'chain-12' : version === 16 ? 'chain-11' : version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
-    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version >= 15, version >= 16, version >= 17, version >= 18 ? RETAIL_MAX_LEVEL : RETAIL_LEGACY_MAX_LEVEL, version === 19);
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version >= 15, version >= 16, version >= 17, version >= 18 ? RETAIL_MAX_LEVEL : RETAIL_LEGACY_MAX_LEVEL, version === 19, expandedPopulation);
     if (market) loaded.market = market;
     return loaded;
   }
