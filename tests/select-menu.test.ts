@@ -4,6 +4,12 @@ import { readFileSync } from 'node:fs';
 import { installSelectMenu } from '../src/select-menu.ts';
 import { installToolMenu } from '../src/tool-menu.ts';
 import { createCity, serialize } from '../src/sim.ts';
+import { selectorTouchEmulation } from './select-menu-browser.mjs';
+
+test('browser harness omits an invalid zero touch-point count when returning to desktop', () => {
+  assert.deepEqual(selectorTouchEmulation(false), { enabled: false });
+  assert.deepEqual(selectorTouchEmulation(true), { enabled: true, maxTouchPoints: 2 });
+});
 
 // Minimal DOM boundary, not a browser/layout substitute. Exercises the actual menu listeners.
 class Element {

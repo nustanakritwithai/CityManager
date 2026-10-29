@@ -2,6 +2,9 @@
 import assert from 'node:assert/strict';
 import { bulldoze, deserialize, serialize } from '../src/sim.ts';
 
+// CDP validates maxTouchPoints even when disabled; zero is not an accepted value.
+export const selectorTouchEmulation = touch => touch ? { enabled: true, maxTouchPoints: 2 } : { enabled: false };
+
 export async function checkSelectMenu({ evaluate, button, click, send, screenshot, load, close, paints, fixture, cell, setTouch }) {
   const checks = [], layouts = [];
   const state = () => evaluate('window.cityManager.snapshot()');
@@ -14,7 +17,7 @@ export async function checkSelectMenu({ evaluate, button, click, send, screensho
   };
   const viewport = async (width, height, touch, screenWidth = width) => {
     await close(); await send('Emulation.setDeviceMetricsOverride', { width, height, screenWidth, screenHeight: height, deviceScaleFactor: 1, mobile: touch });
-    await send('Emulation.setTouchEmulationEnabled', { enabled: touch, maxTouchPoints: touch ? 2 : 0 }); setTouch(touch); await paints();
+    await send('Emulation.setTouchEmulationEnabled', selectorTouchEmulation(touch)); setTouch(touch); await paints();
   };
   const geometry = async name => {
     const result = await evaluate(`(()=>{const a=document.querySelector('[data-tool="select"]'),m=document.querySelector('#select-submenu'),b=m.querySelector('button'),r=e=>{const p=e.getBoundingClientRect();return{x:p.x,y:p.y,right:p.right,bottom:p.bottom,w:p.width,h:p.height}},k=Math.min(1,screen.width/innerWidth),br=r(b);return{name:${JSON.stringify(name)},a:r(a),m:r(m),b:br,ratio:k,width:innerWidth,height:innerHeight,hit:b.contains(document.elementFromPoint(br.x+br.w/2,br.y+br.h/2)),count:m.querySelectorAll('button').length}})()`);
