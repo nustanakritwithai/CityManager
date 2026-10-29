@@ -50,7 +50,7 @@ async function until(expression) {
   throw Error(`Condition timeout ${expression}`);
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";if(c.education&&c.education.origin==="migrated-absent"&&!(c.education.campuses&&c.education.campuses.length)&&!(c.education.people&&c.education.people.length))delete c.education;return c})()');
 async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
