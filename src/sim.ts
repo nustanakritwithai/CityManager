@@ -1,4 +1,6 @@
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
+import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
+export { OWNER_DEVELOPMENT_SHARE_DENOMINATOR } from './owner-profit.ts';
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
 import { HOUSING_LEVELS, housingLevel, getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
@@ -217,8 +219,6 @@ export function upgradeCampus(c: City, id: number): Result {
 /** Proposed prototype finance policy, in integer satang; no credit or outside grant. */
 export const INDUSTRY_STARTUP_CAPITAL = 300_000;
 export const OWNER_STARTUP_CAPITAL = 60_000;
-/** One quarter of each month's after-tax profit stays in the business for development. */
-export const OWNER_DEVELOPMENT_SHARE_DENOMINATOR = 4;
 export const MARKET_CONVERSION_COST = 20_000;
 const INDUSTRY_WORKING_RESERVE = 20_000;
 /**
@@ -274,16 +274,23 @@ export function ownerFinance(c: City, firmId: number) {
   const f = c.firms.find(f => f.id === firmId), owner = f?.owner;
   const h = owner && c.households.find(h => h.id === owner.householdId);
   if (!f || !(isMarket(f) || isRetail(f)) || !owner || !h) return null;
-  const currentProfit = f.monthlyRevenue - f.monthlyExpense, taxReserve = Math.floor(Math.max(0, currentProfit) / 5);
-  const profit = BigInt(f.profit) + BigInt(currentProfit) - BigInt(owner.taxPaid) - BigInt(owner.withdrawn) - BigInt(taxReserve);
-  const distributable = profit <= 0n ? 0 : Number(profit > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : profit);
+  // Paid wages are already in monthlyExpense; only still-unpaid claims accrue here.
+  const earnedWages = payroll(f), currentProfit = BigInt(f.monthlyRevenue) - BigInt(f.monthlyExpense) - BigInt(earnedWages);
+  const tax = currentProfit > 0n ? currentProfit / 5n : 0n, taxReserve = Number(tax);
+  const history = ownerProfitHistory(c, f, currentProfit - tax);
+  // Spending retained earnings must not make that same profit available again.
+  const profit = BigInt(f.profit) + currentProfit - BigInt(owner.taxPaid) - BigInt(owner.withdrawn) - tax - history.invested - history.retained;
+  const bounded = (n: bigint) => Number(n < 0n ? 0n : n > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : n);
+  const distributable = history.reconciled ? bounded(profit) : 0;
+  const developmentReserve = bounded(history.retained), developmentSpent = bounded(history.invested);
   const contributeAvailable = Math.max(0, Math.min(balance(c, h.wallet), Number.MAX_SAFE_INTEGER - owner.capitalContributed, Number.MAX_SAFE_INTEGER - balance(c, f.wallet)));
-  const withdrawAvailable = Math.max(0, Math.min(distributable, spendable(c, f) - 20_000 - taxReserve, Number.MAX_SAFE_INTEGER - owner.withdrawn, Number.MAX_SAFE_INTEGER - balance(c, h.wallet)));
+  const withdrawAvailable = Math.max(0, Math.min(distributable, spendable(c, f) - 20_000 - taxReserve - developmentReserve, Number.MAX_SAFE_INTEGER - owner.withdrawn, Number.MAX_SAFE_INTEGER - balance(c, h.wallet)));
   return { ownerHouseholdId: h.id, capitalContributed: owner.capitalContributed, capitalReturned: owner.capitalReturned,
-    withdrawn: owner.withdrawn, taxPaid: owner.taxPaid, realizedProfit: f.profit + currentProfit, distributable, taxReserve,
+    withdrawn: owner.withdrawn, taxPaid: owner.taxPaid, realizedProfit: Number(BigInt(f.profit) + currentProfit), distributable, taxReserve,
+    earnedWages, developmentReserve, developmentSpent, historyReconciled: history.reconciled,
     contributeAvailable, withdrawAvailable, workingCashFloor: 20_000,
     contributeReason: contributeAvailable >= 10_000 ? 'พร้อมเติมทุนจากเงินครัวเรือนจริง' : 'เงินครัวเรือนไม่พอเติมทุน 100 ฿',
-    withdrawReason: withdrawAvailable >= 10_000 ? 'ถอนจากกำไรที่เกิดขึ้นจริงได้' : 'ต้องมีกำไรหลังสำรองภาษีและเงินหมุนเวียน 200 ฿' };
+    withdrawReason: !history.reconciled ? 'ประวัติกำไรไม่ตรงกับบัญชี จึงยังถอนกำไรไม่ได้' : withdrawAvailable >= 10_000 ? 'ถอนจากกำไรที่เกิดขึ้นจริงได้' : 'ต้องมีกำไรหลังกันค่าจ้าง ภาษี เงินพัฒนา และเงินหมุนเวียน 200 ฿' };
 }
 export function contributeOwnerCapital(c: City, firmId: number, amount: number): Result {
   const f = c.firms.find(f => f.id === firmId), facts = ownerFinance(c, firmId);
@@ -295,7 +302,7 @@ export function contributeOwnerCapital(c: City, firmId: number, amount: number):
 }
 export function withdrawOwnerProfit(c: City, firmId: number, amount: number): Result {
   const f = c.firms.find(f => f.id === firmId), facts = ownerFinance(c, firmId);
-  if (!facts || !f?.owner || !Number.isSafeInteger(amount) || amount <= 0 || amount > facts.withdrawAvailable) return { ok: false, message: 'Owner profit withdrawal rejected; earned profit, tax and working cash must remain sufficient.' };
+  if (!facts || !f?.owner || !Number.isSafeInteger(amount) || amount <= 0 || amount > facts.withdrawAvailable) return { ok: false, message: 'Owner profit withdrawal rejected; earned profit, wages, tax, development reserves and working cash must remain sufficient.' };
   const h = c.households.find(h => h.id === facts.ownerHouseholdId)!;
   if (transfer(c, f.wallet, h.wallet, amount, 'Owner profit distribution') !== amount) throw new Error('Owner draw invariant violated.');
   f.owner.withdrawn += amount;
@@ -956,8 +963,11 @@ function settleMonth(c: City) {
     if (f.owner) {
       const available = ownerFinance(c, f.id)?.withdrawAvailable ?? 0;
       const netProfit = Math.max(0, f.lastMonthProfit - taxPaid);
-      const retained = Math.ceil(netProfit / OWNER_DEVELOPMENT_SHARE_DENOMINATOR);
-      const amount = Math.min(netProfit - retained, Math.max(0, available - retained));
+      const retained = Number(developmentShare(BigInt(netProfit)));
+      const alreadyPaid = c.ledger.filter(e => e.from === f.wallet && e.reason === 'Owner profit distribution' && e.tick > c.tick - MONTH && e.tick <= c.tick).reduce((n, e) => n + e.amount, 0);
+      // ownerFinance already protects retention. Manual draws made this month
+      // count toward the same monthly automatic allowance, not a second payout.
+      const amount = Math.min(Math.max(0, netProfit - retained - alreadyPaid), available);
       if (amount > 0 && !withdrawOwnerProfit(c, f.id, amount).ok) throw new Error('Monthly owner income invariant violated.');
     }
   }
