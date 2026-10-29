@@ -158,6 +158,42 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
   await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day save loaded through explicit Game page and real Load control');
 
+  // Quality must not silently remove user-enabled vehicles, even on low/auto.
+  await closePanel();await button('#atmosphere-toggle');
+  const trafficToggle='#atmosphere-menu input[aria-label^="แสดงรถ"]';
+  if(!await evaluate(`document.querySelector(${JSON.stringify(trafficToggle)}).checked`))await button(trafficToggle);
+  await button('#atmosphere-menu input[name="atmosphere-quality"][value="high"]');
+  await until('window.cityManager.atmosphere().quality==="high"');
+  const trafficHigh=await evaluate('window.cityManager.atmosphere().traffic');assert.ok(trafficHigh.actors>0);
+  await button('#atmosphere-menu input[name="atmosphere-quality"][value="low"]');
+  await until('window.cityManager.atmosphere().quality==="low"');
+  const trafficLow=await evaluate('window.cityManager.atmosphere().traffic');assert.equal(trafficLow.actors,trafficHigh.actors);
+  await button(trafficToggle);assert.equal(await evaluate('window.cityManager.atmosphere().traffic.actors'),0);
+  await button(trafficToggle);assert.equal(await evaluate('window.cityManager.atmosphere().traffic.actors'),trafficHigh.actors);
+  assert.deepEqual(await state(),fixture);await screenshot('low-quality-traffic-retained.png');
+  await button('#atmosphere-menu input[name="atmosphere-quality"][value="auto"]');await button('#atmosphere-toggle');
+  checks.push('High-to-low quality keeps the same actor count; only the explicit traffic toggle removes/restores actors; simulation and wallets unchanged');
+
+  // A map touch opens the building; the trailing compatibility click must not
+  // activate a household link which has just appeared underneath that gesture.
+  await viewport({width:390,height:844,screenWidth:390,screenHeight:844,mobile:true,deviceScaleFactor:2});
+  await closePanel();await button('[data-tool="select"]');
+  const housePoint=await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`);
+  assert.equal(await evaluate(`document.elementFromPoint(${housePoint.x},${housePoint.y})?.id`),'city-canvas');
+  await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:housePoint.x,y:housePoint.y,id:1}]});
+  await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${homes[0].id}'`);
+  const residentSelector=`#entity-content [data-household-id="${homeHousehold.id}"]`;
+  // Explicitly exercise an orphan compatibility click, separately from the real tap above.
+  await evaluate(`document.querySelector(${JSON.stringify(residentSelector)}).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,detail:1}))`);
+  assert.equal(await evaluate('document.querySelector("#entity-content").dataset.scope'),'place');
+  assert.deepEqual(await state(),fixture);await screenshot('home-tap-house-panel.png');
+  await button(residentSelector);await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${homeHousehold.id}'`);
+  await button('#submenu-back');assert.equal(await evaluate('document.querySelector("#entity-content").dataset.scope'),'place');
+  await closePanel();await viewport({width:1440,height:1000,screenWidth:1440,screenHeight:1000,mobile:false,deviceScaleFactor:1});
+  await until(`document.documentElement.dataset.touchUi==='false'&&!!document.querySelector('[data-speed="10"]').getBoundingClientRect().width`);
+  checks.push('Real mobile map tap opens house details; orphan compatibility click cannot drill into a person; a fresh resident-button press and Back still work');
+
   // Keep the native press active across real 10x simulation refreshes. A programmatic
   // click or a re-queried mouseup target would miss the replaced-button regression.
   for (const inputKind of ['mouse', 'mouse', 'touch']) {
