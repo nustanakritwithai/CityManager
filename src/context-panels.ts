@@ -387,7 +387,7 @@ type CardData = NonNullable<ReturnType<typeof buildingCardData> | ReturnType<typ
 type CardKind = CardData['kind'];
 type CardParts = {
   values: Map<string, HTMLElement>; statuses: HTMLElement[]; assumptions: HTMLElement[];
-  journals: HTMLElement[]; notes: HTMLElement[]; residents: HTMLElement | null;
+  journals: HTMLElement[]; notes: HTMLElement[]; progression: HTMLElement[]; residents: HTMLElement | null;
   employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null; funding: HTMLElement | null;
 };
 function cardIcon(kind: CardKind): SVGElement {
@@ -425,7 +425,7 @@ function cardHero(data: CardData, city: City): HTMLElement {
 }
 /** Move existing metric nodes, retaining each raw key once and every live handler. */
 function cardParts(nodes: HTMLElement[]): CardParts {
-  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], residents: null, employment: null, skills: null, owner: null, funding: null };
+  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], progression: [], residents: null, employment: null, skills: null, owner: null, funding: null };
   for (const node of nodes) {
     const cards = [...(node.matches('[data-context-metric]') ? [node] : []), ...node.querySelectorAll<HTMLElement>('[data-context-metric]')];
     for (const card of cards) { parts.values.set(card.dataset.contextMetric!, card); card.remove(); }
@@ -434,7 +434,7 @@ function cardParts(nodes: HTMLElement[]): CardParts {
     if (node.classList.contains('cx-status')) parts.statuses.push(node);
     else if (node.classList.contains('cx-legacy-assumption')) parts.assumptions.push(node);
     else if (node.classList.contains('cx-activity')) parts.journals.push(node);
-    else if (node.dataset.buildingProgression) parts.statuses.push(node);
+    else if (node.dataset.buildingProgression) parts.progression.push(node);
     else if (node.classList.contains('bc-residents-source')) parts.residents = node;
     else if (node.classList.contains('bc-employment-source')) parts.employment = node;
     else if (node.classList.contains('bc-skills-source')) parts.skills = node;
@@ -608,7 +608,7 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     if (parts.owner) { parts.owner.firstElementChild?.after(cardKpis(takeCards(parts, ['drawable', 'owner-household']))); output.push(cardSection(parts.owner, 'owner')); }
     output.push(cardCash(data, parts)); const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
   } else if (data.kind === 'factory') {
-    const upgradeFirm = city.firms.find(f => f.id === data.identity.firmId); if (upgradeFirm) output.push(renderProductionProgression(city, upgradeFirm));
+    const upgradeFirm = city.firms.find(f => f.id === data.identity.firmId); if (upgradeFirm) parts.progression.push(renderProductionProgression(city, upgradeFirm));
     const firm = city.firms.find(f => f.id === data.identity.firmId && f.zone === 'I');
     if (firm && firm.recipe) {
       const picker = section('สินค้าที่ผลิต'); picker.dataset.factoryRecipePicker = String(firm.id);
@@ -635,7 +635,7 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
   } else {
     const firm = city.firms.find(f => f.building === data.identity.buildingId && f.zone === 'F');
-    if (firm) output.push(renderProductionProgression(city, firm));
+    if (firm) parts.progression.push(renderProductionProgression(city, firm));
     if (firm) {
       const picker = section('พืชที่ผลิต'); picker.dataset.farmCropPicker = String(firm.id);
       const controls = el('div', 'farm-crop-choices');
@@ -653,7 +653,8 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     output.push(cardGroup('พืชผลที่เก็บไว้', 'stock', takeCards(parts, ['crop-stock', 'crop-cost'])));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
   }
-  output.push(cardDetails(data, parts));
+  // Keep today's key metrics above the fold; progression stays expanded below them.
+  output.push(...parts.progression, cardDetails(data, parts));
   for (const journal of parts.journals) output.push(cardSection(journal, `journal-${journal.dataset.kind}`));
   return output;
 }
