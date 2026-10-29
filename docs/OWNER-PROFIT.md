@@ -82,3 +82,19 @@ the transfer path. A separate day-210 case proves that fully distributed earning
 leave 128,600 development retention, zero withdrawable profit and only `hold`,
 with no provider call even when upstream is enabled. These tests use no injected
 cash or profit and do not change the advisor runtime.
+
+## Agriculture browser fixture
+
+The real migrated-v4 agriculture fixture reaches its first complete supply
+chain on day 30. Market 12 has 35,346 profit, 7,069 tax paid and 21,207 already
+distributed; the remaining 7,070 is its rounded-up development retention.
+Cash remains 51,774, but withdrawable profit is zero. The smoke test's previous
+independent formula omitted retention and incorrectly expected that 7,070 to
+be drawable. It now compares UI finance to the canonical policy, with explicit
+numeric assertions for this fixture and rejection of even a one-satang draw.
+
+Real withdrawal coverage remains on day 35: the same market has 11,788
+withdrawable profit. A 10,000 capital contribution leaves that limit unchanged;
+the native 10,000 profit draw leaves 1,788. Exact counterparty ledger entries,
+cash/state equality, unchanged revenue/expenses, save/reload and button-state
+assertions remain. No agriculture runtime or fixture cash is modified.
