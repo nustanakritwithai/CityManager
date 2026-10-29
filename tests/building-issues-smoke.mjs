@@ -64,6 +64,10 @@ try {
     await until(`document.querySelector('#building-issue-details').dataset.cell===${JSON.stringify(String(next.cell))} && document.querySelector('#inspector').dataset.open==='true'`);
     assert.equal(await evaluate('document.querySelector("#inspector").dataset.page'), 'entity');
     assert.equal(await evaluate('window.cityManager.snapshot()'), before, 'Tap and drag do not mutate city data or advance time');
+    const layout = await evaluate(`(()=>{const body=document.querySelector('#inspector-body'),p=document.querySelector('#inspector').getBoundingClientRect();return{client:body.clientWidth,scroll:body.scrollWidth,height:body.getBoundingClientRect().height,left:p.left,right:p.right,width:innerWidth,icons:[...document.querySelectorAll('#building-issue-details .bc-issue-row > .ui-icon')].map(e=>({width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height}))}})()`);
+    assert.ok(layout.height > 0 && layout.scroll <= layout.client + 1, 'Issue details stay in the contained scroll body');
+    assert.ok(layout.left >= 0 && layout.right <= layout.width + 1, 'Issue panel stays inside the viewport');
+    assert.ok(layout.icons.length && layout.icons.every(icon => icon.width > 0 && icon.width <= 24 && icon.height > 0 && icon.height <= 24), 'Shared span/SVG wrappers are bounded, not intrinsic-width overflow');
     const expected = buildingIssues(city).find(i => i.cell === next.cell); assert.equal(await evaluate('document.querySelectorAll("#building-issue-details [data-issue]").length'), expected.details.length);
     await screenshot(mobile ? 'mobile-issue-details.png' : 'desktop-issue-details.png'); await close();
     // Build/road tools keep their own gestures: badges become pointer-transparent.

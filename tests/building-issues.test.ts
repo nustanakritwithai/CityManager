@@ -90,7 +90,7 @@ test('badge gesture distinguishes tap, drag, cancellation, multitouch and blocke
 
 test('integration routes badge activation to the existing inspector and preserves accessible touch targets', () => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8'), css = readFileSync(new URL('../src/building-issues.css', import.meta.url), 'utf8'), markers = readFileSync(new URL('../src/map-markers.ts', import.meta.url), 'utf8');
-  assert.match(main, /new MapMarkers\(view, cell =>/); assert.match(main, /const next = issuePlaceRoute\(city, cell\); if \(next\) openRoute\(next\)/);
+  assert.match(main, /new MapMarkers\(view, cell =>/); assert.match(main, /const next = issuePlaceRoute\(city, cell\); if \(next\) \{[\s\S]*?openRoute\(next\)/);
   assert.match(main, /renderBuildingIssues\(city, route\?\.page === 'place'/); assert.match(css, /width: 44px; height: 44px/);
   assert.match(markers, /setAttribute\('aria-label'/); assert.match(markers, /setAttribute\('aria-controls', 'inspector'\)/); assert.match(markers, /Cull BEFORE/);
   assert.doesNotMatch(markers, /activate\(|onCell\(|dispatchEvent\(/, 'does not route through citizen/build command picking');
@@ -178,4 +178,16 @@ test('real badge binder respects capture/target ordering, never re-arms a second
     dispose(); assert.ok([...globals.values()].every(list => list.length === 0), 'global capture listeners are removed on disposal');
     if (originalWindow === undefined) Reflect.deleteProperty(globalThis, 'window'); else Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
   }
+});
+
+
+test('issue section sizes the shared span icon wrapper and preserves KPI-first ordinary selection', () => {
+  const css = readFileSync(new URL('../src/building-issues.css', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const icon = readFileSync(new URL('../src/ui-icons.ts', import.meta.url), 'utf8');
+  assert.match(icon, /function iconElement[\s\S]*?createElement\('span'\)/);
+  assert.match(css, /\.bc-issue-row > \.ui-icon \{[^}]*flex: 0 0 23px; width: 23px; height: 23px/);
+  assert.match(css, /\.bc-issue-row > div \{[^}]*min-width: 0; overflow-wrap: anywhere/);
+  assert.match(main, /\$\('#entity-content'\)\.after\(issueHost\)/);
+  assert.match(main, /\$\('#building-issue-details'\)\.scrollIntoView\(\{ block: 'start', inline: 'nearest' \}\)/);
 });

@@ -397,7 +397,7 @@ function renderPlace() {
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction, factoryRecipeAction);
   let issueHost = document.getElementById('building-issue-details');
-  if (!issueHost) { issueHost = document.createElement('section'); issueHost.id = 'building-issue-details'; $('#entity-content').before(issueHost); }
+  if (!issueHost) { issueHost = document.createElement('section'); issueHost.id = 'building-issue-details'; $('#entity-content').after(issueHost); }
   renderBuildingIssues(city, route?.page === 'place' ? cellIndex : null, issueHost);
   if (page === 'city') { renderCityOverview(city); renderEducationOverview(); dashboard?.update(city); renderParkPanel(); }
   decoratePanels($('#inspector'));
@@ -662,7 +662,11 @@ async function boot() {
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
   mapMarkers = new MapMarkers(view, cell => {
     // Open the existing place route directly: never activate a build tool or pick a citizen.
-    const next = issuePlaceRoute(city, cell); if (next) openRoute(next);
+    const next = issuePlaceRoute(city, cell); if (next) {
+      openRoute(next);
+      // Ordinary selection keeps its KPI-first layout; an explicit issue tap reveals its reasons.
+      $('#building-issue-details').scrollIntoView({ block: 'start', inline: 'nearest' });
+    }
   });
   dashboard = new OverviewDashboard($('#city-dashboard'));
   cityHud = new CityHud((cell, buildingId) => { view.focus(cell); openRoute({ page: 'place', cell, buildingId }); }, () => {
