@@ -29,5 +29,5 @@ test('browser snapshot helpers reject wrong current save envelopes before preser
     }
     checked++;
   }
-  assert.equal(checked, 13, 'all browser city snapshot helpers are covered');
+  assert.equal(checked, 14, 'all browser city snapshot helpers are covered');
 });
