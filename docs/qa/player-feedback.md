@@ -18,6 +18,10 @@ including the Load identity fence and workforce fixes.
   the upgrade shows its actual 2,500 baht price; repeated refusal remains visible
   beside the actions. The revised layout gives the refusal a full row instead of
   squeezing the two action buttons. Screenshots below were visually inspected.
+  They precede the final read-only capacity row, which now distinguishes maximum
+  seats from `report.operatingSeats`, enrolled learners and today's progressing
+  learners. That row consumes the simulator report directly, including partial
+  capacity when available; it does not implement its own staffing policy.
 - No real player saves, personal browser profile, server identity or shared market
   transactions were used. No new dependencies or external assets were installed.
 

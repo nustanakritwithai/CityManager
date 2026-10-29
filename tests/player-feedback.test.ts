@@ -46,6 +46,9 @@ test('education presentation reads actual cohorts and paused progress without ch
   assert.equal(serialize(city), before, 'the view must not spend, assign workers, or advance progress');
   assert.ok(data.cohorts.length > 0);
   assert.ok(data.cohorts.every(cohort => cohort.days > 0 && cohort.days < data.studyDays));
+  assert.equal(data.operatingSeats, campus.report.operatingSeats);
+  assert.equal(data.enrolled, campus.report.enrolled);
+  assert.equal(data.progressing, campus.report.progressing);
   assert.equal(pocketPark(city, site), false, 'a real campus never becomes decorative vacant land');
   assert.equal(toggleCampus(city, campus.id).ok, true);
   const paused = educationPanelData(city, campus).cohorts;

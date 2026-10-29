@@ -21,6 +21,7 @@ export function educationPanelData(city: City, campus: Campus) {
     build: spec.build, upgrade: spec.upgrade, upkeep: spec.upkeep, studyDays: spec.studyDays,
     current, next, localDaily, contractDaily, cohorts, upgradeRequirements,
     localStaff: campus.report.localStaff, contract: campus.contract,
+    operatingSeats: campus.report.operatingSeats, enrolled: campus.report.enrolled, progressing: campus.report.progressing,
     accruedWages: Object.values(campus.workDays).reduce((sum, days) => sum + days, 0) * localDaily,
   };
 }

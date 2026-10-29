@@ -31,7 +31,8 @@ export function installEducationPanel(actions: HTMLElement) {
         paragraph(`ค่าก่อสร้าง ${money(data.build)} · ค่าบำรุง ${money(data.upkeep)}/เดือน`),
         paragraph(`บุคลากรในเมือง ${data.localStaff} คน · ค่าจ้าง ${money(data.localDaily)}/คน/วัน (จ่ายสิ้นเดือน) · ค่าจ้างสะสม ${money(data.accruedWages)}`),
         paragraph(`บุคลากรสัญญาภายนอก ${data.contract} คน · ${money(data.contractDaily)}/คน/วัน (จ่ายรายวัน)`),
-        paragraph(`บริการระดับนี้: ${data.current.seats} ที่นั่ง · บุคลากร ${data.current.staff} คน · ไฟ ${data.current.power} · น้ำ ${data.current.water}`),
+        paragraph(`ความจุสูงสุดระดับนี้: ${data.current.seats} ที่นั่ง · บุคลากรเต็มกำลัง ${data.current.staff} คน · ไฟ ${data.current.power} · น้ำ ${data.current.water}`),
+        paragraph(`เปิดรับจริง ${data.operatingSeats}/${data.current.seats} ที่นั่ง · ลงทะเบียน ${data.enrolled} คน · ได้เรียนวันนี้ ${data.progressing} คน`),
         paragraph(campus.kind === 'school'
           ? `รับแรงงานที่ยังไม่มีวุฒิพื้นฐานและมีสิทธิเรียน · ต้องเรียน ${data.studyDays} วันที่ให้บริการได้`
           : `รับแรงงานที่มีวุฒิพื้นฐานและมีสิทธิเรียน · ต้องเรียน ${data.studyDays} วันที่ให้บริการได้`),
@@ -47,7 +48,7 @@ export function installEducationPanel(actions: HTMLElement) {
       } else rows.push(paragraph('ยังไม่มีผู้เรียนในสถานศึกษานี้'));
       rows.push(paragraph('เป็นความก้าวหน้าที่สะสมจริง ไม่ใช่วันนัดจบ: เมื่อพักบริการหรือกำลังบริการไม่พอ การเรียนอาจหยุดหรือรอที่นั่ง'));
       if (data.next) rows.push(
-        paragraph(`ขยายระดับ 2 ใช้ ${money(data.upgrade)} · ${data.current.seats} → ${data.next.seats} ที่นั่ง · ต้องมีบุคลากร ${data.next.staff} คน ไฟ ${data.next.power} น้ำ ${data.next.water}`),
+        paragraph(`ขยายระดับ 2 ใช้ ${money(data.upgrade)} · ความจุสูงสุด ${data.current.seats} → ${data.next.seats} ที่นั่ง · บุคลากรเต็มกำลัง ${data.next.staff} คน ไฟ ${data.next.power} น้ำ ${data.next.water}`),
         paragraph(`เงื่อนไขขยาย: ${data.upgradeRequirements.join(' · ')} · ค่าบำรุงยัง ${money(data.upkeep)}/เดือน ค่าจ้างขึ้นกับบุคลากรจริง`),
       );
       details.replaceChildren(...rows);
