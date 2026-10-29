@@ -112,7 +112,7 @@ export function deserializeParkSession(json: string): { city: City; runtime: Par
   const parsed = JSON.parse(json);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid city save');
   const { parkRuntime, ...citySave } = parsed;
-  if (parkRuntime !== undefined && !((parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12') || (parsed.version === 18 && parsed.rulesVersion === 'chain-13') || (parsed.version === 19 && parsed.rulesVersion === 'chain-14') || (parsed.version === 20 && parsed.rulesVersion === 'chain-15'))) throw new Error('Park runtime requires save v15 through v20 with matching rules');
+  if (parkRuntime !== undefined && !((parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12') || (parsed.version === 18 && parsed.rulesVersion === 'chain-13') || (parsed.version === 19 && parsed.rulesVersion === 'chain-14') || (parsed.version === 20 && parsed.rulesVersion === 'chain-15') || (parsed.version === 21 && parsed.rulesVersion === 'chain-16'))) throw new Error('Park runtime requires save v15 through v21 with matching rules');
   const city = deserialize(JSON.stringify(citySave));
   const runtime = parkRuntime === undefined ? createParkRuntime(city) : restoreRuntime(city, parkRuntime);
   return { city, runtime };
