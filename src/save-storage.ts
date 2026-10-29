@@ -21,7 +21,15 @@ export const FOOD_BACKUP_KEY = 'citymanager.backup.before-food-demand';
 export const FACTORY_CHOICE_BACKUP_KEY = 'citymanager.backup.before-factory-choice';
 export const FARM_CHOICE_BACKUP_KEY = 'citymanager.backup.before-farm-choice';
 export const PARKS_BACKUP_KEY = 'citymanager.backup.before-parks';
+export const FACTORY_PROGRESS_BACKUP_KEY = 'citymanager.backup.before-factory-progression';
+const factoryProgressBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${FACTORY_PROGRESS_BACKUP_KEY}.${i}` : FACTORY_PROGRESS_BACKUP_KEY);
 export const PARK_WORKFORCE_BACKUP_KEY = 'citymanager.backup.before-park-workforce';
+export const HOUSING_BACKUP_KEY = 'citymanager.backup.before-housing-density';
+const housingBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${HOUSING_BACKUP_KEY}.${i}` : HOUSING_BACKUP_KEY);
+export const RETAIL_BACKUP_KEY = 'citymanager.backup.before-retail-levels';
+const retailBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${RETAIL_BACKUP_KEY}.${i}` : RETAIL_BACKUP_KEY);
+export const FARM_LEVEL_BACKUP_KEY = 'citymanager.backup.before-farm-levels';
+const farmLevelBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${FARM_LEVEL_BACKUP_KEY}.${i}` : FARM_LEVEL_BACKUP_KEY);
 const workforceBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${PARK_WORKFORCE_BACKUP_KEY}.${i}` : PARK_WORKFORCE_BACKUP_KEY);
 const BACKUP_SLOTS = 8;
 const parksBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${PARKS_BACKUP_KEY}.${i}` : PARKS_BACKUP_KEY);
@@ -45,7 +53,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys()];
+    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -62,7 +70,11 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const food13 = parsed?.version === 13 && parsed?.rulesVersion === 'chain-8' && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   const parks14 = parsed?.version === 14 && parsed?.rulesVersion === 'chain-9' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   const workforce15 = parsed?.version === 15 && parsed?.rulesVersion === 'chain-10' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
-  if (parsed?.version !== 9 && !market10 && !farm11 && !factory12 && !food13 && !parks14 && !workforce15) throw new Error('Expected a supported CityManager snapshot.');
+  const housing16 = parsed?.version === 16 && parsed?.rulesVersion === 'chain-11' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  const factory17 = parsed?.version === 17 && parsed?.rulesVersion === 'chain-12' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  const retail18 = parsed?.version === 18 && parsed?.rulesVersion === 'chain-13' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  const farm19 = parsed?.version === 19 && parsed?.rulesVersion === 'chain-14' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  if (parsed?.version !== 9 && !market10 && !farm11 && !factory12 && !food13 && !parks14 && !workforce15 && !housing16 && !factory17 && !retail18 && !farm19) throw new Error('Expected a supported CityManager snapshot.');
   let backup: string | null = null;
   if (importedLegacy !== null) {
     const version: unknown = JSON.parse(importedLegacy)?.version;
@@ -83,27 +95,47 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const current = storage.getItem(SAVE_KEY);
   if (current !== null) {
     let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
-    if ((food13 || parks14 || workforce15) && version === 12) {
+    if (farm19 && (version === 15 || version === 16 || version === 17 || version === 18)) {
+      const keys = farmLevelBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
+      if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Farm level backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
+      if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
+    }
+    if (retail18 && (version === 15 || version === 16 || version === 17)) {
+      const keys = retailBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
+      if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Retail backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
+      if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
+    }
+    if ((food13 || parks14 || workforce15 || housing16 || factory17 || retail18 || farm19) && version === 12) {
       const keys = foodBackupKeys();
       let slot = keys.find(key => storage.getItem(key) === current);
       if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Food demand backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
       if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
     }
-    if ((factory12 || food13 || parks14 || workforce15) && version === 11) {
+    if ((factory12 || food13 || parks14 || workforce15 || housing16 || factory17 || retail18 || farm19) && version === 11) {
       const keys = factoryBackupKeys();
       let slot = keys.find(key => storage.getItem(key) === current);
       if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Factory choice backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
       if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
     }
-    if ((farm11 || factory12 || food13 || parks14 || workforce15) && (version === 9 || version === 10) && storage.getItem(FARM_CHOICE_BACKUP_KEY) === null) { storage.setItem(FARM_CHOICE_BACKUP_KEY, current); storage.setItem(LATEST_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY); }
-    if ((parks14 || workforce15) && version === 13) {
+    if ((farm11 || factory12 || food13 || parks14 || workforce15 || housing16 || factory17 || retail18 || farm19) && (version === 9 || version === 10) && storage.getItem(FARM_CHOICE_BACKUP_KEY) === null) { storage.setItem(FARM_CHOICE_BACKUP_KEY, current); storage.setItem(LATEST_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY); }
+    if ((parks14 || workforce15 || housing16 || factory17 || retail18 || farm19) && version === 13) {
       const keys = parksBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
       if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Park backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
       if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
     }
-    if (workforce15 && version === 14) {
+    if ((workforce15 || housing16 || factory17 || retail18 || farm19) && version === 14) {
       const keys = workforceBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
       if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Park workforce backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
+      if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
+    }
+    if (housing16 && version === 15) {
+      const keys = housingBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
+      if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Housing backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
+      if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
+    }
+    if (factory17 && (version === 15 || version === 16)) {
+      const keys = factoryProgressBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
+      if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Factory progression backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }
       if (storage.getItem(LATEST_BACKUP_KEY) !== slot) storage.setItem(LATEST_BACKUP_KEY, slot);
     }
     if (version === 7 && storage.getItem(CHAIN2_BACKUP_KEY) === null) storage.setItem(CHAIN2_BACKUP_KEY, current);

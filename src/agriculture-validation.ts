@@ -1,6 +1,7 @@
+import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
-import { CROP_EXPORT, CROP_STOCK_CAPS, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
+import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 
 const invalid = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture state.'); };
@@ -11,7 +12,7 @@ type Holding = { quantity: number; value: number };
 type Operating = { tick: number; revenue: number; expense: number; moneyIndex?: number };
 
 /** No repair, allocation, time advance or writes occur here. Historical roads are not inferred. */
-export function validateAgriculture(c: City): void {
+export function validateAgriculture(c: City, extendedFactories = false, withFarmLevels = true): void {
   requireThat(isCanonicalResourceMap(c.resources, c.seed));
   requireThat(isSafeCount(c.agricultureStartTick) && c.agricultureStartTick <= c.tick);
   requireThat(object(c.crops) && ['harvested', 'processed', 'consumed', 'writtenOff'].every(key => isSafeCount(c.crops[key as keyof City['crops']])));
@@ -20,11 +21,11 @@ export function validateAgriculture(c: City): void {
   const households = new Map(c.households.map(h => [h.id, h]));
   const ownerIds = new Set<number>();
   for (const f of c.firms) {
-    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
+    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'F' && withFarmLevels ? farmStockCapacity(c.buildings.find(b => b.id === f.building)!.level) : f.zone === 'I' && extendedFactories ? factoryCropCapacity(c.buildings.find(b => b.id === f.building)!.level) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
     requireThat(isSafeCount(f.cropInventory) && f.cropInventory <= capacity && isSafeCount(f.cropCost) && (f.cropInventory > 0 || f.cropCost === 0));
     requireThat(isSafeCount(f.productionTick) && f.productionTick >= c.agricultureStartTick && f.productionTick <= c.tick);
     if (isRetail(f)) requireThat(f.cropCost === 0);
-    // Farms grow up to level 3 (one worker per level); crop markets stay single-stall.
+    // Farms have one worker per level; crop markets stay single-stall.
     if (f.zone === 'F' || isMarket(f)) requireThat(f.inventory === 0 && (f.zone === 'F' || c.buildings.find(b => b.id === f.building)?.level === 1));
     if (f.zone === 'F') {
       const b = c.buildings.find(b => b.id === f.building);
@@ -57,6 +58,28 @@ export function validateAgriculture(c: City): void {
   c.goodsLedger.forEach((e, i) => { const rows = goodsReasons.get(e.reason) ?? []; rows.push(i); goodsReasons.set(e.reason, rows); });
   const matchedCash = new Set<number>(), matchedGoods = new Set<number>();
   const roles = new Map<string, Role>(), holdings = new Map<string, Holding>(), operating = new Map<string, Operating[]>();
+  // A demolished firm's earlier market receipt has no embedded role. Recover
+  // any provable role from its other journal entries before replaying stock.
+  if (extendedFactories) {
+    const remember = (wallet: unknown, expected: Role) => {
+      if (typeof wallet !== 'string' || firms.has(wallet)) return;
+      const prior = roles.get(wallet); requireThat(!prior || prior === expected); roles.set(wallet, expected);
+    };
+    for (const e of c.cropLedger) {
+      if (!e || typeof e !== 'object') continue;
+      if (e.kind === 'harvest') remember(e.to, 'F');
+      else if (e.kind === 'process') remember(e.from, 'I');
+      else if (e.kind === 'export' || e.kind === 'market-deposit') remember(e.from, 'F');
+      else if (e.kind === 'market-refund') remember(e.to, 'F');
+      else if (e.kind === 'consumption') remember(e.from, 'T');
+      else if (e.kind === 'trade' && e.quantity > 0) {
+        const price = e.cash / e.quantity;
+        if (price === 350) { remember(e.from, 'F'); remember(e.to, 'I'); }
+        else if (price === 300) { remember(e.from, 'T'); remember(e.to, 'I'); }
+        else if (price === 150 || price === 200) remember(e.to, 'T');
+      }
+    }
+  }
   const op = (wallet: string, item: Operating) => { const rows = operating.get(wallet) ?? []; rows.push(item); operating.set(wallet, rows); };
   const role = (wallet: string, expected?: Role): Role | undefined => {
     requireThat(/^firm:[1-9][0-9]*$/.test(wallet) && Object.hasOwn(c.accounts, wallet));
@@ -79,7 +102,11 @@ export function validateAgriculture(c: City): void {
   const holding = (wallet: string): Holding => { const value = holdings.get(wallet) ?? { quantity: 0, value: 0 }; holdings.set(wallet, value); return value; };
   const receive = (wallet: string, qty: number, value: number) => {
     const h = holding(wallet); h.quantity = safeAdd(h.quantity, qty); h.value = safeAdd(h.value, value);
-    const known = role(wallet); if (known) requireThat(h.quantity <= CROP_STOCK_CAPS[known]);
+    const known = role(wallet), f = firms.get(wallet), b = f && c.buildings.find(b => b.id === f.building);
+    if (known) requireThat(h.quantity <= (known === 'F' && withFarmLevels ? farmStockCapacity(b?.level ?? FARM_MAX_LEVEL) : known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? factoryCropCapacity(b?.level ?? 9) : CROP_STOCK_CAPS[known]));
+    // A deleted market-receipt recipient may not have left enough history to
+    // distinguish a market from a factory. Both are bounded by 48 lots.
+    else if (extendedFactories) requireThat(h.quantity <= CROP_STOCK_CAPS.T);
   };
   const release = (e: CropEntry) => {
     const h = holding(e.from); requireThat(e.quantity <= h.quantity && e.fromValue === releaseCropCost(h.quantity, h.value, e.quantity));
@@ -104,6 +131,9 @@ export function validateAgriculture(c: City): void {
   let previousTick = c.agricultureStartTick, day = -1;
   let sellable = new Map<string, number>();
   const dailyProduction = new Set<string>();
+  // Farms never lose levels; the smallest level compatible with the journal so far
+  // must remain possible at every subsequent harvest for the same firm.
+  const farmMinimumLevels = new Map<string, number>();
   const totals = { harvested: 0, processed: 0, consumed: 0, writtenOff: 0, exported: 0 };
   for (let i = 0; i < c.cropLedger.length; i++) {
     const e = c.cropLedger[i];
@@ -112,11 +142,24 @@ export function validateAgriculture(c: City): void {
     previousTick = e.tick;
     if (day !== e.tick) { day = e.tick; sellable = new Map([...holdings].map(([wallet, h]) => [wallet, h.quantity])); }
     if (e.kind === 'harvest') {
-      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= 3 && e.batches === 0 && e.outputQuantity === 0);
+      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? FARM_MAX_LEVEL : 3) && e.batches === 0 && e.outputQuantity === 0);
       role(e.to, 'F'); const before = holding(e.to), current = firms.get(e.to), b = current && c.buildings.find(b => b.id === current.building);
       if (b) requireThat(e.workers <= b.level);
-      const maximum = Math.min(96 - before.quantity, b ? harvestYield(Math.max(50, c.resources.fertility[b.cell]), e.workers) : 24 * e.workers);
-      requireThat(e.quantity <= maximum && (!b || e.quantity === maximum));
+      const oldRules = !withFarmLevels || e.tick <= (c.farmLevelStartTick ?? 0);
+      const maxLevel = Math.min(b?.level ?? FARM_MAX_LEVEL, oldRules ? 3 : FARM_MAX_LEVEL);
+      const minLevel = Math.max(e.workers, farmMinimumLevels.get(e.to) ?? 1);
+      let feasible = 0;
+      for (let level = minLevel; level <= maxLevel; level++) {
+        const room = FARM_STOCK_BY_LEVEL[level] - before.quantity;
+        if (room < 0) continue;
+        // Removed farms have no remaining cell; preserve historical v15 validation,
+        // while new events must be possible at some actual effective fertility.
+        const matches = b ? e.quantity === Math.min(room, harvestYield(Math.max(50, c.resources.fertility[b.cell]), e.workers)) : oldRules
+          ? e.quantity <= Math.min(room, 24 * e.workers)
+          : Array.from({ length: 51 }, (_, i) => 50 + i).some(fertility => e.quantity === Math.min(room, harvestYield(fertility, e.workers)));
+        if (matches) { feasible = level; break; }
+      }
+      requireThat(feasible > 0); farmMinimumLevels.set(e.to, feasible);
       const key = e.tick + ':' + e.to; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);
       receive(e.to, e.quantity, 0); totals.harvested = safeAdd(totals.harvested, e.quantity);
     } else if (e.kind === 'trade') {
@@ -136,9 +179,9 @@ export function validateAgriculture(c: City): void {
       const index = cash(e, e.to, e.from); release(e); totals.consumed = safeAdd(totals.consumed, 1);
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
     } else if (e.kind === 'process') {
-      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= 6 && e.batches >= 1 && e.batches <= e.workers && e.quantity === 2 * e.batches && e.outputQuantity === 8 * e.batches);
+      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= (extendedFactories && e.tick > (c.factoryProgressionStartTick ?? c.tick) ? FACTORY_MAX_WORKERS : 6) && e.batches >= 1 && e.batches <= e.workers && e.quantity === 2 * e.batches && e.outputQuantity === 8 * e.batches);
       role(e.from, 'I'); release(e);
-      const current = firms.get(e.from), b = current && c.buildings.find(b => b.id === current.building); if (b) requireThat(e.workers <= b.level + 3);
+      const current = firms.get(e.from), b = current && c.buildings.find(b => b.id === current.building); if (b) requireThat(e.workers <= factoryLevel(b.level).jobs);
       const key = e.tick + ':' + e.from; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);
       const matches = goodsReasons.get(e.reason) ?? []; requireThat(matches.length === 1);
       const index = matches[0], output = c.goodsLedger[index];
@@ -155,10 +198,12 @@ export function validateAgriculture(c: City): void {
       role(e.from, 'F'); release(e); const deposited = holding(e.to); deposited.quantity = safeAdd(deposited.quantity, e.quantity); deposited.value = safeAdd(deposited.value, e.toValue);
     } else if (e.kind === 'market-refund') {
       requireThat(e.from === 'market-server' && e.reason === `Market escrow refund #${e.id}` && e.toValue === e.fromValue && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
-      const crop = e.crop; requireThat(crop !== undefined); release(e); role(e.to, cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
+      const crop = e.crop; requireThat(crop !== undefined); release(e);
+      role(e.to, extendedFactories && !firms.has(e.to) ? 'F' : cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
     } else if (e.kind === 'market-receipt') {
       requireThat(e.from === 'market-server' && e.reason === `Market receipt #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
-      const crop = e.crop; requireThat(crop !== undefined); role(e.to, cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
+      const crop = e.crop; requireThat(crop !== undefined);
+      role(e.to, extendedFactories && !firms.has(e.to) ? undefined : cropDestinationRole(e.to, crop)); receive(e.to, e.quantity, e.toValue);
     } else {
       requireThat(e.kind === 'writeoff' && e.to === 'outside' && e.reason === `Crop write-off #${e.id}` && e.toValue === 0 && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
       role(e.from); requireThat(e.quantity === holding(e.from).quantity); release(e);

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY, access, buildRoad, chooseRecipe, createCity, deserialize, farmCrop, selectFarmCrop, serialize, step, zoneCell, type City } from '../src/sim.ts';
+import { GATEWAY, access, automaticFarmCrop, buildRoad, chooseRecipe, createCity, deserialize, farmCrop, selectFarmCrop, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
 import { CROPS, CROP_BANDS, PRODUCTS, RECIPE, RECIPES, cropForFertility, freshPreference, mixTotal, productPreference, takeLargest } from '../src/goods.ts';
 import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '../src/legacy-v6.ts';
 import { untyped } from './untyped.ts';
 import { keepSupplied } from './plants.ts';
 
 /** An empty-start city with two farms on each fertility band, homes, shops, and factory plots added on day 400. */
-function threeCropCity(): City {
+function threeCropCity(observe?: (city: City) => void): City {
   const c = createCity(61025, { starter: false });
   buildRoad(c, GATEWAY, GATEWAY + 20); buildRoad(c, 12 * 24 + 10, 4 * 24 + 10); buildRoad(c, 12 * 24 + 16, 20 * 24 + 16);
   const frontage = c.cells.map((cell, i) => !cell.road && !cell.zone && access(c, i) ? i : -1).filter(i => i >= 0), used = new Set<number>();
@@ -20,10 +20,31 @@ function threeCropCity(): City {
     step(c);
     for (const farm of c.firms.filter(f => f.zone === 'F')) { const parcel = c.buildings.find(b => b.id === farm.building)!; selectFarmCrop(c, farm.id, cropForFertility(c.resources.fertility[parcel.cell])!); }
     keepSupplied(c);
+    observe?.(c);
     if (d === 400) for (const i of take(frontage.filter(i => !c.cells[i].zone), 2)) zoneCell(c, i, 'I');
   }
   return c;
 }
+
+test('expanded farms expose a missing crop only for real reachable buyers without altering manual choices', { timeout: 240_000 }, () => {
+  let checked = false;
+  threeCropCity(city => {
+    if (checked) return;
+    const farms = city.firms.filter(f => f.zone === 'F');
+    if (!farms.some(f => city.buildings.find(b => b.id === f.building)!.level > 3)) return;
+    const missing = CROPS.filter(crop => !farms.some(f => farmCrop(city, f) === crop));
+    if (!missing.length || summary(city).demand.F !== 1) return;
+    const noBuyerCash = structuredClone(city);
+    for (const household of noBuyerCash.households) noBuyerCash.accounts[household.wallet] = 0;
+    if (summary(noBuyerCash).demand.F !== 0) return; // Aggregate capacity still has its own demand.
+    const before = serialize(city);
+    assert.ok(missing.includes(automaticFarmCrop(city)), 'a new automatic farm chooses a missing crop');
+    assert.ok(farms.every(f => f.cropMode === 'manual'), 'existing manual crop choices remain manual');
+    assert.equal(serialize(city), before, 'the demand check has no side effects');
+    checked = true;
+  });
+  assert.ok(checked, 'observed missing-crop demand distinct from aggregate crop capacity');
+});
 
 test('the catalog: three farm-to-table lines, crops by fertility band, daily rotating baskets', () => {
   assert.deepEqual(RECIPES.map(r => [RECIPE[r].crop, RECIPE[r].product]), [['rice', 'milled-rice'], ['vegetables', 'canned-food'], ['sugarcane', 'sugar']]);

@@ -1,13 +1,14 @@
+import { factoryCropCapacity } from './factory-levels.ts';
 import { PARK_STAFF } from './parks.ts';
 import './context-panels.css';
 import './building-cards.css';
 import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
-import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, harvestYield } from './agriculture.ts';
+import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity, harvestYield } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
@@ -229,19 +230,24 @@ function legacyAssumption(household: Household): HTMLElement | null {
 }
 function renderHouse(city: City, building: Building, households: Household[], onHousehold: HouseholdAction): HTMLElement[] {
   const occupied = homeOccupancy(city, building.id), capacity = housingCapacity(building);
+  const upgrade = housingUpgradeStatus(city, building), labels = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' } as const;
   const residents = section('ครัวเรือนที่พักอาศัย', `${households.length} ครัวเรือน · ${occupied.persons} คน`), list = el('div', 'cx-household-list');
   residents.classList.add('bc-residents-source');
   for (const household of households) list.append(householdButton(city, household, building, onHousehold));
   if (!households.length) list.append(empty('บ้านว่าง', 'ยังไม่มีครัวเรือนพักอาศัย การรับผู้ย้ายเข้าแยกจากการสร้างอาคารและเริ่มได้ในวันถัดไปเมื่อผ่านเงื่อนไข'));
   residents.append(list);
   const conditions = explainMigration(city, building.id).map(reason => el('p', '', reason));
+  const progression = upgrade.next ? [
+    el('p', '', `ถัดไป: ${labels[upgrade.next.type]} ระดับ ${upgrade.next.tierLevel} · ความจุ ${upgrade.next.households} ครัวเรือน / ${upgrade.next.persons} คน · ทุนภายนอก 200 เครดิต`),
+    el('p', '', upgrade.blocked.length ? `ยังขาด: ${upgrade.blocked.join(' · ')}` : 'ครบเงื่อนไขแล้ว รอตรวจอัตโนมัติสิ้นเดือน'),
+  ] : [el('p', '', 'ถึงระดับสูงสุดแล้ว')];
   return [status(city, building.cell), metrics([
     capacityMetric('households', 'พักอยู่ / รับได้', occupied.households, capacity.households, 'ครัวเรือน'),
     capacityMetric('persons', 'สมาชิก / รับได้', occupied.persons, capacity.persons, 'คน'),
     metric('vacant-households', 'ช่องครัวเรือนว่าง', count(Math.max(0, capacity.households - occupied.households)), Math.max(0, capacity.households - occupied.households)),
     metric('vacant-persons', 'ความจุสมาชิกว่าง', `${count(Math.max(0, capacity.persons - occupied.persons))} คน`, Math.max(0, capacity.persons - occupied.persons)),
-    metric('level', 'ระดับอาคาร', String(building.level), building.level), metric('age', 'อายุอาคาร', `${building.age} วัน`, building.age)
-  ]), residents, facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือนและความจุ', ...conditions, el('p', '', `ความจุบ้านเป็นค่าที่เกมกำหนด ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
+    metric('level', 'ระดับอาคาร', `${labels[upgrade.current.type]} ${upgrade.current.tierLevel}`, building.level), metric('age', 'อายุอาคาร', `${building.age} วัน`, building.age)
+  ]), residents, facts(`house:${building.id}`, 'การเติบโตและเงื่อนไขรับครัวเรือน', ...progression, ...conditions, el('p', '', `ความจุระดับใหม่เป็นค่าทดลอง ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
   const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building);
@@ -278,9 +284,9 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
     metric('cash', 'เงินกิจการ', cash(wallet), wallet, true), metric('reserved', 'สำรองค่าจ้าง', cash(reserved), reserved, true), metric('spendable', 'เงินพ้นสำรองค่าจ้าง', cash(spendable), spendable, true), metric('stock', 'สำเร็จรูปคงคลัง', `${count(firm.inventory)} หน่วย`, firm.inventory), workerMetric, metric('household-count', 'บัญชีครัวเรือนของผู้ทำงาน', count(labor.householdCount), labor.householdCount), metric('profit', 'กำไรรอบก่อนภาษี', cash(firm.lastMonthProfit, true), firm.lastMonthProfit, true)
   ]), ...renderAgriculture(city, building, firm, labor.workers), ...funding, employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), ...(firm.zone === 'I' || isRetail(firm) ? [activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)] : []), ...(!isRetail(firm) ? [cropActivity(city, firm.wallet, `${businessName(firm)} #${firm.id}`)] : [])];
 }
-function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
+export function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
   if (isRetail(firm)) return [];
-  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : isMarket(firm) ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = CROP_STOCK_CAPS[isMarket(firm) ? 'T' : firm.zone === 'F' ? 'F' : 'I'];
+  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : isMarket(firm) ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = firm.zone === 'I' ? factoryCropCapacity(building.level) : isMarket(firm) ? CROP_STOCK_CAPS.T : farmStockCapacity(building.level);
   body.classList.add('cx-agriculture'); body.dataset.firmId = String(firm.id);
   const cards = [capacityMetric('crop-stock', 'พืชผลคงคลัง / เก็บได้', firm.cropInventory, cap, 'ล็อต'), metric('crop-cost', 'มูลค่าพืชผลตามบัญชี', cash(firm.cropCost), firm.cropCost, true), metric('production-tick', 'วันประมวลผลล่าสุด', String(firm.productionTick), firm.productionTick)];
   if (firm.zone === 'F') {
@@ -562,6 +568,17 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
   } else if (data.kind === 'shop') {
     output.push(cardGroup('สินค้าสำเร็จรูปพร้อมขาย', 'stock', takeCards(parts, ['stock'])), cardTrade(data), cardCash(data, parts));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
+    const firm = city.firms.find(f => f.id === data.identity.firmId && isRetail(f));
+    if (firm) {
+      const s = retailGrowthStatus(city, firm), panel = section('ระดับร้านและการขยาย');
+      panel.dataset.retailGrowth = String(firm.id);
+      panel.append(el('p', 'cx-detail-note', `ระดับ ${s.level} · คนทำงาน ${s.workers}/${s.current.workers} · พื้นที่สินค้า ${s.current.stock} หน่วย · เป้าเติมตามคนทำงานสูงสุด ${s.staffed.stock} หน่วย`));
+      panel.append(el('p', 'cx-detail-note', `ความครอบคลุมที่ใช้วางแผนร้านใหม่สูงสุด ${s.staffed.householdCoverage} ครัวเรือนเมื่อมีสินค้า ถนน และสาธารณูปโภคครบ; ร้านเดิมยังนับอย่างน้อย 8 ครัวเรือน`));
+      panel.append(el('p', 'cx-detail-note', 'ไม่มีเพดานลูกค้ารายวันตายตัว ยอดขายขึ้นกับสินค้าที่มี คนทำงาน ลูกค้า และเงินซื้อจริง'));
+      panel.append(el('p', 'cx-detail-note', s.next ? `ระดับถัดไป ${s.level + 1}: คนทำงาน ${s.next.workers} คน · พื้นที่สินค้า ${s.next.stock} หน่วย · ทบทวนอัตโนมัติทุกเดือน` : 'ถึงระดับสูงสุดแล้ว'));
+      if (s.next) panel.append(el('p', 'cx-detail-note', s.reasons.length ? `เงื่อนไขที่ยังขาด: ${s.reasons.join(' · ')}` : 'เงื่อนไขปัจจุบันครบ; ไฟฟ้าและน้ำสำรองอาจถูกใช้งานก่อนถึงรอบทบทวน'));
+      output.push(panel);
+    }
   } else if (data.kind === 'market') {
     const marketKpis = takeCards(parts, ['crop-stock', 'crop-cost', 'realised-profit', 'workers', 'cash']);
     const ownerWork = marketKpis.find(card => card.dataset.contextMetric === 'workers'); if (ownerWork) ownerWork.querySelector('dt')!.textContent = 'เจ้าของทำงาน / รับได้';

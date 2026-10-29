@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, summary, serialize, deserialize, industryGrowthStatus, firmWorkerCount, firmWage, bulldoze, zoneCell, type City } from '../src/sim.ts';
+import { createCity, step, summary, serialize, deserialize, industryGrowthStatus, firmWorkerCount, firmWage, bulldoze, zoneCell, access, type City } from '../src/sim.ts';
 import { createCity as legacyCity, step as legacyStep, serialize as legacySerialize } from '../src/legacy-v5.ts';
 import { createCity as agricultureCity, step as agricultureStep, serialize as agricultureSerialize } from '../src/legacy-v4.ts';
 import { untyped } from './untyped.ts';
@@ -18,6 +18,18 @@ function conservation(c: City) {
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((n, f) => n + f.inventory, 0));
   assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0), c.firms.reduce((n, f) => n + f.cropInventory, 0));
   assert.deepEqual(clone(c), c);
+}
+
+// Higher factory tiers can attract an outside investor before a local firm has
+// saved enough. Provide another connected parcel only once the local sponsor
+// has its real capital and all funded vacancies are filled. This keeps both
+// investment paths active and makes the land assumption explicit.
+function zoneFundedParcel(c: City, sponsorId?: number): number | null {
+  const status = industryGrowthStatus(c);
+  if (status.code !== 'growth.no-industrial-parcel' || status.availableCapital < 300_000 || status.fundedVacancies !== 0 || (sponsorId !== undefined && status.sponsorFirmId !== sponsorId)) return null;
+  const i = c.cells.findIndex((cell, index) => cell.zone === null && !cell.road && cell.building === null && access(c, index) && zoneCell(c, index, 'I').ok);
+  assert.ok(i >= 0, 'An additional connected industrial parcel is available');
+  return i;
 }
 
 test('genuine v5 day388 plateau migrates without changing state, then existing capital creates paid jobs and real arrivals', () => {
@@ -47,12 +59,20 @@ test('midmonth expansion preserves all earned wages, tax/rent/working reserves a
   assert.ok(c.accounts[sponsor.wallet] >= earned + tax + 10_000 + 20_000); conservation(c);
 });
 
-test('fresh deterministic cities pass initial tier population/job capacity without arbitrary people or outside expansion money', () => {
+test('fresh deterministic cities use real outside and local capital with adequate industrial land', () => {
   for (const seed of [61025, 20261023]) {
-    const c = createCity(seed), twin = createCity(seed); let firstExpansion = 0;
-    for (let day = 1; day <= 388; day++) { step(c); step(twin); keepSupplied(c); keepSupplied(twin); if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day; if (day % 30 === 0) conservation(c); }
-    // Levelled farms add crop jobs that fill before a factory sponsors expansion, and markets pay farms more for
-    // the crops factories buy, so chain-2 expands later than growth-1 (294) but still inside the first 13 months.
+    const c = createCity(seed), twin = createCity(seed); let firstExpansion = 0, addedParcel: number | null = null;
+    for (let day = 1; day <= 388; day++) {
+      step(c); step(twin); keepSupplied(c); keepSupplied(twin);
+      if (addedParcel === null) { addedParcel = zoneFundedParcel(c); assert.equal(zoneFundedParcel(twin), addedParcel); }
+      if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day;
+      if (day % 30 === 0) conservation(c);
+    }
+    // The new factory tiers bring the existing outside-investor trigger forward.
+    // An outside-funded factory can occupy the original last industrial parcel;
+    // the controlled extra parcel allows a genuinely funded local expansion too.
+    const outside = c.ledger.find(e => /^Outside industry equity #/.test(e.reason));
+    assert.ok(outside); assert.equal(outside.from, 'outside'); assert.equal(outside.amount, 300_000); assert.notEqual(addedParcel, null);
     assert.ok(firstExpansion > 120 && firstExpansion < 390, String(firstExpansion)); assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8); assert.deepEqual(c, twin);
     for (const f of c.firms.filter(f => f.fundedBy)) { const capital = c.ledger.find(e => e.reason === `Industry expansion capital #${f.id}`)!; assert.equal(c.ledger.some(e => e.to === f.wallet && e.from === 'outside' && e.tick === capital.tick), false); }
     for (const h of c.households.filter(h => h.origin === 'arrival')) assert.equal(c.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1);
@@ -83,12 +103,38 @@ test('funded factory closes only after claims and returns residual cash to its s
   assert.equal(bulldoze(estate, estate.buildings.find(b => b.id === offspring.building)!.cell).ok, true); assert.equal(estate.accounts[source.wallet], sourceCash + residue); conservation(estate);
 });
 
+test('a locally funded factory cannot create a new parcel or free capital after outside investment takes the last site', () => {
+  const city = current(251); step(city);
+  const funded = city.firms.find(f => f.fundedBy)!, parent = city.firms.find(f => f.id === funded.fundedBy!.firmId)!;
+  const site = city.buildings.find(b => b.id === parent.building)!.cell;
+  assert.equal(bulldoze(city, site).ok, true); assert.equal(zoneCell(city, site, 'I').ok, true);
+  const zones = city.cells.map(cell => cell.zone);
+  for (let n = 0; n < 500; n++) { step(city); keepSupplied(city); }
+  const status = industryGrowthStatus(city);
+  assert.equal(status.code, 'growth.no-industrial-parcel'); assert.equal(status.sponsorFirmId, funded.id); assert.ok(status.availableCapital >= 300_000);
+  assert.deepEqual(city.cells.map(cell => cell.zone), zones, 'no industrial zoning is invented');
+  assert.ok(city.ledger.some(e => /^Outside industry equity #/.test(e.reason) && e.from === 'outside' && e.amount === 300_000));
+  assert.equal(city.firms.some(f => f.fundedBy?.firmId === funded.id), false);
+  const capital = city.ledger.filter(e => e.reason === `Industry expansion capital #${funded.id}`);
+  assert.equal(capital.length, 1); assert.equal(capital[0].from, parent.wallet); assert.equal(capital[0].amount, 300_000);
+  conservation(city);
+});
+
 test('two-generation funded sponsors retain later estate receipts in either same-tick closure order', () => {
   const c = current(251); step(c); const b = c.firms.find(f => f.fundedBy)!, a = c.firms.find(f => f.id === b.fundedBy!.firmId)!, oldSite = c.buildings.find(home => home.id === a.building)!.cell;
   assert.equal(bulldoze(c, oldSite).ok, true); assert.equal(zoneCell(c, oldSite, 'I').ok, true);
-  let child = c.firms.find(f => f.fundedBy?.firmId === b.id);
-  for (let n = 0; n < 1500 && !child; n++) { step(c); keepSupplied(c); child = c.firms.find(f => f.fundedBy?.firmId === b.id); }
+  let child = c.firms.find(f => f.fundedBy?.firmId === b.id), addedParcel: number | null = null;
+  for (let n = 0; n < 1500 && !child; n++) {
+    step(c); keepSupplied(c);
+    if (addedParcel === null) addedParcel = zoneFundedParcel(c, b.id);
+    child = c.firms.find(f => f.fundedBy?.firmId === b.id);
+  }
+  assert.ok(c.ledger.some(e => /^Outside industry equity #/.test(e.reason) && e.from === 'outside' && e.amount === 300_000));
+  assert.notEqual(addedParcel, null);
   assert.ok(child, 'Actual profitable funded B can later sponsor C from accumulated operating cash'); conservation(c);
+  const funding = c.ledger.filter(e => e.reason === `Industry expansion capital #${child.id}`);
+  assert.equal(funding.length, 1); assert.equal(funding[0].from, b.wallet); assert.equal(funding[0].amount, 300_000);
+  assert.equal(c.ledger.some(e => e.to === child!.wallet && e.from === 'outside' && e.tick === funding[0].tick), false);
   for (const parentFirst of [true, false]) {
     const state = clone(c), parent = state.firms.find(f => f.id === b.id)!, offspring = state.firms.find(f => f.id === child!.id)!;
     const closing = parentFirst ? [parent, offspring] : [offspring, parent];

@@ -72,10 +72,10 @@ test('moves enforce both capacities and preserve household identity, savings, cl
   assert.deepEqual({ ...h, home: before.home }, before);
   assert.equal(JSON.stringify(c.accounts), accounts); assert.equal(JSON.stringify(c.ledger), ledger); assert.equal(JSON.stringify(c.firms.map(f => f.workDays)), claims); assert.equal(c.migration.arrivals, arrivals);
   const repeated = serialize(c); assert.equal(moveHousehold(c, h.id, destination.id).ok, true); assert.equal(serialize(c), repeated);
-  const full = c.buildings.find(b => b.zone === 'R' && b.id !== h.home && homeOccupancy(c, b.id).households > 0)!;
+  const full = c.buildings.find(b => b.zone === 'R' && b.id !== h.home && homeOccupancy(c, b.id).households > 0 && homeOccupancy(c, b.id).households <= 3)!;
   assert.ok(full);
   // Fixture with precisely occupied capacity; no resident or money is changed.
-  full.level = homeOccupancy(c, full.id).households;
+  full.level = homeOccupancy(c, full.id).households; full.housingType = 'cottage';
   const blocked = serialize(c);
   assert.equal(moveHousehold(c, h.id, full.id).ok, false); assert.equal(serialize(c), blocked);
   assert.doesNotThrow(() => deserialize(serialize(c)));

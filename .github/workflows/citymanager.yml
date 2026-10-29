@@ -130,6 +130,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Agriculture acceptance failed with exit code $LASTEXITCODE." }
             npm run test:building-cards
             if ($LASTEXITCODE -ne 0) { throw "Building card acceptance failed with exit code $LASTEXITCODE." }
+            npm run test:building-progression
+            if ($LASTEXITCODE -ne 0) { throw "Building progression acceptance failed with exit code $LASTEXITCODE." }
             npm run test:audio
             if ($LASTEXITCODE -ne 0) { throw "Audio acceptance failed with exit code $LASTEXITCODE." }
             $env:CITYMANAGER_BLOCK_MODELS = '1'
@@ -153,6 +155,15 @@ jobs:
           } finally {
             Stop-Process -Id $previewProcess.Id -ErrorAction SilentlyContinue
           }
+
+      - name: Preserve building progression browser evidence
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: building-progression-browser-evidence
+          path: .test-output/building-progression/*.png
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Verify preserved signal GUI without provider calls
         run: |

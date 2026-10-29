@@ -5,7 +5,7 @@ import { FOOD_BACKUP_KEY, PARKS_BACKUP_KEY, SAVE_KEY, LATEST_BACKUP_KEY, readSto
 
 function oldCity(version: 12 | 13, seed: number): string {
   const raw = JSON.parse(serialize(createCity(seed, { starter: false })));
-  raw.version = version; raw.rulesVersion = version === 12 ? 'chain-7' : 'chain-8'; delete raw.parks;
+  raw.version = version; raw.rulesVersion = version === 12 ? 'chain-7' : 'chain-8'; delete raw.parks; delete raw.factoryProgressionStartTick; delete raw.farmLevelStartTick;
   if (version === 12) delete raw.foodDemandStartTick;
   return JSON.stringify(raw);
 }

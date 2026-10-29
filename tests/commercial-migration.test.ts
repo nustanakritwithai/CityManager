@@ -11,7 +11,7 @@ function oldCity(day = 179) {
   return legacy.deserializeV4(legacy.serialize(c));
 }
 function preserved(c: City | legacy.City) {
-  const { version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, foodDemandStartTick: _food, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, parks: _parks, ...state } = c as City;
+  const { version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, parks: _parks, ...state } = c as City;
   // Water and power changed shape in chain-4 (an outside contract and plants); the facts below did not.
   return state;
 }
@@ -30,6 +30,7 @@ test('v4 T market becomes commercial L1 without changing any economic or labor f
   assert.equal(legacy.contributeOwnerCapital(old, owner.id, 10000).ok, true);
   const raw = legacy.serialize(old), city = deserialize(raw);
   assert.equal(city.version, 9); assert.equal(city.rulesVersion, 'chain-4');
+  assert.equal(city.factoryProgressionStartTick, city.tick); assert.equal(city.farmLevelStartTick, city.tick);
   assert.deepEqual(preserved(city), preserved(old));
   for (const f of old.firms) {
     const current = city.firms.find(n => n.id === f.id)!;
@@ -60,7 +61,7 @@ test('legacy retailers retain exact jobs at mapped commercial levels 2-4; market
   const city = deserialize(legacy.serialize(old)), market = city.firms.find(isMarket)!;
   for (const kind of [undefined, 'retail', 'other']) {
     const bad = structuredClone(city); (bad.firms.find(f => f.id === market.id)! as unknown as { commercialKind: unknown }).commercialKind = kind;
-    assert.throws(() => deserialize(JSON.stringify(bad)), /corrupt/);
+    assert.throws(() => deserialize(serialize(bad)), /corrupt/);
   }
   const bad = structuredClone(city); bad.buildings.find(b => b.id === market.building)!.level = 2;
   assert.throws(() => loaded(bad), /corrupt/);

@@ -4,6 +4,7 @@ import {
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
+import { factoryLevel } from './factory-levels.ts';
 import { utilityService, type UtilityKind } from './utilities.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
@@ -133,7 +134,7 @@ export class CityView {
     parent.addChild(entity);
     return entity;
   }
-  private farm(tile: Entity, fertility: number) {
+  private farm(tile: Entity, fertility: number, level: number) {
     const plot = new Entity('Original farm plot'); tile.addChild(plot);
     this.box(plot, 0, .09, 0, 1.68, .035, 1.68, this.ground.soilMaterial);
     this.box(plot, -.17, .12, .12, 1.2, .035, 1.24, '#725b3e');
@@ -141,6 +142,9 @@ export class CityView {
     for (const [row, x] of [-.62, -.36, -.1, .16].entries()) {
       const crop = this.box(plot, x, .15 + cropHeight / 2, .12, .17, cropHeight, 1.14, row % 2 ? '#86ad58' : '#b0bc61');
       crop.name = 'Renewable crop row';
+    }
+    for (let tier = 4; tier <= level; tier++) {
+      const marker = this.box(plot, .4 + (tier - 4) * .15, .69, -.46, .1, .1, .1, '#e3bd55'); marker.name = `Farm level ${tier} marker`;
     }
     const shed = this.box(plot, .55, .32, -.46, .5, .43, .48, '#d7dec9'); shed.name = 'Original farm shed';
     this.box(plot, .55, .58, -.46, .6, .13, .57, '#4c7056');
@@ -461,17 +465,29 @@ export class CityView {
         for (const dz of [-.86, .86]) this.box(tile, 0, .075, dz, 1.8, .03, .08, color, false);
         for (const dx of [-.86, .86]) this.box(tile, dx, .075, 0, .08, .03, 1.8, color, false);
         if (b) {
-          if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i]); continue; }
+          if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level); continue; }
           if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
+          // Code-native apartment/condo silhouettes fit the same tile even when assets fail.
+          if (b.zone === 'R' && b.level > 3) {
+            const condo = b.level >= 7, tier = condo ? b.level - 6 : b.level - 3;
+            const height = (condo ? 3.8 : 2.1) + tier * .6;
+            this.box(tile, 0, height / 2 + .1, 0, 1.3, height, 1.25, condo ? '#9fbcc8' : '#d5d6c5');
+            this.box(tile, 0, height + .16, 0, 1.4, .12, 1.35, condo ? '#667c8b' : '#aa8270');
+            for (let floor = 0; floor < (condo ? tier + 4 : tier + 2); floor++)
+              for (const x of [-.36, .12]) this.box(tile, x, .48 + floor * .58, .635, .25, .25, .025, lit ? this.windowLit : '#718a97', false);
+            continue;
+          }
           // Retained shops move up one commercial tier; their geometry stays unchanged.
           const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
-          const model = this.assets?.building(b.zone, visualLevel, i, lit);
+          const model = this.assets?.building(b.zone, b.zone === 'I' ? factoryLevel(b.level).model : visualLevel, i, lit);
           if (model) {
             model.setLocalPosition(0, .1, 0); tile.addChild(model);
             // Bigger factories show their scale with a chimney and an input tank.
             if (b.zone === 'I' && b.level >= 2) { const chimney = this.assets?.detail('chimney', .32); if (chimney) { chimney.setLocalPosition(.68, .1, -.62); tile.addChild(chimney); } }
             if (b.zone === 'I' && b.level >= 3) { const tank = this.assets?.detail('tank', .6); if (tank) { tank.setLocalPosition(-.6, .1, .66); tile.addChild(tank); } }
+            // One inset marker per level above three, contained within the same parcel.
+            if (b.zone === 'I') for (let n = 0; n < factoryLevel(b.level).markers; n++) this.box(tile, -.7 + n * .23, .12, .82, .13, .06, .09, '#f1c267', false);
             if (b.zone === 'R' && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
             // A lived-in house gets a front-yard bench; some also a second bush (decoration only).
             if (b.zone === 'R' && lit && hashCell(i + 5) % 2 === 0) this.bench(tile, -.62, .7);
