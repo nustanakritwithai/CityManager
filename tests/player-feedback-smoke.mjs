@@ -180,7 +180,9 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width:844, height:390, screenWidth:844, screenHeight:390, deviceScaleFactor:1, mobile:true });
   await send('Emulation.setTouchEmulationEnabled', { enabled:true, maxTouchPoints:1 });
   mobile = true;
-  const cardCell = await evaluate("JSON.parse(cityManager.snapshot()).buildings.find(b=>b.zone==='C').cell");
+  stage = 'Select an existing starter-house card for landscape';
+  const cardCell = await evaluate("JSON.parse(cityManager.snapshot()).buildings.find(b=>b.zone==='R')?.cell");
+  assert.ok(Number.isInteger(cardCell), 'The actual starter city contains an occupied housing parcel');
   await button('#close-inspector'); await cell(cardCell);
   await until("!!document.querySelector('#entity-content .bc-hero')");
   await evaluate("document.querySelector('#inspector-body').scrollTop=0");
