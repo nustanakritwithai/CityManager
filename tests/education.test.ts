@@ -103,6 +103,23 @@ test('education save backs up the previous city and does not touch guest identit
   assert.equal(JSON.parse(old).market, undefined);
 });
 
+test('one closed school day pauses the apartment streak instead of clearing it', () => {
+  const city = createCity(61025, { education: true });
+  const site = city.cells.findIndex((cell, index) => !cell.road && cell.zone === null && [index - 1, index + 1, index - 24, index + 24].some(n => city.cells[n]?.road));
+  assert.equal(buildCampus(city, site, 'school').ok, true);
+  for (let day = 0; day < 10; day++) step(city);
+  const ready = city.education!.schoolReadyDays;
+  assert.ok(ready >= 10, `school counted ${ready} operating days`);
+  const campus = city.education!.campuses[0];
+  assert.equal(toggleCampus(city, campus.id).ok, true);
+  step(city);
+  assert.equal(campus.open, false);
+  assert.equal(city.education!.schoolReadyDays, ready);
+  assert.equal(toggleCampus(city, campus.id).ok, true);
+  step(city);
+  assert.equal(city.education!.schoolReadyDays, ready + 1);
+});
+
 test('education does not add a per-day population times campus scan cost that dominates the city', () => {
   const plain = createCity(61025), taught = createCity(61025, { education: true });
   const site = taught.cells.findIndex((cell, index) => !cell.road && cell.zone === null && [index - 1, index + 1, index - 24, index + 24].some(n => taught.cells[n]?.road));
