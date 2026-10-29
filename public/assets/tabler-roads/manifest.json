@@ -1,0 +1,31 @@
+{
+  "id": "tabler-road-icons",
+  "license": "MIT",
+  "upstreamCommit": "ed177a085b652fe04ec4f37ced867c94621e7840",
+  "files": [
+    {
+      "path": "road.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/ed177a085b652fe04ec4f37ced867c94621e7840/icons/outline/road.svg",
+      "bytes": 455,
+      "sha256": "3524dff35b2b15ff4d1d557cf1409ab54aa788b5a723a731304c669fa2d1cb0e"
+    },
+    {
+      "path": "arrows-up.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/ed177a085b652fe04ec4f37ced867c94621e7840/icons/outline/arrows-up.svg",
+      "bytes": 462,
+      "sha256": "b13bea0f0177afd4c35175b6a1c8e2d0553faae6ebd07e16aca92b5705862ce0"
+    },
+    {
+      "path": "unlink.svg",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/ed177a085b652fe04ec4f37ced867c94621e7840/icons/outline/unlink.svg",
+      "bytes": 629,
+      "sha256": "f53fc177bb40baf7d31074f28d3a86572e96c66b298242bfed5f85baefb6c4e6"
+    },
+    {
+      "path": "LICENSE",
+      "source": "https://raw.githubusercontent.com/tabler/tabler-icons/ed177a085b652fe04ec4f37ced867c94621e7840/LICENSE",
+      "bytes": 1073,
+      "sha256": "b740a1d46122672da62833e97f7e7c8a13fa85cbc7445b584b297cc00dde93db"
+    }
+  ]
+}
