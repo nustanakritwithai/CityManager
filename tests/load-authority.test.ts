@@ -9,7 +9,7 @@ import {createAutosave,installAutosave} from '../src/autosave.ts';
 import {MarketClient,marketJournalForTest,MARKET_SAVE_KEY} from '../src/market-client.ts';
 import {SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY} from '../src/save-storage.ts';
 
-const memory=()=>{const data=new Map<string,string>();return {data,getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>{data.set(key,value);}};};
+const memory=()=>{const data=new Map<string,string>();return {data,getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>{data.set(key,value);},removeItem:(key:string)=>{data.delete(key);}};};
 const snapshot=(city:ReturnType<typeof createCity>)=>serializeParkSession(city,createParkRuntime(city));
 
 test('rejected guest Load never arms periodic or lifecycle saves over the preserved city',async()=>{
@@ -72,4 +72,53 @@ test('an older pending Load cannot replace a subsequently loaded city',async()=>
  await loadLocalCitySession(next,undefined,guard,restored=>{applied=serializeParkSession(restored.city,restored.runtime);});
  resume();await assert.rejects(pending,/cancelled the older Load/);
  assert.equal(guard.armed,true);assert.equal(applied,next);guard.write(applied,null);assert.equal(storage.getItem(SAVE_KEY),next);
+});
+
+test('superseded Load with the real market binder preserves every stored byte and restart identity',async()=>{
+ const descriptors=['window','navigator','localStorage'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ try{
+  for(const existingJournal of [false,true]){
+   const storage=memory();let resume!:()=>void;
+   Object.defineProperty(globalThis,'localStorage',{configurable:true,value:storage});
+   Object.defineProperty(globalThis,'window',{configurable:true,value:{}});
+   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{locks:{request:(_name:string,_options:unknown,callback:(lock:unknown)=>Promise<unknown>)=>new Promise((resolve,reject)=>{resume=()=>{void Promise.resolve().then(()=>callback({})).then(resolve,reject);};})}}});
+   if(existingJournal)storage.setItem(MARKET_SAVE_KEY,JSON.stringify(marketJournalForTest(null),null,2));
+   let city=createCity(3);storage.setItem(SAVE_KEY,snapshot(city));storage.setItem(AUTOSAVE_CHECKPOINT_KEY,snapshot(city));
+   const guard=createSaveGuard(storage);guard.acceptLoaded(snapshot(city));
+   const client=new MarketClient(()=>city,'/citymanager-api'),journalBefore=client.exportSave();
+   const old=createCity(8);old.market=marketJournalForTest(null);old.market.guestId='00000000-0000-4000-8000-000000000001';
+   old.market.receipts['00000000-0000-4000-8000-000000000002']={claimId:'00000000-0000-4000-8000-000000000003',state:'claimed'};
+   const before=[...storage.data];
+   const pending=loadLocalCitySession(snapshot(old),client,guard,()=>assert.fail('cancelled city applied'));
+   await loadLocalCitySession(snapshot(createCity(9)),client,guard,restored=>{city=restored.city;});
+   const rejected=assert.rejects(pending,/cancelled the older Load/);resume();await rejected;
+   assert.equal(city.seed,9);assert.equal(guard.armed,true);
+   assert.deepEqual([...storage.data],before,'the cancelled binder must not persist its guest or receipts');
+   assert.deepEqual(client.exportSave(),journalBefore);assert.equal(client.guestId,null);
+   const restarted=new MarketClient(()=>city,'/citymanager-api');assert.equal(restarted.guestId,null);assert.deepEqual(restarted.journal.receipts,{});
+   if(existingJournal)assert.deepEqual(restarted.exportSave(),journalBefore);
+  }
+ }finally{for(const [key,descriptor] of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
+test('real binder rolls back exact journal bytes and revision if applying the loaded city fails',async()=>{
+ const descriptors=['window','navigator','localStorage'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+ try{
+  for(const existingJournal of [false,true]){
+   const storage=memory();Object.defineProperty(globalThis,'localStorage',{configurable:true,value:storage});
+   Object.defineProperty(globalThis,'window',{configurable:true,value:{}});
+   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{locks:{request:(_name:string,_options:unknown,callback:(lock:unknown)=>Promise<unknown>)=>callback({})}}});
+   if(existingJournal)storage.setItem(MARKET_SAVE_KEY,JSON.stringify(marketJournalForTest(null),null,2));
+   let city=createCity(3);storage.setItem(SAVE_KEY,snapshot(city));
+   const guard=createSaveGuard(storage),client=new MarketClient(()=>city,'/citymanager-api'),journalBefore=client.exportSave();
+   const loaded=createCity(8);loaded.market=marketJournalForTest(null);loaded.market.guestId='00000000-0000-4000-8000-000000000001';
+   loaded.market.receipts['00000000-0000-4000-8000-000000000002']={claimId:'00000000-0000-4000-8000-000000000003',state:'claimed'};
+   const before=[...storage.data];
+   await assert.rejects(loadLocalCitySession(snapshot(loaded),client,guard,()=>{throw Error('synthetic apply failure');}),/synthetic apply failure/);
+   assert.equal(city.seed,3);assert.equal(guard.armed,false);assert.deepEqual([...storage.data],before);
+   assert.deepEqual(client.exportSave(),journalBefore);assert.equal(client.guestId,null);assert.equal(new MarketClient(()=>city,'/citymanager-api').guestId,null);
+   await loadLocalCitySession(snapshot(loaded),client,guard,restored=>{city=restored.city;});
+   assert.equal(city.seed,8);assert.equal(client.guestId,loaded.market.guestId,'restored revision permits a subsequent valid bind');
+  }
+ }finally{for(const [key,descriptor] of descriptors){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
 });
