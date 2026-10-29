@@ -118,6 +118,18 @@ test('offscreen markers do not consume visible budget, and overlapping hit areas
   const before = JSON.stringify(points); assert.deepEqual([...visibleIssueCells(points, 390, 844, 2)], [80, 82]); assert.equal(JSON.stringify(points), before);
 });
 
+test('badge hit areas preserve normal selection centres, including unbadged neighbouring homes', () => {
+  // Exact 360x740 population fixture projection: cell270's raised icon used to
+  // intercept the normal home tap for cell269 (also reproduced in landscape).
+  const points = [{ cell: 270, x: 180.000, y: 331.146, z: 71.65 }, { cell: 300, x: 80, y: 180, z: 70 }];
+  const targets = [{ cell: 269, x: 164.530, y: 345.457, z: 75.26 }];
+  const before = JSON.stringify([points, targets]);
+  assert.deepEqual([...visibleIssueCells(points, 360, 740, 1, targets)], [300], 'occluded icon does not consume the visible budget');
+  assert.deepEqual([...visibleIssueCells([{ cell: 270, x: 422, y: 158.067, z: 39.28 }], 844, 390, 64, [{ cell: 269, x: 407.834, y: 172.526, z: 42.89 }])], []);
+  assert.deepEqual([...visibleIssueCells(points, 360, 740, 64, [{ ...targets[0], x: 20 }])], [270, 300], 'camera movement can reveal the icon again');
+  assert.equal(JSON.stringify([points, targets]), before, 'culling never changes selection/model data');
+});
+
 
 test('education badges share the canonical one-holder allocator, rather than copying all household diplomas', () => {
   const c = fixture(); c.buildings[0].level = 3; c.buildings[0].age = 60;

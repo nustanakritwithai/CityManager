@@ -50,6 +50,7 @@ try {
   for (const mobile of [false, true]) {
     if (mobile) { await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); await paints(); }
     const p = await marker(); assert.ok(p, 'An unobstructed issue marker is visible'); assert.ok(p.w >= 44 && p.h >= 44 && p.label);
+    assert.deepEqual(await evaluate(`(${JSON.stringify(city.buildings.map(b => b.cell))}).filter(cell=>{const p=window.cityManager.cellScreen(cell);return document.elementFromPoint(p.x,p.y)?.closest('.map-issue')})`), [], 'Badges never intercept normal building selection centres');
     if (mobile) {
       const first = { x: p.x, y: p.y, id: 1 }, second = { x: p.x + 3, y: p.y, id: 2 };
       await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first] });

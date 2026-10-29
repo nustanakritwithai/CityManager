@@ -13,6 +13,7 @@ export class MapMarkers {
   private readonly tip = document.createElement('div');
   private readonly legend = document.createElement('div');
   private issues: { issue: Issue; node: HTMLButtonElement; dispose: () => void }[] = [];
+  private selectionCells: number[] = [];
   private tipCell: number | null = null;
   // worldToScreen must not read and write the same vector.
   private readonly world = new Vec3();
@@ -27,7 +28,10 @@ export class MapMarkers {
     view.app.on('postrender', () => this.place());
   }
 
-  setIssues(issues: Issue[]) {
+  setIssues(issues: Issue[], selectionCells: readonly number[]) {
+    // Cache identities only when city facts change; camera frames project these
+    // centres without inspecting simulation, occupants, utility or issue state.
+    this.selectionCells = [...new Set(selectionCells)];
     const previous = new Map(this.issues.map(item => [item.issue.cell, item]));
     this.issues = [...issues].sort((a, b) => ISSUE_PRIORITY.indexOf(a.kind) - ISSUE_PRIORITY.indexOf(b.kind) || a.cell - b.cell).map(issue => {
       let item = previous.get(issue.cell); previous.delete(issue.cell);
@@ -76,7 +80,8 @@ export class MapMarkers {
     this.layer.dataset.interactive = String(this.view.mode === 'select');
     const points = this.issues.map(({ issue }) => { const p = this.screen(issue.cell, 3.6); return { cell: issue.cell, x: p.x, y: p.y, z: p.z }; });
     // Cull BEFORE the visible budget, so offscreen buildings cannot starve visible warnings.
-    const visible = visibleIssueCells(points, innerWidth, innerHeight);
+    const selectionPoints = this.selectionCells.map(cell => { const p = this.screen(cell, .1); return { cell, x: p.x, y: p.y, z: p.z }; });
+    const visible = visibleIssueCells(points, innerWidth, innerHeight, 64, selectionPoints);
     for (let i = 0; i < this.issues.length; i++) {
       const { issue, node } = this.issues[i], p = points[i], shown = visible.has(issue.cell);
       node.hidden = !shown; node.tabIndex = shown && this.view.mode === 'select' ? 0 : -1;

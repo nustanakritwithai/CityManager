@@ -475,7 +475,8 @@ function updateMapInfo(placement: Preview | null) {
   }
   const issueRevision = buildingIssueRevision(city);
   if (issueRevision !== mapInfo.issueLayout) {
-    mapMarkers.setIssues(buildingIssues(city)); Object.assign(mapInfo, { issueLayout: issueRevision, issueTick: city.tick, issueAt: now });
+    mapMarkers.setIssues(buildingIssues(city), [...city.buildings, ...city.plants, ...city.parks, ...(city.education?.campuses ?? [])].map(place => place.cell));
+    Object.assign(mapInfo, { issueLayout: issueRevision, issueTick: city.tick, issueAt: now });
   }
 }
 
