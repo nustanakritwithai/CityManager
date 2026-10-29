@@ -3,16 +3,20 @@
 This patch adds visible school/university models, inline campus action results,
 education costs and actual cohort progress, inspector pause/play controls, and a
 persistent save-failure banner. It does not change education rules, prices,
-payroll, simulation timing, or save storage/authority. Main `a6f4ada` is integrated,
-including the Load identity fence and workforce fixes.
+payroll, simulation timing, or save storage/authority. Main `8dca948` is integrated,
+including the Load identity fence, workforce, payroll and partial-study fixes.
+The progress read-model expands optional `studyCohorts` into actual count/day
+groups, preserving the legacy single-cohort fallback. School and university tests
+exercise a real partial-attendance split and verify that closing the campus does
+not invent progress or flatten advanced learners to the household minimum.
 
 ## Verified
 
 - TypeScript: `node node_modules/typescript/bin/tsc --noEmit` passed.
 - Production build: `node node_modules/vite/bin/vite.js build --configLoader native`
   passed (existing large-bundle warning remains).
-- Targeted tests: 18/18 passed with
-  `node --experimental-strip-types --test tests/player-feedback.test.ts tests/autosave.test.ts tests/scene-decor.test.ts tests/load-authority.test.ts tests/education-labor.test.ts`.
+- Targeted integration tests after main `8dca948`: 44/44 passed with
+  `node --experimental-strip-types --test tests/player-feedback.test.ts tests/autosave.test.ts tests/scene-decor.test.ts tests/load-authority.test.ts tests/education-labor.test.ts tests/education-capacity.test.ts tests/education-payroll.test.ts`.
 - Isolated Edge/CDP, CSS viewport 390 x 844, DPR 1, synthetic starter city:
   school and university appear on the map; tapping the university selects it;
   the upgrade shows its actual 2,500 baht price; repeated refusal remains visible

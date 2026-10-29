@@ -4,6 +4,7 @@ import { createSaveFeedback, type SaveFeedbackState } from '../src/save-feedback
 import { educationPanelData } from '../src/education-panel-data.ts';
 import { buildCampus, campusSiteReason, createCity, serialize, step, toggleCampus } from '../src/sim.ts';
 import { pocketPark } from '../src/scene-decor.ts';
+import { assertEducationInvariants, stepEducation, type EducationPeople, type EducationView } from '../src/education.ts';
 
 test('save failure stays visible during retries, and only a later successful write clears it', () => {
   let state: SaveFeedbackState = { pending: 0, lastSuccess: null, failure: null }, clock = 100;
@@ -57,4 +58,34 @@ test('education presentation reads actual cohorts and paused progress without ch
   assert.equal(data.upgrade, 150_000);
   assert.equal(data.studyDays, 60);
   assert.equal(data.next?.seats, 16);
+});
+
+for (const kind of ['school', 'university'] as const) test(`${kind} panel preserves split progress and legacy single-cohort progress`, () => {
+  const city = createCity(3, { starter: true });
+  const site = city.cells.findIndex((_, index) => campusSiteReason(city, index, kind) === null);
+  assert.equal(buildCampus(city, site, kind).ok, true);
+  const education = city.education!, campus = education.campuses[0];
+  campus.level = 2;
+  const count = kind === 'school' ? 6 : 3, servedFromSecond = kind === 'school' ? 2 : 1;
+  // A valid education-domain fixture: partial staffing actually creates the
+  // split. This is a read-model check, not a whole-city save fixture.
+  education.people = [101, 102].map((householdId): EducationPeople => ({
+    householdId, basic:kind === 'university' ? count : 0, higher:0,
+    school:kind === 'school' ? count : 0, university:kind === 'university' ? count : 0,
+    teacher:0, professor:0, campusId:campus.id, progress:10,
+  }));
+  education.residentBasic = kind === 'university' ? count * 2 : 0;
+  const view: EducationView = { tick:1, households:education.people.map(person => ({ id:person.householdId, workforce:count, wallet:`household:${person.householdId}`, ownsFirm:false })), buildings:[], posts:[], road:()=>true, sparePower:20, spareWater:20, treasury:100_000 };
+  stepEducation(education, view); assertEducationInvariants(education, view.households);
+  assert.equal(education.people[0].studyCohorts, undefined, 'uniform/legacy representation stays supported');
+  assert.equal(education.people[1].studyCohorts?.length, 2);
+  const before = JSON.stringify(city), data = educationPanelData(city, campus);
+  assert.deepEqual(data.cohorts, [
+    { householdId:101, learners:count, days:11 },
+    { householdId:102, learners:servedFromSecond, days:11 },
+    { householdId:102, learners:count - servedFromSecond, days:10 },
+  ], 'advanced learners must not be displayed at the household minimum');
+  assert.equal(JSON.stringify(city), before, 'reading split progress never changes it');
+  campus.open = false; stepEducation(education, { ...view, tick:2 });
+  assert.deepEqual(educationPanelData(city, campus).cohorts, data.cohorts, 'closed service preserves both earned progress groups');
 });

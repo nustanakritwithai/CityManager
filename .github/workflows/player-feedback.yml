@@ -36,6 +36,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Verify save feedback and actual education progress data
+        run: node --experimental-strip-types --test tests/player-feedback.test.ts
       - name: Build local-only UX test artifact
         env:
           VITE_MARKET_URL: ''

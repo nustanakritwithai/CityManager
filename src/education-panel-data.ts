@@ -9,8 +9,14 @@ export function educationPanelData(city: City, campus: Campus) {
   const localDaily = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
   const contractDaily = campus.kind === 'school' ? EDUCATION_COST.contractTeacherDaily : EDUCATION_COST.contractProfessorDaily;
   const cohorts = (city.education?.people ?? []).filter(person => person.campusId === campus.id)
-    .map(person => ({ householdId: person.householdId, learners: campus.kind === 'school' ? person.school : person.university, days: person.progress }))
-    .filter(cohort => cohort.learners > 0);
+    .flatMap(person => {
+      const learners = campus.kind === 'school' ? person.school : person.university;
+      if (!learners) return [];
+      // The shared progress is only the minimum after partial attendance splits
+      // a household. Preserve each actual group's count and earned days.
+      return (person.studyCohorts ?? [{ count: learners, progress: person.progress }])
+        .map(group => ({ householdId: person.householdId, learners: group.count, days: group.progress }));
+    });
   const available = treasurySpendable(city), higher = city.education?.residentHigher ?? 0;
   const upgradeRequirements: string[] = [];
   if (next) {
