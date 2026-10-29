@@ -8,6 +8,7 @@ import './building-cards.css';
 import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
+import { peopleOf } from './education.ts';
 import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, marketConversionStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
@@ -265,6 +266,14 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
   }
   if (!labor.householdCount) list.append(el('p', 'cx-detail-note', isMarket(firm) ? 'เจ้าของยังไม่ได้ใช้แรงงานทำตลาดในวันนี้ กิจการและเงินยังคงแยกจากบ้านพัก' : 'ยังไม่มีแรงงานที่มีความสามารถตรงกับงานและสำรองค่าจ้างได้'));
   employees.append(list);
+  if (city.education) {
+    const posts = new Map<number, number>();
+    for (const row of labor.households) posts.set(row.householdId, (posts.get(row.householdId) ?? 0) + row.workers);
+    if (firm.owner) posts.set(firm.owner.householdId, (posts.get(firm.owner.householdId) ?? 0) + 1);
+    let basic = 0, higher = 0;
+    for (const [householdId, count] of posts) { const person = peopleOf(city.education, householdId); basic += Math.min(count, person.basic); higher += Math.min(count, person.higher); }
+    employees.append(el('p', 'cx-detail-note', `ตำแหน่งที่มีวุฒิพื้นฐาน ${basic} คน · วุฒิขั้นสูง ${higher} คน · ระดับสูงบางช่วงต้องการอย่างน้อย 1 คน ไม่บังคับทุกคน และคนมีวุฒิยังทำงานพื้นฐานได้`));
+  }
   if (isRetail(firm)) employees.append(el('p', 'cx-detail-note', firm.owner
     ? `ร้านค้าของครัวเรือน #${firm.owner.householdId}${firm.convertedAt !== undefined ? ` · ยกระดับจากตลาดเมื่อวันที่ ${firm.convertedAt}` : ''} · พาณิชย์ระดับ ${building.level} · เจ้าของยืนร้านเอง 1 คน ไม่มีเงินเดือน จ้างลูกจ้างได้อีก ${Math.max(0, capacity - 1)} คน`
     : `ร้านค้าสำเร็จรูป · พาณิชย์ระดับ ${building.level} · ทุนจากนักลงทุนภายนอก ตำแหน่งงานทั้งหมดเป็นลูกจ้าง`));
@@ -365,6 +374,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     metric('food-today', 'อาหารที่ซื้อวันนี้', `${food.purchased} / ${food.required} หน่วย`, food.purchased), metric('food-missing', 'อาหารที่ยังขาดวันนี้', `${food.missing} หน่วย`, food.missing),
     metric('needs', 'วันต่อเนื่องที่อาหารไม่ครบ', `${household.needs} วัน`, household.needs), metric('last-purchase', 'ซื้อครั้งล่าสุด', purchaseText(city, household), household.lastPurchaseTick)
   ]));
+  if (city.education) { const person = peopleOf(city.education, household.id); const studying = person.school + person.university; const reserved = studying + person.teacher + person.professor; output.push(el('p', 'cx-detail-note', `ผู้เรียน ${studying} คน · วุฒิพื้นฐาน ${person.basic} · วุฒิขั้นสูง ${person.higher} · แรงงานที่ถูกกันไว้เรียนหรือสอน ${reserved} คน · เป็นจำนวนรวม ไม่มีรายชื่อรายบุคคล และไม่นับผู้พึ่งพิงเป็นนักเรียน`)); }
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
   const leaves = departureDay(city, household.id);
   if (leaves !== null) { const row = el('div', 'cx-status cx-departure-status'); row.dataset.departureDay = String(leaves); row.append(chip(`ไม่มีงาน · ย้ายออกในอีก ${leaves - city.tick} วัน`, false)); output.push(row); }
