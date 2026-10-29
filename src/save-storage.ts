@@ -1,3 +1,4 @@
+import {decodeSaveCopy} from './save-copy-codec.ts';
 export const SAVE_CONFLICT_LATEST_KEY='citymanager.backup.save-conflict.latest';
 export const AUTOSAVE_CHECKPOINT_KEY='citymanager.checkpoint.latest';
 export const PRE_AUTOSAVE_BACKUP='citymanager.backup.before-autosave';
@@ -79,7 +80,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
     // never let a corrupt metadata value redirect recovery to another slot.
     if (latest !== null && keys.includes(latest)) keys = [latest, ...keys.filter(key => key !== latest)];
   }
-  for (const key of keys) { const raw = storage.getItem(key); if (raw !== null) return { raw, key }; }
+  for (const key of keys) { const raw = storage.getItem(key); if (raw !== null) return { raw:decodeSaveCopy(raw)!, key }; }
   return null;
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
