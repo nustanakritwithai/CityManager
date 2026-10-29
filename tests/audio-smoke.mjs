@@ -48,7 +48,7 @@ try {
   const parcel = city.cells.findIndex((c, i) => !c.road && c.zone === null && c.building === null && [i - 1, i + 1, i - SIZE, i + SIZE].some(j => city.cells[j]?.road));
   const p = await evaluate(`window.cityManager.cellScreen(${parcel})`); await click(p.x, p.y); await sleep(300);
   assert.ok((await played()).includes('ui-place'), 'Zoning plays its sound');
-  await press('[data-tool="bulldoze"]'); const gate = await evaluate(`window.cityManager.cellScreen(${city.cells.findIndex((c, i) => c.road && i % SIZE === 0)})`); await click(gate.x, gate.y); await sleep(300);
+  await press('[data-tool="select"]'); await press('[data-tool="bulldoze"]'); const gate = await evaluate(`window.cityManager.cellScreen(${city.cells.findIndex((c, i) => c.road && i % SIZE === 0)})`); await click(gate.x, gate.y); await sleep(300);
   assert.ok((await played()).includes('ui-error'), 'A refused command plays the soft refusal');
   checks.push('Map commands play their action sound, a refusal plays the error sound');
 

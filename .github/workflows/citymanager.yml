@@ -185,6 +185,7 @@ jobs:
           path: |
             .test-output/building-progression/*.png
             .test-output/roads/*.png
+            .test-output/roads/select-menu-report.json
             docs/population-preview/phone-population-2000.png
             .test-output/fallback/phone-population-2000.png
             docs/context-preview/home-tap-house-panel.png

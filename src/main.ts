@@ -3,6 +3,8 @@ import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
+import { installSelectMenu } from './select-menu.ts';
+import './tool-menu.css';
 import '@fontsource/ibm-plex-sans-thai/thai-400.css';
 import '@fontsource/ibm-plex-sans-thai/thai-600.css';
 import '@fontsource/ibm-plex-sans-thai/thai-700.css';
@@ -98,6 +100,7 @@ const resultSound = <T extends { ok: boolean }>(result: T, success: EffectName):
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
+let selectMenu: ReturnType<typeof installSelectMenu> | undefined;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
 let parkFrameMs = 0, parkFramePeakMs = 0;
@@ -125,7 +128,7 @@ const help: Record<string, string> = {
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
-  bulldoze: 'แตะสวน สถานศึกษา ถนน อาคาร หรือโรงน้ำไฟเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้'
+  bulldoze: 'โหมดรื้อถอน · แตะสวน สถานศึกษา ถนน อาคาร หรือโรงน้ำไฟเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้ · ลูกศร/V/Esc เพื่อออก'
 };
 const WARN_TEXT = /ไม่พอ|ไม่ได้|ต้อง|ขวาง|ไม่ถูกต้อง|นอกแผนที่|ยังไม่เชื่อม|ไม่มีอยู่แล้ว|ไม่พบ/;
 function status(message: string) {
@@ -142,6 +145,7 @@ function farmHint(index: number | null): string {
 }
 function setTool(next: string) {
   roadMenu?.close();
+  selectMenu?.close(); selectMenu?.sync(next);
   tool = next; roadStart = null; hover = null;
   if (next !== 'select') inspector(false);
   if (view) { view.abortGesture(); view.mode = next === 'road' && (roadMode === 'split') ? 'select' : next; view.dragStart = null; }
@@ -183,6 +187,7 @@ function openRoute(next: Route) {
 }
 function cancel() {
   view?.abortGesture();
+  if (selectMenu?.isOpen()) { selectMenu.close(true); return; }
   if (cityNetwork?.open) { cityNetwork.toggle(false); return; }
   if (cityStatsPanel?.open) { cityStatsPanel.toggle(false); return; }
   if (dashboard?.modalOpen) { dashboard.closeModal(); return; }
@@ -542,7 +547,12 @@ async function boot() {
   view.traffic.setWalkersEnabled(false);
   const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
-  document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); }));
+  const selectButton = document.querySelector<HTMLButtonElement>('[data-tool="select"]')!;
+  selectMenu = installSelectMenu(selectButton, next => { sound('ui-select'); setTool(next); });
+  document.querySelectorAll<HTMLElement>('.tool-buttons [data-tool]').forEach(b => {
+    if (b === selectButton) return; // Select's popup owns its arrow and explicit demolition option.
+    b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); });
+  });
   document.querySelectorAll<HTMLElement>('[data-camera]').forEach(b => b.addEventListener('click', () => view.control(b.dataset.camera!)));
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { sound('ui-click'); speed = Number(b.dataset.speed); render(); }));
   $('#pause').addEventListener('click', () => { if (ownerDecisionPanel?.isAutoPending()) return; sound('ui-click'); paused = !paused; render(); });
