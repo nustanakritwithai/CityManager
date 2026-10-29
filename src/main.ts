@@ -54,7 +54,7 @@ import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
 import { advancedEnabled, storeAdvanced } from './advanced.ts';
 import { AudioEngine, type EffectName } from './audio-engine.ts';
 import { installAudioPanel } from './audio-panel.ts';
-import { CueLimiter, cityCues, cueSnapshot } from './audio-cues.ts';
+import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from './audio-cues.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
@@ -105,6 +105,13 @@ type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; c
 let route: Route | null = null;
 const EDUCATION_CHOICE = 'citymanager.education.v1';
 const educationPreferred = () => new URLSearchParams(location.search).has('education') || localStorage.getItem(EDUCATION_CHOICE) === 'on';
+function syncEducationTools() {
+  const on = !!city?.education;
+  for (const tool of ['school', 'university']) {
+    const button = document.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
+    if (button) button.hidden = !on;
+  }
+}
 const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน' };
 const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
@@ -469,6 +476,7 @@ async function boot() {
   const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
   city = createCity(61025, { starter: STARTER, education: educationPreferred() });
+  syncEducationTools();
   parkRuntime = createParkRuntime(city);
   ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
@@ -586,7 +594,9 @@ async function boot() {
       const restored = deserializeParkSession(saved.raw), loaded = restored.city, oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       if (loaded.market) marketPanel?.client.validateSave(loaded.market);
       if (marketPanel?.client.enabled) await marketPanel.client.bindLoadedCity(loaded.market, () => { city = loaded; parkRuntime = restored.runtime; }); else { city = loaded; parkRuntime = restored.runtime; }
+      cueLimiter.reset();
       if (educationPreferred() && !city.education) enableEducation(city, 'migrated-absent');
+      syncEducationTools();
       importedLegacyRaw = legacy ? saved.raw : null;
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; render();
@@ -606,7 +616,7 @@ async function boot() {
   $('#toggle-education').addEventListener('click', () => {
     if (educationPreferred() && !new URLSearchParams(location.search).has('education')) localStorage.removeItem(EDUCATION_CHOICE);
     else { localStorage.setItem(EDUCATION_CHOICE, 'on'); enableEducation(city, city.education?.origin ?? 'migrated-absent'); }
-    syncEducationChoice(); status(city.education ? 'เกณฑ์การศึกษาใช้กับเมืองนี้แล้ว วุฒิเริ่มจากศูนย์และไม่แปลงทักษะอาชีพ' : 'เมืองใหม่จะยังไม่ใช้เกณฑ์การศึกษา'); render();
+    syncEducationChoice(); syncEducationTools(); status(city.education ? 'เกณฑ์การศึกษาใช้กับเมืองนี้แล้ว วุฒิเริ่มจากศูนย์และไม่แปลงทักษะอาชีพ' : 'เมืองใหม่จะยังไม่ใช้เกณฑ์การศึกษา'); render();
   });
   $('#toggle-campus').addEventListener('click', () => { const campus = selected === null ? undefined : campusAt(city, selected); if (campus) status(toggleCampus(city, campus.id).message); render(); });
   $('#upgrade-campus').addEventListener('click', () => { const campus = selected === null ? undefined : campusAt(city, selected); if (campus) status(upgradeCampus(city, campus.id).message); render(); });
@@ -619,7 +629,7 @@ async function boot() {
     const sample = document.createElement('button'); sample.textContent = 'เมืองตัวอย่าง (มีถนนและโซนให้แล้ว)';
     const restart = async (starter: boolean) => {
       try { if (marketPanel?.client.enabled) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
-      city = createCity(61025, { starter, education: educationPreferred() }); parkRuntime = createParkRuntime(city); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
+      city = createCity(61025, { starter, education: educationPreferred() }); parkRuntime = createParkRuntime(city); cueLimiter.reset(); syncEducationTools(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
     };
@@ -665,7 +675,8 @@ async function boot() {
     audio.updateAmbience({ ...visual.soundscape, traffic, factories, closeness: Math.min(1, Math.max(0, (130 - view.radius) / 100)) });
     if (paused || document.hidden) return;
     const minutes = Math.min(dt, 0.25) * speed * 1440;
-    const before = parkRuntime.activity.minute + minutes >= 1440 ? cueSnapshot(city) : null;
+    const tickBefore = city.tick;
+    const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
     let days = 0;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
     const frameStarted = performance.now(), frameDeadline = frameStarted + 8;
@@ -677,7 +688,8 @@ async function boot() {
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
-    if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city), performance.now())) sound(cue);
+    if (monthEnded(tickBefore, city.tick)) sound('ev-month');
+    if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
   });

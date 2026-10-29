@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AUDIO_DEFAULTS, AUDIO_KEY, busGain, loadAudioSettings, parseAudioSettings, saveAudioSettings } from '../src/audio-settings.ts';
-import { CueLimiter, cityCues, cueSnapshot } from '../src/audio-cues.ts';
+import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from '../src/audio-cues.ts';
 import { MONTH, createCity, serialize, step } from '../src/sim.ts';
 import { keepSupplied } from './plants.ts';
 
@@ -39,10 +39,25 @@ test('a load or a new city (time going back) plays nothing', () => {
   assert.deepEqual(cityCues(cueSnapshot(c), c), [], 'no time passed');
 });
 
-test('the limiter keeps 10× speed calm but never drops a jingle', () => {
+test('a leftover minute fraction still counts as the day boundary, and the month coin follows the tick', () => {
+  assert.equal(dayBoundaryReached(1439, 0.8, 0.3), true);
+  assert.equal(dayBoundaryReached(1439, 0, 0.4), false);
+  assert.equal(monthEnded(59, 60), true);
+  assert.equal(monthEnded(58, 61), true);
+  assert.equal(monthEnded(60, 61), false);
+  assert.equal(monthEnded(61, 58), false);
+});
+
+test('the limiter keeps 10× speed calm but never drops a jingle or a month coin', () => {
   const limiter = new CueLimiter(3, 900);
   assert.deepEqual(limiter.admit(['ev-build-home', 'ev-month', 'ev-arrival', 'ev-shop'], 0), ['ev-build-home', 'ev-month', 'ev-arrival']);
   assert.deepEqual(limiter.admit(['ev-build-home', 'jingle-level'], 100), ['jingle-level'], 'same cue within the gap and a full second are held back');
   assert.deepEqual(limiter.admit(['ev-build-home'], 1200), ['ev-build-home']);
   assert.deepEqual(limiter.admit(['jingle-win'], 1210), ['jingle-win']);
+  const busy = new CueLimiter(3, 900);
+  assert.deepEqual(busy.admit(['ev-build-home', 'ev-arrival', 'ev-issue'], 0), ['ev-build-home', 'ev-arrival', 'ev-issue']);
+  assert.deepEqual(busy.admit(['ev-month'], 100), ['ev-month'], 'month end still plays when the second is already full');
+  assert.deepEqual(busy.admit(['ev-month'], 200), [], 'the same coin still waits out its gap');
+  busy.reset();
+  assert.deepEqual(busy.admit(['ev-month'], 200), ['ev-month'], 'a loaded city starts with a clear limiter');
 });
