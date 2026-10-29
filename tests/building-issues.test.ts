@@ -6,7 +6,7 @@ import { buildingIssues, buildingIssueRevision, issuePlaceRoute, ISSUE_PRIORITY 
 import { RETAIL_MAX_LEVEL } from '../src/retail-capacity.ts';
 import { initialCampusReport, educationLevel } from '../src/education.ts';
 import { visibleIssueCells } from '../src/building-issue-layout.ts';
-import { issueGesture } from '../src/building-issue-input.ts';
+import { bindIssueInput, issueGesture } from '../src/building-issue-input.ts';
 
 function fixture(zone: 'R' | 'C' | 'I' | 'F' = 'I'): City {
   const c = createCity(5, { starter: false }); buildRoad(c, GATEWAY, GATEWAY + 8);
@@ -137,5 +137,45 @@ test('maximum tiers never invent a further education/upgrade gate', () => {
   for (const zone of ['I', 'F', 'C', 'R'] as const) {
     const c = fixture(zone), b = c.buildings[0]; b.age = 60; b.level = zone === 'F' ? 6 : zone === 'C' ? RETAIL_MAX_LEVEL : 9; if (zone === 'R') b.housingType = 'condo';
     assert.ok(!facts(c).some(f => f.kind === 'education' || f.kind === 'upgrade'), zone);
+  }
+});
+
+
+test('real badge binder respects capture/target ordering, never re-arms a second pointer, and recovers after release', () => {
+  const originalWindow = globalThis.window;
+  type Handler = (event: any) => void;
+  const globals = new Map<string, Handler[]>(), local = new Map<string, Handler[]>();
+  const listenerHost = (map: Map<string, Handler[]>) => ({
+    addEventListener: (name: string, fn: Handler) => map.set(name, [...(map.get(name) ?? []), fn]),
+    removeEventListener: (name: string, fn: Handler) => map.set(name, (map.get(name) ?? []).filter(item => item !== fn)),
+  });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: listenerHost(globals) });
+  const button = { ...listenerHost(local), setPointerCapture() {} } as unknown as HTMLButtonElement;
+  const pans: number[][] = []; let activations = 0;
+  const dispose = bindIssueInput(button, (x, y) => pans.push([x, y]), () => activations++, () => true);
+  const emit = (type: string, pointerId: number, x = 100, target = true, detail = 1) => {
+    const event = { type, pointerId, clientX: x, clientY: 100, button: 0, detail, preventDefault() {}, stopPropagation() {} };
+    // Actual DOM ordering: window capture first, then the badge target.
+    for (const fn of globals.get(type) ?? []) fn(event);
+    if (target) for (const fn of local.get(type) ?? []) fn(event);
+  };
+  try {
+    for (const reverse of [false, true]) {
+      emit('pointerdown', 1); emit('pointerdown', 2);
+      emit('pointerup', reverse ? 1 : 2); emit('pointerup', reverse ? 2 : 1); emit('click', 2);
+      assert.equal(activations, 0, 'two pointers on the badge cannot activate in either release order');
+    }
+    emit('pointerdown', 1, 100, false); emit('pointerdown', 2); emit('pointerup', 1, 100, false); emit('pointerup', 2);
+    assert.equal(activations, 0, 'a pointer already on the canvas also prevents a new badge tap');
+    emit('pointerdown', 1); emit('pointerdown', 2, 100, false); emit('pointercancel', 2, 100, false); emit('pointerup', 1);
+    assert.equal(activations, 0, 'cancelling the outside pointer does not re-arm the first');
+    emit('pointerdown', 1); emit('pointercancel', 1); emit('pointerup', 1); assert.equal(activations, 0);
+    emit('pointerdown', 1); emit('pointerup', 1); emit('click', 1); assert.equal(activations, 1, 'fresh single tap recovers exactly once');
+    emit('pointerdown', 1); emit('pointermove', 1, 112); emit('pointerup', 1, 112); emit('click', 1);
+    assert.deepEqual(pans, [[12, 0]]); assert.equal(activations, 1, 'single-pointer drag still pans without activation');
+    emit('click', 0, 100, true, 0); assert.equal(activations, 2, 'keyboard/assistive activation stays available');
+  } finally {
+    dispose(); assert.ok([...globals.values()].every(list => list.length === 0), 'global capture listeners are removed on disposal');
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis, 'window'); else Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
   }
 });

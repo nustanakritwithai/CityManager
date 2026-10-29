@@ -50,6 +50,14 @@ try {
   for (const mobile of [false, true]) {
     if (mobile) { await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); await paints(); }
     const p = await marker(); assert.ok(p, 'An unobstructed issue marker is visible'); assert.ok(p.w >= 44 && p.h >= 44 && p.label);
+    if (mobile) {
+      const first = { x: p.x, y: p.y, id: 1 }, second = { x: p.x + 3, y: p.y, id: 2 };
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first] });
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first, second] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [first] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await paints();
+      assert.notEqual(await evaluate('document.querySelector("#inspector").dataset.open'), 'true', 'Two badge pointers never re-arm as a tap');
+    }
     if (mobile) await touch(p, true); else { await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: 1 }); await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x + 32, y: p.y + 10, button: 'left', buttons: 1 }); await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x + 32, y: p.y + 10, button: 'left', clickCount: 1 }); }
     await paints(); assert.notEqual(await evaluate('document.querySelector("#inspector").dataset.open'), 'true', 'Drag is not a tap');
     const next = await marker(); assert.ok(next); if (mobile) await touch(next); else await click(next.x, next.y);
