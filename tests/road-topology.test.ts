@@ -59,3 +59,24 @@ test('park runtime and existing market identity survive the road envelope withou
  assert.equal(JSON.parse(saved).version,20);assert.deepEqual(loaded.city.market,market);assert.deepEqual(loaded.runtime,runtime);
  assert.equal(roadLinked(loaded.city,pair[0],pair[1]),false);
 });
+
+test('normal strokes connect adjacent parallel roads without an extra join command and preserve arrows',()=>{
+ const c=fixture();buildParallelRoad(c,at(0,12),at(10,12),true);buildParallelRoad(c,at(10,13),at(0,13),true);
+ const money=c.accounts.treasury,arrows={...c.roadTopology!.oneWay};
+ assert.ok(buildParallelRoad(c,at(4,12),at(4,13)).ok);
+ assert.ok(roadLinked(c,at(4,12),at(4,13)));assert.equal(roadLinked(c,at(5,12),at(5,13)),false);
+ assert.deepEqual(c.roadTopology!.oneWay,arrows);assert.equal(c.accounts.treasury,money);
+ editRoadJunction(c,at(4,12),at(4,13),false);assert.equal(roadLinked(c,at(4,12),at(4,13)),false);
+ buildParallelRoad(c,at(4,12),at(4,13));assert.ok(roadLinked(c,at(4,12),at(4,13)));
+});
+test('drawing a crossing preserves both existing directions and opens only the chosen new stroke',()=>{
+ const c=fixture();buildParallelRoad(c,at(5,10),at(5,14));
+ assert.ok(roadLinked(c,at(4,12),at(5,12)));assert.ok(roadLinked(c,at(5,12),at(6,12)));
+ assert.ok(roadLinked(c,at(5,11),at(5,12)));assert.ok(roadLinked(c,at(5,12),at(5,13)));
+ assert.equal(roadLinked(c,at(5,11),at(4,12)),false);assert.equal(serialize(deserialize(serialize(c))),serialize(c));
+});
+test('single-tile gap repair and no-op redraw keep legacy topology and accounting unchanged',()=>{
+ const c=fixture();bulldoze(c,at(5,12));const expected=deserialize(serialize(c));
+ buildRoad(expected,at(5,12),at(5,12));buildParallelRoad(c,at(5,12),at(5,12));assert.deepEqual(c,expected);
+ const before=serialize(c);assert.ok(buildParallelRoad(c,at(3,12),at(5,12)).ok);assert.equal(serialize(c),before);
+});

@@ -1,7 +1,8 @@
+import { paintRoadIcon } from './road-icons.ts';
 import './road-menu.css';
-export type RoadMode = 'normal' | 'parallel' | 'oneway' | 'join' | 'split';
-const options: readonly [RoadMode,string,string][] = [
-  ['normal','↔','สองทาง'], ['parallel','═','คู่ขนาน'], ['oneway','⇈','2 เลนวันเวย์'], ['join','╋','เชื่อมแยก'], ['split','╎','แยกทาง'],
+export type RoadMode = 'normal' | 'oneway' | 'split';
+const options: readonly [RoadMode,'road'|'arrows-up'|'unlink',string][] = [
+  ['normal','road','ถนนปกติ'], ['oneway','arrows-up','2 เลนวันเวย์'], ['split','unlink','ตัดทางเชื่อม'],
 ];
 /** Portal above the unchanged dock button: not clipped by the mobile dock's horizontal scrolling. */
 export function installRoadMenu(anchor: HTMLButtonElement, choose: (mode: RoadMode)=>void) {
@@ -11,7 +12,7 @@ export function installRoadMenu(anchor: HTMLButtonElement, choose: (mode: RoadMo
   const close=()=>{menu.hidden=true;anchor.setAttribute('aria-expanded','false');};
   for(const [mode,glyph,label] of options) {
     const b=document.createElement('button');b.type='button';b.className='tool road-option';b.dataset.roadMode=mode;b.title=label;b.setAttribute('aria-label',label);b.setAttribute('aria-pressed','false');
-    const icon=document.createElement('span');icon.className='tool-icon';icon.setAttribute('aria-hidden','true');icon.textContent=glyph;
+    const icon=document.createElement('span');icon.className='tool-icon';icon.setAttribute('aria-hidden','true');paintRoadIcon(icon,glyph);
     const name=document.createElement('span');name.textContent=label;b.append(icon,name);
     b.onclick=()=>{close();choose(mode);anchor.focus({preventScroll:true});};menu.append(b);
   }

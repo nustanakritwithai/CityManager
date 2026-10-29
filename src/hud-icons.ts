@@ -1,3 +1,4 @@
+import { paintRoadIcon } from './road-icons.ts';
 /** Swaps the HUD's Unicode glyphs (↖ ╋ ⌫ ✥ ▤ ☰ …) for the shared SVG icon set; labels and ids stay. */
 import { ICONS } from './ui-icons.ts';
 
@@ -9,6 +10,7 @@ const PAGES: Record<string, string> = { 'toggle-stats': 'chart', 'toggle-network
 export function installHudIcons() {
   for (const button of document.querySelectorAll<HTMLElement>('.tool[data-tool]')) {
     const name = TOOLS[button.dataset.tool!], glyph = button.querySelector<HTMLElement>('.tool-icon, .zone-icon');
+    if (name === 'road' && glyph) { paintRoadIcon(glyph,'road'); continue; }
     if (name && glyph) { glyph.innerHTML = svg(name); glyph.classList.add('svg-glyph'); }
   }
   for (const button of document.querySelectorAll<HTMLElement>('[data-camera]')) {
