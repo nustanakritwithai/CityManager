@@ -1,5 +1,5 @@
 import { restoreStartupCity } from './startup-save.ts';
-import { saveLocalCitySession, bindLocalCitySession } from './local-city-save.ts';
+import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
@@ -594,15 +594,13 @@ async function boot() {
   const loadStored = async (source: SaveSource) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
-      const restored = deserializeParkSession(saved.raw), loaded = restored.city, oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
-      if (loaded.market) marketPanel?.client.validateSave(loaded.market);
-      saveGuard.acceptLoaded(saved.raw,true);
-      await bindLocalCitySession(marketPanel?.client,loaded,()=>{city=loaded;parkRuntime=restored.runtime;});
+      const oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
+      await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,restored=>{
+        if (!restored.city.education) adoptSavedEducation(restored.city);
+        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;autosave.reset();
+      });
       cueLimiter.reset();
-      if (!city.education) adoptSavedEducation(city);
       syncEducationTools();
-      importedLegacyRaw = legacy ? saved.raw : null;
-      autosave.reset();
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; render();
       status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว${oldVersion === 7 ? ' · เซฟรุ่น 1.x แปลงเป็นสินค้า 3 สายแล้ว (เก็บสำเนาเดิมไว้ตอนบันทึก)' : ''} · หยุดเวลาให้ตรวจข้อมูล`);

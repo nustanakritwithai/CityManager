@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { adoptSavedEducation, buildCampus, buildPlant, bulldoze, createCity, deserialize, enableEducation, serialize, step, toggleCampus, type City } from '../src/sim.ts';
+import { adoptSavedEducation, buildCampus, buildPlant, bulldoze, createCity, deserialize, enableEducation, householdWorkerCount, serialize, step, toggleCampus, type City } from '../src/sim.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
 import { createEducation, EDUCATION_COST } from '../src/education.ts';
 import { saveStoredCity } from '../src/save-storage.ts';
@@ -74,6 +74,7 @@ test('a new city can reach a higher credential without outside graduates, and re
       const row = city.education?.people.find(person => person.householdId === household.id);
       const used = (row?.school ?? 0) + (row?.university ?? 0) + (row?.teacher ?? 0) + (row?.professor ?? 0);
       assert.ok(used <= household.workforce);
+      assert.ok(householdWorkerCount(city, household.id) <= household.workforce, `day ${city.tick}: household ${household.id} cannot study, teach and work beyond its workforce`);
       assert.equal(household.workerSkills.general + household.workerSkills.manufacturing + household.workerSkills.retail, household.workforce);
     }
     if (!basicDay && (city.education?.residentBasic ?? 0) > 0) {
