@@ -166,6 +166,8 @@ jobs:
           path: |
             .test-output/building-progression/*.png
             .test-output/roads/*.png
+            docs/population-preview/phone-population-2000.png
+            .test-output/fallback/phone-population-2000.png
           if-no-files-found: warn
           retention-days: 3
 
