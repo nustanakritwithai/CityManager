@@ -48,3 +48,19 @@ the synthetic localhost origin and injects quota failures locally. Set
 `CITYMANAGER_UX_RUNTIME_ONLY=1` to skip the already-confirmed campus flow and resume
 the remaining clock/save checks. Successful completion writes `results.json`;
 no successful full-run result has been produced for this draft.
+
+## Targeted CI follow-up
+
+`.github/workflows/player-feedback.yml` runs the full smoke on Windows with the
+installed Edge, a fresh profile, loopback CDP port 9476, and the local test server
+on port 4176. It builds with online APIs disabled and retains JPG screenshots plus
+`results.json` for three days even on failure. It includes desktop campus and
+active-warning screenshots, not only the final game panel.
+
+The first existing browser CI on `55b0dacb` found a real navigation regression:
+after a quota failure, the independently fixed mobile page menu stayed behind
+the persistent banner even though its HUD parent moved down. The follow-up uses
+the shared touch-row origin to move the menu, clock and KPI chip together. The
+new smoke explicitly checks the game-menu hit target while the warning remains.
+This diagnosis is separate from the earlier local executor disconnections; CI
+must confirm the fix before release.
