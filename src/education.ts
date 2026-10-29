@@ -103,6 +103,7 @@ export type EducationView = {
 };
 export type EducationPayment = { amount: number; reason: string; kind: 'contract' | 'upkeep' };
 export type EducationGate = { have: number; need: number; sustainDays: number; requiredDays: number; missing: string; blocked: string[] };
+export type CampusUtilityAvailability = { road: boolean; utility: boolean; availablePower: number; availableWater: number; reserved: boolean };
 
 const blank = (householdId: number): EducationPeople => ({ householdId, basic: 0, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0 });
 
@@ -203,21 +204,30 @@ function advanceStudy(person: EducationPeople, kind: CampusKind, seats: number, 
   return graduated;
 }
 
+/** Pure, live utility preview shared with campus explanations. Only open,
+ * connected campuses reserve supply; active campuses retain their ID priority.
+ * Availability is measured before each reservation, not read from yesterday's report. */
+export function educationUtilityAvailability(state: Pick<EducationState, 'campuses'>, view: Pick<EducationView, 'road' | 'sparePower' | 'spareWater'>): Map<number, CampusUtilityAvailability> {
+  let power = view.sparePower, water = view.spareWater;
+  const served = new Map<number, CampusUtilityAvailability>();
+  for (const campus of [...state.campuses].sort((a, b) => a.id - b.id)) {
+    const need = educationLevel(campus.kind, campus.level);
+    const road = view.road(campus.cell), utility = power >= need.power && water >= need.water;
+    const reserved = campus.open && road && utility;
+    served.set(campus.id, { road, utility, availablePower: power, availableWater: water, reserved });
+    if (reserved) { power -= need.power; water -= need.water; }
+  }
+  return served;
+}
+
 export function stepEducation(state: EducationState, view: EducationView): EducationPayment[] {
   const payments: EducationPayment[] = [];
   let budget = view.treasury;
-  let power = view.sparePower, water = view.spareWater;
-  const served = new Map<number, boolean>();
-  for (const campus of [...state.campuses].sort((a, b) => a.id - b.id)) {
-    const need = educationLevel(campus.kind, campus.level);
-    if (power >= need.power && water >= need.water) { power -= need.power; water -= need.water; served.set(campus.id, true); }
-    else served.set(campus.id, false);
-  }
+  const served = educationUtilityAvailability(state, view);
   for (const campus of [...state.campuses].sort((a, b) => a.id - b.id)) {
     const level = educationLevel(campus.kind, campus.level);
     const role = campus.kind === 'school' ? 'teacher' : 'professor';
-    const road = view.road(campus.cell);
-    const utility = served.get(campus.id) === true;
+    const { road, utility } = served.get(campus.id)!;
     const reasons: string[] = [];
     if (!campus.open) reasons.push('พักบริการ');
     if (!road) reasons.push('ไม่มีถนนเชื่อมถึงเมือง');
@@ -370,7 +380,9 @@ export function educationGate(state: EducationState | undefined, view: Education
   const serviceDays = building.zone === 'R' && building.level + 1 <= 6 ? state.schoolReadyDays : building.zone === 'R' ? state.universityReadyDays : state.sustain.find(item => item.buildingId === building.id)?.days ?? 0;
   const blocked: string[] = [];
   if (!check.ok) blocked.push(`มี ${check.have}/${check.need} · ขาด${check.missing}`);
-  if (building.zone === 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(`บริการการศึกษายังเปิดต่อเนื่อง ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน`);
+  if (building.zone === 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(building.level + 1 <= 6
+    ? `โรงเรียนให้บริการสะสม ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน (วันที่หยุดบริการไม่ล้างวันที่สะสม)`
+    : `มหาวิทยาลัยให้บริการต่อเนื่อง ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน`);
   if (building.zone !== 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(`ต้องมีคนครบเงื่อนไขต่อเนื่องอีก ${EDUCATION_SUSTAIN_DAYS - serviceDays} วัน (${serviceDays}/${EDUCATION_SUSTAIN_DAYS})`);
   return { have: check.have, need: check.need, sustainDays: serviceDays, requiredDays: EDUCATION_SUSTAIN_DAYS, missing: check.missing, blocked };
 }
