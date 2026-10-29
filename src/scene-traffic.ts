@@ -1,4 +1,5 @@
 import { roadTopologyKey } from './road-topology.ts';
+import { decorativePlan } from './traffic/flag.ts';
 import { Entity, StandardMaterial, Color, BLEND_NORMAL } from 'playcanvas';
 import type { CityView } from './renderer.ts';
 import { MAX_CARS, MAX_TRUCKS, commuteGoal, keyHash, leaderAhead, overlapping, trafficPlan, type CommuteGoal, type Mover, type TrafficPlan } from './traffic-plan.ts';
@@ -72,6 +73,7 @@ export class SceneTraffic {
   }
 
   /** Real park citizens replace decorative people; vehicles remain independent. */
+  private carsEnabled = true;
   setWalkersEnabled(enabled: boolean) {
     if (enabled === this.walkersEnabled) return;
     this.walkersEnabled = enabled;
@@ -101,8 +103,17 @@ export class SceneTraffic {
     this.apply(trafficPlan(city), city);
   }
 
+  /** The aggregate traffic fleet replaces decorative cars only; trucks and smoke stay. */
+  setCarsEnabled(enabled: boolean) {
+    if (enabled === this.carsEnabled) return;
+    this.carsEnabled = enabled;
+    if (!enabled) for (const [id, actor] of this.actors) if (actor.kind === 'car') { actor.entity.destroy(); this.actors.delete(id); }
+    this.signature = '';
+    if (this.lastCity) this.sync(this.lastCity);
+  }
+
   private apply(plan: TrafficPlan, city: City) {
-    if (!this.walkersEnabled) plan = { ...plan, walkers: [] };
+    plan = decorativePlan(plan, { cars: this.carsEnabled, walkers: this.walkersEnabled });
     const wanted = new Map([...plan.cars, ...plan.trucks, ...plan.walkers].map(v => [v.key, v.route] as const));
     // Gone from the plan: finish the trip, then leave. A changed road network re-routes at once.
     for (const actor of this.actors.values()) {

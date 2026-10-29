@@ -4,7 +4,7 @@ import { demandForPeriods, totalVehicles } from './demand.ts';
 import { buildNetwork, rebuildRegion, type LinkNetwork } from './network.ts';
 import { assignPeriod, type Assignment, type RouteState } from './routing.ts';
 import { cityDemandInput } from './snapshot.ts';
-import type { DemandCarry, DemandInput } from './types.ts';
+import type { DemandCarry, DemandInput, OdEntry } from './types.ts';
 /**
  * Feature flag for the aggregate traffic model. OFF by default: nothing in gameplay, decorative
  * cars, economy or saves reads it. The clock holds all its state in memory only.
@@ -28,6 +28,8 @@ export class TrafficClock {
   private iteration = 0;
   private net: LinkNetwork | null = null;
   last: Assignment | null = null;
+  /** OD rows of the latest period (for the visual fleet). */
+  lastOd: OdEntry[] = [];
   totals: TrafficTotals = { periods: 0, vehicles: 0, unserved: 0, vehicleSeconds: 0, freeFlowSeconds: 0 };
   constructor(o: TrafficClockOptions = {}) { this.enabled = o.enabled ?? TRAFFIC_MODEL_ENABLED; this.snapshot = o.snapshot ?? cityDemandInput; }
   /**
@@ -51,7 +53,7 @@ export class TrafficClock {
     for (const r of demandForPeriods(this.snapshot(c), start % 24, n, this.carry)) {
       this.carry = r.carry;
       const a = assignPeriod(this.net, r.od, this.state, this.iteration++);
-      this.state = a.state; this.last = a; out.push(a);
+      this.state = a.state; this.last = a; this.lastOd = r.od; out.push(a);
       const t = this.totals; t.periods++; t.vehicles += totalVehicles(r.od); t.unserved += a.unserved; t.vehicleSeconds += a.vehicleSeconds;
       for (const [k, v] of a.volumes) { const l = this.net.links.get(k)!; t.freeFlowSeconds += v * l.length / (l.freeFlowKmh / 3.6); }
     }
@@ -63,7 +65,7 @@ export class TrafficClock {
     rebuildRegion(c as RoadMap, this.net, cells); this.iteration = 0;
   }
   private reset(c: City) {
-    this.city = c; this.carry = {}; this.state = new Map(); this.iteration = 0; this.net = null; this.last = null;
+    this.city = c; this.carry = {}; this.state = new Map(); this.iteration = 0; this.net = null; this.last = null; this.lastOd = [];
     this.totals = { periods: 0, vehicles: 0, unserved: 0, vehicleSeconds: 0, freeFlowSeconds: 0 };
   }
   get network(): LinkNetwork | null { return this.net; }

@@ -1,5 +1,6 @@
 import { restoreStartupCity } from './startup-save.ts';
 import { TrafficLayer, trafficModelEnabled } from './traffic/layer.ts';
+import { screenCull } from './traffic/flag.ts';
 import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
@@ -544,7 +545,7 @@ async function boot() {
   });
   parkScene = new SceneParkActivity(view);
   view.traffic.setWalkersEnabled(false);
-  if (trafficModelEnabled()) trafficLayer = new TrafficLayer(view.app, () => view.traffic.setEnabled(false));
+  if (trafficModelEnabled()) { view.traffic.setCarsEnabled(false); const canvas = $('#city-canvas') as HTMLCanvasElement; trafficLayer = new TrafficLayer(view.app, screenCull(i => view.project(i), () => ({ width: canvas.clientWidth, height: canvas.clientHeight }))); }
   const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); }));

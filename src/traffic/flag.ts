@@ -26,3 +26,13 @@ export function changedRoadCells(before: readonly boolean[], after: readonly boo
   }
   return [...out].sort((a, b) => a - b);
 }
+
+/** Which decorative actors remain. Smoke and trucks are always kept. */
+export function decorativePlan<P extends { cars: unknown[]; walkers: unknown[] }>(plan: P, show: { cars: boolean; walkers: boolean }): P {
+  return { ...plan, cars: show.cars ? plan.cars : [], walkers: show.walkers ? plan.walkers : [] };
+}
+
+/** Camera culling predicate: a cell is on screen if its projection lies inside the canvas plus margin. */
+export function screenCull(project: (cell: number) => { x: number; y: number }, size: () => { width: number; height: number }, margin = 80): (cell: number) => boolean {
+  return cell => { const p = project(cell), { width, height } = size(); return p.x >= -margin && p.y >= -margin && p.x <= width + margin && p.y <= height + margin; };
+}

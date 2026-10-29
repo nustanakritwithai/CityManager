@@ -1,110 +1,154 @@
 import { linkKey, type Link, type LinkNetwork } from './network.ts';
 import { roadNeighbors } from '../road-topology.ts';
-import { LANE_SLOTS, laneOffset, laneSlotCentres, type LanePosition } from '../citizen-road-queue.ts';
+import { LANE_START, LANE_END, SLOT_PITCH, laneOffset } from '../citizen-road-queue.ts';
 import type { CitizenVehiclePose } from '../citizen-vehicle-poses.ts';
+import type { OdDemand, RouteState } from './routing.ts';
 /**
- * Representative fleet: turns the latest assignPeriod link volumes into a capped set of visible
- * cars with stable ids. Visual only — the model keeps running regardless of what is drawn, and
- * nothing here enters a save. Count per link follows volume/capacity; when a link is congested
- * (or its downstream junction has no free exit) its cars pack into a stationary queue that stops
- * before the junction square, so the picture matches the model.
+ * Representative fleet (visual only; nothing here feeds back into the model or a save).
+ *
+ * Count: 1 visible car ≈ VISUAL_SCALE model vehicles on a routed path in the current period
+ * (1 model vehicle = PEOPLE_PER_VEHICLE people). Targets are apportioned across paths by
+ * largest remainder, so the total is round(Σflow / VISUAL_SCALE) and quiet paths show 0.
+ *
+ * Motion: each car drives its routed cell path continuously, handing off link to link. Cars in a
+ * lane keep SLOT_PITCH apart; a car may only cross a turning/junction node square if it holds
+ * the node (one car at a time) and its exit lane has room. Cars spawn at the path start and
+ * leave by driving to the destination and fading out, so a demand drop never pops cars.
  */
+export const VISUAL_SCALE = 2;
 export const GLOBAL_VEHICLE_CAP = 240;
-/** Volume/capacity at which a link shows as a standing queue. */
-export const QUEUE_RATIO = .9;
-/** Seconds for a free-flowing car to sweep its lane segment at free-flow speed. */
-export const SWEEP_SECONDS = 2;
-export type FleetVehicle = { id: string; link: string; lane: number; slot: number; paint: number };
-export type FleetLink = { ids: string[]; phase: number; queued: boolean; ratio: number };
-export type FleetState = { nextId: number; links: Map<string, FleetLink> };
-export const createFleet = (): FleetState => ({ nextId: 1, links: new Map() });
+/** Base visual speed at free flow, tiles per real second; slowed by link congestion. */
+export const VISUAL_TILES_PER_SECOND = 1.2;
+export const FADE_SECONDS = .4;
+/** Centre s at which a car's box touches the node square (stop line) / has fully left it. */
+const STOP = LANE_END, CLEAR = LANE_START, SQUARE = (1 - STOP) + CLEAR;
+
+export type FleetCar = { id: string; path: number[]; pathKey: string; i: number; s: number; lane: number; paint: number; phase: 'in' | 'drive' | 'out'; fade: number };
+export type FleetState = { nextId: number; cars: FleetCar[]; targets: Map<string, { path: number[]; target: number }>; held: Map<number, string>; slow: Map<string, number> };
+export const createFleet = (): FleetState => ({ nextId: 1, cars: [], targets: new Map(), held: new Map(), slow: new Map() });
 const paint = (id: string) => { let n = 0; for (const c of id) n = (Math.imul(n, 31) + c.charCodeAt(0)) | 0; return (n >>> 0) % 6; };
-const slotsOf = (l: Link) => l.lanes * LANE_SLOTS;
 
-/** Visible cars wanted on a link: ceil(v/c · slots), at least 1 when any volume, at most the slots. */
-export const wantedCars = (l: Link, volume: number) => volume <= 0 ? 0 : Math.min(slotsOf(l), Math.max(1, Math.ceil(volume / l.capacityPerHour * slotsOf(l))));
-
-/**
- * Apportion `cap` across links by want, deterministically. Cars already on screen are kept first
- * (up to their link's want) so hitting the cap never makes existing cars vanish; spare capacity
- * then goes to extra wants by largest remainder, ties by link key.
- */
-function capped(want: Map<string, number>, cap: number, have: (k: string) => number): Map<string, number> {
-  const total = [...want.values()].reduce((a, b) => a + b, 0);
-  if (total <= cap) return want;
-  const out = new Map<string, number>();
+/** Largest-remainder apportionment of round(Σw / scale) (capped) — deterministic, may give 0. */
+export function apportion(weights: ReadonlyMap<string, number>, scale = VISUAL_SCALE, cap = GLOBAL_VEHICLE_CAP): Map<string, number> {
+  const sum = [...weights.values()].reduce((a, b) => a + b, 0), total = Math.min(cap, Math.round(sum / scale));
+  const out = new Map<string, number>(), rest: [string, number][] = [];
+  if (total <= 0) { for (const k of weights.keys()) out.set(k, 0); return out; }
   let used = 0;
-  for (const [k, w] of want) { const keep = Math.min(w, have(k)); out.set(k, keep); used += keep; }
-  if (used > cap) { // cap lowered below what is shown: proportional trim
-    const scale = cap / used; used = 0;
-    for (const [k, n] of out) { const f = Math.floor(n * scale); out.set(k, f); used += f; }
-  }
-  const extra = [...want].map(([k, w]) => [k, w - out.get(k)!] as [string, number]).filter(([, x]) => x > 0), extraTotal = extra.reduce((a, [, x]) => a + x, 0);
-  const room = cap - used, rest: [string, number][] = [];
-  for (const [k, x] of extra) { const share = x * room / extraTotal, f = Math.floor(share); out.set(k, out.get(k)! + f); used += f; rest.push([k, share - f]); }
+  for (const [k, w] of weights) { const x = w / sum * total, f = Math.floor(x); out.set(k, f); used += f; rest.push([k, x - f]); }
   rest.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
-  for (let i = 0; used < cap && i < rest.length; i++, used++) out.set(rest[i][0], out.get(rest[i][0])! + 1);
+  for (let i = 0; used < total && i < rest.length; i++, used++) out.set(rest[i][0], out.get(rest[i][0])! + 1);
   return out;
 }
 /**
- * Reconcile the fleet with a new assignment. Existing ids on a link are kept (only surplus ids at
- * the tail retire, only missing ones are added), so a period or day change with similar volume
- * never makes cars vanish and respawn. Offscreen links (visible → false) keep their ids and state
- * but are excluded from the global cap; links gone from the network drop their cars.
+ * New period: set per-path targets from routed flows (OD vehicles × path share) and link slowdown
+ * from congested times. Existing cars are never removed here; surplus ones simply aren't replaced.
  */
-export function updateFleet(fleet: FleetState, net: LinkNetwork, volumes: ReadonlyMap<string, number>, visible: (l: Link) => boolean = () => true, cap = GLOBAL_VEHICLE_CAP): FleetState {
-  for (const k of [...fleet.links.keys()]) if (!net.links.has(k)) fleet.links.delete(k);
-  const want = new Map<string, number>();
-  for (const [k, l] of [...net.links].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    const v = volumes.get(k) ?? 0, entry = fleet.links.get(k);
-    if (!visible(l)) { if (entry) entry.ratio = v / l.capacityPerHour; continue; }
-    want.set(k, wantedCars(l, v));
+export function setFleetDemand(fleet: FleetState, net: LinkNetwork, od: readonly OdDemand[], routes: RouteState, times?: ReadonlyMap<string, number>, scale = VISUAL_SCALE, cap = GLOBAL_VEHICLE_CAP): void {
+  const flow = new Map<string, number>(), paths = new Map<string, number[]>();
+  for (const d of od) for (const p of routes.get(`${d.from}:${d.to}`) ?? []) {
+    if (p.path.length < 2) continue;
+    const k = p.path.join(','); flow.set(k, (flow.get(k) ?? 0) + d.vehicles * p.share); paths.set(k, p.path);
   }
-  for (const [k, n] of capped(want, cap, k => fleet.links.get(k)?.ids.length ?? 0)) {
-    const l = net.links.get(k)!, v = volumes.get(k) ?? 0;
-    let e = fleet.links.get(k);
-    if (!e) { if (!n) continue; e = { ids: [], phase: 0, queued: false, ratio: 0 }; fleet.links.set(k, e); }
-    e.ratio = v / l.capacityPerHour;
-    if (e.ids.length > n) e.ids.length = n;
-    while (e.ids.length < n) e.ids.push(`fleet-${fleet.nextId++}`);
-    if (!n) fleet.links.delete(k);
-  }
-  // Queue state needs every ratio first: a junction with no free exit holds its approaches.
-  for (const [k, e] of fleet.links) { const l = net.links.get(k)!; e.queued = e.ratio >= QUEUE_RATIO || exitFull(fleet, net, l); }
-  return fleet;
+  fleet.targets = new Map([...apportion(new Map([...flow].sort((a, b) => (a[0] < b[0] ? -1 : 1))), scale, cap)].map(([k, n]) => [k, { path: paths.get(k)!, target: n }]));
+  fleet.slow = new Map();
+  if (times) for (const [k, l] of net.links) { const t = times.get(k); if (t) fleet.slow.set(k, Math.min(1, l.length / (l.freeFlowKmh / 3.6) / t)); }
 }
-const isJunction = (net: LinkNetwork, cell: number) => roadNeighbors(cell).filter(n => net.links.has(linkKey(cell, n)) || net.links.has(linkKey(n, cell))).length > 2;
-/** A junction exit is full when every onward link (excluding a U-turn) is at or above capacity. */
-function exitFull(fleet: FleetState, net: LinkNetwork, l: Link): boolean {
-  if (!isJunction(net, l.to)) return false;
-  const exits = (net.out.get(l.to) ?? []).filter(x => x.to !== l.from);
-  return exits.length > 0 && exits.every(x => (fleet.links.get(linkKey(x.from, x.to))?.ratio ?? 0) >= 1);
+const linkOf = (c: FleetCar) => linkKey(c.path[c.i], c.path[c.i + 1]);
+const degree = (net: LinkNetwork, n: number) => roadNeighbors(n).filter(m => net.links.has(linkKey(n, m)) || net.links.has(linkKey(m, n))).length;
+/** A node needs the one-car square unless it is a plain straight run with equal lane counts. */
+function needsSquare(net: LinkNetwork, a: number, n: number, b: number): boolean {
+  const la = net.links.get(linkKey(a, n)), lb = net.links.get(linkKey(n, b));
+  return !(degree(net, n) <= 2 && n - a === b - n && la?.lanes === lb?.lanes);
 }
-/** Advance free-flow animation; queued links stand still at the downstream end of their lane. */
-export function animateFleet(fleet: FleetState, dt: number): void {
-  for (const e of fleet.links.values()) {
-    if (e.queued) { e.phase = 1; continue; }
-    const speed = 1 / (1 + .15 * e.ratio ** 4);
-    e.phase = (e.phase + dt * speed / SWEEP_SECONDS) % 1;
+const laneOn = (net: LinkNetwork, c: FleetCar, i = c.i) => Math.min(c.lane, (net.links.get(linkKey(c.path[i], c.path[i + 1]))?.lanes ?? 1) - 1);
+
+/** Advance visual cars by dt real seconds. Deterministic for a given call sequence. */
+export function stepFleet(fleet: FleetState, net: LinkNetwork, dt: number): void {
+  const live = new Set<string>();
+  // Fades; drop cars whose road vanished (they fade out where they stand).
+  for (const c of fleet.cars) {
+    if (c.phase !== 'out' && !net.links.has(linkOf(c))) c.phase = 'out';
+    if (c.phase === 'in') { c.fade = Math.min(1, c.fade + dt / FADE_SECONDS); if (c.fade >= 1) c.phase = 'drive'; }
+    else if (c.phase === 'out') c.fade -= dt / FADE_SECONDS;
   }
-}
-export function fleetVehicles(fleet: FleetState, net: LinkNetwork): FleetVehicle[] {
-  const out: FleetVehicle[] = [];
-  for (const [k, e] of [...fleet.links].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    const lanes = net.links.get(k)!.lanes;
-    e.ids.forEach((id, i) => out.push({ id, link: k, lane: i % lanes, slot: Math.floor(i / lanes), paint: paint(id) }));
+  for (const c of fleet.cars) if (c.fade <= 0 && c.phase === 'out') for (const [n, id] of fleet.held) if (id === c.id) fleet.held.delete(n);
+  fleet.cars = fleet.cars.filter(c => !(c.phase === 'out' && c.fade <= 0));
+  const lanes = () => {
+    const m = new Map<string, FleetCar[]>();
+    for (const c of fleet.cars) { const k = `${linkOf(c)}|${laneOn(net, c)}`; (m.get(k) ?? m.set(k, []).get(k)!).push(c); }
+    return m;
+  };
+  let occ = lanes();
+  const order = [...fleet.cars].sort((a, b) => b.s - a.s || (a.id < b.id ? -1 : 1));
+  for (const c of order) {
+    live.add(c.id);
+    if (c.phase === 'out') continue;
+    const last = c.i === c.path.length - 2, link = linkOf(c), lane = laneOn(net, c);
+    let max = Infinity;
+    // A leader inside the node square is drawn on its L-shaped turn, so followers hold back from the stop line.
+    const squareAhead = !last && needsSquare(net, c.path[c.i], c.path[c.i + 1], c.path[c.i + 2]);
+    for (const o of occ.get(`${link}|${lane}`) ?? []) if (o !== c && o.s > c.s) max = Math.min(max, (o.s > STOP ? (squareAhead || o.i === o.path.length - 2 ? STOP : o.s) : o.s) - SLOT_PITCH);
+    if (last) max = Math.min(max, STOP);
+    else {
+      const n = c.path[c.i + 1], next = linkKey(n, c.path[c.i + 2]), nl = laneOn(net, c, c.i + 1);
+      if (!net.links.has(next)) max = Math.min(max, STOP);
+      else {
+        const ahead = occ.get(`${next}|${nl}`) ?? [];
+        for (const o of ahead) if (o !== c) max = Math.min(max, 1 + o.s - SLOT_PITCH);
+        if (needsSquare(net, c.path[c.i], n, c.path[c.i + 2]) && c.s <= STOP) {
+          const holder = fleet.held.get(n), room = ahead.every(o => o === c || o.s >= CLEAR + SLOT_PITCH);
+          if ((holder && holder !== c.id) || !room) max = Math.min(max, STOP);
+        }
+      }
+    }
+    const speed = VISUAL_TILES_PER_SECOND * (fleet.slow.get(link) ?? 1);
+    const ns = Math.max(c.s, Math.min(c.s + speed * dt, max));
+    if (!last && c.s <= STOP && ns > STOP && needsSquare(net, c.path[c.i], c.path[c.i + 1], c.path[c.i + 2])) fleet.held.set(c.path[c.i + 1], c.id);
+    c.s = ns;
+    if (c.s >= 1) { c.i++; c.s -= 1; }
+    if (c.i > 0 && c.s >= CLEAR && fleet.held.get(c.path[c.i]) === c.id) fleet.held.delete(c.path[c.i]);
+    if (c.i === c.path.length - 2 && c.s >= STOP) c.phase = 'out';
+    occ = lanes();
   }
-  return out;
+  // Spawn toward each path's target, at most one per path per step, only into a clear start.
+  const count = new Map<string, number>();
+  for (const c of fleet.cars) if (c.phase !== 'out') count.set(c.pathKey, (count.get(c.pathKey) ?? 0) + 1);
+  for (const [k, t] of fleet.targets) {
+    if ((count.get(k) ?? 0) >= t.target || fleet.cars.length >= GLOBAL_VEHICLE_CAP) continue;
+    const first = linkKey(t.path[0], t.path[1]); if (!net.links.has(first) || fleet.held.has(t.path[0])) continue;
+    const lane = Math.min(fleet.nextId % 2, net.links.get(first)!.lanes - 1);
+    if ((occ.get(`${first}|${lane}`) ?? []).some(o => o.s < CLEAR + SLOT_PITCH)) continue;
+    const id = `fleet-${fleet.nextId++}`;
+    const car: FleetCar = { id, path: t.path, pathKey: k, i: 0, s: CLEAR, lane, paint: paint(id), phase: 'in', fade: 0 };
+    fleet.cars.push(car); occ = lanes();
+  }
 }
 /** World-space poses (UNIT = 2 world units per tile, origin at the map centre, as renderer.ts). */
-export function fleetPoses(fleet: FleetState, net: LinkNetwork, size = 24, unit = 2): CitizenVehiclePose[] {
+export function fleetPoses(fleet: FleetState, net: LinkNetwork, visible: (cell: number) => boolean = () => true, size = 24, unit = 2): CitizenVehiclePose[] {
   const centre = (i: number) => [((i % size) - (size - 1) / 2) * unit, (Math.floor(i / size) - (size - 1) / 2) * unit];
-  return fleetVehicles(fleet, net).map(v => {
-    const l = net.links.get(v.link)!, e = fleet.links.get(v.link)!, lane: LanePosition = { cell: l.to, incoming: l.to - l.from, lane: v.lane };
-    const perLane = Math.floor(e.ids.length / l.lanes) + (v.lane < e.ids.length % l.lanes ? 1 : 0);
-    const s = laneSlotCentres(perLane, e.phase)[v.slot];
-    const [ax, az] = centre(l.from), [bx, bz] = centre(l.to), hx = Math.sign(bx - ax), hz = Math.sign(bz - az);
-    const offset = laneOffset(lane) * unit;
-    return { vehicleId: v.id, x: ax + (bx - ax) * s + hz * offset, z: az + (bz - az) * s - hx * offset, headingX: hx, headingZ: hz, paint: v.paint };
-  });
+  const at = (a: number, b: number, s: number, lane: number) => {
+    const [ax, az] = centre(a), [bx, bz] = centre(b), hx = Math.sign(bx - ax), hz = Math.sign(bz - az), o = laneOffset({ cell: b, incoming: b - a, lane }) * unit;
+    return { x: ax + (bx - ax) * s + hz * o, z: az + (bz - az) * s - hx * o, hx, hz };
+  };
+  const out: CitizenVehiclePose[] = [];
+  for (const c of [...fleet.cars].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    const a = c.path[c.i], b = c.path[c.i + 1];
+    if (!visible(a) && !visible(b)) continue;
+    let p = at(a, b, c.s, laneOn(net, c));
+    const into = c.s > STOP && c.i < c.path.length - 2 && needsSquare(net, a, b, c.path[c.i + 2]);
+    const from = c.s < CLEAR && c.i > 0 && needsSquare(net, c.path[c.i - 1], a, b);
+    if (into || from) {
+      const k = into ? c.i : c.i - 1, u = into ? (c.s - STOP) / SQUARE : (c.s + 1 - STOP) / SQUARE;
+      const e = at(c.path[k], c.path[k + 1], STOP, laneOn(net, c, k)), x = at(c.path[k + 1], c.path[k + 2], CLEAR, laneOn(net, c, k + 1));
+      // L-shaped path through the square: along the entry lane to the corner, then along the exit lane.
+      const straight = e.hx === x.hx && e.hz === x.hz, cx = straight ? (e.x + x.x) / 2 : e.hx !== 0 ? x.x : e.x, cz = straight ? (e.z + x.z) / 2 : e.hx !== 0 ? e.z : x.z;
+      const d1 = Math.hypot(cx - e.x, cz - e.z), d2 = Math.hypot(x.x - cx, x.z - cz), d = u * (d1 + d2);
+      p = d <= d1 ? { x: e.x + (cx - e.x) * (d1 ? d / d1 : 0), z: e.z + (cz - e.z) * (d1 ? d / d1 : 0), hx: e.hx, hz: e.hz }
+        : { x: cx + (x.x - cx) * ((d - d1) / d2), z: cz + (x.z - cz) * ((d - d1) / d2), hx: x.hx, hz: x.hz };
+    }
+    out.push({ vehicleId: c.id, x: p.x, z: p.z, headingX: p.hx, headingZ: p.hz, paint: c.paint, scale: c.fade });
+  }
+  return out;
 }
+export const activeCars = (fleet: FleetState) => fleet.cars.filter(c => c.phase !== 'out').length;
+export type { Link };

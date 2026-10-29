@@ -5,7 +5,7 @@
  * so cars cannot overlap across crossing links and never enter a junction.
  */
 export type LanePosition = { cell: number; incoming: number; lane: number };
-export const CAR_LENGTH = .22, CAR_WIDTH = .15, LANE_OFFSET = .15, JUNCTION_HALF = .25, QUEUE_GAP = .04;
+export const CAR_LENGTH = .22, CAR_WIDTH = .15, LANE_OFFSET = .12, JUNCTION_HALF = .25, QUEUE_GAP = .04;
 /** Usable span of a lane between the two junction squares, for car centres. */
 export const LANE_START = JUNCTION_HALF + CAR_LENGTH / 2, LANE_END = 1 - JUNCTION_HALF - CAR_LENGTH / 2;
 export const SLOT_PITCH = CAR_LENGTH + QUEUE_GAP;
