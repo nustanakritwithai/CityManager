@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
-import { createCity, buildCampus, campusSiteReason, step } from '../src/sim.ts';
+import { createCity, buildCampus, campusSiteReason, step, adoptSavedEducation, deserialize, serialize, isRetail } from '../src/sim.ts';
+import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
 import { reachTouch } from './touch-reach.mjs';
 
@@ -66,6 +67,13 @@ const schoolCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'sch
 const universityCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'university') === null); assert.ok(buildCampus(city, universityCell, 'university').ok);
 for (let i = 0; i < 12; i++) step(city);
 const fixture = serializeParkSession(city, createParkRuntime(city));
+// The same real published-save replay used by building-cards-smoke includes a
+// retailer, whose taller financial card exposed the warning/landscape regression.
+const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
+const cardCity = deserialize(serializeV4(prior)); adoptSavedEducation(cardCity);
+const retail = cardCity.firms.find(isRetail);
+const cardCell = cardCity.buildings.find(b => b.id === retail?.building)?.cell;
+assert.ok(Number.isInteger(cardCell), 'The real day29 replay contains a retailer');
 await writeFile(resolve(output, 'synthetic-fixture.json'), fixture);
 let injected;
 try {
@@ -180,11 +188,12 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width:844, height:390, screenWidth:844, screenHeight:390, deviceScaleFactor:1, mobile:true });
   await send('Emulation.setTouchEmulationEnabled', { enabled:true, maxTouchPoints:1 });
   mobile = true;
-  stage = 'Select an existing starter-house card for landscape';
-  const cardCell = await evaluate("JSON.parse(cityManager.snapshot()).buildings.find(b=>b.zone==='R')?.cell");
-  assert.ok(Number.isInteger(cardCell), 'The actual starter city contains an occupied housing parcel');
+  stage = 'Load the real retailer replay for landscape';
+  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(cardCity))})`);
+  await button('#load');
+  await until('JSON.parse(cityManager.snapshot()).tick===29');
   await button('#close-inspector'); await cell(cardCell);
-  await until("!!document.querySelector('#entity-content .bc-hero')");
+  await until("document.querySelector('#entity-content').dataset.cardKind==='shop'");
   await evaluate("document.querySelector('#inspector-body').scrollTop=0");
   await shot('17-landscape-building-after');
   await game();
