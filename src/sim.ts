@@ -62,7 +62,8 @@ export type Result = { ok: boolean; message: string };
 const validIndex = (i: number) => Number.isInteger(i) && i >= 0 && i < SIZE * SIZE;
 const neighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(validIndex);
 const balance = (c: City, id: string) => c.accounts[id] ?? 0;
-export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - c.parks.reduce((n, p) => n + parkPayroll(p), 0) - educationPayroll(c.education));
+const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p), 0) + educationPayroll(c.education);
+export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - treasuryPayroll(c));
 export const parkEmploymentForHousehold = (c: City, id: number) => c.parks.flatMap(p => p.staffing?.allocations ?? []).filter(a => a.householdId === id);
 const parkEmployment = (c: City) => c.parks.flatMap(p => p.staffing?.allocations ?? []);
 /** ID-ordered funding shares prevent several parks promising the same treasury money. */
@@ -386,9 +387,9 @@ function trimWorkAssignments(c: City): void {
 }
 
 /** Every transfer has a debit and credit. Outside is the sole permitted negative source account. */
-function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false): number {
+function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false, reservedTreasuryClaim = 0): number {
   const firm = c.firms.find(f => f.wallet === from);
-  const available = from === 'outside' ? amount : from === 'treasury' ? treasurySpendable(c) : firm ? spendable(c, firm) : balance(c, from);
+  const available = from === 'outside' ? amount : from === 'treasury' ? Math.min(balance(c, from), treasurySpendable(c) + reservedTreasuryClaim) : firm ? spendable(c, firm) : balance(c, from);
   const paid = Math.max(0, Math.min(Math.round(amount), available));
   if (!Number.isSafeInteger(paid) || paid === 0) return 0;
   c.accounts[from] = balance(c, from) - paid;
@@ -927,17 +928,35 @@ function payParkWages(c: City, p: Park, onlyWallet?: string): void {
     if (onlyWallet && wallet !== onlyWallet) continue;
     const owed = days * PARK_STAFF.dailyWage;
     delete p.staffing!.workDays[wallet];
-    if (transfer(c, 'treasury', wallet, owed, `Monthly park wages #${p.id}`) !== owed) throw new Error('Park payroll reserve invariant violated.');
+    // Park claims are already cash-backed. Legacy education arrears must not
+    // block their reserved payment or leave park claims across a month boundary.
+    if (transfer(c, 'treasury', wallet, owed, `Monthly park wages #${p.id}`, false, owed) !== owed) throw new Error('Park payroll reserve invariant violated.');
     transfer(c, wallet, 'treasury', Math.floor(owed / 10), 'Monthly household wage tax');
   }
 }
 const isWage = (reason: string): boolean => reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
-function payEducationWages(c: City, campusId?: number, onlyWallet?: string): void {
-  if (!c.education) return;
-  for (const claim of takeEducationWages(c.education, onlyWallet, campusId)) {
-    const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
-    if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
-    transfer(c, claim.wallet, 'treasury', Math.floor(claim.amount / 10), 'Monthly household wage tax');
+function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boolean {
+  if (!c.education) return true;
+  const claims = takeEducationWages(c.education, onlyWallet, campusId);
+  if (!claims.length) return true;
+  // Old saves can contain unfunded earned days. Keep the entire debt until
+  // cash covers payroll, rather than borrowing another worker's reservation.
+  if (balance(c, 'treasury') < treasuryPayroll(c)) return false;
+  const accounts = { ...c.accounts }, ledgerLength = c.ledger.length;
+  const workDays = new Map(claims.map(({ campus }) => [campus, { ...campus.workDays }]));
+  try {
+    for (const claim of claims) {
+      delete claim.campus.workDays[claim.wallet];
+      const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
+      if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
+      const tax = Math.floor(claim.amount / 10);
+      if (transfer(c, claim.wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Education wage tax invariant violated.');
+    }
+    return true;
+  } catch (error) {
+    c.accounts = accounts; c.ledger.length = ledgerLength;
+    for (const [campus, days] of workDays) campus.workDays = days;
+    throw error;
   }
 }
 function settleMonth(c: City) {
@@ -1026,15 +1045,18 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
   const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet))
     .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
+  let departed = 0;
   for (const h of leaving) {
     for (const p of c.parks) payParkWages(c, p, h.wallet);
-    if (c.education) { payEducationWages(c, undefined, h.wallet); forgetHouseholdEducation(c.education, h.id); }
+    // Preserve the creditor's identity while an old education claim is unpaid.
+    if (c.education) { if (!payEducationWages(c, undefined, h.wallet)) continue; forgetHouseholdEducation(c.education, h.id); }
     for (const f of c.firms) payWages(c, f, h.wallet); // no claim should remain after settlement; pay any that does
     transfer(c, h.wallet, 'outside', balance(c, h.wallet), 'Emigration savings');
     c.households = c.households.filter(x => x.id !== h.id);
     c.migration.departures = (c.migration.departures ?? 0) + 1;
+    departed++;
   }
-  return { retrained, departed: leaving.length };
+  return { retrained, departed };
 }
 
 export function moveHousehold(c: City, householdId: number, destinationId: number): Result {
