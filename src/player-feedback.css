@@ -24,6 +24,12 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:44px; min-width:100px; 
   html[data-touch-ui=true] #save-failure-banner > div { display:grid; grid-template-columns:auto minmax(0,1fr); column-gap:12px; }
   html[data-touch-ui=true] #save-failure-banner small { grid-column:2; grid-row:1; text-align:right; }
   html[data-touch-ui=true] #save-failure-banner span { grid-column:1 / -1; grid-row:2; }
+  /* Retail stock is a single tile. In landscape its full-width section would
+     push every actual purchase/sale metric below the warning-reduced viewport. */
+  html[data-touch-ui=true] #entity-content[data-card-kind=shop] { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2fr); column-gap:12px; }
+  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > * { grid-column:1 / -1; }
+  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=stock] { grid-column:1; }
+  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=trade] { grid-column:2; }
 }
 #save-failure-banner { position:fixed; z-index:150; top:8px; left:50%; transform:translateX(-50%); width:min(600px,calc(100% - 16px)); max-height:40dvh; overflow-y:auto; display:flex; align-items:center; gap:10px; padding:10px; border:2px solid #f5b85a; border-radius:8px; background:#382715; color:#fff5de; box-shadow:0 4px 18px #0008; }
 #save-failure-banner div { min-width:0; flex:1; }
