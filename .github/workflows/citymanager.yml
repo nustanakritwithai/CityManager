@@ -166,6 +166,8 @@ jobs:
           path: |
             .test-output/building-progression/*.png
             .test-output/roads/*.png
+            docs/population-preview/phone-population-2000.png
+            .test-output/fallback/phone-population-2000.png
             docs/context-preview/home-tap-house-panel.png
             docs/context-preview/low-quality-traffic-retained.png
             .test-output/fallback/home-tap-house-panel.png
