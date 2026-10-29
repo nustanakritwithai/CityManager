@@ -158,6 +158,25 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
   await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day save loaded through explicit Game page and real Load control');
 
+  // A map touch opens the building; the trailing compatibility click must not
+  // activate a household link which has just appeared underneath that gesture.
+  await viewport({width:390,height:844,screenWidth:390,screenHeight:844,mobile:true,deviceScaleFactor:2});
+  await closePanel();await button('[data-tool="select"]');
+  const housePoint=await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`);
+  assert.equal(await evaluate(`document.elementFromPoint(${housePoint.x},${housePoint.y})?.id`),'city-canvas');
+  await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:housePoint.x,y:housePoint.y,id:1}]});
+  await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${homes[0].id}'`);
+  const residentSelector=`#entity-content [data-household-id="${homeHousehold.id}"]`;
+  // Explicitly exercise an orphan compatibility click, separately from the real tap above.
+  await evaluate(`document.querySelector(${JSON.stringify(residentSelector)}).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,detail:1}))`);
+  assert.equal(await evaluate('document.querySelector("#entity-content").dataset.scope'),'place');
+  assert.deepEqual(await state(),fixture);await screenshot('home-tap-house-panel.png');
+  await button(residentSelector);await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${homeHousehold.id}'`);
+  await button('#submenu-back');assert.equal(await evaluate('document.querySelector("#entity-content").dataset.scope'),'place');
+  await closePanel();await viewport({width:1440,height:1000,screenWidth:1440,screenHeight:1000,mobile:false,deviceScaleFactor:1});
+  checks.push('Real mobile map tap opens house details; orphan compatibility click cannot drill into a person; a fresh resident-button press and Back still work');
+
   // Keep the native press active across real 10x simulation refreshes. A programmatic
   // click or a re-queried mouseup target would miss the replaced-button regression.
   for (const inputKind of ['mouse', 'mouse', 'touch']) {
