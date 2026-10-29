@@ -57,7 +57,7 @@ async function selectRoad(mode) { await button('[data-tool="road"]');await until
  assert.ok(layout.m.b<=layout.a.y&&layout.m.y>=0,'Submenu above unchanged road button and on screen');
  assert.equal(layout.buttons.length,3,'Only normal, one-way and disconnect tools remain');
  const masks=await evaluate('[...document.querySelectorAll("#road-submenu .road-asset-icon")].map(e=>({mask:getComputedStyle(e).maskImage,w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height}))');
- assert.equal(masks.length,3);for(const [i,name]of ['road','arrows-up','unlink'].entries()){assert.ok(masks[i].mask.endsWith(`/assets/tabler-roads/${name}.svg")`));assert.ok(masks[i].w>=20&&masks[i].h>=20);}
+ assert.equal(masks.length,3);for(const [i,name]of ['road','arrows-up','unlink'].entries()){assert.ok(masks[i].mask.endsWith(`/assets/tabler-roads/${name}.svg")`));assert.ok(masks[i].w>=20&&masks[i].h>=20,JSON.stringify(masks[i]));}
 
  for(const b of layout.buttons){assert.ok(Math.abs(b.x-layout.a.x)<1);assert.ok(Math.abs(b.w-layout.a.w)<1&&Math.abs(b.h-layout.a.h)<1,'Same size as original road button');}
  await button(`[data-road-mode="${mode}"]`);assert.equal(await evaluate('document.querySelector("#road-submenu").hidden'),true);
