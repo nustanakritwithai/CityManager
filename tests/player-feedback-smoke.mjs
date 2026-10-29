@@ -28,7 +28,7 @@ const target = targets.find(item => item.type === 'page' && /CityManager/.test(i
   ?? targets.find(item => item.type === 'page' && item.url === 'about:blank');
 assert.ok(target, 'explicitly isolated CityManager or blank test target');
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout; const pending = new Map(), errors = [], checks = [];
+let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout; const pending = new Map(), errors = [], checks = [];
 function send(method, params = {}) {
   return new Promise((resolve, reject) => { const id = ++sequence; const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 15000); pending.set(id, { resolve: r => { clearTimeout(timer); resolve(r); }, reject: e => { clearTimeout(timer); reject(e); } }); ws.send(JSON.stringify({ id, method, params })); });
 }
@@ -53,7 +53,7 @@ async function button(selector) {
   } else await tap(p.x, p.y);
 }
 async function cell(index) {
-  stage = `Select campus cell ${index}`;
+  stage = `Select parcel cell ${index}`;
   const p = await evaluate(`cityManager.cellScreen(${index})`);
   assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', 'campus is reachable on the map');
   if (mobile) await tap(p.x, p.y);
@@ -177,13 +177,37 @@ try {
   await evaluate('Storage.prototype.setItem=window.__uxWrite');
   await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
   checks.push('desktop campus details and active persistent save warning at 1280x900, reachable panel clock, successful retry');
+  await send('Emulation.setDeviceMetricsOverride', { width:844, height:390, screenWidth:844, screenHeight:390, deviceScaleFactor:1, mobile:true });
+  await send('Emulation.setTouchEmulationEnabled', { enabled:true, maxTouchPoints:1 });
+  mobile = true;
+  const cardCell = await evaluate("JSON.parse(cityManager.snapshot()).buildings.find(b=>b.zone==='C').cell");
+  await button('#close-inspector'); await cell(cardCell);
+  await until("!!document.querySelector('#entity-content .bc-hero')");
+  await evaluate("document.querySelector('#inspector-body').scrollTop=0");
+  await shot('17-landscape-building-after');
+  await game();
+  await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic landscape quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
+  await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
+  await button('#close-inspector'); await cell(cardCell);
+  await evaluate("document.querySelector('#inspector-body').scrollTop=0");
+  landscapeLayout = await evaluate(`(()=>{const panel=document.querySelector('#inspector').getBoundingClientRect(),body=document.querySelector('#inspector-body').getBoundingClientRect(),header=document.querySelector('#inspector .inspector-heading').getBoundingClientRect(),visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>body.top&&r.top<body.bottom&&getComputedStyle(e).visibility!=='hidden'};return{viewport:[innerWidth,innerHeight],panelTop:panel.top,headerHeight:header.height,bodyHeight:body.height,heroVisible:visible(document.querySelector('#entity-content .bc-hero')),visibleKeyMetrics:[...document.querySelectorAll('.bc-kpis [data-context-metric],.bc-kpis [data-card-metric]')].filter(visible).length,controls:['#panel-pause','#close-inspector','#save-failure-export'].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})}})()`);
+  assert.deepEqual(landscapeLayout.viewport, [844,390]);
+  assert.ok(landscapeLayout.heroVisible && landscapeLayout.visibleKeyMetrics >= 2, `Landscape identity and two real metrics remain visible under the save warning: ${JSON.stringify(landscapeLayout)}`);
+  assert.ok(landscapeLayout.controls.every(c=>c.width>=44&&c.height>=44&&c.hit), 'Landscape clock, close and Export retain reachable 44px targets');
+  await shot('18-landscape-save-warning-after');
+  await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'), false);
+  await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'), true);
+  assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"), false);
+  await evaluate('Storage.prototype.setItem=window.__uxWrite');
+  await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
+  checks.push('landscape 844x390 identity and at least two real building metrics, 44px clock/close/export and persistent warning until successful retry');
   assert.equal(errors.length, 0, JSON.stringify(errors));
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   const failedStage = stage;
   await shot(mobile ? 'failure-mobile' : 'failure-desktop').catch(() => {});
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), warningMenuLayout, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), warningMenuLayout, landscapeLayout, checks, errors }, null, 2));
   throw error;
 } finally {
   if (injected) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier }).catch(() => {});
