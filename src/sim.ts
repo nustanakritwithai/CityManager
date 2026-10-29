@@ -984,6 +984,31 @@ export function retailGrowthStatus(c: City, f: Firm) {
   }
   return { level: b.level, current, staffed: staffedRetailCapacity(b.level, workers), workers, next, reasons };
 }
+/** Read-only preview of the existing monthly upgrade gates; does not allocate spare utilities. */
+export function productionUpgradeStatus(c: City, f: Firm) {
+  if (f.zone !== 'I' && f.zone !== 'F') throw new TypeError('Expected factory or farm');
+  const b = building(c, f.building), maximum = f.zone === 'I' ? FACTORY_MAX_LEVEL : FARM_MAX_LEVEL;
+  const nextLevel = b.level < maximum ? b.level + 1 : null, reasons: string[] = [];
+  const svc = utilities(c), before = buildingNeed(b.zone, b.level);
+  const after = nextLevel === null ? before : buildingNeed(b.zone, nextLevel);
+  const extra = { power: after.power - before.power, water: after.water - before.water };
+  const profitThreshold = f.owner || f.zone === 'F' ? firmWage(f) : 0;
+  const requiredSpendable = nextLevel === null ? 0 : f.zone === 'F' && b.level >= 3 ? 40_000
+    : f.zone === 'I' && b.level >= 3 ? 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(nextLevel).jobs * (firmWage(f) / MONTH + 2 * 350) : 0;
+  if (nextLevel !== null) {
+    if (b.age < MONTH) reasons.push(`อายุอาคาร ${b.age}/${MONTH} วัน`);
+    if (!access(c, b.cell)) reasons.push('ต้องมีถนนเชื่อมถึงเมือง');
+    if (!svc.ok(b.id)) reasons.push('น้ำและไฟของอาคารปัจจุบันยังไม่พร้อม');
+    if (!fits(svc.spare, extra)) reasons.push('น้ำหรือไฟสำรองไม่พอสำหรับระดับถัดไป');
+    if (f.lastMonthProfit <= profitThreshold) reasons.push(`กำไรรอบก่อนต้องมากกว่า ${profitThreshold / 100} เครดิต`);
+    if (firmWorkerCount(c, f.id) === 0) reasons.push('ต้องมีคนทำงานจริงอย่างน้อย 1 คน');
+    if (balance(c, f.wallet) < 20_000) reasons.push('เงินกิจการต้องมีอย่างน้อย 200 เครดิต');
+    if (requiredSpendable && spendable(c, f) < requiredSpendable) reasons.push(`เงินพ้นสำรองค่าจ้างต้องมี ${requiredSpendable / 100} เครดิต`);
+  }
+  return { level: b.level, maximum, nextLevel, reasons, cost: 20_000, cash: balance(c, f.wallet),
+    spendable: spendable(c, f), requiredSpendable, profitThreshold, workers: firmWorkerCount(c, f.id),
+    before, after, extra, spare: { ...svc.spare } };
+}
 /** The stall's leftover fresh crops are written off at book value (a shop holds no crops), then the owner pays the refit. */
 function convertMarket(c: City, f: Firm) {
   if (!writeOffCrops(c, f, agricultureHooks(c))) return;
