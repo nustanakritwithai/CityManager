@@ -12,6 +12,7 @@ export function isQuotaError(error: unknown): boolean {
 export interface AutosaveOptions {
   save: () => void | Promise<void>;
   tick: () => number;
+  revision?:()=>string;
   onResult: (result: AutosaveResult) => void;
   now?: () => number;
   canSave?: () => boolean;
@@ -19,18 +20,19 @@ export interface AutosaveOptions {
 
 export function createAutosave(opts: AutosaveOptions) {
   const now = opts.now ?? Date.now;
-  let savedTick: number | null = null, running = false, last: AutosaveResult | null = null;
+  let savedRevision:string|number|null=null, savedTick: number | null = null, running = false, last: AutosaveResult | null = null;
   const finish = (r: AutosaveResult) => { last = r; opts.onResult(r); return r; };
   async function run(force = false): Promise<AutosaveResult | null> {
     if (running || (opts.canSave && !opts.canSave())) return null;
     const tick = opts.tick();
-    if (!force && savedTick === tick && last?.ok) return null;
+    let revision:string|number;try{revision=opts.revision?.()??tick;}catch(error){return finish({ok:false,at:now(),quota:isQuotaError(error),message:error instanceof Error?error.message:String(error)});}
+    if (!force && savedRevision === revision && last?.ok) return null;
     running = true;
-    try { await opts.save(); savedTick = tick; return finish({ ok: true, at: now() }); }
+    try { await opts.save(); savedTick = tick; savedRevision=revision; return finish({ ok: true, at: now() }); }
     catch (error) { return finish({ ok: false, at: now(), quota: isQuotaError(error), message: error instanceof Error ? error.message : String(error) }); }
     finally { running = false; }
   }
-  return { run, flush() { void run(); }, markSaved(tick: number) { savedTick = tick; last = { ok: true, at: now() }; }, get last() { return last; } };
+  return { run, flush() { void run(true); }, reset(){savedTick=null;savedRevision=null;last=null;}, markSaved(tick: number) { savedTick = tick;savedRevision=opts.revision?.()??tick; last = { ok: true, at: now() }; }, get last() { return last; } };
 }
 
 type Listen = { addEventListener(type: string, fn: () => void): void };
@@ -44,6 +46,6 @@ export function installAutosave(doc: Listen, win: Listen & { setInterval(fn: () 
 export function describeAutosave(r: AutosaveResult, fmt: (at: number) => string = at => new Date(at).toLocaleTimeString()): string {
   if (r.ok) return `บันทึกอัตโนมัติแล้ว ${fmt(r.at)}`;
   return r.quota
-    ? 'บันทึกอัตโนมัติไม่สำเร็จ: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) — ส่งออกเซฟหรือล้างข้อมูลเว็บไซต์ เซฟเดิมยังอยู่'
+    ? 'บันทึกอัตโนมัติไม่สำเร็จ: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) — เก็บเซฟเดิมไว้ ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์สำรองก่อน'
     : `บันทึกอัตโนมัติไม่สำเร็จ: ${r.message} — เซฟเดิมยังอยู่`;
 }

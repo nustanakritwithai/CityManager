@@ -1564,7 +1564,10 @@ function deserializeVersioned(json: string, expandedPopulation = false): City {
     const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }));
     assertEducationInvariants(education, city.households);
     city.education = education;
-    return city;
+    // Reuse the validated values while preserving the v22 envelope key order.
+    // Restoring education after the inner validator must not move it past market.
+    const ordered = Object.fromEntries(Object.keys(envelope).filter(key => Object.hasOwn(city, key)).map(key => [key, (city as unknown as Record<string, unknown>)[key]]));
+    return { ...ordered, ...city } as City;
   }
   if (parsed && typeof parsed === 'object' && 'education' in parsed) throw new Error('Education requires save v22');
   if (version === 21) {

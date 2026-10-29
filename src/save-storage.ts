@@ -1,3 +1,15 @@
+import {decodeSaveCopy} from './save-copy-codec.ts';
+export const SAVE_CONFLICT_LATEST_KEY='citymanager.backup.save-conflict.latest';
+export const AUTOSAVE_CHECKPOINT_KEY='citymanager.checkpoint.latest';
+export const PRE_AUTOSAVE_BACKUP='citymanager.backup.before-autosave';
+export const SAVE_CONFLICT_INDEX_KEY='citymanager.backup.save-conflict.index';
+export function saveConflictBackupKeys(storage?:Pick<Storage,'getItem'>){
+ const base=Array.from({length:8},(_,i)=>`citymanager.backup.save-conflict.${i}`);
+ const raw=storage?.getItem(SAVE_CONFLICT_INDEX_KEY);if(!raw)return base;
+ const extra:unknown=JSON.parse(raw);
+ if(!Array.isArray(extra)||!extra.every(k=>typeof k==='string'&&/^citymanager\.backup\.save-conflict\.[0-9]+$/.test(k)))throw Error('Recovery index requires repair; original saves preserved');
+ return [...new Set([...base,...extra])];
+}
 export const EDUCATION_BACKUP_KEY = 'citymanager.backup.before-education';
 export const educationBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${EDUCATION_BACKUP_KEY}.${i}` : EDUCATION_BACKUP_KEY);
 export const POPULATION_BACKUP_KEY = 'citymanager.backup.before-population-capacity';
@@ -44,7 +56,7 @@ const factoryBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i
 const foodBackupKeys = () => Array.from({ length: BACKUP_SLOTS }, (_, i) => i ? `${FOOD_BACKUP_KEY}.${i}` : FOOD_BACKUP_KEY);
 type Reader = Pick<Storage, 'getItem'>;
 type Writer = Pick<Storage, 'getItem' | 'setItem'>;
-export type SaveSource = 'current' | 'growth' | 'commercial' | 'agriculture' | 'worker' | 'household' | 'legacy' | 'backup';
+export type SaveSource = 'current' | 'growth' | 'commercial' | 'agriculture' | 'worker' | 'household' | 'legacy' | 'backup' | 'checkpoint' | 'conflict';
 const backupKey = (version: 1 | 2 | 3 | 4 | 5 | 6, i: number) => {
   const base = version === 1 ? LEGACY_BACKUP_KEY : version === 2 ? HOUSEHOLD_BACKUP_KEY : version === 3 ? WORKER_BACKUP_KEY : version === 4 ? AGRICULTURE_BACKUP_KEY : version === 5 ? COMMERCIAL_BACKUP_KEY : GROWTH_BACKUP_KEY;
   return i === 0 ? base : `${base}.${i}`;
@@ -53,6 +65,8 @@ const backupKeys = (version: 1 | 2 | 3 | 4 | 5 | 6) => Array.from({ length: BACK
 export function readStoredCity(storage: Reader, source: SaveSource = 'current'): { raw: string; key: string } | null {
   let keys: string[];
   if (source === 'current') keys = [SAVE_KEY, GROWTH_SAVE_KEY, COMMERCIAL_SAVE_KEY, AGRICULTURE_SAVE_KEY, WORKER_SAVE_KEY, HOUSEHOLD_SAVE_KEY, LEGACY_SAVE_KEY];
+  else if (source === 'checkpoint') keys=[AUTOSAVE_CHECKPOINT_KEY];
+  else if (source === 'conflict') {keys=saveConflictBackupKeys(storage);const latest=storage.getItem(SAVE_CONFLICT_LATEST_KEY);if(latest&&keys.includes(latest))keys=[latest,...keys.filter(key=>key!==latest)];}
   else if (source === 'growth') keys = [GROWTH_SAVE_KEY];
   else if (source === 'commercial') keys = [COMMERCIAL_SAVE_KEY];
   else if (source === 'agriculture') keys = [AGRICULTURE_SAVE_KEY];
@@ -60,13 +74,13 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [...educationBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
+    keys = [PRE_AUTOSAVE_BACKUP,...saveConflictBackupKeys(storage),...educationBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
     if (latest !== null && keys.includes(latest)) keys = [latest, ...keys.filter(key => key !== latest)];
   }
-  for (const key of keys) { const raw = storage.getItem(key); if (raw !== null) return { raw, key }; }
+  for (const key of keys) { const raw = storage.getItem(key); if (raw !== null) return { raw:decodeSaveCopy(raw)!, key }; }
   return null;
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
