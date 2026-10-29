@@ -1,4 +1,5 @@
 import { restoreStartupCity } from './startup-save.ts';
+import { TrafficLayer, trafficModelEnabled } from './traffic/layer.ts';
 import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
@@ -84,6 +85,8 @@ let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | un
 const STARTER = new URLSearchParams(location.search).get('starter') === '1';
 let city: City;
 let parkRuntime: ParkRuntime;
+/** Aggregate traffic model (flag OFF by default; dev: ?traffic=1). Null keeps the old behaviour exactly. */
+let trafficLayer: TrafficLayer | null = null;
 let parkScene: SceneParkActivity | undefined;
 let parkPanel: HTMLElement;
 let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
@@ -220,6 +223,7 @@ function activate(index: number) {
   else if (tool === 'bulldoze') status(resultSound(bulldoze(city, index), 'ui-bulldoze').message);
   else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
   if (tool !== 'select') ownerDecisionSession.syncExternal(city, 'player-map-command');
+  trafficLayer?.afterMapEdit(city);
   render();
 }
 function node(tag: string, className = '', content?: string): HTMLElement {
@@ -540,6 +544,7 @@ async function boot() {
   });
   parkScene = new SceneParkActivity(view);
   view.traffic.setWalkersEnabled(false);
+  if (trafficModelEnabled()) trafficLayer = new TrafficLayer(view.app, () => view.traffic.setEnabled(false));
   const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); }));
@@ -668,6 +673,7 @@ async function boot() {
     visual.update(dt);
     minimap?.redraw();
     view.traffic.update(dt, !paused && !document.hidden);
+    trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt);
     if (city.tick !== soundTick) {
       soundTick = city.tick;
       traffic = Math.min(1, city.households.reduce((n, h) => n + h.members, 0) / 40);
@@ -695,7 +701,7 @@ async function boot() {
     else if (route?.page === 'city') renderParkPanel();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });
