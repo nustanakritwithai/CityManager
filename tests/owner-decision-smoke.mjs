@@ -119,7 +119,10 @@ async function mode(value) { await button(selector('data-owner-mode', value)); a
 async function advancePast(targetTick) {
   await close(); await button('[data-speed="10"]');
   assert.equal(await evaluate('document.querySelector("#pause").textContent.trim()'), '▶', 'Fixture remains paused until native Play');
-  await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${targetTick}`); await button('#pause');
+  // Stop via the native Pause control inside the browser, not after a remote
+  // CDP round trip plus paints that can advance an extra month on a busy runner.
+  await evaluate(`(()=>{const target=${targetTick};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);
+  await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${targetTick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`);
   const actual = await state(); assert(actual.tick >= targetTick && actual.tick <= targetTick + 10, 'Bounded native clock advance within the same monthly cycle');
   await openPanel(); return actual;
 }
