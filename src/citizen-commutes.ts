@@ -37,10 +37,11 @@ export function planCitizenCommutes(city: City, earliestMinute=WORK_START_MINUTE
   const buildings=new Map(city.buildings.map(b=>[b.id,b.cell]));
   const firms=new Map(city.firms.map(f=>[f.id,buildings.get(f.building)??null]));
   const parks=new Map(city.parks.map(p=>[p.id,p.cell]));
+  const campuses=new Map(city.education?.campuses.map(p=>[p.id,p.cell])??[]);
   const routeCache=new Map<string,number[]>();
   return parkActivityCitizens(city).filter(p=>p.employed).map(citizen=>{
     const homeCell=citizen.homeId===null?null:buildings.get(citizen.homeId)??null;
-    const workCell=citizen.firmId!==null?firms.get(citizen.firmId)??null:citizen.parkJobId!==null?parks.get(citizen.parkJobId)??null:null;
+    const workCell=citizen.firmId!==null?firms.get(citizen.firmId)??null:citizen.parkJobId!==null?parks.get(citizen.parkJobId)??null:citizen.campusJobId!=null?campuses.get(citizen.campusJobId)??null:null;
     if(homeCell===null||workCell===null)return {citizen,homeCell,workCell,request:null,blocked:homeCell===null?'missing-home' as const:'missing-workplace' as const};
     const key=`${homeCell}:${workCell}`;
     let route=routeCache.get(key);if(!route){route=citizenDriveRoute(city,homeCell,workCell);routeCache.set(key,route);}

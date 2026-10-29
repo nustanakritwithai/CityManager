@@ -1,3 +1,6 @@
+import { restoreStartupCity } from './startup-save.ts';
+import { saveLocalCitySession, bindLocalCitySession } from './local-city-save.ts';
+import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
 import '@fontsource/ibm-plex-sans-thai/thai-400.css';
@@ -53,7 +56,7 @@ import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
 import { advancedEnabled, storeAdvanced } from './advanced.ts';
 import { AudioEngine, type EffectName } from './audio-engine.ts';
 import { installAudioPanel } from './audio-panel.ts';
-import { CueLimiter, cityCues, cueSnapshot } from './audio-cues.ts';
+import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from './audio-cues.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
@@ -104,6 +107,13 @@ type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; c
 let route: Route | null = null;
 const EDUCATION_CHOICE = 'citymanager.education.v1';
 const educationPreferred = () => new URLSearchParams(location.search).has('education') || localStorage.getItem(EDUCATION_CHOICE) === 'on';
+function syncEducationTools() {
+  const on = !!city?.education;
+  for (const tool of ['school', 'university']) {
+    const button = document.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
+    if (button) button.hidden = !on;
+  }
+}
 const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน' };
 const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
@@ -467,8 +477,10 @@ function updateMapInfo(placement: Preview | null) {
 async function boot() {
   const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
-  city = createCity(61025, { starter: STARTER, education: educationPreferred() });
-  parkRuntime = createParkRuntime(city);
+  const startup=restoreStartupCity({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)},()=>createCity(61025,{starter:STARTER,education:educationPreferred()}));
+  city=startup.city;parkRuntime=startup.runtime;importedLegacyRaw=startup.legacyRaw;
+  const saveGuard=startup.guard,startupSaveError=startup.error;
+  syncEducationTools();if(startup.restored||startup.error)paused=true;
   ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
   $('#signal-entry').hidden = !signalsEnabled();
@@ -555,7 +567,7 @@ async function boot() {
   mapEntry.addEventListener('click', () => { cityStatsPanel!.toggle(false); minimap?.toggleMap(true); });
   document.querySelector('#city-stats .st-titlebar .st-close')?.before(mapEntry);
   installHudIcons(); installKeycaps(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); });
-  if (!STARTER) { guide.offer(); view.focus(GATEWAY + 5); }
+  if (!STARTER && !startup.restored && !startup.error) { guide.offer(); view.focus(GATEWAY + 5); }
   goalPill = new GoalPill(() => { if (route?.page !== 'city') openRoute({page:'city'}); document.getElementById('dash-goals')?.scrollIntoView({ block: 'start' }); });
   winWatch = new WinWatch(() => $('#new-city').click(), () => { paused = true; });
   minimap = new Minimap(view, cell => { view.focus(cell); render(); }, cell => { view.focus(cell); openRoute({ page: 'place', cell, buildingId: city.cells[cell].building }); });
@@ -564,19 +576,34 @@ async function boot() {
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
-  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
+  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveGuard.write(serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
   installHudRow();
+  const writeLocalSave = async () => {const generation=saveGuard.generation,legacy=importedLegacyRaw;await saveLocalCitySession(city,parkRuntime,marketPanel?.client,raw=>saveGuard.write(raw,legacy,generation));};
+  // Autosave: every minute, plus on tab hide / close. Failures (e.g. localStorage quota) are shown, never swallowed.
+  const saveBadge = document.createElement('span'); saveBadge.id = 'autosave-status'; saveBadge.setAttribute('role', 'status'); saveBadge.style.cssText = 'font-size:11px;opacity:.85;margin-inline:6px;white-space:normal;overflow-wrap:anywhere;max-width:100%'; saveBadge.textContent = 'ยังไม่ได้บันทึกอัตโนมัติ'; $('#save').insertAdjacentElement('afterend', saveBadge);
+  let autosaveFailed = false;
+  const autosave = createAutosave({ save: writeLocalSave, tick: () => city.tick, revision:()=>serializeParkSession(city,parkRuntime,city.market), canSave:()=>saveGuard.armed, onResult: r => {
+    saveBadge.textContent = describeAutosave(r); saveBadge.style.color = r.ok ? '' : '#e5484d';
+    if (!r.ok) { if (!autosaveFailed) { sound('ui-error'); status(describeAutosave(r)); } }
+    autosaveFailed = !r.ok;
+  } });
+  installAutosave(document, window, autosave, () => document.hidden);
+  if(startupSaveError){saveBadge.textContent='โหลดเซฟเดิมไม่สำเร็จ: ปิด autosave เพื่อรักษาต้นฉบับ';saveBadge.style.color='#e5484d';status(startupSaveError+' · เซฟเดิมยังอยู่ กรุณากู้คืนหรือส่งออก ห้ามล้างข้อมูลเว็บไซต์');}
   $('#save').addEventListener('click', async () => {
-    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
+    try { await writeLocalSave(); autosave.markSaved(city.tick); saveBadge.textContent = describeAutosave({ ok: true, at: Date.now() }); saveBadge.style.color = ''; sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
   });
   const loadStored = async (source: SaveSource) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
       const restored = deserializeParkSession(saved.raw), loaded = restored.city, oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       if (loaded.market) marketPanel?.client.validateSave(loaded.market);
-      if (marketPanel?.client.enabled) await marketPanel.client.bindLoadedCity(loaded.market, () => { city = loaded; parkRuntime = restored.runtime; }); else { city = loaded; parkRuntime = restored.runtime; }
+      saveGuard.acceptLoaded(saved.raw,true);
+      await bindLocalCitySession(marketPanel?.client,loaded,()=>{city=loaded;parkRuntime=restored.runtime;});
+      cueLimiter.reset();
       if (educationPreferred() && !city.education) enableEducation(city, 'migrated-absent');
+      syncEducationTools();
       importedLegacyRaw = legacy ? saved.raw : null;
+      autosave.reset();
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; render();
       status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว${oldVersion === 7 ? ' · เซฟรุ่น 1.x แปลงเป็นสินค้า 3 สายแล้ว (เก็บสำเนาเดิมไว้ตอนบันทึก)' : ''} · หยุดเวลาให้ตรวจข้อมูล`);
@@ -590,12 +617,15 @@ async function boot() {
   $('#load-v5').addEventListener('click', () => loadStored('commercial'));
   $('#load-v6').addEventListener('click', () => loadStored('growth'));
   $('#load-backup').addEventListener('click', () => loadStored('backup'));
+  const checkpointButton=document.createElement('button');checkpointButton.id='load-autosave-copy';checkpointButton.textContent='โหลดสำเนาอัตโนมัติล่าสุด';checkpointButton.onclick=()=>void loadStored('checkpoint');$('#load-backup').insertAdjacentElement('afterend',checkpointButton);
+  const conflictButton=document.createElement('button');conflictButton.id='load-save-conflict';conflictButton.textContent='กู้คืนสำเนางานที่ขัดแย้ง';conflictButton.onclick=()=>void loadStored('conflict');checkpointButton.insertAdjacentElement('afterend',conflictButton);
+  const exportButton=document.createElement('button');exportButton.id='export-city-save';exportButton.textContent='ส่งออกเซฟเมืองเป็นไฟล์';exportButton.onclick=()=>{try{const raw=serializeParkSession(city,parkRuntime,city.market),url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-day-${city.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งไฟล์เซฟให้เบราว์เซอร์ดาวน์โหลดแล้ว ตรวจไฟล์ก่อนปิดเกม');}catch(error){status(error instanceof Error?error.message:'ส่งออกไม่สำเร็จ');}};$('#save').insertAdjacentElement('afterend',exportButton);
   const syncEducationChoice = () => { const button = $('#toggle-education'); const on = educationPreferred(); button.setAttribute('aria-pressed', String(on)); button.textContent = on ? 'เกณฑ์การศึกษาเปิดอยู่' : 'เปิดเกณฑ์การศึกษา'; };
   syncEducationChoice();
   $('#toggle-education').addEventListener('click', () => {
     if (educationPreferred() && !new URLSearchParams(location.search).has('education')) localStorage.removeItem(EDUCATION_CHOICE);
     else { localStorage.setItem(EDUCATION_CHOICE, 'on'); enableEducation(city, city.education?.origin ?? 'migrated-absent'); }
-    syncEducationChoice(); status(city.education ? 'เกณฑ์การศึกษาใช้กับเมืองนี้แล้ว วุฒิเริ่มจากศูนย์และไม่แปลงทักษะอาชีพ' : 'เมืองใหม่จะยังไม่ใช้เกณฑ์การศึกษา'); render();
+    syncEducationChoice(); syncEducationTools(); status(city.education ? 'เกณฑ์การศึกษาใช้กับเมืองนี้แล้ว วุฒิเริ่มจากศูนย์และไม่แปลงทักษะอาชีพ' : 'เมืองใหม่จะยังไม่ใช้เกณฑ์การศึกษา'); render();
   });
   $('#toggle-campus').addEventListener('click', () => { const campus = selected === null ? undefined : campusAt(city, selected); if (campus) status(toggleCampus(city, campus.id).message); render(); });
   $('#upgrade-campus').addEventListener('click', () => { const campus = selected === null ? undefined : campusAt(city, selected); if (campus) status(upgradeCampus(city, campus.id).message); render(); });
@@ -607,8 +637,10 @@ async function boot() {
     const empty = document.createElement('button'); empty.textContent = 'เริ่มจากที่ว่าง (มีผู้ช่วยสอน)';
     const sample = document.createElement('button'); sample.textContent = 'เมืองตัวอย่าง (มีถนนและโซนให้แล้ว)';
     const restart = async (starter: boolean) => {
-      try { if (marketPanel?.client.enabled) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
-      city = createCity(61025, { starter, education: educationPreferred() }); parkRuntime = createParkRuntime(city); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
+      try{saveGuard.preserveNew(serializeParkSession(city,parkRuntime,city.market));}catch(error){status(error instanceof Error?error.message:'เก็บสำเนาเมืองเดิมไม่สำเร็จ');return;}
+      try { if (marketPanel?.client.enabled && (marketPanel.client.guestId||marketPanel.client.journal.operations.length)) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
+      saveGuard.authorizeNew(serializeParkSession(city,parkRuntime,city.market));autosave.reset();
+      city = createCity(61025, { starter, education: educationPreferred() }); parkRuntime = createParkRuntime(city); cueLimiter.reset(); syncEducationTools(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
     };
@@ -654,7 +686,8 @@ async function boot() {
     audio.updateAmbience({ ...visual.soundscape, traffic, factories, closeness: Math.min(1, Math.max(0, (130 - view.radius) / 100)) });
     if (paused || document.hidden) return;
     const minutes = Math.min(dt, 0.25) * speed * 1440;
-    const before = parkRuntime.activity.minute + minutes >= 1440 ? cueSnapshot(city) : null;
+    const tickBefore = city.tick;
+    const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
     let days = 0;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
     const frameStarted = performance.now(), frameDeadline = frameStarted + 8;
@@ -666,7 +699,8 @@ async function boot() {
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
-    if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city), performance.now())) sound(cue);
+    if (monthEnded(tickBefore, city.tick)) sound('ev-month');
+    if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
   });

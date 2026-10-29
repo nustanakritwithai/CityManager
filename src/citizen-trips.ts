@@ -21,7 +21,9 @@ export type TripPlanningResult = {
  * cross-household pooling, instant transfer, or dropping people from the result.
  * The driver has the last stop. Seat count includes the driver.
  */
-export function planFamilyRides(requests: readonly TripRequest[], seats = 4): TripPlanningResult {
+export type RidePlanningPolicy = { sameDestinationOnly?: boolean; spreadDepartures?: boolean };
+const departureHash=(value:string)=>{let h=2166136261;for(const c of value)h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0;};
+export function planFamilyRides(requests: readonly TripRequest[], seats = 4, policy:RidePlanningPolicy = {}): TripPlanningResult {
   if (!Number.isSafeInteger(seats) || seats < 1) throw new RangeError('Invalid vehicle seats');
   const ids = new Set<string>(), people = new Set<string>();
   const groups = new Map<string, TripRequest[]>();
@@ -49,6 +51,7 @@ export function planFamilyRides(requests: readonly TripRequest[], seats = 4): Tr
       for (const rider of candidates) {
         if (members.length >= seats) break;
         if (rider.id === driver.id || !remaining.has(rider.id) || rider.route.length > driver.route.length) continue;
+        if (policy.sameDestinationOnly && rider.destination !== driver.destination) continue;
         if (!rider.route.every((cell, i) => cell === driver.route[i])) continue;
         const start = Math.max(earliest, rider.earliestDeparture), end = Math.min(latest, rider.latestDeparture);
         if (start > end) continue;
@@ -61,7 +64,7 @@ export function planFamilyRides(requests: readonly TripRequest[], seats = 4): Tr
         occupants.push(member.citizenId); stops.set(i, occupants);
       }
       result.rides.push({ id: `ride:${driver.id}`, driverId: driver.citizenId, householdId: driver.householdId,
-        departure: earliest, route: [...driver.route], requestIds: members.map(r => r.id), passengerIds: members.map(r => r.citizenId),
+        departure: earliest + (policy.spreadDepartures ? departureHash(`${driver.householdId}:${driver.origin}:${driver.destination}:${Math.floor(earliest/1440)}`) % (latest-earliest+1) : 0), route: [...driver.route], requestIds: members.map(r => r.id), passengerIds: members.map(r => r.citizenId),
         stops: [...stops].sort(([a], [b]) => a - b).map(([routeIndex, citizenIds]) => ({ routeIndex, citizenIds: citizenIds.sort() })) });
     }
     for (const r of group) if (remaining.has(r.id)) result.waiting.push({ requestId: r.id, reason: 'no-driver' });

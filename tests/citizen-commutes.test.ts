@@ -28,3 +28,12 @@ test('directed local route does not require the external city gateway',()=>{
  assert.deepEqual(citizenDriveRoute(c,50,52),[50,51,52]);
  assert.deepEqual(citizenDriveRoute(c,52,50),[]);
 });
+
+test('a real reserved teacher is a commuter, not a second copy of the employed member',async()=>{
+ const {enableEducation,buildCampus}=await import('../src/sim.ts');
+ const c=populationFixture(1,true),h=c.households[0],f=c.firms[0];
+ c.employment=[{householdId:h.id,firmId:f.id,occupation:'manufacturing',rank:'entry',skill:'general',workers:1}];
+ enableEducation(c);const site=c.cells.findIndex((cell,i)=>!cell.road&&cell.building===null&&cell.zone===null&&[i-1,i+1,i-24,i+24].some(n=>c.cells[n]?.road));assert.equal(buildCampus(c,site,'school').ok,true);
+ const campus=c.education!.campuses[0];c.education!.people=[{householdId:h.id,basic:1,higher:0,school:0,university:0,teacher:1,professor:0,campusId:campus.id,progress:0}];
+ const before=JSON.stringify(c),intents=planCitizenCommutes(c);assert.equal(intents.length,2);assert.equal(new Set(intents.map(i=>i.citizen.citizenId)).size,2);assert.ok(intents.some(i=>i.workCell===site&&i.citizen.campusJobId===campus.id));assert.equal(JSON.stringify(c),before);
+});

@@ -33,3 +33,13 @@ test('commuters stuck at work cannot also appear as park visitors after shift en
  assert.ok(p.activity.visitors.every(v=>!workers.has(v.citizenId)));
  assert.ok(t.journeys.vehicles.every(v=>!v.returnTrip));
 });
+
+test('six-second day pacing produces the same transport and economy at different render frame rates',()=>{
+ const base=fixture();let expected:string|undefined;
+ for(const fps of [20,30,60]){
+  const c=structuredClone(base),p=createParkRuntime(c),t=createCitizenTransport(c);
+  for(let frame=0;frame<6*fps;frame++)advanceCitizenLife(c,p,t,240/fps,()=>step(c));
+  assert.equal(c.tick,base.tick+1);assert.equal(t.minute,c.tick*1440);assert.equal(p.minuteRemainder,0);
+  const raw=serializeCitizenLife(c,p,t);if(expected)assert.equal(raw,expected);else expected=raw;
+ }
+});

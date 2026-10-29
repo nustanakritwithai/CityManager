@@ -40,3 +40,12 @@ test('2000 simultaneous people have no hidden count cap', () => {
   assert.equal(new Set(r.rides.flatMap(v=>v.passengerIds)).size,2000);
   assert.equal(r.rides.flatMap(v=>v.stops.flatMap(s=>s.citizenIds)).length,2000);
 });
+
+test('stage one pools only same destinations and spreads real family departures deterministically',()=>{
+ const input=Array.from({length:30},(_,i)=>trip(String(i),{householdId:Math.floor(i/2),latestDeparture:450}));
+ input.push(trip('different-stop',{householdId:0,destination:11,route:[10,11],latestDeparture:450}));
+ const policy={sameDestinationOnly:true,spreadDepartures:true},r=planFamilyRides(input,4,policy);
+ assert.equal(r.rides.length,16);assert.equal(new Set(r.rides.flatMap(v=>v.passengerIds)).size,31);
+ assert.ok(r.rides.every(v=>v.stops.length===1&&v.departure>=420&&v.departure<=450));
+ assert.ok(new Set(r.rides.map(v=>v.departure)).size>5);assert.deepEqual(planFamilyRides([...input].reverse(),4,policy),r);
+});

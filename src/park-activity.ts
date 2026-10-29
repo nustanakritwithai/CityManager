@@ -10,14 +10,14 @@ export const MAX_PARK_ROUTE_SEARCHES = 256;
 export const PARK_ACTIVITY_DAY_MINUTES = 1440, WORK_START_MINUTE = 480, WORK_END_MINUTE = 1020;
 export const MAX_PARK_ROUTE_CELLS = 34;
 export type ParkActivityPhase = 'travel' | 'enter' | 'stroll' | 'wait' | 'meet' | 'sit' | 'leave';
-export type Citizen = { citizenId: string; householdId: number; memberSlot: number; homeId: number | null; employed: boolean; firmId: number | null; parkJobId: number | null };
+export type Citizen = { citizenId: string; householdId: number; memberSlot: number; homeId: number | null; employed: boolean; firmId: number | null; parkJobId: number | null; campusJobId?: number | null };
 export type ParkVisitor = Citizen & { homeId: number; homeCell: number; parkId: number; parkCell: number; slot: number; route: number[]; departureMinute: number; phase: ParkActivityPhase; phaseMinute: number; partnerId: string | null };
 export type ParkActivityState = { version: 1; day: number; minute: number; visitors: ParkVisitor[]; visited: string[]; completed: number; cancelled: number; lastCancellation: string | null; routeSearches: number };
 export type ParkVisitorSnapshot = ParkVisitor & { x: number; z: number; headingX: number; headingZ: number };
 type Point = { x: number; z: number };
 /** Read-only bridge to the reviewed workforce candidate; no assignment authority here. */
 type StaffedPark = City['parks'][number] & { staffing?: { allocations: { householdId: number; parkId: number; skill: typeof WORKER_SKILLS[number]; workers: number }[] } };
-type Job = { firmId: number | null; parkJobId: number | null };
+type Job = { firmId: number | null; parkJobId: number | null; campusJobId?: number | null };
 const integer = (n: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): n is number => Number.isSafeInteger(n) && (n as number) >= min && (n as number) <= max;
 const neighbours = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(n => n >= 0);
 const centre = (cell: number): Point => ({ x: cell % SIZE + .5, z: Math.floor(cell / SIZE) + .5 });
@@ -49,7 +49,15 @@ export function parkActivityCitizens(city: City): Citizen[] {
       while (pool.length < h.workerSkills[skill]) pool.push(null);
       jobs.push(...pool);
     }
-    for (let slot = 0; slot < h.members; slot++) people.push({ citizenId: identity(h.id, slot), householdId: h.id, memberSlot: slot, homeId: h.home, employed: jobs[slot] != null, firmId: jobs[slot]?.firmId ?? null, parkJobId: jobs[slot]?.parkJobId ?? null });
+    // Campus staff are reserved by the education allocator, not employment rows.
+    // Occupy only remaining real workforce slots; never fabricate a teacher.
+    const education=city.education?.people.find(row=>row.householdId===h.id);
+    if(education?.campusId!==null&&education?.campusId!==undefined){
+      let staff=education.teacher+education.professor;
+      for(let slot=0;slot<Math.min(jobs.length,h.workforce)&&staff>0;slot++)if(jobs[slot]===null){jobs[slot]={firmId:null,parkJobId:null,campusJobId:education.campusId};staff--;}
+      if(staff>0)throw new Error('Education staff exceed available real workforce slots');
+    }
+    for (let slot = 0; slot < h.members; slot++) people.push({ citizenId: identity(h.id, slot), householdId: h.id, memberSlot: slot, homeId: h.home, employed: jobs[slot] != null, firmId: jobs[slot]?.firmId ?? null, parkJobId: jobs[slot]?.parkJobId ?? null, ...(jobs[slot]?.campusJobId!==undefined?{campusJobId:jobs[slot]!.campusJobId}:{}) });
   }
   return people;
 }

@@ -2,7 +2,7 @@
  * No wallet, job, production or household count is modified by this module.
  */
 import {type City} from './sim.ts';
-import {parkActivityCitizens,WORK_END_MINUTE} from './park-activity.ts';
+import {parkActivityCitizens,WORK_START_MINUTE,WORK_END_MINUTE} from './park-activity.ts';
 import {planCitizenCommutes} from './citizen-commutes.ts';
 import {planFamilyRides,type RidePlan} from './citizen-trips.ts';
 import {createJourneys,departJourneys,journeyRoute,restoreJourneys,type JourneyState} from './citizen-journey.ts';
@@ -33,7 +33,10 @@ export function prepareTransportDay(city:City,r:CitizenTransportRuntime):void {
  const available=r.fleet.filter(car=>car.atHome&&!busy.has(car.id)).sort((a,b)=>a.id.localeCompare(b.id));
  const intents=planCitizenCommutes(city).filter(i=>!carriedPeople.has(i.citizen.citizenId));
  r.waiting=intents.filter(i=>i.blocked).map(i=>({citizenId:i.citizen.citizenId,reason:i.blocked!}));
- const requests=intents.flatMap(i=>i.request?[i.request]:[]),plans=planFamilyRides(requests);
+ // A save opened after the departure window must not replay the missed morning.
+ const requests=intents.flatMap(i=>i.request&&r.minute%1440<WORK_START_MINUTE?[i.request]:[]);
+ if(r.minute%1440>=WORK_START_MINUTE)for(const i of intents)if(i.request)r.waiting.push({citizenId:i.citizen.citizenId,reason:'missed-departure'});
+ const plans=planFamilyRides(requests,4,{sameDestinationOnly:true,spreadDepartures:true});
  for(const wait of plans.waiting){const request=requests.find(q=>q.id===wait.requestId)!;r.waiting.push({citizenId:request.citizenId,reason:wait.reason});}
  const rides:RidePlan[]=plans.rides.map(plan=>{
    let car=available.find(car=>car.householdId===plan.householdId);
@@ -95,6 +98,6 @@ export function restoreCitizenTransport(city:City,value:unknown,expectedMinute:n
  const usedCars=new Set(journeys.vehicles.map(v=>v.vehicleId));
  for(const car of fleet.values())if(!usedCars.has(car.id)&&!car.atHome)throw new Error('Away car has no active journey');
  const travelling=new Set(journeys.people.map(p=>p.citizenId)),waiting=new Set<string>();
- for(const w of r.waiting){if(!w||!people.has(w.citizenId)||travelling.has(w.citizenId)||waiting.has(w.citizenId)||!['missing-home','missing-workplace','no-route','no-driver'].includes(w.reason))throw new Error('Invalid waiting citizen');waiting.add(w.citizenId);}
+ for(const w of r.waiting){if(!w||!people.has(w.citizenId)||travelling.has(w.citizenId)||waiting.has(w.citizenId)||!['missing-home','missing-workplace','no-route','no-driver','missed-departure'].includes(w.reason))throw new Error('Invalid waiting citizen');waiting.add(w.citizenId);}
  return {...structuredClone(r),journeys,queue};
 }
