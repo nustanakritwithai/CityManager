@@ -1,3 +1,6 @@
+import { buildingIssueRevision, issuePlaceRoute } from './building-issues.ts';
+import { renderBuildingIssues } from './building-issue-panel.ts';
+import './building-issues.css';
 import { restoreStartupCity } from './startup-save.ts';
 import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
@@ -393,6 +396,9 @@ function renderPlace() {
   $('#explanation').replaceChildren(...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction, factoryRecipeAction);
+  let issueHost = document.getElementById('building-issue-details');
+  if (!issueHost) { issueHost = document.createElement('section'); issueHost.id = 'building-issue-details'; $('#entity-content').before(issueHost); }
+  renderBuildingIssues(city, route?.page === 'place' ? cellIndex : null, issueHost);
   if (page === 'city') { renderCityOverview(city); renderEducationOverview(); dashboard?.update(city); renderParkPanel(); }
   decoratePanels($('#inspector'));
 }
@@ -452,7 +458,7 @@ function render() {
   cityHud?.update(city, paused, s);
 }
 
-/** Tool-matched map layer, issue badges and the placement tip; recomputed at most twice a second while time runs. */
+/** Tool overlays are throttled; issue facts refresh only on meaningful city/context revisions, not camera frames. */
 function updateMapInfo(placement: Preview | null) {
   if (!mapMarkers) return;
   const enabled = atmosphere?.settings.mapInfo !== false;
@@ -467,8 +473,9 @@ function updateMapInfo(placement: Preview | null) {
     view.setOverlay(overlay); mapMarkers.setLegend(overlay);
     Object.assign(mapInfo, { overlayKey, overlayTick: city.tick, overlayAt: now });
   }
-  if (layout !== mapInfo.issueLayout || city.tick !== mapInfo.issueTick && now - mapInfo.issueAt > 500) {
-    mapMarkers.setIssues(buildingIssues(city)); Object.assign(mapInfo, { issueLayout: layout, issueTick: city.tick, issueAt: now });
+  const issueRevision = buildingIssueRevision(city);
+  if (issueRevision !== mapInfo.issueLayout) {
+    mapMarkers.setIssues(buildingIssues(city)); Object.assign(mapInfo, { issueLayout: issueRevision, issueTick: city.tick, issueAt: now });
   }
 }
 
@@ -653,7 +660,10 @@ async function boot() {
   });
   inspector(false);
   setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
-  mapMarkers = new MapMarkers(view);
+  mapMarkers = new MapMarkers(view, cell => {
+    // Open the existing place route directly: never activate a build tool or pick a citizen.
+    const next = issuePlaceRoute(city, cell); if (next) openRoute(next);
+  });
   dashboard = new OverviewDashboard($('#city-dashboard'));
   cityHud = new CityHud((cell, buildingId) => { view.focus(cell); openRoute({ page: 'place', cell, buildingId }); }, () => {
     openRoute({ page: 'city' });
