@@ -1,0 +1,20 @@
+#education-details { margin:12px 0; padding:10px; border:1px solid var(--line); border-radius:8px; }
+#education-details p, .education-cohorts { margin:8px 0; font-size:14px; line-height:1.55; overflow-wrap:anywhere; }
+.education-cohorts { padding-inline-start:22px; }
+#campus-feedback { grid-column:1 / -1; margin:0 0 8px; padding:10px; border:1px solid #f3c46b; border-radius:6px; color:#fff5d6; background:#513e24; font-size:14px; line-height:1.5; }
+#campus-feedback[data-ok=true] { border-color:#95d5b2; color:#e2ffed; background:#214b39; }
+#campus-feedback[hidden], #education-details[hidden], #save-failure-banner[hidden] { display:none!important; }
+html #inspector .inspector-heading { flex-wrap:wrap; }
+.panel-time-controls { flex:1 0 100%; display:flex; justify-content:space-between; align-items:center; gap:8px; padding-top:4px; border-top:1px solid var(--line); }
+.panel-time-controls span { font-size:12px; line-height:1.4; }
+html #inspector #panel-pause { flex:0 0 auto; min-height:44px; min-width:100px; padding:6px 10px; font-size:14px; }
+#save-failure-banner { position:fixed; z-index:150; top:8px; left:50%; transform:translateX(-50%); width:min(600px,calc(100% - 16px)); max-height:40dvh; overflow-y:auto; display:flex; align-items:center; gap:10px; padding:10px; border:2px solid #f5b85a; border-radius:8px; background:#382715; color:#fff5de; box-shadow:0 4px 18px #0008; }
+#save-failure-banner div { min-width:0; flex:1; }
+#save-failure-banner strong, #save-failure-banner span, #save-failure-banner small { display:block; overflow-wrap:anywhere; line-height:1.45; }
+#save-failure-banner strong { font-size:14px; }
+#save-failure-banner span { font-size:13px; }
+#save-failure-banner small { font-size:12px; }
+#save-failure-banner button { flex-shrink:0; min-height:44px; padding:6px 10px; color:#1b2438; background:#f3c46b; }
+#autosave-status[data-failed=true] { color:#ffd2a0; }
+html:has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:calc(var(--save-warning-height,0px) + 6px); height:calc(100dvh - var(--save-warning-height,0px) - 12px); max-height:calc(100dvh - var(--save-warning-height,0px) - 12px); }
+html:has(#save-failure-banner:not([hidden])) .top-hud, html:has(#save-failure-banner:not([hidden])) .time-hud { margin-top:var(--save-warning-height,0px); }
