@@ -2,3 +2,4 @@
 # License whitespace is part of the unmodified third-party source payload.
 public/assets/kenney-city/** -text -whitespace
 public/assets/kenney-ui/** -text -whitespace
+public/assets/tabler-roads/** -text -whitespace

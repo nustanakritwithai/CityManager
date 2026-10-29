@@ -203,7 +203,10 @@ try {
   await cityMetrics(expectedDemolished); await screenshot('displaced-households.png'); checks.push('Real demolition displaces every occupant, preserves identities/members/wallets/claims, clears affected jobs and charges only recorded demolition cost');
 
   const expectedRehoused = deserialize(serialize(expectedDemolished)); step(expectedRehoused); deserialize(serialize(expectedRehoused));
-  await close(); await button('[data-speed="1"]'); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}`); await button('#pause'); assert.deepEqual(await state(), expectedRehoused);
+  await close(); await button('[data-speed="1"]');
+  // Pause at the boundary inside the browser; CDP + two paints can overshoot a day.
+  await evaluate(`(()=>{const target=${expectedRehoused.tick};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);
+  await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`); assert.deepEqual(await state(), expectedRehoused);
   for (const old of displaced) { const h = expectedRehoused.households.find(h => h.id === old.id); assert.notEqual(h.home, null); assert.equal(h.members, old.members); assert.equal(h.wallet, old.wallet); assert.equal(expectedRehoused.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1); }
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
   await page('game'); await button('#save'); await assertSavedCity(evaluate, expectedRehoused); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);

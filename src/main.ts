@@ -1,4 +1,4 @@
-import { roadTopologyKey, clearRoadDirections } from './road-topology.ts';
+import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
 import '@fontsource/ibm-plex-sans-thai/thai-400.css';
 import '@fontsource/ibm-plex-sans-thai/thai-600.css';
@@ -136,7 +136,7 @@ function setTool(next: string) {
   roadMenu?.close();
   tool = next; roadStart = null; hover = null;
   if (next !== 'select') inspector(false);
-  if (view) { view.abortGesture(); view.mode = next === 'road' && (roadMode === 'join' || roadMode === 'split') ? 'select' : next; view.dragStart = null; }
+  if (view) { view.abortGesture(); view.mode = next === 'road' && (roadMode === 'split') ? 'select' : next; view.dragStart = null; }
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(button => {
     const active = button.dataset.tool === next; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
   });
@@ -192,11 +192,10 @@ function cancel() {
   inspector(false); status('กลับสู่แผนที่เมือง');
 }
 function roadHelp() {
-  return roadMode === 'normal' ? help.road : roadMode === 'join' ? 'เชื่อมทางแยก · แตะถนน 2 ช่องติดกัน · ทิศวันเวย์ยังคงอยู่' : roadMode === 'split' ? 'แยกทางเชื่อม · แตะถนน 2 ช่องติดกัน · อาจทำให้ถนนหรือน้ำไฟขาด' : roadMode === 'oneway' ? '2 เลนวันเวย์ ฿50/ช่องใหม่ · ลากตรงจากต้นไปปลายตามทิศรถ · เลือกจุดเชื่อมเอง' : 'ถนนคู่ขนาน ฿50/ช่องใหม่ · ลากตามแนว · ด้านข้างไม่เชื่อมทุกช่อง';
+  return roadMode === 'split' ? 'ตัดทางเชื่อม · แตะถนน 2 ช่องติดกัน · อาจทำให้ถนนหรือน้ำไฟขาด' : roadMode === 'oneway' ? '2 เลนวันเวย์ ฿50/ช่องใหม่ · ลากตรงตามทิศรถ · ใช้ถนนปกติลากเชื่อมทางแยก' : 'ถนนปกติ ฿50/ช่องใหม่ · ด้านข้างแยกเป็นคู่ขนาน · ลากจากถนนเส้นหนึ่งถึงอีกเส้นเพื่อเชื่อมแยก';
 }
 function roadCommand(a: number, b: number) {
-  if (roadMode === 'join' || roadMode === 'split') return editRoadJunction(city, a, b, roadMode === 'join');
-  if (roadMode === 'normal') { const result = buildRoad(city, a, b); if (result.ok) clearRoadDirections(city, roadPath(a,b)); return result; }
+  if (roadMode === 'split') return editRoadJunction(city, a, b, false);
   return buildParallelRoad(city, a, b, roadMode === 'oneway');
 }
 function activate(index: number) {
@@ -204,7 +203,7 @@ function activate(index: number) {
   selected = index;
   if (tool === 'road') {
     roadMenu?.close();
-    if (roadStart === null) { roadStart = index; status(roadMode === 'join' || roadMode === 'split' ? 'เลือกถนนแล้ว · แตะถนนช่องที่ติดกันเพื่อแก้ทางเชื่อม' : 'เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
+    if (roadStart === null) { roadStart = index; status(roadMode === 'split' ? 'เลือกถนนแล้ว · แตะถนนช่องที่ติดกันเพื่อแก้ทางเชื่อม' : 'เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
     else { const result = resultSound(roadCommand(roadStart, index), 'ui-road'); roadStart = null; status(result.message); }
   } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
   else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);

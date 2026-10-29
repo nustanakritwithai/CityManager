@@ -462,13 +462,16 @@ export function buildRoad(c: City, a: number, b: number): Result {
 /** Selected parallel paths do not join every adjacent side. Existing roads remain legacy until explicitly edited. */
 export function buildParallelRoad(c: City, a: number, b: number, oneWay = false): Result {
   const path=roadPath(a,b);
-  if(path.length<2)return {ok:false,message:'เลือกจุดเริ่มและจุดจบต่างกันเพื่อกำหนดแนวถนน'};
+  if(oneWay && path.length<2)return {ok:false,message:'เลือกจุดเริ่มและจุดจบต่างกันเพื่อกำหนดแนวถนน'};
   // One-way corners need a dedicated junction cell; this first tool builds straight carriageways.
-  if(oneWay && a%SIZE!==b%SIZE && Math.floor(a/SIZE)!==Math.floor(b/SIZE))return {ok:false,message:'ถนนวันเวย์ลากเป็นเส้นตรง แล้วเชื่อมทางเลี้ยวด้วยเครื่องมือทางแยก'};
+  if(oneWay && a%SIZE!==b%SIZE && Math.floor(a/SIZE)!==Math.floor(b/SIZE))return {ok:false,message:'ถนนวันเวย์ลากเป็นเส้นตรง แล้วใช้ถนนปกติลากเชื่อมทางเลี้ยว'};
+  const previousTopology=JSON.stringify(c.roadTopology);
   const added=new Set(path.filter(i=>!c.cells[i].road)),result=buildRoad(c,a,b);
   if(!result.ok)return result;
   configureRoadPath(c,path,added,oneWay);
-  c.lastEvent=oneWay?'สร้างถนน 2 เลนวันเวย์ตามลูกศรแล้ว · เชื่อมทางแยกเอง':'จัดถนนคู่ขนานแล้ว · จุดด้านข้างแยกจากกัน เลือกเชื่อมทางแยกเอง';
+  if(JSON.stringify(c.roadTopology)===previousTopology)return result;
+  c.lastEvent=oneWay?'สร้างถนน 2 เลนวันเวย์แล้ว · ใช้ถนนปกติลากเชื่อมทางแยก':'สร้างถนนแล้ว · คู่ขนานแยกด้านข้าง ทางที่ลากเชื่อมต่อถึงกัน'
+;
   return {ok:true,message:c.lastEvent};
 }
 export function editRoadJunction(c:City,a:number,b:number,connect:boolean):Result {

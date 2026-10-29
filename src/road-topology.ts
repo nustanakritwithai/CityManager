@@ -31,20 +31,28 @@ export function setRoadJunction(c:RoadMap,a:number,b:number,connected:boolean):b
   const t=copyTopology(c),set=new Set(t.blocked),key=edgeKey(a,b);if(connected)set.delete(key);else set.add(key);
   t.blocked=[...set].sort((a,b)=>a-b);c.roadTopology=t;return true;
 }
-/** Explicit selected path only. Old junctions elsewhere and endpoint connections are preserved. */
+/** Drawing opens its selected edges. Existing crossing roads keep their connections and arrows. */
 export function configureRoadPath(c:RoadMap,path:number[],newCells:ReadonlySet<number>,oneWay:boolean):void {
   const t=copyTopology(c),blocked=new Set(t.blocked),edges=new Set(path.slice(1).map((b,i)=>edgeKey(path[i],b)));
+  // A single missing tile between opposite roads repairs that axis. An ambiguous
+  // isolated/crossing tile needs a directed stroke to choose its connections.
+  if(path.length===1 && newCells.has(path[0])) {
+    const i=path[0],ns=roadNeighbors(i).filter(n=>c.cells[n].road);
+    const axes=[1,SIZE].filter(d=>ns.includes(i-d)&&ns.includes(i+d));
+    if(axes.length===1)for(const n of [i-axes[0],i+axes[0]])edges.add(edgeKey(i,n));
+  }
   for(let at=0;at<path.length;at++) {
     const i=path[at];
     for(const n of roadNeighbors(i)) if(c.cells[n].road) {
       const key=edgeKey(i,n);
       if(edges.has(key))blocked.delete(key);
-      else if(newCells.has(i)||(at>0&&at<path.length-1))blocked.add(key);
+      else if(newCells.has(i))blocked.add(key);
     }
     if(oneWay) { const delta=at<path.length-1?path[at+1]-i:i-path[at-1];t.oneWay[i]=delta; }
-    else delete t.oneWay[i];
+    else if(newCells.has(i))delete t.oneWay[i];
   }
-  t.blocked=[...blocked].sort((a,b)=>a-b);validateRoadTopology(c,t);c.roadTopology=t;
+  t.blocked=[...blocked].sort((a,b)=>a-b);validateRoadTopology(c,t);
+  if(c.roadTopology || t.blocked.length || Object.keys(t.oneWay).length)c.roadTopology=t;
 }
 export function forgetRoadTopology(c:RoadMap,i:number):void {
   if(!c.roadTopology)return;const t=copyTopology(c);t.blocked=t.blocked.filter(k=>Math.floor(k/CELLS)!==i&&k%CELLS!==i);delete t.oneWay[i];c.roadTopology=t;
