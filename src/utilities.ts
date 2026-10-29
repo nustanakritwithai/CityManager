@@ -1,3 +1,4 @@
+import { edgeKey } from './road-topology.ts';
 /**
  * Water and power (rules chain-4). Supply enters the road network at the outside gateway (a fixed
  * contract) and at city-built plants with road frontage; pipes and lines follow connected roads.
@@ -76,7 +77,7 @@ export function utilityService(c: City, roads: ReadonlySet<number>): Service {
     // buildings still have a network distance and can be marked served.
     if (c.utilities.outside[kind] > 0 || plants[kind] === 0) seed(GATEWAY);
     for (const p of c.plants) if (p.kind === kind && online.has(p.id)) for (const n of neighbors(p.cell)) seed(n);
-    for (let q = 0; q < queue.length; q++) for (const n of neighbors(queue[q])) if (roads.has(n) && !distances.has(n)) { distances.set(n, distances.get(queue[q])! + 1); queue.push(n); }
+    for (let q = 0; q < queue.length; q++) for (const n of neighbors(queue[q])) if (roads.has(n) && !c.roadTopology?.blocked.includes(edgeKey(queue[q],n)) && !distances.has(n)) { distances.set(n, distances.get(queue[q])! + 1); queue.push(n); }
     return distances;
   };
   const roadsByKind = { power: roadDistances('power'), water: roadDistances('water') };

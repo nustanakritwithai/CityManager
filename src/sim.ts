@@ -1,3 +1,4 @@
+import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
 import { HOUSING_LEVELS, housingLevel, getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
@@ -35,6 +36,7 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
  */
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = {
+  roadTopology?: RoadTopology;
   foodDemandStartTick?: number;
   factoryProgressionStartTick?: number;
   /** Earlier harvests were produced under the level 1–3 farm rules. */
@@ -361,14 +363,14 @@ export function connectedRoads(c: City): Set<number> {
   if (!c.cells[GATEWAY].road) return seen;
   const queue = [GATEWAY]; seen.add(GATEWAY);
   for (let q = 0; q < queue.length; q++) for (const n of neighbors(queue[q])) {
-    if (c.cells[n].road && !seen.has(n)) { seen.add(n); queue.push(n); }
+    if (roadLinked(c, queue[q], n) && !seen.has(n)) { seen.add(n); queue.push(n); }
   }
   return seen;
 }
 export function access(c: City, i: number): boolean {
   if (!validIndex(i)) return false;
   const connected = roadScopes.get(c) ?? connectedRoads(c);
-  return connected.has(i) || neighbors(i).some(n => connected.has(n));
+  return c.cells[i].road ? connected.has(i) : neighbors(i).some(n => connected.has(n));
 }
 export function roadPath(a: number, b: number): number[] {
   if (!validIndex(a) || !validIndex(b)) return [];
@@ -391,6 +393,23 @@ export function buildRoad(c: City, a: number, b: number): Result {
   const message = access(c, b) ? `Built ${added.length} road cells.` : 'Road built, but disconnected from the west outside gateway. Adjacent zones cannot grow.';
   c.lastEvent = message;
   return { ok: true, message };
+}
+/** Selected parallel paths do not join every adjacent side. Existing roads remain legacy until explicitly edited. */
+export function buildParallelRoad(c: City, a: number, b: number, oneWay = false): Result {
+  const path=roadPath(a,b);
+  if(path.length<2)return {ok:false,message:'เลือกจุดเริ่มและจุดจบต่างกันเพื่อกำหนดแนวถนน'};
+  // One-way corners need a dedicated junction cell; this first tool builds straight carriageways.
+  if(oneWay && a%SIZE!==b%SIZE && Math.floor(a/SIZE)!==Math.floor(b/SIZE))return {ok:false,message:'ถนนวันเวย์ลากเป็นเส้นตรง แล้วเชื่อมทางเลี้ยวด้วยเครื่องมือทางแยก'};
+  const added=new Set(path.filter(i=>!c.cells[i].road)),result=buildRoad(c,a,b);
+  if(!result.ok)return result;
+  configureRoadPath(c,path,added,oneWay);
+  c.lastEvent=oneWay?'สร้างถนน 2 เลนวันเวย์ตามลูกศรแล้ว · เชื่อมทางแยกเอง':'จัดถนนคู่ขนานแล้ว · จุดด้านข้างแยกจากกัน เลือกเชื่อมทางแยกเอง';
+  return {ok:true,message:c.lastEvent};
+}
+export function editRoadJunction(c:City,a:number,b:number,connect:boolean):Result {
+  if(!setRoadJunction(c,a,b,connect))return {ok:false,message:'เลือกถนนสองช่องที่ติดกันด้านข้าง ไม่ใช่แนวทแยง'};
+  c.lastEvent=connect?'เชื่อมทางแยกแล้ว · รถยังต้องตามทิศลูกศร':'แยกทางเชื่อมแล้ว · ตรวจทางออกและน้ำไฟของเมือง';
+  return {ok:true,message:c.lastEvent};
 }
 export function zoneCell(c: City, i: number, zone: Zone): Result {
   if (!validIndex(i) || ![null, 'R', 'C', 'I', 'F'].includes(zone)) return { ok: false, message: 'Invalid parcel or zone.' };
@@ -440,6 +459,7 @@ export function bulldoze(c: City, i: number): Result {
     for (const f of closing) closeFirm(c, f);
     c.buildings = c.buildings.filter(v => v.id !== b.id);
   }
+  forgetRoadTopology(c, i);
   cell.road = false; cell.zone = null; cell.building = null;
   c.lastEvent = 'Parcel cleared. Disconnected buildings stop recruiting, trading and growing.';
   return { ok: true, message: c.lastEvent };
@@ -1081,7 +1101,8 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   return c;
 }
 export function serialize(c: City, market?: City['market']): string {
-  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: 19, rulesVersion: 'chain-14', ...(market ? { market } : {}) });
+  if (c.roadTopology) validateRoadTopology(c, c.roadTopology);
+  const json = JSON.stringify({ ...c, foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: c.roadTopology ? 20 : 19, rulesVersion: c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1353,6 +1374,14 @@ function deserializeVersioned(json: string): City {
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 20) {
+    const envelope = parsed as Record<string, unknown>;
+    if(envelope.rulesVersion !== 'chain-15') throw Error('Invalid road save version');
+    const {roadTopology,...base}=envelope;
+    const city=deserializeVersioned(JSON.stringify({...base,version:19,rulesVersion:'chain-14'}));
+    validateRoadTopology(city,roadTopology); city.roadTopology=roadTopology; return city;
+  }
+  if(parsed && typeof parsed==='object' && 'roadTopology' in parsed) throw Error('Road topology requires save v20');
   if (version !== 19 && parsed && typeof parsed === 'object' && 'farmLevelStartTick' in parsed) throw new Error('Unexpected farm progression boundary.');
   if (version !== 17 && version !== 18 && version !== 19 && parsed && typeof parsed === 'object' && 'factoryProgressionStartTick' in parsed) throw new Error('Unexpected factory progression boundary.');
   if (version !== 13 && version !== 14 && version !== 15 && version !== 16 && version !== 17 && version !== 18 && version !== 19 && parsed && typeof parsed === 'object' && 'foodDemandStartTick' in parsed) throw new Error('Unsupported or corrupt CityManager save.');

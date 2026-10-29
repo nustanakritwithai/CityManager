@@ -1,3 +1,4 @@
+import { roadTopologyKey } from './road-topology.ts';
 import { Entity, StandardMaterial, Color, BLEND_NORMAL } from 'playcanvas';
 import type { CityView } from './renderer.ts';
 import { MAX_CARS, MAX_TRUCKS, commuteGoal, keyHash, leaderAhead, overlapping, trafficPlan, type CommuteGoal, type Mover, type TrafficPlan } from './traffic-plan.ts';
@@ -14,6 +15,7 @@ const MIN_GAP = .14, SAFE_GAP = .75, ACCEL = 3, WAIT_LIMIT = 3, GHOST = 1.2;
 /** Seconds a truck spends loading or unloading at each end of its delivery route. */
 const DWELL = 3;
 type Actor = {
+  outbound?: number[]; inbound?: number[]; leg?: 'home' | 'work';
   key: string; kind: 'car' | 'truck' | 'walker'; entity: Entity; route: number[]; p: number; dir: 1 | -1; speed: number; v: number;
   rank: number; depart: number; errand: number; retire: boolean; parked: boolean; dwell: number; waited: number; ghost: number;
   x: number; z: number; hx: number; hz: number;
@@ -33,6 +35,7 @@ export class SceneTraffic {
   private readonly puffMaterial = new StandardMaterial();
   private readonly lightMaterial = new StandardMaterial();
   private signature = '';
+  private topologySignature = '';
   private enabled = true;
   private walkersEnabled = true;
   private clock = 0;
@@ -90,7 +93,9 @@ export class SceneTraffic {
     this.lastCity = city;
     if (!this.enabled) return;
     const roads = city.cells.reduce((n, cell) => n + (cell.road ? 1 : 0), 0);
-    const key = `${city.tick}:${roads}:${city.buildings.length}:${city.employment.length}`;
+    const topology = city.cells.map(c=>c.road?'1':'0').join('') + roadTopologyKey(city);
+    if (topology !== this.topologySignature) { for (const actor of this.actors.values()) actor.entity.destroy(); this.actors.clear(); this.topologySignature = topology; }
+    const key = `${city.tick}:${roads}:${topology}:${city.buildings.length}:${city.employment.length}`;
     if (key === this.signature) return;
     this.signature = key;
     this.apply(trafficPlan(city), city);
@@ -103,10 +108,10 @@ export class SceneTraffic {
     for (const actor of this.actors.values()) {
       const route = wanted.get(actor.key);
       if (!route) actor.retire = true;
-      else if (route.join() !== actor.route.join()) { actor.entity.destroy(); this.actors.delete(actor.key); }
+      else if (route.join() !== (actor.outbound ?? actor.route).join()) { actor.entity.destroy(); this.actors.delete(actor.key); }
     }
-    for (const car of plan.cars) this.add(car.key, 'car', car.route, car.colour);
-    for (const truck of plan.trucks) this.add(truck.key, 'truck', truck.route, truck.colour);
+    for (const car of plan.cars) this.add(car.key, 'car', car.route, car.colour, car.returnRoute);
+    for (const truck of plan.trucks) this.add(truck.key, 'truck', truck.route, truck.colour, truck.returnRoute);
     for (const walker of plan.walkers) this.add(walker.key, 'walker', walker.route, walker.colour);
     // Keep the screen within the caps: over them, leaving vehicles go at once (parked ones first).
     for (const [kind, cap] of [['car', MAX_CARS], ['truck', MAX_TRUCKS]] as const) {
@@ -119,7 +124,7 @@ export class SceneTraffic {
     this.view.app.renderNextFrame = true;
   }
 
-  private add(key: string, kind: Actor['kind'], route: number[], colour: number) {
+  private add(key: string, kind: Actor['kind'], route: number[], colour: number, returnRoute?: number[]) {
     const existing = this.actors.get(key);
     if (existing) { existing.retire = false; return; }
     const entity = new Entity(`${kind} ${key}`), view = this.view, box = (x: number, y: number, z: number, sx: number, sy: number, sz: number, c: string | StandardMaterial) => view.box(entity, x, y, z, sx, sy, sz, c, false);
@@ -140,12 +145,19 @@ export class SceneTraffic {
       key, kind, entity, route, p: seed * Math.max(0, route.length - 1), dir: seed < .5 ? 1 : -1, speed, v: speed, rank: seed,
       depart: keyHash(`${key}:depart`), errand: keyHash(`${key}:errand`), retire: false, parked: false, dwell: 0, waited: 0, ghost: 0, x: 0, z: 0, hx: 0, hz: 1,
     };
+    if (returnRoute) { actor.outbound = route; actor.inbound = returnRoute; actor.leg = seed < .5 ? 'work' : 'home'; actor.route = actor.leg === 'work' ? route : returnRoute; actor.dir = 1; actor.p = seed * Math.max(0, actor.route.length - 1); }
     // A commuter appears where the hour puts it: parked at home or at work, or out on an errand.
-    if (kind === 'car') { const goal = this.goal(actor); if (goal !== 'cruise') this.park(actor, goal === 'work' ? route.length - 1 : 0); }
+    if (kind === 'car') { const goal = this.goal(actor); if (goal !== 'cruise') { if (actor.outbound) this.parkDirected(actor, goal); else this.park(actor, goal === 'work' ? route.length - 1 : 0); } }
     this.actors.set(key, actor); this.move(actor, 0); // placed at once, even while the game is paused
   }
 
   private goal(actor: Actor): CommuteGoal { return commuteGoal(this.view.atmosphere.hour ?? START_HOUR, actor.depart, actor.errand); }
+
+  private parkDirected(actor: Actor, reached: 'home' | 'work') {
+    actor.leg = reached === 'home' ? 'work' : 'home';
+    actor.route = actor.leg === 'work' ? actor.outbound! : actor.inbound!;
+    actor.p = 0; actor.dir = 1; actor.parked = true; actor.entity.enabled = false; actor.v = 0;
+  }
 
   private park(actor: Actor, at: number) {
     actor.p = at; actor.dir = at === 0 ? 1 : -1; actor.parked = true; actor.entity.enabled = false; actor.v = 0;
@@ -170,7 +182,7 @@ export class SceneTraffic {
       if (!actor.parked) continue;
       if (actor.retire) { actor.entity.destroy(); this.actors.delete(actor.key); continue; }
       // Trucks load for a moment; commuters leave when their rush (or an errand) comes.
-      const leave = actor.kind === 'truck' ? (actor.dwell -= step) <= 0 : this.goal(actor) !== (actor.p === 0 ? 'home' : 'work');
+      const leave = actor.kind === 'truck' ? (actor.dwell -= step) <= 0 : this.goal(actor) !== (actor.leg ? (actor.leg === 'work' ? 'home' : 'work') : actor.p === 0 ? 'home' : 'work');
       if (leave) { actor.parked = false; actor.entity.enabled = true; actor.v = 0; }
     }
     this.follow(step);
@@ -202,10 +214,15 @@ export class SceneTraffic {
   }
 
   private move(actor: Actor, dt: number) {
-    const last = actor.route.length - 1;
+    let last = actor.route.length - 1;
     if (last > 0) {
       actor.p += actor.dir * (actor.kind === 'walker' ? actor.speed : actor.v) * dt / CELL;
-      if (actor.p >= last || actor.p <= 0) {
+      if (actor.leg && actor.p >= last) {
+        if (actor.retire) { actor.entity.destroy(); this.actors.delete(actor.key); return; }
+        const reached = actor.leg;
+        if (actor.kind === 'truck' || this.goal(actor) === reached) { this.parkDirected(actor, reached); actor.dwell = DWELL; return; }
+        actor.leg = reached === 'home' ? 'work' : 'home'; actor.route = actor.leg === 'work' ? actor.outbound! : actor.inbound!; actor.p = 0; actor.dir = 1; last = actor.route.length - 1;
+      } else if (!actor.leg && (actor.p >= last || actor.p <= 0)) {
         const end = actor.p >= last ? last : 0;
         if (actor.retire) { actor.entity.destroy(); this.actors.delete(actor.key); return; }
         if (actor.kind === 'truck') { this.park(actor, end); actor.dwell = DWELL; return; }
@@ -219,7 +236,8 @@ export class SceneTraffic {
     let hx = (to.x - from.x) * actor.dir, hz = (to.z - from.z) * actor.dir;
     const length = Math.hypot(hx, hz) || 1; hx /= length; hz /= length;
     // Right-hand lane or sidewalk, relative to the direction of travel.
-    const offset = actor.kind === 'walker' ? SIDEWALK : LANE, sway = actor.kind === 'walker' && last === 0 ? Math.sin(this.clock * .8 + actor.route[0]) * .5 : 0;
+    const oneway = this.lastCity?.roadTopology?.oneWay[actor.route[a]] || this.lastCity?.roadTopology?.oneWay[actor.route[b]];
+    const offset = actor.kind === 'walker' ? SIDEWALK : oneway && actor.rank < .5 ? -LANE : LANE, sway = actor.kind === 'walker' && last === 0 ? Math.sin(this.clock * .8 + actor.route[0]) * .5 : 0;
     const x = from.x + (to.x - from.x) * t + hz * offset + (last === 0 ? sway : 0), z = from.z + (to.z - from.z) * t - hx * offset;
     actor.x = x; actor.z = z; actor.hx = hx; actor.hz = hz;
     actor.entity.setLocalPosition(x, .14, z);

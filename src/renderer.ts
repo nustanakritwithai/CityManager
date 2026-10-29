@@ -1,3 +1,4 @@
+import { roadLinked, roadTopologyKey } from './road-topology.ts';
 import {
   AppBase, AppOptions, createGraphicsDevice, DEVICETYPE_WEBGL2,
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
@@ -405,33 +406,45 @@ export class CityView {
     const fadeLater: Entity[] = [];
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
-      const links = cell.road ? [i % SIZE > 0 && city.cells[i - 1].road, i % SIZE < SIZE - 1 && city.cells[i + 1].road, i >= SIZE && city.cells[i - SIZE].road, i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road].map(Number).join('') : '';
+      const links = cell.road ? [roadLinked(city, i, i + (-1)), roadLinked(city, i, i + (1)), roadLinked(city, i, i + (-24)), roadLinked(city, i, i + (24))].map(Number).join('') : '';
       const fertility = cell.zone === 'F' ? city.resources.fertility[i] : '';
       // Night lights only for real occupancy: residents at home or allocated workers on site.
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
       // Buildings without connected frontage are suspended in the sim, so they render faded.
       const reach = !!b && access(city, i);
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}`;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
       this.tiles.set(i, { entity: tile, signature });
       if (b && !reach || plant && !plantOn) fadeLater.push(tile);
       if (cell.road) {
-        const horizontal = (i % SIZE > 0 && city.cells[i - 1].road) || (i % SIZE < SIZE - 1 && city.cells[i + 1].road);
-        const vertical = (i >= SIZE && city.cells[i - SIZE].road) || (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road);
+        const horizontal = (roadLinked(city, i, i + (-1))) || (roadLinked(city, i, i + (1)));
+        const vertical = (roadLinked(city, i, i + (-24))) || (roadLinked(city, i, i + (24)));
         const open = new Set<Side>();
-        if (i % SIZE > 0 && city.cells[i - 1].road || i === GATEWAY) open.add('-x');
-        if (i % SIZE < SIZE - 1 && city.cells[i + 1].road) open.add('+x');
-        if (i >= SIZE && city.cells[i - SIZE].road) open.add('-z');
-        if (i < SIZE * (SIZE - 1) && city.cells[i + SIZE].road) open.add('+z');
+        if (roadLinked(city, i, i + (-1)) || i === GATEWAY) open.add('-x');
+        if (roadLinked(city, i, i + (1))) open.add('+x');
+        if (roadLinked(city, i, i + (-24))) open.add('-z');
+        if (roadLinked(city, i, i + (24))) open.add('+z');
         const choice = roadTileFor(open, i), model = this.assets?.road(choice.tile, connected.has(i));
         if (model) { model.setLocalEulerAngles(0, choice.rotation, 0); model.setLocalPosition(0, .03, 0); tile.addChild(model); }
         else {
           this.box(tile, 0, .065, 0, 1.98, .1, 1.98, '#bcc4b8');
           this.box(tile, 0, .12, 0, vertical && !horizontal ? 1.48 : 1.98, .035, horizontal && !vertical ? 1.48 : 1.98, connected.has(i) ? '#46535b' : '#a86155');
           if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
+        }
+        const direction = city.roadTopology?.oneWay[i];
+        if (direction) {
+          const arrows = new Entity('Two lanes one-way arrows'); tile.addChild(arrows);
+          // Local +z arrow, rotated to match the selected grid direction.
+          arrows.setLocalEulerAngles(0, direction === 1 ? 90 : direction === -1 ? -90 : direction === -SIZE ? 180 : 0, 0);
+          for (const lane of [-.36, .36]) {
+            this.box(arrows, lane, .18, 0, .055, .012, .48, '#ffffff', false);
+            const left = this.box(arrows, lane - .08, .18, .17, .055, .012, .23, '#ffffff', false);
+            const right = this.box(arrows, lane + .08, .18, .17, .055, .012, .23, '#ffffff', false);
+            left.setLocalEulerAngles(0, 40, 0); right.setLocalEulerAngles(0, -40, 0);
+          }
         }
         // Lamps stand on the sidewalk of straight streets, every fourth parcel along the street.
         const along = horizontal && !vertical ? i % SIZE : vertical && !horizontal ? Math.floor(i / SIZE) : -1;
@@ -554,7 +567,7 @@ export class CityView {
   setQuality(quality: Quality) { this.atmosphere.setQuality(quality); }
 
   private updateGroundEdges(city: City) {
-    const signature = city.cells.map(cell => cell.road ? '1' : '0').join('') + ':' + city.buildings.map(b => b.cell).join(',');
+    const signature = city.cells.map(cell => cell.road ? '1' : '0').join('') + ':' + roadTopologyKey(city) + ':' + city.buildings.map(b => b.cell).join(',');
     if (!this.edgeMesh || signature === this.edgeSignature) return;
     this.edgeSignature = signature;
     const positions: number[] = [], normals: number[] = [], colors: number[] = [], indices: number[] = [];

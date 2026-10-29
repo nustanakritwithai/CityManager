@@ -1,0 +1,6 @@
+.road-submenu { position:fixed; z-index:100; display:flex; flex-direction:column; gap:4px; }
+.road-submenu[hidden] { display:none; }
+.road-submenu .road-option { width:100%; min-width:0; height:var(--road-button-height); min-height:var(--road-button-height); flex:none; box-sizing:border-box; padding:2px; border:1px solid #899fc6; border-radius:8px; background:#344769; color:#f0f4ff; box-shadow:0 3px 9px #0006; }
+.road-submenu .road-option[aria-pressed=true] { border-color:#e7c36c; background:#526382; }
+.road-submenu .road-option > span:last-child { font-size:10px; line-height:1.1; white-space:normal; }
+.road-submenu .road-option:focus-visible { outline:2px solid #f1d78d; outline-offset:2px; }

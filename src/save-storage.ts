@@ -1,3 +1,6 @@
+import { validateRoadTopology } from './road-topology.ts';
+export const roadTopologyBackupKeys = () => Array.from({length:8},(_,i)=>i?`${ROAD_TOPOLOGY_BACKUP_KEY}.${i}`:ROAD_TOPOLOGY_BACKUP_KEY);
+export const ROAD_TOPOLOGY_BACKUP_KEY = 'citymanager.backup.before-road-topology';
 /** Loading never writes; original v1-v6 bytes are independent of the v7 slot. */
 export const SAVE_KEY = 'citymanager.save.v7';
 export const GROWTH_SAVE_KEY = 'citymanager.save.v6';
@@ -53,7 +56,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
+    keys = [...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -73,8 +76,10 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const housing16 = parsed?.version === 16 && parsed?.rulesVersion === 'chain-11' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   const factory17 = parsed?.version === 17 && parsed?.rulesVersion === 'chain-12' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   const retail18 = parsed?.version === 18 && parsed?.rulesVersion === 'chain-13' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
-  const farm19 = parsed?.version === 19 && parsed?.rulesVersion === 'chain-14' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  const road20 = parsed?.version === 20 && parsed?.rulesVersion === 'chain-15' && parsed?.roadTopology?.version === 1;
+  const farm19 = ((parsed?.version === 19 && parsed?.rulesVersion === 'chain-14') || road20) && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   if (parsed?.version !== 9 && !market10 && !farm11 && !factory12 && !food13 && !parks14 && !workforce15 && !housing16 && !factory17 && !retail18 && !farm19) throw new Error('Expected a supported CityManager snapshot.');
+  if (road20) validateRoadTopology(parsed, parsed.roadTopology);
   let backup: string | null = null;
   if (importedLegacy !== null) {
     const version: unknown = JSON.parse(importedLegacy)?.version;
@@ -95,6 +100,7 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const current = storage.getItem(SAVE_KEY);
   if (current !== null) {
     let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
+    if (road20 && version === 19) { const keys=roadTopologyBackupKeys();let slot=keys.find(k=>storage.getItem(k)===current);if(!slot){slot=keys.find(k=>storage.getItem(k)===null);if(!slot)throw Error('Road migration backups full; original save preserved');storage.setItem(slot,current);}storage.setItem(LATEST_BACKUP_KEY,slot); }
     if (farm19 && (version === 15 || version === 16 || version === 17 || version === 18)) {
       const keys = farmLevelBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
       if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Farm level backup slots are full; the current save was preserved.'); storage.setItem(slot, current); }

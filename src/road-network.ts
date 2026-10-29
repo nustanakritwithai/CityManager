@@ -1,7 +1,8 @@
+import { roadLinked } from './road-topology.ts';
 /** Read-only shortest paths over four-neighbor road cells. */
 import { GATEWAY, SIZE, type City } from './sim.ts';
 
-type RoadMap = Pick<City, 'cells'>;
+type RoadMap = Pick<City, 'cells' | 'roadTopology'>;
 const valid = (city: RoadMap, index: number) => Number.isInteger(index) && index >= 0 && index < SIZE * SIZE && index < city.cells.length;
 
 function neighbors(index: number): number[] {
@@ -34,7 +35,7 @@ export function shortestRoadRoute(city: RoadMap, from: number, to: number): numb
       return path.reverse();
     }
     for (const next of neighbors(current)) {
-      if (!city.cells[next]?.road || previous.has(next)) continue;
+      if (!roadLinked(city,current,next) || previous.has(next)) continue;
       previous.set(next, current);
       queue.push(next);
     }
