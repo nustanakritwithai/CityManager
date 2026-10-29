@@ -199,9 +199,14 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       for (const person of state.people) if (person.campusId === campus.id) { person.teacher = 0; person.professor = 0; }
       campus.contract = 0;
     } else {
-      let local = state.people.filter(person => atCampus(person, campus, role)).reduce((sum, person) => sum + person[role], 0);
+      const wage = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
+      let local = 0;
+      // Existing staff also need today's wage; releasing a shift never erases earned claims.
+      for (const person of state.people.filter(person => atCampus(person, campus, role)).sort((a, b) => a.householdId - b.householdId)) {
+        const funded = Math.min(person[role], Math.floor(budget / wage));
+        person[role] = funded; local += funded; budget -= funded * wage;
+      }
       while (local < level.staff) {
-        const wage = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
         if (budget < wage) break;
         const candidate = [...view.households].sort((a, b) => a.id - b.id).find(household => {
           const person = peopleOf(state, household.id);
@@ -348,6 +353,7 @@ export function educationUpkeep(state: EducationState): EducationPayment[] {
   return state.campuses.map(campus => ({ kind: 'upkeep' as const, amount: campus.kind === 'school' ? EDUCATION_COST.school.upkeep : EDUCATION_COST.university.upkeep, reason: campus.kind === 'school' ? `Monthly school upkeep #${campus.id}` : `Monthly university upkeep #${campus.id}` }));
 }
 
+/** Snapshot earned claims; only a successful payment may remove them. */
 export function takeEducationWages(state: EducationState, wallet?: string, campusId?: number): { campus: Campus; wallet: string; amount: number }[] {
   const claims: { campus: Campus; wallet: string; amount: number }[] = [];
   for (const campus of state.campuses) {
@@ -356,7 +362,6 @@ export function takeEducationWages(state: EducationState, wallet?: string, campu
     for (const [claimWallet, days] of Object.entries(campus.workDays)) {
       if (wallet && claimWallet !== wallet) continue;
       claims.push({ campus, wallet: claimWallet, amount: days * wage });
-      delete campus.workDays[claimWallet];
     }
   }
   return claims;
