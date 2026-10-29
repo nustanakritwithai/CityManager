@@ -74,7 +74,7 @@ async function until(expression, timeoutMs = 20000) {
   throw Error(`Condition timeout: ${safePrefix(expression)}`);
 }
 const paints = () => evaluate('new Promise(r=>{const t=setTimeout(r,100);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(t);r()}))})');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const hostState = () => evaluate('({...document.querySelector("#owner-decisions").dataset})');
 const selector = (key, value) => `[${key}=${JSON.stringify(value)}]`;
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); await paints(); }

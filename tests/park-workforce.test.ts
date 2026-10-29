@@ -93,8 +93,8 @@ test('removal settles earned claims, releases workers, and stops payroll/upkeep 
 
 test('v14 migration changes no money/jobs/history; v15 retains earned claims and rejects double assignment or unfunded claims', () => {
   const c = isolated(); buildPark(c, 0);
-  const old = JSON.parse(serialize(c)); old.version = 14; old.rulesVersion = 'chain-9'; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
-  const migrated = deserialize(JSON.stringify(old)); assert.deepEqual(migrated, { ...c, factoryProgressionStartTick: c.tick, farmLevelStartTick: c.tick });
+  const old = JSON.parse(serialize(c)); delete old.education; old.version = 14; old.rulesVersion = 'chain-9'; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
+  const migrated = deserialize(JSON.stringify(old)); const comparable = { ...c, factoryProgressionStartTick: c.tick, farmLevelStartTick: c.tick }; delete comparable.education; assert.deepEqual(migrated, comparable);
   step(c); const raw = serialize(c); assert.deepEqual(deserialize(raw), c);
   for (const corrupt of [
     (x: any) => x.parks[0].staffing.allocations.push({ ...x.parks[0].staffing.allocations[0] }),

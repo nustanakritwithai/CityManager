@@ -6,6 +6,7 @@ import { createCity as agricultureCity, step as agricultureStep, serialize as ag
 import { untyped } from './untyped.ts';
 import { SAVE_KEY, COMMERCIAL_SAVE_KEY, COMMERCIAL_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { keepSupplied } from './plants.ts';
+import { holdEducationReady } from './education-ready.ts';
 
 function oldCity(day: number) { const c = legacyCity(61025); for (let n = 0; n < day; n++) legacyStep(c); return c; }
 const legacy388 = oldCity(388), legacy251 = oldCity(251);
@@ -63,7 +64,7 @@ test('fresh deterministic cities use real outside and local capital with adequat
   for (const seed of [61025, 20261023]) {
     const c = createCity(seed), twin = createCity(seed); let firstExpansion = 0, addedParcel: number | null = null;
     for (let day = 1; day <= 388; day++) {
-      step(c); step(twin); keepSupplied(c); keepSupplied(twin);
+      holdEducationReady(c); holdEducationReady(twin); step(c); step(twin); keepSupplied(c); keepSupplied(twin);
       if (addedParcel === null) { addedParcel = zoneFundedParcel(c); assert.equal(zoneFundedParcel(twin), addedParcel); }
       if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day;
       if (day % 30 === 0) conservation(c);

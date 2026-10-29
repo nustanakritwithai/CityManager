@@ -85,7 +85,7 @@ test('park upkeep follows existing treasury clipping without negative funds or d
 });
 
 test('v15 validates one-tile level-1 park ownership and construction evidence; old v13 remains intact', () => {
-  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 19);
+  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 22);
   for (const change of [
     (x: any) => { x.parks[0].width = 2; }, (x: any) => { x.parks[0].cells = [0, 1]; },
     (x: any) => { x.parks[0].level = 0; }, (x: any) => { x.parks[0].level = 2; },
@@ -95,7 +95,7 @@ test('v15 validates one-tile level-1 park ownership and construction evidence; o
     (x: any) => { delete x.parks; },
   ]) { const invalid = structuredClone(raw); change(invalid); assert.throws(() => deserialize(JSON.stringify(invalid)), /corrupt/i); }
   const oldCity = createCity(61025); run(oldCity, 60); const old = JSON.parse(serialize(oldCity));
-  old.version = 13; old.rulesVersion = 'chain-8'; delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
+  delete old.education; old.version = 13; old.rulesVersion = 'chain-8'; delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
   const loaded = deserialize(JSON.stringify(old)); assert.deepEqual(loaded.parks, []);
   for (const key of ['accounts', 'ledger', 'buildings', 'households', 'firms', 'rng', 'tick', 'nextId']) assert.deepEqual((loaded as any)[key], old[key]);
 });
@@ -112,11 +112,8 @@ test('first park save keeps exact pre-park bytes and backup failure preserves pr
 });
 
 test('no-park city matches the pre-density engine until residential progression begins', () => {
-  // Fixed independently from 98f406ae4fe29508e1cd6cb45fd89685e285e3b2, re-baselined once when
-  // staffed shop levels 3-4 gained shelf space (24/32/40); no other engine rule changed before day 120.
-  // Day 120 is the first apartment review; apartments now also require a full cottage. A 360-day
-  // frozen pre-density hash cannot hold once those requested upgrades occur;
-  // park-runtime.test.ts separately checks 360-day no-park session parity.
-  const baselines = [[61025, 'd58145934210874bd0ad6ec448b48ff9dc1bd492f235525b00b0f401cdca14f7'], [20261023, 'e08df3fa2d6b8083160df5ea7c8dd313f82ce46cebd73c6da64fdddae3be07a8']] as const;
+  // Re-baselined when education became part of every new city. Without a graduate, day 120
+  // does not raise housing. Any apartment that does appear must still be a full cottage.
+  const baselines = [[61025, 'd319b45b4283300213db12f3b9eb52f6efa7688f86b6016b177150e3d17cd6a8'], [20261023, '709783b3251ed89b36daa99b2045cf3020a7085ba005df7edc4fc0992eaf447f']] as const;
   for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 119); const { parks, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3)); run(c, 1); for (const b of c.buildings.filter(b => b.zone === 'R' && b.level >= 4)) assert.equal(homeOccupancy(c, b.id).households >= 3, true, 'apartment tier is reached only from a full cottage'); }
 });

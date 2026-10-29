@@ -6,7 +6,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { firmWage, createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
+import { adoptSavedEducation, firmWage, createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
+import { assertOriginalSave } from './education-adoption.mjs';
 import { reachTouch } from './touch-reach.mjs';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -22,6 +23,7 @@ for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], 
 for (const old of legacy.firms) { const firm = fixture.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
 const fixtureJson = serialize(fixture), emptyJson = serialize(createCity(91));
 assert.deepEqual(deserialize(fixtureJson), fixture);
+adoptSavedEducation(fixture);
 const homes = fixture.buildings.filter(b => b.zone === 'R').slice(0, 2), firms = fixture.firms.slice(0, 2);
 assert.equal(homes.length, 2, 'Fixture has two actual homes'); assert.equal(firms.length, 2, 'Fixture has two actual firms');
 const homeHousehold = fixture.households.find(h => h.home === homes[0].id);
@@ -49,7 +51,7 @@ async function until(expression, timeout = 15000) {
   const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Timed out: ${expression}`);
 }
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) {
@@ -74,7 +76,7 @@ async function load(json) {
   await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(json)})`); await button('#load');
-  const expected = deserialize(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
+  const expected = deserialize(json); adoptSavedEducation(expected); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); await assertOriginalSave(evaluate, json);
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
 }
 async function cell(index, close = true) {

@@ -8,9 +8,10 @@ export const TILE_LENGTH_M = 100, FREE_FLOW_KMH = 40, LANE_CAPACITY_VPH = 600;
 export type Link = { from: number; to: number; length: number; freeFlowKmh: number; lanes: number; capacityPerHour: number };
 export type LinkNetwork = { links: Map<string, Link>; out: Map<number, Link[]> };
 export const linkKey = (a: number, b: number) => `${a}>${b}`;
-const isOneWay = (c: RoadMap, a: number, b: number) => c.roadTopology?.oneWay[a] != null || c.roadTopology?.oneWay[b] != null || !roadDriveAllowed(c, b, a);
 function makeLink(c: RoadMap, a: number, b: number): Link {
-  const lanes = isOneWay(c, a, b) ? 2 : 1;
+  // This forward link is legal. Only a forbidden reverse movement makes this segment one-way;
+  // an endpoint's perpendicular arrow must not widen a bidirectional junction branch.
+  const lanes = roadDriveAllowed(c, b, a) ? 1 : 2;
   return { from: a, to: b, length: TILE_LENGTH_M, freeFlowKmh: FREE_FLOW_KMH, lanes, capacityPerHour: lanes * LANE_CAPACITY_VPH };
 }
 function addCell(c: RoadMap, net: LinkNetwork, a: number) {

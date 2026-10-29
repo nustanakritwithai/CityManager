@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
-import { deserialize, serialize, firmWorkerCount, householdWorkerCount, homeOccupancy, housingCapacity, firmWage, MONTH } from '../src/sim.ts';
+import { adoptSavedEducation, deserialize, serialize, firmWorkerCount, householdWorkerCount, homeOccupancy, housingCapacity, firmWage, MONTH } from '../src/sim.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const mode = process.env.CITYMANAGER_COMPACT_MODE || 'candidate';
@@ -22,6 +22,7 @@ const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 9);
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
+if (mode !== 'baseline') adoptSavedEducation(migrated);
 const city = mode === 'baseline' ? legacy : migrated, fixture = mode === 'baseline' ? legacyRaw : serialize(city);
 const home = city.buildings.find(b => b.zone === 'R'), company = city.firms.find(f => mode === 'baseline' ? f.employees.length > 1 : firmWorkerCount(city, f.id) > 1) || city.firms[0];
 const firmBuilding = city.buildings.find(b => b.id === company.building), resident = city.households.find(h => h.home === home.id);
@@ -35,7 +36,7 @@ async function send(method, params = {}) { const key = ++id; const p = new Promi
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(80); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => mode === 'baseline' ? evaluate('JSON.parse(window.cityManager.snapshot())') : evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => mode === 'baseline' ? evaluate('JSON.parse(window.cityManager.snapshot())') : evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) { if (await reachTouch(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`); assert.ok(r.w && r.h && !r.disabled, selector); assert.equal(await evaluate(`!!document.elementFromPoint(${r.x},${r.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}`); await click(r.x, r.y); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }

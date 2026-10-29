@@ -6,6 +6,7 @@ import { retailCapacity, staffedRetailCapacity } from '../src/retail-capacity.ts
 import { keepSupplied } from './plants.ts';
 import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
+import { holdEducationReady } from './education-ready.ts';
 
 function grown(): City {
   const c = createCity(61025);
@@ -60,7 +61,7 @@ test('a real shop upgrades on the same cell and buys and sells its expanded stoc
   let upgradedId = 0, transitionTick = 0, beforeIdentity: unknown;
   for (let d = 0; d < 400; d++) {
     const before = c.firms.filter(isRetail).map(f => ({ id: f.id, building: f.building, wallet: f.wallet, owner: structuredClone(f.owner), convertedAt: f.convertedAt, level: c.buildings.find(b => b.id === f.building)!.level, cell: c.buildings.find(b => b.id === f.building)!.cell }));
-    step(c); keepSupplied(c);
+    holdEducationReady(c); step(c); keepSupplied(c);
     for (const prev of before) {
       const f = c.firms.find(x => x.id === prev.id), b = c.buildings.find(x => x.id === prev.building);
       if (!upgradedId && prev.level === 4 && f && b?.level === 5) {

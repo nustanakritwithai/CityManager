@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { isMarket, isRetail, createCity, step, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
+import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
 
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 
@@ -15,6 +15,7 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 // Genuine published v4 replay retains a real retailer beside the merged commercial-L1 market.
 const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
 const fixture = deserialize(serializeV4(prior));
+adoptSavedEducation(fixture);
 const baseline = serialize(fixture); assert.deepEqual(deserialize(baseline), fixture);
 const later = deserialize(baseline); for (let day = 0; day < 30; day++) step(later);
 assert.equal(later.tick, 59); assert.deepEqual(deserialize(serialize(later)), later);
@@ -39,7 +40,7 @@ async function send(method, params = {}) { const id = ++sequence; const promise 
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId,kind:document.querySelector("#entity-content").dataset.cardKind})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
