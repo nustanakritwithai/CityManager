@@ -9,7 +9,7 @@ import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyPr
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
 import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from './parks.ts';
-import { EDUCATION_COST, assertEducationInvariants, createEducation, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
+import { EDUCATION_COST, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
 import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
@@ -143,13 +143,22 @@ export function utilityAt(c: City, cell: number): boolean {
 export const plantAt = (c: City, i: number): Plant | undefined => c.plants.find(p => p.cell === i);
 export const parkAt = (c: City, i: number): Park | undefined => c.parks.find(p => p.cell === i);
 export const campusAt = (c: City, i: number) => c.education?.campuses.find(campus => campus.cell === i);
+function educationPosts(c: City): EducationView['posts'] {
+  return [...c.employment.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: e.workers, owner: false })), ...c.ownerLabor.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: 0, owner: true }))];
+}
+/** Current allocated qualifications, not every diploma held by a worker's household. */
+export function firmCredentialCounts(c: City, firmId: number): { basic: number; higher: number } {
+  if (!c.education) return { basic: 0, higher: 0 };
+  const view = { posts: educationPosts(c) };
+  return { basic: credentialPosts(c.education, view, firmId, 'basic'), higher: credentialPosts(c.education, view, firmId, 'higher') };
+}
 function educationView(c: City): EducationView {
   const roads = connectedRoads(c), spare = utilities(c).spare;
   return {
     tick: c.tick,
     households: c.households.map(h => ({ id: h.id, workforce: h.workforce, wallet: h.wallet, ownsFirm: c.firms.some(f => f.owner?.householdId === h.id) })),
     buildings: c.buildings.map(b => ({ id: b.id, zone: b.zone, level: b.level, firmId: c.firms.find(f => f.building === b.id)?.id ?? null })),
-    posts: [...c.employment.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: e.workers, owner: false })), ...c.ownerLabor.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: 0, owner: true }))],
+    posts: educationPosts(c),
     road: cell => neighbors(cell).some(n => roads.has(n)),
     sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c),
   };
@@ -892,13 +901,16 @@ function trade(c: City) {
       if (isMarket(shop)) {
         while (purchased < h.members && balance(c, h.wallet) >= 800 && consumeMarketCrop(c, h, shop, sellable, hooks, true)) purchased++;
       } else {
-        const product = productPreference(h.id, c.tick).find(p => shop.products[p] > 0);
-        if (!product) continue;
-        const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
-        if (!quantity) continue;
-        transfer(c, h.wallet, shop.wallet, 800 * quantity, `Household #${h.id} purchase`, true);
-        moveProduct(c, shop, null, product, quantity); c.goods.consumed += quantity; h.lastPurchaseTick = c.tick;
-        goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); purchased += quantity;
+        // Preferences select the order, not a one-product limit: a family can fill its one
+        // daily basket from the remaining stocked products without inventing demand or credit.
+        for (const product of productPreference(h.id, c.tick)) {
+          if (purchased >= h.members || balance(c, h.wallet) < 800) break;
+          const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
+          if (!quantity) continue;
+          transfer(c, h.wallet, shop.wallet, 800 * quantity, `Household #${h.id} purchase`, true);
+          moveProduct(c, shop, null, product, quantity); c.goods.consumed += quantity; h.lastPurchaseTick = c.tick;
+          goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); purchased += quantity;
+        }
       }
     }
     h.needs = purchased === h.members ? 0 : unmetDays;

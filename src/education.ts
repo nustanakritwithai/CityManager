@@ -323,7 +323,8 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
   return payments;
 }
 
-function credentialPosts(state: EducationState, view: EducationView, firmId: number | null, rank: 'basic' | 'higher'): number {
+/** Shared by upgrade gates and inspectors: each available holder qualifies one real post. */
+export function credentialPosts(state: EducationState, view: Pick<EducationView, 'posts'>, firmId: number | null, rank: 'basic' | 'higher'): number {
   if (firmId === null) return 0;
   // A higher holder also has a basic diploma, but occupies only one post.
   // After education roles, allocate both ranks together in stable firm order;
