@@ -133,9 +133,12 @@ try {
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),migratedPark,'Entire populated session survives save and reload');
   checks.push('Genuine v18 park activity/recreation, city and exact backup survive desktop load/save/reload');
   await runBoundary(120,[home,factory,farm]);
-  await inspect(farm.building,'farm'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=crop-stock]").dataset.capacity'),'120'); await screenshot('desktop-farm.png');
-  await inspect(factory.building,'factory'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=crop-stock]").dataset.capacity'),'28');
+  await inspect(farm.building,'farm'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=crop-stock]").dataset.capacity'),'120'); assert.match(await evaluate('document.querySelector("#entity-content [data-building-progression]").textContent'), /ระดับ 4\/6[\s\S]*ระดับถัดไป 5/); await screenshot('desktop-farm.png');
+  await inspect(factory.building,'factory'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=crop-stock]").dataset.capacity'),'28'); assert.match(await evaluate('document.querySelector("#entity-content [data-building-progression]").textContent'), /ระดับ 4\/9[\s\S]*ระดับถัดไป 5/);
   await inspect(home.building,'house'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=households]").dataset.capacity'),'5');
+  assert.match(await evaluate('document.querySelector("#entity-content .bc-type-label").textContent'), /อพาร์ตเมนต์ ระดับ 1/);
+  assert.equal(await evaluate('!!document.querySelector("#entity-content [data-building-progression]").closest("details")'), false, 'Housing progression is not hidden in collapsed details');
+  await screenshot('desktop-apartment-details.png');
   checks.push('Natural day-120 home, factory and farm upgrades match replay, identity, paid costs and real capacity');
   await runBoundary(180,[shop]);
   // This genuine city reaches its fifth goal at day 180. Continue through the
@@ -143,7 +146,7 @@ try {
   await until('!!document.querySelector("dialog.win-dialog[open] .win-continue")');
   await button('.win-continue'); await until('!document.querySelector("dialog.win-dialog[open]")');
   await inspect(shop.building,'shop'); assert.equal(await evaluate('document.querySelector("#entity-content [data-retail-growth]")?.dataset.retailGrowth'),String(shop.firm.id));
-  await screenshot('desktop-shop.png'); checks.push('Natural day-180 shop upgrade matches replay, paid cost, identity and capacity');
+  assert.match(await evaluate('document.querySelector("#entity-content [data-retail-growth]").textContent'), /ค่าก่อสร้าง 200 เครดิต[\s\S]*สำรองเมือง/); await screenshot('desktop-shop.png'); checks.push('Natural day-180 shop upgrade matches replay, paid cost, identity and capacity');
   await close(); await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:1,mobile:true}); await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2}); await until('innerWidth===390');
   await load(originalPark); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),migratedPark); await button('#save'); await button('#load');
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),migratedPark,'Mobile full park session survives save and reload'); await screenshot('mobile-park-session.png');
