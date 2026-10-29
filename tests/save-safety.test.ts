@@ -63,3 +63,10 @@ test('stale-work recovery is separate from the legacy migration backup selection
  const s=memory(),c=fresh(),g=createSaveGuard(s);g.write(snapshot(c),null);s.setItem('citymanager.backup.latest','citymanager.backup.v1');const other=snapshot(createCity(2));s.setItem(SAVE_KEY,other);
  const work=snapshot(c);assert.throws(()=>g.write(work,null),/อีกแท็บ/);assert.equal(s.getItem('citymanager.backup.latest'),'citymanager.backup.v1');assert.equal(readStoredCity(s,'conflict')?.raw,work);assert.equal(s.getItem(SAVE_KEY),other);
 });
+
+test('more than eight explicit city replacements retain every original and remain saveable',()=>{
+ const s=memory(),g=createSaveGuard(s), originals:string[]=[];
+ for(let i=0;i<20;i++){const raw=snapshot(createCity(100+i));if(i)g.acceptLoaded(raw,true);g.write(raw,null);originals.push(raw);assert.equal(s.getItem(SAVE_KEY),raw);}
+ for(const raw of originals)assert.ok([...s.data.values()].includes(raw),'Each distinct prior city remains recoverable');
+ assert.ok(readStoredCity(s,'conflict'));
+});
