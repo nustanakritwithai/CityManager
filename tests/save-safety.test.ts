@@ -38,3 +38,8 @@ test('quota failures preserve primary snapshot and explicit new-city archives pr
  const s=memory(),old=snapshot(fresh());s.setItem(SAVE_KEY,old);const blocked=createSaveGuard({...s,setItem:()=>{throw Error('quota');}});blocked.acceptLoaded(old);assert.throws(()=>blocked.write(old,null),/quota/);assert.equal(s.getItem(SAVE_KEY),old);
  const guard=createSaveGuard(s);guard.acceptLoaded(old);guard.authorizeNew(old);guard.write(snapshot(createCity(2)),null);assert.ok([...s.data.values()].includes(old));
 });
+
+test('explicit Load remains read-only; replacement copies are deferred until Save',()=>{
+ const s=memory(),current=snapshot(fresh()),other=snapshot(createCity(2));s.setItem(SAVE_KEY,current);s.setItem(AUTOSAVE_CHECKPOINT_KEY,current);const g=createSaveGuard(s),before=[...s.data];
+ g.acceptLoaded(other,true);assert.deepEqual([...s.data],before);g.write(other,null);assert.ok([...s.data.values()].includes(current));assert.equal(s.getItem(SAVE_KEY),other);
+});
