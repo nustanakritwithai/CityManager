@@ -44,6 +44,14 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:max(44px,calc(44 * var(
 #save-failure-banner button { flex-shrink:0; min-height:max(44px,calc(44 * var(--reader-unit,1px))); min-width:max(44px,calc(44 * var(--reader-unit,1px))); padding:6px 10px; font-size:calc(14 * var(--reader-unit,1px)); color:#1b2438; background:#f3c46b; }
 #autosave-status[data-failed=true] { color:#ffd2a0; }
 html #inspector > #save-failure-banner { position:static; transform:none; width:auto; flex:0 0 auto; margin:4px 4px 0; box-shadow:none; }
+/* On tall/portrait phones the inline warning also consumes reading space.
+   Keep actual values before editable production choices while it is present. */
+@media (max-width:700px), (min-height:501px) {
+  html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind] { display:flex; flex-direction:column; }
+  html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind] > * { order:2; }
+  html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind] > :is(.bc-hero,.flow-strip) { order:0; }
+  html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind] > :is([data-card-section=occupancy],[data-card-section=members],[data-card-section=production],[data-card-section=plot],[data-card-section=harvest],[data-card-section=stock],[data-card-section=trade]) { order:1; }
+}
 html:not([data-touch-ui=true]):has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:max(91px,calc(var(--save-warning-height,0px) + 6px)); }
 /* The touch menu and KPI chip are independently fixed, so move their shared
    row origin instead of only adding a margin to the visible HUD containers. */

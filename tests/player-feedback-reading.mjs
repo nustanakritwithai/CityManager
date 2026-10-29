@@ -11,6 +11,16 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
   ];
   const pages = ['ledger','city','help','game','house','factory','household'], failures = [];
   const snapshot = await evaluate('cityManager.snapshot()');
+  const expected = JSON.parse(snapshot);
+  function differences(actual, before=expected, path='city', out=[]) {
+    if (Object.is(actual,before)) return out;
+    if (!actual||!before||typeof actual!=='object'||typeof before!=='object') { out.push({path,before,actual}); return out; }
+    for (const key of new Set([...Object.keys(before),...Object.keys(actual)])) {
+      differences(actual[key],before[key],path+'.'+key,out); if (out.length>=12) break;
+    }
+    return out;
+  }
+  await evaluate("window.__uxReadingClicks=[];document.addEventListener('click',e=>{const t=e.target.closest?.('button,summary,canvas');if(t){window.__uxReadingClicks.push({tag:t.tagName,id:t.id,data:{...t.dataset},trusted:e.isTrusted});window.__uxReadingClicks=window.__uxReadingClicks.slice(-8)}},{capture:true})");
   const close = async () => { if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector'); };
   async function open(name) {
     await close();
@@ -68,7 +78,9 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
             if (measurement.primaryTotal) assert.equal(measurement.primaryFull,measurement.primaryTotal,'Complete type-specific primary values fit initially: '+label);
             if (name==='ledger') assert.ok(measurement.ledgerFull>0,'Actual complete ledger row visible: '+label);
           }
-          assert.equal(await evaluate('cityManager.snapshot()'),snapshot,'Reading preserves actual simulation: '+label);
+          const delta = differences(JSON.parse(await evaluate('cityManager.snapshot()')));
+          if (delta.length) Object.assign(measurement,{stateDelta:delta,recentClicks:await evaluate('window.__uxReadingClicks')});
+          assert.deepEqual(delta,[],'Reading preserves actual simulation: '+label);
         } catch (error) {
           failures.push({label,error:String(error)});
           if (measurement) measurement.error=String(error); else layouts.push({viewportName,page:name,warning,error:String(error)});
