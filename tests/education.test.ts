@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { adoptSavedEducation, buildCampus, buildPlant, bulldoze, createCity, deserialize, enableEducation, serialize, step, toggleCampus, type City } from '../src/sim.ts';
+import { previewPlacement } from '../src/placement-preview.ts';
 import { createEducation, EDUCATION_COST } from '../src/education.ts';
 import { saveStoredCity } from '../src/save-storage.ts';
 
@@ -137,6 +138,21 @@ test('education save backs up the previous city and does not touch guest identit
   assert.equal(memory.get('citymanager.backup.before-education'), old);
   assert.equal(JSON.parse(memory.get('citymanager.save.v7')!).version, 22);
   assert.equal(JSON.parse(old).market, undefined);
+});
+
+test('a school names the starter zone it refuses and places on the empty parcel beside the road', () => {
+  const city = createCity(3, { starter: true });
+  const zoned = city.cells.findIndex(cell => cell.zone === 'R');
+  const refused = buildCampus(city, zoned, 'school');
+  const preview = previewPlacement(city, 'school', null, zoned);
+  assert.equal(refused.ok, false);
+  assert.match(refused.message, /โซนบ้าน/);
+  assert.equal(preview?.ok, false);
+  assert.equal(preview?.label, refused.message);
+  const empty = city.cells.findIndex((cell, index) => !cell.road && cell.zone === null && cell.building === null && [index - 1, index + 1, index - 24, index + 24].some(next => city.cells[next]?.road));
+  assert.equal(previewPlacement(city, 'school', null, empty)?.ok, true);
+  assert.equal(buildCampus(city, empty, 'school').ok, true);
+  assert.equal(city.education?.campuses.length, 1);
 });
 
 test('one closed school day pauses the apartment streak instead of clearing it', () => {

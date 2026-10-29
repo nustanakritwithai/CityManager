@@ -166,20 +166,30 @@ export function enableEducation(c: City, origin: EducationState['origin'] = 'new
 export function adoptSavedEducation(c: City): EducationState {
   return enableEducation(c, 'migrated-absent');
 }
-export function buildCampus(c: City, i: number, kind: CampusKind): Result {
-  if (!c.education) return { ok: false, message: 'เมืองนี้ยังไม่มีข้อมูลการศึกษา' };
-  if (!validIndex(i)) return { ok: false, message: 'ตำแหน่งอยู่นอกแผนที่' };
+/** Why this parcel cannot take a school or university. Null means the build can proceed. */
+export function campusSiteReason(c: City, i: number, kind: CampusKind): string | null {
+  const name = kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย';
+  if (!c.education) return 'เมืองนี้ยังไม่มีข้อมูลการศึกษา';
+  if (!validIndex(i)) return 'ตำแหน่งอยู่นอกแผนที่';
   const cell = c.cells[i];
-  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i)) return { ok: false, message: 'สถานศึกษาต้องใช้แปลงว่าง 1 ช่อง' };
-  if (!neighbors(i).some(n => connectedRoads(c).has(n))) return { ok: false, message: 'ต้องติดถนนที่เชื่อมถึงประตูเมือง' };
+  const occupied = cell.road ? 'ถนน' : cell.zone === 'R' ? 'โซนบ้าน' : cell.zone === 'C' ? 'โซนพาณิชย์' : cell.zone === 'I' ? 'โซนโรงงาน' : cell.zone === 'F' ? 'โซนฟาร์ม' : cell.building !== null ? 'อาคาร' : plantAt(c, i) ? 'โรงน้ำหรือไฟ' : parkAt(c, i) ? 'สวน' : campusAt(c, i) ? 'สถานศึกษา' : null;
+  if (occupied) return `แปลงนี้เป็น${occupied}อยู่แล้ว ${name}วางบนแปลงว่างที่ยังไม่ลงโซน และต้องติดถนน`;
+  if (!neighbors(i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';
   const limit = kind === 'school' ? EDUCATION_COST.maxSchools : EDUCATION_COST.maxUniversities;
   const have = c.education.campuses.filter(campus => campus.kind === kind).length;
-  if (have >= limit || !canAllocateIds(c, 1)) return { ok: false, message: 'สร้างสถานศึกษาเพิ่มไม่ได้' };
+  if (have >= limit || !canAllocateIds(c, 1)) return 'สร้างสถานศึกษาเพิ่มไม่ได้';
   const cost = kind === 'school' ? EDUCATION_COST.school.build : EDUCATION_COST.university.build;
-  if (treasurySpendable(c) < cost) return { ok: false, message: `เงินคลังไม่พอ ใช้ ${cost / 100} เครดิต` };
+  if (treasurySpendable(c) < cost) return `เงินคลังไม่พอ ใช้ ${cost / 100} เครดิต`;
+  return null;
+}
+export function buildCampus(c: City, i: number, kind: CampusKind): Result {
+  const reason = campusSiteReason(c, i, kind);
+  const education = c.education;
+  if (reason || !education) return { ok: false, message: reason ?? 'เมืองนี้ยังไม่มีข้อมูลการศึกษา' };
+  const cost = kind === 'school' ? EDUCATION_COST.school.build : EDUCATION_COST.university.build;
   const id = c.nextId++;
   transfer(c, 'treasury', 'construction', cost, kind === 'school' ? `Build school #${id}` : `Build university #${id}`);
-  c.education.campuses.push({ id, kind, cell: i, level: 1, tick: c.tick, open: true, contract: 0, workDays: {}, report: initialCampusReport(kind, 1) });
+  education.campuses.push({ id, kind, cell: i, level: 1, tick: c.tick, open: true, contract: 0, workDays: {}, report: initialCampusReport(kind, 1) });
   c.lastEvent = kind === 'school' ? `สร้างโรงเรียน #${id} แล้ว รอครูสัญญาหรือผู้จบในเมือง` : `สร้างมหาวิทยาลัย #${id} แล้ว รับผู้มีวุฒิพื้นฐาน`;
   return { ok: true, message: c.lastEvent };
 }
