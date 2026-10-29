@@ -27,7 +27,7 @@ const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).j
 const target = targets.find(item => item.type === 'page' && /CityManager/.test(item.url));
 assert.ok(target, 'existing isolated CityManager target');
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-let sequence = 0, stage = 'connect', mobile = true; const pending = new Map(), errors = [], checks = [];
+let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout; const pending = new Map(), errors = [], checks = [];
 function send(method, params = {}) {
   return new Promise((resolve, reject) => { const id = ++sequence; const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 15000); pending.set(id, { resolve: r => { clearTimeout(timer); resolve(r); }, reject: e => { clearTimeout(timer); reject(e); } }); ws.send(JSON.stringify({ id, method, params })); });
 }
@@ -120,6 +120,15 @@ try {
   assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')===window.__uxSaved"), true);
   await shot('12-manual-save-failure-after');
   await button('#close-inspector'); await button('#hud-more');
+  // Bounded layout-only diagnostic: measure the previous fixed-menu offset,
+  // then immediately remove it. Never hide the warning or bypass a UI action.
+  warningMenuLayout = await evaluate(`(()=>{
+    const measure=()=>{const e=document.querySelector('#toggle-game-menu'),r=e.getBoundingClientRect(),b=document.querySelector('#save-failure-banner').getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{menu:{top:r.top,bottom:r.bottom},banner:{top:b.top,bottom:b.bottom},reachable:e.contains(hit),hit:hit?.id||hit?.tagName}};
+    const probe=document.createElement('style');probe.textContent='html[data-touch-ui=true]:has(#save-failure-banner:not([hidden])){--row-top:max(calc(6 * var(--row-u)),env(safe-area-inset-top));}html[data-touch-ui=true]:has(#save-failure-banner:not([hidden])) :is(.top-hud,.time-hud){margin-top:var(--save-warning-height,0px);}';
+    let previous;document.head.append(probe);try{previous=measure()}finally{probe.remove()}
+    return{previousOffset:previous,currentOffset:measure()};
+  })()`);
+  console.log('Warning menu layout:', JSON.stringify(warningMenuLayout));
   assert.equal(await evaluate("(()=>{const e=document.querySelector('#toggle-game-menu'),r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()"), true, 'persistent warning leaves the fixed mobile game menu reachable');
   await shot('12a-save-warning-menu-after');
   await button('#toggle-game-menu');
@@ -162,12 +171,12 @@ try {
   await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
   checks.push('desktop campus details and active persistent save warning at 1280x900, reachable panel clock, successful retry');
   assert.equal(errors.length, 0, JSON.stringify(errors));
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   const failedStage = stage;
   await shot(mobile ? 'failure-mobile' : 'failure-desktop').catch(() => {});
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), warningMenuLayout, checks, errors }, null, 2));
   throw error;
 } finally {
   if (injected) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier }).catch(() => {});
