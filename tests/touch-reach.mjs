@@ -1,8 +1,13 @@
 // Touch layout (src/hud-row.ts): the page buttons live in the ☰ menu and the speeds behind
-// one cycle button. Before a suite clicks one of those, open the menu or step the speed.
+// one cycle button. Demolition lives above the select arrow on every viewport.
+// Before a suite clicks a hidden control, reveal it using the actual user-facing buttons.
 // Returns true when the target speed is already selected (nothing left to click).
 export async function reachTouch(evaluate, button, selector) {
   const target = JSON.stringify(selector);
+  if (await evaluate(`!!document.querySelector(${target})?.closest('#select-submenu[hidden]')`)) {
+    if (await evaluate(`!document.querySelector('[data-tool="select"]').getBoundingClientRect().width && document.querySelector('#inspector').dataset.open==='true'`)) await button('#close-inspector');
+    await button('[data-tool="select"]');
+  }
   const where = await evaluate(`(()=>{const e=document.querySelector(${target});if(!e||e.getBoundingClientRect().width)return '';const shown=s=>!!document.querySelector(s)?.getBoundingClientRect().width;return e.closest('.page-buttons')&&shown('#hud-more')?'menu':e.matches('[data-speed]')&&shown('#speed-cycle')?'speed':''})()`);
   if (where === 'menu') await button('#hud-more');
   if (where !== 'speed') return false;
