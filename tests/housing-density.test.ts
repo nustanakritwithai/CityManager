@@ -21,13 +21,30 @@ test('all residential levels have explicit monotonic dual capacities and strict 
   assert.throws(() => getHousingCapacity('cottage', 4)); assert.throws(() => getHousingCapacity('apartment', 7));
 });
 
+/** Move other existing households into the home until its current household slots are full. */
+function fill(city: ReturnType<typeof createCity>, home: { id: number; level: number }): boolean {
+  const need = HOUSING_LEVELS[home.level - 1].households - homeOccupancy(city, home.id).households;
+  const movers = city.households.filter(h => h.home !== null && h.home !== home.id).slice(0, Math.max(0, need));
+  if (movers.length < need) return false;
+  for (const h of movers) h.home = home.id;
+  return true;
+}
+
 test('each autonomous upgrade keeps the same parcel, identity, households and actual funding', () => {
+  let upgraded = 0;
   for (let level = 1; level < 9; level++) {
     const { city, home } = fixture(); home.level = level; home.housingType = HOUSING_LEVELS[level - 1].type;
+    const full = fill(city, home);
     const id = home.id, cell = home.cell, residents = city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]);
     const before = city.ledger.filter(e => e.reason === 'Outside residential height investment').length;
+    if (!full) {
+      // Not enough households in the city to fill this tier: the occupancy gate must hold it and say why.
+      assert.ok(level >= 3, `levels 1-2 are never occupancy gated (${level})`);
+      assert.ok(housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง')));
+      step(city); assert.equal(home.level, level, `gated ${level}`); continue;
+    }
     step(city);
-    assert.equal(home.level, level + 1, `upgrade ${level}`); assert.equal(home.housingType, HOUSING_LEVELS[level].type);
+    assert.equal(home.level, level + 1, `upgrade ${level}`); assert.equal(home.housingType, HOUSING_LEVELS[level].type); upgraded++;
     assert.equal(home.id, id); assert.equal(home.cell, cell); assert.equal(city.cells[cell].building, id);
     assert.deepEqual(city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]), residents);
     assert.equal(city.ledger.filter(e => e.reason === 'Outside residential height investment' && e.tick === city.tick).length > 0, true);
@@ -35,6 +52,17 @@ test('each autonomous upgrade keeps the same parcel, identity, households and ac
     assert.equal(Object.values(city.accounts).reduce((a, b) => a + b, 0), 0);
     assert.deepEqual(deserialize(serialize(city)), city);
   }
+  assert.ok(upgraded >= 3, `cottage 1-2 and at least one filled gated tier upgrade (${upgraded})`);
+});
+
+test('apartment and condo tiers upgrade only when every household slot is taken', () => {
+  const { city, home } = fixture(); home.level = 3; home.housingType = 'cottage';
+  assert.ok(homeOccupancy(city, home.id).households < 3);
+  assert.ok(housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง')));
+  const vacant = structuredClone(city); step(vacant); assert.equal(vacant.buildings.find(b => b.id === home.id)!.level, 3);
+  assert.equal(fill(city, home), true); assert.equal(homeOccupancy(city, home.id).households, 3);
+  assert.ok(!housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง')));
+  step(city); assert.equal(home.level, 4); assert.equal(home.housingType, 'apartment');
 });
 
 test('upgrade explains and respects road, utility and resident financial conditions', () => {

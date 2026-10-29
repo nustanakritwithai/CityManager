@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { GATEWAY, SIZE, MONTH, access, buildPark, parkAt, buildPlant, buildRoad, bulldoze, createCity, deserialize, serialize, step, zoneCell, type City } from '../src/sim.ts';
+import { GATEWAY, SIZE, MONTH, access, buildPark, parkAt, buildPlant, buildRoad, bulldoze, createCity, homeOccupancy, deserialize, serialize, step, zoneCell, type City } from '../src/sim.ts';
 import { PARK, MAX_PARKS } from '../src/parks.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
 import { pocketPark } from '../src/scene-decor.ts';
@@ -113,9 +113,9 @@ test('first park save keeps exact pre-park bytes and backup failure preserves pr
 
 test('no-park city matches the pre-density engine until residential progression begins', () => {
   // Fixed independently from 98f406ae4fe29508e1cd6cb45fd89685e285e3b2.
-  // Both seeds first reach the new apartment tier on day 120. A 360-day
+  // Day 120 is the first apartment review; apartments now also require a full cottage. A 360-day
   // frozen pre-density hash cannot hold once those requested upgrades occur;
   // park-runtime.test.ts separately checks 360-day no-park session parity.
   const baselines = [[61025, '8ab2c8203f2778feee35432a10f3ca910db5215c1ea188750e3d0b0f1654c82f'], [20261023, '3a5d3cc45efd4950df4a3304e9c31134ee6c582561d5a513354dee1b586eddc7']] as const;
-  for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 119); const { parks, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3)); run(c, 1); assert.ok(c.buildings.some(b => b.zone === 'R' && b.level === 4 && b.housingType === 'apartment')); }
+  for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 119); const { parks, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3)); run(c, 1); for (const b of c.buildings.filter(b => b.zone === 'R' && b.level >= 4)) assert.equal(homeOccupancy(c, b.id).households >= 3, true, 'apartment tier is reached only from a full cottage'); }
 });

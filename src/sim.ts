@@ -97,6 +97,12 @@ export const firmWorkerCount = (c: City, id: number): number => employmentForFir
 export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length + parkEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0);
 export const housingCapacity = (b: Building): HousingCapacity => b.zone === 'R' ? getHousingCapacity(b.housingType!, b.level) : { households: 0, persons: 0 };
 export const homeOccupancy = (c: City, id: number): HousingCapacity => buildOccupancyIndex(c.households).get(id) ?? { households: 0, persons: 0 };
+/**
+ * Cottage levels 1–3 keep their legacy growth. From cottage 3 upward (apartment and condo tiers) a home
+ * grows only once every household slot at its current level is taken, so height follows real demand.
+ */
+export const HOUSING_OCCUPANCY_GATE_LEVEL = 3;
+const homeFull = (c: City, b: Building) => b.level < HOUSING_OCCUPANCY_GATE_LEVEL || homeOccupancy(c, b.id).households >= housingCapacity(b).households;
 const residentialInvestorEligible = (c: City, h: Household) => householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && balance(c, h.wallet) >= 20_000;
 /** Uses the same conditions as autonomous residential growth. */
 export function housingUpgradeStatus(c: City, b: Building) {
@@ -107,6 +113,7 @@ export function housingUpgradeStatus(c: City, b: Building) {
     if (b.age < MONTH) blocked.push('อาคารต้องมีอายุอย่างน้อย 30 วัน');
     if (!access(c, b.cell)) blocked.push('ต้องมีถนนเชื่อมถึงประตูเมือง');
     if (!utilities(c).ok(b.id)) blocked.push('ต้องมีน้ำและไฟเพียงพอสำหรับผู้อยู่อาศัยปัจจุบัน');
+    if (!homeFull(c, b)) blocked.push(`ต้องมีครัวเรือนเต็มทุกช่องก่อน (${homeOccupancy(c, b.id).households}/${housingCapacity(b).households} ครัวเรือน)`);
     if (!c.households.some(h => h.home === b.id && residentialInvestorEligible(c, h))) blocked.push('ต้องมีครัวเรือนที่ทำงาน ซื้อสินค้าใน 3 วัน และมีเงินอย่างน้อย 200 เครดิต');
   }
   return { current, next, blocked };
@@ -1077,7 +1084,7 @@ function grow(c: City) {
     const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1, c.households.filter(h => h.home === b.id).length), extra = { power: after.power - before.power, water: after.water - before.water };
     if (!fits(spare, extra)) continue;
     const residents = c.households.filter(h => h.home === b.id), f = c.firms.find(f => f.building === b.id);
-    if (b.zone === 'R' && residents.some(h => residentialInvestorEligible(c, h))) {
+    if (b.zone === 'R' && homeFull(c, b) && residents.some(h => residentialInvestorEligible(c, h))) {
       transfer(c, 'outside', 'construction', 20_000, 'Outside residential height investment'); b.level++; b.housingType = HOUSING_LEVELS[b.level - 1].type; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && !isMarket(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f) / MONTH + 2 * 350))) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
