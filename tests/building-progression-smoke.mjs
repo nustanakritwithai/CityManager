@@ -137,7 +137,12 @@ try {
   await inspect(factory.building,'factory'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=crop-stock]").dataset.capacity'),'28');
   await inspect(home.building,'house'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=households]").dataset.capacity'),'5');
   checks.push('Natural day-120 home, factory and farm upgrades match replay, identity, paid costs and real capacity');
-  await runBoundary(180,[shop]); await inspect(shop.building,'shop'); assert.equal(await evaluate('document.querySelector("#entity-content [data-retail-growth]")?.dataset.retailGrowth'),String(shop.firm.id));
+  await runBoundary(180,[shop]);
+  // This genuine city reaches its fifth goal at day 180. Continue through the
+  // real win dialog before using map tools, just as a player would.
+  await until('!!document.querySelector("dialog.win-dialog[open] .win-continue")');
+  await button('.win-continue'); await until('!document.querySelector("dialog.win-dialog[open]")');
+  await inspect(shop.building,'shop'); assert.equal(await evaluate('document.querySelector("#entity-content [data-retail-growth]")?.dataset.retailGrowth'),String(shop.firm.id));
   await screenshot('desktop-shop.png'); checks.push('Natural day-180 shop upgrade matches replay, paid cost, identity and capacity');
   await close(); await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:1,mobile:true}); await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2}); await until('innerWidth===390');
   await load(originalPark); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),migratedPark); await button('#save'); await button('#load');
@@ -146,6 +151,10 @@ try {
   assert.deepEqual(errors,[],'No browser runtime or console errors'); assert.deepEqual(external,[],'No external browser requests');
   await writeFile(resolve(output,'report.json'),JSON.stringify({checks,errors,external,upgrades:[home,factory,farm,shop].map(x=>({id:x.building.id,zone:x.building.zone,level:x.building.level})),note:'Headless Edge; mobile viewport is emulated, not physical-device QA.'},null,2));
   console.log(JSON.stringify({checks,errors,external},null,2));
+} catch (error) {
+  if (ws?.readyState === 1) { try { await screenshot('failure.png'); } catch {} }
+  console.error(JSON.stringify({ checks, errors, external, failure: String(error?.message ?? error) }));
+  throw error;
 } finally {
   clearTimeout(watchdog); if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();} child.kill();
 }
