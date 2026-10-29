@@ -17,7 +17,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, enableEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -477,7 +477,7 @@ async function boot() {
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
   const startup=restoreStartupCity({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)},()=>createCity(61025,{starter:STARTER}));
   city=startup.city;parkRuntime=startup.runtime;importedLegacyRaw=startup.legacyRaw;
-  if(!city.education)enableEducation(city,startup.restored?'migrated-absent':'new-city');
+  if(!city.education)adoptSavedEducation(city);
   const saveGuard=startup.guard,startupSaveError=startup.error;
   syncEducationTools();if(startup.restored||startup.error)paused=true;
   ownerDecisionSession = createOwnerDecisionSession(city);
@@ -599,7 +599,7 @@ async function boot() {
       saveGuard.acceptLoaded(saved.raw,true);
       await bindLocalCitySession(marketPanel?.client,loaded,()=>{city=loaded;parkRuntime=restored.runtime;});
       cueLimiter.reset();
-      if (!city.education) enableEducation(city, 'migrated-absent');
+      if (!city.education) adoptSavedEducation(city);
       syncEducationTools();
       importedLegacyRaw = legacy ? saved.raw : null;
       autosave.reset();

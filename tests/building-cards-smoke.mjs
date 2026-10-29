@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { isMarket, isRetail, createCity, step, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
+import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
 
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 
@@ -15,6 +15,7 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 // Genuine published v4 replay retains a real retailer beside the merged commercial-L1 market.
 const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
 const fixture = deserialize(serializeV4(prior));
+adoptSavedEducation(fixture);
 const baseline = serialize(fixture); assert.deepEqual(deserialize(baseline), fixture);
 const later = deserialize(baseline); for (let day = 0; day < 30; day++) step(later);
 assert.equal(later.tick, 59); assert.deepEqual(deserialize(serialize(later)), later);

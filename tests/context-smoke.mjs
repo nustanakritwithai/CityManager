@@ -6,7 +6,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { firmWage, createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
+import { adoptSavedEducation, firmWage, createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
+import { assertOriginalSave } from './education-adoption.mjs';
 import { reachTouch } from './touch-reach.mjs';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -22,6 +23,7 @@ for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], 
 for (const old of legacy.firms) { const firm = fixture.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
 const fixtureJson = serialize(fixture), emptyJson = serialize(createCity(91));
 assert.deepEqual(deserialize(fixtureJson), fixture);
+adoptSavedEducation(fixture);
 const homes = fixture.buildings.filter(b => b.zone === 'R').slice(0, 2), firms = fixture.firms.slice(0, 2);
 assert.equal(homes.length, 2, 'Fixture has two actual homes'); assert.equal(firms.length, 2, 'Fixture has two actual firms');
 const homeHousehold = fixture.households.find(h => h.home === homes[0].id);
@@ -74,7 +76,7 @@ async function load(json) {
   await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(json)})`); await button('#load');
-  const expected = deserialize(json); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected);
+  const expected = deserialize(json); adoptSavedEducation(expected); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); await assertOriginalSave(evaluate, json);
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
 }
 async function cell(index, close = true) {

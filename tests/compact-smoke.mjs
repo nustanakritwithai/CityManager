@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
-import { deserialize, serialize, firmWorkerCount, householdWorkerCount, homeOccupancy, housingCapacity, firmWage, MONTH } from '../src/sim.ts';
+import { adoptSavedEducation, deserialize, serialize, firmWorkerCount, householdWorkerCount, homeOccupancy, housingCapacity, firmWage, MONTH } from '../src/sim.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const mode = process.env.CITYMANAGER_COMPACT_MODE || 'candidate';
@@ -22,6 +22,7 @@ const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 9);
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
+if (mode !== 'baseline') adoptSavedEducation(migrated);
 const city = mode === 'baseline' ? legacy : migrated, fixture = mode === 'baseline' ? legacyRaw : serialize(city);
 const home = city.buildings.find(b => b.zone === 'R'), company = city.firms.find(f => mode === 'baseline' ? f.employees.length > 1 : firmWorkerCount(city, f.id) > 1) || city.firms[0];
 const firmBuilding = city.buildings.find(b => b.id === company.building), resident = city.households.find(h => h.home === home.id);

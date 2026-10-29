@@ -9,6 +9,7 @@ import { access, createCity, step, buildPark, bulldoze, GATEWAY, deserialize, se
 import { PARK, PARK_STAFF } from '../src/parks.ts';
 import { createParkRuntime, advanceParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
 import { reachTouch } from './touch-reach.mjs';
+import { assertAdoptedCity, assertOriginalSave } from './education-adoption.mjs';
 
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
@@ -257,12 +258,12 @@ try {
   checks.push('Real citizen identities, staffed visit benefit, citizen-speed pause, persistent provenance table, atomic fractional save/load, corrupt-sidecar rejection');
 
   await button('[data-camera="reset"]');
-  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
+  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assertAdoptedCity(await state(), fixture, 'Loaded legacy city'); await assertOriginalSave(evaluate, fixtureJson); await closeInspector();
   await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=90', 15000);
   await button('#pause'); const grown = await state();
   assert.ok(grown.buildings.length > 0); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason.includes('purchase'))); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason === 'Monthly wages'));
-  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
+  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assertAdoptedCity(await state(), fixture, 'Restored legacy city'); await assertOriginalSave(evaluate, fixtureJson); await closeInspector();
   if (process.env.CITYMANAGER_BLOCK_MODELS !== '1') assert.equal((await evaluate('window.cityManager.visuals()')).failed.length, 0, 'Models instantiate successfully after growth');
   await screenshot('desktop-city.png'); checks.push('10x real purchases and monthly wages after frozen legacy migration; identical paused financial/spatial fixture restored for GUI checks');
   if (process.env.CITYMANAGER_VISUAL_PREVIEW === '1') {

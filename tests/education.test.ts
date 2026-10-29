@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildCampus, buildPlant, bulldoze, createCity, deserialize, enableEducation, serialize, step, toggleCampus, type City } from '../src/sim.ts';
-import { EDUCATION_COST } from '../src/education.ts';
+import { readFileSync } from 'node:fs';
+import { adoptSavedEducation, buildCampus, buildPlant, bulldoze, createCity, deserialize, enableEducation, serialize, step, toggleCampus, type City } from '../src/sim.ts';
+import { createEducation, EDUCATION_COST } from '../src/education.ts';
 import { saveStoredCity } from '../src/save-storage.ts';
 
 const sum = (c: City) => Object.values(c.accounts).reduce((total, value) => total + value, 0);
@@ -21,6 +22,35 @@ test('every city calculates education, and an older save gains no diplomas from 
   assert.equal(migrated.education?.residentBasic, 0);
   assert.equal(migrated.education?.people.length, 0);
   assert.equal(skills(migrated).every((count, index) => count === migrated.households[index].workforce), true);
+});
+
+test('an older save adopts only an empty education record and its original bytes stay unchanged', () => {
+  const raw = readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
+  const loaded = deserialize(raw);
+  const money = structuredClone(loaded.accounts);
+  const households = structuredClone(loaded.households);
+  const goods = structuredClone(loaded.goods);
+  const ledger = structuredClone(loaded.ledger);
+  const goodsLedger = structuredClone(loaded.goodsLedger);
+  assert.equal(loaded.education, undefined);
+  adoptSavedEducation(loaded);
+  assert.equal(raw, readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'));
+  assert.equal(deserialize(raw).education, undefined);
+  assert.deepEqual(loaded.accounts, money);
+  assert.deepEqual(loaded.households, households);
+  assert.deepEqual(loaded.goods, goods);
+  assert.deepEqual(loaded.ledger, ledger);
+  assert.deepEqual(loaded.goodsLedger, goodsLedger);
+  assert.deepEqual(loaded.education, createEducation('migrated-absent'));
+  assert.equal(loaded.education?.residentBasic, 0);
+  assert.equal(loaded.education?.residentHigher, 0);
+  assert.equal(loaded.education?.people.length, 0);
+  assert.equal(loaded.education?.campuses.length, 0);
+  const again = deserialize(raw);
+  adoptSavedEducation(again);
+  assert.equal(again.education?.origin, 'migrated-absent');
+  adoptSavedEducation(again);
+  assert.equal(again.education?.origin, 'migrated-absent', 'a second load does not replace the adopted record or invent diplomas');
 });
 
 test('a new city can reach a higher credential without outside graduates, and reload does not graduate twice', () => {

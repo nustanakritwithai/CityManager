@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { isMarket, isRetail, createCity, step, serialize, deserialize, zoneCell, bulldoze, buildRoad, access, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, housingCapacity, firmCapacity, firmRent, contributeOwnerCapital, withdrawOwnerProfit, industryGrowthStatus, summary, WAGES, MONTH } from '../src/sim.ts';
+import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, deserialize, zoneCell, bulldoze, buildRoad, access, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, housingCapacity, firmCapacity, firmRent, contributeOwnerCapital, withdrawOwnerProfit, industryGrowthStatus, summary, WAGES, MONTH } from '../src/sim.ts';
 import { untyped } from './untyped.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createCity as createCityV5, step as stepV5, serialize as serializeV5, summary as summaryV5 } from '../src/legacy-v5.ts';
@@ -23,6 +23,7 @@ for(const key of ['seed','rng','tick','nextId','accounts','ledger','goods','good
 for(const b of imported.buildings){const prior=old.buildings.find(p=>p.id===b.id);assert.deepEqual(b,{...prior,level:prior.level+(prior.zone==='C'?1:0)});}
 assert.deepEqual(imported.cropLedger,[]);assert.deepEqual(imported.ownerLabor,[]);
 for(const f of imported.firms){const prior=old.firms.find(p=>p.id===f.id);assert.equal(f.cropInventory,0);assert.equal(f.cropCost,0);assert.equal(f.productionTick,old.tick);assert.equal(f.owner,null);for(const key of Object.keys(prior))assert.deepEqual(f[key],prior[key]);}
+adoptSavedEducation(imported);
 const stopped=deserialize(importedRaw);step(stopped);deserialize(serialize(stopped));assert.equal(stopped.goods.produced,imported.goods.produced,'Legacy zero-crop factories cannot fabricate recipe inputs');
 // Start from an authentic v4 city that already has a finished-goods retailer.
 const legacyAgriculture=createCityV4(61025);for(let day=0;day<29;day++)stepV4(legacyAgriculture);
@@ -32,7 +33,8 @@ for(const b of legacyAgriculture.buildings){const current=legacyV4Imported.build
 for(const f of legacyAgriculture.firms){const {crops,products,recipe,...current}=legacyV4Imported.firms.find(item=>item.id===f.id);assert.equal(Object.values(crops).reduce((a,b)=>a+b,0),current.cropInventory);assert.equal(Object.values(products).reduce((a,b)=>a+b,0),current.inventory);assert.equal(recipe!==undefined,f.zone==='I');assert.deepEqual(current,{...f,zone:f.zone==='T'?'C':f.zone,...(f.zone==='T'||f.zone==='C'?{commercialKind:f.zone==='T'?'market':'retail'}:{})});}
 for(const [i,cell] of legacyAgriculture.cells.entries())assert.deepEqual(legacyV4Imported.cells[i],{...cell,zone:cell.zone==='T'?'C':cell.zone});
 assert.deepEqual(deserialize(serialize(legacyV4Imported)),legacyV4Imported,'Repeated v6 loading does not re-increment commercial levels or duplicate entities');
-const fresh=deserialize(legacyV4Raw),resources=JSON.parse(JSON.stringify(fresh.resources));
+adoptSavedEducation(legacyV4Imported);
+const fresh=deserialize(legacyV4Raw);adoptSavedEducation(fresh);const resources=JSON.parse(JSON.stringify(fresh.resources));
 assert.equal(resources.fertility.length,576);assert.ok(resources.fertility.every(n=>Number.isInteger(n)&&n>=0&&n<=100));
 assert.deepEqual(createCity(61025).resources,resources);assert.notDeepEqual(createCity(61026).resources.fertility,resources.fertility);
 const seen={harvest:false,farmToMarket:false,marketToFactory:false,process:false,factoryToShop:false,shopToHousehold:false,marketToHousehold:false};
@@ -71,6 +73,7 @@ assert.equal(oldGrowth.version,5);assert.equal(oldGrowth.rulesVersion,'commercia
 assert.equal(oldGrowthSummary.population,10);assert.equal(oldGrowthSummary.households,6);assert.equal(oldGrowthSummary.jobs,8);assert.equal(oldGrowthSummary.employed,8);assert.equal(oldGrowthSummary.homeSlots,12);
 const withoutGrowthMetadata=city=>{const{version,rulesVersion,growthStartTick,...preserved}=untyped(JSON.stringify(city));return preserved;};
 assert.deepEqual(withoutGrowthMetadata(growthStart),withoutGrowthMetadata(oldGrowth));assert.equal(growthStart.growthStartTick,388);
+adoptSavedEducation(growthStart);adoptSavedEducation(growthEarly);
 assert.ok(industryGrowthStatus(growthEarly).availableCapital<industryGrowthStatus(growthEarly).requiredCapital);
 const growthReplay=deserialize(serialize(growthStart)),growthSteps=[];let growthBefore,growthBorn,growthFinal,growthFirmId;
 for(let n=0;n<24;n++){
@@ -110,7 +113,7 @@ async function button(selector) { if (await reachTouch(evaluate, button, selecto
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(city) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
+async function load(city) { await page('game'); const planted=serialize(city); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(planted)})`); await button('#load'); const expected=deserialize(planted); adoptSavedEducation(expected); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), planted, 'Loading does not rewrite the original save bytes'); await close(); }
 async function oneTick(city) { await close(); await button('[data-speed="1"]'); await evaluate(`requestAnimationFrame(function stopAtDay(){if(JSON.parse(window.cityManager.snapshot()).tick>=${city.tick})document.querySelector('#pause').click();else requestAnimationFrame(stopAtDay)})`); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${city.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`); assert.deepEqual(await state(), city); }
 async function place(city, id) { await close(); await button('[data-tool="select"]'); await paints(); const b = city.buildings.find(b => b.id === id), p = await evaluate(`window.cityManager.cellScreen(${b.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${id}'`); }
 async function metrics(expected) { const actual = await evaluate('Object.fromEntries([...document.querySelectorAll("#entity-content [data-context-metric]")].map(e=>[e.dataset.contextMetric,e.dataset.value]))'); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact metric ${key}`); }

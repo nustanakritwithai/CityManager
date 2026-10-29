@@ -161,6 +161,11 @@ export function enableEducation(c: City, origin: EducationState['origin'] = 'new
   c.education ??= createEducation(origin);
   return c.education;
 }
+/** An older save has no education record. Playing it adds an empty one.
+ * Diplomas stay zero. Job skills, money, people, goods and the original bytes are not rewritten. */
+export function adoptSavedEducation(c: City): EducationState {
+  return enableEducation(c, 'migrated-absent');
+}
 export function buildCampus(c: City, i: number, kind: CampusKind): Result {
   if (!c.education) return { ok: false, message: 'เมืองนี้ยังไม่มีข้อมูลการศึกษา' };
   if (!validIndex(i)) return { ok: false, message: 'ตำแหน่งอยู่นอกแผนที่' };

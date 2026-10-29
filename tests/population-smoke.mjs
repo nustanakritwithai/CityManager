@@ -7,7 +7,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { firmWage, createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, WAGES, MONTH } from '../src/sim.ts';
+import { adoptSavedEducation, firmWage, createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, WAGES, MONTH } from '../src/sim.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -28,6 +28,7 @@ for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqu
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
 assert.deepEqual(deserialize(migratedRaw), migrated);
+adoptSavedEducation(householdV2Migrated); adoptSavedEducation(workerV3Migrated); adoptSavedEducation(migrated);
 
 // Natural deterministic fixture: no fabricated people, wallets, stock or money.
 const natural = createCity(61025), milestones = []; let vacantDay, upgradeDay;
@@ -72,6 +73,7 @@ const retailSkill = family.workerSkills.retail > 0 ? 'retail' : 'general';
 fixture.employment.push({ householdId: family.id, firmId: factory.id, occupation: 'manufacturing', rank: 'entry', skill: productionSkill, workers: 1 }, { householdId: family.id, firmId: shop.id, occupation: 'retail', rank: 'entry', skill: retailSkill, workers: 1 });
 assert.equal(JSON.stringify([fixture.accounts, fixture.ledger, fixture.goodsLedger, fixture.goods, fixture.firms.map(f => [f.inventory, f.workDays])]), financialBeforeSplit);
 deserialize(serialize(fixture));
+adoptSavedEducation(fixture);
 const fixtureRaw = serialize(fixture), sharedHome = fixture.buildings.find(b => b.zone === 'R' && homeOccupancy(fixture, b.id).households > 1);
 assert.ok(sharedHome, 'Natural fixture contains a shared home');
 const keys = ['citymanager.save.v7', 'citymanager.save.v6', 'citymanager.save.v5', 'citymanager.save.v4', 'citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2, 3, 4, 5, 6].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
@@ -106,7 +108,7 @@ async function button(selector) { if (await reachTouch(evaluate, button, selecto
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : name === 'help' ? '#toggle-help' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(raw) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)})`); await button('#load'); assert.deepEqual(await state(), deserialize(raw)); await close(); }
+async function load(raw) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)})`); await button('#load'); const expected = deserialize(raw); adoptSavedEducation(expected); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), raw, 'Loading does not rewrite the original save bytes'); await close(); }
 async function place(building) { await close(); await button('[data-tool="select"]'); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${building.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', `Actual canvas cell ${building.cell}`); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
 async function metrics(expected, root = '#entity-content') { const actual = await evaluate(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(root + ' [data-context-metric]')})].map(e=>[e.dataset.contextMetric,e.dataset.value]))`); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact ${root} metric ${key}`); }
 async function household(h, source, city = fixture) {

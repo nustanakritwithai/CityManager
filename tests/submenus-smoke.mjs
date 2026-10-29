@@ -4,13 +4,15 @@ import {mkdir,readFile,writeFile,mkdtemp} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
-import {createCity,deserialize,serialize} from '../src/sim.ts';
+import {adoptSavedEducation,createCity,deserialize,serialize} from '../src/sim.ts';
+import { assertOriginalSave } from './education-adoption.mjs';
 import { reachTouch } from './touch-reach.mjs';
 const legacyRaw=await readFile(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),legacy=JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
 const fixture=deserialize(legacyRaw),fixtureJson=serialize(fixture);assert.equal(fixture.version, 9);
 for(const key of ['accounts','ledger','goodsLedger','goods'])assert.deepEqual(fixture[key],legacy[key]);
 for(const key of ['seed','rng','tick','nextId'])assert.equal(fixture[key],legacy[key]);
+adoptSavedEducation(fixture);
 const output=resolve('.test-output'), shots=resolve(process.env.CITYMANAGER_SCREENSHOT_DIR||'docs/submenu-preview');
 const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
 await mkdir(output,{recursive:true}); await mkdir(shots,{recursive:true});
@@ -57,7 +59,7 @@ try{
  // explicit pristine city through the same real controls before the empty-state check.
  await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(createCity(61025)))})`);await button('#load');await button('#close-inspector');
  const initial=await state();assert.equal(initial.goodsLedger.length,0);await open('#goods-section');assert.equal(await evaluate('!!document.querySelector("#goods-ledger .sm-empty")'),true);await assertLayout();await screenshot('phone-goods-empty.png');assert.deepEqual(await state(),initial);checks.push('Empty goods state is explicit and does not mutate the city');
- await button('#close-inspector');await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`);await button('#load');assert.deepEqual(await state(),fixture);await button('#close-inspector');const baseline=await state();
+ await button('#close-inspector');await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`);await button('#load');assert.deepEqual(await state(),fixture,'Loaded legacy city keeps every saved field and adds only the empty education record');await assertOriginalSave(evaluate,fixtureJson);await button('#close-inspector');const baseline=await state();
  const home=baseline.buildings.find(b=>b.zone==='R'),homePoint=await evaluate(`window.cityManager.cellScreen(${home.cell})`);assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`),'city-canvas');await click(homePoint.x,homePoint.y);
  for(const [kind,section,root,journal,initialCount]of[['money','#money-section','#ledger',baseline.ledger,12],['goods','#goods-section','#goods-ledger',baseline.goodsLedger,10]]){
   await open(section);await assertLayout();let actual=await rows(kind);assert.equal(actual.length,Math.min(initialCount,journal.length));assertRows(actual,journal,kind);assert.match(await evaluate(`document.querySelector('${root} .sm-scope').textContent`),/ข้อมูลทั้งเมือง.*เรียงจากรายการล่าสุด/);await screenshot(`phone-${kind}.png`);
