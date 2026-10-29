@@ -993,6 +993,21 @@ export function marketToConvert(c: City): Firm | undefined {
     return svc.ok(b.id) && svc.spare.power >= extra && !!f.owner && b.age >= MONTH && access(c, b.cell) && c.ownerLabor.some(e => e.firmId === f.id) && f.lastMonthProfit > 0 && spendable(c, f) >= MARKET_CONVERSION_COST + 20_000;
   });
 }
+/** Read-only Thai preview of the market-to-shop gates used by marketToConvert and openShop. */
+export function marketConversionStatus(c: City, f: Firm) {
+  if (!isMarket(f)) throw new TypeError('Expected a market firm');
+  const b = building(c, f.building), svc = utilities(c), extra = buildingNeed('C', 2).power - buildingNeed('C', 1).power, reasons: string[] = [];
+  if (retailDemand(c) <= 0) reasons.push('เมืองยังไม่ต้องการร้านค้าเพิ่ม');
+  if (c.firms.filter(isMarket).length < 2) reasons.push('ต้องมีตลาดอื่นอย่างน้อย 1 แห่งเพื่อขายพืชผลสดต่อ');
+  if (!f.owner || !c.ownerLabor.some(e => e.firmId === f.id)) reasons.push('เจ้าของต้องทำงานที่แผงเอง');
+  if (b.age < MONTH) reasons.push(`อายุอาคาร ${b.age}/${MONTH} วัน`);
+  if (!access(c, b.cell)) reasons.push('ต้องมีถนนเชื่อมถึงเมือง');
+  if (!svc.ok(b.id)) reasons.push('ต้องมีไฟฟ้าและน้ำ');
+  if (svc.spare.power < extra) reasons.push(`ไฟฟ้าสำรองต้องมีอย่างน้อย ${extra} หน่วย`);
+  if (f.lastMonthProfit <= 0) reasons.push('กำไรรอบก่อนต้องมากกว่า 0');
+  if (spendable(c, f) < MARKET_CONVERSION_COST + 20_000) reasons.push(`เงินพ้นสำรองค่าจ้างต้องมี ${(MARKET_CONVERSION_COST + 20_000) / 100} เครดิต`);
+  return { cost: MARKET_CONVERSION_COST, reasons, next: marketToConvert(c)?.id === f.id && retailDemand(c) > 0 };
+}
 /** Current conditions are a preview: other buildings may use spare utilities first at review. */
 export function retailGrowthStatus(c: City, f: Firm) {
   if (!isRetail(f)) throw new TypeError('Expected a retail firm');
@@ -1005,7 +1020,7 @@ export function retailGrowthStatus(c: City, f: Firm) {
     if (!access(c, b.cell)) reasons.push('ต้องเชื่อมถนน');
     if (!svc.ok(b.id)) reasons.push('ต้องมีไฟฟ้าและน้ำ');
     if (!fits(svc.spare, { power: after.power - before.power, water: after.water - before.water })) reasons.push('ไฟฟ้าหรือน้ำสำรองไม่พอสำหรับระดับถัดไป');
-    if (f.lastMonthProfit <= (f.owner ? firmWage(f) : 0)) reasons.push('กำไรรอบก่อนยังไม่ถึงเกณฑ์');
+    if (f.lastMonthProfit <= (f.owner ? firmWage(f) : 0)) reasons.push(`กำไรรอบก่อนต้องมากกว่า ${(f.owner ? firmWage(f) : 0) / 100} เครดิต (ล่าสุด ${f.lastMonthProfit / 100})`);
     if (workers === 0) reasons.push('ต้องมีคนทำงานจริงอย่างน้อย 1 คน');
     if (balance(c, f.wallet) < 20_000) reasons.push('เงินกิจการต้องมีอย่างน้อย 200 เครดิต');
   }
