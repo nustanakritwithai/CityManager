@@ -14,7 +14,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildPark, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, enableEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -102,7 +102,9 @@ let pausedByTyphoonAuto = false;
 let importedLegacyRaw: string | null = null;
 type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
 let route: Route | null = null;
-const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', bulldoze: 'รื้อถอน' };
+const EDUCATION_CHOICE = 'citymanager.education.v1';
+const educationPreferred = () => new URLSearchParams(location.search).has('education') || localStorage.getItem(EDUCATION_CHOICE) === 'on';
+const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน' };
 const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
@@ -113,7 +115,9 @@ const help: Record<string, string> = {
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
   water: 'โรงสูบน้ำ ฿3,000 · +40 หน่วย · บำรุง ฿60/เดือน · วางแปลงว่างริมถนน น้ำวิ่งตามถนน อาคารใกล้ได้ก่อน',
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
-  bulldoze: 'แตะสวน ถนน อาคาร หรือโรงน้ำไฟเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้'
+  school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
+  university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
+  bulldoze: 'แตะสวน สถานศึกษา ถนน อาคาร หรือโรงน้ำไฟเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้'
 };
 const WARN_TEXT = /ไม่พอ|ไม่ได้|ต้อง|ขวาง|ไม่ถูกต้อง|นอกแผนที่|ยังไม่เชื่อม|ไม่มีอยู่แล้ว|ไม่พบ/;
 function status(message: string) {
@@ -205,6 +209,7 @@ function activate(index: number) {
   } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
   else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
   else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
+  else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
   else if (tool === 'bulldoze') status(resultSound(bulldoze(city, index), 'ui-bulldoze').message);
   else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
   if (tool !== 'select') ownerDecisionSession.syncExternal(city, 'player-map-command');
@@ -301,12 +306,13 @@ function renderPlace() {
     $('#place-subtitle').textContent = 'ข้อมูลเฉพาะครัวเรือน · ไม่ใช่บุคคลรายคน'; symbol('R', false);
   } else if (cell && cellIndex !== null) {
     const firm = building && city.firms.find(f => f.building === building.id);
-    const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex);
-    const name = park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? firm && isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาด' : building ? 'พาณิชย์ · ร้านค้าสำเร็จรูป' : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
+    const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex);
+    const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? firm && isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาด' : building ? 'พาณิชย์ · ร้านค้าสำเร็จรูป' : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (cellIndex % SIZE + 1) + ',' + (Math.floor(cellIndex / SIZE) + 1);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, !!firm && isMarket(firm), !!park);
     if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
+    if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
@@ -331,6 +337,16 @@ function renderPlace() {
         metric('ถนนทั้งเมือง', `${road.network} ช่อง`, false, `เชื่อมประตูเมือง ${road.connectedNetwork} ช่อง`, road.network),
         metric('บำรุงทั้งเมือง/วัน', money(road.network * 10), true, 'หักจากเงินคลังทุกวัน', road.network * 10));
       reasons.push(road.gateway ? 'ประตูเมืองฝั่งตะวันตก จุดเชื่อมตลาดและบริการน้ำไฟภายนอก รื้อไม่ได้' : connected ? 'ถนนนี้เชื่อมกับตลาดภายนอก แปลงที่ติดถนนนี้เติบโตได้เมื่อผ่านเงื่อนไขอื่น' : 'ถนนนี้ยังแยกจากตลาดภายนอก ต่อถนนให้ถึงประตูเมืองฝั่งตะวันตกก่อน');
+    }
+    else if (campus) {
+      const report = campus.report;
+      metrics.push(
+        metric('ระดับ', String(campus.level), false, 'ขยายได้ถึงระดับ 2 บนแปลงเดิม'),
+        metric('ที่เรียน', `${report.operatingSeats} / ${report.nominalSeats}`, false, 'จำนวนที่ใช้ได้หลังหักครู น้ำ ไฟ ถนน และงบ'),
+        metric('ผู้เรียน', `${report.enrolled} คน`, false, `ความก้าวหน้าวันนี้ ${report.progressing} คน`),
+        metric('บุคลากรในเมือง', `${report.localStaff} / ${report.requiredStaff}`, false, report.contract ? 'มีบุคลากรสัญญาจากภายนอก' : 'ไม่มีสัญญาภายนอก'),
+        metric('เหตุผลที่ยังไม่เต็ม', report.reasons.join(' · ') || 'ให้บริการตามกำลัง', false));
+      reasons.push('ผู้เรียนเป็นจำนวนคนในครัวเรือน ไม่ใช่รายชื่อรายบุคคล', 'ปิดบริการหรือขาดน้ำไฟหยุดความก้าวหน้า แต่ไม่ลบวุฒิที่ได้แล้ว');
     }
     else if (park) {
       const staff = parkStaffingStatus(city, park);
@@ -364,10 +380,13 @@ function renderPlace() {
     else if (!cell.zone) reasons.push('แปลงนี้ยังไม่มีโซน');
   } else { $('#selection-title').textContent = 'เลือกสถานที่บนแผนที่'; $('#place-subtitle').textContent = 'บ้าน · บริษัท · ครัวเรือน'; symbol(null, false); }
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
+  const selectedCampus = cellIndex === null ? undefined : campusAt(city, cellIndex);
+  $('#campus-actions').hidden = !selectedCampus;
+  if (selectedCampus) { $('#toggle-campus').textContent = selectedCampus.open ? 'พักบริการ' : 'เปิดบริการ'; ($('#upgrade-campus') as HTMLButtonElement).disabled = selectedCampus.level >= 2; }
   $('#explanation').replaceChildren(...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction, factoryRecipeAction);
-  if (page === 'city') { renderCityOverview(city); dashboard?.update(city); renderParkPanel(); }
+  if (page === 'city') { renderCityOverview(city); renderEducationOverview(); dashboard?.update(city); renderParkPanel(); }
   decoratePanels($('#inspector'));
 }
 function validateRoute() {
@@ -385,6 +404,17 @@ function renderParkPanel(force = false) {
   if (parkPanelState === parkRuntime.recreation && parkPanelRoster === roster) return;
   parkPanelState = parkRuntime.recreation; parkPanelRoster = roster; parkPanelAt = performance.now();
   renderParkRecreationPanel(parkPanel, parkRuntime.recreation, ids);
+}
+function renderEducationOverview() {
+  const host = document.getElementById('education-overview'); if (!host) return;
+  const education = city.education;
+  host.hidden = !education;
+  if (!education) return;
+  const seats = education.campuses.reduce((sum, campus) => sum + campus.report.nominalSeats, 0);
+  const openSeats = education.campuses.reduce((sum, campus) => sum + campus.report.operatingSeats, 0);
+  const enrolled = education.campuses.reduce((sum, campus) => sum + campus.report.enrolled, 0);
+  const shortTeachers = education.campuses.filter(campus => campus.open && campus.report.localStaff + campus.report.contract < campus.report.requiredStaff).length;
+  host.replaceChildren(node('h3', '', 'การศึกษา'), node('p', 'reason', `ที่เรียนที่ใช้ได้ ${openSeats}/${seats} · ผู้เรียน ${enrolled} · ถือวุฒิพื้นฐาน ${education.residentBasic} · ถือวุฒิขั้นสูง ${education.residentHigher} · จบสะสม ${education.completed.basic}/${education.completed.higher} · โรงเรียนพร้อม ${education.schoolReadyDays} วัน · มหาวิทยาลัยพร้อม ${education.universityReadyDays} วัน · สถานศึกษาที่ขาดครู ${shortTeachers}`));
 }
 function render() {
   if (!view) return;
@@ -438,7 +468,7 @@ function updateMapInfo(placement: Preview | null) {
 async function boot() {
   const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
-  city = createCity(61025, { starter: STARTER });
+  city = createCity(61025, { starter: STARTER, education: educationPreferred() });
   parkRuntime = createParkRuntime(city);
   ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
@@ -546,6 +576,7 @@ async function boot() {
       const restored = deserializeParkSession(saved.raw), loaded = restored.city, oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       if (loaded.market) marketPanel?.client.validateSave(loaded.market);
       if (marketPanel?.client.enabled) await marketPanel.client.bindLoadedCity(loaded.market, () => { city = loaded; parkRuntime = restored.runtime; }); else { city = loaded; parkRuntime = restored.runtime; }
+      if (educationPreferred() && !city.education) enableEducation(city, 'migrated-absent');
       importedLegacyRaw = legacy ? saved.raw : null;
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; render();
@@ -560,6 +591,15 @@ async function boot() {
   $('#load-v5').addEventListener('click', () => loadStored('commercial'));
   $('#load-v6').addEventListener('click', () => loadStored('growth'));
   $('#load-backup').addEventListener('click', () => loadStored('backup'));
+  const syncEducationChoice = () => { const button = $('#toggle-education'); const on = educationPreferred(); button.setAttribute('aria-pressed', String(on)); button.textContent = on ? 'เกณฑ์การศึกษาเปิดอยู่' : 'เปิดเกณฑ์การศึกษา'; };
+  syncEducationChoice();
+  $('#toggle-education').addEventListener('click', () => {
+    if (educationPreferred() && !new URLSearchParams(location.search).has('education')) localStorage.removeItem(EDUCATION_CHOICE);
+    else { localStorage.setItem(EDUCATION_CHOICE, 'on'); enableEducation(city, city.education?.origin ?? 'migrated-absent'); }
+    syncEducationChoice(); status(city.education ? 'เกณฑ์การศึกษาใช้กับเมืองนี้แล้ว วุฒิเริ่มจากศูนย์และไม่แปลงทักษะอาชีพ' : 'เมืองใหม่จะยังไม่ใช้เกณฑ์การศึกษา'); render();
+  });
+  $('#toggle-campus').addEventListener('click', () => { const campus = selected === null ? undefined : campusAt(city, selected); if (campus) status(toggleCampus(city, campus.id).message); render(); });
+  $('#upgrade-campus').addEventListener('click', () => { const campus = selected === null ? undefined : campusAt(city, selected); if (campus) status(upgradeCampus(city, campus.id).message); render(); });
   $('#new-city').addEventListener('click', () => {
     const dialog = document.createElement('dialog');
     const title = document.createElement('h2'); title.textContent = 'เริ่มเมืองใหม่?';
@@ -569,7 +609,7 @@ async function boot() {
     const sample = document.createElement('button'); sample.textContent = 'เมืองตัวอย่าง (มีถนนและโซนให้แล้ว)';
     const restart = async (starter: boolean) => {
       try { if (marketPanel?.client.enabled) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
-      city = createCity(61025, { starter }); parkRuntime = createParkRuntime(city); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
+      city = createCity(61025, { starter, education: educationPreferred() }); parkRuntime = createParkRuntime(city); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
     };
