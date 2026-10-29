@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { factoryCropCapacity, factoryLevel } from '../src/factory-levels.ts';
 import { proposeCropPurchase, proposeRecipe } from '../src/agriculture.ts';
 import { createCity, deserialize, serialize, step } from '../src/sim.ts';
+import { holdEducationReady } from './education-ready.ts';
 
 test('factory capacity retains old tiers and adds two days of input storage per funded job', () => {
   assert.deepEqual(Array.from({length:9}, (_, i) => factoryCropCapacity(i + 1)), [24,24,24,28,32,36,40,44,48]);
@@ -63,6 +64,7 @@ test('automatic monthly reviews upgrade same-cell factories through level nine u
     assert.equal(selectFactoryRecipe(city,f.id,choice).ok,true);
     const identity = {building:b.id,cell:b.cell,firm:f.id,wallet:f.wallet,owner:structuredClone(f.owner),recipe:f.recipe,mode:f.recipeMode};
     const beforeLedger = city.ledger.length; assert.ok(firmWorkerCount(city,f.id)>0);
+    holdEducationReady(city);
     step(city);
     assert.equal(b.level,level+1, `level ${level} upgrades`);
     assert.deepEqual({building:b.id,cell:b.cell,firm:f.id,wallet:f.wallet,owner:f.owner,recipe:f.recipe,mode:f.recipeMode},identity);
@@ -127,7 +129,7 @@ test('new upgrades retain working capital while old level-two economics stay unc
 
 test('legacy v15 migration preserves records and applies old worker limits before the boundary', () => {
   const source=createCity(61025); for(let day=0;day<89;day++)step(source);
-  const old=JSON.parse(serialize(source)); old.version=15; old.rulesVersion='chain-10'; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
+  const old=JSON.parse(serialize(source)); delete old.education; old.version=15; old.rulesVersion='chain-10'; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
   const raw=JSON.stringify(old), loaded=deserialize(raw);
   assert.equal(loaded.factoryProgressionStartTick,old.tick);
   assert.deepEqual(loaded.cropLedger,old.cropLedger); assert.deepEqual(loaded.goodsLedger,old.goodsLedger); assert.deepEqual(loaded.accounts,old.accounts);

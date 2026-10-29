@@ -6,6 +6,7 @@ import { buildingNeed } from '../src/utilities.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { validateAgriculture } from '../src/agriculture-validation.ts';
+import { holdEducationReady } from './education-ready.ts';
 
 test('farm levels preserve old capacities and add worker, water and storage slots', () => {
   assert.deepEqual([1,2,3,4,5,6].map(farmStockCapacity), [96,96,96,120,144,168]);
@@ -29,17 +30,19 @@ test('upgraded farm keeps identity, selection and historical journal through par
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   assert.equal(b.level, 3);
   assert.equal(selectFarmCrop(c, f.id, 'sugarcane').ok, true);
+  holdEducationReady(c);
   const identity = { id: f.id, building: f.building, wallet: f.wallet, owner: structuredClone(f.owner), cell: b.cell };
   step(c); assert.equal(b.level, 4);
   assert.deepEqual({ id: f.id, building: f.building, wallet: f.wallet, owner: f.owner, cell: b.cell }, identity);
   assert.equal(farmCrop(c, f), 'sugarcane');
-  const migrated = JSON.parse(serialize(c)); migrated.version = 15; migrated.rulesVersion = 'chain-10';
+  const migrated = JSON.parse(serialize(c)); delete migrated.education; migrated.version = 15; migrated.rulesVersion = 'chain-10';
   delete migrated.farmLevelStartTick; delete migrated.factoryProgressionStartTick;
   assert.throws(() => deserialize(JSON.stringify(migrated)), /corrupt/);
   const old = createCity(61025); for (let i = 0; i < 60; i++) step(old);
-  const oldEnvelope = JSON.parse(serialize(old)); oldEnvelope.version = 15; oldEnvelope.rulesVersion = 'chain-10';
+  const oldEnvelope = JSON.parse(serialize(old)); delete oldEnvelope.education; oldEnvelope.version = 15; oldEnvelope.rulesVersion = 'chain-10';
   delete oldEnvelope.farmLevelStartTick; delete oldEnvelope.factoryProgressionStartTick;
-  assert.deepEqual(deserialize(JSON.stringify(oldEnvelope)), { ...old, factoryProgressionStartTick: old.tick, farmLevelStartTick: old.tick });
+  const comparable = { ...old, factoryProgressionStartTick: old.tick, farmLevelStartTick: old.tick }; delete comparable.education;
+  assert.deepEqual(deserialize(JSON.stringify(oldEnvelope)), comparable);
   const runtime = createParkRuntime(c), session = deserializeParkSession(serializeParkSession(c, runtime));
   assert.deepEqual(session.city, c); assert.deepEqual(session.runtime, runtime);
   assert.equal(selectFarmCrop(c, f.id, 'auto').ok, true);
@@ -67,7 +70,7 @@ test('profitable farms autonomously reach level six when water is available', ()
   assert.equal(selectFarmCrop(c, f.id, 'vegetables').ok, true);
   const id = f.id, wallet = f.wallet, cell = b.cell;
   for (let level = 4; level <= 6; level++) {
-    for (let i = 0; i < (level === 4 ? 1 : 30); i++) step(c);
+    for (let i = 0; i < (level === 4 ? 1 : 30); i++) { holdEducationReady(c); step(c); }
     assert.equal(b.level, level); assert.equal(f.id, id); assert.equal(f.wallet, wallet); assert.equal(b.cell, cell);
     assert.equal(farmCrop(c, f), 'vegetables');
     assert.deepEqual(deserialize(serialize(c)), c);
@@ -123,7 +126,7 @@ test('replay rejects a six-worker harvest truncated to the three-worker store', 
 
 test('v15 migration fixes the boundary and admits valid pre- and post-upgrade harvests', () => {
   const original = createCity(61025); for (let i = 0; i < 119; i++) step(original);
-  const old = JSON.parse(serialize(original)); old.version = 15; old.rulesVersion = 'chain-10'; delete old.farmLevelStartTick; delete old.factoryProgressionStartTick;
+  const old = JSON.parse(serialize(original)); delete old.education; old.version = 15; old.rulesVersion = 'chain-10'; delete old.farmLevelStartTick; delete old.factoryProgressionStartTick;
   const c = deserialize(JSON.stringify(old)); assert.equal(c.farmLevelStartTick, 119);
   assert.deepEqual(c.cropLedger, original.cropLedger);
   step(c);

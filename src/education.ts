@@ -272,7 +272,8 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       localStaff, requiredStaff: level.staff, contract: campus.contract, road, utility, open: campus.open, reasons,
     };
   }
-  state.schoolReadyDays = state.campuses.some(campus => campus.kind === 'school' && campus.report.operatingSeats > 0) ? state.schoolReadyDays + 1 : 0;
+  // A closed day pauses the city apartment streak. It does not throw away days already counted.
+  if (state.campuses.some(campus => campus.kind === 'school' && campus.report.operatingSeats > 0)) state.schoolReadyDays++;
   state.universityReadyDays = state.campuses.some(campus => campus.kind === 'university' && campus.report.operatingSeats > 0) ? state.universityReadyDays + 1 : 0;
   const seen = new Set<number>();
   for (const building of view.buildings) {

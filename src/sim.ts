@@ -162,7 +162,7 @@ export function enableEducation(c: City, origin: EducationState['origin'] = 'new
   return c.education;
 }
 export function buildCampus(c: City, i: number, kind: CampusKind): Result {
-  if (!c.education) return { ok: false, message: 'ระบบการศึกษายังปิดอยู่ เปิดได้จากเมนูเกม' };
+  if (!c.education) return { ok: false, message: 'เมืองนี้ยังไม่มีข้อมูลการศึกษา' };
   if (!validIndex(i)) return { ok: false, message: 'ตำแหน่งอยู่นอกแผนที่' };
   const cell = c.cells[i];
   if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i)) return { ok: false, message: 'สถานศึกษาต้องใช้แปลงว่าง 1 ช่อง' };
@@ -1250,14 +1250,14 @@ function stepWithRoads(c: City): void {
   else if (c.tick % 3 === 1) openShop(c);
 }
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
-export function createCity(seed = 20261023, options: { starter?: boolean; education?: boolean } = {}): City {
+export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
   const c: City = { foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
     buildings: [], households: [], firms: [], accounts: { outside: 0, treasury: 0, construction: 0, roadworks: 0, upkeep: 0, landlord: 0 }, ledger: [], goodsLedger: [],
-    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], parks: [], lastEvent: '', ...(options.education ? { education: createEducation('new-city') } : {}) };
+    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], parks: [], lastEvent: '', education: createEducation('new-city') };
   transfer(c, 'outside', 'treasury', 3_000_000, 'Initial municipal grant');
   if (options.starter === false) {
     buildRoad(c, GATEWAY, GATEWAY);
