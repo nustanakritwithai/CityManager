@@ -9,18 +9,18 @@ let occupied=false;try{occupied=(await fetch(`http://127.0.0.1:${port}/json/vers
 assert.equal(occupied,false,'Isolated renderer CDP port must be free');
 const profile=await mkdtemp(join(tmpdir(),'city-citizen-render-'));
 const browser=spawn(process.env.CITYMANAGER_BROWSER||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',['--headless=new','--no-first-run','--no-default-browser-check','--disable-extensions','--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${port}`,`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore',windowsHide:true});
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));let ws,serial=0;const pending=new Map(),errors=[];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));let ws,serial=0;const pending=new Map(),errors=[],network=[];
 async function send(method,params={}){const id=++serial;const response=new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error(`Timeout ${method}`));},30000);pending.set(id,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});});ws.send(JSON.stringify({id,method,params}));return response;}
 async function evaluate(expression){const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
 try{
  let tabs;for(let i=0;i<80;i++){try{tabs=await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();if(tabs.length)break;}catch{}await sleep(100);}
  assert.ok(tabs?.length,'Test browser started');ws=new WebSocket(tabs[0].webSocketDebuggerUrl);
- ws.onmessage=event=>{const r=JSON.parse(event.data);if(r.id){const p=pending.get(r.id);pending.delete(r.id);if(r.error)p?.reject(Error(JSON.stringify(r.error)));else p?.resolve(r.result);}else if(r.method==='Runtime.exceptionThrown')errors.push(r.params.exceptionDetails);else if(r.method==='Runtime.consoleAPICalled'&&r.params.type==='error')errors.push(r.params.args);};
- await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});await send('Runtime.enable');await send('Page.enable');
+ ws.onmessage=event=>{const r=JSON.parse(event.data);if(r.id){const p=pending.get(r.id);pending.delete(r.id);if(r.error)p?.reject(Error(JSON.stringify(r.error)));else p?.resolve(r.result);}else if(r.method==='Runtime.exceptionThrown')errors.push(r.params.exceptionDetails);else if(r.method==='Runtime.consoleAPICalled'&&r.params.type==='error')errors.push(r.params.args);else if(r.method==='Network.responseReceived')network.push({url:r.params.response.url,status:r.params.response.status,mimeType:r.params.response.mimeType});else if(r.method==='Network.loadingFailed')network.push(r.params);};
+ await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});await send('Runtime.enable');await send('Page.enable');await send('Network.enable');
  await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});
- await send('Page.navigate',{url:'http://127.0.0.1:4189/tests/fixtures/citizen-render.html'});
+ const navigation=await send('Page.navigate',{url:'http://127.0.0.1:4189/tests/fixtures/citizen-render.html'});
  let ready=false;for(let i=0;i<200;i++){const state=await evaluate('({ready:!!window.citizenRendererQA,error:window.citizenRendererError})');if(state.error)throw Error(state.error);if(state.ready){ready=true;break;}await sleep(100);}
- assert.ok(ready,'Instanced renderer initialized');await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+ if(!ready){const page=await evaluate('({url:location.href,title:document.title,html:document.documentElement.outerHTML.slice(0,4000)})');await writeFile(join(output,'startup-failure.json'),JSON.stringify({navigation,page,errors,network},null,2));const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(join(output,'startup-failure.png'),Buffer.from(shot.data,'base64'));throw Error('Renderer startup failed: '+JSON.stringify({navigation,page,errors,network}));}await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
  const initial=await evaluate('window.citizenRendererQA.snapshot()');assert.equal(initial.cars,2000);assert.equal(initial.drawBatches,6);assert.equal(initial.trianglesPerCar,24);assert.ok(initial.drawCalls>0&&initial.drawCalls<=8,JSON.stringify(initial));
  const times=await evaluate('new Promise(resolve=>{const a=[];let last;function sample(t){if(last!==undefined)a.push(t-last);last=t;if(a.length===120)resolve(a);else requestAnimationFrame(sample)}requestAnimationFrame(sample)})');
  const shot=await send('Page.captureScreenshot',{format:'png'});
