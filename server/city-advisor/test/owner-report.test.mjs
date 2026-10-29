@@ -1,23 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step } from '../../../src/sim.ts';
+import { createCity, ownerFinance, serialize, step } from '../../../src/sim.ts';
 import { captureOwnerSnapshot } from '../../../src/owner-decision.ts';
+import { ownerDecisionCandidates } from '../src/owner-contract.mjs';
 import { buildOwnerDecisionReport } from '../src/owner-report.mjs';
 import { configFromEnv, createAdvisorServer } from '../src/server.mjs';
 import { ENTITY_MODEL, ENTITY_UPSTREAM } from '../src/entity-report.mjs';
 
-const fixture = () => {
+const fixture = (days = 215) => {
   const city = createCity(61025);
-  for (let day = 0; day < 210; day++) step(city);
+  for (let day = 0; day < days; day++) step(city);
   const firm = city.firms.find(row => row.commercialKind === 'market');
   assert(firm);
   const snapshot = captureOwnerSnapshot(city, firm.id);
   assert(snapshot);
-  return { schemaVersion: 3, operation: 'owner-decision', locale: 'th', snapshot };
+  return { city, firm, request: { schemaVersion: 3, operation: 'owner-decision', locale: 'th', snapshot } };
 };
-const input = fixture();
+const { city: transferCity, firm: transferFirm, request: input } = fixture();
 const output = candidateId => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ candidateId }) } }] }), { headers: { 'Content-Type': 'application/json' } });
 const enabled = extra => ({ ownerDecisionEnabled: true, upstreamEnabled: true, apiKey: 'non-deployable-owner-test-placeholder', ...extra });
+
+test('transfer fixture has actual open-month profit after tax and development retention', () => {
+  // Five real simulation days after the monthly payout; no injected cash,
+  // fabricated profit or modified snapshot is used to enable the provider path.
+  assert.equal(input.snapshot.tick, 215); assert.equal(transferFirm.id, 22);
+  assert.equal(transferFirm.monthlyRevenue, 34_000); assert.equal(transferFirm.monthlyExpense, 16_000);
+  const finance = ownerFinance(transferCity, transferFirm.id);
+  assert.equal(finance.historyReconciled, true); assert.equal(finance.earnedWages, 0);
+  assert.equal(finance.taxReserve, 3_600); assert.equal(finance.developmentReserve, 132_200);
+  assert.equal(finance.distributable, 10_800); assert.equal(finance.withdrawAvailable, 10_800);
+  assert.equal(input.snapshot.budgetKnown, true);
+  assert.equal(input.snapshot.facts.firmCash, 188_400);
+  assert.equal(input.snapshot.facts.safeContribute, 0); assert.equal(input.snapshot.facts.safeWithdraw, 10_000);
+});
+
+test('fully distributed month-end earnings offer only hold and never call the enabled provider', async () => {
+  const { city, firm, request } = fixture(210), before = serialize(city);
+  const finance = ownerFinance(city, firm.id);
+  assert.equal(finance.developmentReserve, 128_600);
+  assert.equal(finance.distributable, 0); assert.equal(finance.withdrawAvailable, 0);
+  assert.equal(request.snapshot.facts.safeContribute, 0); assert.equal(request.snapshot.facts.safeWithdraw, 0);
+  assert.deepEqual(ownerDecisionCandidates(request.snapshot), [{ id: 'hold', action: 'hold', amountSatang: 0 }]);
+  let calls = 0;
+  const result = await buildOwnerDecisionReport(request, enabled({ fetchImpl: async () => { calls++; return output('safe-transfer'); } }));
+  assert.equal(result.mode, 'fallback'); assert.equal(result.selection.candidateId, 'hold');
+  assert.equal(calls, 0); assert.deepEqual(result.snapshot, request.snapshot);
+  assert.equal(serialize(city), before);
+});
 
 test('owner decision API remains disabled by default and does not call the provider', async () => {
   let calls = 0;

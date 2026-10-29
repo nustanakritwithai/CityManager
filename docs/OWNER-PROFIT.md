@@ -68,3 +68,17 @@ on any additional state change; it does not ignore owner accounting or replace
 the golden with whatever the new simulation produces. Live-state money
 conservation, save/reload, empty parks and residential occupancy gates remain
 explicit assertions. No park runtime or policy is changed.
+
+## Advisor transfer fixture
+
+The advisor's transfer/provider tests use the real seed-61025 market (firm 22)
+on day 215, five simulation days after the automatic payout. It has 34,000
+revenue minus 16,000 booked expenses and no unpaid wages: 18,000 current profit.
+The 3,600 tax reserve and 3,600 current development share leave 10,800 earned
+funds available; carried retention is 132,200 and cash is 188,400. The unchanged
+10,000 command ceiling therefore admits the 2,500 / 5,000 / 10,000 candidates.
+Provider-call, bounded-candidate and malformed-response assertions still exercise
+the transfer path. A separate day-210 case proves that fully distributed earnings
+leave 128,600 development retention, zero withdrawable profit and only `hold`,
+with no provider call even when upstream is enabled. These tests use no injected
+cash or profit and do not change the advisor runtime.
