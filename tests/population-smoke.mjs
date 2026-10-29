@@ -247,6 +247,8 @@ try {
   while(replayed2000.tick<actual2000.tick)step(replayed2000);
   assert.deepEqual(actual2000,replayed2000);assert.equal(summary(actual2000).population,2000);
   const frameTimes=await evaluate('window.__populationFrames'),frameSorted=[...frameTimes].sort((a,b)=>a-b);
+  const traffic2000=await evaluate('window.cityManager.atmosphere()');assert.equal(traffic2000.settings.traffic,true);assert.ok(traffic2000.traffic.actors>0,'Current enabled traffic survives automatic quality selection');
+  checks.push('2000-person current traffic diagnostics: '+JSON.stringify({quality:traffic2000.quality,traffic:traffic2000.traffic})+'; population is not vehicle count');
   checks.push(`2000-person 1x mobile-emulated scene: ${frameTimes.length} frame intervals, median ${frameSorted[60].toFixed(1)}ms, P95 ${frameSorted[113].toFixed(1)}ms, max ${frameSorted.at(-1).toFixed(1)}ms. Headless CI only, not physical Android.`);
   await cityMetrics(actual2000);await layout();await screenshot('phone-population-2000.png');
   await page('game');await button('#save');await assertSavedCity(evaluate,actual2000);await button('#load');assert.deepEqual(await state(),actual2000);
