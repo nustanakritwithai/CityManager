@@ -1,7 +1,7 @@
 // Small dependency-free CDP smoke test against the installed Microsoft Edge.
 // Runs real browser/WebGL; emulated mobile metrics do not establish device QA.
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
@@ -25,7 +25,9 @@ await mkdir(output, { recursive: true }); await mkdir(screenshots, { recursive: 
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT || 9349);
 const edge = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const softwareFlags = process.env.CITYMANAGER_SOFTWARE_WEBGL === '1' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [];
-const child = spawn(edge, ['--headless=new', ...softwareFlags, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${resolve(output, `edge-profile-${debugPort}`)}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+// A fresh disposable profile isolates normal/fallback runs from prior autosaves.
+const profile = await mkdtemp(resolve(output, `edge-profile-${debugPort}-`));
+const child = spawn(edge, ['--headless=new', ...softwareFlags, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
