@@ -83,10 +83,13 @@ try {
  await selectRoad('normal');await tapCell(cell(10,12));await tapCell(cell(10,13));
  assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected,'Real controls produce exact intended topology and accounting');
  await screenshot('desktop-parallel-oneway.png');await button('[data-tool="select"]');await screenshot('desktop-road-arrows.png');
- await game();await button('#save');const saved=await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`);assert.equal(JSON.parse(saved).version,20);
- assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(ROAD_TOPOLOGY_BACKUP_KEY)})`),original,'Legacy bytes preserved before topology migration');
+ await game();await button('#save');const saved=await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`);const savedDoc=JSON.parse(saved);
+ assert.equal(savedDoc.version,22);assert.equal(savedDoc.rulesVersion,'chain-17');
+ assert.equal(savedDoc.roadTopology.version,1);
+ assert.equal(savedDoc.accounts.treasury,expected.accounts.treasury);
+ assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(ROAD_TOPOLOGY_BACKUP_KEY)})`),original,'Pre-edit city bytes preserved before the road-topology save');
  await button('#load');assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected);
- checks.push('Desktop real one-way, parallel junction controls and v20 save/load preserve v19 backup and accounting');
+ checks.push('Desktop real one-way, parallel junction controls and v22 save/load preserve the pre-edit backup, roads and accounting');
  await close();await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:1,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});await until('innerWidth===390');touchMode=true;
  await button('[data-tool="road"]');await until('!document.querySelector("#road-submenu").hidden');await screenshot('mobile-road-submenu.png');
  await button('[data-road-mode="split"]');await tapCell(cell(5,12));await tapCell(cell(5,13));editRoadJunction(expected,cell(5,12),cell(5,13),false);

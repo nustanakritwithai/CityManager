@@ -6,7 +6,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { firmCapacity, createCity, step, serialize, deserialize, bulldoze, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, WAGES, MONTH } from '../src/sim.ts';
+import { adoptSavedEducation, firmCapacity, createCity, step, serialize, deserialize, bulldoze, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, WAGES, MONTH } from '../src/sim.ts';
+import { deserializeParkSession } from '../src/park-runtime.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -23,6 +24,8 @@ assert.deepEqual(imported.employment, old.employment.map(e => ({ ...e, skill: 'g
 for (const h of imported.households) { assert.deepEqual(h.workerSkills, { general: h.workforce, manufacturing: 0, retail: 0 }); assert.equal(h.skillSource, 'legacy-assumed'); }
 for (const f of old.firms) assert.deepEqual(imported.firms.find(value => value.id === f.id).workDays, f.workDays);
 assert.ok(old.firms.some(f => Object.keys(f.workDays).length), 'Frozen v2 fixture contains actually earned, unsettled wage claims');
+const importedMoney = structuredClone(imported.accounts), importedPeople = structuredClone(imported.households), importedGoods = structuredClone(imported.goods);
+adoptSavedEducation(imported);
 
 // Preserve #9's genuine funded-vacancy regression through a strict v3 migration.
 // New F/T startup timings do not replace this published worker scenario. The
@@ -33,7 +36,9 @@ const payrollV3Raw = await readFile(new URL('./fixtures/legacy-v3-day119.json', 
 assert.equal(hash(beforeV3Raw), 'd3df2066643b63e0e2839215922c373c302f84907c55fd2890b56fb467652fdb');
 assert.equal(hash(afterV3Raw), '16b5b547aaf12732cb179b3634946e6fd9c8a973aba7ce948b623e8490579327');
 assert.equal(hash(payrollV3Raw), '2f63fa3d0863568907009ae405b770fd3fc7a79bcd9306d4aced72391aed2727');
-const before = deserialize(beforeV3Raw), after = deserialize(serialize(before)), familyId = 4;
+const before = deserialize(beforeV3Raw), familyId = 4;
+adoptSavedEducation(before);
+const after = deserialize(serialize(before));
 step(after); deserialize(serialize(after));
 assert.deepEqual(after.employment, JSON.parse(afterV3Raw).employment, 'The actual eligible-worker distribution remains identical to published #9');
 assert.equal(after.goods.produced, before.goods.produced, 'Migrated zero-crop industry creates no new input-free finished goods');
@@ -51,6 +56,7 @@ const dismissed = deserialize(serialize(after)); assert.equal(bulldoze(dismissed
 assert.equal(householdWorkerCount(dismissed, familyId), 1); assert.deepEqual(dismissed.households.find(h => h.id === familyId), family);
 assert.ok(dismissed.ledger.slice(after.ledger.length).some(e => e.from === shop.wallet && e.to === family.wallet && e.reason === 'Monthly wages'), 'Dismissal pays the actually earned shop claim');
 const payrollBefore = deserialize(payrollV3Raw);
+adoptSavedEducation(payrollBefore);
 const payrollAfter = deserialize(serialize(payrollBefore)); step(payrollAfter); deserialize(serialize(payrollAfter));
 const wageEntries = payrollAfter.ledger.slice(payrollBefore.ledger.length).filter(e => e.to === family.wallet && e.reason === 'Monthly wages');
 assert.ok(new Set(wageEntries.map(e => e.from)).size >= 2, 'Both real firms pay into the same household wallet at month end');
@@ -68,14 +74,14 @@ async function send(method, params = {}) { const id = ++sequence; const promise 
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) { if (await reachTouch(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,physicalWidth:r.width*k,physicalHeight:r.height*k,touch:navigator.maxTouchPoints>0,disabled:e.disabled}})()`); assert.ok(p.w && p.h && !p.disabled, `Visible enabled ${selector}`); if (p.touch) assert.ok(p.physicalWidth >= 43.5 && p.physicalHeight >= 43.5, `44px ${selector}: ${JSON.stringify(p)}`); assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actual hit ${selector}`); await click(p.x, p.y); }
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(city) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
+async function load(city) { await page('game'); const planted=serialize(city); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(planted)})`); await button('#load'); const expected=deserialize(planted); adoptSavedEducation(expected); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), planted, 'Loading does not rewrite the original save bytes'); await close(); }
 async function oneTick(city) {
   await close(); await button('[data-speed="1"]');
   assert.equal(await evaluate(`document.querySelector('#pause').getAttribute('aria-pressed')`), 'true', 'Start boundary paused');
@@ -113,7 +119,7 @@ try {
   await evaluate('window.__workerStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v2"))throw new DOMException("Worker backup quota", "QuotaExceededError");return window.__workerStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), originalStorage); assert.deepEqual(await state(), imported); }
   finally { await evaluate('Storage.prototype.setItem=window.__workerStorageSet;delete window.__workerStorageSet'); }
-  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], v1Raw); assert.equal(backed['citymanager.save.v2'], oldRaw); assert.equal(backed['citymanager.backup.v2'], oldRaw); assert.equal(backed['citymanager.backup.latest'], 'citymanager.backup.v2'); await assertSavedCity(evaluate, importedRaw);
+  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], v1Raw); assert.equal(backed['citymanager.save.v2'], oldRaw); assert.equal(backed['citymanager.backup.v2'], oldRaw); assert.equal(backed['citymanager.backup.latest'], 'citymanager.backup.v2'); const savedRaw = await assertSavedCity(evaluate, imported); const savedCity = deserializeParkSession(savedRaw).city; assert.deepEqual(savedCity.accounts, importedMoney, 'Saved money matches the imported city'); assert.deepEqual(savedCity.households, importedPeople, 'Saved people match the imported city'); assert.deepEqual(savedCity.goods, importedGoods, 'Saved goods match the imported city');
   await button('#save'); assert.deepEqual(await storage(), backed);
   await evaluate('localStorage.setItem("citymanager.save.v7","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#load-backup'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);
   checks.push('Real Save preserves exact v1/v2 slots, immutably backs v2 before v6, aborts on backup quota, deduplicates backups and explicitly recovers corrupt preferred v6 without silent fallback');
