@@ -1250,14 +1250,14 @@ function stepWithRoads(c: City): void {
   else if (c.tick % 3 === 1) openShop(c);
 }
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
-export function createCity(seed = 20261023, options: { starter?: boolean; education?: boolean } = {}): City {
+export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
   const c: City = { foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
     buildings: [], households: [], firms: [], accounts: { outside: 0, treasury: 0, construction: 0, roadworks: 0, upkeep: 0, landlord: 0 }, ledger: [], goodsLedger: [],
-    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], parks: [], lastEvent: '', ...(options.education ? { education: createEducation('new-city') } : {}) };
+    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], parks: [], lastEvent: '', education: createEducation('new-city') };
   transfer(c, 'outside', 'treasury', 3_000_000, 'Initial municipal grant');
   if (options.starter === false) {
     buildRoad(c, GATEWAY, GATEWAY);
@@ -1280,7 +1280,8 @@ export function serialize(c: City, market?: City['market']): string {
   const expanded = c.populationCapacityVersion === 1 || c.households.length > 128 || c.employment.length > 256;
   const educated = c.education !== undefined;
   if (c.education) assertEducationInvariants(c.education, c.households);
-  const json = JSON.stringify({ ...c, ...(expanded ? {populationCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
+  const { education, ...body } = c;
+  const json = JSON.stringify({ ...body, ...(expanded ? {populationCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, ...(education ? { education } : {}), version: educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
