@@ -71,8 +71,8 @@ export class AtmosphereController {
     });
   }
 
-  /** City life is decorative and costs continuous frames, so low quality turns it off. */
-  private syncTraffic() { this.host.view.traffic?.setEnabled(this.settings.traffic && this.quality !== 'low'); }
+  /** Quality changes lighting/detail, never silently disables user-enabled traffic. */
+  private syncTraffic() { this.host.view.traffic?.setEnabled(this.settings.traffic); }
 
   private open(open: boolean) {
     this.menu.hidden = !open; this.button.setAttribute('aria-expanded', String(open));
@@ -94,7 +94,7 @@ export class AtmosphereController {
     };
     const toggle = (text: string, current: boolean, onChange: (value: boolean) => void) => {
       const label = document.createElement('label'), input = document.createElement('input');
-      label.className = 'atmosphere-check'; input.type = 'checkbox'; input.checked = current;
+      label.className = 'atmosphere-check'; input.type = 'checkbox'; input.checked = current; input.setAttribute('aria-label',text);
       input.addEventListener('change', () => onChange(input.checked));
       label.append(input, document.createTextNode(text)); return label;
     };
@@ -108,7 +108,7 @@ export class AtmosphereController {
     this.menu.replaceChildren(heading, this.status, time, quality,
       toggle('ฤดูกาลตามเดือนในเกม', this.settings.seasons, value => this.change({ seasons: value })),
       toggle('ฝนตามฤดู (ภาพตกแต่ง)', this.settings.rain, value => this.change({ rain: value })),
-      toggle('รถ คนเดิน และควันโรงงาน (ภาพตกแต่ง · ปิดในคุณภาพต่ำ)', this.settings.traffic, value => this.change({ traffic: value })),
+      toggle('แสดงรถ คนเดิน และควันโรงงาน (คงจำนวนเมื่อปรับคุณภาพภาพ)', this.settings.traffic, value => this.change({ traffic: value })),
       toggle('ชั้นข้อมูลตามเครื่องมือ และไอคอนปัญหาเหนืออาคาร', this.settings.mapInfo, value => this.change({ mapInfo: value })), note);
   }
 

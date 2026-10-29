@@ -48,6 +48,7 @@ export class CityView {
   private edgeMesh?: Mesh;
   private edgeSignature = '';
   private visualRevision = 0;
+  private quality: Quality = 'high';
   private lastScene: { city: City; selected: number | null; preview: number[] } | null = null;
   private forest: { entity: Entity; x: number; y: number; z: number; scale: number }[] = [];
   pointers = new Map<number, { x: number; y: number }>();
@@ -134,6 +135,26 @@ export class CityView {
     entity.setLocalScale(sx, sy, sz);
     parent.addChild(entity);
     return entity;
+  }
+  /**
+   * Factory levels 4–9 each add one visible structure inside the parcel: a second stack (4), a
+   * brick annex (5), a second input tank (6), an annex upper floor (7), a goods silo (8) and a lit
+   * beacon band on the silo (9). Low quality keeps the silhouettes as unshadowed boxes only.
+   */
+  private factoryTiers(tile: Entity, level: number, lit: boolean) {
+    const low = this.quality === 'low', shadow = !low;
+    if (level >= 4) {
+      const stack = low ? null : this.assets?.detail('chimney', .24);
+      if (stack) { stack.setLocalPosition(.36, .1, -.74); tile.addChild(stack); } else this.box(tile, .36, .55, -.74, .14, .9, .14, '#7b6e63', shadow);
+    }
+    if (level >= 5) this.box(tile, -.62, .32, -.52, .5, .44, .5, '#a5654a', shadow);
+    if (level >= 6) {
+      const tank = low ? null : this.assets?.detail('tank', .42);
+      if (tank) { tank.setLocalPosition(-.18, .1, .72); tile.addChild(tank); } else this.box(tile, -.18, .3, .72, .34, .4, .34, '#b9c3c7', shadow);
+    }
+    if (level >= 7) { this.box(tile, -.62, .72, -.52, .44, .36, .44, '#b87457', shadow); this.box(tile, -.62, .93, -.52, .48, .06, .48, '#6d4b3a', false); }
+    if (level >= 8) this.box(tile, .72, .75, .36, .26, 1.3, .26, '#c9c2b0', shadow);
+    if (level >= 9) this.box(tile, .72, 1.3, .36, .3, .1, .3, lit ? this.windowLit : '#f1c267', false);
   }
   private farm(tile: Entity, fertility: number, level: number) {
     const plot = new Entity('Original farm plot'); tile.addChild(plot);
@@ -500,6 +521,7 @@ export class CityView {
             if (b.zone === 'I' && b.level >= 2) { const chimney = this.assets?.detail('chimney', .32); if (chimney) { chimney.setLocalPosition(.68, .1, -.62); tile.addChild(chimney); } }
             if (b.zone === 'I' && b.level >= 3) { const tank = this.assets?.detail('tank', .6); if (tank) { tank.setLocalPosition(-.6, .1, .66); tile.addChild(tank); } }
             // One inset marker per level above three, contained within the same parcel.
+            if (b.zone === 'I' && b.level >= 4) this.factoryTiers(tile, b.level, lit);
             if (b.zone === 'I') for (let n = 0; n < factoryLevel(b.level).markers; n++) this.box(tile, -.7 + n * .23, .12, .82, .13, .06, .09, '#f1c267', false);
             if (b.zone === 'R' && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
             // A lived-in house gets a front-yard bench; some also a second bush (decoration only).
@@ -515,6 +537,7 @@ export class CityView {
             for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, lit ? this.windowLit : '#f9df9a', false);
           }
           if (b.zone === 'I') this.box(tile, 0.52, h * 0.65, -0.38, 0.2, h * 1.1, 0.22, '#786b60');
+          if (b.zone === 'I' && b.level >= 4) this.factoryTiers(tile, b.level, lit);
         }
       }
     }
@@ -564,7 +587,7 @@ export class CityView {
     }
   }
   setAtmosphere(atmosphere: Atmosphere) { this.atmosphere.apply(atmosphere); this.world.apply(atmosphere); }
-  setQuality(quality: Quality) { this.atmosphere.setQuality(quality); }
+  setQuality(quality: Quality) { this.atmosphere.setQuality(quality); if (quality !== this.quality) { this.quality = quality; this.visualRevision++; } }
 
   private updateGroundEdges(city: City) {
     const signature = city.cells.map(cell => cell.road ? '1' : '0').join('') + ':' + roadTopologyKey(city) + ':' + city.buildings.map(b => b.cell).join(',');
