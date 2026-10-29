@@ -4,13 +4,14 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, isRetail, firmCapacity, housingCapacity, farmCrop, homeOccupancy, HOUSING_OCCUPANCY_GATE_LEVEL } from '../src/sim.ts';
+import { adoptSavedEducation, createCity, step, serialize, isRetail, firmCapacity, housingCapacity, farmCrop, homeOccupancy, HOUSING_OCCUPANCY_GATE_LEVEL } from '../src/sim.ts';
 import { farmStockCapacity } from '../src/agriculture.ts';
 import { factoryCropCapacity } from '../src/factory-levels.ts';
 import { retailCapacity } from '../src/retail-capacity.ts';
 import { deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 import { SAVE_KEY, FARM_LEVEL_BACKUP_KEY } from '../src/save-storage.ts';
 import { keepSupplied } from './plants.ts';
+import { EDUCATION_SUSTAIN_DAYS } from '../src/education.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const output = resolve('.test-output/building-progression'), debugPort = 9364;
@@ -20,9 +21,36 @@ const originalPark = await readFile(new URL('./fixtures/retail-v18-park-session.
 const old = JSON.parse(originalPark), imported = deserializeParkSession(originalPark);
 assert.equal(old.version, 18); assert.equal(old.rulesVersion, 'chain-13');
 assert.equal(old.parkRuntime.activity.visitors.length, 6); assert.equal(Object.keys(old.parkRuntime.recreation.citizens).length, 6);
+adoptSavedEducation(imported.city);
 const migratedPark = serializeParkSession(imported.city, imported.runtime);
+/** Satisfies the education upgrade gate without adding campuses, wages, or utility. */
+function keepEducationGatesOpen(city) {
+  const education = city.education;
+  education.schoolReadyDays = Math.max(education.schoolReadyDays, EDUCATION_SUSTAIN_DAYS);
+  education.universityReadyDays = Math.max(education.universityReadyDays, EDUCATION_SUSTAIN_DAYS);
+  for (const household of city.households) {
+    let person = education.people.find(item => item.householdId === household.id);
+    if (!person) {
+      person = { householdId: household.id, basic: 0, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0 };
+      education.people.push(person);
+    }
+    if (person.school + person.university + person.teacher + person.professor > 0) continue;
+    person.basic = Math.max(person.basic, household.workforce);
+    person.higher = Math.max(person.higher, household.workforce);
+  }
+  education.residentBasic = education.people.reduce((sum, person) => sum + person.basic, 0);
+  education.residentHigher = education.people.reduce((sum, person) => sum + person.higher, 0);
+  for (const building of city.buildings) {
+    const row = education.sustain.find(item => item.buildingId === building.id);
+    if (row) row.days = Math.max(row.days, EDUCATION_SUSTAIN_DAYS);
+    else education.sustain.push({ buildingId: building.id, days: EDUCATION_SUSTAIN_DAYS });
+  }
+}
 const snapshots = new Map(), city = createCity(61025);
 for (let day = 1; day <= 180; day++) {
+  // Education is on for every city. Hold only its credential counters so day 120
+  // still measures the real full-house and paid upgrade.
+  keepEducationGatesOpen(city);
   if (day === 120 || day === 180) {
     const before = structuredClone(city), after = structuredClone(city); step(after);
     snapshots.set(day, { before, after });
