@@ -19,8 +19,9 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:44px; min-width:100px; 
 #save-failure-banner small { font-size:12px; }
 #save-failure-banner button { flex-shrink:0; min-height:44px; padding:6px 10px; color:#1b2438; background:#f3c46b; }
 #autosave-status[data-failed=true] { color:#ffd2a0; }
-html:has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:calc(var(--save-warning-height,0px) + 6px); height:calc(100dvh - var(--save-warning-height,0px) - 12px); max-height:calc(100dvh - var(--save-warning-height,0px) - 12px); }
+html[data-touch-ui=true]:has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:calc(var(--save-warning-height,0px) + 6px); height:calc(100dvh - var(--save-warning-height,0px) - 12px); max-height:calc(100dvh - var(--save-warning-height,0px) - 12px); }
+html:not([data-touch-ui=true]):has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:max(91px,calc(var(--save-warning-height,0px) + 6px)); }
 /* The touch menu and KPI chip are independently fixed, so move their shared
    row origin instead of only adding a margin to the visible HUD containers. */
 html[data-touch-ui=true]:has(#save-failure-banner:not([hidden])) { --row-top:calc(max(calc(6 * var(--row-u)), env(safe-area-inset-top)) + var(--save-warning-height,0px)); }
-html:not([data-touch-ui=true]):has(#save-failure-banner:not([hidden])) :is(.top-hud,.time-hud,.city-kpis,.atmosphere-menu) { margin-top:var(--save-warning-height,0px); }
+html:not([data-touch-ui=true]):has(#save-failure-banner:not([hidden])) :is(.top-hud,.time-hud,.city-kpis,.atmosphere-menu,.camera-hud) { margin-top:var(--save-warning-height,0px); }

@@ -169,6 +169,8 @@ try {
   await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic desktop quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
   await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
   await button('#close-inspector'); await cell(schoolCell);
+  assert.equal(await evaluate("document.querySelector('#inspector').getBoundingClientRect().bottom<=document.querySelector('.tool-dock').getBoundingClientRect().top"), true, 'desktop warning preserves space between the inspector and build tools');
+  await button('#toggle-campus'); await button('#toggle-campus');
   await evaluate("document.querySelector('#education-details').scrollIntoView({block:'start'})");
   assert.equal(await evaluate("(()=>{const p=document.querySelector('#panel-pause').getBoundingClientRect(),b=document.querySelector('#save-failure-banner').getBoundingClientRect();return b.top>=0&&b.right<=innerWidth&&b.bottom<=p.top&&!!document.elementFromPoint(p.x+p.width/2,p.y+p.height/2)?.closest('#panel-pause')})()"), true, 'desktop warning leaves the panel clock reachable');
   await shot('16-desktop-save-warning-after');

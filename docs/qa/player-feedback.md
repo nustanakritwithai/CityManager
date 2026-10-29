@@ -28,26 +28,28 @@ including the Load identity fence and workforce fixes.
 ![Synthetic campuses at 390 x 844](player-feedback/campuses-mobile.jpg)
 ![Repeated university refusal and separated action row](player-feedback/campus-refusal-mobile.jpg)
 
-## Still blocked; not a full UI pass
+## Runtime verification
 
-The executor repeatedly disconnected during the remaining runtime flow. CDP
+The local executor repeatedly disconnected during the remaining runtime flow. CDP
 reported `Input.dispatchTouchEvent` and later `Runtime.evaluate` timeouts, followed
 by `exec-server transport disconnected`. This does not establish a product defect
-or a successful test. A later clock attempt used pointer clicks at the mobile
-viewport; it also did not finish. No physical Android test was performed.
+or a successful local test. Verification therefore moved to isolated Windows CI.
+No physical Android test was performed.
 
-Before merge, complete inspector pause/play, actual school progress/cost and
-successful action feedback, manual/autosave failure persistence through panel/tool
-changes, export reachability, and clearing the warning only after a successful
-write. Inspect desktop layout at 1280 x 900 as well. The pure controller tests
-cover pending and overlapping saves, but do not replace these browser checks.
+The [full UX run at e7bbd77](https://github.com/nustanakritwithai/CityManager/actions/runs/40941901537)
+passed inspector pause/play, actual school progress/cost and successful actions,
+same-paused-day toggle/upgrade refresh, manual/autosave failure persistence,
+menu/close/export reachability, and successful-write clearing. It exercised
+390 x 844 and 1280 x 900 with no browser exceptions. The artifact
+`player-feedback-ux-evidence` includes `results.json` and ten small screenshots.
+Clock controls use pointer clicks; other mobile controls use emulated touch.
 
 The bounded `tests/player-feedback-smoke.mjs` uses an explicitly supplied isolated
 browser (`CITYMANAGER_DEBUG_PORT`) and serves the local `dist` build. It seeds only
 the synthetic localhost origin and injects quota failures locally. Set
 `CITYMANAGER_UX_RUNTIME_ONLY=1` to skip the already-confirmed campus flow and resume
-the remaining clock/save checks. Successful completion writes `results.json`;
-no successful full-run result has been produced for this draft.
+the remaining clock/save checks. CI always runs the full flow and writes
+`results.json` on success or failure.
 
 ## Targeted CI follow-up
 
@@ -62,5 +64,12 @@ after a quota failure, the independently fixed mobile page menu stayed behind
 the persistent banner even though its HUD parent moved down. The follow-up uses
 the shared touch-row origin to move the menu, clock and KPI chip together. The
 new smoke explicitly checks the game-menu hit target while the warning remains.
-This diagnosis is separate from the earlier local executor disconnections; CI
-must confirm the fix before release.
+Its measured prior-offset control put the menu at y=60..104 behind the banner
+at y=8..107.375; the corrected menu was y=167..211 and received native clicks.
+This diagnosis is separate from the earlier local executor disconnections.
+
+Visual review of that passing run found the desktop warning stretched the
+inspector into the build dock. The current CSS keeps the desktop bottom clearance
+while moving only its top; the smoke now asserts that separation and activates
+the campus controls while the warning is visible. These follow-up changes require
+their own successful CI before release.
