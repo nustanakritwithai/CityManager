@@ -24,8 +24,9 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(r => server.listen(4176, '127.0.0.1', r));
 const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
-const target = targets.find(item => item.type === 'page' && /CityManager/.test(item.url));
-assert.ok(target, 'existing isolated CityManager target');
+const target = targets.find(item => item.type === 'page' && /CityManager/.test(item.url))
+  ?? targets.find(item => item.type === 'page' && item.url === 'about:blank');
+assert.ok(target, 'explicitly isolated CityManager or blank test target');
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
 let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout; const pending = new Map(), errors = [], checks = [];
 function send(method, params = {}) {
@@ -101,8 +102,10 @@ try {
   const schoolText = await evaluate("document.querySelector('#education-details').innerText");
   assert.match(schoolText, /เรียนแล้ว \d+\/60 วัน/); assert.match(schoolText, /ค่าบำรุง.*50/); assert.match(schoolText, /ค่าจ้างสะสม/);
   await shot('11-education-cost-progress-after');
+  const campusActionTick = await evaluate('JSON.parse(cityManager.snapshot()).tick');
   await button('#toggle-campus');
   assert.match(await evaluate("document.querySelector('#campus-feedback').innerText"), /พักบริการ/);
+  assert.equal(await evaluate("document.querySelector('#toggle-campus').textContent"), 'เปิดบริการ');
   await button('#toggle-campus');
   assert.match(await evaluate("document.querySelector('#campus-feedback').innerText"), /เปิดบริการ/);
   const cash = await evaluate('JSON.parse(cityManager.snapshot()).accounts.treasury');
@@ -110,6 +113,8 @@ try {
   assert.equal(await evaluate('JSON.parse(cityManager.snapshot()).accounts.treasury'), cash - 150000);
   assert.equal(await evaluate("document.querySelector('#upgrade-campus').disabled"), true);
   assert.match(await evaluate("document.querySelector('#campus-feedback').innerText"), /ระดับ 2/);
+  assert.match(await evaluate("document.querySelector('#education-details').innerText"), /ความจุสูงสุดระดับนี้: 16/);
+  assert.equal(await evaluate('JSON.parse(cityManager.snapshot()).tick'), campusActionTick, 'campus feedback and capacity refresh within the same paused day');
   checks.push('school costs and actual cohort progress, toggle feedback, single-charge upgrade');
   }
   await game(); await button('#save');

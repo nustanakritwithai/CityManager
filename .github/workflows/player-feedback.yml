@@ -52,18 +52,23 @@ jobs:
           if (Get-NetTCPConnection -LocalPort $uxPort -State Listen -ErrorAction SilentlyContinue) { throw 'UX CDP port is occupied.' }
           $uxBrowser = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
           if (-not (Test-Path -LiteralPath $uxBrowser)) { throw 'Installed Edge was not found.' }
-          $uxArguments = @('--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', "--remote-debugging-port=$uxPort", "--user-data-dir=`"$uxProfile`"", 'about:blank#CityManager')
+          $uxArguments = @('--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', "--remote-debugging-port=$uxPort", "--user-data-dir=`"$uxProfile`"", 'about:blank')
           $uxEdge = Start-Process -FilePath $uxBrowser -ArgumentList $uxArguments -WindowStyle Hidden -PassThru
           try {
             $uxReady = $false
+            $uxTargets = @()
+            $uxStartupError = ''
             for ($attempt = 0; $attempt -lt 40; $attempt++) {
               try {
                 $uxTargets = Invoke-RestMethod -Uri "http://127.0.0.1:$uxPort/json/list" -TimeoutSec 2
-                if ($uxTargets | Where-Object { $_.type -eq 'page' -and $_.url -like '*CityManager*' }) { $uxReady = $true; break }
-              } catch {}
+                if ($uxTargets | Where-Object { $_.type -eq 'page' -and $_.url -eq 'about:blank' }) { $uxReady = $true; break }
+              } catch { $uxStartupError = $_.Exception.Message }
               Start-Sleep -Milliseconds 500
             }
-            if (-not $uxReady) { throw 'Isolated Edge did not expose the expected test tab.' }
+            if (-not $uxReady) {
+              @{ passed = $false; stage = 'Edge startup'; error = $uxStartupError; targets = $uxTargets; exited = $uxEdge.HasExited } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 .test-output/player-feedback/results.json
+              throw 'Isolated Edge did not expose the expected test tab.'
+            }
             $env:CITYMANAGER_DEBUG_PORT = [string]$uxPort
             $env:CITYMANAGER_SCREENSHOT_DIR = '.test-output/player-feedback'
             $env:CITYMANAGER_UX_RUNTIME_ONLY = ''
