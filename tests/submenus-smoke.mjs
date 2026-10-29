@@ -1,6 +1,6 @@
 // Real installed Edge, native DOM input and WebGL; no downloaded browser.
 import {spawn} from 'node:child_process';
-import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,mkdtemp} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
@@ -14,7 +14,11 @@ for(const key of ['seed','rng','tick','nextId'])assert.equal(fixture[key],legacy
 const output=resolve('.test-output'), shots=resolve(process.env.CITYMANAGER_SCREENSHOT_DIR||'docs/submenu-preview');
 const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
 await mkdir(output,{recursive:true}); await mkdir(shots,{recursive:true});
-const child=spawn(process.env.CITYMANAGER_BROWSER||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',['--headless=new','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-component-update','--remote-debugging-address=127.0.0.1','--remote-debugging-port=9349',`--user-data-dir=${resolve(output,'edge-profile')}`,'about:blank'],{windowsHide:true,stdio:'ignore'});
+// Isolate this suite from the shared 9349/profile used by adjacent browser processes.
+const debugPort=9371, profile=await mkdtemp(resolve(output,'submenu-profile-'));
+let occupied=false;try{occupied=(await fetch(`http://127.0.0.1:${debugPort}/json/version`,{signal:AbortSignal.timeout(500)})).ok;}catch{}
+assert.equal(occupied,false,'Submenu browser port already in use');
+const child=spawn(process.env.CITYMANAGER_BROWSER||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',['--headless=new','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-component-update','--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${debugPort}`,`--user-data-dir=${profile}`,'about:blank'],{windowsHide:true,stdio:'ignore'});
 let ws,id=0; const pending=new Map(), errors=[],expected=[],checks=[],screenshots=[];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function send(method,params={}) {const key=++id; const promise=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('CDP timeout '+method)),30000);pending.set(key,{resolve:v=>{clearTimeout(timer);resolve(v)},reject});});ws.send(JSON.stringify({id:key,method,params}));return promise;}
@@ -37,7 +41,7 @@ async function assertLayout(){const r=await layout();assert.ok(r.left>=0&&r.righ
 async function rows(kind){return evaluate(`[...document.querySelectorAll('.sm-flow-card[data-kind="${kind}"]')].map(e=>({...e.dataset,text:e.querySelector('.sm-flow-value').textContent}))`);}
 function assertRows(actual, journal, kind){for(let i=0;i<actual.length;i++){const index=journal.length-i-1,e=journal[index],a=actual[i];assert.deepEqual({index:Number(a.index),kind:a.kind,tick:Number(a.tick),from:a.from,to:a.to,value:Number(a.value),reason:a.reason},{index,kind,tick:e.tick,from:e.from,to:e.to,value:kind==='money'?e.amount:e.quantity,reason:e.reason});assert.equal(a.text.trim(),kind==='money'?`${(e.amount/100).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})} ฿`:`${e.quantity.toLocaleString('th-TH')} หน่วย`);}}
 try{
- let tabs;for(let n=0;n<100;n++){try{tabs=await(await fetch('http://127.0.0.1:9349/json/list')).json();break;}catch{await sleep(100);}}
+ let tabs;for(let n=0;n<100;n++){try{tabs=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();break;}catch{await sleep(100);}}
  assert.ok(tabs?.length);ws=new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
  ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error'){const a=m.params.args,blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1'&&a.length===2&&/^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value)&&a[1]?.value==='Network error';(blocked?expected:errors).push(a);}if(m.method==='Fetch.requestPaused')void send('Fetch.failRequest',{requestId:m.params.requestId,errorReason:'Failed'});};
  await send('Runtime.enable');await send('Page.enable');
