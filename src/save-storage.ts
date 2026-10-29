@@ -10,6 +10,8 @@ export function saveConflictBackupKeys(storage?:Pick<Storage,'getItem'>){
  if(!Array.isArray(extra)||!extra.every(k=>typeof k==='string'&&/^citymanager\.backup\.save-conflict\.[0-9]+$/.test(k)))throw Error('Recovery index requires repair; original saves preserved');
  return [...new Set([...base,...extra])];
 }
+export const BUSINESS_CAPACITY_BACKUP_KEY = 'citymanager.backup.before-business-capacity';
+export const businessCapacityBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${BUSINESS_CAPACITY_BACKUP_KEY}.${i}` : BUSINESS_CAPACITY_BACKUP_KEY);
 export const EDUCATION_BACKUP_KEY = 'citymanager.backup.before-education';
 export const educationBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${EDUCATION_BACKUP_KEY}.${i}` : EDUCATION_BACKUP_KEY);
 export const POPULATION_BACKUP_KEY = 'citymanager.backup.before-population-capacity';
@@ -74,7 +76,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [PRE_AUTOSAVE_BACKUP,...saveConflictBackupKeys(storage),...educationBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
+    keys = [PRE_AUTOSAVE_BACKUP,...saveConflictBackupKeys(storage),...businessCapacityBackupKeys(), ...educationBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -94,10 +96,11 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const housing16 = parsed?.version === 16 && parsed?.rulesVersion === 'chain-11' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   const factory17 = parsed?.version === 17 && parsed?.rulesVersion === 'chain-12' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   const retail18 = parsed?.version === 18 && parsed?.rulesVersion === 'chain-13' && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  const business23 = parsed?.version === 23 && parsed?.rulesVersion === 'chain-18' && parsed?.businessCapacityVersion === 1;
   const education22 = parsed?.version === 22 && parsed?.rulesVersion === 'chain-17' && parsed?.education?.version === 1 && parsed?.education?.rules === 'education-1';
   const population21 = parsed?.version === 21 && parsed?.rulesVersion === 'chain-16' && parsed?.populationCapacityVersion === 1;
   const road20 = parsed?.version === 20 && parsed?.rulesVersion === 'chain-15' && parsed?.roadTopology?.version === 1 || population21 && parsed.roadTopology?.version === 1;
-  const farm19 = ((parsed?.version === 19 && parsed?.rulesVersion === 'chain-14') || road20 || population21 || education22) && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
+  const farm19 = ((parsed?.version === 19 && parsed?.rulesVersion === 'chain-14') || road20 || population21 || education22 || business23) && Array.isArray(parsed.parks) && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   if (parsed?.version !== 9 && !market10 && !farm11 && !factory12 && !food13 && !parks14 && !workforce15 && !housing16 && !factory17 && !retail18 && !farm19 && !education22) throw new Error('Expected a supported CityManager snapshot.');
   if (road20 || population21 && parsed.roadTopology !== undefined) validateRoadTopology(parsed, parsed.roadTopology);
   let backup: string | null = null;
@@ -120,6 +123,11 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const current = storage.getItem(SAVE_KEY);
   if (current !== null) {
     let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
+    if (business23 && typeof version === 'number' && version >= 9 && version <= 22) {
+      const keys = businessCapacityBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
+      if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Business capacity migration backups full; original save preserved'); storage.setItem(slot, current); }
+      storage.setItem(LATEST_BACKUP_KEY, slot);
+    }
     if (education22 && typeof version === 'number' && version >= 9 && version <= 21) { const keys = educationBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current); if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Education migration backups full; original save preserved'); storage.setItem(slot, current); } storage.setItem(LATEST_BACKUP_KEY, slot); }
     if (population21 && typeof version === 'number' && version >= 9 && version <= 20) { const keys=populationBackupKeys(); let slot=keys.find(k=>storage.getItem(k)===current); if(!slot){slot=keys.find(k=>storage.getItem(k)===null);if(!slot)throw Error('Population migration backups full; original save preserved');storage.setItem(slot,current);}storage.setItem(LATEST_BACKUP_KEY,slot); }
     let currentTopology = false; try { currentTopology = JSON.parse(current)?.roadTopology?.version === 1; } catch { currentTopology = false; }
