@@ -161,20 +161,35 @@ export function enableEducation(c: City, origin: EducationState['origin'] = 'new
   c.education ??= createEducation(origin);
   return c.education;
 }
-export function buildCampus(c: City, i: number, kind: CampusKind): Result {
-  if (!c.education) return { ok: false, message: 'ระบบการศึกษายังปิดอยู่ เปิดได้จากเมนูเกม' };
-  if (!validIndex(i)) return { ok: false, message: 'ตำแหน่งอยู่นอกแผนที่' };
+/** An older save has no education record. Playing it adds an empty one.
+ * Diplomas stay zero. Job skills, money, people, goods and the original bytes are not rewritten. */
+export function adoptSavedEducation(c: City): EducationState {
+  return enableEducation(c, 'migrated-absent');
+}
+/** Why this parcel cannot take a school or university. Null means the build can proceed. */
+export function campusSiteReason(c: City, i: number, kind: CampusKind): string | null {
+  const name = kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย';
+  if (!c.education) return 'เมืองนี้ยังไม่มีข้อมูลการศึกษา';
+  if (!validIndex(i)) return 'ตำแหน่งอยู่นอกแผนที่';
   const cell = c.cells[i];
-  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i)) return { ok: false, message: 'สถานศึกษาต้องใช้แปลงว่าง 1 ช่อง' };
-  if (!neighbors(i).some(n => connectedRoads(c).has(n))) return { ok: false, message: 'ต้องติดถนนที่เชื่อมถึงประตูเมือง' };
+  const occupied = cell.road ? 'ถนน' : cell.zone === 'R' ? 'โซนบ้าน' : cell.zone === 'C' ? 'โซนพาณิชย์' : cell.zone === 'I' ? 'โซนโรงงาน' : cell.zone === 'F' ? 'โซนฟาร์ม' : cell.building !== null ? 'อาคาร' : plantAt(c, i) ? 'โรงน้ำหรือไฟ' : parkAt(c, i) ? 'สวน' : campusAt(c, i) ? 'สถานศึกษา' : null;
+  if (occupied) return `แปลงนี้เป็น${occupied}อยู่แล้ว ${name}วางบนแปลงว่างที่ยังไม่ลงโซน และต้องติดถนน`;
+  if (!neighbors(i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';
   const limit = kind === 'school' ? EDUCATION_COST.maxSchools : EDUCATION_COST.maxUniversities;
   const have = c.education.campuses.filter(campus => campus.kind === kind).length;
-  if (have >= limit || !canAllocateIds(c, 1)) return { ok: false, message: 'สร้างสถานศึกษาเพิ่มไม่ได้' };
+  if (have >= limit || !canAllocateIds(c, 1)) return 'สร้างสถานศึกษาเพิ่มไม่ได้';
   const cost = kind === 'school' ? EDUCATION_COST.school.build : EDUCATION_COST.university.build;
-  if (treasurySpendable(c) < cost) return { ok: false, message: `เงินคลังไม่พอ ใช้ ${cost / 100} เครดิต` };
+  if (treasurySpendable(c) < cost) return `เงินคลังไม่พอ ใช้ ${cost / 100} เครดิต`;
+  return null;
+}
+export function buildCampus(c: City, i: number, kind: CampusKind): Result {
+  const reason = campusSiteReason(c, i, kind);
+  const education = c.education;
+  if (reason || !education) return { ok: false, message: reason ?? 'เมืองนี้ยังไม่มีข้อมูลการศึกษา' };
+  const cost = kind === 'school' ? EDUCATION_COST.school.build : EDUCATION_COST.university.build;
   const id = c.nextId++;
   transfer(c, 'treasury', 'construction', cost, kind === 'school' ? `Build school #${id}` : `Build university #${id}`);
-  c.education.campuses.push({ id, kind, cell: i, level: 1, tick: c.tick, open: true, contract: 0, workDays: {}, report: initialCampusReport(kind, 1) });
+  education.campuses.push({ id, kind, cell: i, level: 1, tick: c.tick, open: true, contract: 0, workDays: {}, report: initialCampusReport(kind, 1) });
   c.lastEvent = kind === 'school' ? `สร้างโรงเรียน #${id} แล้ว รอครูสัญญาหรือผู้จบในเมือง` : `สร้างมหาวิทยาลัย #${id} แล้ว รับผู้มีวุฒิพื้นฐาน`;
   return { ok: true, message: c.lastEvent };
 }
@@ -1250,14 +1265,14 @@ function stepWithRoads(c: City): void {
   else if (c.tick % 3 === 1) openShop(c);
 }
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
-export function createCity(seed = 20261023, options: { starter?: boolean; education?: boolean } = {}): City {
+export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
   const c: City = { foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
     buildings: [], households: [], firms: [], accounts: { outside: 0, treasury: 0, construction: 0, roadworks: 0, upkeep: 0, landlord: 0 }, ledger: [], goodsLedger: [],
-    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], parks: [], lastEvent: '', ...(options.education ? { education: createEducation('new-city') } : {}) };
+    goods: { produced: 0, imported: 0, consumed: 0, exported: 0 }, utilities: { outside: { ...OUTSIDE_SUPPLY } }, plants: [], parks: [], lastEvent: '', education: createEducation('new-city') };
   transfer(c, 'outside', 'treasury', 3_000_000, 'Initial municipal grant');
   if (options.starter === false) {
     buildRoad(c, GATEWAY, GATEWAY);

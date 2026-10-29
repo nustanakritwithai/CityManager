@@ -3,7 +3,8 @@
  * up-front checks in buildRoad / zoneCell / bulldoze (sim.ts) without mutating City;
  * tests compare every preview against the real action on a cloned city.
  */
-import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, type City, type Zone } from './sim.ts';
+import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, campusSiteReason, type City, type Zone } from './sim.ts';
+import { EDUCATION_COST } from './education.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
 import { MAX_PARKS, PARK } from './parks.ts';
 import { FERTILITY_THRESHOLD } from './agriculture.ts';
@@ -52,6 +53,12 @@ export function previewPlacement(city: City, tool: string, start: number | null,
       : city.parks.length >= MAX_PARKS || !Number.isSafeInteger(city.nextId) || city.nextId < 1 || city.nextId > Number.MAX_SAFE_INTEGER - 3 ? `สร้างสวนเพิ่มไม่ได้ (สูงสุด ${MAX_PARKS} แห่ง)`
       : treasury < PARK.cost ? 'เงินคลังไม่พอ' : null;
     return { ok: !reason, cost: reason ? 0 : PARK.cost, label: reason ?? `สวนสาธารณะ · ${credits(PARK.cost)} ฿ · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ${credits(PARK.upkeep)} ฿/เดือน`, cells: [{ cell: hover, ok: !reason }] };
+  }
+  if (tool === 'school' || tool === 'university') {
+    const reason = campusSiteReason(city, hover, tool);
+    const cost = tool === 'school' ? EDUCATION_COST.school.build : EDUCATION_COST.university.build;
+    const name = tool === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย';
+    return { ok: !reason, cost: reason ? 0 : cost, label: reason ?? `${name} · ${credits(cost)} ฿ · 1 ช่องว่างที่ยังไม่ลงโซน · ต้องติดถนน`, cells: [{ cell: hover, ok: !reason }] };
   }
   if (tool === 'bulldoze') {
     const cell = city.cells[hover], target = cell.building !== null || cell.road || plantAt(city, hover) !== undefined || parkAt(city, hover) !== undefined, cost = target ? DEMOLITION_COST : 0;

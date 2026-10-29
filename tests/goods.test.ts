@@ -5,6 +5,7 @@ import { CROPS, CROP_BANDS, PRODUCTS, RECIPE, RECIPES, cropForFertility, freshPr
 import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '../src/legacy-v6.ts';
 import { untyped } from './untyped.ts';
 import { keepSupplied } from './plants.ts';
+import { holdEducationReady } from './education-ready.ts';
 
 /** An empty-start city with two farms on each fertility band, homes, shops, and factory plots added on day 400. */
 function threeCropCity(observe?: (city: City) => void): City {
@@ -17,7 +18,7 @@ function threeCropCity(observe?: (city: City) => void): City {
   for (const i of take(frontage, 4)) zoneCell(c, i, 'I');
   for (const i of take(frontage, 3)) zoneCell(c, i, 'C');
   for (let d = 1; d <= 600; d++) {
-    step(c);
+    holdEducationReady(c); step(c);
     for (const farm of c.firms.filter(f => f.zone === 'F')) { const parcel = c.buildings.find(b => b.id === farm.building)!; selectFarmCrop(c, farm.id, cropForFertility(c.resources.fertility[parcel.cell])!); }
     keepSupplied(c);
     observe?.(c);

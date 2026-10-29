@@ -4,13 +4,14 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, isRetail, firmCapacity, housingCapacity, farmCrop, homeOccupancy, HOUSING_OCCUPANCY_GATE_LEVEL } from '../src/sim.ts';
+import { adoptSavedEducation, createCity, step, serialize, isRetail, firmCapacity, housingCapacity, farmCrop, homeOccupancy, HOUSING_OCCUPANCY_GATE_LEVEL } from '../src/sim.ts';
 import { farmStockCapacity } from '../src/agriculture.ts';
 import { factoryCropCapacity } from '../src/factory-levels.ts';
 import { retailCapacity } from '../src/retail-capacity.ts';
 import { deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 import { SAVE_KEY, FARM_LEVEL_BACKUP_KEY } from '../src/save-storage.ts';
 import { keepSupplied } from './plants.ts';
+import { EDUCATION_SUSTAIN_DAYS } from '../src/education.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const output = resolve('.test-output/building-progression'), debugPort = 9364;
@@ -20,9 +21,36 @@ const originalPark = await readFile(new URL('./fixtures/retail-v18-park-session.
 const old = JSON.parse(originalPark), imported = deserializeParkSession(originalPark);
 assert.equal(old.version, 18); assert.equal(old.rulesVersion, 'chain-13');
 assert.equal(old.parkRuntime.activity.visitors.length, 6); assert.equal(Object.keys(old.parkRuntime.recreation.citizens).length, 6);
+adoptSavedEducation(imported.city);
 const migratedPark = serializeParkSession(imported.city, imported.runtime);
+/** Satisfies the education upgrade gate without adding campuses, wages, or utility. */
+function keepEducationGatesOpen(city) {
+  const education = city.education;
+  education.schoolReadyDays = Math.max(education.schoolReadyDays, EDUCATION_SUSTAIN_DAYS);
+  education.universityReadyDays = Math.max(education.universityReadyDays, EDUCATION_SUSTAIN_DAYS);
+  for (const household of city.households) {
+    let person = education.people.find(item => item.householdId === household.id);
+    if (!person) {
+      person = { householdId: household.id, basic: 0, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0 };
+      education.people.push(person);
+    }
+    if (person.school + person.university + person.teacher + person.professor > 0) continue;
+    person.basic = Math.max(person.basic, household.workforce);
+    person.higher = Math.max(person.higher, household.workforce);
+  }
+  education.residentBasic = education.people.reduce((sum, person) => sum + person.basic, 0);
+  education.residentHigher = education.people.reduce((sum, person) => sum + person.higher, 0);
+  for (const building of city.buildings) {
+    const row = education.sustain.find(item => item.buildingId === building.id);
+    if (row) row.days = Math.max(row.days, EDUCATION_SUSTAIN_DAYS);
+    else education.sustain.push({ buildingId: building.id, days: EDUCATION_SUSTAIN_DAYS });
+  }
+}
 const snapshots = new Map(), city = createCity(61025);
 for (let day = 1; day <= 180; day++) {
+  // Education is on for every city. Hold only its credential counters so day 120
+  // still measures the real full-house and paid upgrade.
+  keepEducationGatesOpen(city);
   if (day === 120 || day === 180) {
     const before = structuredClone(city), after = structuredClone(city); step(after);
     snapshots.set(day, { before, after });
@@ -87,7 +115,7 @@ async function send(method, params = {}) {
 async function evaluate(expression) { const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (result.exceptionDetails) throw Error(result.exceptionDetails.text); return result.result.value; }
 async function until(expression, timeout = 30_000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(75); } throw Error(`Timed out: ${expression.slice(0, 120)}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 async function click(x,y) { for (const type of ['mouseMoved','mousePressed','mouseReleased']) await send('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',clickCount:1}); }
 async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;

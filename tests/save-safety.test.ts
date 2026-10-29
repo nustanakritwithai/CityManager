@@ -73,7 +73,7 @@ test('more than eight explicit city replacements retain every original and remai
 
 test('v22 education and Guest market preserve original key order and exact startup bytes',()=>{
  for(const educationFirst of [true,false]){
- const c=createCity(3,{education:true});const j=marketJournalForTest(null);j.guestId='00000000-0000-4000-8000-000000000003';
+ const c=createCity(3);const j=marketJournalForTest(null);j.guestId='00000000-0000-4000-8000-000000000003';
  const {education,...rest}=c;const ordered=(educationFirst?{...rest,education,market:j}:{...rest,market:j,education}) as typeof c;
  const raw=snapshot(ordered),s=memory();s.setItem(SAVE_KEY,raw);const before=[...s.data],loaded=restoreStartupCity(s,fresh);
  assert.deepEqual([...s.data],before);assert.equal(serializeParkSession(loaded.city,loaded.runtime),raw);loaded.guard.write(serializeParkSession(loaded.city,loaded.runtime),null);assert.equal(s.getItem(SAVE_KEY),raw);

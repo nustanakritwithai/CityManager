@@ -4,12 +4,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { isMarket, isRetail, createCity, step, serialize, housingCapacity, bulldoze, summary, firmWorkerCount } from '../src/sim.ts';
+import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, housingCapacity, bulldoze, summary, firmWorkerCount } from '../src/sim.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { deserialize } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 import { buildLocalSignalReport } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
+import { assertAdoptedCity, assertOriginalSave } from './education-adoption.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const workspaceOutput = resolve(root, '.test-output');
@@ -50,7 +51,7 @@ async function until(expression) {
   throw Error(`Condition timeout ${expression}`);
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
@@ -75,9 +76,11 @@ async function openQuestions() {
 async function loadCity(city) {
   if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
   await button('#toggle-game-menu');
-  await evaluate(`localStorage.removeItem(${JSON.stringify(SAVE_KEY)});localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(serialize(city))})`);
+  const planted = serialize(city);
+  await evaluate(`localStorage.removeItem(${JSON.stringify(SAVE_KEY)});localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(planted)})`);
   await button('#load'); await button('#close-inspector'); await openSignals(); await openQuestions();
-  assert.deepEqual(await state(), city, 'Loading preserves exact current-schema fixture');
+  assertAdoptedCity(await state(), city, 'Loading preserves the saved city and adds only an empty education record when the save had none');
+  await assertOriginalSave(evaluate, planted);
 }
 async function ask(intent, entityId) {
   await choose('#city-question-intent', intent);
@@ -212,6 +215,7 @@ try {
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: mapPoint.x, y: mapPoint.y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
   await paints();
   const removed = await state(), expectedRemoved = structuredClone(mature);
+  adoptSavedEducation(expectedRemoved);
   assert.equal(bulldoze(expectedRemoved, house.cell).ok, true);
   assert.deepEqual(removed, expectedRemoved, 'Only the actual native demolition changes the same city, without a reload or clock advance');
   assert.equal(removed.tick, mature.tick, 'Entity removal occurs in the same paused day');

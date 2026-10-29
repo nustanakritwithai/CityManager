@@ -4,6 +4,7 @@ import { MARKET_CONVERSION_COST, bulldoze, createCity, deserialize, firmCapacity
 import { untyped } from './untyped.ts';
 import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '../src/legacy-v6.ts';
 import { keepSupplied } from './plants.ts';
+import { holdEducationReady } from './education-ready.ts';
 import { FARM_MAX_LEVEL } from '../src/agriculture.ts';
 
 test('a v6 growth-1 save loads as v8 chain-3 with only goods typing added, then keeps running', () => {
@@ -17,7 +18,7 @@ test('a v6 growth-1 save loads as v8 chain-3 with only goods typing added, then 
 
 test('farms grow from realised profit and each level is one more harvest worker', () => {
   const c = createCity(61025);
-  for (let d = 1; d <= 540; d++) { step(c); if (d % 90 === 0) assert.deepEqual(deserialize(serialize(c)), c); }
+  for (let d = 1; d <= 540; d++) { holdEducationReady(c); step(c); if (d % 90 === 0) assert.deepEqual(deserialize(serialize(c)), c); }
   const farms = c.firms.filter(f => f.zone === 'F').map(f => ({ f, b: c.buildings.find(b => b.id === f.building)! }));
   assert.ok(farms.some(({ b }) => b.level >= 2), 'a farm levelled up');
   assert.ok(farms.some(({ b }) => b.level > 3), 'the new farm tiers are reached');
@@ -30,7 +31,7 @@ test('farms grow from realised profit and each level is one more harvest worker'
 
 test('a save whose harvest used more workers than the farm level allows is rejected', () => {
   const c = createCity(61025);
-  for (let d = 1; d <= 540; d++) step(c);
+  for (let d = 1; d <= 540; d++) { holdEducationReady(c); step(c); }
   const harvest = c.cropLedger.find(e => e.kind === 'harvest' && e.workers > 1)!;
   const raw = JSON.parse(serialize(c)), farm = raw.firms.find((f: { wallet: string }) => f.wallet === harvest.to);
   raw.buildings.find((b: { id: number }) => b.id === farm.building).level = 1;

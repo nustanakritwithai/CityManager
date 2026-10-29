@@ -6,12 +6,12 @@ import { saveStoredCity, SAVE_KEY, POPULATION_BACKUP_KEY, populationBackupKeys, 
 import { createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 
 test('the 129th household requires actual funded jobs and housing; funding is recorded once',()=>{
-  const c=fixture(128);const old=serialize(c);assert.equal(JSON.parse(old).version,19);assert.deepEqual(deserialize(old),c);
+  const c=fixture(128);const old=serialize(c);assert.equal(JSON.parse(old).version,22);assert.deepEqual(deserialize(old),c);
   const before=c.accounts.outside;step(c);
   assert.equal(c.households.length,129);assert.equal(c.populationCapacityVersion,1);
   const arrivals=c.ledger.filter(e=>e.tick===c.tick&&e.reason==='New household arrival savings');assert.equal(arrivals.length,1);assert.equal(arrivals[0].amount,150000);
   assert.equal(c.accounts.outside,before-150000);assert.equal(Object.values(c.accounts).reduce((a,b)=>a+b,0),0);
-  assert.equal(JSON.parse(serialize(c)).version,21);assert.deepEqual(deserialize(serialize(c)),c);
+  assert.equal(JSON.parse(serialize(c)).version,22);assert.equal(c.populationCapacityVersion,1);assert.deepEqual(deserialize(serialize(c)),c);
   for(const change of [(v:City)=>{v.utilities.outside={power:20,water:20};},(v:City)=>{v.firms=[];},(v:City)=>{const empty=v.buildings.find(b=>b.zone==='R'&&!v.households.some(h=>h.home===b.id))!;v.buildings=v.buildings.filter(b=>b.id!==empty.id);v.cells[empty.cell].building=null;}]){
     const blocked=fixture(128);change(blocked);step(blocked);assert.equal(blocked.households.length,128);
   }
@@ -36,7 +36,7 @@ test('population envelope preserves road topology and requires matching version 
 });
 
 test('old bytes backed up before large-population save; full/quota backups preserve old primary',()=>{
-  const old=serialize(fixture(128)),next=serialize(fixture(129));
+  const smaller=fixture(128),larger=fixture(129);delete smaller.education;delete larger.education;const old=serialize(smaller),next=serialize(larger);
   const data=new Map<string,string>([[SAVE_KEY,old]]),storage={getItem:(k:string)=>data.get(k)??null,setItem:(k:string,v:string)=>{data.set(k,v);}};
   saveStoredCity(storage,next,null);assert.equal(data.get(POPULATION_BACKUP_KEY),old);assert.equal(data.get(SAVE_KEY),next);assert.equal(readStoredCity(storage,'backup')?.raw,old);
   saveStoredCity(storage,next,null);assert.equal(data.get(POPULATION_BACKUP_KEY),old);
