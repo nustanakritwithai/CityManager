@@ -4,6 +4,7 @@ import { HOUSING_LEVELS, getHousingCapacity } from '../src/housing.ts';
 import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount } from '../src/sim.ts';
 import { advanceParkRuntime, createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { SAVE_KEY, FARM_LEVEL_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
+import { holdEducationReady } from './education-ready.ts';
 
 function fixture() {
   const city = createCity(61025); for (let n = 0; n < 119; n++) step(city);
@@ -43,7 +44,7 @@ test('each autonomous upgrade keeps the same parcel, identity, households and ac
       assert.ok(housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง')));
       step(city); assert.equal(home.level, level, `gated ${level}`); continue;
     }
-    step(city);
+    holdEducationReady(city); step(city);
     assert.equal(home.level, level + 1, `upgrade ${level}`); assert.equal(home.housingType, HOUSING_LEVELS[level].type); upgraded++;
     assert.equal(home.id, id); assert.equal(home.cell, cell); assert.equal(city.cells[cell].building, id);
     assert.deepEqual(city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]), residents);
@@ -62,7 +63,7 @@ test('apartment and condo tiers upgrade only when every household slot is taken'
   const vacant = structuredClone(city); step(vacant); assert.equal(vacant.buildings.find(b => b.id === home.id)!.level, 3);
   assert.equal(fill(city, home), true); assert.equal(homeOccupancy(city, home.id).households, 3);
   assert.ok(!housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง')));
-  step(city); assert.equal(home.level, 4); assert.equal(home.housingType, 'apartment');
+  holdEducationReady(city); step(city); assert.equal(home.level, 4); assert.equal(home.housingType, 'apartment');
 });
 
 test('upgrade explains and respects road, utility and resident financial conditions', () => {
@@ -83,9 +84,10 @@ test('v15 park session migrates without changing state, rejects new housing unde
   const { city, home } = fixture(); assert.equal(buildPark(city, 0).ok, true);
   const runtime = createParkRuntime(city); advanceParkRuntime(city, runtime, 650.5, () => step(city));
   const session = JSON.parse(serializeParkSession(city, runtime));
-  session.version = 15; session.rulesVersion = 'chain-10'; delete session.factoryProgressionStartTick; delete session.farmLevelStartTick; const old = JSON.stringify(session);
+  delete session.education; session.version = 15; session.rulesVersion = 'chain-10'; delete session.factoryProgressionStartTick; delete session.farmLevelStartTick; const old = JSON.stringify(session);
   const restored = deserializeParkSession(old);
-  assert.deepEqual(restored.city, { ...city, factoryProgressionStartTick: city.tick, farmLevelStartTick: city.tick }); assert.deepEqual(restored.runtime, runtime);
+  const comparable = { ...city }; delete comparable.education;
+  assert.deepEqual(restored.city, { ...comparable, factoryProgressionStartTick: city.tick, farmLevelStartTick: city.tick }); assert.deepEqual(restored.runtime, runtime);
   const saved = serializeParkSession(restored.city, restored.runtime);
   assert.deepEqual(deserializeParkSession(saved), restored);
   const bad = structuredClone(session); const b = bad.buildings.find((x: { id: number }) => x.id === home.id); b.level = 4; b.housingType = 'apartment';
@@ -106,7 +108,7 @@ test('future and mismatched housing schemas are rejected without changing the sa
 });
 
 test('full or failed v15 backup prevents replacement of the original save', () => {
-  const { city } = fixture(), current = JSON.parse(serialize(city)); current.version = 15; current.rulesVersion = 'chain-10'; delete current.factoryProgressionStartTick; delete current.farmLevelStartTick;
+  const { city } = fixture(), current = JSON.parse(serialize(city)); delete current.education; current.version = 15; current.rulesVersion = 'chain-10'; delete current.factoryProgressionStartTick; delete current.farmLevelStartTick;
   const old = JSON.stringify(current), next = serialize(deserialize(old));
   const data = new Map<string, string>([[SAVE_KEY, old]]);
   for (let i = 0; i < 8; i++) data.set(i ? `${FARM_LEVEL_BACKUP_KEY}.${i}` : FARM_LEVEL_BACKUP_KEY, `prior-${i}`);
