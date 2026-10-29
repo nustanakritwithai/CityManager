@@ -4,7 +4,7 @@ import {mkdir,readFile,writeFile,mkdtemp} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
-import {deserialize,serialize} from '../src/sim.ts';
+import {createCity,deserialize,serialize} from '../src/sim.ts';
 import { reachTouch } from './touch-reach.mjs';
 const legacyRaw=await readFile(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),legacy=JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
@@ -53,6 +53,9 @@ try{
   await send('Network.setBlockedURLs',{urls:['*kenney-city/models/*.glb']});
  }
  await send('Page.navigate',{url:url+'?starter=1'});await until('!!window.cityManager');await until('window.cityManager.visuals().ready');await button('#pause');
+ // Asset startup can take multiple simulated days on a loaded runner. Load an
+ // explicit pristine city through the same real controls before the empty-state check.
+ await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(createCity(61025)))})`);await button('#load');await button('#close-inspector');
  const initial=await state();assert.equal(initial.goodsLedger.length,0);await open('#goods-section');assert.equal(await evaluate('!!document.querySelector("#goods-ledger .sm-empty")'),true);await assertLayout();await screenshot('phone-goods-empty.png');assert.deepEqual(await state(),initial);checks.push('Empty goods state is explicit and does not mutate the city');
  await button('#close-inspector');await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`);await button('#load');assert.deepEqual(await state(),fixture);await button('#close-inspector');const baseline=await state();
  const home=baseline.buildings.find(b=>b.zone==='R'),homePoint=await evaluate(`window.cityManager.cellScreen(${home.cell})`);assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`),'city-canvas');await click(homePoint.x,homePoint.y);

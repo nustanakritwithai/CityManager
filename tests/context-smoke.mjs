@@ -158,6 +158,22 @@ try {
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
   await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day save loaded through explicit Game page and real Load control');
 
+  // Quality must not silently remove user-enabled vehicles, even on low/auto.
+  await closePanel();await button('#atmosphere-toggle');
+  const trafficToggle='#atmosphere-menu input[aria-label^="แสดงรถ"]';
+  if(!await evaluate(`document.querySelector(${JSON.stringify(trafficToggle)}).checked`))await button(trafficToggle);
+  await button('#atmosphere-menu input[name="atmosphere-quality"][value="high"]');
+  await until('window.cityManager.atmosphere().quality==="high"');
+  const trafficHigh=await evaluate('window.cityManager.atmosphere().traffic');assert.ok(trafficHigh.actors>0);
+  await button('#atmosphere-menu input[name="atmosphere-quality"][value="low"]');
+  await until('window.cityManager.atmosphere().quality==="low"');
+  const trafficLow=await evaluate('window.cityManager.atmosphere().traffic');assert.equal(trafficLow.actors,trafficHigh.actors);
+  await button(trafficToggle);assert.equal(await evaluate('window.cityManager.atmosphere().traffic.actors'),0);
+  await button(trafficToggle);assert.equal(await evaluate('window.cityManager.atmosphere().traffic.actors'),trafficHigh.actors);
+  assert.deepEqual(await state(),fixture);await screenshot('low-quality-traffic-retained.png');
+  await button('#atmosphere-menu input[name="atmosphere-quality"][value="auto"]');await button('#atmosphere-toggle');
+  checks.push('High-to-low quality keeps the same actor count; only the explicit traffic toggle removes/restores actors; simulation and wallets unchanged');
+
   // A map touch opens the building; the trailing compatibility click must not
   // activate a household link which has just appeared underneath that gesture.
   await viewport({width:390,height:844,screenWidth:390,screenHeight:844,mobile:true,deviceScaleFactor:2});
