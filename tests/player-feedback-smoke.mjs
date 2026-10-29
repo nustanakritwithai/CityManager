@@ -8,6 +8,7 @@ import { createCity, buildCampus, campusSiteReason, step, adoptSavedEducation, d
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
 import { reachTouch } from './touch-reach.mjs';
+import { verifyReadingPanels } from './player-feedback-reading.mjs';
 
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT);
 const runtimeOnly = process.env.CITYMANAGER_UX_RUNTIME_ONLY === '1';
@@ -29,7 +30,7 @@ const target = targets.find(item => item.type === 'page' && /CityManager/.test(i
   ?? targets.find(item => item.type === 'page' && item.url === 'about:blank');
 assert.ok(target, 'explicitly isolated CityManager or blank test target');
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout; const pending = new Map(), errors = [], checks = [], landscapeLayouts = [];
+let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout; const pending = new Map(), errors = [], checks = [], landscapeLayouts = [], readingLayouts = [];
 function send(method, params = {}) {
   return new Promise((resolve, reject) => { const id = ++sequence; const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 15000); pending.set(id, { resolve: r => { clearTimeout(timer); resolve(r); }, reject: e => { clearTimeout(timer); reject(e); } }); ws.send(JSON.stringify({ id, method, params })); });
 }
@@ -243,13 +244,15 @@ try {
   await evaluate('Storage.prototype.setItem=window.__uxWrite');
   await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
   checks.push('all six cards at landscape 844x390, warning on/off: complete identity and at least two complete labelled numeric metrics, unchanged city data, no horizontal overflow, 44px reachable controls and real save retry');
+  await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts });
+  checks.push('seven tall reading panels across phone, short, landscape and wide-request viewports, warning on/off: >=90% panel height, contained scroll content, inline persistent warning, physical 44px controls, full primary values at normal reading heights, unchanged city data');
   assert.equal(errors.length, 0, JSON.stringify(errors));
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, readingLayouts, checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   const failedStage = stage;
   await shot(mobile ? 'failure-mobile' : 'failure-desktop').catch(() => {});
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), warningMenuLayout, landscapeLayout, landscapeLayouts, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), warningMenuLayout, landscapeLayout, landscapeLayouts, readingLayouts, checks, errors }, null, 2));
   throw error;
 } finally {
   if (injected) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier }).catch(() => {});

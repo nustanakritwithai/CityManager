@@ -9,8 +9,8 @@
 #campus-feedback[hidden], #education-details[hidden], #save-failure-banner[hidden] { display:none!important; }
 html #inspector .inspector-heading { flex-wrap:wrap; }
 .panel-time-controls { flex:1 0 100%; display:flex; justify-content:space-between; align-items:center; gap:8px; padding-top:4px; border-top:1px solid var(--line); }
-.panel-time-controls span { font-size:12px; line-height:1.4; }
-html #inspector #panel-pause { flex:0 0 auto; min-height:44px; min-width:100px; padding:6px 10px; font-size:14px; }
+.panel-time-controls span { font-size:calc(12 * var(--reader-unit,1px)); line-height:1.4; }
+html #inspector #panel-pause { flex:0 0 auto; min-height:max(44px,calc(44 * var(--reader-unit,1px))); min-width:calc(100 * var(--reader-unit,1px)); padding:calc(6 * var(--reader-unit,1px)) calc(10 * var(--reader-unit,1px)); font-size:calc(14 * var(--reader-unit,1px)); }
 /* A short, wide phone has room beside the identity, but not for another header
    row. Keep the clock and 44px close button available without hiding card data. */
 @media (min-width:701px) and (max-height:500px) {
@@ -35,15 +35,15 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:44px; min-width:100px; 
   html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=stock] { grid-column:1; }
   html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=trade] { grid-column:2; }
 }
-#save-failure-banner { position:fixed; z-index:150; top:8px; left:50%; transform:translateX(-50%); width:min(600px,calc(100% - 16px)); max-height:40dvh; overflow-y:auto; display:flex; align-items:center; gap:10px; padding:10px; border:2px solid #f5b85a; border-radius:8px; background:#382715; color:#fff5de; box-shadow:0 4px 18px #0008; }
+#save-failure-banner { position:fixed; z-index:150; top:8px; left:50%; transform:translateX(-50%); width:min(calc(600 * var(--reader-unit,1px)),calc(100% - 16px)); max-height:40dvh; overflow-y:auto; display:flex; align-items:center; gap:calc(10 * var(--reader-unit,1px)); padding:calc(10 * var(--reader-unit,1px)); border:2px solid #f5b85a; border-radius:8px; background:#382715; color:#fff5de; box-shadow:0 4px 18px #0008; }
 #save-failure-banner div { min-width:0; flex:1; }
 #save-failure-banner strong, #save-failure-banner span, #save-failure-banner small { display:block; overflow-wrap:anywhere; line-height:1.45; }
-#save-failure-banner strong { font-size:14px; }
-#save-failure-banner span { font-size:13px; }
-#save-failure-banner small { font-size:12px; }
-#save-failure-banner button { flex-shrink:0; min-height:44px; padding:6px 10px; color:#1b2438; background:#f3c46b; }
+#save-failure-banner strong { font-size:calc(14 * var(--reader-unit,1px)); }
+#save-failure-banner span { font-size:calc(13 * var(--reader-unit,1px)); }
+#save-failure-banner small { font-size:calc(12 * var(--reader-unit,1px)); }
+#save-failure-banner button { flex-shrink:0; min-height:max(44px,calc(44 * var(--reader-unit,1px))); min-width:max(44px,calc(44 * var(--reader-unit,1px))); padding:6px 10px; font-size:calc(14 * var(--reader-unit,1px)); color:#1b2438; background:#f3c46b; }
 #autosave-status[data-failed=true] { color:#ffd2a0; }
-html[data-touch-ui=true]:has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:calc(var(--save-warning-height,0px) + 6px); height:calc(100dvh - var(--save-warning-height,0px) - 12px); max-height:calc(100dvh - var(--save-warning-height,0px) - 12px); }
+html #inspector > #save-failure-banner { position:static; transform:none; width:auto; flex:0 0 auto; margin:4px 4px 0; box-shadow:none; }
 html:not([data-touch-ui=true]):has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:max(91px,calc(var(--save-warning-height,0px) + 6px)); }
 /* The touch menu and KPI chip are independently fixed, so move their shared
    row origin instead of only adding a margin to the visible HUD containers. */
