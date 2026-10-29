@@ -26,8 +26,10 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:44px; min-width:100px; 
   html[data-touch-ui=true] #save-failure-banner span { grid-column:1 / -1; grid-row:2; }
   /* Retail stock is a single tile. In landscape its full-width section would
      push every actual purchase/sale metric below the warning-reduced viewport. */
-  html[data-touch-ui=true] #entity-content[data-card-kind=shop] { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2fr); column-gap:12px; }
+  html[data-touch-ui=true] #entity-content[data-card-kind=shop] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:12px; }
   html[data-touch-ui=true] #entity-content[data-card-kind=shop] > * { grid-column:1 / -1; }
+  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > .bc-hero { grid-column:1; }
+  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > .flow-strip { grid-column:2; align-self:center; }
   html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=stock] { grid-column:1; }
   html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=trade] { grid-column:2; }
 }
