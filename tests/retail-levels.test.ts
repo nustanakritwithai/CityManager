@@ -14,15 +14,17 @@ function grown(): City {
   return c;
 }
 
-test('retail capacity preserves the old shelf and adds capacity only for actual staff', () => {
+test('every retail level adds shelf space, unlocked only by actual staff', () => {
+  assert.deepEqual([2, 3, 4, 5, 6, 7].map(level => retailCapacity(level).stock), [24, 32, 40, 48, 72, 96]);
   for (const level of [2, 3, 4]) {
-    assert.equal(retailCapacity(level).stock, 24);
-    assert.equal(staffedRetailCapacity(level, 1).stock, 24);
+    assert.equal(staffedRetailCapacity(level, 1).stock, 24, 'one worker keeps the legacy shelf');
+    assert.equal(staffedRetailCapacity(level, 9).stock, retailCapacity(level).stock, 'fully staffed uses the whole shelf');
+    assert.equal(staffedRetailCapacity(level, 9).householdCoverage, 8);
     assert.equal(retailCapacity(level).workers, level - 1);
   }
-  assert.deepEqual([5, 6, 7].map(level => retailCapacity(level).stock), [48, 72, 96]);
   assert.equal(staffedRetailCapacity(7, 0).stock, 0);
-  assert.equal(staffedRetailCapacity(7, 3).stock, 24);
+  assert.equal(staffedRetailCapacity(7, 2).stock, 32);
+  assert.equal(staffedRetailCapacity(7, 3).stock, 40);
   assert.equal(staffedRetailCapacity(7, 4).stock, 48);
   assert.equal(staffedRetailCapacity(7, 6).stock, 96);
 });

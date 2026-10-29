@@ -22,7 +22,7 @@ export function populationFixture(count: number, families = false, jobs = true):
     fund(wallet,150000,families?'New household arrival savings':'Historical household savings',families?n+1:0);
   }
   c.migration={arrivals:count,legacyHouseholds:families?0:count};
-  if(jobs)for(let n=0;n<Math.ceil(count*(families?2:1)/12)+1;n++){
+  if(jobs)for(let n=0;n<Math.min(64,Math.ceil(count*(families?2:1)/12)+1);n++){
     const bid=c.nextId++,id=c.nextId++,cell=sites.shift()!,wallet=`firm:${id}`;
     c.cells[cell]={road:false,zone:'I',building:bid};c.buildings.push({id:bid,cell,zone:'I',level:9,age:c.tick});
     c.firms.push({id,building:bid,zone:'I',recipe:'rice-mill',wallet,crops:emptyCrops(),products:emptyProducts(),workDays:{},inventory:0,cropInventory:0,cropCost:0,productionTick:0,owner:null,profit:0,lastMonthProfit:0,monthlyRevenue:0,monthlyExpense:0});
@@ -32,3 +32,12 @@ export function populationFixture(count: number, families = false, jobs = true):
   return c;
 }
 
+
+/** 666 families and two singles: exactly 2,000 people, with the real 64-firm cap. */
+export function population2000Fixture(): City {
+  const c=populationFixture(668,true);
+  for(const h of c.households.slice(-2)) {
+    h.members=1;h.workforce=1;h.dependents=0;h.profile='single-worker';h.workerSkills={general:1,manufacturing:0,retail:0};
+  }
+  return c;
+}

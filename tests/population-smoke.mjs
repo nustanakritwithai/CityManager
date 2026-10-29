@@ -1,4 +1,4 @@
-import { populationFixture } from './population-capacity-fixture.ts';
+import { populationFixture, population2000Fixture } from './population-capacity-fixture.ts';
 import { assertSavedCity } from './park-session-assertions.mjs';
 // Household/housing acceptance on worker schema v6. Root runs suites sequentially.
 // The browser receives only strict-valid public-simulation fixtures via real Load.
@@ -234,6 +234,25 @@ try {
   await cityMetrics(high); await screenshot('phone-population-1000.png');
   assert.ok(summary(high).population>=1002); assert.ok(high.employment.length>256);
   checks.push('Synthetic 1000+ actual people and 256+ job allocations load, show exact city metrics and round-trip through real mobile Save/Load; no natural-growth or FPS claim');
+
+  const twoK=population2000Fixture();step(twoK);deserialize(serialize(twoK));
+  await load(serialize(twoK));await cityMetrics(twoK);await layout();
+  await page('game');await button('#save');await assertSavedCity(evaluate,twoK);
+  await button('#load');assert.deepEqual(await state(),twoK);await close();
+  await button('[data-speed="1"]');
+  // Observe actual frame intervals at 1x, then pause in-page before reading state.
+  await evaluate(`(()=>{window.__populationFrames=null;const deltas=[];let previous=null;const sample=now=>{if(previous!==null)deltas.push(now-previous);previous=now;if(deltas.length===120){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click();window.__populationFrames=deltas;}else requestAnimationFrame(sample)};requestAnimationFrame(sample)})()`);
+  await button('#pause');await until('Array.isArray(window.__populationFrames)&&document.querySelector("#pause").getAttribute("aria-pressed")==="true"');
+  const actual2000=await state(),replayed2000=deserialize(serialize(twoK));
+  while(replayed2000.tick<actual2000.tick)step(replayed2000);
+  assert.deepEqual(actual2000,replayed2000);assert.equal(summary(actual2000).population,2000);
+  const frameTimes=await evaluate('window.__populationFrames'),frameSorted=[...frameTimes].sort((a,b)=>a-b);
+  const traffic2000=await evaluate('window.cityManager.atmosphere()');assert.equal(traffic2000.settings.traffic,true);assert.ok(traffic2000.traffic.actors>0,'Current enabled traffic survives automatic quality selection');
+  checks.push('2000-person current traffic diagnostics: '+JSON.stringify({quality:traffic2000.quality,traffic:traffic2000.traffic})+'; population is not vehicle count');
+  checks.push(`2000-person 1x mobile-emulated scene: ${frameTimes.length} frame intervals, median ${frameSorted[60].toFixed(1)}ms, P95 ${frameSorted[113].toFixed(1)}ms, max ${frameSorted.at(-1).toFixed(1)}ms. Headless CI only, not physical Android.`);
+  await cityMetrics(actual2000);await layout();await screenshot('phone-population-2000.png');
+  await page('game');await button('#save');await assertSavedCity(evaluate,actual2000);await button('#load');assert.deepEqual(await state(),actual2000);
+  checks.push('Exactly 2000 real people / 668 households retain complete simulation state, balanced accounts and session bytes through mobile Load, running at1x, Save and reload; job shortages remain explicit');
 
   // Restore the intended v4 test city after recovery-button layout exercises.
   await load(fixtureRaw); assert.deepEqual(await state(), fixture); assert.deepEqual(errors, []);

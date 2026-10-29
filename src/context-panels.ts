@@ -9,7 +9,7 @@ import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
 import { peopleOf } from './education.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, marketConversionStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity, harvestYield } from './agriculture.ts';
@@ -618,6 +618,13 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     output.push(cardGroup('พืชผล เงินกิจการ และเจ้าของที่ทำงาน', 'stock', marketKpis, 'bc-market-stock'), cardTrade(data));
     if (parts.owner) { parts.owner.firstElementChild?.after(cardKpis(takeCards(parts, ['drawable', 'owner-household']))); output.push(cardSection(parts.owner, 'owner')); }
     output.push(cardCash(data, parts)); const jobs = cardEmployment(parts); if (jobs) output.push(jobs);
+    const stall = city.firms.find(f => f.id === data.identity.firmId && isMarket(f));
+    if (stall) {
+      const s = marketConversionStatus(city, stall), panel = section('ยกระดับเป็นร้านค้า (ระดับ 2)'); panel.dataset.marketConversion = String(stall.id);
+      panel.append(el('p', 'cx-detail-note', `ค่าปรับปรุง ${s.cost / 100} เครดิตจากเงินแผง · พืชผลสดที่เหลือจะถูกตัดจำหน่าย`),
+        el('p', 'cx-detail-note', s.next ? 'ครบเงื่อนไข จะเป็นร้านค้าในวันเปิดร้านถัดไป' : s.reasons.length ? `เงื่อนไขที่ยังขาด: ${s.reasons.join(' · ')}` : 'เงื่อนไขครบ แต่มีตลาดอื่นอยู่คิวก่อน'));
+      output.push(panel);
+    }
   } else if (data.kind === 'factory') {
     const upgradeFirm = city.firms.find(f => f.id === data.identity.firmId); if (upgradeFirm) parts.progression.push(renderProductionProgression(city, upgradeFirm));
     const firm = city.firms.find(f => f.id === data.identity.firmId && f.zone === 'I');
