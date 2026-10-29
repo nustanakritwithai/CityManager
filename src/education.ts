@@ -227,9 +227,10 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       if (local + campus.contract < level.staff) reasons.push(campus.kind === 'school' ? 'ขาดครู' : 'ขาดอาจารย์');
     }
     const localStaff = state.people.filter(person => atCampus(person, campus, role)).reduce((sum, person) => sum + person[role], 0);
-    const staffed = localStaff + campus.contract >= level.staff;
     const seatFactor = campus.kind === 'school' ? 8 : 4;
-    const operating = operable && staffed ? Math.min(level.seats, (localStaff + campus.contract) * seatFactor) : 0;
+    // Expansion adds seats; missing staff must not switch off the teaching
+    // capacity already supplied by qualified local or contracted educators.
+    const operating = operable ? Math.min(level.seats, (localStaff + campus.contract) * seatFactor) : 0;
     let enrolled = 0;
     for (const household of [...view.households].sort((a, b) => a.id - b.id)) {
       const person = peopleOf(state, household.id);
