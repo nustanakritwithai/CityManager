@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, deserialize, zoneCell, bulldoze, buildRoad, access, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, housingCapacity, firmCapacity, firmRent, contributeOwnerCapital, withdrawOwnerProfit, industryGrowthStatus, summary, WAGES, MONTH } from '../src/sim.ts';
+import { deserializeParkSession } from '../src/park-runtime.ts';
 import { untyped } from './untyped.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createCity as createCityV5, step as stepV5, serialize as serializeV5, summary as summaryV5 } from '../src/legacy-v5.ts';
@@ -23,8 +24,9 @@ for(const key of ['seed','rng','tick','nextId','accounts','ledger','goods','good
 for(const b of imported.buildings){const prior=old.buildings.find(p=>p.id===b.id);assert.deepEqual(b,{...prior,level:prior.level+(prior.zone==='C'?1:0)});}
 assert.deepEqual(imported.cropLedger,[]);assert.deepEqual(imported.ownerLabor,[]);
 for(const f of imported.firms){const prior=old.firms.find(p=>p.id===f.id);assert.equal(f.cropInventory,0);assert.equal(f.cropCost,0);assert.equal(f.productionTick,old.tick);assert.equal(f.owner,null);for(const key of Object.keys(prior))assert.deepEqual(f[key],prior[key]);}
+const importedMoney=structuredClone(imported.accounts),importedPeople=structuredClone(imported.households),importedGoods=structuredClone(imported.goods);
 adoptSavedEducation(imported);
-const stopped=deserialize(importedRaw);step(stopped);deserialize(serialize(stopped));assert.equal(stopped.goods.produced,imported.goods.produced,'Legacy zero-crop factories cannot fabricate recipe inputs');
+const stopped=deserialize(serialize(imported));step(stopped);deserialize(serialize(stopped));assert.equal(stopped.goods.produced,imported.goods.produced,'Legacy zero-crop factories cannot fabricate recipe inputs');
 // Start from an authentic v4 city that already has a finished-goods retailer.
 const legacyAgriculture=createCityV4(61025);for(let day=0;day<29;day++)stepV4(legacyAgriculture);
 const legacyV4Raw=serializeV4(legacyAgriculture),legacyV4Imported=deserialize(legacyV4Raw);
@@ -137,7 +139,7 @@ try {
   await page('game');const originalStorage=await storage();await button('#load-v3');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),originalStorage);await button('#load-v3');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),originalStorage);
   await evaluate('window.__agStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v3"))throw new DOMException("Agriculture backup quota","QuotaExceededError");return window.__agStorageSet.call(this,k,v)}');
   try{await button('#save');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),originalStorage);}finally{await evaluate('Storage.prototype.setItem=window.__agStorageSet;delete window.__agStorageSet');}
-  await button('#save');const backed=await storage();assert.equal(backed['citymanager.save.v3'],oldRaw);assert.equal(backed['citymanager.save.v2'],v2Raw);assert.equal(backed['citymanager.save.v1'],v1Raw);assert.equal(backed['citymanager.backup.v3'],oldRaw);assert.equal(backed['citymanager.backup.latest'],'citymanager.backup.v3');await assertSavedCity(evaluate,importedRaw);await button('#save');assert.deepEqual(await storage(),backed);
+  await button('#save');const backed=await storage();assert.equal(backed['citymanager.save.v3'],oldRaw);assert.equal(backed['citymanager.save.v2'],v2Raw);assert.equal(backed['citymanager.save.v1'],v1Raw);assert.equal(backed['citymanager.backup.v3'],oldRaw);assert.equal(backed['citymanager.backup.latest'],'citymanager.backup.v3');const savedRaw=await assertSavedCity(evaluate,imported);const savedCity=deserializeParkSession(savedRaw).city;assert.deepEqual(savedCity.accounts,importedMoney,'Saved money matches the imported city');assert.deepEqual(savedCity.households,importedPeople,'Saved people match the imported city');assert.deepEqual(savedCity.goods,importedGoods,'Saved goods match the imported city');await button('#save');assert.deepEqual(await storage(),backed);
   await evaluate('localStorage.setItem("citymanager.save.v7","{broken")');const corrupt=await storage();await button('#load');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),corrupt);await button('#load-backup');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),corrupt);await button('#save');assert.deepEqual(await storage(),backed);
   await close();await oneTick(stopped);assert.equal((await state()).goods.produced,imported.goods.produced);
   checks.push('Actual strict v3 import is read-only and idempotent, adds zero crop stock, stops input-free factory production; v6 Save first preserves immutable v3 bytes and original v1/v2, handles quota/corruption/recovery without replacing old saves');
