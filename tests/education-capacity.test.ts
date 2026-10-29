@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCampus, createCity, deserialize, householdWorkerCount, serialize, step, toggleCampus, upgradeCampus, type City } from '../src/sim.ts';
-import { assertEducationInvariants, createEducation, EDUCATION_COST, educationOccupied, initialCampusReport, stepEducation, type CampusKind, type EducationPeople, type EducationView } from '../src/education.ts';
+import { assertEducationInvariants, createEducation, EDUCATION_COST, educationOccupied, initialCampusReport, stepEducation, withdrawCampus, type CampusKind, type EducationPeople, type EducationView } from '../src/education.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
 import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
 import { restoreStartupCity } from '../src/startup-save.ts';
@@ -84,6 +84,85 @@ const checkCity = (city: City) => {
   assert.equal(Object.values(city.accounts).reduce((n, amount) => n + amount, 0), 0);
   for (const household of city.households) assert.ok(householdWorkerCount(city, household.id) <= household.workforce, `day ${city.tick}: household ${household.id}`);
 };
+
+for (const kind of ['school', 'university'] as const) {
+  for (const lastDay of [false, true]) {
+    test(`${kind}: a partial multi-person cohort keeps only the teaching days each learner earned (${lastDay ? 'graduation' : 'mid-course'})`, () => {
+      const count = kind === 'school' ? 6 : 3;
+      const seats = kind === 'school' ? 8 : 4;
+      const role = kind === 'school' ? 'school' : 'university';
+      const rank = kind === 'school' ? 'basic' : 'higher';
+      const days = EDUCATION_COST[kind].studyDays;
+      const progress = lastDay ? days - 1 : 10;
+      const { state, campus, view } = fixture(kind, 0, 100_000);
+      state.people = [1, 2].map(id => person(id, { [role]: count, basic: kind === 'university' ? count : 0, campusId: campus.id, progress }));
+      state.residentBasic = kind === 'university' ? count * 2 : 0;
+      view.households = state.people.map(row => ({ id: row.householdId, workforce: count + 1, wallet: `household:${row.householdId}`, ownsFirm: false }));
+      const cohorts = (row: EducationPeople) => row.studyCohorts ?? [{ count: row[role], progress: row.progress }];
+      const earned = () => state.people.reduce((sum, row) => sum + cohorts(row).reduce((n, group) => n + group.count * group.progress, 0), 0) + state.completed[rank] * days;
+      assertEducationInvariants(state, view.households);
+      const before = earned();
+      stepEducation(state, view);
+      assert.equal(campus.report.operatingSeats, seats);
+      assert.equal(earned() - before, seats, 'exactly one attendance day per served learner; none credited to waiting learners');
+      assert.equal(state.completed[rank], lastDay ? seats : 0);
+      const waiting = state.people.find(row => row.householdId === 2)!;
+      if (lastDay) {
+        assert.equal(waiting[role], count * 2 - seats);
+        assert.equal(waiting.progress, progress, 'partial graduation preserves every remaining learner\'s earned progress');
+      } else {
+        assert.deepEqual(cohorts(waiting).slice().sort((a, b) => a.progress - b.progress), [{ count: count * 2 - seats, progress }, { count: seats - count, progress: progress + 1 }]);
+      }
+      assertEducationInvariants(state, view.households);
+      const persisted = JSON.stringify(state), resumed = JSON.parse(persisted);
+      assertEducationInvariants(resumed, view.households);
+      campus.open = false; resumed.campuses[0].open = false;
+      const closed = state.people.map(row => structuredClone(cohorts(row)));
+      stepEducation(state, view); stepEducation(resumed, view);
+      assert.deepEqual(state.people.map(row => cohorts(row)), closed, 'closing pauses every subcohort');
+      assert.deepEqual(resumed, state);
+      campus.open = true; resumed.campuses[0].open = true;
+      stepEducation(state, view); stepEducation(resumed, view);
+      assert.deepEqual(resumed, state, 'serialized progress resumes deterministically without duplicate graduation');
+      assertEducationInvariants(state, view.households);
+      const completed = structuredClone(state.completed);
+      withdrawCampus(state, campus.id);
+      assert.ok(state.people.every(row => row.studyCohorts === undefined && row.progress === 0));
+      assert.deepEqual(state.completed, completed, 'withdrawal removes study groups without deleting diplomas');
+    });
+  }
+}
+
+test('v22 preserves split study cohorts and rejects inconsistent saved attendance', () => {
+  const city = createCity(3);
+  assert.equal(buildCampus(city, 265, 'school').ok, true);
+  for (let day = 0; day < 40; day++) step(city);
+  const household = city.households.find(row => row.workforce === 2 && !city.firms.some(firm => firm.owner?.householdId === row.id))!;
+  assert.ok(household);
+  const learner = city.education!.people.find(row => row.householdId === household.id)!;
+  // A legal two-person saved cohort with different earned attendance days.
+  Object.assign(learner, { school: 2, progress: 10, studyCohorts: [{ count: 1, progress: 11 }, { count: 1, progress: 10 }] });
+  const raw = serialize(city), restored = deserialize(raw);
+  assert.deepEqual(restored.education, city.education);
+  assert.deepEqual(restored.accounts, city.accounts);
+  assert.deepEqual(restored.households, city.households);
+  assert.equal(JSON.parse(raw).version, 22);
+  const again = deserialize(serialize(restored));
+  step(restored); step(again);
+  assert.deepEqual(again.education, restored.education);
+  assert.deepEqual(again.accounts, restored.accounts);
+  for (const bad of [
+    [], [{ count: 2, progress: 11 }], [{ count: 0, progress: 11 }, { count: 2, progress: 10 }],
+    [{ count: 1, progress: 10 }, { count: 1, progress: 10 }],
+    [{ count: 1, progress: 60 }, { count: 1, progress: 10 }],
+    [{ count: 1, progress: 11 }, { count: 2, progress: 10 }],
+    [{ count: 1, progress: 11.5 }, { count: 1, progress: 10 }],
+  ]) {
+    const invalid = JSON.parse(raw);
+    invalid.education.people.find((row: EducationPeople) => row.householdId === household.id).studyCohorts = bad;
+    assert.throws(() => deserialize(JSON.stringify(invalid)), /study cohort/i);
+  }
+});
 
 test('seed 3 early school expansion keeps teaching until natural graduates can staff it', () => {
   const firstGraduation: number[] = [];
