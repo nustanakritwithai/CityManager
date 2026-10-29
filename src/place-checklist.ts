@@ -2,7 +2,7 @@
  * Growth checklist for a vacant zoned parcel, read from the simulator's own `explainCell`
  * blockers so it can never disagree with what growth actually checks. Presentation only.
  */
-import { GATEWAY, SIZE, connectedRoads, explainCell, type City } from './sim.ts';
+import { GATEWAY, SIZE, MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, connectedRoads, explainCell, type City } from './sim.ts';
 import { roadLinked } from './road-topology.ts';
 
 export type ParcelCheck = { key: string; label: string; state: 'pass' | 'fail'; detail?: string };
@@ -13,8 +13,8 @@ const RULES: readonly Rule[] = [
   { key: 'power', label: 'ไฟฟ้าในเครือข่ายพอสำหรับอาคารใหม่', zones: 'RC', match: /^Not enough power:/, detail: () => 'เครือข่ายไฟไม่พอ อาคารใหม่ต้องใช้ไฟเพิ่ม สร้างโรงไฟฟ้าริมถนนที่เชื่อมประตูเมือง' },
   { key: 'water', label: 'น้ำในเครือข่ายพอสำหรับอาคารใหม่', zones: 'RCF', match: /^Not enough water:/, detail: () => 'เครือข่ายน้ำไม่พอ อาคารใหม่ต้องใช้น้ำเพิ่ม สร้างโรงสูบน้ำริมถนนที่เชื่อมประตูเมือง' },
   { key: 'ids', label: 'รหัสข้อมูลยังเหลือ', zones: '', match: /^Entity ID range exhausted/, detail: () => 'รหัสข้อมูลเต็ม ระบบไม่สร้างอาคารใหม่' },
-  { key: 'building-limit', label: 'จำนวนอาคารไม่เกิน 192', zones: '', match: /^Prototype building limit/, detail: () => 'ถึงจำนวนอาคารสูงสุดที่ต้นแบบรองรับแล้ว' },
-  { key: 'firm-limit', label: 'จำนวนกิจการไม่เกิน 64', zones: '', match: /^Firm limit/, detail: () => 'ถึงจำนวนกิจการสูงสุดที่ต้นแบบรองรับแล้ว' },
+  { key: 'building-limit', label: `จำนวนอาคารไม่เกิน ${MAX_CITY_BUILDINGS}`, zones: '', match: /^Prototype building limit/, detail: () => 'ถึงจำนวนอาคารสูงสุดที่ต้นแบบรองรับแล้ว' },
+  { key: 'firm-limit', label: `จำนวนกิจการไม่เกิน ${MAX_CITY_FIRMS}`, zones: '', match: /^Firm limit/, detail: () => `กิจการใช้แปลงอาคารร่วมกับบ้าน รวมอาคารได้ไม่เกิน ${MAX_CITY_BUILDINGS} แห่ง` },
   { key: 'housing-demand', label: 'มีความต้องการบ้านเพิ่ม', zones: 'R', match: /^No housing demand/, detail: () => 'บ้านว่างที่มีอยู่รองรับผู้ย้ายเข้าและครัวเรือนไร้บ้านได้แล้ว' },
   { key: 'income', label: 'รายได้คาดหมายพอซื้อของและจ่ายค่าเช่า', zones: 'R', match: /^Expected income/, detail: () => 'รายได้คาดหมายยังไม่พอซื้อสินค้าและจ่ายค่าเช่า' },
   { key: 'crop-demand', label: 'มีผู้ซื้อพืชผลเพิ่ม', zones: 'F', match: /^No additional crop demand/, detail: () => 'ฟาร์มเดิมผลิตพอสำหรับโรงงานและครัวเรือนแล้ว' },
