@@ -55,7 +55,10 @@ export class MarketClient {
   connectPages() { if (!this.usesPagesAuth || this.journalUnavailable) throw new Error('pages-auth-unavailable'); const expected = this.expectedPagesGuest(); const exchange = pagesSession.connect(expected); return exchange.then(async guest => { try { const me = await this.request('/v1/me'); if (me?.guest_id !== guest) throw new Error('market guest identity mismatch'); return me; } catch (error) { pagesSession.clear(); throw error; } }); }
   exportSave() { return structuredClone(this.journal); }
   validateSave(value: unknown) { safeJournal(JSON.stringify(value)); }
-  async bindLoadedCity(value: unknown, apply: () => void) { return this.writer(async () => {
+  async bindLoadedCity(value: unknown, apply: () => void, assertCurrent: () => void = () => {}) { return this.writer(async () => {
+    // The lock may be acquired after another Load has already committed. Check
+    // before changing either the in-memory identity or its persistent journal.
+    assertCurrent();
     const hasState = Boolean(this.guestId || this.journal.operations.length || this.journal.escrow.length || Object.keys(this.journal.receipts).length);
     if (value == null) { if (hasState) throw new Error('saved-market-reconciliation-required'); apply(); return; }
     const imported = safeJournal(JSON.stringify(value));
@@ -68,7 +71,26 @@ export class MarketClient {
       if (!ack || !receipt || receipt.state !== 'applied' || ack.payload.claim_id !== receipt.claimId || ack.guestId !== this.guestId || ack.cityId !== this.journal.cityId || JSON.stringify(imported) !== JSON.stringify(withoutAck)) throw new Error('saved-market-reconciliation-required');
       apply(); return;
     }
-    const old = this.journal, oldGuest = this.guestId; this.journal = imported; this.guestId = imported.guestId; try { this.save(); apply(); } catch (e) { this.journal = old; this.guestId = oldGuest; throw e; }
+    const old = this.journal, oldGuest = this.guestId, oldRevision = this.revision;
+    this.journal = imported; this.guestId = imported.guestId;
+    let persisted = false;
+    try { this.save(); persisted = true; apply(); }
+    catch (error) {
+      const written = this.revision;
+      this.journal = old; this.guestId = oldGuest; this.revision = oldRevision;
+      if (persisted && globalThis.localStorage) {
+        try {
+          // Do not roll back over a newer writer that ignored the market lock.
+          if (localStorage.getItem(MARKET_SAVE_KEY) !== written) throw new Error('market-state-changed-reload');
+          if (oldRevision === null) localStorage.removeItem(MARKET_SAVE_KEY);
+          else localStorage.setItem(MARKET_SAVE_KEY, oldRevision);
+        } catch (rollbackError) {
+          this.journalUnavailable = true;
+          throw new Error('market-load-rollback-failed', { cause: rollbackError });
+        }
+      }
+      throw error;
+    }
   }); }
   async importSave(value: unknown) { return this.bindLoadedCity(value, () => {}); }
   private save() { if (globalThis.localStorage) { persist(this.journal); this.revision = JSON.stringify(this.journal); } }

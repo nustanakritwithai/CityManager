@@ -330,7 +330,7 @@ export function retailDemand(c: City): number {
 /** The lowest-id connected household with 600 credits of savings and a general/retail worker that owns nothing yet. */
 function ownerCandidate(c: City): Household | undefined {
   return [...c.households].sort((a, b) => a.id - b.id).find(h => householdAccess(c, h) && balance(c, h.wallet) >= 60_000 &&
-    h.workerSkills.general + h.workerSkills.retail > 0 && !c.firms.some(f => f.owner?.householdId === h.id));
+    h.workerSkills.general + h.workerSkills.retail > 0 && h.workforce > educationOccupied(c.education, h.id) && !c.firms.some(f => f.owner?.householdId === h.id));
 }
 function reserveOwnerLabor(c: City): void {
   c.ownerLabor = [];
@@ -339,25 +339,48 @@ function reserveOwnerLabor(c: City): void {
     const h = c.households.find(h => h.id === f.owner!.householdId);
     if (!h || !householdAccess(c, h) || !access(c, building(c, f.building).cell) || !svc.ok(f.building)) continue;
     const skill = h.workerSkills.retail > 0 ? 'retail' : 'general';
-    if (h.workerSkills[skill] <= c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length) continue;
+    if (h.workerSkills[skill] <= c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length ||
+      h.workforce <= educationOccupied(c.education, h.id) + c.ownerLabor.filter(e => e.householdId === h.id).length) continue;
     c.ownerLabor.push({ householdId: h.id, firmId: f.id, skill, workers: 1 });
   }
+  trimWorkAssignments(c);
+}
+
+/** Education and ownership reserve counts before wage/park jobs. Only active
+ * assignments are released; firm ownership, assets and earned pay stay intact.
+ * Also repairs v22 snapshots written before owners respected education. */
+function trimWorkAssignments(c: City): void {
+  for (const h of c.households) {
+    let remaining = h.workforce - educationOccupied(c.education, h.id);
+    c.ownerLabor = c.ownerLabor.filter(e => e.householdId !== h.id || remaining-- > 0);
+  }
+  const jobSkills = (h: Household) => {
+    const skills = { ...h.workerSkills };
+    for (const owner of c.ownerLabor.filter(e => e.householdId === h.id)) skills[owner.skill]--;
+    return subtractEducationReserve(skills, educationOccupied(c.education, h.id));
+  };
   // Changing into self-employment never deletes already earned wage claims.
-  for (const h of c.households) for (const skill of ['general', 'manufacturing', 'retail'] as const) {
-    let remaining = h.workerSkills[skill] - c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length;
-    for (const e of c.employment.filter(e => e.householdId === h.id && e.skill === skill).sort((a, b) => a.firmId - b.firmId)) {
-      const kept = Math.min(remaining, e.workers); e.workers = kept; remaining -= kept;
+  for (const h of c.households) {
+    const available = jobSkills(h);
+    for (const skill of ['general', 'manufacturing', 'retail'] as const) {
+      let remaining = available[skill];
+      for (const e of c.employment.filter(e => e.householdId === h.id && e.skill === skill).sort((a, b) => a.firmId - b.firmId)) {
+        const kept = Math.min(remaining, e.workers); e.workers = kept; remaining -= kept;
+      }
     }
   }
   c.employment = c.employment.filter(e => e.workers > 0);
   if (!c.parks.length) return;
   // New owners may claim a worker after today's park shift. Keep earned pay, release
   // only the assignment that conflicts with the real remaining skill pool.
-  for (const h of c.households) for (const skill of ['general', 'manufacturing', 'retail'] as const) {
-    let left = h.workerSkills[skill] - [...c.employment, ...c.ownerLabor].filter(a => a.householdId === h.id && a.skill === skill).reduce((n, a) => n + a.workers, 0);
-    for (const p of [...c.parks].sort((a, b) => a.id - b.id)) if (p.staffing) {
-      for (const a of p.staffing.allocations.filter(a => a.householdId === h.id && a.skill === skill)) { a.workers = Math.min(a.workers, Math.max(0, left)); left -= a.workers; }
-      p.staffing.allocations = p.staffing.allocations.filter(a => a.workers > 0);
+  for (const h of c.households) {
+    const available = jobSkills(h);
+    for (const skill of ['general', 'manufacturing', 'retail'] as const) {
+      let left = available[skill] - c.employment.filter(a => a.householdId === h.id && a.skill === skill).reduce((n, a) => n + a.workers, 0);
+      for (const p of [...c.parks].sort((a, b) => a.id - b.id)) if (p.staffing) {
+        for (const a of p.staffing.allocations.filter(a => a.householdId === h.id && a.skill === skill)) { a.workers = Math.min(a.workers, Math.max(0, left)); left -= a.workers; }
+        p.staffing.allocations = p.staffing.allocations.filter(a => a.workers > 0);
+      }
     }
   }
 }
@@ -1579,6 +1602,8 @@ function deserializeVersioned(json: string, expandedPopulation = false): City {
     const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }));
     assertEducationInvariants(education, city.households);
     city.education = education;
+    if (city.households.some(h => householdWorkerCount(city, h.id) > h.workforce)) trimWorkAssignments(city);
+    if (city.households.some(h => householdWorkerCount(city, h.id) > h.workforce)) throw new Error('Education and jobs exceed household workforce');
     // Reuse the validated values while preserving the v22 envelope key order.
     // Restoring education after the inner validator must not move it past market.
     const ordered = Object.fromEntries(Object.keys(envelope).filter(key => Object.hasOwn(city, key)).map(key => [key, (city as unknown as Record<string, unknown>)[key]]));
