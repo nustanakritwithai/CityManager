@@ -1,6 +1,7 @@
 /** Local saves need no login/network. Existing market operations retain their guard. */
 import {type City} from './sim.ts';
-import {serializeParkSession,type ParkRuntime} from './park-runtime.ts';
+import {deserializeParkSession,serializeParkSession,type ParkRuntime} from './park-runtime.ts';
+import {type createSaveGuard} from './save-guard.ts';
 import {type MarketClient} from './market-client.ts';
 export async function saveLocalCitySession(city:City,runtime:ParkRuntime,client:MarketClient|undefined,write:(raw:string)=>void):Promise<void>{
  const financial=client&&Boolean(client.journal.operations.length||client.journal.escrow.length||Object.keys(client.journal.receipts).length);
@@ -17,4 +18,20 @@ export async function bindLocalCitySession(client:MarketClient|undefined,loaded:
    apply();return;
  }
  await client.bindLoadedCity(loaded.market,apply);
+}
+
+export async function loadLocalCitySession(raw:string,client:MarketClient|undefined,guard:ReturnType<typeof createSaveGuard>,apply:(restored:{city:City;runtime:ParkRuntime})=>void):Promise<void>{
+ // Invalidate pending writers before awaiting the market lock. A failed or
+ // superseded Load must never authorize saving the city that was already open.
+ guard.block();
+ const generation=guard.generation;
+ const restored=deserializeParkSession(raw);
+ if(restored.city.market)client?.validateSave(restored.city.market);
+ await bindLocalCitySession(client,restored.city,()=>{
+  if(guard.generation!==generation)throw Error('City changed while loading; cancelled the older Load');
+  try{
+   guard.acceptLoaded(raw,true);
+   apply(restored);
+  }catch(error){guard.block();throw error;}
+ });
 }
