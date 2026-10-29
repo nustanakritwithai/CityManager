@@ -5,11 +5,11 @@ type Store=Pick<Storage,'getItem'|'setItem'>;
 export function createSaveGuard(storage:Store){
  let expected:string|null=null,checkpoint:string|null=null,armed=false,replacement=false,generation=0;let pendingArchive:string[]=[];
  try{expected=storage.getItem(SAVE_KEY);checkpoint=storage.getItem(AUTOSAVE_CHECKPOINT_KEY);armed=readStoredCity(storage)===null&&!checkpoint;}catch{/* unavailable storage never authorizes replacing data */}
- const archive=(raw:string|null)=>{
+ const archive=(raw:string|null,publishPointer=true)=>{
   if(raw===null)return;
   const keys=saveConflictBackupKeys();let key=keys.find(k=>storage.getItem(k)===raw);
   if(!key){key=keys.find(k=>storage.getItem(k)===null);if(!key)throw Error('สำเนากู้คืนเต็ม กรุณาส่งออกไฟล์ก่อน เซฟเดิมยังอยู่');storage.setItem(key,raw);}
-  storage.setItem(LATEST_BACKUP_KEY,key);
+  if(publishPointer)storage.setItem(LATEST_BACKUP_KEY,key);return key;
  };
  const preserveOriginal=()=>{const current=storage.getItem(SAVE_KEY);if(current!==null&&storage.getItem(PRE_AUTOSAVE_BACKUP)===null)storage.setItem(PRE_AUTOSAVE_BACKUP,current);};
  return {
@@ -31,11 +31,18 @@ export function createSaveGuard(storage:Store){
    const next=JSON.parse(raw);let previous:{version:number}|null=null;
    try{previous=expected===null?null:JSON.parse(expected);}catch{if(!replacement)throw Error('เซฟเดิมอ่านไม่ได้ หยุดการเขียนทับ');}
    if(!replacement&&previous&&Number(previous.version)>Number(next.version))throw Error('ไม่เขียนเซฟเวอร์ชันเก่าทับเวอร์ชันใหม่');
-   for(const prior of pendingArchive)archive(prior);
+   // Validate and plan the existing migration writes first. Required legacy backup
+   // failures must occur before publishing any new recovery pointer/checkpoint.
+   const staged=new Map<string,string>();
+   saveStoredCity({getItem:key=>staged.get(key)??storage.getItem(key),setItem:(key,value)=>{staged.set(key,value);}},raw,legacy);
+   for(const [key,value] of staged)if(key!==SAVE_KEY&&key!==LATEST_BACKUP_KEY)storage.setItem(key,value);
+   let pointer:string|undefined;
+   for(const prior of pendingArchive)pointer=archive(prior,false)??pointer;
    preserveOriginal();
-   // Independent newest copy survives a still-open older client writing the old slot.
+   if(storage.getItem(SAVE_KEY)!==expected||storage.getItem(AUTOSAVE_CHECKPOINT_KEY)!==checkpoint){armed=false;archive(raw);throw Error('เซฟถูกเปลี่ยนจากอีกแท็บ เก็บสำเนาเมืองนี้แล้ว');}
    storage.setItem(AUTOSAVE_CHECKPOINT_KEY,raw);checkpoint=raw;
-   saveStoredCity(storage,raw,legacy);expected=storage.getItem(SAVE_KEY);replacement=false;pendingArchive=[];
+   const latest=staged.get(LATEST_BACKUP_KEY)??pointer;if(latest)storage.setItem(LATEST_BACKUP_KEY,latest);
+   storage.setItem(SAVE_KEY,staged.get(SAVE_KEY)!);expected=storage.getItem(SAVE_KEY);replacement=false;pendingArchive=[];
   },
  };
 }

@@ -51,6 +51,8 @@ jobs:
         if: always()
         with:
           name: save-safety-evidence
-          path: .test-output/save-safety
+          path: |
+            .test-output/save-safety/*.png
+            .test-output/save-safety/*.json
           if-no-files-found: warn
           retention-days: 3

@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {createCity,step,zoneCell} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
@@ -42,4 +43,10 @@ test('quota failures preserve primary snapshot and explicit new-city archives pr
 test('explicit Load remains read-only; replacement copies are deferred until Save',()=>{
  const s=memory(),current=snapshot(fresh()),other=snapshot(createCity(2));s.setItem(SAVE_KEY,current);s.setItem(AUTOSAVE_CHECKPOINT_KEY,current);const g=createSaveGuard(s),before=[...s.data];
  g.acceptLoaded(other,true);assert.deepEqual([...s.data],before);g.write(other,null);assert.ok([...s.data.values()].includes(current));assert.equal(s.getItem(SAVE_KEY),other);
+});
+
+test('required legacy backup quota fails before any new recovery metadata is published',()=>{
+ const old=readFileSync(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),loaded=deserializeParkSession(old),s=memory(),sentinel=snapshot(createCity(91));s.setItem(SAVE_KEY,sentinel);s.setItem('citymanager.save.v1',old);const before=[...s.data];
+ const g=createSaveGuard({...s,setItem:(key,value)=>{if(key.startsWith('citymanager.backup.v1'))throw Error('backup quota');s.setItem(key,value);}});g.acceptLoaded(old,true);
+ assert.throws(()=>g.write(serializeParkSession(loaded.city,loaded.runtime),old),/backup quota/);assert.deepEqual([...s.data],before);
 });
