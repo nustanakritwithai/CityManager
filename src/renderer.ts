@@ -443,7 +443,7 @@ export class CityView {
             this.box(arrows, lane, .18, 0, .055, .012, .48, '#ffffff', false);
             const left = this.box(arrows, lane - .08, .18, .17, .055, .012, .23, '#ffffff', false);
             const right = this.box(arrows, lane + .08, .18, .17, .055, .012, .23, '#ffffff', false);
-            left.setLocalEulerAngles(0, -40, 0); right.setLocalEulerAngles(0, 40, 0);
+            left.setLocalEulerAngles(0, 40, 0); right.setLocalEulerAngles(0, -40, 0);
           }
         }
         // Lamps stand on the sidewalk of straight streets, every fourth parcel along the street.

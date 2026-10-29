@@ -72,7 +72,7 @@ try {
  await selectRoad('join');await tapCell(cell(5,12));await tapCell(cell(5,13));
  await selectRoad('join');await tapCell(cell(10,12));await tapCell(cell(10,13));
  assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected,'Real controls produce exact intended topology and accounting');
- await screenshot('desktop-parallel-oneway.png');
+ await screenshot('desktop-parallel-oneway.png');await button('[data-tool="select"]');await screenshot('desktop-road-arrows.png');
  await game();await button('#save');const saved=await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`);assert.equal(JSON.parse(saved).version,20);
  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(ROAD_TOPOLOGY_BACKUP_KEY)})`),original,'Legacy bytes preserved before topology migration');
  await button('#load');assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected);
