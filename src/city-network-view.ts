@@ -1,3 +1,4 @@
+import { roadTopologyKey } from './road-topology.ts';
 /**
  * "เครือข่ายเมือง": the city's variables as a slowly turning 3D web. Node chips are real buttons
  * placed over a canvas that draws the links, the ambient flow along them and the pulses an
@@ -134,7 +135,7 @@ export class CityNetworkView {
   update(city: City) {
     const fresh = city !== this.city; this.city = city;
     if (!this.open) return;
-    const key = `${city.tick}:${city.ledger.length}:${city.buildings.length}:${city.households.length}:${city.cells.reduce((n, c) => n + (c.road ? 1 : 0), 0)}`;
+    const key = `${roadTopologyKey(city)}:${city.tick}:${city.ledger.length}:${city.buildings.length}:${city.households.length}:${city.cells.reduce((n, c) => n + (c.road ? 1 : 0), 0)}`;
     if (!fresh && key === this.key) return;
     this.key = key;
     const values = networkValues(city), now = performance.now();

@@ -58,7 +58,7 @@ export function firmLabor(city: City, id: number): {
 
 /** Same-tick pool/role edits and moves invalidate an entity view without a fake tick. */
 export function contextRevision(city: City): string {
-  return JSON.stringify([city.version, city.rulesVersion, city.tick, city.ledger.length, city.goodsLedger.length, city.utilities, city.migration,
+  return JSON.stringify([city.roadTopology, city.version, city.rulesVersion, city.tick, city.ledger.length, city.goodsLedger.length, city.utilities, city.migration,
     city.households.map(h => [h.id, h.home, h.members, h.workforce, h.dependents, h.profile, h.origin, h.skillSource, h.workerSkills, h.needs, h.lastPurchaseTick, city.accounts[h.wallet]]),
     city.employment.map(a => [a.householdId, a.firmId, a.occupation, a.rank, a.skill, a.workers]),
     city.ownerLabor, city.parks, city.resources, city.crops, city.cropLedger.length, city.cropLedger.at(-1),

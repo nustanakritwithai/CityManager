@@ -1,3 +1,4 @@
+import { roadLinked, roadDriveAllowed, roadTopologyKey } from './road-topology.ts';
 /**
  * Decorative city life: which cars, trucks, walkers and smoke plumes to show.
  * Read-only over City; no sim RNG, no mutation, nothing enters a save. Quantities follow
@@ -15,7 +16,7 @@ const TRUCKED = ['Wholesale stock delivery', 'Imported shop stock', 'Exported go
 /** Truck cargo, in paint order: the three crops, then the three products. */
 export const CARGO = ['rice', 'vegetables', 'sugarcane', 'milled-rice', 'canned-food', 'sugar'] as const;
 /** `colour` is the paint for cars; for trucks it is the index in CARGO of what the route mostly carries. */
-export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; colour: number };
+export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; returnRoute?: number[]; colour: number };
 export type Walker = { key: string; route: number[]; colour: number };
 export type TrafficPlan = { cars: Vehicle[]; trucks: Vehicle[]; walkers: Walker[]; smoke: number[]; signature: string };
 
@@ -91,14 +92,14 @@ export function accessCell(roads: ReadonlySet<number>, cell: number): number | n
 }
 
 /** Shortest path over connected road cells, deterministic neighbour order. */
-export function roadRoute(roads: ReadonlySet<number>, from: number, to: number): number[] {
+export function roadRoute(roads: ReadonlySet<number>, from: number, to: number, city?: City): number[] {
   if (!roads.has(from) || !roads.has(to)) return [];
   if (from === to) return [from];
   const previous = new Map<number, number>([[from, -1]]), queue = [from];
   for (let q = 0; q < queue.length; q++) {
     const here = queue[q];
     for (const next of neighbours(here)) {
-      if (!roads.has(next) || previous.has(next)) continue;
+      if (!roads.has(next) || previous.has(next) || city && !roadDriveAllowed(city, here, next)) continue;
       previous.set(next, here);
       if (next === to) {
         const path = [to]; for (let at = here; at !== -1; at = previous.get(at)!) path.push(at);
@@ -129,8 +130,9 @@ export function trafficPlan(city: City): TrafficPlan {
       const homeCell = home == null ? null : buildingCell(home), workCell = firm ? buildingCell(firm.building) : null;
       const from = homeCell == null ? null : accessCell(roads, homeCell), to = workCell == null ? null : accessCell(roads, workCell);
       if (from == null || to == null || from === to) continue;
-      const route = roadRoute(roads, from, to);
-      if (route.length > 1) cars.push({ key: `car:${job.h}:${job.f}`, kind: 'car', route, colour: Math.floor(visualHash(job.h, job.f) * 6) });
+      const route = roadRoute(roads, from, to, city), returnRoute = city.roadTopology ? roadRoute(roads, to, from, city) : undefined;
+      if (returnRoute && returnRoute.length < 2) continue;
+      if (route.length > 1) cars.push({ key: `car:${job.h}:${job.f}`, kind: 'car', route, ...(returnRoute ? { returnRoute } : {}), colour: Math.floor(visualHash(job.h, job.f) * 6) });
     }
     // Trucks: one per real delivery route of the last full week (goods wholesale/import/export, crop
     // trades and crop exports to the gateway), two on a busy route. Keys carry no day, so a route keeps its truck.
@@ -145,8 +147,9 @@ export function trafficPlan(city: City): TrafficPlan {
       if (trucks.length >= MAX_TRUCKS) break;
       const from = walletCell(city, roads, f.from), to = walletCell(city, roads, f.to);
       if (from == null || to == null || from === to) continue;
-      const route = roadRoute(roads, from, to);
-      for (let k = 0; route.length > 1 && k < (f.quantity >= TRUCK_LOAD ? 2 : 1) && trucks.length < MAX_TRUCKS; k++) trucks.push({ key: `truck:${key}:${k}`, kind: 'truck', route, colour: f.loads.indexOf(Math.max(...f.loads)) });
+      const route = roadRoute(roads, from, to, city), returnRoute = city.roadTopology ? roadRoute(roads, to, from, city) : undefined;
+      if (returnRoute && returnRoute.length < 2) continue;
+      for (let k = 0; route.length > 1 && k < (f.quantity >= TRUCK_LOAD ? 2 : 1) && trucks.length < MAX_TRUCKS; k++) trucks.push({ key: `truck:${key}:${k}`, kind: 'truck', route, ...(returnRoute ? { returnRoute } : {}), colour: f.loads.indexOf(Math.max(...f.loads)) });
     }
     // Walkers: residents of connected homes stroll a short stretch of their street.
     const people = new Map<number, number>();
@@ -154,7 +157,7 @@ export function trafficPlan(city: City): TrafficPlan {
     for (const [home, count] of [...people].sort((a, b) => a[0] - b[0])) {
       const cell = buildingCell(home), start = cell == null ? null : accessCell(roads, cell);
       if (start == null) continue;
-      const out = neighbours(start).filter(n => roads.has(n)).sort((a, b) => a - b);
+      const out = neighbours(start).filter(n => roads.has(n) && roadLinked(city,start,n)).sort((a, b) => a - b);
       for (let k = 0; k < Math.min(2, Math.ceil(count / 3)) && walkers.length < MAX_WALKERS; k++) {
         const far = out.length ? out[Math.floor(visualHash(home, k) * out.length)] : start;
         walkers.push({ key: `walk:${home}:${k}`, route: far === start ? [start] : [start, far], colour: Math.floor(visualHash(home, k + 9) * 6) });
@@ -167,6 +170,6 @@ export function trafficPlan(city: City): TrafficPlan {
       const cell = buildingCell(firm.building); if (cell != null && roads.has(accessCell(roads, cell) ?? -1)) smoke.push(cell);
     }
   }
-  const signature = [city.tick, cars.map(c => c.key).join(','), trucks.map(t => t.key).join(','), walkers.length, smoke.join(',')].join('|');
+  const signature = [city.tick, roadTopologyKey(city), cars.map(c => c.key).join(','), trucks.map(t => t.key).join(','), walkers.length, smoke.join(',')].join('|');
   return { cars, trucks, walkers, smoke, signature };
 }

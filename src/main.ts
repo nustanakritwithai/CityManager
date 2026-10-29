@@ -1,3 +1,5 @@
+import { roadTopologyKey, clearRoadDirections } from './road-topology.ts';
+import { installRoadMenu, type RoadMode } from './road-menu.ts';
 import '@fontsource/ibm-plex-sans-thai/thai-400.css';
 import '@fontsource/ibm-plex-sans-thai/thai-600.css';
 import '@fontsource/ibm-plex-sans-thai/thai-700.css';
@@ -12,7 +14,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildPark, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildPark, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -92,6 +94,7 @@ const sound = (name: EffectName) => audio.play(name);
 const resultSound = <T extends { ok: boolean }>(result: T, success: EffectName): T => { sound(result.ok ? success : 'ui-error'); return result; };
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
+let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
 let parkFrameMs = 0, parkFramePeakMs = 0;
@@ -126,13 +129,14 @@ function farmHint(index: number | null): string {
   return `ฟาร์ม · ความอุดมสมบูรณ์ ${fertility}% · ${access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
 }
 function setTool(next: string) {
+  roadMenu?.close();
   tool = next; roadStart = null; hover = null;
   if (next !== 'select') inspector(false);
-  if (view) { view.abortGesture(); view.mode = next; view.dragStart = null; }
+  if (view) { view.abortGesture(); view.mode = next === 'road' && (roadMode === 'join' || roadMode === 'split') ? 'select' : next; view.dragStart = null; }
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(button => {
     const active = button.dataset.tool === next; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
   });
-  $('#tool-help').textContent = help[next]; status(`${toolNames[next]}พร้อมใช้งาน`); render();
+  $('#tool-help').textContent = next === 'road' ? roadHelp() : help[next]; status(`${toolNames[next]}พร้อมใช้งาน`); render();
 }
 function inspector(open: boolean) {
   if (!open) signalPanel?.close();
@@ -183,12 +187,21 @@ function cancel() {
   if (tool !== 'select') { setTool('select'); return; }
   inspector(false); status('กลับสู่แผนที่เมือง');
 }
+function roadHelp() {
+  return roadMode === 'normal' ? help.road : roadMode === 'join' ? 'เชื่อมทางแยก · แตะถนน 2 ช่องติดกัน · ทิศวันเวย์ยังคงอยู่' : roadMode === 'split' ? 'แยกทางเชื่อม · แตะถนน 2 ช่องติดกัน · อาจทำให้ถนนหรือน้ำไฟขาด' : roadMode === 'oneway' ? '2 เลนวันเวย์ ฿50/ช่องใหม่ · ลากตรงจากต้นไปปลายตามทิศรถ · เลือกจุดเชื่อมเอง' : 'ถนนคู่ขนาน ฿50/ช่องใหม่ · ลากตามแนว · ด้านข้างไม่เชื่อมทุกช่อง';
+}
+function roadCommand(a: number, b: number) {
+  if (roadMode === 'join' || roadMode === 'split') return editRoadJunction(city, a, b, roadMode === 'join');
+  if (roadMode === 'normal') { const result = buildRoad(city, a, b); if (result.ok) clearRoadDirections(city, roadPath(a,b)); return result; }
+  return buildParallelRoad(city, a, b, roadMode === 'oneway');
+}
 function activate(index: number) {
   if (tool !== 'select') ownerDecisionSession.beforeExternal(city);
   selected = index;
   if (tool === 'road') {
-    if (roadStart === null) { roadStart = index; status('เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
-    else { const result = resultSound(buildRoad(city, roadStart, index), 'ui-road'); roadStart = null; status(result.message); }
+    roadMenu?.close();
+    if (roadStart === null) { roadStart = index; status(roadMode === 'join' || roadMode === 'split' ? 'เลือกถนนแล้ว · แตะถนนช่องที่ติดกันเพื่อแก้ทางเชื่อม' : 'เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
+    else { const result = resultSound(roadCommand(roadStart, index), 'ui-road'); roadStart = null; status(result.message); }
   } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
   else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
   else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
@@ -410,7 +423,7 @@ function updateMapInfo(placement: Preview | null) {
   if (!enabled) { view.setOverlay(null); mapMarkers.setLegend(null); mapMarkers.setPreview(null, null); return; }
   mapMarkers.setPreview(placement, hover);
   const mode = route ? undefined : TOOL_OVERLAY[tool], now = performance.now();
-  const layout = city.cells.map(cell => (cell.road ? 'r' : cell.zone ?? '.') + (cell.building === null ? '' : 'b')).join('');
+  const layout = city.cells.map(cell => (cell.road ? 'r' : cell.zone ?? '.') + (cell.building === null ? '' : 'b')).join('') + roadTopologyKey(city);
   const overlayKey = `${mode}:${layout}`;
   if (overlayKey !== mapInfo.overlayKey || mode && city.tick !== mapInfo.overlayTick && now - mapInfo.overlayAt > 500) {
     const overlay = mode ? mapOverlay(city, mode) : null;
@@ -482,12 +495,14 @@ async function boot() {
   $('#open-signals').addEventListener('click', () => { if (signalsEnabled()) openRoute({ page: 'signals' }); });
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
     ownerDecisionSession.beforeExternal(city);
-    selected = b; roadStart = null; status(resultSound(buildRoad(city, a, b), 'ui-road').message);
+    selected = b; roadStart = null; status(resultSound(roadCommand(a, b), 'ui-road').message);
     ownerDecisionSession.syncExternal(city, 'player-drag-road'); render();
   });
   parkScene = new SceneParkActivity(view);
   view.traffic.setWalkersEnabled(false);
-  document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => { sound('ui-select'); setTool(b.dataset.tool!); }));
+  const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
+  roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
+  document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); }));
   document.querySelectorAll<HTMLElement>('[data-camera]').forEach(b => b.addEventListener('click', () => view.control(b.dataset.camera!)));
   document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { sound('ui-click'); speed = Number(b.dataset.speed); render(); }));
   $('#pause').addEventListener('click', () => { if (ownerDecisionPanel?.isAutoPending()) return; sound('ui-click'); paused = !paused; render(); });
@@ -523,7 +538,7 @@ async function boot() {
   marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
   installHudRow();
   $('#save').addEventListener('click', async () => {
-    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมือง v19/chain-14 และข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
+    try { if (marketPanel?.client.enabled) { await marketPanel.client.saveLocalCity(market => { saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, market), importedLegacyRaw); city.market = structuredClone(market); }); } else saveStoredCity(localStorage, serializeParkSession(city, parkRuntime, city.market), importedLegacyRaw); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch { sound('ui-error'); status('บันทึกไม่ได้: ตรวจสอบเมืองและรายการตลาดก่อน เซฟเดิมยังอยู่'); }
   });
   const loadStored = async (source: SaveSource) => {
     try {
