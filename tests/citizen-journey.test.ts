@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {planFamilyRides, type TripRequest} from '../src/citizen-trips.ts';
-import {createJourneys, departJourneys, moveJourneyVehicle, restoreJourneys} from '../src/citizen-journey.ts';
+import {createJourneys, departJourneys, moveJourneyVehicle, restoreJourneys, prepareJourneyFrame} from '../src/citizen-journey.ts';
 const r=(id:string,route:number[]):TripRequest=>({id,citizenId:id,householdId:1,origin:route[0],destination:route.at(-1)!,route,earliestDeparture:420,latestDeparture:430,canDrive:true});
 const fixture=()=>createJourneys(planFamilyRides([r('driver',[1,2,3,4]),r('partner',[1,2,3])]).rides,400);
 test('time passing never teleports passengers through traffic',()=>{
@@ -28,4 +28,14 @@ test('mid-trip save restores exactly and rejects duplicated or teleported passen
 test('co-located origin and destination is an explicit immediate drop, not a road journey',()=>{
  const s=createJourneys(planFamilyRides([r('a',[1])]).rides,400);departJourneys(s,420);
  assert.equal(s.vehicles[0].status,'parked');assert.equal(s.people[0].state,'arrived');assert.deepEqual(restoreJourneys(s),s);
+});
+
+test('indexed motion handles 2000 solo drivers without losing identity',()=>{
+ const requests=Array.from({length:2000},(_,i)=>({...r(String(i),[1,2,3]),householdId:i}));
+ const s=createJourneys(planFamilyRides(requests).rides,400);departJourneys(s,420);
+ const frame=prepareJourneyFrame(s);
+ for(const v of s.vehicles)assert.equal(moveJourneyVehicle(s,v.vehicleId,()=>true,frame),true);
+ assert.equal(s.people.filter(p=>p.state==='in-vehicle'&&p.cell===2).length,2000);
+ assert.deepEqual(restoreJourneys(JSON.parse(JSON.stringify(s))),s);
+ s.people=[...s.people];assert.throws(()=>moveJourneyVehicle(s,s.vehicles[0].vehicleId,()=>true,frame));
 });

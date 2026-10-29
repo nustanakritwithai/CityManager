@@ -20,8 +20,8 @@
 
 ## ยังไม่เสร็จ / ห้ามอ้างว่าใช้งานจริงแล้ว
 
-1. เชื่อม persistent fleet และ state machine ขากลับ รวม pickup ที่ยังไม่พร้อม
-2. lane solver, safe spacing, queues, intersection reservations, blocked/reroute diagnostics
+1. เชื่อม persistent fleet ข้ามวันกับเมืองจริง (state machine ขากลับระดับโมดูลทำแล้ว รวมรอสมาชิกพร้อม รับตามจุด และเซฟระหว่างรับกลับ)
+2. ขยาย cell/lane admission ที่ทดสอบแล้วเป็นการเคลื่อนไหวต่อเนื่อง พร้อม spacing และ reroute diagnostics
 3. clock pacing ที่ยังคงจังหวะเศรษฐกิจเดิม ต้องวัดกับ 1 วันต่อวินาทีปัจจุบันก่อนกำหนดค่า
 4. renderer แบบจำนวนมาก และกำจัดการแสดงตัวคนซ้ำกับ park activity
 5. atomic save envelope และ migration แบบเก็บต้นฉบับ ห้ามนำ snapshot ของโมดูลไปแทนเซฟเมืองโดยตรง
@@ -32,7 +32,11 @@
 ## ข้อจำกัดที่ต้องแก้ก่อนเปิดใช้
 
 - Identity เดิมเป็น household member slots ไม่มีอายุ/ใบขับขี่ การทดลองนี้ให้เฉพาะ employed slots ขับได้ ไม่ตีความ dependent เป็นเด็กโดยอัตโนมัติ
-- ขากลับขณะนี้เป็น itinerary เท่านั้น ยังไม่ขยับรถหรือเพิ่มของในเมือง
-- Journey module ยังไม่ควบคุมความถี่การขยับรถและ occupancy เอง ต้องมี solver ก่อนเชื่อมเกม
-- การค้นหาบุคคลต่อการขยับรถต้องทำ index/context ต่อ frame ก่อน scale test ห้ามใช้สร้าง map ทั้งเมืองต่อรถใน runtime จริง
+- ขากลับขยับได้ใน journey module เมื่อ road solver อนุมัติ ยังไม่เชื่อม renderer หรือเพิ่มทรัพย์สินในเมือง
+- Road queue module ควบคุม occupancy แบบช่อง/เลนและจองแยกแล้ว ยังต้องเชื่อม quantum กับ canonical clock และ animation ก่อนเปิดจริง
+- ใช้ prepareJourneyFrame ทำ index ต่อ quantum แล้ว ทดสอบ 2,000 รถเดี่ยวในข้อมูลได้ แต่ไม่ใช่ผล FPS ของ browser
 - Snapshot validator ของโมดูลไม่ใช่ server security boundary
+
+## ขั้นรับกลับและคิวถนน
+
+เพิ่ม beginReturnRide ใช้รถคันเดิม รอสมาชิกพร้อม ลงทะเบียนคนที่ยังรอ ณ ที่ทำงาน และรับเมื่อรถไปถึงเท่านั้น เพิ่ม road queue ที่รักษารถทุกคันในคิว รองรับ 2 เลนทางเดียว ไม่อนุญาต timeout เพื่อขับทะลุ และตรวจ occupancy คู่กับ journey snapshot ทดสอบถนนถูกลบ/สร้างคืนและทางแยกตัดกัน ระดับข้อมูลยังไม่ใช่การเล่นจริงบนเว็บ
