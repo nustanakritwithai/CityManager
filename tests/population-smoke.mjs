@@ -168,7 +168,9 @@ try {
 
   await evaluate('localStorage.setItem("citymanager.save.v7","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt);
   await button('#load-backup'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);
-  await load(fixtureRaw); await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sentinel)})`); const beforeQuota = await storage(), stateBeforeQuota = await state();
+  // Adopt the quota fixture through real Load. A direct external write after Load
+  // is now (correctly) a stale-tab conflict, covered by save-safety-smoke separately.
+  await load(sentinel); await page('game'); const beforeQuota = await storage(), stateBeforeQuota = await state();
   await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==="citymanager.save.v7")throw new DOMException("Acceptance primary quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
   try { await button('#save'); assert.deepEqual(await storage(), beforeQuota); assert.deepEqual(await state(), stateBeforeQuota); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
   finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }

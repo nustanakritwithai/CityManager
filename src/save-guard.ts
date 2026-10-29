@@ -9,7 +9,8 @@ export function createSaveGuard(storage:Store){
   if(raw===null)return;
   const keys=saveConflictBackupKeys();let key=keys.find(k=>storage.getItem(k)===raw);
   if(!key){key=keys.find(k=>storage.getItem(k)===null);if(!key)throw Error('สำเนากู้คืนเต็ม กรุณาส่งออกไฟล์ก่อน เซฟเดิมยังอยู่');storage.setItem(key,raw);}
-  if(publishPointer)storage.setItem(LATEST_BACKUP_KEY,key);return key;
+  let valid=true;try{deserializeParkSession(raw);}catch{valid=false;}
+  if(valid&&publishPointer)storage.setItem(LATEST_BACKUP_KEY,key);return valid?key:undefined;
  };
  const preserveOriginal=()=>{const current=storage.getItem(SAVE_KEY);if(current!==null&&storage.getItem(PRE_AUTOSAVE_BACKUP)===null)storage.setItem(PRE_AUTOSAVE_BACKUP,current);};
  return {
@@ -34,15 +35,18 @@ export function createSaveGuard(storage:Store){
    // Validate and plan the existing migration writes first. Required legacy backup
    // failures must occur before publishing any new recovery pointer/checkpoint.
    const staged=new Map<string,string>();
-   saveStoredCity({getItem:key=>staged.get(key)??storage.getItem(key),setItem:(key,value)=>{staged.set(key,value);}},raw,legacy);
+   const migration=saveStoredCity({getItem:key=>staged.get(key)??storage.getItem(key),setItem:(key,value)=>{staged.set(key,value);}},raw,legacy);
    for(const [key,value] of staged)if(key!==SAVE_KEY&&key!==LATEST_BACKUP_KEY)storage.setItem(key,value);
    let pointer:string|undefined;
    for(const prior of pendingArchive)pointer=archive(prior,false)??pointer;
    preserveOriginal();
    if(storage.getItem(SAVE_KEY)!==expected||storage.getItem(AUTOSAVE_CHECKPOINT_KEY)!==checkpoint){armed=false;archive(raw);throw Error('เซฟถูกเปลี่ยนจากอีกแท็บ เก็บสำเนาเมืองนี้แล้ว');}
    storage.setItem(AUTOSAVE_CHECKPOINT_KEY,raw);checkpoint=raw;
-   const latest=staged.get(LATEST_BACKUP_KEY)??pointer;if(latest)storage.setItem(LATEST_BACKUP_KEY,latest);
+   const latest=staged.get(LATEST_BACKUP_KEY)??migration.backup;if(latest)storage.setItem(LATEST_BACKUP_KEY,latest);
    storage.setItem(SAVE_KEY,staged.get(SAVE_KEY)!);expected=storage.getItem(SAVE_KEY);replacement=false;pendingArchive=[];
+   // Supplemental pointer publication is not the commit point. Its raw backup
+   // already exists; a metadata quota cannot undo a successful primary write.
+   if(!latest&&pointer)try{storage.setItem(LATEST_BACKUP_KEY,pointer);}catch{/* primary and immutable copy remain durable */}
   },
  };
 }

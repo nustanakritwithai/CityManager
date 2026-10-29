@@ -50,3 +50,11 @@ test('required legacy backup quota fails before any new recovery metadata is pub
  const g=createSaveGuard({...s,setItem:(key,value)=>{if(key.startsWith('citymanager.backup.v1'))throw Error('backup quota');s.setItem(key,value);}});g.acceptLoaded(old,true);
  assert.throws(()=>g.write(serializeParkSession(loaded.city,loaded.runtime),old),/backup quota/);assert.deepEqual([...s.data],before);
 });
+
+test('corrupt primary recovery preserves the valid legacy-backup pointer',()=>{
+ const old=readFileSync(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),loaded=deserializeParkSession(old),raw=serializeParkSession(loaded.city,loaded.runtime),s=memory();s.setItem(SAVE_KEY,snapshot(createCity(91)));s.setItem('citymanager.save.v1',old);const g=createSaveGuard(s);g.acceptLoaded(old,true);g.write(raw,old);const pointer=s.getItem('citymanager.backup.latest');
+ s.setItem(SAVE_KEY,'{broken');g.acceptLoaded(old,true);g.write(raw,old);assert.equal(s.getItem('citymanager.backup.latest'),pointer);assert.equal(s.getItem(SAVE_KEY),raw);
+});
+test('primary quota preserves current bytes and existing recovery pointer',()=>{
+ const c=fresh(),s=memory(),old=snapshot(c);s.setItem(SAVE_KEY,old);s.setItem('citymanager.backup.latest','citymanager.backup.v1');const g=createSaveGuard({...s,setItem:(k,v)=>{if(k===SAVE_KEY)throw Error('primary quota');s.setItem(k,v);}});g.acceptLoaded(old);step(c);assert.throws(()=>g.write(snapshot(c),null),/primary quota/);assert.equal(s.getItem(SAVE_KEY),old);assert.equal(s.getItem('citymanager.backup.latest'),'citymanager.backup.v1');
+});
