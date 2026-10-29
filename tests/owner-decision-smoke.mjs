@@ -54,7 +54,7 @@ const sleep = ms => new Promise(done => setTimeout(done, ms));
 const safePrefix = value => /localStorage/.test(String(value)) ? 'synthetic localStorage fixture setup (<payload omitted>)' : String(value).replace(/\s+/g, ' ').slice(0, 180);
 let ws, browser, sequence = 0, currentStage = 'setup', lastCommand = null;
 const stage = name => { currentStage = name; console.log(`[owner QA] ${name}`); };
-async function send(method, params = {}, timeoutMs = 15000) {
+async function send(method, params = {}, timeoutMs = 360_000) {
   const id = ++sequence, metadata = { method, ...(method === 'Runtime.evaluate' ? { expressionPrefix: safePrefix(params.expression) } : {}) };
   lastCommand = metadata;
   const promise = new Promise((done, reject) => {
@@ -68,7 +68,7 @@ async function evaluate(expression) {
   if (result.exceptionDetails) throw Error(`Browser evaluation failed: ${result.exceptionDetails.text}`);
   return result.result.value;
 }
-async function until(expression, timeoutMs = 20000) {
+async function until(expression, timeoutMs = 360_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) { if (await evaluate(expression)) return; await sleep(70); }
   throw Error(`Condition timeout: ${safePrefix(expression)}`);
@@ -117,7 +117,7 @@ async function load(city) {
 }
 async function mode(value) { await button(selector('data-owner-mode', value)); assert.equal((await hostState()).mode, value); }
 async function advancePast(targetTick) {
-  await close(); await button('[data-speed="10"]');
+  await close();
   assert.equal(await evaluate('document.querySelector("#pause").textContent.trim()'), '▶', 'Fixture remains paused until native Play');
   // Stop via the native Pause control inside the browser, not after a remote
   // CDP round trip plus paints that can advance an extra month on a busy runner.

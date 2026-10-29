@@ -1,11 +1,12 @@
 import {
   START_HOUR, WEATHER_PERIOD_SECONDS, TIME_MODES, QUALITIES, PHASE_LABELS, SEASON_LABELS,
-  advanceHour, resolveHour, atmosphereAt, seasonWeights, dominantSeason, isRaining, formatClock, phaseOf,
+  gameHour, resolveHour, atmosphereAt, seasonWeights, dominantSeason, isRaining, formatClock, phaseOf,
   type TimeMode, type Quality, type SeasonWeights
 } from './atmosphere.ts';
 import { WeatherOverlay } from './weather-overlay.ts';
 import type { CityView } from './renderer.ts';
 import type { City } from './sim.ts';
+import { GAME_MINUTES_PER_DAY } from './game-clock.ts';
 
 export type VisualSettings = { timeMode: TimeMode; quality: Quality | 'auto'; rain: boolean; seasons: boolean; traffic: boolean; mapInfo: boolean };
 const STORAGE_KEY = 'citymanager.visual.v1';
@@ -37,7 +38,7 @@ export const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|basic render|war
 const autoQuality = (renderer: string): Quality => SOFTWARE_RENDERER.test(renderer) ? 'low'
   : matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600 ? 'medium' : 'high';
 
-type Host = { view: CityView; getCity: () => City; isPaused: () => boolean; getSpeed: () => number; tickFraction: () => number; onChange?: () => void };
+type Host = { view: CityView; getCity: () => City; isPaused: () => boolean; tickFraction: () => number; onChange?: () => void };
 
 /** Drives the visual-only sky clock, season tint, decorative rain and render quality. */
 export class AtmosphereController {
@@ -104,7 +105,7 @@ export class AtmosphereController {
     });
     this.qualityNote.className = 'atmosphere-note'; quality.append(this.qualityNote);
     const note = document.createElement('p'); note.className = 'atmosphere-note';
-    note.textContent = 'เวลาในวัน ฤดูกาล และฝนเป็นภาพบรรยากาศเท่านั้น ไม่มีผลต่อการจำลองหรือเซฟ · 1 tick ยังเท่ากับ 1 วัน';
+    note.textContent = 'เวลาในวัน ฤดูกาล และฝนเป็นภาพบรรยากาศเท่านั้น ไม่มีผลต่อการจำลองหรือเซฟ · ท้องฟ้าโหมดอัตโนมัติเดินตามเวลาเกม (1 วันเกม = 6 วินาที)';
     this.menu.replaceChildren(heading, this.status, time, quality,
       toggle('ฤดูกาลตามเดือนในเกม', this.settings.seasons, value => this.change({ seasons: value })),
       toggle('ฝนตามฤดู (ภาพตกแต่ง)', this.settings.rain, value => this.change({ rain: value })),
@@ -135,7 +136,8 @@ export class AtmosphereController {
   update(dt: number) {
     const running = !this.host.isPaused() && !document.hidden;
     this.watchFrameRate(dt);
-    if (running) { this.autoHour = advanceHour(this.autoHour, dt, this.host.getSpeed()); this.weatherClock += Math.min(dt, .25); }
+    this.autoHour = gameHour(this.host.tickFraction() * GAME_MINUTES_PER_DAY);
+    if (running) this.weatherClock += Math.min(dt, .25);
     const city = this.host.getCity();
     const weights = this.settings.seasons ? seasonWeights(city.tick + this.host.tickFraction()) : NO_SEASON;
     const raining = this.settings.rain && isRaining(city.seed, this.weatherClock / WEATHER_PERIOD_SECONDS, this.settings.seasons ? weights : { hot: 0, rainy: .4, cool: 0 });

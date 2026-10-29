@@ -40,7 +40,7 @@ async function evaluate(expression) {
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails));
   return r.result.value;
 }
-async function until(expression, timeout = 15000) {
+async function until(expression, timeout = 360_000) {
   const start = Date.now();
   while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); }
   throw new Error(`Condition timed out: ${expression}`);
@@ -128,9 +128,12 @@ try {
   await button('#new-city'); await key('Escape');
   assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), false);
   assert.deepEqual(await state(), saved); checks.push('Game-menu new-city cancel and Escape keep state'); await closeInspector();
-  await button('[data-speed="3"]');
-  assert.equal(await evaluate(`document.querySelector('[data-speed="3"]').getAttribute('aria-pressed')`), 'true');
-  await button('[data-speed="1"]');
+  // Fixed game clock: no speed multiplier controls remain; normal play is 240 game minutes/s (6 s per day).
+  assert.equal(await evaluate('document.querySelectorAll("[data-speed], #speed-cycle").length'), 0);
+  assert.equal(await evaluate('window.cityManager.parks().clockMode'), 'normal');
+  assert.equal(await evaluate('window.cityManager.parks().gameMinutesPerSecond'), 240);
+  assert.match(await text('.time-label small'), /1 วันเกม = 6 วินาที/);
+ 
   await button('[data-tool="road"]'); await cell(12 * 24 + 11); await button('#cancel-tool');
   assert.match(await text('#status'), /start cancelled/i);
   await button('#cancel-tool'); assert.equal(await evaluate('document.querySelector("[data-tool=select]").getAttribute("aria-pressed")'), 'true');
@@ -198,7 +201,7 @@ try {
   for (let i = 0; i < staffFixture.cells.length; i++) if (staffFixture.cells[i].road && i !== GATEWAY) bulldoze(staffFixture, i);
   buildPark(staffFixture, parkCell);
   await game(); await evaluate('localStorage.setItem("citymanager.save.v7",' + JSON.stringify(serialize(staffFixture)) + ')'); await button('#load'); await closeInspector();
-  await button('[data-speed="10"]'); await button('#pause');
+  await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=46'); await button('#pause');
   const staffed = await state(), staffedPark = staffed.parks[0];
   assert.equal(staffedPark.staffing.allocations.reduce((n, a) => n + a.workers, 0), 1);
@@ -231,7 +234,8 @@ try {
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), activitySave);
   await closeInspector(); await button('#toggle-inspector');
   await button('#park-recreation > button');
-  assert.equal(await evaluate('window.cityManager.parks().speed'), 1 / 1440);
+  assert.equal(await evaluate('window.cityManager.parks().clockMode'), 'citizen-watch');
+  assert.equal(await evaluate('window.cityManager.parks().gameMinutesPerSecond'), 1);
   const realPeople = await evaluate('window.cityManager.parks()');
   assert.ok(realPeople.renderedVisitors > 0);
   assert.equal(new Set(realPeople.citizenIds).size, realPeople.renderedVisitors);
@@ -254,12 +258,14 @@ try {
   await button('#load'); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
   assert.match(await text('#inspector-status'), /โหลดไม่สำเร็จ.*sidecar clock mismatch/);
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await closeInspector();
+  await button('#toggle-inspector'); await button('#citizen-watch');
+  assert.equal(await evaluate('window.cityManager.parks().gameMinutesPerSecond'), 240); await closeInspector();
   checks.push('Real citizen identities, staffed visit benefit, citizen-speed pause, persistent provenance table, atomic fractional save/load, corrupt-sidecar rejection');
 
   await button('[data-camera="reset"]');
   await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();
-  await button('[data-speed="10"]'); await button('#pause');
-  await until('JSON.parse(window.cityManager.snapshot()).tick>=90', 15000);
+  await button('#pause');
+  await until('JSON.parse(window.cityManager.snapshot()).tick>=90', 360_000);
   await button('#pause'); const grown = await state();
   assert.ok(grown.buildings.length > 0); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason.includes('purchase'))); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason === 'Monthly wages'));
   await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assert.deepEqual(await state(), fixture); await closeInspector();

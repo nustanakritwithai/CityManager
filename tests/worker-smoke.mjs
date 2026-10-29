@@ -66,7 +66,7 @@ const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/M
 let ws, sequence = 0; const pending = new Map(), sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) { const id = ++sequence; const promise = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id, method, params })); return promise; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
-async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
+async function until(expression) { const start = Date.now(); while (Date.now() - start < 360000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
@@ -77,7 +77,7 @@ async function page(name) { if ((await route()).open !== 'true' || (await route(
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
 async function load(city) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
 async function oneTick(city) {
-  await close(); await button('[data-speed="1"]');
+  await close();
   assert.equal(await evaluate(`document.querySelector('#pause').getAttribute('aria-pressed')`), 'true', 'Start boundary paused');
   // Stop on the page, not after a CDP round trip and two additional paints.
   // The complete independently replayed city must still match at the exact tick.

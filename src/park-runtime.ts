@@ -8,7 +8,8 @@ import { createParkActivity, advanceParkActivity, reconcileParkActivity, startPa
 import { createParkRecreation, advanceParkRecreation, restoreParkRecreation, type ParkRecreationState } from './park-recreation.ts';
 import { observeParkRecreationMinute, parkRecreationResidentIds, PROPOSED_PARK_COMFORT } from './park-recreation-activity.ts';
 
-export const GAME_MINUTES_PER_DAY = 1440;
+import { GAME_MINUTES_PER_DAY } from './game-clock.ts';
+export { GAME_MINUTES_PER_DAY };
 export type ParkRuntime = { version: 1; activity: ParkActivityState; recreation: ParkRecreationState; minuteRemainder: number };
 
 export function createParkRuntime(city: City): ParkRuntime {
@@ -28,7 +29,7 @@ export function reconcileParkRuntime(city: City, runtime: ParkRuntime): void {
 }
 
 /** One economic day per 1440 actual minutes. A zero advance is a true pause.
- * Normal playback still requests 1440 minutes/second; citizen view requests one.
+ * Rates live in game-clock.ts: normal play 240 minutes/second, citizen watch one.
  */
 export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean): number {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440 * 120) throw new RangeError('Invalid park clock advance');

@@ -34,8 +34,6 @@ html:not([data-visual-quality=low]) :is(.panel, .city-kpis .kpi, .status-chip) {
 .kpi-ring text { transform: rotate(90deg); transform-origin: 18px 18px; fill: var(--c-text); font-size: 12px; font-weight: 700; }
 .city-kpis[data-paused=true] .kpi-ring .arc { stroke: var(--c-warn); }
 
-/* ---- Time controls: the chosen speed glows -------------------------------- */
-.time-hud [data-speed].active, .time-hud [data-speed][aria-pressed=true] { color: var(--c-accent); background: linear-gradient(180deg, rgba(243, 196, 107, .2), rgba(243, 196, 107, .06)); box-shadow: var(--glow); border-radius: 9px; }
 .time-hud #pause { color: var(--c-accent); }
 
 /* ---- Tool dock ------------------------------------------------------------ */

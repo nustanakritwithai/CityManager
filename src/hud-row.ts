@@ -5,7 +5,7 @@ const svg = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICO
 
 /**
  * Touch layout keeps the top of the screen to one row: level, city summary, pause,
- * one speed button and a menu. The page buttons, the day and the atmosphere toggle
+ * a menu. The page buttons, the day and the atmosphere toggle
  * move into that menu. Desktop is unchanged (these extra controls are hidden there).
  */
 export function installHudRow() {
@@ -37,12 +37,4 @@ export function installHudRow() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && top.dataset.more === 'true') { open(false); more.focus(); } });
   top.append(more); open(false);
 
-  // One speed button that steps 1× → 3× → 10×; the three original buttons keep their handlers.
-  const speeds = [...document.querySelectorAll<HTMLButtonElement>('.time-buttons [data-speed]')];
-  const cycle = document.createElement('button'); cycle.type = 'button'; cycle.id = 'speed-cycle'; cycle.className = 'hud-row-only';
-  const current = () => speeds.findIndex(b => b.getAttribute('aria-pressed') === 'true');
-  const syncSpeed = () => { const b = speeds[current()]; cycle.textContent = b?.textContent ?? 'ชม'; cycle.setAttribute('aria-label', b ? `ความเร็ว ${b.textContent} · แตะเพื่อเปลี่ยน` : 'ดูชีวิตประชาชน 1 นาทีเกมต่อวินาที · แตะเพื่อกลับ 1×'); };
-  cycle.addEventListener('click', () => speeds[(current() + 1) % speeds.length]?.click());
-  const watch = new MutationObserver(syncSpeed); for (const b of document.querySelectorAll('[data-speed]')) watch.observe(b, { attributes: true, attributeFilter: ['aria-pressed'] });
-  speeds.at(-1)?.after(cycle); syncSpeed();
 }

@@ -1,5 +1,6 @@
 import { restoreStartupCity } from './startup-save.ts';
 import { saveLocalCitySession, bindLocalCitySession } from './local-city-save.ts';
+import { frameGameMinutes, gameMinutesPerSecond, GAME_MINUTES_PER_DAY, type ClockMode } from './game-clock.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
@@ -99,7 +100,7 @@ const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: ''
 let view: CityView;
 let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
-let paused = false, speed = 1;
+let paused = false, clockMode: ClockMode = 'normal';
 let parkFrameMs = 0, parkFramePeakMs = 0;
 let pausedByTyphoonAuto = false;
 let importedLegacyRaw: string | null = null;
@@ -437,7 +438,8 @@ function render() {
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;
   $('#pause').textContent = paused ? '▶' : 'Ⅱ'; $('#pause').setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา'); $('#pause').title = paused ? 'เล่นต่อ (Space)' : 'หยุดเวลา (Space)'; $('#pause').setAttribute('aria-pressed', String(paused));
   ($('#pause') as HTMLButtonElement).disabled = ownerDecisionPanel?.isAutoPending() ?? false;
-  document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => { b.classList.toggle('active', Number(b.dataset.speed) === speed); b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === speed)); });
+  const watching = clockMode === 'citizen-watch', watchButton = document.querySelector<HTMLElement>('#citizen-watch');
+  if (watchButton) { watchButton.classList.toggle('active', watching); watchButton.setAttribute('aria-pressed', String(watching)); }
   const demand = node('div', 'demand-grid');
   const history = recordDemand(city, s.demand);
   for (const [zone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const) {
@@ -494,9 +496,10 @@ async function boot() {
   $('#city-content').insertBefore(ownerDecisionHost, $('#city-content .ledger-details'));
   const parkSection = document.createElement('section'); parkSection.id = 'park-recreation';
   const citizenSpeed = document.createElement('button'); citizenSpeed.type = 'button';
-  citizenSpeed.dataset.speed = String(1 / 1440); citizenSpeed.setAttribute('aria-pressed', 'false');
+  citizenSpeed.id = 'citizen-watch'; citizenSpeed.setAttribute('aria-pressed', 'false');
   citizenSpeed.textContent = 'ดูชีวิตประชาชน · 1 นาทีเกม/วินาที';
-  citizenSpeed.title = 'ชะลอทั้งเมืองเพื่อดูการเดินและพักผ่อน · 1 วันเกมใช้ 24 นาที · กลับความเร็วเดิมด้วย 1×';
+  citizenSpeed.title = 'ชะลอทั้งเมืองเพื่อดูการเดินและพักผ่อน · 1 วันเกมใช้ 24 นาที · กดอีกครั้งเพื่อกลับเวลาปกติ (1 วันเกม = 6 วินาที)';
+  citizenSpeed.addEventListener('click', () => { sound('ui-click'); clockMode = clockMode === 'citizen-watch' ? 'normal' : 'citizen-watch'; render(); });
   parkPanel = document.createElement('div'); parkPanel.id = 'park-recreation-data';
   parkSection.append(citizenSpeed, parkPanel); $('#city-content').insertBefore(parkSection, ownerDecisionHost);
   // Experimental panels are built the first time the switch is on, and only hidden when it goes off.
@@ -545,7 +548,6 @@ async function boot() {
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); }));
   document.querySelectorAll<HTMLElement>('[data-camera]').forEach(b => b.addEventListener('click', () => view.control(b.dataset.camera!)));
-  document.querySelectorAll<HTMLElement>('[data-speed]').forEach(b => b.addEventListener('click', () => { sound('ui-click'); speed = Number(b.dataset.speed); render(); }));
   $('#pause').addEventListener('click', () => { if (ownerDecisionPanel?.isAutoPending()) return; sound('ui-click'); paused = !paused; render(); });
   $('#cancel-tool').addEventListener('click', cancel);
   $('#toggle-camera-pan').addEventListener('click', () => {
@@ -669,7 +671,7 @@ async function boot() {
     openRoute({ page: 'city' });
     const issues = document.querySelector<HTMLDetailsElement>('#issue-section'); if (issues) { issues.open = true; issues.scrollIntoView({ block: 'start' }); }
   });
-  atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / 1440, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
+  atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / GAME_MINUTES_PER_DAY, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   const visual = atmosphere;
   audioPanel = installAudioPanel(audio, $('#atmosphere-menu'));
   // Ambience follows what the screen shows; the city-wide levels only change once a day.
@@ -684,8 +686,8 @@ async function boot() {
       factories = Math.min(1, new Set(city.cropLedger.filter(e => e.kind === 'process' && e.tick === city.tick).map(e => e.from)).size / 3);
     }
     audio.updateAmbience({ ...visual.soundscape, traffic, factories, closeness: Math.min(1, Math.max(0, (130 - view.radius) / 100)) });
-    if (paused || document.hidden) return;
-    const minutes = Math.min(dt, 0.25) * speed * 1440;
+    const minutes = frameGameMinutes(dt, clockMode, paused, document.hidden);
+    if (!minutes) return;
     const tickBefore = city.tick;
     const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
     let days = 0;
@@ -705,7 +707,7 @@ async function boot() {
     else if (route?.page === 'city') renderParkPanel();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, clockMode, gameMinutesPerSecond: gameMinutesPerSecond(clockMode), frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

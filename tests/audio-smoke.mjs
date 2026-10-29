@@ -17,7 +17,7 @@ const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/M
 let ws, sequence = 0; const pending = new Map(), sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) { const id = ++sequence; const promise = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id, method, params })); return promise; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
-async function until(expression, timeout = 20000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); } throw Error(`Timed out ${expression}`); }
+async function until(expression, timeout = 360_000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); } throw Error(`Timed out ${expression}`); }
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: `Key${value.toUpperCase()}`, text: type === 'keyDown' ? value : undefined }); }
 async function press(selector) { const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`); await sleep(50); await click(p.x, p.y); await sleep(50); }
@@ -56,7 +56,7 @@ try {
   const fixture = createCity(61025); for (let d = 0; d < 58; d++) step(fixture);
   await press('[data-tool="select"]'); await press('#toggle-game-menu'); await until('document.querySelector("#inspector").dataset.page==="game"');
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(fixture))})`); await press('#load'); await press('#close-inspector');
-  await press('[data-speed="10"]'); await press('#pause');
+  await press('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick >= 61', 60000); await press('#pause');
   const heard = await played();
   assert.ok(heard.includes('ev-month'), 'Month end plays the coin sound: ' + heard.join(','));

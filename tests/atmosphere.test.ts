@@ -1,18 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DAY_CYCLE_SECONDS, LOCKED_HOURS, advanceHour, atmosphereAt, cycleRate, formatClock, isRaining, phaseOf,
+  LOCKED_HOURS, atmosphereAt, gameHour, formatClock, isRaining, phaseOf,
   resolveHour, seasonWeights, dominantSeason, sunPosition, wrapHour
 } from '../src/atmosphere.ts';
 import { createCity, serialize, step } from '../src/sim.ts';
 
-test('one visual day lasts the configured real seconds at 1× and speed is capped', () => {
-  assert.equal(advanceHour(0, DAY_CYCLE_SECONDS, 1), 0);
-  assert.ok(Math.abs(advanceHour(6, DAY_CYCLE_SECONDS / 4, 1) - 12) < 1e-9);
-  assert.equal(cycleRate(0), 0);
-  assert.equal(cycleRate(1), 1);
-  assert.equal(cycleRate(10), 2);
-  assert.equal(advanceHour(23, -5, 1), 23, 'time never runs backwards');
+test('the automatic sky hour follows the game clock, never a speed multiplier', () => {
+  assert.equal(gameHour(0), 0);
+  assert.equal(gameHour(720), 12);
+  assert.equal(gameHour(1440), 0);
+  assert.equal(gameHour(-5), 0, 'time never runs backwards');
   assert.equal(wrapHour(-1), 23);
 });
 

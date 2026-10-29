@@ -85,7 +85,7 @@ async function send(method, params = {}) {
   ws.send(JSON.stringify({ id, method, params })); return result;
 }
 async function evaluate(expression) { const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (result.exceptionDetails) throw Error(result.exceptionDetails.text); return result.result.value; }
-async function until(expression, timeout = 30_000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(75); } throw Error(`Timed out: ${expression.slice(0, 120)}`); }
+async function until(expression, timeout = 360_000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(75); } throw Error(`Timed out: ${expression.slice(0, 120)}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 async function click(x,y) { for (const type of ['mouseMoved','mousePressed','mouseReleased']) await send('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',clickCount:1}); }
@@ -108,7 +108,7 @@ async function inspect(building, kind) {
 }
 async function runBoundary(day,items) {
   const { before, after } = snapshots.get(day); await load(serialize(before)); assert.deepEqual(await state(),before); await close();
-  await button('[data-speed="1"]');
+ 
   // Pause from the browser's next animation callback as soon as the real day is
   // reached, avoiding an unrelated second-day race on a loaded CI machine.
   await evaluate(`(()=>{const target=${day};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);

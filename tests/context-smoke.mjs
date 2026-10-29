@@ -45,7 +45,7 @@ async function evaluate(expression) {
   const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
   if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails)); return result.result.value;
 }
-async function until(expression, timeout = 15000) {
+async function until(expression, timeout = 360_000) {
   const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Timed out: ${expression}`);
 }
@@ -191,14 +191,14 @@ try {
   await button(residentSelector);await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${homeHousehold.id}'`);
   await button('#submenu-back');assert.equal(await evaluate('document.querySelector("#entity-content").dataset.scope'),'place');
   await closePanel();await viewport({width:1440,height:1000,screenWidth:1440,screenHeight:1000,mobile:false,deviceScaleFactor:1});
-  await until(`document.documentElement.dataset.touchUi==='false'&&!!document.querySelector('[data-speed="10"]').getBoundingClientRect().width`);
+  await until(`document.documentElement.dataset.touchUi==='false'&&!!document.querySelector('#pause').getBoundingClientRect().width`);
   checks.push('Real mobile map tap opens house details; orphan compatibility click cannot drill into a person; a fresh resident-button press and Back still work');
 
   // Keep the native press active across real 10x simulation refreshes. A programmatic
   // click or a re-queried mouseup target would miss the replaced-button regression.
   for (const inputKind of ['mouse', 'mouse', 'touch']) {
-    if (inputKind === 'touch') { await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 }); await until("document.documentElement.dataset.touchUi==='true'&&!!document.querySelector('#speed-cycle').getBoundingClientRect().width"); }
-    await closePanel(); await button('[data-speed="10"]'); await button('#pause'); await place(homes[0]);
+    if (inputKind === 'touch') { await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 }); await until("document.documentElement.dataset.touchUi==='true'&&!!document.querySelector('#pause').getBoundingClientRect().width"); }
+    await closePanel(); await button('#pause'); await place(homes[0]);
     assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'false');
     const selector = `#entity-content [data-household-id="${homeHousehold.id}"]`;
     const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
@@ -222,7 +222,7 @@ try {
     await evaluate('document.removeEventListener("pointerdown",window.__contextHeldDown,true);document.removeEventListener("click",window.__contextHeldClick,true);delete window.__contextHeld;delete window.__contextHeldDown;delete window.__contextHeldClick');
     await button('#submenu-back'); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${homes[0].id}'`); await closePanel();
     await button('#pause'); assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
-    await load(fixtureJson); await closePanel(); await button('[data-speed="1"]');
+    await load(fixtureJson); await closePanel();
   }
   await viewport({ width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, mobile: false });
   checks.push('Two mouse and one trusted touch 200ms household-link holds preserve the same DOM through native activation during live 10x refreshes; Back returns to source home and frozen fixture is restored');

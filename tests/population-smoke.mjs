@@ -90,7 +90,7 @@ async function send(method, params = {}) {
   ws.send(JSON.stringify({ id, method, params })); return result;
 }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
-async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out: ${expression}`); }
+async function until(expression) { const start = Date.now(); while (Date.now() - start < 360000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out: ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===21&&c.rulesVersion==="chain-16"&&c.populationCapacityVersion===1)))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
@@ -205,7 +205,7 @@ try {
   await cityMetrics(expectedDemolished); await screenshot('displaced-households.png'); checks.push('Real demolition displaces every occupant, preserves identities/members/wallets/claims, clears affected jobs and charges only recorded demolition cost');
 
   const expectedRehoused = deserialize(serialize(expectedDemolished)); step(expectedRehoused); deserialize(serialize(expectedRehoused));
-  await close(); await button('[data-speed="1"]');
+  await close();
   // Pause at the boundary inside the browser; CDP + two paints can overshoot a day.
   await evaluate(`(()=>{const target=${expectedRehoused.tick};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);
   await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`); assert.deepEqual(await state(), expectedRehoused);
@@ -241,7 +241,7 @@ try {
   await load(serialize(twoK));await cityMetrics(twoK);await layout();
   await page('game');await button('#save');await assertSavedCity(evaluate,twoK);
   await button('#load');assert.deepEqual(await state(),twoK);await close();
-  await button('[data-speed="1"]');
+ 
   // Observe actual frame intervals at 1x, then pause in-page before reading state.
   await evaluate(`(()=>{window.__populationFrames=null;const deltas=[];let previous=null;const sample=now=>{if(previous!==null)deltas.push(now-previous);previous=now;if(deltas.length===120){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click();window.__populationFrames=deltas;}else requestAnimationFrame(sample)};requestAnimationFrame(sample)})()`);
   await button('#pause');await until('Array.isArray(window.__populationFrames)&&document.querySelector("#pause").getAttribute("aria-pressed")==="true"');

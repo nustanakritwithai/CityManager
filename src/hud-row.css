@@ -47,14 +47,13 @@ html[data-touch-ui=true] body .city-kpis .kpi strong { font-size: calc(14 * var(
 html[data-touch-ui=true] body .city-kpis .kpi-month { display: block; }
 html[data-touch-ui=true] body .city-kpis .kpi-month .kpi-ring { display: block; width: calc(30 * var(--row-u)); height: calc(30 * var(--row-u)); }
 
-/* Time: pause and one speed button. The clock, day and atmosphere live in the menu. */
+/* Time: the pause button. The clock, day and atmosphere live in the menu. */
 html[data-touch-ui=true] body .time-hud {
   top: var(--row-top); left: auto; right: calc(var(--row-right) + var(--row-h) + var(--row-gap));
   width: auto; min-height: var(--row-h); height: var(--row-h); padding: 0; gap: 0; border-radius: calc(8 * var(--row-u));
 }
-html[data-touch-ui=true] body .time-hud .time-label, html[data-touch-ui=true] body .time-hud .atmosphere-toggle, html[data-touch-ui=true] body .time-buttons [data-speed] { display: none; }
+html[data-touch-ui=true] body .time-hud .time-label, html[data-touch-ui=true] body .time-hud .atmosphere-toggle { display: none; }
 html[data-touch-ui=true] body .time-buttons { gap: 0; }
-html[data-touch-ui=true] body .time-buttons #speed-cycle { display: block; font-size: calc(13 * var(--row-u)); font-weight: 700; color: var(--c-accent); }
 
 /* Menu: one compact row of icon buttons under the top row, with the day above them. */
 html[data-touch-ui=true] body .page-buttons {

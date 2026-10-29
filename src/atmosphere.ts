@@ -20,13 +20,11 @@ export type Atmosphere = {
   overcast: number; saturation: number; contrast: number; brightness: number; tint: Rgb;
 };
 
-/** Real seconds for one full visual day at 1× speed. */
-export const DAY_CYCLE_SECONDS = 300;
 export const START_HOUR = 7.5;
 export const LOCKED_HOURS: Readonly<Record<Exclude<TimeMode, 'auto' | 'local'>, number>> = Object.freeze({ morning: 8, noon: 12.5, evening: 17.4, night: 21.5 });
 export const TIME_MODES: readonly TimeMode[] = Object.freeze(['auto', 'morning', 'noon', 'evening', 'night', 'local']);
 export const QUALITIES: readonly Quality[] = Object.freeze(['low', 'medium', 'high']);
-/** Visual weather is rolled per real-time window so 10× speed cannot strobe the sky. */
+/** Visual weather is rolled per real-time window so fast game days cannot strobe the sky. */
 export const WEATHER_PERIOD_SECONDS = 75;
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
@@ -37,11 +35,8 @@ const scaleRgb = (a: Rgb, s: number): Rgb => [a[0] * s, a[1] * s, a[2] * s];
 const hex = (value: string): Rgb => [parseInt(value.slice(1, 3), 16) / 255, parseInt(value.slice(3, 5), 16) / 255, parseInt(value.slice(5, 7), 16) / 255];
 export const wrapHour = (hour: number) => ((hour % 24) + 24) % 24;
 
-/** Faster game speeds move the sky a little faster, capped at 2× so it never flickers. */
-export function cycleRate(speed: number): number { return speed > 0 ? Math.min(2, Math.sqrt(speed)) : 0; }
-export function advanceHour(hour: number, seconds: number, speed: number): number {
-  return wrapHour(hour + Math.max(0, seconds) * cycleRate(speed) * 24 / DAY_CYCLE_SECONDS);
-}
+/** The automatic sky hour is the game clock: minute of the economic day / 60. */
+export function gameHour(minuteOfDay: number): number { return wrapHour(Math.max(0, minuteOfDay) / 60); }
 export function resolveHour(mode: TimeMode, autoHour: number, now: Date = new Date()): number {
   if (mode === 'auto') return wrapHour(autoHour);
   if (mode === 'local') return now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;

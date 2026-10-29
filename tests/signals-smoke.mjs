@@ -37,7 +37,7 @@ async function evaluate(expression) {
   return response.result.value;
 }
 async function until(expression) {
-  for (let i = 0; i < 150; i++) { if (await evaluate(expression)) return; await sleep(80); }
+  for (let i = 0; i < 4500; i++) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Condition timeout ${expression}`);
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
@@ -107,7 +107,7 @@ try {
   await shot('desktop-signals.png');
   checks.push('Actual people, household, employment, housing-capacity and credit units match save-v6 simulation with missing first history and no mutation');
 
-  await button('#close-inspector'); await button('[data-speed="10"]'); await button('#pause');
+  await button('#close-inspector'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=68'); await button('#pause');
   const advanced = await state(); await openSignals();
   assert.equal(await count('[data-signal-id^="trend."]'), 9);

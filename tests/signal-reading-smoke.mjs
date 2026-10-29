@@ -42,7 +42,7 @@ async function evaluate(expression) {
   return response.result.value;
 }
 async function until(expression) {
-  for (let i = 0; i < 160; i++) { if (await evaluate(expression)) return; await sleep(80); }
+  for (let i = 0; i < 4500; i++) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Condition timeout ${expression}`);
 }
 async function untilRequests(count) {
@@ -180,7 +180,7 @@ try {
   assert.equal(await visible('#signal-retry'), true);
   const failedCapture = apiRequests.at(-1).tick;
   const failedBody = await evaluate('[...document.querySelectorAll("#signal-summary .signal-summary-link")].map(e=>({id:e.dataset.signalRef,text:e.textContent}))');
-  await button('[data-speed="10"]'); await button('#pause');
+  await button('#pause');
   await until(`JSON.parse(window.cityManager.snapshot()).tick>${failedCapture + 2}`); await button('#pause');
   const advanced = await state(); assert(advanced.tick > failedCapture);
   assert.equal(apiRequests.length, 2, 'City ticks never make automatic report requests');

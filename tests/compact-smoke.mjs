@@ -33,7 +33,7 @@ const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/M
 let ws, id = 0; const pending = new Map(); const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) { const key = ++id; const p = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(key); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(key, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id: key, method, params })); return p; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
-async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(80); } throw Error(`Timed out ${expression}`); }
+async function until(expression) { const start = Date.now(); while (Date.now() - start < 360000) { if (await evaluate(expression)) return; await sleep(80); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = () => mode === 'baseline' ? evaluate('JSON.parse(window.cityManager.snapshot())') : evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(c.version!==19||c.rulesVersion!=="chain-14")throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
@@ -92,7 +92,7 @@ async function disclosure(scope, cardSelector, detailSelector, name) {
 }
 async function liveRow() {
   for (const input of ['mouse', 'touch']) {
-    await mapRestored(); await button('[data-speed="10"]'); await button('#pause'); await ledger();
+    await mapRestored(); await button('#pause'); await ledger();
     await button('[data-kind="money"][data-journal-action="all"]'); await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints();
     // Coordinates are only a prepared aim. The trusted native event records the
     // actual row that was pressed after any intervening live-list refresh.
@@ -124,7 +124,7 @@ async function liveRow() {
     const releaseTick = (await state()).tick; await until(`JSON.parse(window.cityManager.snapshot()).tick>${releaseTick}`);
     const after = await evaluate(`(()=>{const p=window.__compactHeldInput,e=document.querySelector('#ledger .sm-flow-card[data-index="'+p.down.data.index+'"]');return{open:e?.open,data:p.data(e),text:e?.querySelector('.sm-flow-details')?.textContent}})()`);
     assert.equal(after.open, true, 'The actual activated identity remains expanded after a further refresh'); assert.deepEqual(after.data, down.data); for (const fact of [down.data.from, down.data.to, down.data.reason]) assert.ok(after.text.includes(fact));
-    await evaluate('delete window.__compactHeldInput'); await close(); await button('#pause'); await loadFixture(); await button('[data-speed="1"]');
+    await evaluate('delete window.__compactHeldInput'); await close(); await button('#pause'); await loadFixture();
   }
 }
 function householdMetrics(h) {

@@ -48,7 +48,7 @@ async function evaluate(expression) {
   return result.result.value;
 }
 async function until(expression) {
-  for (let n = 0; n < 180; n++) { if (await evaluate(expression)) return; await sleep(80); }
+  for (let n = 0; n < 4500; n++) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Condition timeout ${expression}`);
 }
 async function waitRequests(expected) {
@@ -207,7 +207,7 @@ try {
   const invalid = await capture(fixture, buildingSelection, 'invalid-reference');
   assert(await evaluate('!document.querySelector("#entity-explain-retry").hidden'));
   assert(!await evaluate('document.querySelector("#entity-explain-content").textContent.includes("evidence.invented")'));
-  const oldRequests = requests.length; await button('[data-speed="10"]'); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>${fixture.tick+1}`); await button('#pause');
+  const oldRequests = requests.length; await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>${fixture.tick+1}`); await button('#pause');
   const advanced = await state(); assert.equal(requests.length, oldRequests, 'No entity requests on daily ticks');
   await until('document.querySelector("#entity-explanation-host").dataset.stale==="true"');
   behavior = 'ai'; await button('#entity-explain-retry'); await waitRequests(oldRequests + 1); await until('document.querySelector("#entity-explain-mode").dataset.mode==="ai"');
