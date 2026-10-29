@@ -369,7 +369,9 @@ export function educationGate(state: EducationState | undefined, view: Education
   const serviceDays = building.zone === 'R' && building.level + 1 <= 6 ? state.schoolReadyDays : building.zone === 'R' ? state.universityReadyDays : state.sustain.find(item => item.buildingId === building.id)?.days ?? 0;
   const blocked: string[] = [];
   if (!check.ok) blocked.push(`มี ${check.have}/${check.need} · ขาด${check.missing}`);
-  if (building.zone === 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(`บริการการศึกษายังเปิดต่อเนื่อง ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน`);
+  if (building.zone === 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(building.level + 1 <= 6
+    ? `โรงเรียนให้บริการสะสม ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน (วันที่หยุดบริการไม่ล้างวันที่สะสม)`
+    : `มหาวิทยาลัยให้บริการต่อเนื่อง ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน`);
   if (building.zone !== 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(`ต้องมีคนครบเงื่อนไขต่อเนื่องอีก ${EDUCATION_SUSTAIN_DAYS - serviceDays} วัน (${serviceDays}/${EDUCATION_SUSTAIN_DAYS})`);
   return { have: check.have, need: check.need, sustainDays: serviceDays, requiredDays: EDUCATION_SUSTAIN_DAYS, missing: check.missing, blocked };
 }
