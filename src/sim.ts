@@ -900,13 +900,16 @@ function trade(c: City) {
       if (isMarket(shop)) {
         while (purchased < h.members && balance(c, h.wallet) >= 800 && consumeMarketCrop(c, h, shop, sellable, hooks, true)) purchased++;
       } else {
-        const product = productPreference(h.id, c.tick).find(p => shop.products[p] > 0);
-        if (!product) continue;
-        const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
-        if (!quantity) continue;
-        transfer(c, h.wallet, shop.wallet, 800 * quantity, `Household #${h.id} purchase`, true);
-        moveProduct(c, shop, null, product, quantity); c.goods.consumed += quantity; h.lastPurchaseTick = c.tick;
-        goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); purchased += quantity;
+        // Preferences select the order, not a one-product limit: a family can fill its one
+        // daily basket from the remaining stocked products without inventing demand or credit.
+        for (const product of productPreference(h.id, c.tick)) {
+          if (purchased >= h.members || balance(c, h.wallet) < 800) break;
+          const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
+          if (!quantity) continue;
+          transfer(c, h.wallet, shop.wallet, 800 * quantity, `Household #${h.id} purchase`, true);
+          moveProduct(c, shop, null, product, quantity); c.goods.consumed += quantity; h.lastPurchaseTick = c.tick;
+          goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); purchased += quantity;
+        }
       }
     }
     h.needs = purchased === h.members ? 0 : unmetDays;
