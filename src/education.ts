@@ -293,16 +293,25 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
   return payments;
 }
 
-function postsFor(view: EducationView, firmId: number | null): Map<number, number> {
-  const totals = new Map<number, number>();
-  if (firmId === null) return totals;
-  for (const post of view.posts) if (post.firmId === firmId) totals.set(post.householdId, (totals.get(post.householdId) ?? 0) + post.workers + (post.owner ? 1 : 0));
-  return totals;
-}
-
 function credentialPosts(state: EducationState, view: EducationView, firmId: number | null, rank: 'basic' | 'higher'): number {
+  if (firmId === null) return 0;
+  // A higher holder also has a basic diploma, but occupies only one post.
+  // After education roles, allocate both ranks together in stable firm order;
+  // querying a different firm's gate must not spend the same holder again.
+  const pools = new Map(state.people.map(person => [person.householdId, {
+    basicOnly: person.basic - person.higher - person.teacher - person.university,
+    higher: person.higher - person.professor,
+  }]));
   let total = 0;
-  for (const [householdId, workers] of postsFor(view, firmId)) total += Math.min(workers, rank === 'basic' ? peopleOf(state, householdId).basic : peopleOf(state, householdId).higher);
+  for (const post of [...view.posts].sort((a, b) => a.firmId - b.firmId || a.householdId - b.householdId)) {
+    const pool = pools.get(post.householdId);
+    if (!pool) continue;
+    const workers = post.workers + (post.owner ? 1 : 0);
+    const higher = Math.min(workers, pool.higher);
+    const basicOnly = Math.min(workers - higher, pool.basicOnly);
+    pool.higher -= higher; pool.basicOnly -= basicOnly;
+    if (post.firmId === firmId) total += rank === 'higher' ? higher : higher + basicOnly;
+  }
   return total;
 }
 
