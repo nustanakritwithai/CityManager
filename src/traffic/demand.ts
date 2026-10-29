@@ -2,10 +2,12 @@ import { PEOPLE_PER_VEHICLE, type DemandCarry, type DemandInput, type DemandResu
 
 /** Share of daily trips of each purpose that start in a given hour (0..23). Each profile sums to 1. */
 const norm = (w: number[]) => { const s = w.reduce((a, b) => a + b, 0); return w.map(x => x / s); };
+// The direction switches at noon. Give each leg half the daily trips while preserving its peak shape.
+const roundTripProfile = (w: number[]) => [...norm(w.slice(0, 12)), ...norm(w.slice(12))].map(x => x / 2);
 export const HOURLY_PROFILE: Record<TripPurpose, readonly number[]> = {
   // AM peak 7-8 out, PM peak 17-18 back (each person 2 commute trips/day).
-  commute: norm([0,0,0,0,0,1,4,12,10,3,2,2,2,2,2,3,6,12,10,4,2,1,0,0]),
-  school: norm([0,0,0,0,0,0,2,12,6,1,0,0,1,1,2,10,4,1,0,0,0,0,0,0]),
+  commute: roundTripProfile([0,0,0,0,0,1,4,12,10,3,2,2,2,2,2,3,6,12,10,4,2,1,0,0]),
+  school: roundTripProfile([0,0,0,0,0,0,2,12,6,1,0,0,1,1,2,10,4,1,0,0,0,0,0,0]),
   park: norm([0,0,0,0,0,0,1,2,3,4,5,6,6,6,6,6,6,6,5,4,3,1,0,0]),
   freight: norm([0,0,0,0,1,2,4,6,7,7,7,7,6,6,6,6,5,4,3,2,1,0,0,0]),
 };
