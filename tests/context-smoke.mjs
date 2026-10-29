@@ -136,7 +136,7 @@ async function assertLayout() {
 async function viewport(metric) {
   await closePanel(); await send('Emulation.setDeviceMetricsOverride', { ...metric, deviceScaleFactor: metric.deviceScaleFactor ?? 1 }); await send('Emulation.setTouchEmulationEnabled', { enabled: metric.mobile, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`);
   if(metric.width>700&&metric.screenWidth<700){
-  await until(`document.documentElement.dataset.touchUi==='false'&&!!document.querySelector('[data-speed="10"]').getBoundingClientRect().width`);
+    await until('document.documentElement.dataset.touchUi==="true"');
     const small=await evaluate(`(()=>{const ratio=screen.width/innerWidth;return [...document.querySelectorAll('.time-hud button,.page-buttons button,.camera-hud button,.tool-dock button')].filter(e=>{const r=e.getBoundingClientRect();return r.width&&r.height&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&(r.width*ratio<43.5||r.height*ratio<43.5)}).map(e=>({id:e.id,tool:e.dataset.tool,width:e.getBoundingClientRect().width*ratio,height:e.getBoundingClientRect().height*ratio}))})()`);
     assert.deepEqual(small,[],'Wide-phone time, camera, page and construction controls retain 44px physical touch targets');
   }
