@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bulldoze, contributeOwnerCapital, createCity, deserialize, serialize, step, type City } from '../src/sim.ts';
+import { bulldoze, contributeOwnerCapital, createCity, deserialize, ownerFinance, serialize, step, type City } from '../src/sim.ts';
 import { captureOwnerSnapshot, executeOwnerProposal, ownerStateHash, proposeOwnerDecision, validateOwnerProposal, type OwnerProposal } from '../src/owner-decision.ts';
 import { ownerDecisionCandidates, validateOwnerDecisionSelection } from '../server/city-advisor/src/owner-contract.mjs';
 
-function fixture() {
+function fixture(day = 210) {
   const city = createCity(61025);
-  for (let day = 0; day < 210; day++) step(city);
+  for (let n = 0; n < day; n++) step(city);
   const firm = city.firms.find(f => f.commercialKind === 'market')!;
   assert(firm?.owner, 'Real seeded market has its actual household owner');
   const household = city.households.find(h => h.id === firm.owner!.householdId)!;
@@ -44,7 +44,8 @@ test('owner capture/proposal is copied, deterministic and read-only for real mar
 });
 
 test('realized profit withdrawal uses the existing command and retains firm reserves, principal and every inventory', () => {
-  const { city, firm, household } = fixture(), s = snapshot(city, firm.id), proposal = proposeOwnerDecision(s);
+  // Open-month earnings, after the previous month's automatic distribution.
+  const { city, firm, household } = fixture(215), s = snapshot(city, firm.id), proposal = proposeOwnerDecision(s);
   assert.equal(proposal.command.type, 'withdrawOwnerProfit'); assert.equal(validateOwnerProposal(city, proposal).ok, true);
   const cashBefore = [city.accounts[household.wallet], city.accounts[firm.wallet]], capital = firm.owner!.capitalContributed;
   const profitBefore = firm.owner!.withdrawn, ledgers = [city.ledger.length, city.goodsLedger.length, city.cropLedger.length];
@@ -114,16 +115,17 @@ test('household essentials and next rent cap a partial contribution instead of d
 });
 
 test('cash is not profit and withdrawal retains next rent in addition to existing command reserves', () => {
-  const { city, firm } = fixture();
+  const { city, firm } = fixture(215);
   step(city); // a current open-month tax reserve is now available from actual activity
   const initial = snapshot(city, firm.id);
   assert(initial.facts.distributableProfit! > 0);
-  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - initial.facts.firmTotalReserve! - 700);
+  const development = ownerFinance(city, firm.id)!.developmentReserve;
+  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - initial.facts.firmTotalReserve! - development - 700);
   const s = snapshot(city, firm.id), proposal = proposeOwnerDecision(s);
   assert.equal(s.facts.safeWithdraw, 700); assert(s.facts.withdrawAvailable! > s.facts.safeWithdraw!);
   assert.deepEqual(proposal.command, { type: 'withdrawOwnerProfit', amountSatang: 700 });
   assert.equal(executeOwnerProposal(city, proposal).status, 'applied');
-  assert.equal(city.accounts[firm.wallet], s.facts.firmTotalReserve); conserved(city);
+  assert.equal(city.accounts[firm.wallet], s.facts.firmTotalReserve! + development); conserved(city);
 });
 
 test('missing home or uncomputable amounts produce hold with no state change', () => {
