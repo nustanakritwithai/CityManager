@@ -1,6 +1,9 @@
 #education-details { margin:12px 0; padding:10px; border:1px solid var(--line); border-radius:8px; }
 #education-details p, .education-cohorts { margin:8px 0; font-size:14px; line-height:1.55; overflow-wrap:anywhere; }
 .education-cohorts { padding-inline-start:22px; }
+#campus-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+#campus-actions[hidden] { display:none!important; }
+#campus-actions button { min-height:44px; padding:10px; white-space:normal; overflow-wrap:anywhere; }
 #campus-feedback { grid-column:1 / -1; margin:0 0 8px; padding:10px; border:1px solid #f3c46b; border-radius:6px; color:#fff5d6; background:#513e24; font-size:14px; line-height:1.5; }
 #campus-feedback[data-ok=true] { border-color:#95d5b2; color:#e2ffed; background:#214b39; }
 #campus-feedback[hidden], #education-details[hidden], #save-failure-banner[hidden] { display:none!important; }

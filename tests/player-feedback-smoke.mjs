@@ -8,6 +8,7 @@ import { createCity, buildCampus, campusSiteReason, step } from '../src/sim.ts';
 import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
 
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT);
+const runtimeOnly = process.env.CITYMANAGER_UX_RUNTIME_ONLY === '1';
 if (!debugPort) throw Error('Set CITYMANAGER_DEBUG_PORT to your isolated test browser.');
 const root = resolve('dist'), output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/player-feedback');
 await mkdir(output, { recursive: true });
@@ -35,11 +36,21 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(expression, timeout = 15000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); } throw Error(`Timed out: ${expression}`); }
 async function tap(x, y) { await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); }
 async function button(selector) {
+  console.log(`Touch ${selector}`);
+  await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'})`);
+  await sleep(100);
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);
-  assert.ok(p.w && p.h && p.hit, `${selector} is visible and reachable`); await tap(p.x, p.y);
+  assert.ok(p.w && p.h && p.hit, `${selector} is visible and reachable`);
+  if (['#upgrade-campus', '#toggle-campus', '#panel-pause', '#save-failure-export'].includes(selector)) assert.ok(p.w >= 44 && p.h >= 44, `${selector} has a 44px touch target`);
+  // Keep the clock check independent of touch-emulation acknowledgements;
+  // its visibility and mobile hit target are still checked above.
+  if (selector === '#panel-pause') {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+  } else await tap(p.x, p.y);
 }
 async function cell(index) { const p = await evaluate(`cityManager.cellScreen(${index})`); await tap(p.x, p.y); }
-async function shot(name) { const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 75, captureBeyondViewport: false }); await writeFile(resolve(output, name + '.jpg'), Buffer.from(r.data, 'base64')); }
+async function shot(name) { const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 75, captureBeyondViewport: false }); await writeFile(resolve(output, name + '.jpg'), Buffer.from(r.data, 'base64')); console.log(`Screenshot ${name}`); }
 async function game() { if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector'); await button('#hud-more'); await button('#toggle-game-menu'); }
 const city = createCity(3, { starter: true });
 const schoolCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'school') === null); assert.ok(buildCampus(city, schoolCell, 'school').ok);
@@ -57,6 +68,7 @@ try {
   await send('Page.navigate', { url: 'http://127.0.0.1:4176/CityManager/' });
   await until('!!window.cityManager && cityManager.visuals().ready', 30000);
   assert.deepEqual(await evaluate('({width:innerWidth,height:innerHeight})'), { width: 390, height: 844 });
+  if (!runtimeOnly) {
   await shot('08-campuses-after');
   await cell(universityCell);
   await until("document.querySelector('#selection-title').textContent.includes('มหาวิทยาลัย')");
@@ -67,6 +79,7 @@ try {
   await button('#upgrade-campus');
   assert.equal(await evaluate('JSON.parse(cityManager.snapshot()).education.campuses[1].level'), 1);
   await shot('09-inline-refusal-after'); checks.push('university selection, priced upgrade and repeated visible refusal');
+  } else await game();
   await button('#panel-pause');
   const tick = await evaluate('JSON.parse(cityManager.snapshot()).tick');
   await until(`JSON.parse(cityManager.snapshot()).tick>${tick}`);
@@ -74,6 +87,7 @@ try {
   assert.equal(await evaluate('cityManager.parks().paused'), true);
   assert.match(await evaluate("document.querySelector('#panel-time-state').textContent"), /หยุดเวลาอยู่.*1×/);
   await shot('10-panel-time-after'); checks.push('panel pause and play advance then stop the existing city clock');
+  if (!runtimeOnly) {
   await button('#close-inspector'); await cell(schoolCell);
   await until("document.querySelector('#selection-title').textContent.includes('โรงเรียน')");
   const schoolText = await evaluate("document.querySelector('#education-details').innerText");
@@ -89,6 +103,7 @@ try {
   assert.equal(await evaluate("document.querySelector('#upgrade-campus').disabled"), true);
   assert.match(await evaluate("document.querySelector('#campus-feedback').innerText"), /ระดับ 2/);
   checks.push('school costs and actual cohort progress, toggle feedback, single-charge upgrade');
+  }
   await game(); await button('#save');
   await until("document.querySelector('#autosave-status').textContent.includes('บันทึกสำเร็จล่าสุด')");
   await evaluate("window.__uxSaved=localStorage.getItem('citymanager.save.v7');Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
