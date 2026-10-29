@@ -1,4 +1,4 @@
-import { access, MONTH, parkEmploymentForHousehold, summary, housingCapacity, homeOccupancy, industryGrowthStatus, utilityStatus } from './sim.ts';
+import { access, MONTH, parkEmploymentForHousehold, summary, housingCapacity, homeOccupancy, industryGrowthStatus, utilityStatus, utilityUpgradeBlocks } from './sim.ts';
 import type { Building, City, Firm, Household } from './sim.ts';
 import type { EmploymentAllocation, WorkerSkill } from './labor.ts';
 import { flowRows } from './inspector-data.ts';
@@ -196,6 +196,8 @@ export function cityOverview(city: City, current = summary(city)): CityOverview 
   const utility = utilityStatus(city);
   if (!utility.power) warnings.push(`ไฟฟ้าไม่พอ อาคาร ${utility.unserved.power} แห่งที่ไกลสุดไม่มีไฟ งาน การผลิต และการเติบโตของอาคารเหล่านั้นหยุด สร้างโรงไฟฟ้าริมถนน`);
   if (!utility.water) warnings.push(`น้ำไม่พอ อาคาร ${utility.unserved.water} แห่งที่ไกลสุดไม่มีน้ำ งาน การผลิต และการเติบโตของอาคารเหล่านั้นหยุด สร้างโรงสูบน้ำริมถนน`);
+  const capped = utilityUpgradeBlocks(city);
+  if (capped.count) warnings.push(`อาคาร ${capped.count} แห่งรออัปเกรดเพราะน้ำไฟสำรองไม่พอ: ต้องการไฟเพิ่ม ${capped.need.power} (สำรอง ${capped.spare.power}) · น้ำเพิ่ม ${capped.need.water} (สำรอง ${capped.spare.water}) — ${[capped.need.power > capped.spare.power ? 'สร้างโรงไฟฟ้า' : '', capped.need.water > capped.spare.water ? 'สร้างปั๊มน้ำ' : ''].filter(Boolean).join(' และ ') || 'สร้างโรงไฟฟ้าหรือปั๊มน้ำ'}ริมถนน`);
   if (current.unemployed) warnings.push(`มีแรงงาน ${current.unemployed} คนที่ยังไม่ได้รับการจัดสรรงาน`);
   if (displaced.length) warnings.push(`มี ${displaced.length} ครัวเรือน รวม ${homelessPersons} คนที่ยังไม่มีบ้านพัก`);
   const foodByHousehold = new Map<string, number>();

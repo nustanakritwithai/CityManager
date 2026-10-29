@@ -69,9 +69,10 @@ test('upgrade explains and respects road, utility and resident financial conditi
   const { city, home } = fixture(); home.level = 3; home.housingType = 'cottage';
   assert.equal(housingUpgradeStatus(city, home).next?.type, 'apartment');
   city.households.filter(h => h.home === home.id).forEach(h => { city.accounts[h.wallet] = 0; });
-  assert.ok(housingUpgradeStatus(city, home).blocked.some(x => x.includes('200')));
-  // Prevent the imminent month-end from paying a wage and making the household eligible.
+  // Prevent the imminent month-end from paying a wage and making the household eligible;
+  // the panel previews that month-end, so it must see the same unpaid state.
   city.firms.forEach(f => { city.accounts[f.wallet] = 0; f.workDays = {}; });
+  assert.ok(housingUpgradeStatus(city, home).blocked.some(x => x.includes('200')));
   step(city); assert.equal(home.level, 3);
   const other = fixture(); other.home.level = 3; other.city.utilities.outside = { power: 0, water: 0 };
   assert.ok(housingUpgradeStatus(other.city, other.home).blocked.some(x => x.includes('น้ำและไฟ')));

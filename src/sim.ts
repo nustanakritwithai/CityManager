@@ -105,8 +105,9 @@ export const HOUSING_OCCUPANCY_GATE_LEVEL = 3;
 const homeFull = (c: City, b: Building) => b.level < HOUSING_OCCUPANCY_GATE_LEVEL || homeOccupancy(c, b.id).households >= housingCapacity(b).households;
 const residentialInvestorEligible = (c: City, h: Household) => householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && balance(c, h.wallet) >= 20_000;
 /** Uses the same conditions as autonomous residential growth. */
-export function housingUpgradeStatus(c: City, b: Building) {
-  if (b.zone !== 'R') throw new Error('Not a residential building.');
+export function housingUpgradeStatus(live: City, liveBuilding: Building) {
+  if (liveBuilding.zone !== 'R') throw new Error('Not a residential building.');
+  const view = reviewView(live), found = view.buildings.find(x => x.id === liveBuilding.id && x.zone === 'R'), c = found ? view : live, b = found ?? liveBuilding;
   const current = housingLevel(b.housingType!, b.level), next = HOUSING_LEVELS[b.level] ?? null;
   const blocked: string[] = [];
   if (next) {
@@ -116,6 +117,7 @@ export function housingUpgradeStatus(c: City, b: Building) {
     if (!homeFull(c, b)) blocked.push(`ต้องมีครัวเรือนเต็มทุกช่องก่อน (${homeOccupancy(c, b.id).households}/${housingCapacity(b).households} ครัวเรือน)`);
     if (!c.households.some(h => h.home === b.id && residentialInvestorEligible(c, h))) blocked.push('ต้องมีครัวเรือนที่ทำงาน ซื้อสินค้าใน 3 วัน และมีเงินอย่างน้อย 200 เครดิต');
   }
+  if (next && !blocked.length && reviewGrows(live, b) === false) blocked.push(SPARE_TAKEN);
   return { current, next, blocked };
 }
 const householdAccess = (c: City, h: Household) => h.home !== null && access(c, building(c, h.home).cell);
@@ -1016,8 +1018,9 @@ export function marketConversionStatus(c: City, f: Firm) {
   return { cost: MARKET_CONVERSION_COST, reasons, next: marketToConvert(c)?.id === f.id && retailDemand(c) > 0 };
 }
 /** Current conditions are a preview: other buildings may use spare utilities first at review. */
-export function retailGrowthStatus(c: City, f: Firm) {
-  if (!isRetail(f)) throw new TypeError('Expected a retail firm');
+export function retailGrowthStatus(live: City, liveFirm: Firm) {
+  if (!isRetail(liveFirm)) throw new TypeError('Expected a retail firm');
+  const view = reviewView(live), found = view.firms.find(x => x.id === liveFirm.id && x.zone === liveFirm.zone && x.commercialKind === liveFirm.commercialKind), c = found ? view : live, f = found ?? liveFirm;
   const b = building(c, f.building), current = retailCapacity(b.level), workers = firmWorkerCount(c, f.id);
   const next = b.level < RETAIL_MAX_LEVEL ? retailCapacity(b.level + 1) : null;
   const reasons: string[] = [];
@@ -1026,16 +1029,18 @@ export function retailGrowthStatus(c: City, f: Firm) {
     if (b.age < MONTH) reasons.push(`อาคารต้องมีอายุอย่างน้อย ${MONTH} วัน`);
     if (!access(c, b.cell)) reasons.push('ต้องเชื่อมถนน');
     if (!svc.ok(b.id)) reasons.push('ต้องมีไฟฟ้าและน้ำ');
-    if (!fits(svc.spare, { power: after.power - before.power, water: after.water - before.water })) reasons.push('ไฟฟ้าหรือน้ำสำรองไม่พอสำหรับระดับถัดไป');
+    const short = spareShortfall({ power: after.power - before.power, water: after.water - before.water }, svc.spare); if (short) reasons.push(short);
     if (f.lastMonthProfit <= (f.owner ? firmWage(f) : 0)) reasons.push(`กำไรรอบก่อนต้องมากกว่า ${(f.owner ? firmWage(f) : 0) / 100} เครดิต (ล่าสุด ${f.lastMonthProfit / 100})`);
     if (workers === 0) reasons.push('ต้องมีคนทำงานจริงอย่างน้อย 1 คน');
     if (balance(c, f.wallet) < 20_000) reasons.push('เงินกิจการต้องมีอย่างน้อย 200 เครดิต');
   }
+  if (next && !reasons.length && reviewGrows(live, b) === false) reasons.push(SPARE_TAKEN);
   return { level: b.level, current, staffed: staffedRetailCapacity(b.level, workers), workers, next, reasons };
 }
 /** Read-only preview of the existing monthly upgrade gates; does not allocate spare utilities. */
-export function productionUpgradeStatus(c: City, f: Firm) {
-  if (f.zone !== 'I' && f.zone !== 'F') throw new TypeError('Expected factory or farm');
+export function productionUpgradeStatus(live: City, liveFirm: Firm) {
+  if (liveFirm.zone !== 'I' && liveFirm.zone !== 'F') throw new TypeError('Expected factory or farm');
+  const view = reviewView(live), found = view.firms.find(x => x.id === liveFirm.id && x.zone === liveFirm.zone && x.commercialKind === liveFirm.commercialKind), c = found ? view : live, f = found ?? liveFirm;
   const b = building(c, f.building), maximum = f.zone === 'I' ? FACTORY_MAX_LEVEL : FARM_MAX_LEVEL;
   const nextLevel = b.level < maximum ? b.level + 1 : null, reasons: string[] = [];
   const svc = utilities(c), before = buildingNeed(b.zone, b.level);
@@ -1048,12 +1053,13 @@ export function productionUpgradeStatus(c: City, f: Firm) {
     if (b.age < MONTH) reasons.push(`อายุอาคาร ${b.age}/${MONTH} วัน`);
     if (!access(c, b.cell)) reasons.push('ต้องมีถนนเชื่อมถึงเมือง');
     if (!svc.ok(b.id)) reasons.push('น้ำและไฟของอาคารปัจจุบันยังไม่พร้อม');
-    if (!fits(svc.spare, extra)) reasons.push('น้ำหรือไฟสำรองไม่พอสำหรับระดับถัดไป');
+    const short = spareShortfall(extra, svc.spare); if (short) reasons.push(short);
     if (f.lastMonthProfit <= profitThreshold) reasons.push(`กำไรรอบก่อนต้องมากกว่า ${profitThreshold / 100} เครดิต`);
     if (firmWorkerCount(c, f.id) === 0) reasons.push('ต้องมีคนทำงานจริงอย่างน้อย 1 คน');
     if (balance(c, f.wallet) < 20_000) reasons.push('เงินกิจการต้องมีอย่างน้อย 200 เครดิต');
     if (requiredSpendable && spendable(c, f) < requiredSpendable) reasons.push(`เงินพ้นสำรองค่าจ้างต้องมี ${requiredSpendable / 100} เครดิต`);
   }
+  if (nextLevel !== null && !reasons.length && reviewGrows(live, b) === false) reasons.push(SPARE_TAKEN);
   return { level: b.level, maximum, nextLevel, reasons, cost: 20_000, cash: balance(c, f.wallet),
     spendable: spendable(c, f), requiredSpendable, profitThreshold, workers: firmWorkerCount(c, f.id),
     before, after, extra, spare: { ...svc.spare } };
@@ -1094,12 +1100,66 @@ function grow(c: City) {
 export function step(c: City): void {
   withRoadScope(c, () => stepWithRoads(c));
 }
-function stepWithRoads(c: City): void {
+/** Everything a day does before growth review; shared by step() and the month-end upgrade preview. */
+function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
   rehouse(c); employ(c); admitHousehold(c); trade(c);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
+}
+/**
+ * The city as grow() will see it at the coming review. On the eve of a month-end review this is a
+ * private copy advanced through tomorrow's trade and month settlement, so the upgrade panels judge
+ * the profit, cash and age that will actually be closed; otherwise it is the live city.
+ */
+const reviewCache = new WeakMap<City, { key: string; view: City; grown: Map<number, number> }>();
+// Panels and tests may edit any part of the city between renders, so the whole state is the key.
+const reviewKey = (c: City) => JSON.stringify(c);
+function review(c: City) {
+  const key = reviewKey(c), hit = reviewCache.get(c);
+  if (hit && hit.key === key) return hit;
+  const view = structuredClone(c);
+  withRoadScope(view, () => advanceToReview(view));
+  // Run the real review on a second copy so shared spare water and power is spent in grow()'s order.
+  const after = structuredClone(view); withRoadScope(after, () => grow(after));
+  const grown = new Map(after.buildings.map(b => [b.id, b.level]));
+  const entry = { key, view, grown }; reviewCache.set(c, entry); return entry;
+}
+export function reviewView(c: City): City {
+  return (c.tick + 1) % MONTH !== 0 ? c : review(c).view;
+}
+/** On the eve of a review: whether this building will actually gain a level tomorrow; otherwise null. */
+function reviewGrows(c: City, b: Building): boolean | null {
+  if ((c.tick + 1) % MONTH !== 0) return null;
+  const r = review(c), before = r.view.buildings.find(x => x.id === b.id)?.level, after = r.grown.get(b.id);
+  return before === undefined || after === undefined ? null : after > before;
+}
+/** Thai blocker naming each short utility with needed vs spare units and what to build. */
+export function spareShortfall(extra: Need, spare: Need): string | null {
+  const parts: string[] = [];
+  if (spare.power < extra.power) parts.push(`ไฟฟ้าต้องเพิ่ม ${extra.power} หน่วย แต่สำรองเหลือ ${spare.power} — สร้างโรงไฟฟ้าเพิ่ม`);
+  if (spare.water < extra.water) parts.push(`น้ำต้องเพิ่ม ${extra.water} หน่วย แต่สำรองเหลือ ${spare.water} — สร้างปั๊มน้ำเพิ่ม`);
+  return parts.length ? parts.join(' · ') : null;
+}
+/** Buildings otherwise ready by age, road and service whose next level needs more spare water or power than the city has. */
+export function utilityUpgradeBlocks(c: City) {
+  const svc = utilities(c), need = { power: 0, water: 0 }; let count = 0;
+  for (const b of c.buildings) {
+    if (b.zone === 'R' || (b.zone === 'C' && b.level === 1)) continue;
+    const max = b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : FARM_MAX_LEVEL;
+    if (b.level >= max || b.age < MONTH || !access(c, b.cell) || !svc.ok(b.id)) continue;
+    const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1), extra = { power: after.power - before.power, water: after.water - before.water };
+    if (fits(svc.spare, extra)) continue;
+    count++; need.power += Math.max(0, extra.power); need.water += Math.max(0, extra.water);
+  }
+  return { count, need, spare: { ...svc.spare } };
+}
+const SPARE_TAKEN = 'น้ำหรือไฟสำรองจะถูกอาคารที่ตรวจก่อนใช้ไปในรอบนี้';
+/** True when upgrade panels are showing tomorrow's month-end figures rather than today's. */
+export const reviewIsTomorrow = (c: City) => (c.tick + 1) % MONTH === 0;
+function stepWithRoads(c: City): void {
+  advanceToReview(c);
   if (c.tick % 3 === 0) grow(c);
   else if (c.tick % 3 === 1) openShop(c);
 }
