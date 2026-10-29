@@ -19,7 +19,8 @@ try{
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:1,mobile:true});
  await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.__saveSafetyBoot=crypto.randomUUID();if(location.origin==='http://127.0.0.1:4191'&&!sessionStorage.getItem('seeded-save-test')){localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)});${guestMode?`localStorage.setItem(${JSON.stringify(MARKET_SAVE_KEY)},${JSON.stringify(JSON.stringify(journal))});`:''}sessionStorage.setItem('seeded-save-test','1');}`});
  await send('Page.navigate',{url});await enter();await until('!!window.cityManager&&window.cityManager.visuals().ready');
- assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),raw,'Opening the game automatically restores the exact v22 city, not a fresh city');
+ const resumed=await evaluate('window.cityManager.sessionSnapshot()');if(resumed!==raw){const a=JSON.parse(raw),b=JSON.parse(resumed);console.log('STARTUP_DIFF',JSON.stringify(Object.keys({...a,...b}).filter(k=>JSON.stringify(a[k])!==JSON.stringify(b[k])).map(k=>({key:k,expected:a[k],actual:b[k]}))));}
+ assert.deepEqual(JSON.parse(resumed),JSON.parse(raw),'Opening the game automatically restores the exact v22 city, not a fresh city');
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw,'Startup did not write the original');checks.push('Automatic v22 resume preserves complete snapshot and original bytes');
  await button('#toggle-game-menu');await button('#save');await until('localStorage.getItem("citymanager.checkpoint.latest")!==null');
  assert.equal(await evaluate('localStorage.getItem("citymanager.backup.before-autosave")'),raw);assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
