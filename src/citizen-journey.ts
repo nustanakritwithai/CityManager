@@ -24,7 +24,7 @@ export function createJourneys(rides: readonly RidePlan[], minute: number): Jour
   for(const source of rides) {
     const ride=structuredClone(source);
     if(vehicles.has(ride.id)||!ride.id||!ride.route.length||!ride.passengerIds.includes(ride.driverId))throw new Error('Invalid ride identity');
-    if(!Number.isSafeInteger(ride.departure)||ride.departure<0||ride.route.some(n=>!Number.isSafeInteger(n)||n<0))throw new Error('Invalid ride route/clock');
+    if(!Number.isSafeInteger(ride.departure)||ride.departure<0||ride.route.some(n=>!Number.isSafeInteger(n)||n<0||n>=576))throw new Error('Invalid ride route/clock');
     vehicles.add(ride.id);
     const drops=ride.stops.flatMap(s=>s.citizenIds);
     if(drops.length!==ride.passengerIds.length||new Set(drops).size!==drops.length||drops.some(p=>!ride.passengerIds.includes(p)))throw new Error('Invalid passenger stops');
@@ -137,7 +137,7 @@ export function restoreJourneys(value:unknown):JourneyState {
 
 function validateReturnSnapshot(v:JourneyVehicle,minute:number):void {
  const r=v.returnTrip!;
- if(r.vehicleId!==v.vehicleId||r.driverId!==v.ride.driverId||v.status==='waiting'||!Number.isSafeInteger(r.departure)||r.departure<v.ride.departure||r.departure>minute||!Array.isArray(r.route)||!r.route.length||r.route.some(n=>!Number.isSafeInteger(n)||n<0)||r.route[0]!==v.ride.route.at(-1)||r.homeCell!==v.ride.route[0]||r.route.at(-1)!==r.homeCell)throw new Error('Invalid return itinerary');
+ if(r.vehicleId!==v.vehicleId||r.driverId!==v.ride.driverId||v.status==='waiting'||!Number.isSafeInteger(r.departure)||r.departure<v.ride.departure||r.departure>minute||!Array.isArray(r.route)||!r.route.length||r.route.some(n=>!Number.isSafeInteger(n)||n<0||n>=576)||r.route[0]!==v.ride.route.at(-1)||r.homeCell!==v.ride.route[0]||r.route.at(-1)!==r.homeCell)throw new Error('Invalid return itinerary');
  if(!Array.isArray(r.pickups)||!Array.isArray(r.passengerIds)||r.passengerIds.length!==v.ride.passengerIds.length||new Set(r.passengerIds).size!==r.passengerIds.length||r.passengerIds.some(id=>!v.ride.passengerIds.includes(id)))throw new Error('Invalid return manifest');
  const ids=r.pickups.flatMap(p=>p.citizenIds);
  if(ids.length!==r.passengerIds.length||new Set(ids).size!==ids.length||ids.some(id=>!r.passengerIds.includes(id)))throw new Error('Invalid pickup manifest');

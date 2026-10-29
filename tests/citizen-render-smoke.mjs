@@ -31,4 +31,18 @@ try{
  await evaluate('window.citizenRendererQA.setEnabled(false);window.citizenRendererQA.setEnabled(true)');assert.equal((await evaluate('window.citizenRendererQA.snapshot()')).cars,2000);
  assert.deepEqual(errors,[]);times.sort((a,b)=>a-b);const result={scope:'isolated renderer only; synthetic 2000 car poses, not whole-city traffic',...initial,medianFrameMs:times[60],p95FrameMs:times[114],maxFrameMs:times.at(-1)};
  await writeFile(join(output,'metrics.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+ await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ const cityNavigation=await send('Page.navigate',{url:'http://127.0.0.1:4189/tests/fixtures/citizen-city.html'});assert.equal(cityNavigation.errorText,undefined);
+ let cityReady=false;
+ for(let i=0;i<600;i++){const v=await evaluate('({ready:!!window.citizenCityQA&&window.citizenCityQA.snapshot().assetsReady,error:window.citizenCityError})');if(v.error)throw Error(v.error);if(v.ready){cityReady=true;break;}await sleep(100);}
+ assert.ok(cityReady,'Real CityView and admitted assets initialized');
+ const cityInitial=await evaluate('window.citizenCityQA.snapshot()');assert.equal(cityInitial.population,2000);assert.ok(cityInitial.commuters>0);assert.equal(cityInitial.oldDecorativeActors,0);
+ assert.equal(await evaluate('window.citizenCityQA.roundTrip()'),true,'Mid-trip coupled city save is exact');
+ const cityTimes=await evaluate('new Promise(resolve=>{const a=[];let last;window.citizenCityQA.start();function sample(t){if(last!==undefined)a.push(t-last);last=t;if(a.length===120){window.citizenCityQA.pause();resolve(a);}else requestAnimationFrame(sample)}requestAnimationFrame(sample)})');
+ const cityAfter=await evaluate('window.citizenCityQA.snapshot()');assert.equal(cityAfter.population,2000);assert.equal(cityAfter.commuters,cityInitial.commuters);assert.equal(cityAfter.vehicles,cityInitial.vehicles);assert.equal(cityAfter.rendered,cityAfter.onRoad);assert.equal(cityAfter.unchangedEconomy,true);assert.equal(cityAfter.oldDecorativeActors,0);
+ assert.equal(await evaluate('window.citizenCityQA.roundTrip()'),true,'Moving city saves and restores identically');
+ const cityShot=await send('Page.captureScreenshot',{format:'png'});await writeFile(join(output,'2000-resident-city-traffic.png'),Buffer.from(cityShot.data,'base64'));
+ cityTimes.sort((a,b)=>a-b);const cityResult={scope:'CityView synthetic funded 2000 resident fixture, low visual quality, 390x844 CI Edge; one game minute per rendered frame, not production pacing or physical phone',initial:cityInitial,after:cityAfter,medianFrameMs:cityTimes[60],p95FrameMs:cityTimes[114],maxFrameMs:cityTimes.at(-1)};
+ assert.deepEqual(errors,[]);await writeFile(join(output,'city-metrics.json'),JSON.stringify(cityResult,null,2));console.log(JSON.stringify(cityResult));
+
 }finally{ws?.close();browser.kill();}

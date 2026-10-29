@@ -74,7 +74,7 @@ function walkable(city: City): Set<number> {
 /** Read-only cache for one synchronous advance. Never retain across city edits,
  * economic days or asynchronous work. Identity allocation still has one owner.
  */
-export type ParkActivityContext = { city: City; day: number; citizens: Citizen[]; people: ReadonlyMap<string, Citizen>; open: ReadonlySet<number> };
+export type ParkActivityContext = { city: City; day: number; citizens: Citizen[]; people: ReadonlyMap<string, Citizen>; open: ReadonlySet<number>; unavailableCitizenIds?: ReadonlySet<string> };
 export function prepareParkActivity(city: City): ParkActivityContext {
   const citizens = parkActivityCitizens(city);
   return { city, day: city.tick, citizens, people: new Map(citizens.map(p => [p.citizenId, p])), open: walkable(city) };
@@ -145,7 +145,7 @@ const duration = (v: ParkVisitor) => v.phase === 'travel' ? (v.route.length - 1)
 const setPhase = (v: ParkVisitor, phase: ParkActivityPhase) => { v.phase = phase; v.phaseMinute = 0; v.partnerId = null; };
 function admit(city: City, state: ParkActivityState, context?: ParkActivityContext): void {
   if (state.minute < 600 || state.minute > 1140 || state.minute % 15) return;
-  const visited = new Set(state.visited), people = (context?.citizens ?? parkActivityCitizens(city)).filter(p => p.homeId !== null && !visited.has(p.citizenId) && (!p.employed || state.minute >= WORK_END_MINUTE));
+  const visited = new Set(state.visited), people = (context?.citizens ?? parkActivityCitizens(city)).filter(p => !context?.unavailableCitizenIds?.has(p.citizenId) && p.homeId !== null && !visited.has(p.citizenId) && (!p.employed || state.minute >= WORK_END_MINUTE));
   // Per-admission cache shares even failed searches across all residents of a
   // building. It cannot become stale across construction edits or another minute.
   const routesByHome = new Map<number, { park: City['parks'][number]; route: number[] }[]>();

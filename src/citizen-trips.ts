@@ -31,6 +31,7 @@ export function planFamilyRides(requests: readonly TripRequest[], seats = 4): Tr
     ids.add(r.id); people.add(r.citizenId);
     if (![r.householdId, r.origin, r.destination, r.earliestDeparture, r.latestDeparture, ...r.route].every(n => Number.isSafeInteger(n) && n >= 0)
       || r.latestDeparture < r.earliestDeparture) throw new RangeError('Invalid trip request');
+    if (r.origin >= 576 || r.destination >= 576 || r.route.some(n => n >= 576)) throw new RangeError('Trip outside the city map');
     if (r.route.length === 0) { result.waiting.push({ requestId: r.id, reason: 'no-route' }); continue; }
     if (r.route[0] !== r.origin || r.route.at(-1) !== r.destination) throw new Error('Trip route endpoints mismatch');
     const key = `${r.householdId}:${r.origin}`;

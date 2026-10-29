@@ -30,7 +30,8 @@ export function reconcileParkRuntime(city: City, runtime: ParkRuntime): void {
 /** One economic day per 1440 actual minutes. A zero advance is a true pause.
  * Normal playback still requests 1440 minutes/second; citizen view requests one.
  */
-export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean): number {
+export type CityMinuteObserver = { beforeMinute?: (absoluteMinute:number)=>void; afterDay?:()=>void; unavailableCitizenIds?:()=>ReadonlySet<string> };
+export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean, observer?:CityMinuteObserver): number {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440 * 120) throw new RangeError('Invalid park clock advance');
   if (minutes === 0) return 0;
   if (runtime.activity.day !== city.tick || runtime.recreation.minute !== parkActivityAbsoluteMinute(runtime.activity)) throw new Error('Park clocks differ');
@@ -51,17 +52,19 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
     // Application-only pacing budget: stop at an observed minute, never jump the
     // game clock or accumulate catch-up debt. Heavy frames slow playback.
     if (processed > 0 && continueFrame?.() === false) { runtime.minuteRemainder = 0; break; }
+    observer?.beforeMinute?.(parkActivityAbsoluteMinute(runtime.activity)+1);
+    context.activity.unavailableCitizenIds=observer?.unavailableCitizenIds?.();
     // With neither parks nor any earned benefit there are no observations to miss.
     // Preserve the no-park economy's cost and byte-for-byte behavior.
     if (!city.parks.length && !runtime.activity.visitors.length && !Object.keys(runtime.recreation.citizens).length) {
-      const count = Math.min(remaining, GAME_MINUTES_PER_DAY - runtime.activity.minute);
+      const count = Math.min(remaining, observer ? 1 : GAME_MINUTES_PER_DAY - runtime.activity.minute);
       runtime.activity.minute += count; remaining -= count;
       processed += count;
       runtime.recreation = createParkRecreation(parkActivityAbsoluteMinute(runtime.activity), runtime.recreation.tuning);
     } else {
       reconcileParkActivity(city, runtime.activity, context.activity);
       const frame = observeParkRecreationMinute(city, runtime.activity, { parkPolicy: context.parkPolicy,
-        unavailableCitizenIds: runtime.activity.minute >= WORK_START_MINUTE && runtime.activity.minute < WORK_END_MINUTE ? context.onDuty : offDuty });
+        unavailableCitizenIds: context.activity.unavailableCitizenIds ?? (runtime.activity.minute >= WORK_START_MINUTE && runtime.activity.minute < WORK_END_MINUTE ? context.onDuty : offDuty) });
       const nextRecreation = advanceParkRecreation(runtime.recreation, frame);
       advanceParkActivity(city, runtime.activity, 1, context.activity);
       runtime.recreation = nextRecreation;
@@ -74,6 +77,7 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
       if (city.tick !== before + 1) throw new Error('Park runtime requires exactly one economic day');
       startParkActivityDay(city, runtime.activity); days++;
       reconcileParkRuntime(city, runtime);
+      observer?.afterDay?.();
       // UI/owner automation can render or pause synchronously. Publish the whole
       // boundary first, then stop this wall-time request at that explicit pause.
       if (afterDay?.() === false) { runtime.minuteRemainder = 0; break; }
