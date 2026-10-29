@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
-import { createCity, buildCampus, campusSiteReason, step, adoptSavedEducation, deserialize, serialize, isRetail } from '../src/sim.ts';
+import { createCity, buildCampus, campusSiteReason, step, adoptSavedEducation, deserialize, serialize, isRetail, isMarket } from '../src/sim.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
 import { reachTouch } from './touch-reach.mjs';
@@ -29,7 +29,7 @@ const target = targets.find(item => item.type === 'page' && /CityManager/.test(i
   ?? targets.find(item => item.type === 'page' && item.url === 'about:blank');
 assert.ok(target, 'explicitly isolated CityManager or blank test target');
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout; const pending = new Map(), errors = [], checks = [];
+let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout; const pending = new Map(), errors = [], checks = [], landscapeLayouts = [];
 function send(method, params = {}) {
   return new Promise((resolve, reject) => { const id = ++sequence; const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 15000); pending.set(id, { resolve: r => { clearTimeout(timer); resolve(r); }, reject: e => { clearTimeout(timer); reject(e); } }); ws.send(JSON.stringify({ id, method, params })); });
 }
@@ -71,9 +71,13 @@ const fixture = serializeParkSession(city, createParkRuntime(city));
 // retailer, whose taller financial card exposed the warning/landscape regression.
 const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
 const cardCity = deserialize(serializeV4(prior)); adoptSavedEducation(cardCity);
-const retail = cardCity.firms.find(isRetail);
-const cardCell = cardCity.buildings.find(b => b.id === retail?.building)?.cell;
-assert.ok(Number.isInteger(cardCell), 'The real day29 replay contains a retailer');
+const cardCases = ['house','shop','market','factory','farm'].map(kind => {
+  const b = cardCity.buildings.find(b => kind === 'house' ? b.zone === 'R' : cardCity.firms.some(f => f.building === b.id && (kind === 'shop' ? isRetail(f) : kind === 'market' ? isMarket(f) : f.zone === (kind === 'farm' ? 'F' : 'I'))));
+  assert.ok(b, 'Real day29 replay contains ' + kind); return { kind, cell:b.cell };
+});
+const family = cardCity.households[0], familyHome = cardCity.buildings.find(b=>b.id===family.home);
+assert.ok(familyHome, 'Replay household has a real home');
+cardCases.push({ kind:'household', cell:familyHome.cell, householdId:family.id });
 await writeFile(resolve(output, 'synthetic-fixture.json'), fixture);
 let injected;
 try {
@@ -188,38 +192,64 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width:844, height:390, screenWidth:844, screenHeight:390, deviceScaleFactor:1, mobile:true });
   await send('Emulation.setTouchEmulationEnabled', { enabled:true, maxTouchPoints:1 });
   mobile = true;
-  stage = 'Load the real retailer replay for landscape';
+  stage = 'Load the real six-card replay for landscape';
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(cardCity))})`);
-  await button('#load');
-  await until('JSON.parse(cityManager.snapshot()).tick===29');
-  await button('#close-inspector'); await cell(cardCell);
-  await until("document.querySelector('#entity-content').dataset.cardKind==='shop'");
-  await evaluate("document.querySelector('#inspector-body').scrollTop=0");
-  await shot('17-landscape-building-after');
-  await game();
-  await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic landscape quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
-  await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
-  await button('#close-inspector'); await cell(cardCell);
-  await evaluate("document.querySelector('#inspector-body').scrollTop=0");
-  landscapeLayout = await evaluate(`(()=>{const panel=document.querySelector('#inspector').getBoundingClientRect(),body=document.querySelector('#inspector-body').getBoundingClientRect(),header=document.querySelector('#inspector .inspector-heading').getBoundingClientRect(),visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>body.top&&r.top<body.bottom&&getComputedStyle(e).visibility!=='hidden'};return{viewport:[innerWidth,innerHeight],panelTop:panel.top,headerHeight:header.height,bodyHeight:body.height,heroVisible:visible(document.querySelector('#entity-content .bc-hero')),visibleKeyMetrics:[...document.querySelectorAll('.bc-kpis [data-context-metric],.bc-kpis [data-card-metric]')].filter(visible).length,fullyVisibleKeyValues:[...document.querySelectorAll('.bc-kpis [data-context-metric] dd,.bc-kpis [data-card-metric] dd')].filter(e=>{const r=e.getBoundingClientRect();return visible(e)&&r.top>=body.top&&r.bottom<=body.bottom}).length,controls:['#panel-pause','#close-inspector','#save-failure-export'].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})}})()`);
-  assert.deepEqual(landscapeLayout.viewport, [844,390]);
-  assert.ok(landscapeLayout.heroVisible && landscapeLayout.visibleKeyMetrics >= 2, `Landscape identity and two real metrics remain visible under the save warning: ${JSON.stringify(landscapeLayout)}`);
-  assert.ok(landscapeLayout.fullyVisibleKeyValues >= 2, `Landscape shows at least two complete numeric values, not just tile edges: ${JSON.stringify(landscapeLayout)}`);
-  assert.ok(landscapeLayout.controls.every(c=>c.width>=44&&c.height>=44&&c.hit), 'Landscape clock, close and Export retain reachable 44px targets');
-  await shot('18-landscape-save-warning-after');
-  await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'), false);
-  await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'), true);
-  assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"), false);
+  await button('#load'); await until('JSON.parse(cityManager.snapshot()).tick===29');
+  const cardSnapshot = await evaluate('cityManager.snapshot()');
+  const matrixFailures = [];
+  for (const warning of [false,true]) {
+    if (warning) {
+      await game();
+      await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic landscape quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
+      await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
+    }
+    for (const [index, entry] of cardCases.entries()) {
+      const label = entry.kind + (warning ? '-warning' : '-clear');
+      try {
+        if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector');
+        await cell(entry.cell);
+        if (entry.householdId) await button(`#entity-content [data-household-id="${entry.householdId}"]`);
+        await until(`document.querySelector('#entity-content').dataset.cardKind===${JSON.stringify(entry.kind)}`);
+        await evaluate("document.querySelector('#inspector-body').scrollTop=0;new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+        stage = 'Measure landscape ' + label;
+        landscapeLayout = await evaluate(`(()=>{const panel=document.querySelector('#inspector').getBoundingClientRect(),body=document.querySelector('#inspector-body').getBoundingClientRect(),header=document.querySelector('#inspector .inspector-heading').getBoundingClientRect(),visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>body.top&&r.top<body.bottom&&getComputedStyle(e).visibility!=='hidden'},full=e=>{const r=e.getBoundingClientRect();return visible(e)&&r.top>=body.top&&r.bottom<=body.bottom&&r.left>=body.left&&r.right<=body.right};const metrics=[...document.querySelectorAll('.bc-kpis [data-context-metric],.bc-kpis [data-card-metric]')];return{viewport:[innerWidth,innerHeight],panelTop:panel.top,headerHeight:header.height,bodyHeight:body.height,heroVisible:full(document.querySelector('#entity-content .bc-hero')),visibleKeyMetrics:metrics.filter(visible).length,fullyVisibleKeyMetrics:metrics.filter(full).length,fullyVisibleKeyValues:metrics.flatMap(e=>[...e.querySelectorAll('dd')]).filter(full).length,horizontalOverflow:document.querySelector('#inspector-body').scrollWidth>document.querySelector('#inspector-body').clientWidth+1,warningVisible:!document.querySelector('#save-failure-banner').hidden,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-export']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})}})()`);
+        Object.assign(landscapeLayout,{kind:entry.kind,warning});
+        landscapeLayouts.push(landscapeLayout);
+        await shot((17+index+(warning?cardCases.length:0))+'-landscape-'+label);
+        assert.deepEqual(landscapeLayout.viewport,[844,390]);
+        assert.equal(landscapeLayout.warningVisible,warning,'Actual warning state');
+        assert.ok(landscapeLayout.heroVisible && landscapeLayout.visibleKeyMetrics>=2,'Identity and at least two real metrics: '+label);
+        assert.ok(landscapeLayout.fullyVisibleKeyMetrics>=2 && landscapeLayout.fullyVisibleKeyValues>=2,'At least two complete labelled metric tiles and values: '+label);
+        assert.equal(landscapeLayout.horizontalOverflow,false,'No horizontal overflow: '+label);
+        assert.ok(landscapeLayout.controls.every(c=>c.width>=44&&c.height>=44&&c.hit),'44px reachable Back/clock/close/Export: '+label);
+        if (entry.kind==='factory' || entry.kind==='farm') {
+          const selector = entry.kind==='factory' ? '[data-recipe][aria-pressed="true"]' : '[data-crop][aria-pressed="true"]';
+          await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center',behavior:'instant'})`);
+          await sleep(100);
+          landscapeLayout.detailControl = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);
+          assert.ok(landscapeLayout.detailControl.width>=44&&landscapeLayout.detailControl.height>=44&&landscapeLayout.detailControl.hit,'Recipe/crop control remains reachable below the metrics: '+label);
+        }
+        assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Card inspection preserves actual city data');
+      } catch (error) {
+        matrixFailures.push({kind:entry.kind,warning,error:String(error)});
+        if (!landscapeLayouts.some(r=>r.kind===entry.kind&&r.warning===warning)) landscapeLayouts.push({kind:entry.kind,warning,error:String(error)});
+      }
+    }
+  }
+  assert.deepEqual(matrixFailures,[],'Complete landscape card matrix: '+JSON.stringify(landscapeLayouts));
+  await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'),false);
+  await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'),true);
+  assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"),false);
   await evaluate('Storage.prototype.setItem=window.__uxWrite');
   await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
-  checks.push('landscape 844x390 identity and at least two real building metrics, 44px clock/close/export and persistent warning until successful retry');
+  checks.push('all six cards at landscape 844x390, warning on/off: complete identity and at least two complete labelled numeric metrics, unchanged city data, no horizontal overflow, 44px reachable controls and real save retry');
   assert.equal(errors.length, 0, JSON.stringify(errors));
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   const failedStage = stage;
   await shot(mobile ? 'failure-mobile' : 'failure-desktop').catch(() => {});
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), warningMenuLayout, landscapeLayout, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed:false, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, stage:failedStage, error:String(error), warningMenuLayout, landscapeLayout, landscapeLayouts, checks, errors }, null, 2));
   throw error;
 } finally {
   if (injected) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier }).catch(() => {});

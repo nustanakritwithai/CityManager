@@ -24,12 +24,14 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:44px; min-width:100px; 
   html[data-touch-ui=true] #save-failure-banner > div { display:grid; grid-template-columns:auto minmax(0,1fr); column-gap:12px; }
   html[data-touch-ui=true] #save-failure-banner small { grid-column:2; grid-row:1; text-align:right; }
   html[data-touch-ui=true] #save-failure-banner span { grid-column:1 / -1; grid-row:2; }
-  /* Retail stock is a single tile. In landscape its full-width section would
-     push every actual purchase/sale metric below the warning-reduced viewport. */
-  html[data-touch-ui=true] #entity-content[data-card-kind=shop] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:12px; }
-  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > * { grid-column:1 / -1; }
-  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > .bc-hero { grid-column:1; }
-  html[data-touch-ui=true] #entity-content[data-card-kind=shop] > .flow-strip { grid-column:2; align-self:center; }
+  /* Every card uses the short viewport for identity and actual current values
+     first. Recipe/crop controls and detail sections remain reachable below. */
+  html[data-touch-ui=true] #entity-content[data-card-kind] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:12px; }
+  html[data-touch-ui=true] #entity-content[data-card-kind] > * { grid-column:1 / -1; order:2; }
+  html[data-touch-ui=true] #entity-content[data-card-kind] > .bc-hero { order:0; }
+  html[data-touch-ui=true] #entity-content[data-card-kind]:has(> .flow-strip) > .bc-hero { grid-column:1; }
+  html[data-touch-ui=true] #entity-content[data-card-kind] > .flow-strip { grid-column:2; order:0; align-self:center; }
+  html[data-touch-ui=true] #entity-content[data-card-kind] > :is([data-card-section=occupancy],[data-card-section=members],[data-card-section=production],[data-card-section=plot],[data-card-section=harvest],[data-card-section=stock],[data-card-section=trade]) { order:1; }
   html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=stock] { grid-column:1; }
   html[data-touch-ui=true] #entity-content[data-card-kind=shop] > [data-card-section=trade] { grid-column:2; }
 }
