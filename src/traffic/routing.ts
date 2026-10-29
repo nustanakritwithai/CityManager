@@ -11,7 +11,14 @@ export type OdDemand = { from: number; to: number; vehicles: number };
 export type PathShare = { path: number[]; share: number };
 /** Per-OD path shares, carried between periods. Key: "from:to". */
 export type RouteState = Map<string, PathShare[]>;
-export type Assignment = { state: RouteState; volumes: Map<string, number>; times: Map<string, number>; served: number; unserved: number; vehicleSeconds: number };
+export type Assignment = {
+  /** Damped shares for the next period; volumes, times and cost describe the current assignment. */
+  state: RouteState;
+  volumes: Map<string, number>; times: Map<string, number>;
+  /** Route-assigned demand, not road admission or completed trips. This model has no queue. */
+  served: number;
+  unserved: number; vehicleSeconds: number;
+};
 
 export const bprTime = (l: Link, volume: number) => freeFlowSeconds(l) * (1 + BPR_ALPHA * (volume / l.capacityPerHour) ** BPR_BETA);
 /** A junction is a node with more than two distinct road neighbours reachable in or out. */
@@ -50,13 +57,23 @@ function load(net: LinkNetwork, od: readonly OdDemand[], state: RouteState) {
   for (const d of od) for (const ps of state.get(`${d.from}:${d.to}`) ?? []) for (let i = 1; i < ps.path.length; i++) { const k = linkKey(ps.path[i - 1], ps.path[i]); v.set(k, (v.get(k) ?? 0) + ps.share * d.vehicles); }
   return v;
 }
+/** Purpose-specific rows share one route state, so prepare, load and reroute each OD only once. */
+function aggregateOd(od: readonly OdDemand[]): OdDemand[] {
+  const grouped = new Map<string, OdDemand>();
+  for (const d of od) if (d.vehicles > 0) {
+    const key = `${d.from}:${d.to}`, existing = grouped.get(key);
+    if (existing) existing.vehicles += d.vehicles;
+    else grouped.set(key, { from: d.from, to: d.to, vehicles: d.vehicles });
+  }
+  return [...grouped.values()].sort((a, b) => a.from - b.from || a.to - b.to);
+}
 /**
  * Assign one period's OD demand. Uses last period's shares (dropping paths broken by road edits),
  * measures congested times, then moves REROUTE_SHARE of each OD onto its current best path.
  * Unreachable ODs count as `unserved` vehicles and keep no state.
  */
 export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: RouteState = new Map()): Assignment {
-  const rows = [...od].filter(d => d.vehicles > 0).sort((a, b) => a.from - b.from || a.to - b.to);
+  const rows = aggregateOd(od);
   const free = linkTimes(net, new Map()), state: RouteState = new Map();
   let unserved = 0;
   for (const d of rows) {
@@ -68,11 +85,12 @@ export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: R
     state.set(key, paths);
   }
   const volumes = load(net, rows, state), times = linkTimes(net, volumes);
-  let vehicleSeconds = 0, served = 0;
+  // Freeze this period's cost from its loaded links before changing any shares for the next period.
+  const vehicleSeconds = [...volumes].reduce((sum, [key, vehicles]) => sum + vehicles * times.get(key)!, 0);
+  let served = 0;
   for (const d of rows) {
     const key = `${d.from}:${d.to}`, paths = state.get(key); if (!paths) continue;
     served += d.vehicles;
-    for (const p of paths) vehicleSeconds += p.share * d.vehicles * pathTime(p.path, times);
     const best = shortestPath(net, times, d.from, d.to)!;
     const id = best.join(','); let hit = paths.find(p => p.path.join(',') === id);
     if (!hit) { hit = { path: best, share: 0 }; paths.push(hit); }
