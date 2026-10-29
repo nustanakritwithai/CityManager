@@ -1,5 +1,7 @@
 # แรงงานตามความสามารถของสมาชิกครัวเรือน
 
+> ส่วนแรกบันทึกกติกาต้นทางรุ่น `worker-1`; สัญญาการสรุปสถานะที่รวมการศึกษาและงานสวนอยู่ใน [สรุปสถานะระยะ A](#สรุปสถานะระยะ-a-อ่านอย่างเดียว) ด้านล่าง ระยะ A ยังไม่เปลี่ยน UI หรือตัวจัดสรรงานเดิม
+
 เอกสารนี้อธิบายกติกาเกมที่เสนอและนำมาใช้ในข้อมูลรุ่น `3 / worker-1` ไม่ใช่สูตรหรือข้อมูลสมดุลจาก Cities: Skylines II การจำลองยังใช้ครัวเรือนและสถานประกอบการแต่ละแห่ง ไม่มีตัวละครหรือการตัดสินใจรายบุคคล
 
 ## ปัญหาที่แก้
@@ -82,3 +84,55 @@ npm run build
 - เซฟ v2 วันที่ 180 ที่ตำแหน่งเต็มอยู่แล้วไม่ถูกบังคับแยกนายจ้างด้วยการปลดครัวเรือนอื่น ต้องมีตำแหน่งว่างที่ตรงความสามารถและจ่ายค่าจ้างได้ก่อน
 
 ภาพจากการเล่นจริงใน Edge บน branch นี้: [ครัวเรือนสองนายจ้าง](worker-preview/worker-household.png), [กิจการรับแรงงานตามจำนวน](worker-preview/worker-firm.png), [จอมือถือจำลอง](worker-preview/worker-phone.png) ยังไม่ใช่ภาพรุ่นที่เผยแพร่ และยังไม่มีผลทดสอบมือถือเครื่องจริงหรือประสิทธิภาพระดับประชากรหลักแสน–ล้าน
+
+## สรุปสถานะระยะ A: อ่านอย่างเดียว
+
+`src/workforce-summary.ts` เพิ่ม `deriveWorkforceSummary(city)` เป็น snapshot จาก **จำนวนรวมของครัวเรือนที่มีอยู่จริง** ไม่ใช่ทะเบียนบุคคล ระบบเศรษฐกิจและการศึกษาเดิมยังเป็นเจ้าของข้อมูล มีเพียงโมดูลนี้และเทสต์ที่ใช้ API ใหม่ในระยะ A; panel, HUD, คำตอบเมือง, กราฟ, gate และสวนยังไม่ได้เปลี่ยนมาใช้ snapshot นี้
+
+### สัญญาการนับ
+
+- `population = workforce + dependents`
+- `economicWorkers = employeeWorkers + ownerWorkers`
+- `studying = schoolStudents + universityStudents`
+- `occupiedWorkforce = economicWorkers + studying`
+- `unassignedWorkforce = workforce - occupiedWorkforce`
+- ดังนั้น `population = economicWorkers + studying + unassignedWorkforce + dependents`
+- `unassignedShare = unassignedWorkforce / (economicWorkers + unassignedWorkforce)`; เป็น `null` เมื่อไม่มีตัวหาร หรือ snapshot ไม่ผ่าน reconciliation
+
+ใช้คำไทยว่า **ทำงาน / กำลังศึกษา / ยังไม่ได้รับจัดสรรงาน / ผู้พึ่งพิง** สำหรับสถานะหลักที่ไม่ทับกัน `unassignedShare` เป็นสัดส่วนการจัดสรรในเกม ไม่ใช่อัตราว่างงานตามนิยามตลาดแรงงาน เพราะไม่มีข้อมูลอายุ ความตั้งใจหางาน หรือความสมัครใจทำงาน สัดส่วนนี้ไม่รับรองว่าคนที่ยังไม่ได้งานรับงานได้ทุกประเภท
+
+`economicWorkers` รวมลูกจ้างฟาร์ม โรงงาน ร้านค้า เจ้าของที่มี `ownerLabor` พนักงานสวน ครู และอาจารย์ ผู้ที่ยังลงทะเบียนเรียนอยู่เป็น `studying` แม้การเรียนพักหรือรอที่สอน; snapshot อ่านบทบาทที่บันทึกไว้ ไม่เดิน tick หรือคาดเดาการเข้าเรียนวันนี้
+
+อาชีพแยกจากสถานะหลักและทักษะ: `agriculture`, `manufacturing`, `retail`, `market-trading`, `park-maintenance`, `teacher`, `professor` โดยฟาร์มดู `Firm.zone === 'F'` แม้ allocation เดิมใช้ occupation `manufacturing` เหมือนโรงงาน `relationship` แยก `employee`, `owner-worker`, `student`; ผู้เรียนมีบทบาท `school-student` / `university-student` แต่ไม่เพิ่มยอดอาชีพทำงาน
+
+`ownedFirmIds` คือกิจการที่ **ครัวเรือน** ถือครอง ไม่ใช่จำนวนเจ้าของรายบุคคล การมี ownership อย่างเดียวไม่เพิ่ม `economicWorkers` และไม่มีการสร้างค่าจ้างเจ้าของ ครัวเรือนที่ลงแรงเองหนึ่งคนและส่งสมาชิกอีกหนึ่งคนเป็นลูกจ้างจะนับสองหน่วยแรงงาน ไม่ใช่สามคนเพราะมี ownership เพิ่มด้วย
+
+`skills` คัดลอกจำนวน `general / manufacturing / retail` ที่ยังรวมเท่ากับ workforce; `credentials.basic / higher` เป็นอีกแกน และ higher รวมอยู่ใน basic แล้ว ไม่บวกวุฒิเข้าประชากร ไม่มีข้อมูลจับคู่วุฒิกับทักษะรายบุคคล จึงไม่ใส่ `skill` ให้ assignment ครู/อาจารย์/ผู้เรียน ไม่ใช้ snapshot เปลี่ยนทักษะ ล้างวุฒิ หรือแทนการจัดสรรวุฒิให้ gate ของ #97
+
+### ดัชนีและกำลังจากภายนอก
+
+- `byHousehold.get(householdId)` ให้ counts, skills, credentials, ownership และ assignment rows ที่คัดลอกแล้ว
+- `byWorkplace.get('firm:<id>' | 'park:<id>' | 'campus:<id>')` ให้ `localWorkers`, `learners`, `externalTeachers`, `externalProfessors` และ assignment rows
+- `externalEducators` รวม `campus.contract` แยกครู/อาจารย์ภายนอก ไม่เพิ่มประชากร workforce หรือตัวหารสัดส่วนชาวเมือง
+- ผลรวม localWorkers และ learners ของสถานที่ต้องตรง economicWorkers และ studying ของครัวเรือนเมื่อ snapshot ผ่าน reconciliation
+- ไม่สร้างคนงานสาธารณูปโภค ขนส่ง หรือก่อสร้างจากความจุโรงไฟฟ้า ภาพรถ หรือยอดเงินบัญชี `construction` เพราะยังไม่มี allocation อาชีพเหล่านั้น
+
+### ข้อมูลผิดและขอบเขต validation
+
+ตรวจ `reconciled` และ `issues` ก่อนใช้ผลเป็นข้อเท็จจริง หากทำงาน+เรียนเกิน workforce จะคง `unassignedWorkforce` ติดลบให้เห็นและรายงาน `workforce-overallocated` ไม่ clamp หรือย้ายคนออกเพื่อให้ยอดดูถูกต้อง ตรวจยอดประชากร ทักษะเกินโควตา วุฒิที่ขัดกัน cohort ซ้ำ และ reference ที่หายด้วย ข้อมูลจำนวนที่ไม่ใช่จำนวนเต็มไม่ติดลบหรือ reference ที่หายจะมี issue; แถวนั้นไม่สามารถนำมาจัดกลุ่มได้ จึงไม่ควรใช้ totals ของ snapshot ที่ invalid เป็นยอดสมบูรณ์
+
+นี่เป็น reconciliation สำหรับ **City ที่ผ่านการโหลด/ตรวจสอบตามสัญญาเดิมแล้ว** ไม่ใช่ตัว deserialize หรือ validator เซฟใหม่ และไม่ตรวจทุกกติกางบ กำลังผลิต ลำดับจัดสรร การเชื่อมถนน หรือประวัติการศึกษา การจ่ายค่าจ้างจริง/ค้างรับยังดู ledger และ workDays เดิม การเปลี่ยนสถานะไม่ล้างสิทธิที่ทำมาแล้ว
+
+### ความบริสุทธิ์ ประสิทธิภาพ และเรื่องที่ยังไม่อนุมัติ
+
+อ่านหนึ่งรอบตามจำนวนครัวเรือน สถานประกอบการ และ allocation/cohort rows; ไม่วนตามจำนวนสมาชิก ไม่ใช้ RNG ไม่ scan ledger ไม่เรียก serialize ไม่เดินเกม และไม่เพิ่ม cache ที่อาจค้างเมื่อแก้ข้อมูลภายใน tick เดียว ผลลัพธ์ไม่อ้าง mutable objects ของ City (ReadonlyMap/readonly เป็นสัญญาระดับ TypeScript ไม่ใช่ runtime freeze)
+
+ผู้ใช้ API ควรเรียกเมื่อ state/revision ที่เกี่ยวข้องเปลี่ยน ไม่เรียกทุก animation frame การต่อ cache/revision เข้ากับ consumer เป็นงานระยะ B; เทสต์ cohort ใหญ่ยืนยันเพียงว่าไม่แตกหนึ่ง object ต่อคน **ไม่ใช่ผล benchmark รองรับเมืองล้านคนบนมือถือ**
+
+ระยะ A ไม่เปลี่ยน `householdWorkerCount`, allocator, เงิน/RNG, schema/bytes ของ save, ลำดับ gate, ระดับอาคารเดิม, เวลาเกม หรือ park member-slot roster เซฟไม่มี education ให้สรุปบทบาท/วุฒิเป็นศูนย์โดยไม่เพิ่ม education field หรือแจกวุฒิ
+
+ยังต้องตัดสินใจก่อนระยะ B: บ้านที่มีแต่ผู้เรียนจะผ่าน working-household gate หรือไม่; ปิดสถานศึกษาจะคง enrollment reservation หรือปล่อยรับงาน; ownership ที่ไม่ลงแรงจะยังกันโควตาเข้าเรียนหนึ่งคนหรือไม่ ส่วนเรียนควบงาน/part-time และอาชีพใหม่ต้องมีระบบรองรับก่อน ไม่ใช่เพิ่ม label หรือบวกคนซ้ำ
+
+### การตรวจสอบเฉพาะงาน
+
+`node --experimental-strip-types --test tests/workforce-summary.test.ts` ครอบคลุมยอดทุกอาชีพ ผู้เรียน ครู/อาจารย์ เจ้าของลงแรงและไม่ลงแรง สัญญาภายนอก ผู้พึ่งพิง ตัวหารศูนย์ ข้อมูลผิดที่ต้องเห็น และเซฟไม่มี education รวมทั้งอ่าน natural education city แล้ว serialize ได้ bytes เดิมและเดินเกมต่อเหมือน control ตรวจ regression การศึกษา/แรงงาน/สวน และ `npm run build` ก่อนรับเข้าระบบ
