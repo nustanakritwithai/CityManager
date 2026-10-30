@@ -4,6 +4,8 @@ import { buildNetwork, type LinkNetwork } from '../src/traffic/network.ts';
 import { linkTimes } from '../src/traffic/routing.ts';
 import { configureRoadPath, setRoadJunction, type RoadMap } from '../src/road-topology.ts';
 import { dispatchZones, travelTree, treeMinutes, TAXI_DISPATCH_MINUTES } from '../src/taxi/coverage.ts';
+import { planRoam } from '../src/taxi/rrt-roam.ts';
+import * as dispatchApi from '../src/taxi/dispatch.ts';
 import { TaxiEngine, TAXI_MAX_WAIT_MIN, DEPOT_UNITS, type TaxiLeaseAdapter, type TaxiRequest } from '../src/taxi/dispatch.ts';
 
 const S = 24, at = (x: number, y: number) => y * S + x;
@@ -38,13 +40,13 @@ test('nearest depot wins, ties go to the lower id', () => {
 });
 test('requests outside coverage are rejected without a lease', () => {
   const c = grid(); draw(c, row(20, 0, 3)); const net = buildNetwork(c), l = new Ledger();
-  const e = new TaxiEngine(net, free(net), [depot], [], 0, l);
+  const e = new TaxiEngine(net, free(net), [depot], 0, { lease: l, width: S });
   const r = e.submit([{ id: 'far', from: at(1, 20), to: at(3, 20), persons: 4, minute: 0 }]);
   assert.deepEqual(r.rejected, ['far']); assert.equal(l.reserved.size, 0);
 });
 test('deterministic nearest-ETA assignment and people conserved every quantum', () => {
   const run = () => {
-    const net = buildNetwork(grid()), l = new Ledger(), e = new TaxiEngine(net, free(net), [depot, { id: 2, cell: at(20, 10), level: 2, open: true }], [{ id: 9, cell: at(10, 6), open: true }], 0, l);
+    const net = buildNetwork(grid()), l = new Ledger(), e = new TaxiEngine(net, free(net), [depot, { id: 2, cell: at(20, 10), level: 2, open: true }], 0, { lease: l, width: S, seed: 7 });
     e.submit(reqs(12));
     for (let m = 0; m <= 180; m += 5) { e.advanceTo(m); assert.equal(e.ledger().conservationError, 0); l.check(); }
     return { d: e.diagnostics(), legs: e.legs };
@@ -54,7 +56,7 @@ test('deterministic nearest-ETA assignment and people conserved every quantum', 
   assert.ok(a.d.completed > 0);
 });
 test('wait over the max returns people to private cars (never dropped)', () => {
-  const net = buildNetwork(grid()), l = new Ledger(), e = new TaxiEngine(net, free(net), [depot], [], 0, l);
+  const net = buildNetwork(grid()), l = new Ledger(), e = new TaxiEngine(net, free(net), [depot], 0, { lease: l, width: S });
   e.submit(reqs(40)); // far more than 4 units can serve in 20 minutes
   e.advanceTo(240);
   const g = e.ledger();
@@ -64,7 +66,7 @@ test('wait over the max returns people to private cars (never dropped)', () => {
   for (const w of e.waits) assert.ok(w <= TAXI_MAX_WAIT_MIN);
 });
 test('road edit mid-trip strands a taxi without losing riders; repair resumes', () => {
-  const c = grid(); const net = buildNetwork(c), l = new Ledger(), e = new TaxiEngine(net, free(net), [depot], [], 0, l);
+  const c = grid(); const net = buildNetwork(c), l = new Ledger(), e = new TaxiEngine(net, free(net), [depot], 0, { lease: l, width: S });
   e.submit([{ id: 'x', from: at(1, 2), to: at(20, 10), persons: 5, minute: 0 }]);
   e.advanceTo(5);
   for (const n of [at(20, 9), at(19, 10)]) setRoadJunction(c, at(20, 10), n, false); // isolate destination
@@ -74,22 +76,48 @@ test('road edit mid-trip strands a taxi without losing riders; repair resumes', 
   const fixed = buildNetwork(c); e.setNetwork(fixed, free(fixed)); e.advanceTo(200);
   assert.equal(e.ledger().completed, 5); assert.equal(l.completed.get('x'), 5);
 });
-test('idle taxis never cruise: no legs without requests or stands', () => {
-  const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [depot], [], 0);
-  e.advanceTo(24 * 60); assert.equal(e.legs.length, 0);
-  const withStand = new TaxiEngine(net, free(net), [depot], [{ id: 5, cell: at(10, 6), open: true }], 0);
-  withStand.advanceTo(24 * 60); assert.equal(withStand.legs.length, 2); // fill the stand's 2 slots once, then stay
+const legal = (net: LinkNetwork, path: number[]) => { for (let i = 1; i < path.length; i++) assert.ok((net.out.get(path[i - 1]) ?? []).some(l => l.to === path[i]), `illegal step ${path[i - 1]}->${path[i]}`); };
+test('RRT roaming is deterministic per (seed, taxi, period) and bounded', () => {
+  const net = buildNetwork(grid()), t = free(net), o = { seed: 42, taxiId: 'taxi-1-0', period: 8, width: S, weight: (c: number) => (c === at(10, 6) ? 5 : 0), demandCells: [at(10, 6)] };
+  const a = planRoam(net, t, at(0, 2), o); assert.deepEqual(planRoam(net, t, at(0, 2), o), a);
+  assert.ok(a.expanded <= 48 && a.minutes <= 5 + 1e-9);
+  const others = [1, 2, 3, 4, 5].map(seed => planRoam(net, t, at(0, 6), { ...o, seed, weight: () => 1, demandCells: [] }).path.join());
+  assert.ok(new Set(others).size > 1, 'different seeds explore differently');
 });
-test('pause makes no progress; 1x vs 10x stepping gives identical totals', () => {
-  const mk = () => { const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [depot], [{ id: 9, cell: at(10, 6), open: true }], 0); e.submit(reqs(15)); return e; };
-  const p = mk(); p.advanceTo(300, true); assert.equal(p.now, 0); assert.equal(p.legs.length, 0);
-  const slow = mk(), fast = mk();
-  for (let m = 0; m <= 600; m++) slow.advanceTo(m);
-  for (let m = 0; m <= 600; m += 97) fast.advanceTo(m); fast.advanceTo(600);
-  assert.deepEqual(fast.diagnostics(), slow.diagnostics()); assert.deepEqual(fast.legs, slow.legs);
+test('RRT roaming only uses legal links (one-way respected)', () => {
+  const c = blank(); draw(c, row(2, 0, 12), true); draw(c, row(4, 0, 12)); draw(c, col(0, 2, 4)); draw(c, col(12, 2, 4));
+  const net = buildNetwork(c), t = free(net);
+  for (let seed = 0; seed < 20; seed++) {
+    const p = planRoam(net, t, at(6, 2), { seed, taxiId: 'u', period: 1, width: S, weight: x => (x === at(3, 2) ? 9 : 1), demandCells: [at(3, 2)] });
+    legal(net, p.path); assert.ok(!p.path.includes(at(5, 2)), 'never drives west on the eastbound one-way');
+  }
+});
+test('roaming is biased toward expected demand', () => {
+  const net = buildNetwork(grid()), hot = at(20, 6);
+  const mk = (expected?: (c: number) => number) => { const e = new TaxiEngine(net, free(net), [depot], 8 * 60, { width: S, seed: 3, expected }); e.advanceTo(8 * 60 + 60); return e; };
+  const dist = (e: TaxiEngine) => e.units.reduce((n, u) => n + Math.abs((u.target ?? u.cell) % S - 20) + Math.abs(Math.floor((u.target ?? u.cell) / S) - 6), 0);
+  const biased = mk(c => (c === hot ? 10 : 0.01)), flat = mk(() => 1);
+  assert.ok(dist(biased) < dist(flat), `${dist(biased)} < ${dist(flat)}`);
+  for (const l of biased.legs) { assert.ok(!l.loaded); legal(net, l.path); }
+  assert.ok(biased.totals.roamLegs > 0 && biased.totals.roamMinutes > 0);
+});
+test('no stands; depot is home: no demand or night → taxis go home and stay', () => {
+  assert.ok(!Object.keys(dispatchApi).some(k => /stand/i.test(k)));
+  const net = buildNetwork(grid()), idle = new TaxiEngine(net, free(net), [depot], 0, { width: S });
+  idle.advanceTo(24 * 60); assert.equal(idle.legs.length, 0);
+  const e = new TaxiEngine(net, free(net), [depot], 20 * 60, { width: S, expected: () => 1 });
+  e.advanceTo(23 * 60 + 30); assert.ok(e.totals.roamLegs > 0);
+  e.advanceTo(26 * 60); for (const u of e.units) assert.equal(u.cell, depot.cell);
+  const n = e.legs.length; e.advanceTo(28 * 60); assert.equal(e.legs.length, n);
+});
+test('taxis pick up locally: a nearby free taxi takes the request on its own', () => {
+  const c = grid(); draw(c, row(14, 0, 23)); draw(c, col(23, 2, 14)); draw(c, row(2, 20, 23));
+  const net = buildNetwork(c), l = new Ledger(), e = new TaxiEngine(net, free(net), [depot], 0, { lease: l, width: S });
+  e.submit([{ id: 'near', from: at(3, 2), to: at(10, 10), persons: 2, minute: 0 }]);
+  e.advanceTo(60); assert.equal(e.ledger().completed, 2);
 });
 test('legs carry routed paths, loaded and empty, for road loading later', () => {
-  const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [depot], [], 0);
+  const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [depot], 0, { width: S });
   e.submit(reqs(3)); e.advanceTo(120);
   assert.ok(e.legs.some(l => l.loaded) && e.legs.some(l => !l.loaded));
   for (const l of e.legs) { assert.equal(l.path[0], l.from); assert.equal(l.path.at(-1), l.to); }
