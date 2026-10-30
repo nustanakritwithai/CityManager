@@ -46,6 +46,6 @@ export function installAutosave(doc: Listen, win: Listen & { setInterval(fn: () 
 export function describeAutosave(r: AutosaveResult, fmt: (at: number) => string = at => new Date(at).toLocaleTimeString()): string {
   if (r.ok) return `บันทึกอัตโนมัติแล้ว ${fmt(r.at)}`;
   return r.quota
-    ? 'บันทึกอัตโนมัติไม่สำเร็จ: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) — เก็บเซฟเดิมไว้ ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์สำรองก่อน'
+    ? 'บันทึกอัตโนมัติไม่สำเร็จ: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) — เซฟหลักเดิมยังอยู่ แต่สำเนาอัตโนมัติอาจเปลี่ยนแล้ว ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์สำรองก่อน'
     : `บันทึกอัตโนมัติไม่สำเร็จ: ${r.message} — เซฟเดิมยังอยู่`;
 }

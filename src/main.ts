@@ -10,7 +10,8 @@ import { BusPresentation } from './bus/presentation.ts';
 import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
-import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts';
+import { saveLocalCitySession, loadLocalCitySession, loadRecoveryCityReadOnly, exportLocalCitySession, withLocalCitySnapshot, hasOnlyKnownNonCityKeys } from './local-city-save.ts';
+import { saveRecoveryCopy, listRecoveryCopies, type RecoveryToken } from './recovery-idb.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
@@ -93,6 +94,7 @@ import { connectPresentedBusEvents, setBusLiveReader } from './bus/live.ts';
 import './bus/player.css';
 import { installPanelTimeControls } from './panel-time-controls.ts';
 import { installSaveFeedback } from './save-feedback-panel.ts';
+import { createSaveAttemptQueue } from './save-feedback.ts';
 import './player-feedback.css';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -541,10 +543,13 @@ async function boot() {
   const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
   const startup=restoreStartupCity({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)},()=>createCity(61025,{starter:STARTER}));
+  // Never silently resume an older primary when emergency branches exist.
+  let recoveryFound=false,recoveryUnavailable=false;try{recoveryFound=(await listRecoveryCopies()).length>0;}catch{recoveryUnavailable=true;}
+  if(recoveryFound||recoveryUnavailable)startup.guard.block();
   city=startup.city;parkRuntime=startup.runtime;importedLegacyRaw=startup.legacyRaw;
   if(!city.education)adoptSavedEducation(city);
-  const saveGuard=startup.guard,startupSaveError=startup.error;
-  syncEducationTools();if(startup.restored||startup.error)paused=true;
+  const saveGuard=startup.guard,startupSaveError=startup.error??(recoveryUnavailable?'idb-recovery-unavailable':recoveryFound?'idb-recovery-available':null);
+  syncEducationTools();if(startup.restored||startupSaveError)paused=true;
   ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
   $('#signal-entry').hidden = !signalsEnabled();
@@ -709,28 +714,70 @@ async function boot() {
   const refreshRecoveryInfo=()=>{recoveryInfo.textContent=recoverySummary({getItem:key=>localStorage.getItem(key)});};
   $('#save').closest('.save-group')?.prepend(recoveryInfo);refreshRecoveryInfo();
   $('#toggle-game-menu').addEventListener('click',refreshRecoveryInfo);
-  const trackedSave = async () => {
-    const attempt = saveFeedback.begin();
-    try { await writeLocalSave(); refreshRecoveryInfo(); saveFeedback.succeeded(attempt); }
-    catch (error) {
-      saveFeedback.failed(isQuotaError(error) ? 'พื้นที่เก็บข้อมูลเต็ม · เซฟเดิมยังอยู่ ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์สำรอง'
-        : `${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} · เซฟเดิมยังอยู่`, attempt);
+  let recoveryOnly=false,previewOnly=false;let recoveryToken:RecoveryToken|null=null;let recoveryUncertain=false;let recoveryQueue:Promise<void>=Promise.resolve();
+  const saveEmergencyCopy=()=>{
+    const generation=saveGuard.generation, capturedCity=city, capturedRuntime=parkRuntime;
+    const work=recoveryQueue.then(async()=>{
+      if(recoveryUncertain)throw Error('recovery-review-required');
+      if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนก่อนสร้างสำเนากู้คืน');
+      return withLocalCitySnapshot(capturedCity,capturedRuntime,marketPanel?.client,async raw=>{
+        if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนก่อนสร้างสำเนากู้คืน');
+        try{
+          const saved=await saveRecoveryCopy(raw,recoveryToken);
+          if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างสร้างสำเนา สำเนาของเมืองก่อนหน้าอาจอยู่ในเบราว์เซอร์');
+          recoveryToken={branchId:saved.branchId,revision:saved.revision};return saved;
+        }catch(error){if(generation===saveGuard.generation&&capturedCity===city)recoveryUncertain=true;throw error;}
+      });
+    });
+    recoveryQueue=work.then(()=>{},()=>{});return work;
+  };
+  const runTrackedSave = async () => {
+    const attempt = saveFeedback.begin(),attemptGeneration=saveGuard.generation,attemptCity=city;let primaryAttempted=false;
+    try {
+      if(previewOnly)throw Error('เมืองชั่วคราวสำหรับดูเท่านั้น ไม่บันทึก');
+      if(recoveryOnly&&!saveGuard.armed)throw Object.assign(Error('recovery-only'),{name:'RecoveryOnly'});
+      primaryAttempted=true;await writeLocalSave(); if(attemptGeneration!==saveGuard.generation||attemptCity!==city)throw Error('เมืองเปลี่ยนระหว่างบันทึก'); recoveryOnly=false;marketPanel?.client.setRecoveryReadOnly(false);refreshRecoveryInfo(); saveFeedback.succeeded(attempt);
+    } catch (error) {
+      if(attemptGeneration!==saveGuard.generation||attemptCity!==city){saveFeedback.cancel(attempt);throw error;}
+      if(isQuotaError(error)||(error instanceof Error&&error.name==='RecoveryOnly')){
+        if(primaryAttempted)status('บันทึกไม่ได้: เซฟหลักไม่สำเร็จ · กำลังพยายามสร้างสำเนากู้คืน');
+        try{
+          const saved=await saveEmergencyCopy();
+          recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);
+          const primary=primaryAttempted?'เซฟหลักบันทึกไม่สำเร็จ':'ไม่ได้พยายามเขียนเซฟหลักในโหมดกู้คืน';
+          const message=`บันทึกสำเนากู้คืนในเบราว์เซอร์แล้ว (วันที่ ${saved.tick} สาขา ${saved.branchId.slice(0,8)}) · ${primary} · พักการทำรายการตลาด · ส่งออกไฟล์และตรวจไฟล์ก่อนปิดเกม`;
+          saveFeedback.failed(message,attempt);throw Object.assign(Error(message),{name:'RecoveryCopyOnly'});
+        }catch(recoveryError){
+          if(attemptGeneration!==saveGuard.generation||attemptCity!==city){saveFeedback.cancel(attempt);throw recoveryError;}
+          if(recoveryError instanceof Error&&recoveryError.name==='RecoveryCopyOnly')throw recoveryError;
+          saveFeedback.failed(`${primaryAttempted?'เซฟหลักไม่สำเร็จ':'ไม่ได้พยายามเขียนเซฟหลักในโหมดกู้คืน'} และยังยืนยันสำเนากู้คืนไม่ได้ (${recoveryError instanceof Error?recoveryError.message:'พื้นที่หรือเบราว์เซอร์ไม่พร้อม'}) · ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์`,attempt);
+          throw recoveryError;
+        }
+      }
+      saveFeedback.failed(`${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} · เซฟหลักเดิมยังอยู่`, attempt);
       throw error;
     }
   };
+  const enqueueSave=createSaveAttemptQueue();
+  const trackedSave=()=>{
+    const generation=saveGuard.generation,capturedCity=city;
+    return enqueueSave(async()=>{if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');return runTrackedSave();});
+  };
   let autosaveFailed = false;
-  let autoWriteStarted = false;
-  const autosave = createAutosave({ save: () => { autoWriteStarted = true; return trackedSave(); }, tick: () => city.tick, revision:()=>serializeParkSession(city,parkRuntime,city.market), canSave:()=>saveGuard.armed, onResult: r => {
+  let autoWriteStarted = false;let autoGeneration=saveGuard.generation;
+  const autosave = createAutosave({ save: () => { autoWriteStarted = true;autoGeneration=saveGuard.generation; return trackedSave(); }, tick: () => city.tick, revision:()=>serializeParkSession(city,parkRuntime,city.market), canSave:()=>saveGuard.armed||recoveryOnly, onResult: r => {
     // Revision/serialization can fail before the write callback starts.
+    if(autoWriteStarted&&autoGeneration!==saveGuard.generation){autoWriteStarted=false;return;}
     if (!r.ok && !autoWriteStarted) saveFeedback.failed(describeAutosave(r));
     autoWriteStarted = false;
     if (!r.ok) { if (!autosaveFailed) { sound('ui-error'); status(describeAutosave(r)); } }
     autosaveFailed = !r.ok;
   } });
   installAutosave(document, window, autosave, () => document.hidden);
-  if(startupSaveError){const message=startupSaveFailureMessage(startupSaveError);saveFeedback.failed(message);status(message);}
+  if(startupSaveError){const message=startupSaveError==='idb-recovery-available'?'พบสำเนากู้คืนในเบราว์เซอร์ · หยุด autosave ไว้ เลือกตรวจเซฟหลักหรือสำเนากู้คืนก่อนเล่นต่อ ห้ามล้างข้อมูลเว็บไซต์':startupSaveError==='idb-recovery-unavailable'?'ยังตรวจสำเนากู้คืนในเบราว์เซอร์ไม่ได้ · หยุด autosave ไว้ เลือกชุดที่จะเปิดอย่างระมัดระวัง ห้ามล้างข้อมูลเว็บไซต์':startupSaveFailureMessage(startupSaveError);saveFeedback.failed(message);status(message);}
   $('#save').addEventListener('click', async () => {
-    try { await trackedSave(); autosave.markSaved(city.tick); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
+    const requestGeneration=saveGuard.generation,requestCity=city;
+    try { await trackedSave(); if(requestGeneration!==saveGuard.generation||requestCity!==city)return; autosave.markSaved(city.tick); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { if(requestGeneration!==saveGuard.generation||requestCity!==city)return; sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
   });
   const loadStored = async (source: SaveSource) => {
     try {
@@ -738,7 +785,7 @@ async function boot() {
       const oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,restored=>{
         if (!restored.city.education) adoptSavedEducation(restored.city);
-        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;autosave.reset();
+        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);autosave.reset();
       });
       saveFeedback.recovered();
       cueLimiter.reset();
@@ -760,7 +807,36 @@ async function boot() {
   $('#load-backup').addEventListener('click', () => loadStored('backup'));
   const checkpointButton=document.createElement('button');checkpointButton.id='load-autosave-copy';checkpointButton.textContent='โหลดสำเนาอัตโนมัติล่าสุด';checkpointButton.onclick=()=>void loadStored('checkpoint');$('#load-backup').insertAdjacentElement('afterend',checkpointButton);
   const conflictButton=document.createElement('button');conflictButton.id='load-save-conflict';conflictButton.textContent='กู้คืนสำเนางานที่ขัดแย้ง';conflictButton.onclick=()=>void loadStored('conflict');checkpointButton.insertAdjacentElement('afterend',conflictButton);
-  const exportButton=document.createElement('button');exportButton.id='export-city-save';exportButton.textContent='ส่งออกเซฟเมืองเป็นไฟล์';exportButton.onclick=()=>{try{const raw=serializeParkSession(city,parkRuntime,city.market),url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-day-${city.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งไฟล์เซฟให้เบราว์เซอร์ดาวน์โหลดแล้ว ตรวจไฟล์ก่อนปิดเกม');}catch(error){status(error instanceof Error?error.message:'ส่งออกไม่สำเร็จ');}};$('#save').insertAdjacentElement('afterend',exportButton);
+  const chooseEmergency=async(mode:'load'|'export'):Promise<boolean>=>{
+    const generation=saveGuard.generation, capturedCity=city;
+    try{
+      const copies=await listRecoveryCopies();
+      if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างอ่านรายการ');
+      if(!copies.length){status('ยังไม่มีสำเนากู้คืนใน IndexedDB');return false;}
+      return await new Promise<boolean>(resolve=>{
+        const dialog=document.createElement('dialog'),title=document.createElement('h2');title.textContent=mode==='load'?'เลือกสำเนากู้คืนที่จะเปิด':'เลือกสำเนากู้คืนที่จะส่งออก';dialog.append(title);
+        const note=document.createElement('p');note.textContent='แต่ละสาขาแยกกัน · เก็บต้นฉบับแรกและสองสถานะล่าสุด การเปิดไม่เขียนทับเซฟหลัก';dialog.append(note);
+        let busy=false,done=false;const finish=(value:boolean)=>{if(done)return;done=true;dialog.close();dialog.remove();resolve(value);};
+        for(const item of copies){const row=document.createElement('div');if(!item.snapshot){row.textContent=`สาขา ${item.branchId.slice(0,8)} · ${item.slot} · อ่านไม่ได้ (เก็บข้อมูลไว้)`;dialog.append(row);continue;}
+          const saved=item.snapshot,button=document.createElement('button');button.textContent=`สาขา ${saved.branchId.slice(0,8)} · ${saved.slot} · วัน ${saved.tick} · ${new Date(saved.capturedAt).toLocaleString()}`;
+          button.onclick=async()=>{if(busy)return;busy=true;try{
+            if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างเลือกรายการ');
+            if(mode==='export'){const url=URL.createObjectURL(new Blob([saved.raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-recovery-day-${saved.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งสำเนากู้คืนให้เบราว์เซอร์ดาวน์โหลดแล้ว ตรวจไฟล์ก่อนปิดเกม');finish(true);return;}
+            await loadRecoveryCityReadOnly(saved.raw,marketPanel?.client,saveGuard,restored=>{
+              city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=null;previewOnly=false;recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);recoveryToken=saved.slot==='current'?{branchId:saved.branchId,revision:saved.revision}:null;recoveryUncertain=false;autosave.reset();
+            });
+            saveGuard.block();saveFeedback.recovered();paused=true;syncEducationTools();ownerDecisionSession.reset(city);ownerDecisionPanel?.reset();render();
+            status(`เปิดสำเนากู้คืนวันที่ ${saved.tick} แล้ว · เซฟหลักไม่ถูกแทนที่ การบันทึกต่อใช้สำเนากู้คืนเท่านั้น และพักการทำรายการตลาด`);finish(true);
+          }catch(error){status(`ใช้สำเนากู้คืนไม่ได้: ${error instanceof Error?error.message:'ตรวจสอบข้อมูลก่อน'} · ข้อมูลเดิมยังอยู่`);finish(false);}finally{busy=false;}};row.append(button);dialog.append(row);
+        }
+        const cancel=document.createElement('button');cancel.textContent='ยกเลิก';cancel.onclick=()=>finish(false);dialog.append(cancel);dialog.addEventListener('cancel',event=>{event.preventDefault();finish(false);});document.body.append(dialog);dialog.showModal();cancel.focus();
+      });
+    }catch(error){status(`อ่านรายการกู้คืนไม่ได้: ${error instanceof Error?error.message:'ตรวจสอบข้อมูลก่อน'}`);return false;}
+  };
+  const loadEmergency=()=>chooseEmergency('load');
+  const emergencyButton=document.createElement('button');emergencyButton.id='load-idb-recovery';emergencyButton.textContent='เลือกเปิดสำเนากู้คืนในเบราว์เซอร์';emergencyButton.onclick=()=>void loadEmergency();conflictButton.insertAdjacentElement('afterend',emergencyButton);
+  const exportEmergency=document.createElement('button');exportEmergency.id='export-idb-recovery';exportEmergency.textContent='เลือกส่งออกสำเนากู้คืน';exportEmergency.onclick=()=>void chooseEmergency('export');emergencyButton.insertAdjacentElement('afterend',exportEmergency);
+  const exportButton=document.createElement('button');exportButton.id='export-city-save';exportButton.textContent='ส่งออกเซฟเมืองเป็นไฟล์';exportButton.onclick=async()=>{try{const raw=await exportLocalCitySession(city,parkRuntime,marketPanel?.client),url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-day-${city.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งไฟล์เซฟให้เบราว์เซอร์ดาวน์โหลดแล้ว ตรวจไฟล์ก่อนปิดเกม');}catch(error){status(`ส่งออกไม่สำเร็จ: ${error instanceof Error?error.message:'ตรวจสอบข้อมูลเมืองและรายการตลาดก่อน'} · อย่าปิดเกมหรือล้างข้อมูล`);}};$('#save').insertAdjacentElement('afterend',exportButton);
   const campusAction = (action: typeof toggleCampus) => {
     const campus = route?.page === 'place' ? campusAt(city, route.cell) : undefined;
     if (!campus) return;
@@ -769,6 +845,7 @@ async function boot() {
   $('#toggle-campus').addEventListener('click', () => campusAction(toggleCampus));
   $('#upgrade-campus').addEventListener('click', () => campusAction(upgradeCampus));
   $('#new-city').addEventListener('click', () => {
+    if(previewOnly){status('เมืองชั่วคราวสำหรับดูเท่านั้น ยังเริ่มเมืองใหม่หรือบันทึกไม่ได้');return;}
     const dialog = document.createElement('dialog');
     const title = document.createElement('h2'); title.textContent = 'เริ่มเมืองใหม่?';
     const text = document.createElement('p'); text.textContent = 'เมืองที่ยังไม่บันทึกจะถูกแทนที่ เมืองที่เคยบันทึกยังเรียกคืนได้ด้วยปุ่มโหลด';
@@ -779,7 +856,7 @@ async function boot() {
       try{saveGuard.preserveNew(serializeParkSession(city,parkRuntime,city.market));}catch(error){status(error instanceof Error?error.message:'เก็บสำเนาเมืองเดิมไม่สำเร็จ');return;}
       try { if (marketPanel?.client.enabled && (marketPanel.client.guestId||marketPanel.client.journal.operations.length)) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
       saveGuard.authorizeNew(serializeParkSession(city,parkRuntime,city.market));autosave.reset();
-      city = createCity(61025, { starter }); parkRuntime = createParkRuntime(city); cueLimiter.reset(); syncEducationTools(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
+      recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);city = createCity(61025, { starter }); parkRuntime = createParkRuntime(city); cueLimiter.reset(); syncEducationTools(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
     };
@@ -858,7 +935,11 @@ async function boot() {
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
   Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null } });
-  if(startupSaveError)installStartupRecoveryChooser({summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,status:()=>$('#inspector-status').textContent??''});
+  const onlyBenignOrMarket=(allowMarket:boolean)=>hasOnlyKnownNonCityKeys(localStorage,allowMarket);
+  const noCityStorage=()=>onlyBenignOrMarket(false);
+  const previewOnlyAfterUnknown=async()=>{if(startup.restored||startup.error||!recoveryUnavailable||!onlyBenignOrMarket(true)){status('ยังยืนยันสถานะเซฟเดิมไม่ได้');return false;}saveGuard.block();previewOnly=true;marketPanel?.client.setRecoveryReadOnly(true);paused=true;saveFeedback.failed('เมืองชั่วคราวสำหรับดูเท่านั้น · ไม่บันทึกและพักตลาด · ยังตรวจสำเนากู้คืนไม่ได้ ห้ามล้างข้อมูล');status('เมืองชั่วคราวสำหรับดูเท่านั้น ไม่ใช่เซฟเดิมและไม่บันทึก');return true;};
+  const startFreshAfterUnknown=async()=>{if(startup.restored||startup.error||!recoveryUnavailable||!noCityStorage()){status('ไม่สามารถยืนยันว่าช่องเซฟเดิมว่าง จึงไม่เริ่มเมืองใหม่');return false;}try{saveGuard.acceptLoaded(serializeParkSession(city,parkRuntime,city.market));autosave.reset();saveFeedback.recovered();paused=true;status('เข้าเมืองใหม่ตามที่เลือก · ยังตรวจสำเนากู้คืนในเบราว์เซอร์ไม่ได้');return true;}catch{status('ยังยืนยันการเริ่มเมืองใหม่ไม่ได้');return false;}};
+  if(startupSaveError)installStartupRecoveryChooser({summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,loadEmergency,exportEmergency:()=>chooseEmergency('export'),recoveryState:recoveryUnavailable?'unavailable':recoveryFound?'available':'none',startFresh:!startup.restored&&!startup.error&&recoveryUnavailable&&noCityStorage()?startFreshAfterUnknown:undefined,previewOnly:!startup.restored&&!startup.error&&recoveryUnavailable&&!noCityStorage()&&onlyBenignOrMarket(true)?previewOnlyAfterUnknown:undefined,status:()=>$('#inspector-status').textContent??''});
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });
