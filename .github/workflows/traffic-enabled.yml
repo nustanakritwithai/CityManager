@@ -38,9 +38,13 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  TRAFFIC_GAME_EXPECT_DEFAULT: '0'
+# Each browser case has its own unchanged watchdog and a fresh runner.  The
+# final job keeps the original check name and fails unless every case passes.
 jobs:
-  enabled:
-    name: Allocation game / fallback / save isolation
+  checks:
+    name: Allocation game / unit and bounded stress
     runs-on: windows-latest
     timeout-minutes: 10
     defaults:
@@ -56,9 +60,11 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - run: node --test tests/traffic-workflow-partition.test.mjs
       - run: node --experimental-strip-types --test tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
-      - run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-modal.test.ts
+      - run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-peak-fixture.test.ts tests/traffic-game-modal.test.ts tests/traffic-game-cases.test.ts
       - run: node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
+      - run: node --experimental-strip-types tests/traffic-default-fault-smoke.mjs --preflight
       - name: Bounded synthetic game throughput and worker isolation
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
@@ -68,15 +74,108 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Allocation-game capture benchmark failed.' }
           node --experimental-strip-types scripts/traffic-game-worker-benchmark.mjs > .test-output/traffic-game-worker.json
           if ($LASTEXITCODE -ne 0) { throw 'Allocation-game worker benchmark failed.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: traffic-game-bounded-evidence
+          path: |
+            .test-output/traffic-game-stress.json
+            .test-output/traffic-game-worker.json
+            .test-output/traffic-game-capture.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  fault:
+    name: Allocation game / default and worker fault
+    needs: checks
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
       - run: npm run build
         env:
           VITE_MARKET_URL: ''
           VITE_CITY_ADVISOR_ONLINE: 'false'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
-      - name: Opt-in game browser acceptance, then missing-model/software-WebGL fallback
+      - name: Default and fault browser acceptance
+        run: |
+          New-Item -ItemType Directory -Force .test-output | Out-Null
+          $preview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4195', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/traffic-preview.log -RedirectStandardError .test-output/traffic-preview-error.log
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4195/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $ready = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) { throw 'Traffic preview did not start.' }
+            node --experimental-strip-types tests/traffic-default-fault-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Default and fault acceptance failed.' }
+          } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: traffic-game-fault-evidence
+          path: |
+            .test-output/traffic-default-fault/*.png
+            .test-output/traffic-default-fault/report.json
+            .test-output/traffic-default-fault/failure.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  browser:
+    name: Allocation game browser / ${{ matrix.case }}
+    needs: checks
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: full
+            blocked: '0'
+            software: '0'
+          - case: core
+            blocked: '1'
+            software: '1'
+          - case: extended
+            blocked: '1'
+            software: '1'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
         env:
-          TRAFFIC_GAME_EXPECT_DEFAULT: '0'
+          VITE_MARKET_URL: ''
+          VITE_CITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
+      - name: Bounded browser acceptance
+        env:
+          TRAFFIC_GAME_CASE: ${{ matrix.case }}
+          CITYMANAGER_BLOCK_MODELS: ${{ matrix.blocked }}
+          CITYMANAGER_SOFTWARE_WEBGL: ${{ matrix.software }}
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           $preview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4195', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/traffic-preview.log -RedirectStandardError .test-output/traffic-preview-error.log
@@ -88,23 +187,31 @@ jobs:
             }
             if (-not $ready) { throw 'Traffic preview did not start.' }
             node --experimental-strip-types tests/traffic-game-smoke.mjs
-            if ($LASTEXITCODE -ne 0) { throw 'Allocation-game acceptance failed.' }
-            Start-Sleep -Seconds 2
-            $env:CITYMANAGER_BLOCK_MODELS = '1'
-            $env:CITYMANAGER_SOFTWARE_WEBGL = '1'
-            node --experimental-strip-types tests/traffic-game-smoke.mjs
-            if ($LASTEXITCODE -ne 0) { throw 'Allocation-game fallback acceptance failed.' }
+            if ($LASTEXITCODE -ne 0) { throw 'Allocation-game browser acceptance failed.' }
           } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: traffic-game-browser-evidence
+          name: traffic-game-${{ matrix.case }}-evidence
           path: |
             .test-output/traffic-game/*/*.png
             .test-output/traffic-game/*/report.json
             .test-output/traffic-game/*/failure.json
-            .test-output/traffic-game-stress.json
-            .test-output/traffic-game-worker.json
-            .test-output/traffic-game-capture.json
           if-no-files-found: warn
           retention-days: 3
+
+  enabled:
+    name: Allocation game / fallback / save isolation
+    needs: [checks, fault, browser]
+    if: always()
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Require all traffic acceptance jobs
+        run: |
+          if ('${{ needs.checks.result }}' -ne 'success' -or '${{ needs.fault.result }}' -ne 'success' -or '${{ needs.browser.result }}' -ne 'success') {
+            throw 'One or more required traffic acceptance jobs did not pass.'
+          }

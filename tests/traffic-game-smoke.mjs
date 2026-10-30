@@ -10,8 +10,10 @@ import {createCity,buildRoad,buildParallelRoad,deserialize,serialize,adoptSavedE
 import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
 import {trafficPlan} from '../src/traffic-plan.ts';
 import {populationFixture} from './population-capacity-fixture.ts';
+import {trafficGamePeakFixture} from './traffic-game-peak-fixture.ts';
 import {TrafficGame,captureTrafficGameSample} from '../src/traffic/game.ts';
 import {reachTouch} from './touch-reach.mjs';
+import {trafficGameCase} from './traffic-game-cases.mjs';
 const cell=(x,y)=>y*SIZE+x;
 // Strictly imported real simulation with actual earned freight/factory effects.
 const old=legacyCity(61025);for(let d=0;d<29;d++)legacyStep(old);
@@ -39,21 +41,22 @@ for(const [a,b] of [[296,320],[320,323],[323,275]])assert.equal(buildParallelRoa
 assert.deepEqual(deserialize(serialize(bypassExpected)),bypassExpected);
 const pureGame=(c,n)=>{const game=new TrafficGame(captureTrafficGameSample(c));for(let i=0;i<n;i++)game.step();return game.frame;};
 const baselineTen=pureGame(bypassCity,10),bypassTen=pureGame(bypassExpected,10);assert.ok(bypassTen.completed>baselineTen.completed,'Validated player-built bypass must improve the independent game');
-if(process.argv.includes('--preflight')){console.log(JSON.stringify({fixture:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length,roads:dense.cells.filter(c=>c.road).length},roadBytes:roadRaw.length,expectedRoads:roadExpected.cells.filter(c=>c.road).length,bypass:{before:baselineTen.completed,after:bypassTen.completed}}));process.exit(0);}
 const blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1',software=process.env.CITYMANAGER_SOFTWARE_WEBGL==='1',expectDefault=process.env.TRAFFIC_GAME_EXPECT_DEFAULT==='1';
+const testPlan=trafficGameCase(process.env.TRAFFIC_GAME_CASE||'full',blocked);
+if(process.argv.includes('--preflight')){console.log(JSON.stringify({testPlan,fixture:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length,roads:dense.cells.filter(c=>c.road).length},roadBytes:roadRaw.length,expectedRoads:roadExpected.cells.filter(c=>c.road).length,bypass:{before:baselineTen.completed,after:bypassTen.completed}}));process.exit(0);}
 const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4195/CityManager/',origin=new URL(url).origin;assert.equal(new URL(url).hostname,'127.0.0.1');
-const output=resolve('.test-output/traffic-game',blocked?'fallback':'normal'),port=9366;await mkdir(output,{recursive:true});const profile=await mkdtemp(resolve(output,'profile-'));
+const output=resolve('.test-output/traffic-game',testPlan.output),port=9366;await mkdir(output,{recursive:true});const profile=await mkdtemp(resolve(output,'profile-'));
 let occupied=false;try{occupied=(await fetch(`http://127.0.0.1:${port}/json/version`,{signal:AbortSignal.timeout(500)})).ok;}catch{}assert.equal(occupied,false,'Dedicated CDP port already in use');
 const args=['--headless=new','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-component-update','--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${port}`,`--user-data-dir=${profile}`];
 if(software)args.push('--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader');
 const child=spawn(process.env.CITYMANAGER_BROWSER||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',[...args,'about:blank'],{windowsHide:true,stdio:'ignore'});
-let ws,sequence=0,initScript,seedGeneration=0,touchMode=false,launchError;const pending=new Map(),errors=[],expectedErrors=[],externalRequests=[],checks=[],screenshots=[],bypassTraces=[];let frameIntervals=null,lastDiagnostic=null,lastDiagnosticAt=null,lastBypassTrace=null;
+let ws,sequence=0,initScript,seedGeneration=0,touchMode=false,launchError;const pending=new Map(),errors=[],expectedErrors=[],externalRequests=[],checks=[],screenshots=[],bypassTraces=[];let frameIntervals=null,peakComparison=null,lastDiagnostic=null,lastDiagnosticAt=null,lastBypassTrace=null;
 const runStarted=Date.now(),stages=[];let stage='browser launch',stageAt=runStarted;
-function setStage(name){stage=name;stageAt=Date.now();stages.push({name,elapsedMs:stageAt-runStarted});console.log(`[traffic-game ${blocked?'fallback':'normal'}] ${name} (+${stageAt-runStarted} ms)`);}
+function setStage(name){stage=name;stageAt=Date.now();stages.push({name,elapsedMs:stageAt-runStarted});console.log(`[traffic-game ${testPlan.output}] ${name} (+${stageAt-runStarted} ms)`);}
 child.on('error',error=>{launchError=error;});
 // The deadline remains 240 seconds. Write already-available context synchronously;
 // do not wait on a potentially hung CDP connection or extend the watchdog.
-const watchdog=setTimeout(()=>{const state={error:'Allocation game acceptance exceeded bounded run',stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,blockedModels:blocked,softwareWebGL:software,checks,stages,lastDiagnostic,lastDiagnosticAt,bypassTraces,lastBypassTrace,errors,externalRequests,pending:[...pending.values()].map(x=>({method:x.method,elapsedMs:Date.now()-x.startedAt}))};console.error(JSON.stringify(state));try{writeFileSync(resolve(output,'failure.json'),JSON.stringify(state,null,2));}catch{}child.kill();process.exit(1);},240_000);const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const watchdog=setTimeout(()=>{const state={error:'Allocation game acceptance exceeded bounded run',stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,checks,stages,lastDiagnostic,lastDiagnosticAt,bypassTraces,lastBypassTrace,errors,externalRequests,pending:[...pending.values()].map(x=>({method:x.method,elapsedMs:Date.now()-x.startedAt}))};console.error(JSON.stringify(state));try{writeFileSync(resolve(output,'failure.json'),JSON.stringify(state,null,2));}catch{}child.kill();process.exit(1);},240_000);const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function send(method,params={}){const id=++sequence,result=new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout ${method} at ${stage}`));},30000);pending.set(id,{method,startedAt:Date.now(),resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});});ws.send(JSON.stringify({id,method,params}));return result;}
 async function evaluate(expression){const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
 async function until(expression,timeout=60000,onProgress){const start=Date.now();while(Date.now()-start<timeout){const result=await evaluate(expression);if(onProgress)onProgress(result);if(onProgress?result.done:result)return;await sleep(60);}throw Error(`Timeout ${expression}`);}
@@ -101,9 +104,11 @@ try{
   else if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(/^https?:/.test(u)&&new URL(u).origin!==origin)externalRequests.push(u);}
  };
  await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Network.setCacheDisabled',{cacheDisabled:true});await send('Fetch.enable',{patterns:[{urlPattern:'*',requestStage:'Request'}]});await viewport(false);
+ let d;
+ if(testPlan.core){
  // Fresh profile has no explicit preference; this must be the *new* game model,
  // not the old assignment fleet. Its workload is a bounded visual allocation.
- setStage('fresh launch and default/opt-in');let d=await navigate(economyRaw);if(!expectDefault){assert.equal(d.traffic,null,'pre-release default is off');d=await navigate(economyRaw,'?traffic=1');}
+ setStage('fresh launch and default/opt-in');d=await navigate(economyRaw);if(!expectDefault){assert.equal(d.traffic,null,'pre-release default is off');d=await navigate(economyRaw,'?traffic=1');}
  await waitModel();d=await diag();assert.equal(d.traffic.mode,'allocation-game');assert.equal(d.traffic.paused,true);assert.ok(d.traffic.roads>0);assert.ok(d.decorative.trucks>0&&d.decorative.plumes>0);assert.equal(d.decorative.cars,0);assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),expectDefault?null:'1');
  const initialCity=await evaluate('window.cityManager.snapshot()');assert.equal(initialCity,economyCityRaw);checks.push(expectDefault?'Fresh no-query launch uses default allocation game with delivery trucks/factory smoke':'Pre-release default OFF; explicit ON uses allocation game with delivery trucks/factory smoke');
  setStage('desktop activation and pause');await button('#pause');await until('window.cityManager.traffic()?.moving>0 && window.cityManager.traffic()?.cars>0 && window.cityManager.traffic()?.step>0',30000);d=await diag();assert.ok(d.traffic.demandRate>0);await screenshot('desktop-traffic-game.png');
@@ -121,6 +126,8 @@ try{
  // Paused road construction must update the actual model snapshot without
  // advancing its game clock or changing anything beyond ordinary road costs.
  setStage('paused road construction');d=await navigate(roadRaw,'?traffic=1');await waitModel();const beforeRoad=(await diag()).traffic;assert.equal(beforeRoad.roads,road.cells.filter(c=>c.road).length);await button('[data-tool="road"]');await tapCell(cell(5,13));await tapCell(cell(10,13));await until(`window.cityManager.traffic()?.roads===${roadExpected.cells.filter(c=>c.road).length}`);await waitPausedModel();d=await diag();assert.equal(d.traffic.step,beforeRoad.step);assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(roadExpected));checks.push('Real road tool updates paused game topology while preserving ordinary construction accounting');
+ }
+ if(testPlan.extended){
  // Real player input builds a connected bypass. One game minute/second keeps
  // the economic city day unchanged while each road game runs ten real seconds.
  setStage('bypass baseline ten steps');await navigate(bypassRaw,'?traffic=1');await waitModel();const beforeBypass=await gameTenSteps();assert.equal(beforeBypass.completed,baselineTen.completed);
@@ -142,8 +149,30 @@ try{
  frameIntervals={paired:!blocked,off:offRaf,on:onRaf,cityBytesEqual:true,offBefore,offAfter,onBefore,onAfter,worker:{before:onBefore.traffic?.worker??null,after:onAfter.traffic?.worker??null},gameTiming:{before:onBefore.traffic?.timing??null,after:onAfter.traffic?.timing??null},note:blocked?'Fallback runs ON only to preserve the original watchdog budget; no paired OFF result. Worker round-trip includes worker queue, compute and message transfer after submit, not time before submit. Browser emulation does not establish smoothness or physical-device FPS.':'Same fixture and economic City at citizen-view speed; OFF uses decorative cars, ON uses allocation-game cars. Worker round-trip includes worker queue, compute and message transfer after submit, not time before submit. Browser emulation and broad thresholds do not establish smoothness or physical-device FPS.'};
  assert.ok(onRaf.p95<100&&onRaf.max<1000,JSON.stringify(onRaf));assert.equal(onAfter.traffic.failure,null);
  await button('#pause');await waitPausedModel();checks.push(blocked?'Fallback 390px ON browser intervals and worker/timing diagnostics captured; paired OFF omitted to preserve watchdog budget':'Paired 390px OFF/ON browser frame intervals and worker/timing diagnostics captured on the same dense City; broad CI thresholds are not smoothness certification');
- setStage('final evidence and assertions');assert.deepEqual(errors,[]);assert.deepEqual(externalRequests,[]);if(blocked)assert.ok(expectedErrors.length>=41);
- const report={browser:await send('Browser.getVersion'),blockedModels:blocked,softwareWebGL:software,expectDefault,fixtures:{economy:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length}},checks,stages,errors,externalRequests,screenshots,frameIntervals,bypassTraces,note:'Installed Edge desktop/mobile emulation; not physical Android, FPS certification or live-site acceptance.'};
+ // Normal-browser-only diagnostic with near-cap real TrafficGame actors. The
+ // fixture is a validated synthetic city, not a claim of naturally grown load.
+ // No synthetic cars are injected; missing peak attainment is reported, not
+ // converted into a new uncalibrated frame-performance gate.
+ if(!blocked){
+  setStage('mobile peak OFF baseline');
+  const peak=trafficGamePeakFixture(),peakCityRaw=serialize(peak),peakRaw=serializeParkSession(peak,createParkRuntime(peak));
+  assert.equal(serialize(deserializeParkSession(peakRaw).city),peakCityRaw);
+  d=await navigate(peakRaw,'?traffic=0');assert.equal(d.traffic,null);await citizenSpeed();await button('#pause');await sleep(1250);
+  const offBefore=await diag(),off=summarizeRaf(await mobileRaf()),offAfter=await diag();
+  assert.equal(await evaluate('window.cityManager.snapshot()'),peakCityRaw);await button('#pause');await until('window.cityManager.parks().paused');
+  setStage('mobile peak ON model warmup');d=await navigate(peakRaw,'?traffic=1');await waitModel();await citizenSpeed();await button('#pause');
+  // Bound observation without making an uncalibrated performance threshold a
+  // CI failure. Preserve the actual count if the model cannot reach the cap.
+  const attainment=await evaluate(`new Promise(resolve=>{const start=performance.now();let done=false;const finish=reason=>{if(done)return;done=true;clearTimeout(timer);const t=window.cityManager.traffic();resolve({reason,elapsedMs:performance.now()-start,step:t?.step??null,moving:t?.moving??null,cars:t?.cars??null})};const timer=setTimeout(()=>finish('observation-limit'),25000);const watch=()=>{if(done)return;const t=window.cityManager.traffic();if(t?.moving===128&&t?.cars>=120)finish('near-cap');else requestAnimationFrame(watch)};requestAnimationFrame(watch)})`);
+  setStage('mobile peak ON frame measurement');const onBefore=await diag(),on=summarizeRaf(await mobileRaf()),onAfter=await diag();
+  assert.equal(await evaluate('window.cityManager.snapshot()'),peakCityRaw);assert.equal(onAfter.traffic.failure,null);await button('#pause');await waitPausedModel();
+  peakComparison={fixture:{population:2000,roads:490,buildings:peak.buildings.length},attainment,off,on,offBefore,offAfter,onBefore,onAfter,cityBytesEqual:true,
+   note:'Synthetic reconciled 2,000-person city, same economic bytes; OFF retains decorative cars, ON uses real model cars. Near-cap attainment is diagnostic, not a new frame-time gate. Emulation is not physical-mobile proof.'};
+  checks.push('Normal browser peak fixture ON/OFF diagnostics captured without injecting traffic actors');
+ }
+ }
+ setStage('final evidence and assertions');assert.equal(checks.length,testPlan.expectedChecks,'All checks required for the selected case must run');assert.deepEqual(errors,[]);assert.deepEqual(externalRequests,[]);if(blocked)assert.ok(expectedErrors.length>=41);
+ const report={browser:await send('Browser.getVersion'),blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,expectDefault,fixtures:{economy:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length}},checks,stages,errors,externalRequests,screenshots,frameIntervals,peakComparison,bypassTraces,note:'Installed Edge desktop/mobile emulation; not physical Android, FPS certification or live-site acceptance.'};
  await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
-}catch(error){const failure={error:String(error),stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,stages,errors,externalRequests,bypassTraces,lastBypassTrace};try{await writeFile(resolve(output,'failure.json'),JSON.stringify(failure,null,2));}catch{}try{await screenshot('failure.png');await writeFile(resolve(output,'failure.json'),JSON.stringify({...failure,state:await diag(),page:await evaluate('({url:location.href,text:document.body.innerText.slice(-3000)})')},null,2));}catch{}throw error;}
+}catch(error){const failure={error:String(error),stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,testCase:testPlan.name,stages,errors,externalRequests,bypassTraces,lastBypassTrace};try{await writeFile(resolve(output,'failure.json'),JSON.stringify(failure,null,2));}catch{}try{await screenshot('failure.png');await writeFile(resolve(output,'failure.json'),JSON.stringify({...failure,state:await diag(),page:await evaluate('({url:location.href,text:document.body.innerText.slice(-3000)})')},null,2));}catch{}throw error;}
 finally{clearTimeout(watchdog);if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();}
