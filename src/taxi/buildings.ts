@@ -1,5 +1,6 @@
 /**
- * Taxi service points (phase D2, taxi-design.th.md). Pure data + validation; no sim.ts import so
+ * Taxi depots (phase D2, taxi-design.th.md). No taxi stands: taxis roam and pick up on their own; the
+ * depot is only their spawn point and home base. Pure data + validation; no sim.ts import so
  * sim.ts can depend on it without a cycle. Round 1 is economy-neutral: COST/UPKEEP are placeholders
  * and are never charged. Stored only in the optional `city.taxi` save section.
  */
@@ -14,16 +15,13 @@ export function taxiEnabled(search = globalThis.location?.search ?? '', storage:
   return TAXI_ENABLED;
 }
 export const TAXI_DEPOT = Object.freeze({ footprint: 1, units: Object.freeze({ 1: 4, 2: 8 }) as Readonly<Record<1 | 2, number>>, cost: 250_000, upgrade: 200_000, upkeep: 6_000 });
-export const TAXI_STAND = Object.freeze({ footprint: 1, slots: 2, cost: 30_000, upkeep: 500 });
-export const MAX_TAXI_DEPOTS = 4, MAX_TAXI_STANDS = 16;
+export const MAX_TAXI_DEPOTS = 4;
 export type TaxiDepot = { id: number; cell: number; tick: number; level: 1 | 2; open: boolean };
-export type TaxiStand = { id: number; cell: number; tick: number; open: boolean };
-export type TaxiState = { version: 1; rules: 'taxi-1'; depots: TaxiDepot[]; stands: TaxiStand[] };
-export const createTaxi = (): TaxiState => ({ version: 1, rules: 'taxi-1', depots: [], stands: [] });
+export type TaxiState = { version: 1; rules: 'taxi-1'; depots: TaxiDepot[] };
+export const createTaxi = (): TaxiState => ({ version: 1, rules: 'taxi-1', depots: [] });
 type Host = { taxi?: TaxiState };
 export const taxiDepotAt = (c: Host, i: number) => c.taxi?.depots.find(d => d.cell === i);
-export const taxiStandAt = (c: Host, i: number) => c.taxi?.stands.find(s => s.cell === i);
-export const taxiAt = (c: Host, i: number): TaxiDepot | TaxiStand | undefined => taxiDepotAt(c, i) ?? taxiStandAt(c, i);
+export const taxiAt = (c: Host, i: number): TaxiDepot | undefined => taxiDepotAt(c, i);
 export const taxiUnits = (d: TaxiDepot) => d.open ? TAXI_DEPOT.units[d.level] : 0;
 
 /** Facts the validator needs from the city, supplied by sim.ts (keeps this module City-free). */
@@ -37,10 +35,10 @@ export type TaxiValidationView = {
 export function validateTaxi(value: unknown, view: TaxiValidationView): asserts value is TaxiState {
   const fail = (why: string): never => { throw new Error(`Invalid taxi save: ${why}`); };
   const t = value as TaxiState;
-  if (!t || typeof t !== 'object' || Array.isArray(t) || Object.keys(t).sort().join(',') !== 'depots,rules,stands,version' || t.version !== 1 || t.rules !== 'taxi-1' || !Array.isArray(t.depots) || !Array.isArray(t.stands)) fail('envelope');
-  if (t.depots.length > MAX_TAXI_DEPOTS || t.stands.length > MAX_TAXI_STANDS) fail('too many sites');
+  if (!t || typeof t !== 'object' || Array.isArray(t) || Object.keys(t).sort().join(',') !== 'depots,rules,version' || t.version !== 1 || t.rules !== 'taxi-1' || !Array.isArray(t.depots)) fail('envelope');
+  if (t.depots.length > MAX_TAXI_DEPOTS) fail('too many depots');
   const ids = new Set<number>(), cells = new Set<number>();
-  const site = (s: TaxiDepot | TaxiStand, keys: string) => {
+  const site = (s: TaxiDepot, keys: string) => {
     if (!s || typeof s !== 'object' || Object.keys(s).sort().join(',') !== keys) fail('site fields');
     if (!Number.isSafeInteger(s.id) || s.id < 1 || s.id >= view.nextId || ids.has(s.id) || view.otherIds.has(s.id)) fail('site id');
     if (!Number.isSafeInteger(s.cell) || s.cell < 0 || s.cell >= view.cells.length || cells.has(s.cell) || view.otherCells.has(s.cell)) fail('site cell');
@@ -50,5 +48,4 @@ export function validateTaxi(value: unknown, view: TaxiValidationView): asserts 
     ids.add(s.id); cells.add(s.cell);
   };
   for (const d of t.depots) { site(d, 'cell,id,level,open,tick'); if (d.level !== 1 && d.level !== 2) fail('depot level'); }
-  for (const s of t.stands) site(s, 'cell,id,open,tick');
 }

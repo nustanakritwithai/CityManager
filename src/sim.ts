@@ -66,7 +66,7 @@ export type City = {
   utilities: { outside: Need }; plants: Plant[]; parks: Park[]; lastEvent: string;
   /** Present only when this city uses the education rules. Absent keeps the previous economy. */
   education?: EducationState;
-  /** Optional taxi service points (phase D2). Absent = no taxi data; saves stay byte-identical. */
+  /** Optional taxi depots (phase D2; no stands). Absent = no taxi data; saves stay byte-identical. */
   taxi?: TaxiState;
 };
 export type Result = { ok: boolean; message: string };
@@ -198,7 +198,7 @@ export function campusSiteReason(c: City, i: number, kind: CampusKind): string |
   if (!c.education) return 'เมืองนี้ยังไม่มีข้อมูลการศึกษา';
   if (!validIndex(i)) return 'ตำแหน่งอยู่นอกแผนที่';
   const cell = c.cells[i];
-  const occupied = cell.road ? 'ถนน' : cell.zone === 'R' ? 'โซนบ้าน' : cell.zone === 'C' ? 'โซนพาณิชย์' : cell.zone === 'I' ? 'โซนโรงงาน' : cell.zone === 'F' ? 'โซนฟาร์ม' : cell.building !== null ? 'อาคาร' : plantAt(c, i) ? 'โรงน้ำหรือไฟ' : parkAt(c, i) ? 'สวน' : campusAt(c, i) ? 'สถานศึกษา' : taxiAt(c, i) ? 'จุดบริการแท็กซี่' : null;
+  const occupied = cell.road ? 'ถนน' : cell.zone === 'R' ? 'โซนบ้าน' : cell.zone === 'C' ? 'โซนพาณิชย์' : cell.zone === 'I' ? 'โซนโรงงาน' : cell.zone === 'F' ? 'โซนฟาร์ม' : cell.building !== null ? 'อาคาร' : plantAt(c, i) ? 'โรงน้ำหรือไฟ' : parkAt(c, i) ? 'สวน' : campusAt(c, i) ? 'สถานศึกษา' : taxiAt(c, i) ? 'อู่แท็กซี่' : null;
   if (occupied) return `แปลงนี้เป็น${occupied}อยู่แล้ว ${name}วางบนแปลงว่างที่ยังไม่ลงโซน และต้องติดถนน`;
   if (!neighbors(i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';
   const limit = kind === 'school' ? EDUCATION_COST.maxSchools : EDUCATION_COST.maxUniversities;
@@ -527,7 +527,7 @@ export function buildRoad(c: City, a: number, b: number): Result {
   if (!path.length) return { ok: false, message: 'Road is outside the bounded map.' };
   if (path.some(i => parkAt(c, i))) return { ok: false, message: 'มีสวนสาธารณะขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => campusAt(c, i))) return { ok: false, message: 'มีสถานศึกษาขวางทาง ต้องรื้อก่อนสร้างถนน' };
-  if (path.some(i => taxiAt(c, i))) return { ok: false, message: 'มีจุดบริการแท็กซี่ขวางทาง ต้องรื้อก่อนสร้างถนน' };
+  if (path.some(i => taxiAt(c, i))) return { ok: false, message: 'มีอู่แท็กซี่ขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => c.cells[i].building !== null || plantAt(c, i))) return { ok: false, message: 'A building or plant blocks this road. Bulldoze it first.' };
   const added = path.filter(i => !c.cells[i].road), cost = added.length * ROAD_COST;
   if (treasurySpendable(c) < cost) return { ok: false, message: `Need ${(cost / 100).toFixed(0)} credits for this road.` };
@@ -564,7 +564,7 @@ export function zoneCell(c: City, i: number, zone: Zone): Result {
   if (cell.road) return { ok: false, message: 'Road cells cannot be zoned.' };
   if (parkAt(c, i)) return { ok: false, message: 'มีสวนสาธารณะอยู่ ต้องรื้อก่อนวางโซน' };
   if (campusAt(c, i)) return { ok: false, message: 'มีสถานศึกษาอยู่ ต้องรื้อก่อนวางโซน' };
-  if (taxiAt(c, i)) return { ok: false, message: 'มีจุดบริการแท็กซี่อยู่ ต้องรื้อก่อนวางโซน' };
+  if (taxiAt(c, i)) return { ok: false, message: 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อนวางโซน' };
   if (plantAt(c, i)) return { ok: false, message: 'A water or power plant stands here. Bulldoze it before zoning.' };
   if (cell.building !== null && cell.zone !== zone) return { ok: false, message: 'Bulldoze the existing building before rezoning.' };
   cell.zone = zone;
@@ -578,8 +578,8 @@ export function bulldoze(c: City, i: number): Result {
   const taxi = taxiAt(c, i);
   if (taxi && c.taxi) {
     // Round 1 is economy-neutral: taxi sites are built and removed without any charge.
-    c.taxi = { ...c.taxi, depots: c.taxi.depots.filter(d => d !== taxi), stands: c.taxi.stands.filter(s => s !== taxi) };
-    c.lastEvent = `รื้อจุดบริการแท็กซี่ #${taxi.id} แล้ว`;
+    c.taxi = { ...c.taxi, depots: c.taxi.depots.filter(d => d !== taxi) };
+    c.lastEvent = `รื้ออู่แท็กซี่ #${taxi.id} แล้ว`;
     return { ok: true, message: c.lastEvent };
   }
   const cell = c.cells[i], b = c.buildings.find(v => v.id === cell.building), plant = plantAt(c, i), park = parkAt(c, i), campus = campusAt(c, i);
