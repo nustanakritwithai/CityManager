@@ -77,4 +77,9 @@ export class TrafficLayer {
   ready:f!==null,updating:f===null||!!worker?.inflight||!!worker?.pending,step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
   completed:f?.completed??0,dropped:f?.dropped??0,cancelled:f?.cancelled??0,clippedRate:f?.clippedRate??0,
   roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker,timing:{...this.timing}};}
+ /** Taxi cars already tagged on the latest frame. Null when the taxi flag is off. Bus does not use this. */
+ taxiFleet(): {cars: TrafficGameFrame['cars']; groups: TrafficGameFrame['groups']} | null {
+  if(!this.taxiOn||!this.latest)return null;
+  return {cars:this.latest.cars.filter(c=>c.taxi),groups:this.latest.groups};
+ }
 }

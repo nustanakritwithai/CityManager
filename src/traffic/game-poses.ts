@@ -26,10 +26,11 @@ function spatialSample(candidates:readonly Candidate[],size:number,limit:number)
 /** Capped representative positions derived only from occupied game-model links.
  * No rendered object feeds back into road capacity, demand, queues or city state.
  * The optional cap exists for equivalence tests, not to change model mass. */
-export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGroup[],size=24,unit=2,limit=GAME_VISUAL_CAR_CAP):CitizenVehiclePose[] {
+export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGroup[],size=24,unit=2,limit=GAME_VISUAL_CAR_CAP,includeTaxi=false):CitizenVehiclePose[] {
  if(!Number.isSafeInteger(limit)||limit<0||limit>128)throw Error('Invalid visual traffic cap');
+ const fleet=includeTaxi?cars:cars.filter(c=>!c.taxi);
  const byLink=new Map<string,GameCar[]>(),groupByKey=new Map(groups.map(g=>[g.key,g]));
- for(const car of cars){const key=`${car.from}>${car.to}`;(byLink.get(key)??byLink.set(key,[]).get(key)!).push(car);}
+ for(const car of fleet){const key=`${car.from}>${car.to}`;(byLink.get(key)??byLink.set(key,[]).get(key)!).push(car);}
  const result:Candidate[]=[];
  for(const [key,unsorted] of [...byLink].sort(([a],[b])=>a.localeCompare(b))){
   const g=groupByKey.get(key);if(!g||g.closed)continue;

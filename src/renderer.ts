@@ -51,6 +51,7 @@ export class CityView {
   private quality: Quality = 'high';
   private lastScene: { city: City; selected: number | null; preview: number[] } | null = null;
   private forest: { entity: Entity; x: number; y: number; z: number; scale: number }[] = [];
+  private taxiDepots: { cell: number; level: 1 | 2; open: boolean }[] = [];
   pointers = new Map<number, { x: number; y: number }>();
   dragStart: number | null = null;
   private aspect = 0;
@@ -398,6 +399,14 @@ export class CityView {
   }
   get animating() { return this.animations.size; }
 
+  /** In-memory taxi stands. An empty list leaves every parcel signature unchanged. */
+  setTaxiDepots(depots: readonly { cell: number; level: 1 | 2; open: boolean }[]) {
+    const key = depots.map(d => `${d.cell}:${d.level}:${d.open ? 1 : 0}`).sort().join('|');
+    if (key === this.taxiDepotKey) return;
+    this.taxiDepotKey = key;
+    this.taxiDepots = depots.map(d => ({ cell: d.cell, level: d.level, open: d.open }));
+  }
+  private taxiDepotKey = '';
   /** Unlit translucent plates so the layer stays readable at night; null hides it. */
   setOverlay(overlay: Overlay | null) {
     if (overlay === this.overlayRef) return;
@@ -435,7 +444,8 @@ export class CityView {
       const reach = !!b && access(city, i);
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
       const campus = city.education?.campuses.find(item => item.cell === i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}`;
+      const stand = this.taxiDepots.find(d => d.cell === i);
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -486,6 +496,8 @@ export class CityView {
         this.municipalPark(tile);
       } else if (plant) {
         this.plant(tile, plant.kind, plantOn);
+      } else if (stand) {
+        this.taxiStand(tile, stand.level, stand.open);
       } else if (park) {
         // Visual-only pocket park on unzoned roadside land between buildings.
         this.box(tile, 0, .05, 0, 1.7, .05, 1.7, this.ground.lawnMaterial, false);
@@ -555,6 +567,17 @@ export class CityView {
       for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, this.material(color, true));
       for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, this.material(color, true));
     }
+  }
+  /** Yellow kerb stand. Not a saved building; the session owns the depot record. */
+  private taxiStand(tile: Entity, level: 1 | 2, open: boolean) {
+    tile.name += ' Taxi stand';
+    const body = open ? '#f2c94c' : '#8d8348';
+    this.box(tile, 0, .08, 0, 1.7, .1, 1.7, '#d9d3c4');
+    this.box(tile, 0, .42, -.05, 1.15, .62, .85, body);
+    this.box(tile, 0, .8, -.05, 1.28, .12, 1.0, '#2b2b2b');
+    this.box(tile, 0, .98, -.05, .7, .22, .16, open ? '#111111' : '#4a4a4a');
+    this.box(tile, 0, .28, .48, .9, .08, .28, '#3a3a3a');
+    if (level > 1) this.box(tile, .62, .45, -.55, .4, .5, .4, body);
   }
   /** Small procedural civic buildings, independent of downloaded assets and simulation data. */
   private campus(tile: Entity, kind: 'school' | 'university', level: number) {

@@ -9,21 +9,26 @@ import {shortestPath} from './routing.ts';
  * not a city day or a citizen trip. The game never writes City or a save. */
 export const GAME_MAX_ODS=64, GAME_MAX_CARS=128, GAME_MAX_QUEUE=32, GAME_MAX_RATE=4;
 const STORAGE_PER_LANE=4, REROUTE_STEPS=5;
-export type GameDemand = {from:number;to:number;rate:number};
+export type GameDemand = {from:number;to:number;rate:number;taxiRate?:number};
 export type TrafficGameSample = {map:RoadMap;demand:GameDemand[];clippedRate?:number};
 export type TrafficGameInput = {map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[]};
-export type GameCar = {id:number;from:number;to:number;blocked:boolean};
+export type GameCar = {id:number;from:number;to:number;blocked:boolean;taxi?:boolean};
 export type GameRenderGroup = {key:string;from:number;to:number;amount:number;queued:number;storage:number;closed:boolean};
 export type TrafficGameFrame = {modal?:GameModalStats|null;step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
-type OD = GameDemand & {waiting:number;path:number[]|null};
-type Actor = {id:number;destination:number;path:number[];index:number;blocked:boolean};
+type OD = GameDemand & {waiting:number;taxiCredit:number;taxiMarkedStep:number;path:number[]|null};
+type Actor = {id:number;destination:number;path:number[];index:number;blocked:boolean;taxi?:boolean};
+/** In-memory stands captured on the next taxi-enabled sample. The layer submit line stays unchanged so bus can attach `input.bus` beside it. */
+let boundTaxiDepots: TaxiDepotSite[] = [];
+export function bindTaxiSessionDepots(depots: readonly TaxiDepotSite[] | null): void {
+  boundTaxiDepots = (depots ?? []).map(d => ({ id: d.id, cell: d.cell, level: d.level, open: d.open }));
+}
 const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<576;
 const pair=(a:number,b:number)=>`${a}:${b}`;
 const frontages=(map:RoadMap,at:number):number[]=>map.cells[at]?.road?[at]:roadNeighbors(at).filter(i=>map.cells[i]?.road).sort((a,b)=>a-b);
 
 /** Read only building placement/density and road topology; no economy, journals,
  * actual travel, city clock, financial data or persistence participates. */
-export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean}={}):TrafficGameInput {
+export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;sessionDepots?:TaxiDepotSite[]}={}):TrafficGameInput {
   if(options.taxiEnabled!==undefined&&typeof options.taxiEnabled!=='boolean')throw Error('Invalid taxi game preference');
   const map:RoadMap={cells:city.cells.map(c=>({road:c.road})),...(city.roadTopology?{roadTopology:structuredClone(city.roadTopology)}:{})};
   const homes=new Map<number,number>(),destinations=new Map<number,number>(),homeAccess=new Map<number,number>();
@@ -33,8 +38,13 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean}
   // the buildings and road map are unchanged; these are not real trip records.
   for(const h of city.households){const at=h.home===null?undefined:homeAccess.get(h.home);if(at!==undefined)homes.set(at,(homes.get(at)??0)+h.members);}
   const depots=city.taxi?.depots??[],ids=new Set<number>();if(!Array.isArray(depots)||depots.length>4)throw Error('Invalid traffic game taxi depots');
-  const taxis=depots.map(d=>{if(!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
-  return {map,homes:[...homes].map(([cell,amount])=>({cell,amount})),destinations:[...destinations].map(([cell,amount])=>({cell,amount})),taxis:options.taxiEnabled?taxis:[]};
+  const saved=depots.map(d=>{if(!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
+  // Session depots are in-memory only. Ignored unless the taxi flag is on, so traffic-off
+  // and taxi-off captures stay identical to a city with no taxi service.
+  const session=options.taxiEnabled?options.sessionDepots??boundTaxiDepots:[];
+  if(!Array.isArray(session)||saved.length+session.length>4)throw Error('Invalid traffic game taxi depots');
+  const extra=session.map(d=>{if(!d||!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
+  return {map,homes:[...homes].map(([cell,amount])=>({cell,amount})),destinations:[...destinations].map(([cell,amount])=>({cell,amount})),taxis:options.taxiEnabled?[...saved,...extra]:[]};
 }
 /** Worker-side OD assembly: prefer road-reachable destinations over visually
  * close disconnected ones; when none are reachable retain an unreachable OD so
@@ -68,13 +78,14 @@ function cleanSample(sample:TrafficGameSample) {
   const map:RoadMap={cells:sample.map.cells.map(c=>({road:c.road})),...(sample.map.roadTopology?{roadTopology:structuredClone(sample.map.roadTopology)}:{})};
   if(map.roadTopology)validateRoadTopology(map,map.roadTopology);
   const grouped=new Map<string,GameDemand>();let clippedRate=sample.clippedRate??0;
-  for(const d of sample.demand){if(!d||!cell(d.from)||!cell(d.to)||typeof d.rate!=='number'||!Number.isFinite(d.rate)||d.rate<0||d.rate>1_000_000)throw Error('Invalid traffic game demand');if(d.from===d.to){clippedRate+=d.rate;continue;}const k=pair(d.from,d.to),old=grouped.get(k);if(old)old.rate+=d.rate;else grouped.set(k,{from:d.from,to:d.to,rate:d.rate});}
+  for(const d of sample.demand){if(!d||!cell(d.from)||!cell(d.to)||typeof d.rate!=='number'||!Number.isFinite(d.rate)||d.rate<0||d.rate>1_000_000)throw Error('Invalid traffic game demand');const taxi=d.taxiRate??0;if(d.taxiRate!==undefined&&(typeof d.taxiRate!=='number'||!Number.isFinite(taxi)||taxi<0||taxi>d.rate+1e-6))throw Error('Invalid traffic game taxi demand');if(d.from===d.to){clippedRate+=d.rate;continue;}const k=pair(d.from,d.to),old=grouped.get(k);if(old){old.rate+=d.rate;old.taxiRate=(old.taxiRate??0)+taxi;}else if(taxi>0)grouped.set(k,{from:d.from,to:d.to,rate:d.rate,taxiRate:taxi});else grouped.set(k,{from:d.from,to:d.to,rate:d.rate});}
   const rows=[...grouped.values()].sort((a,b)=>a.from-b.from||a.to-b.to);
   // Aggregate adjacent ordered ODs into at most 64 representative bins. The
   // total demand from all areas is included; excess above per-bin capacity is
-  // reported as clipped rather than silently erased.
+  // reported as clipped rather than silently erased. Taxi flow scales with the
+  // same clip so a binned OD cannot dispatch more cabs than its modeled rate.
   const kept:GameDemand[]=[];const bins=Math.min(rows.length,GAME_MAX_ODS);
-  for(let i=0;i<bins;i++){const start=Math.floor(i*rows.length/bins),end=Math.floor((i+1)*rows.length/bins),slice=rows.slice(start,end),representative=slice[Math.floor(slice.length/2)],total=slice.reduce((n,d)=>n+d.rate,0);kept.push({...representative,rate:Math.min(GAME_MAX_RATE,total)});clippedRate+=Math.max(0,total-GAME_MAX_RATE);}
+  for(let i=0;i<bins;i++){const start=Math.floor(i*rows.length/bins),end=Math.floor((i+1)*rows.length/bins),slice=rows.slice(start,end),representative=slice[Math.floor(slice.length/2)],total=slice.reduce((n,d)=>n+d.rate,0),taxiTotal=slice.reduce((n,d)=>n+(d.taxiRate??0),0),modeled=Math.min(GAME_MAX_RATE,total),taxiModeled=total>0?modeled*taxiTotal/total:0;const row:GameDemand={from:representative.from,to:representative.to,rate:modeled};if(taxiModeled>1e-12)row.taxiRate=taxiModeled;kept.push(row);clippedRate+=Math.max(0,total-GAME_MAX_RATE);}
   return {map,rows:kept,clippedRate};
 }
 
@@ -95,11 +106,11 @@ export class TrafficGame {
   constructor(sample:TrafficGameSample){const s=cleanSample(sample);this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.replaceRows(s.rows,s.clippedRate);this.prepareJunctions();this.replan();}
   private key(map:RoadMap){return map.cells.map(c=>c.road?'1':'0').join('')+roadTopologyKey(map);}
   private prepareJunctions(){const adj=new Map<number,Set<number>>();for(const l of this.network.links.values())for(const [a,b] of [[l.from,l.to],[l.to,l.from]])(adj.get(a)??adj.set(a,new Set()).get(a)!).add(b);this.junctions=new Set([...adj].filter(([,v])=>v.size>2).map(([n])=>n));}
-  private replaceRows(rows:GameDemand[],clippedRate:number){const prior=new Map(this.ods.map(o=>[pair(o.from,o.to),o]));this.ods=rows.map(d=>{const old=prior.get(pair(d.from,d.to));prior.delete(pair(d.from,d.to));return {...d,waiting:old?.waiting??0,path:old?.path??null};});for(const old of prior.values())this.cancelled+=old.waiting;this.clippedRate=clippedRate;this.demandSignature=JSON.stringify(rows);}
+  private replaceRows(rows:GameDemand[],clippedRate:number){const prior=new Map(this.ods.map(o=>[pair(o.from,o.to),o]));this.ods=rows.map(d=>{const old=prior.get(pair(d.from,d.to));prior.delete(pair(d.from,d.to));const taxiRate=Math.min(d.rate,Math.max(0,d.taxiRate??0));return {...d,taxiRate:taxiRate>1e-12?taxiRate:undefined,waiting:old?.waiting??0,taxiCredit:taxiRate>0?old?.taxiCredit??0:0,taxiMarkedStep:old?.taxiMarkedStep??-1,path:old?.path??null};});for(const old of prior.values())this.cancelled+=old.waiting;this.clippedRate=clippedRate;this.demandSignature=JSON.stringify(rows);}
   setSample(sample:TrafficGameSample):void {const s=cleanSample(sample),signature=this.key(s.map),changed=signature!==this.signature, demandChanged=JSON.stringify(s.rows)!==this.demandSignature;this.replaceRows(s.rows,s.clippedRate);if(changed){this.map=s.map;this.signature=signature;this.network=buildNetwork(this.map);this.prepareJunctions();this.reconcileActors();}if(changed||demandChanged)this.replan();}
   /** Reconcile topology without consuming time, including while paused. */
   private reconcileActors():void {const times=new Map([...this.network.links].map(([key])=>[key,1])),routes=new Map<string,number[]|null>();for(const c of this.cars){const from=c.path[c.index],head=c.path[c.index+1];if(!this.network.links.has(linkKey(from,head))){c.blocked=true;continue;}if(head===c.destination){c.blocked=false;continue;}const key=pair(head,c.destination);if(!routes.has(key))routes.set(key,shortestPath(this.network,times,head,c.destination));const tail=routes.get(key)!;if(!tail)c.blocked=true;else{c.path=[from,...tail];c.index=0;c.blocked=false;}}}
-  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(({from,to,rate})=>({from,to,rate})),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();}
+  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(({from,to,rate,taxiRate})=>({from,to,rate,...(taxiRate?{taxiRate}:{})})),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();}
   /** Detached in-memory transaction candidate; never a save representation. */
   clone():TrafficGame {const copy=Object.create(TrafficGame.prototype) as TrafficGame;
     // Network, map and junction set are immutable after construction; road edits
@@ -140,8 +151,20 @@ export class TrafficGame {
     }
     return this.frame;
   }
+  /** Tag a share of each OD's cars as taxis once per step. Lives off the inflow and spawn lines so bus load can edit those independently. */
+  private markDispatchedTaxis(): void {
+    for (const od of this.ods) {
+      if (od.taxiMarkedStep === this.stepValue) continue;
+      od.taxiMarkedStep = this.stepValue;
+      const taxiIn = Math.min(od.rate, od.taxiRate ?? 0);
+      if (taxiIn > 0) od.taxiCredit += taxiIn;
+      const fleet = this.cars.filter(c => !c.taxi && c.destination === od.to && c.path[0] === od.from);
+      while (od.taxiCredit >= 1 && fleet.length) { fleet.shift()!.taxi = true; od.taxiCredit -= 1; }
+    }
+  }
   get frame():TrafficGameFrame {
-    const cars=this.cars.map(c=>({id:c.id,from:c.path[c.index],to:c.path[c.index+1],blocked:c.blocked}));
+    this.markDispatchedTaxis();
+    const cars=this.cars.map(c=>({id:c.id,from:c.path[c.index],to:c.path[c.index+1],blocked:c.blocked,...(c.taxi?{taxi:true}:{})}));
     const grouped=new Map<string,GameRenderGroup>(),loads=new Map<number,{cell:number;load:number;queued:number}>();
     for(const c of cars){const key=linkKey(c.from,c.to),link=this.network.links.get(key);let group=grouped.get(key);if(!group){group={key,from:c.from,to:c.to,amount:0,queued:0,storage:(link?.lanes??0)*STORAGE_PER_LANE,closed:!link};grouped.set(key,group);}group.amount++;if(c.blocked)group.queued++;let load=loads.get(c.to);if(!load){load={cell:c.to,load:0,queued:0};loads.set(c.to,load);}load.load++;if(c.blocked)load.queued++;}
     // Waiting demand lives at its origin; include it in the cell-level queue
