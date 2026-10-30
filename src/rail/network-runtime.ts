@@ -9,6 +9,7 @@ import type {PassengerOffer} from './passenger.ts';
 import {railAccessPath} from './access.ts';
 import {snapshotDigest} from './snapshot-digest.ts';
 import {replaceRailReservations} from './reserved-parcels.ts';
+import {taxiAt} from '../taxi/buildings.ts';
 
 export type RailStationSite={id:string;cell:number};
 export type RailServicePolicy={seats:number;queueCapacity:number;boardingPerMinute:number;alightingPerMinute:number;minimumDwellMinutes:number;minimumDepartureIntervalMinutes:number;maxBatches:number};
@@ -61,7 +62,7 @@ export class RailNetworkRuntime {
   private assertParcels(){for(const cell of this.reservedCells())this.available(cell);}
   private publishReservations(){replaceRailReservations(this.city,this.reservedCells());}
   private changed(){this.state.revision++;this.publishReservations();}
-  private available(cell:number){const c=this.city.cells[cell];if(!c||c.building!==null||c.zone||c.road||this.city.parks.some(p=>p.cell===cell)||this.city.plants.some(p=>p.cell===cell)||this.city.education?.campuses.some(p=>p.cell===cell))throw Error('Rail needs an empty reserved parcel; crossings are not configured');}
+  private available(cell:number){const c=this.city.cells[cell];if(!c||c.building!==null||c.zone||c.road||this.city.parks.some(p=>p.cell===cell)||this.city.plants.some(p=>p.cell===cell)||this.city.education?.campuses.some(p=>p.cell===cell)||taxiAt(this.city,cell))throw Error('Rail needs an empty reserved parcel; crossings are not configured');}
   isReserved(cell:number){return this.state.stations.some(s=>s.cell===cell)||this.state.graph.links.some(l=>l.from===cell||l.to===cell);}
   addStation(id:string,cell:number){this.assertWritable();if(this.state.service||this.state.stations.length>=2||!validId(id)||this.state.stations.some(s=>s.id===id||s.cell===cell))throw Error('This shuttle supports two distinct stations');this.available(cell);this.state.stations.push({id,cell});this.changed();}
   removeStation(id:string){this.assertWritable();if(this.state.service)throw Error('Remove the idle line before removing a station');const next=this.state.stations.filter(s=>s.id!==id);if(next.length===this.state.stations.length)throw Error('Unknown station');this.state.stations=next;this.changed();}

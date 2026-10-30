@@ -11,7 +11,7 @@ export class SceneCitizenVehicles {
  private readonly mesh:Mesh;
  private readonly batches:Batch[]=[];
  private visibleCount=0;
- constructor(private readonly app:AppBase) {
+ constructor(private readonly app:AppBase, private readonly palette:readonly string[]=PAINT) {
    this.mesh=new Mesh(app.graphicsDevice);
    const positions:number[]=[],normals:number[]=[],colors:number[]=[],indices:number[]=[];
    const box=(sx:number,sy:number,sz:number,y:number,shade:number)=>{
@@ -26,7 +26,7 @@ export class SceneCitizenVehicles {
    box(.28,.16,.42,.09,255);box(.24,.12,.22,.22,100);
    this.mesh.setPositions(positions);this.mesh.setNormals(normals);this.mesh.setColors32(colors);this.mesh.setIndices(indices);this.mesh.update();
    app.root.addChild(this.root);
-   for(const color of PAINT){
+   for(const color of this.palette){
      const material=new StandardMaterial();material.diffuse=new Color().fromString(color);material.diffuseVertexColor=true;material.update();
      const entity=new Entity('Instanced traffic paint');this.root.addChild(entity);
      const instance=new MeshInstance(this.mesh,material,entity);instance.castShadow=false;instance.receiveShadow=false;instance.cull=false;
@@ -35,7 +35,7 @@ export class SceneCitizenVehicles {
    }
  }
  sync(poses:readonly CitizenVehiclePose[]):void {
-   const groups:CitizenVehiclePose[][]=PAINT.map(()=>[]);
+   const groups:CitizenVehiclePose[][]=this.palette.map(()=>[]);
    for(const pose of poses){if(!groups[pose.paint])throw new Error('Unknown vehicle paint');groups[pose.paint].push(pose);}
    this.visibleCount=poses.length;
    groups.forEach((group,i)=>{

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {createCity,buildRoad,step} from '../src/sim.ts';
 import {createParkRuntime,advanceParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
 import {RailNetworkRuntime} from '../src/rail/network-runtime.ts';
+import {buildTaxiDepot} from '../src/taxi/placement.ts';
 import {marketJournalForTest} from '../src/market-client.ts';
 import {SAVE_KEY} from '../src/save-storage.ts';
 import {reachTouch} from './touch-reach.mjs';
@@ -18,7 +19,7 @@ const policy={seats:8,queueCapacity:12,boardingPerMinute:4,alightingPerMinute:4,
 const journal=marketJournalForTest(null);journal.guestId='00000000-0000-4000-8000-000000000003';
 function fixture(moving){
   const city=createCity(61025,{starter:false}),runtime=createParkRuntime(city);city.market=structuredClone(journal);
-  buildRoad(city,288,264);buildRoad(city,264,281);const rail=RailNetworkRuntime.create(city,'synthetic-host-city',0);runtime.rail=rail;
+  buildRoad(city,288,264);buildRoad(city,264,281);assert.ok(buildTaxiDepot(city,243,true).ok);const rail=RailNetworkRuntime.create(city,'synthetic-host-city',0);runtime.rail=rail;
   rail.addStation('a',245);rail.addStation('b',255);for(let from=245;from<255;from++)rail.editTrack(from,from+1,false,2);rail.configureService(policy);
   if(moving){rail.acceptPreparedDemand({id:'trip:1',from:291,to:305,offeredPersons:32,roadAdmittedPersons:0,leases:[]},{id:'batch:1',requestId:'trip:1',leaseId:'lease:1',from:291,to:305,fromStation:'a',toStation:'b',persons:32,readyAtMinute:0,egressMinutes:5});advanceParkRuntime(city,runtime,7,()=>step(city));}
   return serializeParkSession(city,runtime);

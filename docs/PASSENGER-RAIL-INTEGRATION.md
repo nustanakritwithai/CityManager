@@ -113,3 +113,20 @@ Escape/resize/pan/touch cancellation, repeated menus, idle infrastructure
 management and no ghost train. Native touch exposed Escape bubbling into the
 main tool handler; the dialog now consumes that event. Summary is committed in
 `docs/rail-app-validation.json`; screenshots remain local synthetic QA artifacts.
+
+Combined parcel release fix (2026-10-30): integrate main
+`867a920f365e3c93a3bbba72adb82afa6fc0e5e6` before checking optional taxi/rail
+coexistence. Taxi placement rejects the existing rail reservation before allocating
+an ID or taxi section. Rail availability rejects `taxiAt`, including closed depots;
+the same check protects station/track edits and capture/restore. No saved fields,
+envelopes, financial rules or optional-system defaults change.
+
+`tests/rail-taxi-parcels.test.ts` covers both placement orders, unchanged state/IDs,
+separate assets with queues and Guest-preserving round trips, absent optional
+sections, and overlapping station/track saves with a correctly recomputed city
+digest. Rejected capture/restore keeps storage bytes and pre-existing reservations.
+Nine of ten regressions failed before the guards; all ten passed after them, along
+with 69 focused combined/save/traffic checks and TypeScript. The host smoke fixture
+now retains a separate taxi depot while exercising rail touch/demolition and saves.
+Exact combined-head host and CI results are recorded in PR #124; older preview and
+host artifacts above are historical evidence, not acceptance of a later tree.
