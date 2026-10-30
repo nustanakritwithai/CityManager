@@ -86,7 +86,6 @@ import { renderParkRecreationPanel } from './park-recreation-panel.ts';
 import { SceneParkActivity } from './scene-park-activity.ts';
 import './park-runtime.css';
 import { installEducationPanel } from './education-panel.ts';
-import { busEnabled } from './bus/types.ts';
 import { bulldozeGuarded, type BusRemovalImpact } from './bus/player.ts';
 import { confirmBusRemoval } from './bus/panel.ts';
 import { createBusController } from './bus/mount.ts';

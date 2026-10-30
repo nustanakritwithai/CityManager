@@ -214,7 +214,9 @@ test('live read uses snapshot, waiting, detail and totals and never drains event
   setBusLiveReader(() => read);
   assert.equal(getBusLiveSource(), read);
   const stop = await connectPresentedBusEvents();
-  assert.equal(stop, null, 'frame.ts is owned by PR #134; this build only subscribes when it is present');
+  // Stack-aware: without #134 (frame.ts) there is nothing to subscribe to; with it, subscribing returns an unsubscribe.
+  const hasFrame = (await import('node:fs')).existsSync(new URL('../src/bus/frame.ts', import.meta.url));
+  if (hasFrame) { assert.equal(typeof stop, 'function'); stop!(); } else assert.equal(stop, null, 'frame.ts is owned by PR #134; this build only subscribes when it is present');
   assert.equal(engine.pendingEvents, pendingAfter);
   assert.deepEqual(seen.filter(name => name === 'drain'), []);
   setBusLiveReader(() => null);
