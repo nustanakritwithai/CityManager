@@ -2,8 +2,8 @@
  * Samples ONE real activity minute, before the activity engine advances it.
  * Rendering, park proximity and completed-return counts are never visit evidence.
  */
-import { WORKER_SKILLS } from './labor.ts';
-import type { City, Household } from './sim.ts';
+import type { City } from './sim.ts';
+import { parkActivityUnavailableCitizenIds, type ParkActivityContext } from './park-activity.ts';
 import type { ParkRecreationFrame } from './park-recreation.ts';
 
 export const RECREATION_MINUTES_PER_DAY = 1440;
@@ -26,6 +26,8 @@ export type RecreationObservationOptions = {
    * Unioned with existing private/owner work reservations; never unreserves work.
    */
   unavailableCitizenIds?: ReadonlySet<string>;
+  /** Shared read-only roster for this synchronous advance; never reuse after city edits. */
+  activityContext?: ParkActivityContext;
 };
 
 const safe = (n: number) => Number.isSafeInteger(n) && n >= 0;
@@ -45,23 +47,6 @@ export function parkRecreationMinute(day: number, minute: number): number {
   return day * RECREATION_MINUTES_PER_DAY + minute;
 }
 
-/** Mirrors the leisure contract: stable member slots in WORKER_SKILLS order,
- * funded owners then employees occupy the front of each skill pool.
- */
-function employed(city: City, h: Household, slot: number): boolean {
-  let offset = 0;
-  for (const skill of WORKER_SKILLS) {
-    const pool = h.workerSkills[skill];
-    if (slot < offset + pool) {
-      const count = city.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length
-        + city.employment.filter(e => e.householdId === h.id && e.skill === skill).reduce((n, e) => n + e.workers, 0);
-      return slot - offset < Math.min(pool, count);
-    }
-    offset += pool;
-  }
-  return false;
-}
-
 /** Caller must reconcile activity after demolition/displacement and before this
  * read. Stale references fail closed instead of fabricating a completed visit.
  * Call once for EVERY elapsed game minute, regardless of selected display speed.
@@ -74,6 +59,7 @@ export function observeParkRecreationMinute(
     throw new RangeError('Recreation observation must match the current city day before its final boundary');
   }
   const residentIds = parkRecreationResidentIds(city), known = new Set(residentIds);
+  const unavailable = parkActivityUnavailableCitizenIds(city, activity.minute, options.activityContext);
   const parks = city.parks.map(p => ({ parkId: p.id, ...(options.parkPolicy?.get(p.id) ?? {
     qualityPermille: 1000, comfortableCapacity: PROPOSED_PARK_COMFORT
   }) }));
@@ -87,9 +73,8 @@ export function observeParkRecreationMinute(
       throw new Error('Stale or invalid recreation activity; reconcile the real activity state before sampling');
     }
     if (v.phase === 'travel' || v.phase === 'leave') continue;
-    const workReserved = employed(city, h, v.memberSlot) && activity.minute >= 480 && activity.minute < 1020;
     visits.push({ citizenId: v.citizenId, parkId: v.parkId,
-      eligible: eligible.has(v.phase) && !workReserved && !options.unavailableCitizenIds?.has(v.citizenId) });
+      eligible: eligible.has(v.phase) && !unavailable.has(v.citizenId) && !options.unavailableCitizenIds?.has(v.citizenId) });
   }
   return { minute: start + 1, residentIds, parks, visits };
 }

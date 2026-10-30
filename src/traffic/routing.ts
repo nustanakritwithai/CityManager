@@ -12,6 +12,8 @@ export type PathShare = { path: number[]; share: number };
 /** Per-OD path shares, carried between periods. Key: "from:to". */
 export type RouteState = Map<string, PathShare[]>;
 export type Assignment = {
+  /** Shares actually loaded this period; use with volumes and times, not next-period state. */
+  assigned: RouteState;
   /** Damped shares for the next period; volumes, times and cost describe the current assignment. */
   state: RouteState;
   volumes: Map<string, number>; times: Map<string, number>;
@@ -100,19 +102,32 @@ function aggregateOd(od: readonly OdDemand[]): OdDemand[] {
  * measures congested times, then moves REROUTE_SHARE of each OD onto its current best path.
  * Unreachable ODs count as `unserved` vehicles and keep no state.
  */
-export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: RouteState = new Map(), iteration = 0): Assignment {
-  const rows = aggregateOd(od), step = rerouteStep(iteration);
+export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: RouteState = new Map(), iteration: number | ReadonlyMap<string, number> = 0): Assignment {
+  const rows = aggregateOd(od);
   const free = linkTimes(net, new Map()), freePath = treeCache(net, free), state: RouteState = new Map();
+  // Quiet hours must retain learned routes. Prune road-invalidated paths even for inactive ODs.
+  for (const [key, previous] of prior) {
+    const paths = previous.filter(p => valid(net, p.path)).map(p => ({ path: [...p.path], share: p.share }));
+    const sum = paths.reduce((s, p) => s + p.share, 0);
+    if (sum <= 0) continue;
+    // Preserve exact shares through quiet periods; only renormalize if a path was removed.
+    if (paths.length !== previous.length) paths.forEach(p => p.share /= sum);
+    state.set(key, paths);
+  }
   let unserved = 0;
   for (const d of rows) {
     const key = `${d.from}:${d.to}`;
-    let paths = (prior.get(key) ?? []).filter(p => valid(net, p.path)).map(p => ({ ...p }));
+    let paths = state.get(key) ?? [];
     const sum = paths.reduce((s, p) => s + p.share, 0);
     if (sum > 0) paths.forEach(p => p.share /= sum);
     else { const p = freePath(d.from, d.to); if (!p) { unserved += d.vehicles; continue; } paths = [{ path: p, share: 1 }]; }
     state.set(key, paths);
   }
-  const volumes = load(net, rows, state), times = linkTimes(net, volumes);
+  const assigned: RouteState = new Map(rows.flatMap(d => {
+    const key = `${d.from}:${d.to}`, paths = state.get(key);
+    return paths ? [[key, paths.map(p => ({ path: [...p.path], share: p.share }))] as const] : [];
+  }));
+  const volumes = load(net, rows, assigned), times = linkTimes(net, volumes);
   // Freeze this period's cost from its loaded links before changing any shares for the next period.
   const vehicleSeconds = [...volumes].reduce((sum, [key, vehicles]) => sum + vehicles * times.get(key)!, 0);
   let served = 0;
@@ -120,6 +135,7 @@ export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: R
   for (const d of rows) {
     const key = `${d.from}:${d.to}`, paths = state.get(key); if (!paths) continue;
     served += d.vehicles;
+    const step = rerouteStep(typeof iteration === 'number' ? iteration : iteration.get(key) ?? 0);
     const best = bestPath(d.from, d.to)!;
     const id = best.join(','); let hit = paths.find(p => p.path.join(',') === id);
     if (!hit) { hit = { path: best, share: 0 }; paths.push(hit); }
@@ -127,6 +143,6 @@ export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: R
     hit.share += step;
     state.set(key, paths.filter(p => p.share > 1e-4).sort((a, b) => a.path.join(',').localeCompare(b.path.join(','))));
   }
-  return { state, volumes, times, served, unserved, vehicleSeconds };
+  return { assigned, state, volumes, times, served, unserved, vehicleSeconds };
 }
 export const averageTripSeconds = (a: Assignment) => a.served ? a.vehicleSeconds / a.served : 0;

@@ -10,7 +10,7 @@ const endpoint = 'https://advisor.example/api/city-advisor/report';
 const connection = () => ({ enabled: true, endpoint });
 const fixture = () => {
   const city = createCity(61025);
-  for (let day = 0; day < 210; day++) step(city);
+  for (let day = 0; day < 215; day++) step(city);
   const firm = city.firms.find(f => f.commercialKind === 'market');
   assert(firm);
   const snapshot = captureOwnerSnapshot(city, firm.id);

@@ -45,7 +45,11 @@ export type EducationPeople = {
   teacher: number;
   professor: number;
   campusId: number | null;
+  /** Shared progress, or the least advanced group when studyCohorts is present. */
   progress: number;
+  /** Only needed when limited seats give learners in one household different progress.
+   * Older saves omit this field and retain their single shared-progress cohort. */
+  studyCohorts?: { count: number; progress: number }[];
 };
 export type CampusReport = {
   nominalSeats: number;
@@ -99,6 +103,7 @@ export type EducationView = {
 };
 export type EducationPayment = { amount: number; reason: string; kind: 'contract' | 'upkeep' };
 export type EducationGate = { have: number; need: number; sustainDays: number; requiredDays: number; missing: string; blocked: string[] };
+export type CampusUtilityAvailability = { road: boolean; utility: boolean; availablePower: number; availableWater: number; reserved: boolean };
 
 const blank = (householdId: number): EducationPeople => ({ householdId, basic: 0, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0 });
 
@@ -175,21 +180,54 @@ function bind(person: EducationPeople, campusId: number): boolean {
   return true;
 }
 
+function advanceStudy(person: EducationPeople, kind: CampusKind, seats: number, studyDays: number): number {
+  const role = kind === 'school' ? 'school' : 'university';
+  const cohorts = person.studyCohorts ?? [{ count: person[role], progress: person.progress }];
+  const remaining = new Map<number, number>();
+  const keep = (count: number, progress: number) => { if (count > 0) remaining.set(progress, (remaining.get(progress) ?? 0) + count); };
+  let graduated = 0;
+  // Keep household order unchanged. Within a split household, finish the more
+  // advanced learners first; no waiting learner receives an attendance day.
+  for (const cohort of [...cohorts].sort((a, b) => b.progress - a.progress)) {
+    const taught = Math.min(cohort.count, seats);
+    seats -= taught;
+    keep(cohort.count - taught, cohort.progress);
+    if (cohort.progress + 1 >= studyDays) graduated += taught;
+    else keep(taught, cohort.progress + 1);
+  }
+  person[role] -= graduated;
+  if (kind === 'school') person.basic += graduated; else person.higher += graduated;
+  const groups = [...remaining].sort(([a], [b]) => b - a).map(([progress, count]) => ({ count, progress }));
+  person.progress = groups.at(-1)?.progress ?? 0;
+  if (groups.length > 1) person.studyCohorts = groups;
+  else delete person.studyCohorts;
+  return graduated;
+}
+
+/** Pure, live utility preview shared with campus explanations. Only open,
+ * connected campuses reserve supply; active campuses retain their ID priority.
+ * Availability is measured before each reservation, not read from yesterday's report. */
+export function educationUtilityAvailability(state: Pick<EducationState, 'campuses'>, view: Pick<EducationView, 'road' | 'sparePower' | 'spareWater'>): Map<number, CampusUtilityAvailability> {
+  let power = view.sparePower, water = view.spareWater;
+  const served = new Map<number, CampusUtilityAvailability>();
+  for (const campus of [...state.campuses].sort((a, b) => a.id - b.id)) {
+    const need = educationLevel(campus.kind, campus.level);
+    const road = view.road(campus.cell), utility = power >= need.power && water >= need.water;
+    const reserved = campus.open && road && utility;
+    served.set(campus.id, { road, utility, availablePower: power, availableWater: water, reserved });
+    if (reserved) { power -= need.power; water -= need.water; }
+  }
+  return served;
+}
+
 export function stepEducation(state: EducationState, view: EducationView): EducationPayment[] {
   const payments: EducationPayment[] = [];
   let budget = view.treasury;
-  let power = view.sparePower, water = view.spareWater;
-  const served = new Map<number, boolean>();
-  for (const campus of [...state.campuses].sort((a, b) => a.id - b.id)) {
-    const need = educationLevel(campus.kind, campus.level);
-    if (power >= need.power && water >= need.water) { power -= need.power; water -= need.water; served.set(campus.id, true); }
-    else served.set(campus.id, false);
-  }
+  const served = educationUtilityAvailability(state, view);
   for (const campus of [...state.campuses].sort((a, b) => a.id - b.id)) {
     const level = educationLevel(campus.kind, campus.level);
     const role = campus.kind === 'school' ? 'teacher' : 'professor';
-    const road = view.road(campus.cell);
-    const utility = served.get(campus.id) === true;
+    const { road, utility } = served.get(campus.id)!;
     const reasons: string[] = [];
     if (!campus.open) reasons.push('พักบริการ');
     if (!road) reasons.push('ไม่มีถนนเชื่อมถึงเมือง');
@@ -199,9 +237,14 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       for (const person of state.people) if (person.campusId === campus.id) { person.teacher = 0; person.professor = 0; }
       campus.contract = 0;
     } else {
-      let local = state.people.filter(person => atCampus(person, campus, role)).reduce((sum, person) => sum + person[role], 0);
+      const wage = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
+      let local = 0;
+      // Existing staff also need today's wage; releasing a shift never erases earned claims.
+      for (const person of state.people.filter(person => atCampus(person, campus, role)).sort((a, b) => a.householdId - b.householdId)) {
+        const funded = Math.min(person[role], Math.floor(budget / wage));
+        person[role] = funded; local += funded; budget -= funded * wage;
+      }
       while (local < level.staff) {
-        const wage = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
         if (budget < wage) break;
         const candidate = [...view.households].sort((a, b) => a.id - b.id).find(household => {
           const person = peopleOf(state, household.id);
@@ -227,9 +270,10 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       if (local + campus.contract < level.staff) reasons.push(campus.kind === 'school' ? 'ขาดครู' : 'ขาดอาจารย์');
     }
     const localStaff = state.people.filter(person => atCampus(person, campus, role)).reduce((sum, person) => sum + person[role], 0);
-    const staffed = localStaff + campus.contract >= level.staff;
     const seatFactor = campus.kind === 'school' ? 8 : 4;
-    const operating = operable && staffed ? Math.min(level.seats, (localStaff + campus.contract) * seatFactor) : 0;
+    // Expansion adds seats; missing staff must not switch off the teaching
+    // capacity already supplied by qualified local or contracted educators.
+    const operating = operable ? Math.min(level.seats, (localStaff + campus.contract) * seatFactor) : 0;
     let enrolled = 0;
     for (const household of [...view.households].sort((a, b) => a.id - b.id)) {
       const person = peopleOf(state, household.id);
@@ -251,12 +295,8 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       if (slots <= 0) break;
       const moving = Math.min(campus.kind === 'school' ? person.school : person.university, slots);
       slots -= moving;
-      person.progress += 1;
-      if (person.progress >= studyDays) {
-        if (campus.kind === 'school') { person.school -= moving; person.basic += moving; state.completed.basic += moving; }
-        else { person.university -= moving; person.higher += moving; state.completed.higher += moving; }
-        person.progress = 0;
-      }
+      const graduated = advanceStudy(person, campus.kind, moving, studyDays);
+      state.completed[campus.kind === 'school' ? 'basic' : 'higher'] += graduated;
     }
     if (operating > 0) {
       const wageRole = role;
@@ -285,15 +325,16 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
   }
   state.sustain = state.sustain.filter(item => seen.has(item.buildingId));
   for (const person of state.people) {
-    if (person.school + person.university + person.teacher + person.professor === 0) { person.campusId = null; person.progress = 0; }
+    if (person.school + person.university + person.teacher + person.professor === 0) { person.campusId = null; person.progress = 0; delete person.studyCohorts; }
     const campus = kindOf(state, person.campusId);
-    if (person.campusId !== null && !campus) { person.school = person.university = person.teacher = person.professor = 0; person.campusId = null; person.progress = 0; }
+    if (person.campusId !== null && !campus) { person.school = person.university = person.teacher = person.professor = 0; person.campusId = null; person.progress = 0; delete person.studyCohorts; }
   }
   recount(state);
   return payments;
 }
 
-function credentialPosts(state: EducationState, view: EducationView, firmId: number | null, rank: 'basic' | 'higher'): number {
+/** Shared by upgrade gates and inspectors: each available holder qualifies one real post. */
+export function credentialPosts(state: EducationState, view: Pick<EducationView, 'posts'>, firmId: number | null, rank: 'basic' | 'higher'): number {
   if (firmId === null) return 0;
   // A higher holder also has a basic diploma, but occupies only one post.
   // After education roles, allocate both ranks together in stable firm order;
@@ -339,7 +380,9 @@ export function educationGate(state: EducationState | undefined, view: Education
   const serviceDays = building.zone === 'R' && building.level + 1 <= 6 ? state.schoolReadyDays : building.zone === 'R' ? state.universityReadyDays : state.sustain.find(item => item.buildingId === building.id)?.days ?? 0;
   const blocked: string[] = [];
   if (!check.ok) blocked.push(`มี ${check.have}/${check.need} · ขาด${check.missing}`);
-  if (building.zone === 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(`บริการการศึกษายังเปิดต่อเนื่อง ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน`);
+  if (building.zone === 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(building.level + 1 <= 6
+    ? `โรงเรียนให้บริการสะสม ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน (วันที่หยุดบริการไม่ล้างวันที่สะสม)`
+    : `มหาวิทยาลัยให้บริการต่อเนื่อง ${serviceDays}/${EDUCATION_SUSTAIN_DAYS} วัน`);
   if (building.zone !== 'R' && serviceDays < EDUCATION_SUSTAIN_DAYS) blocked.push(`ต้องมีคนครบเงื่อนไขต่อเนื่องอีก ${EDUCATION_SUSTAIN_DAYS - serviceDays} วัน (${serviceDays}/${EDUCATION_SUSTAIN_DAYS})`);
   return { have: check.have, need: check.need, sustainDays: serviceDays, requiredDays: EDUCATION_SUSTAIN_DAYS, missing: check.missing, blocked };
 }
@@ -348,6 +391,7 @@ export function educationUpkeep(state: EducationState): EducationPayment[] {
   return state.campuses.map(campus => ({ kind: 'upkeep' as const, amount: campus.kind === 'school' ? EDUCATION_COST.school.upkeep : EDUCATION_COST.university.upkeep, reason: campus.kind === 'school' ? `Monthly school upkeep #${campus.id}` : `Monthly university upkeep #${campus.id}` }));
 }
 
+/** Snapshot earned claims; only a successful payment may remove them. */
 export function takeEducationWages(state: EducationState, wallet?: string, campusId?: number): { campus: Campus; wallet: string; amount: number }[] {
   const claims: { campus: Campus; wallet: string; amount: number }[] = [];
   for (const campus of state.campuses) {
@@ -356,7 +400,6 @@ export function takeEducationWages(state: EducationState, wallet?: string, campu
     for (const [claimWallet, days] of Object.entries(campus.workDays)) {
       if (wallet && claimWallet !== wallet) continue;
       claims.push({ campus, wallet: claimWallet, amount: days * wage });
-      delete campus.workDays[claimWallet];
     }
   }
   return claims;
@@ -373,6 +416,7 @@ export function withdrawCampus(state: EducationState, campusId: number): Campus 
   for (const person of state.people) {
     if (person.campusId !== campusId) continue;
     person.school = 0; person.university = 0; person.teacher = 0; person.professor = 0; person.campusId = null; person.progress = 0;
+    delete person.studyCohorts;
   }
   state.campuses = state.campuses.filter(item => item.id !== campusId);
   recount(state);
@@ -397,6 +441,20 @@ export function assertEducationInvariants(state: EducationState, households: rea
     if (person.school + person.basic > household.workforce) throw new Error('Schooling plus diplomas exceed workforce');
     if (person.school + person.university + person.teacher + person.professor > household.workforce) throw new Error('One workforce count is used twice');
     if ((person.school + person.university + person.teacher + person.professor) > 0 && (person.campusId === null || !state.campuses.some(campus => campus.id === person.campusId))) throw new Error('Active education role has no campus');
+    if (person.studyCohorts !== undefined) {
+      const campus = kindOf(state, person.campusId);
+      const days = campus ? EDUCATION_COST[campus.kind].studyDays : 0;
+      const learners = person.school + person.university;
+      const cohorts = person.studyCohorts;
+      if (!campus || learners === 0 || (campus.kind === 'school' ? person.university > 0 : person.school > 0) || !Array.isArray(cohorts) || cohorts.length === 0 || cohorts.length > days) throw new Error('Invalid study cohorts');
+      const progress = new Set<number>();
+      let total = 0, minimum = days;
+      for (const cohort of cohorts) {
+        if (!cohort || !Number.isSafeInteger(cohort.count) || cohort.count <= 0 || cohort.count > learners || !Number.isSafeInteger(cohort.progress) || cohort.progress < 0 || cohort.progress >= days || progress.has(cohort.progress)) throw new Error('Invalid study cohort');
+        progress.add(cohort.progress); total += cohort.count; minimum = Math.min(minimum, cohort.progress);
+      }
+      if (total !== learners || person.progress !== minimum) throw new Error('Study cohort totals drifted');
+    }
   }
   if (state.residentBasic !== state.people.reduce((sum, person) => sum + person.basic, 0) || state.residentHigher !== state.people.reduce((sum, person) => sum + person.higher, 0)) throw new Error('Resident credential totals drifted');
   const schools = state.campuses.filter(campus => campus.kind === 'school').length;

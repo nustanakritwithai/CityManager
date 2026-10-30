@@ -6,6 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, SIZE } from '../src/sim.ts';
+import { reachTouch } from './touch-reach.mjs';
 
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), port = 9351;
@@ -20,7 +21,7 @@ async function evaluate(expression) { const r = await send('Runtime.evaluate', {
 async function until(expression, timeout = 20000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); } throw Error(`Timed out ${expression}`); }
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: `Key${value.toUpperCase()}`, text: type === 'keyDown' ? value : undefined }); }
-async function press(selector) { const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`); await sleep(50); await click(p.x, p.y); await sleep(50); }
+async function press(selector) { if (await reachTouch(evaluate, press, selector)) return; const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`); await sleep(50); await click(p.x, p.y); await sleep(50); }
 const audio = () => evaluate('window.cityManager.audio()');
 const played = async () => (await audio()).played.map(p => p.name);
 const open = async () => { await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready', 60000); };
@@ -41,14 +42,14 @@ try {
   await press('[data-tool="R"]');
   await until('window.cityManager.audio().unlocked && window.cityManager.audio().effects === 20');
   state = await audio(); assert.equal(state.state, 'running'); assert.ok((await played()).includes('ui-select'));
-  checks.push('The first tap builds the audio graph, decodes all 20 effects and plays the tool sound');
+  checks.push('Native group/tool taps unlock the audio graph, decode all 20 effects and play the tool sound');
 
   // Zone a parcel beside the starter road, then try a road over open water of rules (a refusal).
   const city = JSON.parse(await evaluate('window.cityManager.snapshot()'));
   const parcel = city.cells.findIndex((c, i) => !c.road && c.zone === null && c.building === null && [i - 1, i + 1, i - SIZE, i + SIZE].some(j => city.cells[j]?.road));
   const p = await evaluate(`window.cityManager.cellScreen(${parcel})`); await click(p.x, p.y); await sleep(300);
   assert.ok((await played()).includes('ui-place'), 'Zoning plays its sound');
-  await press('[data-tool="bulldoze"]'); const gate = await evaluate(`window.cityManager.cellScreen(${city.cells.findIndex((c, i) => c.road && i % SIZE === 0)})`); await click(gate.x, gate.y); await sleep(300);
+  await press('[data-tool="select"]'); await press('[data-tool="bulldoze"]'); const gate = await evaluate(`window.cityManager.cellScreen(${city.cells.findIndex((c, i) => c.road && i % SIZE === 0)})`); await click(gate.x, gate.y); await sleep(300);
   assert.ok((await played()).includes('ui-error'), 'A refused command plays the soft refusal');
   checks.push('Map commands play their action sound, a refusal plays the error sound');
 

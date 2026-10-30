@@ -6,6 +6,7 @@ import { cityDemandInput } from '../src/traffic/snapshot.ts';
 import { assignPeriod, averageTripSeconds, BPR_ALPHA, BPR_BETA, type RouteState } from '../src/traffic/routing.ts';
 import { linkKey, freeFlowSeconds, type Link, type LinkNetwork } from '../src/traffic/network.ts';
 import type { DemandInput } from '../src/traffic/types.ts';
+import { periodDemand } from '../src/traffic/demand.ts';
 
 /** Starter city grown 30 days so it has homes, jobs and freight. */
 const city = () => { const c = createCity(61025); for (let d = 0; d < 30; d++) step(c); return c; };
@@ -103,4 +104,42 @@ test('shrinking step lets shares settle', () => {
   const tail = shares.slice(-50), swing = Math.max(...tail) - Math.min(...tail);
   assert.ok(swing < .02, String(swing));
   assert.ok(Math.abs(shares.at(-1)! - .5) < .05);
+});
+
+/** Real hourly profiles with overnight zero demand and two alternative road corridors. */
+const intermittentInput: DemandInput = { households: [{ cell: 25, amount: 45000 }], jobs: [{ cell: 28, amount: 45000 }], schoolSeats: [], parks: [], freight: [], entrance: 25 };
+const quietInput: DemandInput = { households: [], jobs: [], schoolSeats: [], parks: [], freight: [], entrance: 25 };
+const routeCity = () => ({ cells: Array.from({ length: 576 }, (_, i) => ({ road: [25, 26, 27, 28, 49, 50, 51, 52].includes(i) })) } as City);
+
+test('100 daily peaks retain learning through empty nights and age each OD only when active', () => {
+  const c = routeCity(), k = new TrafficClock({ enabled: true, snapshot: () => intermittentInput });
+  k.advance(c, 0);
+  let state: RouteState = new Map(), carry = {}, active = new Map<string, number>(), peaks = 0;
+  for (let hour = 0; hour < 100 * 24; hour++) {
+    const r = periodDemand(intermittentInput, hour, carry); carry = r.carry;
+    const actual = k.advance(c, (hour + 1) * 60)[0];
+    if (!r.od.length) { assert.deepEqual(actual.state, state); continue; }
+    const expected = assignPeriod(k.network!, r.od, state, active);
+    assert.deepEqual(actual, expected, `hour ${hour}`);
+    state = expected.state;
+    for (const key of new Set(r.od.map(d => `${d.from}:${d.to}`))) active.set(key, (active.get(key) ?? 0) + 1);
+    if (hour % 24 === 8) peaks++;
+  }
+  assert.equal(peaks, 100); assert.ok(k.totals.vehicles > 100000);
+  assert.ok(state.get('25:28')!.length > 1);
+});
+
+test('new OD after 100 quiet days gets a fresh settling step', () => {
+  const c = routeCity(); let demand = quietInput;
+  const k = new TrafficClock({ enabled: true, snapshot: () => demand }); k.advance(c, 0);
+  for (let day = 1; day <= 100; day++) k.advance(c, day * 1440);
+  demand = intermittentInput;
+  for (let h = 0; h < 24; h++) {
+    const actual = k.advance(c, 100 * 1440 + (h + 1) * 60)[0];
+    const r = periodDemand(demand, h);
+    if (!r.od.length) continue;
+    assert.deepEqual(actual, assignPeriod(k.network!, r.od));
+    assert.ok(actual.state.size > 0); return;
+  }
+  assert.fail('fixture must produce a nonempty OD');
 });

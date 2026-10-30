@@ -222,5 +222,5 @@ try {
     const provenance = await publicProvenance(), result = { schema: 1, mode, date: new Date().toISOString(), browser: version.product, fixture: { seed: city.seed, tick: city.tick, sha256: hash(fixture), households: city.households.length, firms: city.firms.length }, provenance, measures, screenshots, errors, note: '360x740 logical viewport and screen360x780 are explicit S22-like assumptions, not dimensions inferred from the user JPEGs or real-device QA.' };
     await mkdir(dirname(baselinePath), { recursive: true }); await writeFile(baselinePath, JSON.stringify(result, null, 2)); console.log(JSON.stringify(result, null, 2));
   } else { await candidateAssertions(); }
-} catch (error) { if (ws?.readyState === 1) try { await shot('compact-failure.png'); console.error(await route()); } catch {} console.error('Unexpected browser errors', errors); throw error; }
+} catch (error) { if (ws?.readyState === 1) try { await shot('compact-failure.png'); console.error(await route()); } catch {} console.error('Compact layout measurements', JSON.stringify(measures)); console.error('Unexpected browser errors', errors); throw error; }
 finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }

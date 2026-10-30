@@ -24,7 +24,7 @@ export class TrafficClock {
   private lastPeriod: number | null = null;
   private carry: DemandCarry = {};
   private state: RouteState = new Map();
-  private iteration = 0;
+  private iterations = new Map<string, number>();
   private net: LinkNetwork | null = null;
   last: Assignment | null = null;
   totals: TrafficTotals = { periods: 0, vehicles: 0, unserved: 0, vehicleSeconds: 0, freeFlowSeconds: 0 };
@@ -46,7 +46,12 @@ export class TrafficClock {
     const out: Assignment[] = [];
     for (const r of demandForPeriods(this.snapshot(c), start % 24, n, this.carry)) {
       this.carry = r.carry;
-      const a = assignPeriod(this.net, r.od, this.state, this.iteration++);
+      const a = assignPeriod(this.net, r.od, this.state, this.iterations);
+      // Age only ODs actually assigned, once even when multiple purposes share the route.
+      for (const key of this.iterations.keys()) if (!a.state.has(key)) this.iterations.delete(key);
+      for (const key of new Set(r.od.filter(d => d.vehicles > 0).map(d => `${d.from}:${d.to}`))) {
+        if (a.state.has(key)) this.iterations.set(key, (this.iterations.get(key) ?? 0) + 1);
+      }
       this.state = a.state; this.last = a; out.push(a);
       const t = this.totals; t.periods++; t.vehicles += totalVehicles(r.od); t.unserved += a.unserved; t.vehicleSeconds += a.vehicleSeconds;
       for (const [k, v] of a.volumes) { const l = this.net.links.get(k)!; t.freeFlowSeconds += v * l.length / (l.freeFlowKmh / 3.6); }
@@ -56,7 +61,7 @@ export class TrafficClock {
   /** After a road edit: rebuild only links near the edited cells; restart the settling step. */
   roadEdited(c: City, cells: Iterable<number>): void {
     if (!this.enabled || !this.net) return;
-    rebuildRegion(c as RoadMap, this.net, cells); this.iteration = 0;
+    rebuildRegion(c as RoadMap, this.net, cells); this.iterations.clear();
   }
   get network(): LinkNetwork | null { return this.net; }
 }

@@ -4,6 +4,7 @@
  */
 import { SIZE, type City } from './sim.ts';
 import { WORKER_SKILLS } from './labor.ts';
+import { educationOccupied } from './education.ts';
 
 export const PARK_VISITOR_CAPACITY = 6, MAX_PARK_VISITORS = 64;
 export const MAX_PARK_ROUTE_SEARCHES = 256;
@@ -30,8 +31,9 @@ const hash = (value: string): number => { let n = 2166136261; for (const char of
  * remaining slots, matching the workforce allocator's residual pools. A change can reassign a slot's
  * job, but never changes its constituent identity or creates another worker.
  */
-export function parkActivityCitizens(city: City): Citizen[] {
+function activityRoster(city: City): { citizens: Citizen[]; daytimeUnavailable: Set<string> } {
   const people: Citizen[] = [];
+  const daytimeUnavailable = new Set<string>();
   for (const h of [...city.households].sort((a, b) => a.id - b.id)) {
     const jobs: (Job | null)[] = [];
     for (const skill of WORKER_SKILLS) {
@@ -49,16 +51,30 @@ export function parkActivityCitizens(city: City): Citizen[] {
       while (pool.length < h.workerSkills[skill]) pool.push(null);
       jobs.push(...pool);
     }
-    for (let slot = 0; slot < h.members; slot++) people.push({ citizenId: identity(h.id, slot), householdId: h.id, memberSlot: slot, homeId: h.home, employed: jobs[slot] != null, firmId: jobs[slot]?.firmId ?? null, parkJobId: jobs[slot]?.parkJobId ?? null });
+    // Education has cohort counts, not named people or per-campus timetables.
+    // Map its canonical reservations to remaining workforce slots in the same
+    // stable skill/member order. Never overwrite a real job or reserve dependents.
+    // Keeping this separate from employed preserves legacy activity save fields.
+    let education = educationOccupied(city.education, h.id);
+    for (let slot = 0; slot < h.members; slot++) {
+      const citizenId = identity(h.id, slot), employed = jobs[slot] != null;
+      const studyingOrTeaching = !employed && slot < h.workforce && education > 0;
+      if (studyingOrTeaching) education--;
+      if (employed || studyingOrTeaching) daytimeUnavailable.add(citizenId);
+      people.push({ citizenId, householdId: h.id, memberSlot: slot, homeId: h.home, employed, firmId: jobs[slot]?.firmId ?? null, parkJobId: jobs[slot]?.parkJobId ?? null });
+    }
   }
-  return people;
+  return { citizens: people, daytimeUnavailable };
 }
+export function parkActivityCitizens(city: City): Citizen[] { return activityRoster(city).citizens; }
 
-/** Shared availability input for leisure and the separate recreation observer. */
-export function parkActivityUnavailableCitizenIds(city: City, minuteOfDay: number): Set<string> {
+/** Jobs and canonical education reservations share the existing 08:00–17:00
+ * leisure window. This does not invent a campus timetable or alter daily roles. */
+export function parkActivityUnavailableCitizenIds(city: City, minuteOfDay: number, context?: ParkActivityContext): Set<string> {
   if (!integer(minuteOfDay, 0, 1440)) throw new RangeError('Invalid activity minute');
+  if (context) checkContext(city, context);
   return new Set(minuteOfDay >= WORK_START_MINUTE && minuteOfDay < WORK_END_MINUTE
-    ? parkActivityCitizens(city).filter(p => p.employed).map(p => p.citizenId) : []);
+    ? (context ?? activityRoster(city)).daytimeUnavailable : []);
 }
 export function parkActivityAbsoluteMinute(state: Pick<ParkActivityState, 'day' | 'minute'>): number {
   const absolute = state.day * 1440 + state.minute;
@@ -74,10 +90,10 @@ function walkable(city: City): Set<number> {
 /** Read-only cache for one synchronous advance. Never retain across city edits,
  * economic days or asynchronous work. Identity allocation still has one owner.
  */
-export type ParkActivityContext = { city: City; day: number; citizens: Citizen[]; people: ReadonlyMap<string, Citizen>; open: ReadonlySet<number> };
+export type ParkActivityContext = { city: City; day: number; citizens: Citizen[]; people: ReadonlyMap<string, Citizen>; daytimeUnavailable: ReadonlySet<string>; open: ReadonlySet<number> };
 export function prepareParkActivity(city: City): ParkActivityContext {
-  const citizens = parkActivityCitizens(city);
-  return { city, day: city.tick, citizens, people: new Map(citizens.map(p => [p.citizenId, p])), open: walkable(city) };
+  const { citizens, daytimeUnavailable } = activityRoster(city);
+  return { city, day: city.tick, citizens, people: new Map(citizens.map(p => [p.citizenId, p])), daytimeUnavailable, open: walkable(city) };
 }
 function checkContext(city: City, context: ParkActivityContext) {
   if (context.city !== city || context.day !== city.tick) throw new Error('Expired park activity context');
@@ -125,14 +141,14 @@ export function startParkActivityDay(city: City, state: ParkActivityState): void
 export function reconcileParkActivity(city: City, state: ParkActivityState, context?: ParkActivityContext): void {
   assertDay(city, state);
   if (context) checkContext(city, context);
-  const { people, open } = context ?? prepareParkActivity(city);
+  const { people, open, daytimeUnavailable } = context ?? prepareParkActivity(city);
   state.visited = state.visited.filter(id => people.has(id));
   state.visitors = state.visitors.filter(v => {
     const p = people.get(v.citizenId), home = city.buildings.find(b => b.id === v.homeId), park = city.parks.find(p => p.id === v.parkId);
     let reason: string | null = null;
     if (!p || p.homeId !== v.homeId || home?.cell !== v.homeCell || park?.cell !== v.parkCell) reason = 'resident, home or park removed/changed';
     else if (v.route.slice(1, -1).some(cell => !open.has(cell))) reason = 'pedestrian route obstructed';
-    else if (p.employed && state.minute >= WORK_START_MINUTE && state.minute < WORK_END_MINUTE) reason = 'work reservation now active';
+    else if (daytimeUnavailable.has(p.citizenId) && state.minute >= WORK_START_MINUTE && state.minute < WORK_END_MINUTE) reason = 'work or education reservation now active';
     if (reason) { state.cancelled++; state.lastCancellation = reason; return false; }
     v.employed = p!.employed; v.firmId = p!.firmId; v.parkJobId = p!.parkJobId; return true;
   });
@@ -145,7 +161,9 @@ const duration = (v: ParkVisitor) => v.phase === 'travel' ? (v.route.length - 1)
 const setPhase = (v: ParkVisitor, phase: ParkActivityPhase) => { v.phase = phase; v.phaseMinute = 0; v.partnerId = null; };
 function admit(city: City, state: ParkActivityState, context?: ParkActivityContext): void {
   if (state.minute < 600 || state.minute > 1140 || state.minute % 15) return;
-  const visited = new Set(state.visited), people = (context?.citizens ?? parkActivityCitizens(city)).filter(p => p.homeId !== null && !visited.has(p.citizenId) && (!p.employed || state.minute >= WORK_END_MINUTE));
+  const roster = context ?? activityRoster(city);
+  const visited = new Set(state.visited), people = roster.citizens.filter(p => p.homeId !== null && !visited.has(p.citizenId)
+    && (!roster.daytimeUnavailable.has(p.citizenId) || state.minute >= WORK_END_MINUTE));
   // Per-admission cache shares even failed searches across all residents of a
   // building. It cannot become stale across construction edits or another minute.
   const routesByHome = new Map<number, { park: City['parks'][number]; route: number[] }[]>();

@@ -111,9 +111,33 @@ test('first park save keeps exact pre-park bytes and backup failure preserves pr
   assert.throws(() => saveStoredCity(failing, next, null), /quota/); assert.equal(failing.getItem(SAVE_KEY), previous);
 });
 
-test('no-park city matches the pre-density engine until residential progression begins', () => {
-  // Re-baselined when education became part of every new city. Without a graduate, day 120
-  // does not raise housing. Any apartment that does appear must still be a full cottage.
-  const baselines = [[61025, 'd319b45b4283300213db12f3b9eb52f6efa7688f86b6016b177150e3d17cd6a8'], [20261023, '709783b3251ed89b36daa99b2045cf3020a7085ba005df7edc4fc0992eaf447f']] as const;
-  for (const [seed, expected] of baselines) { const c = createCity(seed); run(c, 119); const { parks, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, ...legacy } = c; assert.deepEqual(parks, []); assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected); assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3)); run(c, 1); for (const b of c.buildings.filter(b => b.zone === 'R' && b.level >= 4)) assert.equal(homeOccupancy(c, b.id).households >= 3, true, 'apartment tier is reached only from a full cottage'); }
+test('no-park city changes only the audited owner payout before residential progression', () => {
+  // Keep the original pre-owner-policy hashes. Comparing a6f4ada to 69b39d1
+  // found exactly four changed fields per seed: one day-90 firm-16 payout,
+  // its owner.withdrawn total, and the two cash balances. Restore ONLY those
+  // audited deltas in a copy; every unrelated field must still match the old
+  // whole-city hash. See docs/OWNER-PROFIT.md for the earned-funds calculation.
+  const baselines = [
+    { seed: 61025, owner: 6, oldPayout: 13_890, payout: 5_470, hash: 'd319b45b4283300213db12f3b9eb52f6efa7688f86b6016b177150e3d17cd6a8' },
+    { seed: 20261023, owner: 4, oldPayout: 11_700, payout: 1_070, hash: '709783b3251ed89b36daa99b2045cf3020a7085ba005df7edc4fc0992eaf447f' },
+  ] as const;
+  for (const expected of baselines) {
+    const c = createCity(expected.seed); run(c, 119);
+    assert.deepEqual(c.parks, []); assert.equal(sum(c), 0);
+    const comparison = structuredClone(c), firm = comparison.firms.find(f => f.id === 16)!;
+    assert.equal(firm.owner?.householdId, expected.owner);
+    const wallet = `household:${expected.owner}`;
+    const entries = comparison.ledger.filter(e => e.tick === 90 && e.from === firm.wallet && e.reason === 'Owner profit distribution');
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].to, wallet); assert.equal(entries[0].amount, expected.payout);
+    const delta = expected.oldPayout - expected.payout;
+    entries[0].amount += delta; firm.owner!.withdrawn += delta;
+    comparison.accounts[firm.wallet] -= delta; comparison.accounts[wallet] += delta;
+    const { parks: _parks, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, ...legacy } = comparison;
+    assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected.hash);
+    assert.deepEqual(deserialize(serialize(c)), c);
+    assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3));
+    run(c, 1);
+    for (const b of c.buildings.filter(b => b.zone === 'R' && b.level >= 4)) assert.equal(homeOccupancy(c, b.id).households >= 3, true, 'apartment tier is reached only from a full cottage');
+  }
 });

@@ -9,7 +9,7 @@ import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
 import { peopleOf } from './education.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, marketConversionStatus, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, isMarket, isRetail, retailGrowthStatus, marketConversionStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity, harvestYield } from './agriculture.ts';
@@ -266,14 +266,7 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
   }
   if (!labor.householdCount) list.append(el('p', 'cx-detail-note', isMarket(firm) ? 'เจ้าของยังไม่ได้ใช้แรงงานทำตลาดในวันนี้ กิจการและเงินยังคงแยกจากบ้านพัก' : 'ยังไม่มีแรงงานที่มีความสามารถตรงกับงานและสำรองค่าจ้างได้'));
   employees.append(list);
-  if (city.education) {
-    const posts = new Map<number, number>();
-    for (const row of labor.households) posts.set(row.householdId, (posts.get(row.householdId) ?? 0) + row.workers);
-    if (firm.owner) posts.set(firm.owner.householdId, (posts.get(firm.owner.householdId) ?? 0) + 1);
-    let basic = 0, higher = 0;
-    for (const [householdId, count] of posts) { const person = peopleOf(city.education, householdId); basic += Math.min(count, person.basic); higher += Math.min(count, person.higher); }
-    employees.append(el('p', 'cx-detail-note', `ตำแหน่งที่มีวุฒิพื้นฐาน ${basic} คน · วุฒิขั้นสูง ${higher} คน · ระดับสูงบางช่วงต้องการอย่างน้อย 1 คน ไม่บังคับทุกคน และคนมีวุฒิยังทำงานพื้นฐานได้`));
-  }
+  if (city.education) employees.append(renderFirmCredentials(city, firm.id));
   if (isRetail(firm)) employees.append(el('p', 'cx-detail-note', firm.owner
     ? `ร้านค้าของครัวเรือน #${firm.owner.householdId}${firm.convertedAt !== undefined ? ` · ยกระดับจากตลาดเมื่อวันที่ ${firm.convertedAt}` : ''} · พาณิชย์ระดับ ${building.level} · เจ้าของยืนร้านเอง 1 คน ไม่มีเงินเดือน จ้างลูกจ้างได้อีก ${Math.max(0, capacity - 1)} คน`
     : `ร้านค้าสำเร็จรูป · พาณิชย์ระดับ ${building.level} · ทุนจากนักลงทุนภายนอก ตำแหน่งงานทั้งหมดเป็นลูกจ้าง`));
@@ -295,6 +288,11 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
   return [el('p', 'cx-context-meta', `บริษัท #${firm.id} · ${firm.wallet}`), status(city, building.cell), metrics([
     metric('cash', 'เงินกิจการ', cash(wallet), wallet, true), metric('reserved', 'สำรองค่าจ้าง', cash(reserved), reserved, true), metric('spendable', 'เงินพ้นสำรองค่าจ้าง', cash(spendable), spendable, true), metric('stock', 'สำเร็จรูปคงคลัง', `${count(firm.inventory)} หน่วย`, firm.inventory), workerMetric, metric('household-count', 'บัญชีครัวเรือนของผู้ทำงาน', count(labor.householdCount), labor.householdCount), metric('profit', 'กำไรรอบก่อนภาษี', cash(firm.lastMonthProfit, true), firm.lastMonthProfit, true)
   ]), ...renderAgriculture(city, building, firm, labor.workers), ...funding, employees, meanings, activity(city, 'money', firm.wallet, `บริษัท #${firm.id}`), ...(firm.zone === 'I' || isRetail(firm) ? [activity(city, 'goods', firm.wallet, `บริษัท #${firm.id}`)] : []), ...(!isRetail(firm) ? [cropActivity(city, firm.wallet, `${businessName(firm)} #${firm.id}`)] : [])];
+}
+/** Uses the same reserved, city-wide allocation as the actual upgrade gate. */
+export function renderFirmCredentials(city: City, firmId: number): HTMLElement {
+  const { basic, higher } = firmCredentialCounts(city, firmId);
+  return el('p', 'cx-detail-note', `ตำแหน่งที่มีวุฒิพื้นฐาน ${basic} คน · วุฒิขั้นสูง ${higher} คน · ระดับสูงบางช่วงต้องการอย่างน้อย 1 คน ไม่บังคับทุกคน และคนมีวุฒิยังทำงานพื้นฐานได้`);
 }
 export function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
   if (isRetail(firm)) return [];
@@ -429,7 +427,7 @@ function cardHero(data: CardData, city: City): HTMLElement {
   copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), ...goods, period); hero.append(icon, copy);
   const cell = data.kind === 'household' ? null : city.buildings.find(b => b.id === data.identity.buildingId)?.cell;
   if (cell != null) {
-    const issue = buildingIssues(city).find(i => i.cell === cell), badge = el('span', `bc-status-badge ${issue ? 'bad' : 'good'}`, issue ? issue.text : 'ไม่พบปัญหา');
+    const issue = buildingIssues(city).find(i => i.cell === cell), badge = el('span', `bc-status-badge ${issue ? issue.tone : 'good'}`, issue ? issue.text : 'ไม่พบปัญหา');
     badge.dataset.issue = issue?.kind ?? 'none'; copy.prepend(badge);
   }
   return hero;
