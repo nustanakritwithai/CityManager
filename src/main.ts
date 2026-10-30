@@ -619,9 +619,13 @@ async function boot() {
   // Autosave: every minute, plus on tab hide / close. Failures (e.g. localStorage quota) are shown, never swallowed.
   const saveBadge = document.createElement('span'); saveBadge.id = 'autosave-status'; saveBadge.setAttribute('role', 'status'); saveBadge.style.cssText = 'font-size:11px;opacity:.85;margin-inline:6px;white-space:normal;overflow-wrap:anywhere;max-width:100%'; saveBadge.textContent = 'ยังไม่ได้บันทึกอัตโนมัติ'; $('#save').insertAdjacentElement('afterend', saveBadge);
   const saveFeedback = installSaveFeedback(saveBadge, () => document.querySelector<HTMLButtonElement>('#export-city-save')?.click());
+  const recoveryInfo=document.createElement('p');recoveryInfo.id='save-recovery-info';recoveryInfo.style.whiteSpace='pre-line';
+  const refreshRecoveryInfo=()=>{recoveryInfo.textContent=recoverySummary({getItem:key=>localStorage.getItem(key)});};
+  $('#save').closest('.save-group')?.prepend(recoveryInfo);refreshRecoveryInfo();
+  $('#toggle-game-menu').addEventListener('click',refreshRecoveryInfo);
   const trackedSave = async () => {
     const attempt = saveFeedback.begin();
-    try { await writeLocalSave(); saveFeedback.succeeded(attempt); }
+    try { await writeLocalSave(); refreshRecoveryInfo(); saveFeedback.succeeded(attempt); }
     catch (error) {
       saveFeedback.failed(isQuotaError(error) ? 'พื้นที่เก็บข้อมูลเต็ม · เซฟเดิมยังอยู่ ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์สำรอง'
         : `${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} · เซฟเดิมยังอยู่`, attempt);
@@ -642,10 +646,6 @@ async function boot() {
   $('#save').addEventListener('click', async () => {
     try { await trackedSave(); autosave.markSaved(city.tick); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
   });
-  const recoveryInfo=document.createElement('p');recoveryInfo.id='save-recovery-info';recoveryInfo.style.whiteSpace='pre-line';
-  const refreshRecoveryInfo=()=>{recoveryInfo.textContent=recoverySummary({getItem:key=>localStorage.getItem(key)});};
-  $('#save').closest('.save-group')?.prepend(recoveryInfo);refreshRecoveryInfo();
-  $('#toggle-game-menu').addEventListener('click',refreshRecoveryInfo);
   const loadStored = async (source: SaveSource) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }

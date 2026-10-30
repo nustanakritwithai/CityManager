@@ -25,6 +25,7 @@ try{
  assert.equal(resumed,raw,'Opening the game automatically restores the exact v22 city, not a fresh city');
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw,'Startup did not write the original');checks.push('Automatic v22 resume preserves complete snapshot and original bytes');
  await button('#toggle-game-menu');await button('#save');await until('localStorage.getItem("citymanager.checkpoint.latest")!==null');
+ assert.match(await evaluate('document.querySelector("#save-recovery-info").textContent'),/สำเนาอัตโนมัติ: วันที่ 65 · v22 · อ่านได้/);
  assert.equal(await evaluate('localStorage.getItem("citymanager.backup.before-autosave")'),raw);assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
  const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve(output,'saved-mobile.png'),Buffer.from(shot.data,'base64'));
  await button('#close-inspector');await button('[data-tool="R"]');
@@ -43,6 +44,7 @@ try{
  assert.match(await evaluate('document.querySelector("#save-recovery-info").textContent'),/วันที่ 65/);
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
  assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);
+ await send('Page.captureScreenshot',{format:'png'}).then(r=>writeFile(resolve(output,guestMode?'guest-protected-startup.png':'protected-startup.png'),Buffer.from(r.data,'base64')));
  await button('#load-autosave-copy');await until('document.querySelector("#save-failure-banner").hidden');
  assert.match(await evaluate('document.querySelector("#autosave-status").textContent'),/ยังไม่มีการบันทึกสำเร็จในรอบนี้/);
  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),edited);
