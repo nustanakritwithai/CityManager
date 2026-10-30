@@ -11,5 +11,5 @@ test('traffic acceptance partitions bounded cases and gates every result',()=>{
  assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);assert.match(browser,/- case: full\s+blocked: '0'\s+software: '0'/);assert.match(browser,/- case: core\s+blocked: '1'\s+software: '1'/);assert.match(browser,/- case: extended\s+blocked: '1'\s+software: '1'/);
  assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.case \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
  assert.match(gate,/needs: \[checks, fault, browser\]/);assert.match(gate,/if: always\(\)/);for(const name of ['checks','fault','browser'])assert.match(gate,new RegExp(`needs\\.${name}\\.result.*'success'`));
- assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '0'/g)??[]).length,1);
+ assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '1'/g)??[]).length,1);
 });
