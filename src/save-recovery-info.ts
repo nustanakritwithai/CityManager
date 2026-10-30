@@ -14,6 +14,7 @@ export function recoverySummary(storage:Pick<Storage,'getItem'>):string {
 export function loadFailureMessage(error:unknown):string {
  const key=error instanceof Error?error.message:'';
  const reasons:Record<string,string>={
+  'ยังบันทึกการเลือกเมืองใหม่ไม่ได้ กรุณาเก็บเมืองเดิมไว้ก่อน':'ยังบันทึกการเลือกเมืองใหม่ไม่ได้ กรุณาเก็บเมืองเดิมไว้ก่อน',
   'Park recreation: sidecar clock mismatch':'เวลาในข้อมูลกิจกรรมสวนไม่ตรงกับเมือง (sidecar clock mismatch)',
   'market guest identity mismatch':'Guest ของเมืองกับข้อมูลตลาดในเบราว์เซอร์ไม่ตรงกัน',
   'saved-market-reconciliation-required':'ข้อมูลเมืองกับรายการตลาดต้องตรวจสอบร่วมกันก่อน',

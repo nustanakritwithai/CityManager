@@ -145,3 +145,22 @@ test('legacy emergency writer cannot invalidate active A; confirmed rebind saves
  assert.notEqual(switched.snapshot.branchId,saved.snapshot.branchId);
  assert.equal((db.stores.get('branches')!.get(saved.snapshot.branchId) as any).current.copy,a.raw());
 });
+
+
+test('opaque marker v2 fences preserve already-compressed checkpoint bytes without representation collisions',async()=>{
+ const {encodeSaveCopy}=await import('../src/save-copy-codec.ts');const raw=JSON.stringify({payload:'x'.repeat(100000)}),encoded=encodeSaveCopy(raw);
+ assert.notEqual(encoded,raw);assert.equal(encodeSaveCopy(encoded),encoded,'already-compressed short input is not encoded twice');
+ for(const checkpoint of [encoded,raw,'cm-copy-lz1:not-a-valid-copy','"quoted legacy bytes"']){
+  const db=fakeIdb(),fixture=make(),opaque={primary:encoded,checkpoint,inventory:JSON.stringify([['checkpoint',checkpoint]])};
+  const saved=await saveActiveLocalSave({raw:fixture.raw(),token:null,expectedMarker:null,fence:opaque,assertCurrent(){},factory:db.factory});
+  assert.equal(saved.marker.version,2);assert.equal((await readActiveLocalSave(opaque,db.factory))?.snapshot.raw,fixture.raw(),'restart accepts exact opaque bytes');
+  await assert.rejects(readActiveLocalSave({...opaque,checkpoint:checkpoint===encoded?raw:encoded},db.factory),/choice-changed/,'decoded/encoded lookalike never matches original byte fence');
+  await assert.rejects(readActiveLocalSave({...opaque,primary:raw},db.factory),/choice-changed/);
+ }
+});
+
+test('ambiguous pre-release v1 marker is retained and rejected rather than guessed or rewritten',async()=>{
+ const db=fakeIdb(),fixture=make();await saveActiveLocalSave({raw:fixture.raw(),token:null,expectedMarker:null,fence,assertCurrent(){},factory:db.factory});
+ (db.stores.get('active-city')!.get('active') as any).version=1;const before=JSON.stringify([...db.stores].map(([k,v])=>[k,[...v]]));
+ await assert.rejects(readActiveLocalSave(fence,db.factory),/metadata-invalid/);assert.equal(JSON.stringify([...db.stores].map(([k,v])=>[k,[...v]])),before);
+});
