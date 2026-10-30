@@ -12,15 +12,26 @@ export async function withStoredLoadCompletion(evaluate,activate,timeout=15000){
   }finally{await evaluate('window.__storedLoadObserver?.disconnect();delete window.__storedLoadObserver;delete window.__storedLoadResult');}
 }
 
+// Save may finish in primary storage, fail after an awaited emergency copy, or
+// stop for explicit confirmation. Opening the dialog is NEVER auto-confirmed.
+export async function withStoredSaveCompletion(evaluate,activate,timeout=15000){
+  try{
+    await evaluate(`(()=>{window.__storedSaveObserver?.disconnect();window.__storedSaveResult=null;const status=document.querySelector('#status');if(!status)throw Error('Missing save status');window.__storedSaveObserver=new MutationObserver(()=>{const text=status.textContent??'';if(!text.includes('กำลังพยายามสร้างสำเนากู้คืน')&&(/Saved day/.test(text)||/^บันทึกในเบราว์เซอร์นี้แล้ว/.test(text)||/^บันทึกไม่ได้:/.test(text)))window.__storedSaveResult=text;});window.__storedSaveObserver.observe(status,{childList:true,subtree:true,characterData:true})})()`);
+    await activate();const started=Date.now();
+    while(Date.now()-started<timeout){if(await evaluate("window.__storedSaveResult!==null&&window.__storedSaveResult!==undefined||!!document.querySelector('#save-promotion-confirm[open]')"))return;await new Promise(resolve=>setTimeout(resolve,50));}
+    throw Error('Stored Save did not reach a terminal result or confirmation: '+await evaluate("document.querySelector('#status')?.textContent"));
+  }finally{await evaluate('window.__storedSaveObserver?.disconnect();delete window.__storedSaveObserver;delete window.__storedSaveResult');}
+}
+
 // Touch layout (src/hud-row.ts): the page buttons live in the ☰ menu and the speeds behind
 // one cycle button. Dock submenus are body-portaled on every viewport.
 // Before a suite clicks a hidden control, reveal it using the actual user-facing buttons.
-// Returns true when this helper completed the native Load action, or when the
+// Returns true when this helper completed the native Load/Save action, or when the
 // target speed is already selected (nothing left for the caller to click).
 export async function reachTouch(evaluate, button, selector) {
-  if(storedLoadActions.has(selector)&&!loading.has(evaluate)){
+  if((storedLoadActions.has(selector)||selector==='#save')&&!loading.has(evaluate)){
     loading.add(evaluate);
-    try{await withStoredLoadCompletion(evaluate,()=>button(selector));return true;}
+    try{await (selector==='#save'?withStoredSaveCompletion:withStoredLoadCompletion)(evaluate,()=>button(selector));return true;}
     finally{loading.delete(evaluate);}
   }
 
