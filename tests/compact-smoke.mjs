@@ -2,7 +2,7 @@ import { assertSavedCity } from './park-session-assertions.mjs';
 // Measured compact/tall GUI acceptance. Root runs this sequentially on CDP 9349.
 // Baseline mode captures deployed d40; candidate mode reads that frozen JSON only.
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
@@ -30,7 +30,9 @@ const checks = [], errors = [], expectedErrors = [], screenshots = [], measures 
 await mkdir(shots, { recursive: true }); await mkdir(output, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Run browser suites sequentially; CDP 9349 is occupied');
-const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${resolve(output, 'edge-profile')}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+// Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
+const profile = await mkdtemp(resolve(output, 'edge-compact-'));
+const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, id = 0; const pending = new Map(); const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) { const key = ++id; const p = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(key); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(key, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id: key, method, params })); return p; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
