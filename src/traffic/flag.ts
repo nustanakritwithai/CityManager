@@ -1,18 +1,18 @@
-import { TRAFFIC_MODEL_ENABLED } from './clock.ts';
+/** This independent game layer is enabled only after integration acceptance. */
+export const TRAFFIC_GAME_DEFAULT = false;
 export const TRAFFIC_STORAGE_KEY = 'citymanager.traffic';
-/** Feature flag with a dev override: `?traffic=1` / `?traffic=0`, or localStorage[TRAFFIC_STORAGE_KEY] = '1'. */
-export function trafficModelEnabled(search = globalThis.location?.search ?? '', storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): boolean {
+type TrafficStorage = Pick<Storage, 'getItem' | 'setItem'>;
+function defaultStorage():TrafficStorage|undefined { try { return globalThis.localStorage; } catch { return undefined; } }
+/** Store both ON and OFF explicitly so opting out remains off across reloads. */
+export function storeTrafficModel(enabled:boolean,storage:TrafficStorage|undefined=defaultStorage()):boolean {
+  try { if(!storage)return false;storage.setItem(TRAFFIC_STORAGE_KEY,enabled?'1':'0');return true; } catch {return false;}
+}
+/** Query overrides are persisted; unavailable browser storage remains in-memory only. */
+export function trafficModelEnabled(search = globalThis.location?.search ?? '', storage:TrafficStorage|undefined=defaultStorage()): boolean {
   const q = new URLSearchParams(search).get('traffic');
-  // Some browser policies throw when merely obtaining localStorage, before getItem.
-  if (storage === undefined) { try { storage = globalThis.localStorage; } catch { /* denied getter: keep in memory */ } }
-  try {
-    if (q === '1') storage?.setItem(TRAFFIC_STORAGE_KEY, '1');
-    if (q === '0') storage?.removeItem(TRAFFIC_STORAGE_KEY);
-  } catch { /* private mode */ }
-  if (q === '1') return true;
-  if (q === '0') return false;
-  try { if (storage?.getItem(TRAFFIC_STORAGE_KEY) === '1') return true; } catch { /* ignore */ }
-  return TRAFFIC_MODEL_ENABLED;
+  if(q==='1'||q==='0'){const enabled=q==='1';storeTrafficModel(enabled,storage);return enabled;}
+  try {const saved=storage?.getItem(TRAFFIC_STORAGE_KEY);if(saved==='1')return true;if(saved==='0')return false;}catch{/* denied storage uses default */}
+  return TRAFFIC_GAME_DEFAULT;
 }
 type Topo = { blocked: number[]; oneWay: Record<string, number> };
 const CELLS = 576;
