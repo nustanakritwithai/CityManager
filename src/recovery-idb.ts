@@ -1,5 +1,6 @@
 import {encodeSaveCopy,decodeSaveCopy} from './save-copy-codec.ts';
 import {deserializeParkSession} from './park-runtime.ts';
+import {validateRecoveryMarketJournal} from './market-client.ts';
 const DB='citymanager.emergency-recovery-v1', STORE='branches', VERSION=1, TIMEOUT=10_000;
 export const MAX_RECOVERY_BRANCHES=16;
 type Entry={copy:string;capturedAt:number;tick:number;version:number;revision:string};
@@ -20,7 +21,7 @@ function transaction<T>(db:IDBDatabase,mode:IDBTransactionMode,work:(store:IDBOb
  tx.oncomplete=()=>{clearTimeout(timer);resolve(result);};tx.onabort=()=>{clearTimeout(timer);reject(reason??tx.error??Error('recovery-transaction-aborted'));};tx.onerror=()=>{};
  try{work(tx.objectStore(STORE),value=>{result=value;},fail);}catch(error){fail(error);}
 });}
-function check(raw:string){const {city}=deserializeParkSession(raw);return {tick:city.tick,version:JSON.parse(raw).version};}
+function check(raw:string){const {city}=deserializeParkSession(raw);const parsed=JSON.parse(raw);if(Object.hasOwn(parsed,'market'))validateRecoveryMarketJournal(parsed.market);return {tick:city.tick,version:parsed.version};}
 function valid(branchId:string,slot:'baseline'|'previous'|'current',entry:Entry):RecoverySnapshot{
  const raw=decodeSaveCopy(entry.copy);if(raw===null)throw Error('recovery-copy-invalid');const info=check(raw);
  if(info.tick!==entry.tick||info.version!==entry.version||typeof entry.revision!=='string')throw Error('recovery-copy-invalid');

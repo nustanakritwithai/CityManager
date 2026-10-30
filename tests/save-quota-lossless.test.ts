@@ -54,7 +54,7 @@ test('nonzero sequence or unknown market fields are not pristine',async()=>{
 test('recovery mode blocks market mutation but permits locked export without network or storage writes',async()=>{
  const s=memory(),d=['window','navigator','localStorage','fetch'].map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)] as const);let writes=0,network=0;
  try{const j=market();s.setItem(MARKET_SAVE_KEY,JSON.stringify(j));Object.defineProperty(globalThis,'window',{configurable:true,value:{}});Object.defineProperty(globalThis,'navigator',{configurable:true,value:{locks:{request:async(_n:unknown,_o:unknown,fn:(x:unknown)=>unknown)=>fn({})}}});Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:s.getItem,setItem:(k:string,v:string)=>{writes++;s.setItem(k,v);}}});Object.defineProperty(globalThis,'fetch',{configurable:true,value:()=>{network++;throw Error('network forbidden');}});
- const c=createCity(6);c.market=structuredClone(j);const client=new MarketClient(()=>c,'/citymanager-api');client.setRecoveryReadOnly(true);await assert.rejects(client.buy('00000000-0000-4000-8000-000000000008',1),/market-disabled-in-recovery/);await assert.rejects(client.list('crop:rice',1,1),/market-disabled-in-recovery/);assert.deepEqual(JSON.parse(await exportLocalCitySession(c,createParkRuntime(c),client)).market,j);assert.equal(network,0);assert.equal(writes,0);
+ const c=createCity(6);c.market=structuredClone(j);const client=new MarketClient(()=>c,'/citymanager-api');client.setRecoveryReadOnly(true);await assert.rejects(client.buy('00000000-0000-4000-8000-000000000008',1),/market-disabled-in-recovery/);await assert.rejects(client.list('crop:rice',1,1),/market-disabled-in-recovery/);assert.deepEqual(JSON.parse(await exportLocalCitySession(c,createParkRuntime(c),client)).market,j);assert.equal(network,0);assert.equal(writes,0);client.setRecoveryReadOnly(false);await client.reconcileSession({guest_id:j.guestId!,seq:'0'});assert.equal(writes,1,'market writer resumes only after recovery restriction is lifted');assert.equal(network,0);
  }finally{for(const [key,desc] of d)if(desc)Object.defineProperty(globalThis,key,desc);else Reflect.deleteProperty(globalThis,key);}
 });
 
@@ -70,4 +70,17 @@ test('IDB-unavailable continuation inventory distinguishes preferences, journal 
  assert.equal(hasOnlyKnownNonCityKeys(store(['citymanager.market.v10']),false),false);assert.equal(hasOnlyKnownNonCityKeys(store(['citymanager.market.v10']),true),true);
  for(const k of ['citymanager.save.v7','citymanager.backup.v5','citymanager.checkpoint.latest','citymanager.unknown'])assert.equal(hasOnlyKnownNonCityKeys(store([k]),true),false);
  assert.equal(hasOnlyKnownNonCityKeys({get length(){throw Error('denied');},key:()=>null},true),false);
+});
+
+test('recovery market validation rejects malformed, unknown, or unowned financial records',async()=>{
+ const {validateRecoveryMarketJournal}=await import('../src/market-client.ts');const j=market();validateRecoveryMarketJournal(j);
+ const malformed=structuredClone(j) as any;malformed.operations=[{bad:true}];assert.throws(()=>validateRecoveryMarketJournal(malformed));
+ const extra=structuredClone(j) as any;extra.futureFinancialState={amount:1};assert.throws(()=>validateRecoveryMarketJournal(extra),/unknown/);
+ const missing=structuredClone(j) as any;missing.guestId=null;missing.operations=[{opId:'00000000-0000-4000-8000-000000000004',guestId:j.guestId,cityId:j.cityId,kind:'buy',payload:{},state:'pending',createdAt:'2026-10-27T00:00:00.000Z'}];assert.throws(()=>validateRecoveryMarketJournal(missing),/identity-missing/);
+});
+
+test('overlapping failed and successful save attempts settle in order',async()=>{
+ const {createSaveAttemptQueue}=await import('../src/save-feedback.ts');const enqueue=createSaveAttemptQueue(),events:string[]=[];let release!:()=>void;
+ const gate=new Promise<void>(r=>{release=r;});const first=enqueue(async()=>{events.push('first-start');await gate;events.push('first-fail');throw Error('quota');});
+ const second=enqueue(async()=>{events.push('second-start');events.push('second-success');return 1;});await Promise.resolve();assert.deepEqual(events,['first-start']);release();await assert.rejects(first,/quota/);assert.equal(await second,1);assert.deepEqual(events,['first-start','first-fail','second-start','second-success']);
 });

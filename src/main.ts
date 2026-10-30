@@ -87,6 +87,7 @@ import './park-runtime.css';
 import { installEducationPanel } from './education-panel.ts';
 import { installPanelTimeControls } from './panel-time-controls.ts';
 import { installSaveFeedback } from './save-feedback-panel.ts';
+import { createSaveAttemptQueue } from './save-feedback.ts';
 import './player-feedback.css';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
@@ -675,31 +676,37 @@ async function boot() {
     });
     recoveryQueue=work.then(()=>{},()=>{});return work;
   };
-  const trackedSave = async () => {
-    const attempt = saveFeedback.begin(),attemptGeneration=saveGuard.generation,attemptCity=city;
+  const runTrackedSave = async () => {
+    const attempt = saveFeedback.begin(),attemptGeneration=saveGuard.generation,attemptCity=city;let primaryAttempted=false;
     try {
       if(previewOnly)throw Error('เมืองชั่วคราวสำหรับดูเท่านั้น ไม่บันทึก');
-      if(recoveryOnly)throw Object.assign(Error('recovery-only'),{name:'RecoveryOnly'});
-      await writeLocalSave(); if(attemptGeneration!==saveGuard.generation||attemptCity!==city)throw Error('เมืองเปลี่ยนระหว่างบันทึก'); refreshRecoveryInfo(); saveFeedback.succeeded(attempt);
+      if(recoveryOnly&&!saveGuard.armed)throw Object.assign(Error('recovery-only'),{name:'RecoveryOnly'});
+      primaryAttempted=true;await writeLocalSave(); if(attemptGeneration!==saveGuard.generation||attemptCity!==city)throw Error('เมืองเปลี่ยนระหว่างบันทึก'); recoveryOnly=false;marketPanel?.client.setRecoveryReadOnly(false);refreshRecoveryInfo(); saveFeedback.succeeded(attempt);
     } catch (error) {
       if(attemptGeneration!==saveGuard.generation||attemptCity!==city){saveFeedback.cancel(attempt);throw error;}
       if(isQuotaError(error)||(error instanceof Error&&error.name==='RecoveryOnly')){
+        if(primaryAttempted)status('บันทึกไม่ได้: เซฟหลักไม่สำเร็จ · กำลังพยายามสร้างสำเนากู้คืน');
         try{
           const saved=await saveEmergencyCopy();
-          const wasRecoveryOnly=recoveryOnly;recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);
-          const primary=wasRecoveryOnly?'ไม่ได้พยายามเขียนเซฟหลักในโหมดกู้คืน':'เซฟหลักบันทึกไม่สำเร็จ';
+          recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);
+          const primary=primaryAttempted?'เซฟหลักบันทึกไม่สำเร็จ':'ไม่ได้พยายามเขียนเซฟหลักในโหมดกู้คืน';
           const message=`บันทึกสำเนากู้คืนในเบราว์เซอร์แล้ว (วันที่ ${saved.tick} สาขา ${saved.branchId.slice(0,8)}) · ${primary} · พักการทำรายการตลาด · ส่งออกไฟล์และตรวจไฟล์ก่อนปิดเกม`;
           saveFeedback.failed(message,attempt);throw Object.assign(Error(message),{name:'RecoveryCopyOnly'});
         }catch(recoveryError){
           if(attemptGeneration!==saveGuard.generation||attemptCity!==city){saveFeedback.cancel(attempt);throw recoveryError;}
           if(recoveryError instanceof Error&&recoveryError.name==='RecoveryCopyOnly')throw recoveryError;
-          saveFeedback.failed(`${recoveryOnly?'ไม่ได้พยายามเขียนเซฟหลักในโหมดกู้คืน':'เซฟหลักไม่สำเร็จ'} และยังยืนยันสำเนากู้คืนไม่ได้ (${recoveryError instanceof Error?recoveryError.message:'พื้นที่หรือเบราว์เซอร์ไม่พร้อม'}) · ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์`,attempt);
+          saveFeedback.failed(`${primaryAttempted?'เซฟหลักไม่สำเร็จ':'ไม่ได้พยายามเขียนเซฟหลักในโหมดกู้คืน'} และยังยืนยันสำเนากู้คืนไม่ได้ (${recoveryError instanceof Error?recoveryError.message:'พื้นที่หรือเบราว์เซอร์ไม่พร้อม'}) · ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์`,attempt);
           throw recoveryError;
         }
       }
       saveFeedback.failed(`${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} · เซฟหลักเดิมยังอยู่`, attempt);
       throw error;
     }
+  };
+  const enqueueSave=createSaveAttemptQueue();
+  const trackedSave=()=>{
+    const generation=saveGuard.generation,capturedCity=city;
+    return enqueueSave(async()=>{if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');return runTrackedSave();});
   };
   let autosaveFailed = false;
   let autoWriteStarted = false;let autoGeneration=saveGuard.generation;

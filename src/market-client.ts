@@ -38,6 +38,16 @@ const safeJournal = (raw: string | null): MarketJournal => {
   for (const [receiptId, r] of Object.entries(j.receipts)) if (!UUID.test(receiptId) || !r || !UUID.test(r.claimId) || !['claimed', 'applied', 'delivered'].includes(r.state) || (r.firmId !== undefined && !Number.isSafeInteger(r.firmId)) || (r.itemId !== undefined && !MARKET_ITEMS.includes(r.itemId)) || (r.quantity !== undefined && (!Number.isSafeInteger(r.quantity) || r.quantity < 1))) throw new Error('Invalid market journal receipt');
   return j;
 };
+/** Strict recovery validation: unknown fields remain untouched, never rotated away. */
+export function validateRecoveryMarketJournal(value:unknown):void {
+ const j=safeJournal(JSON.stringify(value));
+ const allowed=(o:object,keys:string[])=>Object.keys(o).every(k=>keys.includes(k));
+ if(Object.keys(j).sort().join(',')!=='cityId,escrow,guestId,operations,receipts,rulesVersion,seq,version')throw Error('recovery-market-unknown');
+ for(const op of j.operations)if(!allowed(op,['opId','guestId','cityId','kind','payload','state','createdAt']))throw Error('recovery-market-unknown');
+ for(const e of j.escrow)if(!allowed(e,['opId','cityId','firmId','itemId','quantity','value','state']))throw Error('recovery-market-unknown');
+ for(const r of Object.values(j.receipts))if(!allowed(r,['claimId','state','firmId','itemId','quantity']))throw Error('recovery-market-unknown');
+ if(j.guestId===null&&(j.operations.length||j.escrow.length||Object.keys(j.receipts).length))throw Error('recovery-market-identity-missing');
+}
 const persist = (j: MarketJournal) => localStorage.setItem(MARKET_SAVE_KEY, JSON.stringify(j));
 
 export class MarketClient {

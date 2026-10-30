@@ -23,3 +23,13 @@ export function createSaveFeedback(onChange: (state: SaveFeedbackState) => void,
     },
   };
 }
+
+/** Serialize manual and lifecycle attempts so older completions cannot overwrite newer mode. */
+export function createSaveAttemptQueue() {
+ let tail:Promise<void>=Promise.resolve();
+ return <T>(work:()=>Promise<T>):Promise<T>=>{
+  const current=tail.then(work);
+  tail=current.then(()=>{},()=>{});
+  return current;
+ };
+}
