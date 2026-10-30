@@ -102,7 +102,7 @@ function aggregateOd(od: readonly OdDemand[]): OdDemand[] {
  * measures congested times, then moves REROUTE_SHARE of each OD onto its current best path.
  * Unreachable ODs count as `unserved` vehicles and keep no state.
  */
-export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: RouteState = new Map(), iteration: number | ReadonlyMap<string, number> = 0): Assignment {
+export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: RouteState = new Map(), iteration: number | ReadonlyMap<string, number> = 0, background?: ReadonlyMap<string, number>): Assignment {
   const rows = aggregateOd(od);
   const free = linkTimes(net, new Map()), freePath = treeCache(net, free), state: RouteState = new Map();
   // Quiet hours must retain learned routes. Prune road-invalidated paths even for inactive ODs.
@@ -127,7 +127,10 @@ export function assignPeriod(net: LinkNetwork, od: readonly OdDemand[], prior: R
     const key = `${d.from}:${d.to}`, paths = state.get(key);
     return paths ? [[key, paths.map(p => ({ path: [...p.path], share: p.share }))] as const] : [];
   }));
-  const volumes = load(net, rows, assigned), times = linkTimes(net, volumes);
+  const volumes = load(net, rows, assigned);
+  // Background (bus) volume slows links (times, car vehicleSeconds) but is never counted as served cars. Absent = unchanged.
+  let times: Map<string, number>;
+  if (background?.size) { const v = new Map(volumes); for (const [k, x] of background) if (net.links.has(k)) v.set(k, (v.get(k) ?? 0) + x); times = linkTimes(net, v); } else times = linkTimes(net, volumes);
   // Freeze this period's cost from its loaded links before changing any shares for the next period.
   const vehicleSeconds = [...volumes].reduce((sum, [key, vehicles]) => sum + vehicles * times.get(key)!, 0);
   let served = 0;
