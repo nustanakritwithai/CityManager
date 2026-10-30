@@ -61,6 +61,9 @@ export class TrafficFlow {
   private state: TrafficFlowState = { version: 2, minute: 0, offered: 0, admitted: 0, completed: 0, transferred: 0, peakQueued: 0, waiting: [], batches: [], requests: [] };
   private requests = new Map<string,FlowRequestRecord>();
   private lastAdmitted = 0;
+  /** Transient bus PCU per link (not saved; re-pushed by the bus hook every tick). Empty = unchanged behaviour. */
+  private busLoad: ReadonlyMap<string, number> = new Map();
+  setBusLoad(load: ReadonlyMap<string, number>): void { this.busLoad = new Map(load); }
   private lastCompleted = 0;
   get snapshot(): TrafficFlowState { return clone(this.state); }
   exportState(): TrafficFlowState { return this.snapshot; }
@@ -164,7 +167,10 @@ export class TrafficFlow {
   }
   private quantum(net: LinkNetwork, nodes: Set<number>) {
     const s = this.state, occ = occupancy(s.batches);
-    const input = new Map([...net.links].map(([k, l]) => [k, l.capacityPerHour / 60])), output = new Map(input);
+    const bus = this.busLoad;
+    // Buses consume per-minute throughput and storage on their link (PCU in flow vehicle units).
+    const input = new Map([...net.links].map(([k, l]) => [k, Math.max(0, l.capacityPerHour / 60 - (bus.get(k) ?? 0))])), output = new Map(input);
+    if (bus.size) for (const [k, v] of bus) if (net.links.has(k)) occ.set(k, (occ.get(k) ?? 0) + v);
     const service = new Map([...nodes].map(n => [n, Array<number>(4).fill(FLOW_JUNCTION_CAPACITY / 60)]));
     const takeNode = (n: number, mask: number, amount: number) => { const room = service.get(n); if (room) for (let i = 0; i < 4; i++) if (mask & (1 << i)) room[i] -= amount; };
     const nodeRoom = (n: number, mask: number) => { const room = service.get(n); return room ? Math.min(...room.filter((_, i) => mask & (1 << i))) : Infinity; };
@@ -193,7 +199,8 @@ export class TrafficFlow {
     }
     s.batches = s.batches.filter(b => b.amount > 0);
     for (const b of additions) s.batches.push(b);
-    const after = occupancy(s.batches), originOrder = [...s.waiting], offset = originOrder.length ? s.minute % originOrder.length : 0;
+    const after = occupancy(s.batches); if (bus.size) for (const [k, v] of bus) if (net.links.has(k)) after.set(k, (after.get(k) ?? 0) + v);
+    const originOrder = [...s.waiting], offset = originOrder.length ? s.minute % originOrder.length : 0;
     for (const w of [...originOrder.slice(offset), ...originOrder.slice(0, offset)]) {
      // An OD may use several independent entrances in a quantum. Exhausted input
      // links are excluded only from its first step; shared downstream limits still apply.

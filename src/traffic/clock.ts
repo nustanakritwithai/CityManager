@@ -7,6 +7,8 @@ import { TrafficFlow, FLOW_LANE_CAPACITY } from './flow.ts';
 import { cityDemandInput } from './snapshot.ts';
 import type { DemandCarry, DemandInput, OdEntry } from './types.ts';
 import { roadNeighbors } from '../road-topology.ts';
+import { freeFlowSeconds } from './network.ts';
+import { createBusLoadSink, type BusLoadSink } from './bridge.ts';
 /**
  * Feature flag for the aggregate traffic model. OFF by default: nothing in gameplay, decorative
  * cars, economy or saves reads it. The clock holds all its state in memory only.
@@ -60,6 +62,15 @@ export class TrafficClock {
    * explicitly for conserved clocks without erasing pending journeys; matching sidecar restore
    * is caller-controlled. The released representative-only clock retains its reset lifecycle.
    */
+  private busPcu: ReadonlyMap<string, number> = new Map();
+  /** Bus road-load sink (`trafficLayer.bus?.hook.connect(clock.busRoadSink())`). Never connected = unchanged. */
+  busRoadSink(): BusLoadSink { return createBusLoadSink(load => { this.busPcu = load; this.flow.setBusLoad(load); }); }
+  /** Present bus PCU → hourly volume by Little's law (PCU × 3600 / free-flow seconds). */
+  private busVolumes(): Map<string, number> | undefined {
+    if (!this.busPcu.size || !this.net) return undefined;
+    const v = new Map<string, number>(); for (const [k, p] of this.busPcu) { const l = this.net.links.get(k); if (l) v.set(k, p * 3600 / Math.max(1, freeFlowSeconds(l))); }
+    return v;
+  }
   advance(c: City, minute: number, paused = false): Assignment[] {
     if (!Number.isSafeInteger(minute) || minute < 0) throw Error('Invalid traffic clock minute');
     const period = Math.floor(minute / MINUTES_PER_PERIOD);
@@ -83,7 +94,7 @@ export class TrafficClock {
       this.carry = r.carry;
       const od = this.demandFilter ? this.demandFilter(r.od, (start + out.length) * MINUTES_PER_PERIOD) : r.od;
       const { rows: resolved, unreachable } = this.conservedFlow ? this.routingDemand(od) : { rows: od, unreachable: 0 };
-      const a = assignPeriod(this.net, resolved, this.state, this.iterations);
+      const a = assignPeriod(this.net, resolved, this.state, this.iterations, this.busVolumes());
       a.unserved += unreachable;
       if (this.conservedFlow) this.flow.advancePeriod(this.net, od);
       // Age only ODs actually assigned, once even when multiple purposes share the route.

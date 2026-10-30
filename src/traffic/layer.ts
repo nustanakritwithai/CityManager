@@ -36,7 +36,7 @@ export class TrafficLayer {
   frame(c: City, minuteOfDay: number, paused: boolean, dt: number): void {
     this.checkRoads(c);
     const minute = gameMinute(c.tick, minuteOfDay);
-    if (this.clock.demandFilter && !this.bus) this.bus = new BusIntegration(c, minute, { width: SIZE });
+    if (this.clock.demandFilter && !this.bus) { this.bus = new BusIntegration(c, minute, { width: SIZE }); this.bus.hook.connect(this.clock.busRoadSink()); }
     if (this.bus && !paused) this.bus.tick(minute);
     const ran = this.clock.advance(c, minute, paused), net = this.clock.network, last = this.clock.last;
     if (ran.length && net && last) setFleetDemand(this.fleet, net, this.clock.lastOd, last.assigned, last.times);
