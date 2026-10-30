@@ -15,6 +15,8 @@ export const businessCapacityBackupKeys = () => Array.from({ length: 8 }, (_, i)
 export const EDUCATION_BACKUP_KEY = 'citymanager.backup.before-education';
 export const TAXI_BACKUP_KEY = 'citymanager.backup.before-taxi';
 export const taxiBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${TAXI_BACKUP_KEY}.${i}` : TAXI_BACKUP_KEY);
+export const BUS_BACKUP_KEY = 'citymanager.backup.before-bus';
+export const busBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${BUS_BACKUP_KEY}.${i}` : BUS_BACKUP_KEY);
 export const educationBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${EDUCATION_BACKUP_KEY}.${i}` : EDUCATION_BACKUP_KEY);
 export const POPULATION_BACKUP_KEY = 'citymanager.backup.before-population-capacity';
 export const populationBackupKeys = () => Array.from({length:8}, (_,i) => i ? `${POPULATION_BACKUP_KEY}.${i}` : POPULATION_BACKUP_KEY);
@@ -78,7 +80,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [PRE_AUTOSAVE_BACKUP,...saveConflictBackupKeys(storage),...businessCapacityBackupKeys(), ...educationBackupKeys(), ...taxiBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
+    keys = [PRE_AUTOSAVE_BACKUP,...saveConflictBackupKeys(storage),...businessCapacityBackupKeys(), ...educationBackupKeys(), ...taxiBackupKeys(), ...busBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -128,6 +130,9 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
     // First save that carries taxi data: keep the last taxi-free save once, untouched.
     let currentTaxi = false; try { currentTaxi = JSON.parse(current)?.taxi !== undefined; } catch { currentTaxi = false; }
     if (parsed?.taxi !== undefined && !currentTaxi) { const keys = taxiBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current); if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Taxi migration backups full; original save preserved'); storage.setItem(slot, current); } storage.setItem(LATEST_BACKUP_KEY, slot); }
+    // First save that carries bus data: keep the last bus-free save once, untouched.
+    let currentBus = false; try { currentBus = JSON.parse(current)?.bus !== undefined; } catch { currentBus = false; }
+    if (parsed?.bus !== undefined && !currentBus) { const keys = busBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current); if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Bus migration backups full; original save preserved'); storage.setItem(slot, current); } storage.setItem(LATEST_BACKUP_KEY, slot); }
     if (business23 && typeof version === 'number' && version >= 9 && version <= 22) {
       const keys = businessCapacityBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current);
       if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Business capacity migration backups full; original save preserved'); storage.setItem(slot, current); }
