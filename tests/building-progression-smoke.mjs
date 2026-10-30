@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { adoptSavedEducation, createCity, step, serialize, isRetail, firmCapacity, housingCapacity, farmCrop, homeOccupancy, HOUSING_OCCUPANCY_GATE_LEVEL } from '../src/sim.ts';
+import { adoptSavedEducation, createCity, step, serialize, deserialize, access, isRetail, firmCapacity, housingCapacity, farmCrop, homeOccupancy, HOUSING_OCCUPANCY_GATE_LEVEL } from '../src/sim.ts';
 import { farmStockCapacity } from '../src/agriculture.ts';
 import { factoryCropCapacity } from '../src/factory-levels.ts';
 import { retailCapacity } from '../src/retail-capacity.ts';
@@ -93,8 +93,41 @@ function assertRealFlows(observed, day) {
   for (const sale of sales) assert.ok(observed.ledger.some(e => e.tick === day && e.from === sale.to && e.to === sale.from && e.amount === sale.quantity * 800 && e.reason === `Household #${sale.to.slice(10)} purchase`), 'Each shop sale has its actual household payment');
 }
 for (const [day, snapshot] of snapshots) assertRealFlows(snapshot.after, day);
+// Validate synthetic comparison saves before launching any browser. Place an occupied
+// home at a vacant, road-accessible parcel if the natural city lacks a tower variant.
+const towerVariant = cell => (((Math.imul(cell >>> 0, 1103515245) + 12345) >>> 16) & 0x7fff) % 3;
+const visualBase = structuredClone(snapshots.get(120).before);
+const visualHomes = visualBase.buildings.filter(b => b.zone === 'R' && homeOccupancy(visualBase,b.id).households > 0);
+const visualTargets = [];
+for (const variant of [0,1,2]) {
+  let residence = visualHomes.find(b => towerVariant(b.cell) === variant && !visualTargets.includes(b));
+  if (!residence) {
+    residence = visualHomes.find(b => !visualTargets.includes(b) && visualHomes.some(other => other !== b && towerVariant(other.cell) === towerVariant(b.cell)));
+    assert.ok(residence, 'Synthetic fixture has a spare occupied home');
+    const candidates = visualBase.cells.map((cell,index)=>({cell,index})).filter(({cell,index}) => !cell.road && cell.building === null && (cell.zone === 'R' || cell.zone === null) && ![...visualBase.plants, ...visualBase.parks, ...(visualBase.education?.campuses ?? [])].some(item => item.cell === index) && towerVariant(index) === variant && access(visualBase,index));
+    candidates.sort((a,b)=>Math.abs(a.index-residence.cell)-Math.abs(b.index-residence.cell));
+    assert.ok(candidates.length, 'Synthetic variant has a vacant residential parcel');
+    visualBase.cells[residence.cell].building = null; residence.cell = candidates[0].index;
+    visualBase.cells[residence.cell].building = residence.id; visualBase.cells[residence.cell].zone = 'R';
+  }
+  visualTargets.push(residence);
+}
+const residentialVisualFixtures = new Map([3,4,6,7,9].map(level => {
+  const visualCity = structuredClone(visualBase);
+  for (const target of visualTargets) {
+    const residence = visualCity.buildings.find(b => b.id === target.id);
+    residence.level = level; residence.housingType = level >= 7 ? 'condo' : level >= 4 ? 'apartment' : 'cottage';
+    assert.ok(homeOccupancy(visualCity,residence.id).households > 0);
+  }
+  const raw = serialize(visualCity); assert.equal(serialize(deserialize(raw)),raw); return [level,raw];
+}));
+const emptyTowerCity = deserialize(residentialVisualFixtures.get(9));
+for (const household of emptyTowerCity.households) if (household.home === visualTargets[0].id) household.home = visualTargets[1].id;
+assert.equal(homeOccupancy(emptyTowerCity,visualTargets[0].id).households,0);
+const emptyTowerRaw = serialize(emptyTowerCity); assert.equal(serialize(deserialize(emptyTowerRaw)),emptyTowerRaw);
+residentialVisualFixtures.set('9-unoccupied-a',emptyTowerRaw);
 if (process.argv.includes('--preflight')) {
-  console.log(JSON.stringify({ ticks: [...snapshots.keys()], upgrades: [home, factory, farm, shop].map(item => ({ id: item.building.id, zone: item.building.zone, from: item.previous.level, to: item.building.level })) }));
+  console.log(JSON.stringify({ visualHomes: visualTargets.map(b => ({ cell: b.cell, variant: towerVariant(b.cell), occupied: homeOccupancy(visualBase,b.id).households })), ticks: [...snapshots.keys()], upgrades: [home, factory, farm, shop].map(item => ({ id: item.building.id, zone: item.building.zone, from: item.previous.level, to: item.building.level })) }));
   process.exit(0);
 }
 
@@ -179,7 +212,30 @@ try {
   await button('.win-continue'); await until('!document.querySelector("dialog.win-dialog[open]")');
   await inspect(shop.building,'shop'); assert.equal(await evaluate('document.querySelector("#entity-content [data-retail-growth]")?.dataset.retailGrowth'),String(shop.firm.id));
   assert.match(await evaluate('document.querySelector("#entity-content [data-retail-growth]").textContent'), /ค่าก่อสร้าง 200 เครดิต[\s\S]*สำรองเมือง/); await screenshot('desktop-shop.png'); checks.push('Natural day-180 shop upgrade matches replay, paid cost, identity and capacity');
+  // Synthetic renderer-only level comparison, separate from the genuine progression assertions above.
+  // No ticks or purchases are inferred from these deliberately edited snapshots.
+  for (const [level, raw] of residentialVisualFixtures) {
+    await load(raw); await close();
+    assert.equal(await evaluate('window.cityManager.snapshot()'), raw, 'Visual fixture stays paused and unchanged');
+    for (const target of visualTargets) assert.ok(await evaluate(`(()=>{const p=window.cityManager.cellScreen(${target.cell});return p.x>0&&p.y>0&&p.x<innerWidth&&p.y<innerHeight})()`), 'Variant parcel is visible in the capture viewport');
+    assert.ok(await evaluate("['tower-a','tower-b','tower-c'].every(name=>window.cityManager.visuals().loaded.includes(name))"), 'All tower assets loaded');
+    for (const mode of ['noon', 'night']) {
+      await evaluate(`(()=>{const input=document.querySelector('input[name="atmosphere-time"][value="${mode}"]');input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+      await until(mode === 'night' ? 'window.cityManager.atmosphere().night > .9' : 'window.cityManager.atmosphere().night < .01');
+      await paints(); await paints();
+      assert.equal(await evaluate('window.cityManager.atmosphere().settings.timeMode'), mode);
+      await screenshot(`desktop-residential-level-${level}-${mode}.png`);
+    }
+    assert.equal(await evaluate('window.cityManager.snapshot()'), raw, 'Day/night rendering must not mutate save state');
+  }
+  checks.push('Synthetic R3/R4/R6/R7/R9 day/night captures with all three tower assets loaded and exact city state preserved');
   await close(); await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:1,mobile:true}); await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2}); await until('innerWidth===390');
+  await load(residentialVisualFixtures.get(9)); await close();
+  for (const mode of ['noon', 'night']) {
+    await evaluate(`(()=>{const input=document.querySelector('input[name="atmosphere-time"][value="${mode}"]');input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    await until(mode === 'night' ? 'window.cityManager.atmosphere().night > .9' : 'window.cityManager.atmosphere().night < .01');
+    await paints(); await paints(); await screenshot(`mobile-residential-level-9-${mode}.png`);
+  }
   await load(originalPark); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),migratedPark); await button('#save'); await button('#load');
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),migratedPark,'Mobile full park session survives save and reload'); await screenshot('mobile-park-session.png');
   checks.push('390px mobile-emulated populated park session survives full save/reload');
