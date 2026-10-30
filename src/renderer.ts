@@ -9,7 +9,7 @@ import { factoryLevel } from './factory-levels.ts';
 import { utilityService, type UtilityKind } from './utilities.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
-import { CityAssets } from './asset-models.ts';
+import { CityAssets, disconnectedBuildingMaterial } from './asset-models.ts';
 import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
 import { SceneAtmosphere } from './scene-atmosphere.ts';
@@ -378,8 +378,7 @@ export class CityView {
       if (!(source instanceof StandardMaterial)) continue;
       let material = this.faded.get(source);
       if (!material) {
-        material = source.clone() as StandardMaterial; material.name = `${source.name} · disconnected`;
-        material.diffuse = new Color(.52, .54, .58); material.emissiveIntensity = 0; material.update();
+        material = disconnectedBuildingMaterial(source);
         this.faded.set(source, material);
       }
       instance.material = material;
@@ -505,8 +504,10 @@ export class CityView {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level); continue; }
           if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
-          // Code-native apartment/condo silhouettes fit the same tile even when assets fail.
+          // Detailed assets for apartments/condos; retain code-native fallback if loading fails.
           if (b.zone === 'R' && b.level > 3) {
+            const residence = this.assets?.building('R', b.level, i, lit);
+            if (residence) { residence.setLocalPosition(0, .1, 0); tile.addChild(residence); continue; }
             const condo = b.level >= 7, tier = condo ? b.level - 6 : b.level - 3;
             const height = (condo ? 3.8 : 2.1) + tier * .6;
             this.box(tile, 0, height / 2 + .1, 0, 1.3, height, 1.25, condo ? '#9fbcc8' : '#d5d6c5');
@@ -526,10 +527,10 @@ export class CityView {
             // One inset marker per level above three, contained within the same parcel.
             if (b.zone === 'I' && b.level >= 4) this.factoryTiers(tile, b.level, lit);
             if (b.zone === 'I') for (let n = 0; n < factoryLevel(b.level).markers; n++) this.box(tile, -.7 + n * .23, .12, .82, .13, .06, .09, '#f1c267', false);
-            if (b.zone === 'R' && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
+            if (b.zone === 'R' && b.level < 3 && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
             // A lived-in house gets a front-yard bench; some also a second bush (decoration only).
-            if (b.zone === 'R' && lit && hashCell(i + 5) % 2 === 0) this.bench(tile, -.62, .7);
-            if (b.zone === 'R' && hashCell(i) % 3 === 1) { const bush = this.assets?.detail('planter', .34); if (bush) { bush.setLocalPosition(-.7, .1, -.68); tile.addChild(bush); } }
+            if (b.zone === 'R' && b.level < 3 && lit && hashCell(i + 5) % 2 === 0) this.bench(tile, -.62, .7);
+            if (b.zone === 'R' && b.level < 3 && hashCell(i) % 3 === 1) { const bush = this.assets?.detail('planter', .34); if (bush) { bush.setLocalPosition(-.7, .1, -.68); tile.addChild(bush); } }
             continue;
           }
           const h = 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;

@@ -1,7 +1,8 @@
 import {
-  BoundingBox, Color, Entity, StandardMaterial, Texture, PIXELFORMAT_SRGBA8, FILTER_LINEAR,
+  BoundingBox, Color, Entity, Mesh, MeshInstance, StandardMaterial, Texture, PIXELFORMAT_SRGBA8, FILTER_LINEAR, BLEND_ADDITIVE,
   type AppBase, type ContainerResource, type RenderComponent
 } from 'playcanvas';
+import { TOWER_ROOFS, residentialVisualHeight, roomLights, towerGlassGeometry, type TowerName } from './building-visuals.ts';
 import type { RoadTile } from './road-tiles.ts';
 import { retailCapacity } from './retail-capacity.ts';
 
@@ -32,7 +33,7 @@ const glowRegion = (name: CityModelName): readonly [number, number, number, numb
 
 /** Visual variants per building level; a parcel hash picks one, never the sim RNG. */
 const LEVEL_VARIANTS: Readonly<Record<'R' | 'C' | 'I', readonly (readonly CityModelName[])[]>> = {
-  R: [['house-a', 'house-c', 'house-d'], ['house-b', 'house-e', 'house-f'], ['house-g', 'house-h', 'house-i']],
+  R: [['house-a', 'house-c', 'house-d'], ['house-b', 'house-e', 'house-f'], ['tower-a', 'tower-b', 'tower-c']],
   C: [['shop-a', 'shop-b', 'shop-c', 'shop-d'], ['shop-e', 'shop-f', 'shop-g'], ['tower-a', 'tower-b', 'tower-c']],
   I: [['factory-a', 'factory-c'], ['factory-b', 'factory-d'], ['factory-e', 'factory-f']],
 };
@@ -45,6 +46,14 @@ const ROOF_SWATCHES: readonly [x: number, y: number][] = [[0, 128], [0, 192]];
 const cellHash = (cell: number, salt = 0) => ((Math.imul((cell + salt * 977) >>> 0, 1103515245) + 12345) >>> 16) & 0x7fff;
 export type GlowRegistrar = (material: StandardMaterial, strength: number) => void;
 
+/** Keep additive night overlays black when a disconnected building is greyed out. */
+export function disconnectedBuildingMaterial(source: StandardMaterial): StandardMaterial {
+  const material = source.clone() as StandardMaterial;
+  material.name = `${source.name} · disconnected`;
+  material.diffuse = source.blendType === BLEND_ADDITIVE && !source.useLighting ? new Color(0, 0, 0) : new Color(.52, .54, .58);
+  material.emissiveIntensity = 0; material.update(); return material;
+}
+
 const loads = new WeakMap<AppBase, Promise<CityAssets>>();
 const baseUrl = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
 
@@ -54,12 +63,22 @@ export class CityAssets {
   private readonly resources = new Map<CityModelName, ContainerResource>();
   private readonly lit = new Map<StandardMaterial, StandardMaterial>();
   private readonly masks = new Map<string, Texture>();
+  private readonly glassMeshes = new Map<Mesh, Mesh | null>();
+  private roomMaterial: StandardMaterial | null = null;
   private readonly tinted = new Map<StandardMaterial, StandardMaterial>();
   private readonly roofed = new Map<StandardMaterial, StandardMaterial[]>();
   private readonly roofMaps = new Map<Texture, Texture[]>();
   glowRegistrar: GlowRegistrar | null = null;
 
-  private constructor(private readonly app: AppBase) {}
+  private constructor(private readonly app: AppBase) {
+    app.once('destroy', () => {
+      for (const mesh of this.glassMeshes.values()) if (mesh) {
+        mesh.decRefCount(); if (mesh.refCount < 1) mesh.destroy();
+      }
+      this.glassMeshes.clear();
+      this.roomMaterial?.emissiveMap?.destroy(); this.roomMaterial?.destroy(); this.roomMaterial = null;
+    });
+  }
 
   /** One bounded load per application; failures never prevent the city from starting. */
   static load(app: AppBase): Promise<CityAssets> {
@@ -126,6 +145,42 @@ export class CityAssets {
     texture.setSource(canvas); this.masks.set(key, texture); return texture;
   }
 
+  /** One shared room texture/material and at most one extra mesh per tower source mesh. */
+  private towerRoomMaterial(): StandardMaterial {
+    if (this.roomMaterial) return this.roomMaterial;
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 512;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#000'; context.fillRect(0, 0, 512, 512);
+    for (const room of roomLights()) {
+      context.fillStyle = room.color;
+      context.fillRect((room.column + .14) * 512 / 5, (room.row + .14) * 512 / 6, .72 * 512 / 5, .72 * 512 / 6);
+    }
+    const texture = new Texture(this.app.graphicsDevice, { name: 'Tower room lights', width: 512, height: 512,
+      format: PIXELFORMAT_SRGBA8, mipmaps: false, minFilter: FILTER_LINEAR, magFilter: FILTER_LINEAR });
+    texture.setSource(canvas);
+    const material = new StandardMaterial(); material.name = 'Tower rooms · night only';
+    material.diffuse = new Color(0, 0, 0); material.emissive = new Color(1, 1, 1);
+    material.emissiveMap = texture; material.emissiveMapChannel = 'rgb'; material.emissiveIntensity = 0;
+    material.useLighting = false; material.useFog = false; material.blendType = BLEND_ADDITIVE; material.depthWrite = false;
+    material.update(); this.roomMaterial = material; this.glowRegistrar?.(material, 2.2);
+    return material;
+  }
+
+  private towerGlass(mesh: Mesh): Mesh | null {
+    if (this.glassMeshes.has(mesh)) return this.glassMeshes.get(mesh)!;
+    const positions: number[] = [], normals: number[] = [], uvs: number[] = [], indices: number[] = [];
+    mesh.getPositions(positions); mesh.getNormals(normals); mesh.getUvs(0, uvs); mesh.getIndices(indices);
+    const data = towerGlassGeometry(positions, normals, uvs, indices);
+    let overlay: Mesh | null = null;
+    if (data.indices.length) {
+      overlay = new Mesh(this.app.graphicsDevice);
+      overlay.setPositions(data.positions); overlay.setNormals(data.normals); overlay.setUvs(0, data.uvs); overlay.setIndices(data.indices); overlay.update();
+      // Keep cached geometry alive when the last visible building is rebuilt/destroyed.
+      overlay.incRefCount();
+    }
+    this.glassMeshes.set(mesh, overlay); return overlay;
+  }
+
   private litMaterial(source: StandardMaterial, region: readonly [number, number, number, number], strength: number): StandardMaterial {
     const existing = this.lit.get(source);
     if (existing) return existing;
@@ -171,7 +226,7 @@ export class CityAssets {
     this.tinted.set(source, material); return material;
   }
 
-  private instantiate(name: CityModelName, width: number, heightFactor = 1, lit = false, tint = false, roof?: number): Entity | null {
+  private instantiate(name: CityModelName, width: number, heightFactor = 1, lit = false, tint = false, roof?: number, targetHeight?: number): Entity | null {
     const resource = this.resources.get(name);
     if (!resource) return null;
     let wrapper: Entity | undefined;
@@ -188,13 +243,28 @@ export class CityAssets {
           else bounds = instance.aabb.clone();
         }
       }
-      const region = glowRegion(name);
+      const isTower = name.startsWith('tower-');
+      const region = isTower ? undefined : glowRegion(name);
       if (lit && region || tint || roof !== undefined) for (const render of source.findComponents('render') as RenderComponent[]) for (const instance of render.meshInstances) {
         if (!(instance.material instanceof StandardMaterial)) continue;
         let material = roof === undefined ? instance.material : this.roofMaterial(instance.material, roof);
         if (tint) material = this.tintedMaterial(material);
         else if (lit && region) material = this.litMaterial(material, region, name === 'streetlight' ? 3 : 2.2);
         instance.material = material;
+      }
+      if (isTower && lit) for (const render of source.findComponents('render') as RenderComponent[]) {
+        const overlays: MeshInstance[] = [];
+        for (const instance of render.meshInstances) {
+          const mesh = instance.mesh ? this.towerGlass(instance.mesh) : null;
+          if (mesh) {
+            const overlay = new MeshInstance(mesh, this.towerRoomMaterial(), instance.node);
+            overlay.castShadow = false; overlay.receiveShadow = false; overlays.push(overlay);
+          }
+        }
+        if (overlays.length) {
+          const glass = new Entity('Tower room overlays'); source.addChild(glass);
+          glass.addComponent('render', { meshInstances: overlays, castShadows: false, receiveShadows: false });
+        }
       }
       // Flat road tiles only receive shadows.
       if (name.startsWith('road-')) for (const render of source.findComponents('render') as RenderComponent[]) render.castShadows = false;
@@ -203,7 +273,7 @@ export class CityAssets {
       // Defensive runtime fit also handles a source whose authoring pivot differs from the package convention.
       offset.setLocalPosition(-bounds.center.x, -(bounds.center.y - bounds.halfExtents.y), -bounds.center.z);
       const scale = width / span;
-      wrapper.setLocalScale(scale, scale * heightFactor, scale);
+      wrapper.setLocalScale(scale, targetHeight === undefined ? scale * heightFactor : targetHeight / (bounds.halfExtents.y * 2), scale);
       return wrapper;
     } catch (error) {
       wrapper?.destroy();
@@ -213,14 +283,32 @@ export class CityAssets {
   }
 
   /**
-   * `level` is the visual level (1–3); a higher level always uses a larger model family.
+   * `level` is residential 1–9, otherwise the visual tier (1–3). Tower heights preserve housing progression.
    * `lit` marks a building with residents or allocated workers; empty ones stay dark at night.
    */
   building(zone: 'R' | 'C' | 'I', level: number, cell: number, lit = false): Entity | null {
     const family = LEVEL_VARIANTS[zone][Math.max(1, Math.min(3, level)) - 1];
     const name = family[cellHash(cell) % family.length];
-    // Commercial model tiers are one below persisted shop levels: tier 1 is retail level 2.
-    return this.instantiate(name, name.startsWith('tower-') ? 1.35 : 1.55, zone === 'C' ? retailCapacity(level + 1).heightFactor : 1, lit, false, zone === 'R' ? cellHash(cell, 7) % ROOF_PALETTES.length : undefined);
+    // Residential levels 4–9 retain their existing apartment/condo height progression.
+    const tower = name.startsWith('tower-');
+    const targetHeight = tower && zone === 'R' ? residentialVisualHeight(level) : undefined;
+    const model = this.instantiate(name, tower ? 1.35 : 1.55, zone === 'C' ? retailCapacity(level + 1).heightFactor : 1,
+      lit, false, zone === 'R' && !tower ? cellHash(cell, 7) % ROOF_PALETTES.length : undefined, targetHeight);
+    if (!model || !tower) return model;
+    // Props use parcel coordinates, not the model's authoring scale or commercial height stretch.
+    const building = new Entity(`Detailed ${name}`); building.addChild(model);
+    if (zone === 'R') {
+      const roof = TOWER_ROOFS[name as TowerName], y = targetHeight! * roof.deckRatio;
+      const lounge = this.detail('parasol-a', .36);
+      if (lounge) { lounge.setLocalPosition(roof.lounge[0], y + .004, roof.lounge[1]); building.addChild(lounge); }
+      const garden = this.detail('planter', .24);
+      if (garden) { garden.setLocalPosition(roof.garden[0], y + .004, roof.garden[1]); building.addChild(garden); }
+    }
+    const plant = this.detail('planter', .24);
+    if (plant) { plant.setLocalPosition(.76, 0, .76); building.addChild(plant); }
+    const light = this.streetlight();
+    if (light) { light.setLocalPosition(-.76, 0, .76); building.addChild(light); }
+    return building;
   }
 
   road(tile: RoadTile, connected: boolean): Entity | null { return this.instantiate(tile, 2, 1, false, !connected); }
