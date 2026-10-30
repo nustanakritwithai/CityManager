@@ -1,6 +1,7 @@
 .grouped-tool-anchor { position:relative; }
 .grouped-tool-anchor:after { content:''; position:absolute; top:4px; left:4px; border-left:3px solid transparent; border-right:3px solid transparent; border-bottom:4px solid currentColor; pointer-events:none; }
 .grouped-tool-anchor[aria-expanded=true]:after { transform:rotate(180deg); }
-.grouped-tool-anchor > span:last-child { white-space:normal; line-height:1.1; }
+.grouped-tool-anchor > span:last-child { white-space:normal; line-height:1.1; max-width:100%; overflow-wrap:anywhere; }
+.grouped-tool-submenu .tool-option > span:last-child { max-width:100%; overflow-wrap:anywhere; }
 /* Education controls keep their existing availability rule after moving into the portal. */
 .grouped-tool-submenu [hidden] { display:none !important; }
