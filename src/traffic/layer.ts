@@ -5,6 +5,9 @@ import { SceneCitizenVehicles } from '../scene-citizen-vehicles.ts';
 import { TrafficClock, gameMinute } from './clock.ts';
 import { changedRoadCells } from './flag.ts';
 import { activeCars, createFleet, fleetPoses, setFleetDemand, stepFleet, type FleetState } from './fleet.ts';
+import { busEnabled } from '../bus/types.ts';
+import { BusIntegration } from '../bus/integration.ts';
+import { SIZE } from '../sim.ts';
 export { trafficModelEnabled } from './flag.ts';
 /**
  * Game-side glue, created only when the flag is on. Owns the clock, the fleet and the instanced
@@ -12,7 +15,9 @@ export { trafficModelEnabled } from './flag.ts';
  * the road signature every frame, and rebuild only the changed region.
  */
 export class TrafficLayer {
-  readonly clock = new TrafficClock({ enabled: true });
+  /** Bus integration (PR B5): only when busEnabled() (BUS_ENABLED or ?bus=1). Null = unchanged game. */
+  bus: BusIntegration | null = null;
+  readonly clock = new TrafficClock({ enabled: true, ...(busEnabled() ? { demandFilter: (od, m) => this.bus ? this.bus.filter(od, m) : od } : {}) });
   fleet: FleetState = createFleet();
   private readonly cars: SceneCitizenVehicles;
   private readonly onScreen: (cell: number) => boolean;
@@ -25,12 +30,15 @@ export class TrafficLayer {
     if (c === this.city && sig === this.sig) return;
     const roads = c.cells.map(x => x.road), topo = roadTopologyKey(c);
     if (c === this.city) { const changed = changedRoadCells(this.roads, roads, this.topo, topo); if (changed.length) this.clock.roadEdited(c, changed); }
-    else this.fleet = createFleet();
+    else { this.fleet = createFleet(); this.bus = null; }
     this.city = c; this.roads = roads; this.topo = topo; this.sig = sig;
   }
   frame(c: City, minuteOfDay: number, paused: boolean, dt: number): void {
     this.checkRoads(c);
-    const ran = this.clock.advance(c, gameMinute(c.tick, minuteOfDay), paused), net = this.clock.network, last = this.clock.last;
+    const minute = gameMinute(c.tick, minuteOfDay);
+    if (this.clock.demandFilter && !this.bus) this.bus = new BusIntegration(c, minute, { width: SIZE });
+    if (this.bus && !paused) this.bus.tick(minute);
+    const ran = this.clock.advance(c, minute, paused), net = this.clock.network, last = this.clock.last;
     if (ran.length && net && last) setFleetDemand(this.fleet, net, this.clock.lastOd, last.assigned, last.times);
     if (!net) { this.cars.sync([]); return; }
     if (!paused) stepFleet(this.fleet, net, Math.min(dt, .25));
