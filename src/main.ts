@@ -89,7 +89,7 @@ import { installEducationPanel } from './education-panel.ts';
 import { bulldozeGuarded, type BusRemovalImpact } from './bus/player.ts';
 import { confirmBusRemoval } from './bus/panel.ts';
 import { createBusController } from './bus/mount.ts';
-import { connectPresentedBusEvents, setBusLiveReader } from './bus/live.ts';
+import { connectPresentedBusEvents } from './bus/live.ts';
 import './bus/player.css';
 import { installPanelTimeControls } from './panel-time-controls.ts';
 import { installSaveFeedback } from './save-feedback-panel.ts';
@@ -658,8 +658,8 @@ async function boot() {
     confirm: confirmRemoval,
   });
   busController.sync(tool);
-  // Engine exists only when the traffic model and ?bus=1 are both on (PR #132). Never drain it.
-  setBusLiveReader(() => trafficLayer?.bus?.engine ?? null);
+  // #126 replaced the traffic host. The old BusEngine slot on TrafficLayer stays unused, so the
+  // stop, line, and panel tools run from city.bus alone. Boarding notes still subscribe if presentBuses runs.
   void connectPresentedBusEvents();
   document.querySelectorAll<HTMLElement>('.tool-buttons [data-tool]').forEach(b => {
     if (b === selectButton) return; // Select's popup owns its arrow and explicit demolition option.

@@ -266,7 +266,7 @@ test('the dock button is hidden until the flag is on, and this PR does not drain
   assert.doesNotMatch(renderer, /busLineRoutes|polyline/);
   const main = readFileSync('src/main.ts', 'utf8');
   assert.match(main, /bulldozeGuarded/); assert.match(main, /busEnabled\(/);
-  assert.match(main, /trafficLayer\?\.bus\?\.engine/);
+  assert.doesNotMatch(main, /trafficLayer\?\.bus/);
   assert.match(readFileSync('src/bus/live.ts', 'utf8'), /subscribeBusEvents/);
   assert.doesNotMatch(readFileSync('src/bus/player.ts', 'utf8'), /validateBus|traffic\/bridge|src\/traffic\/layer|src\/traffic\/clock/);
 });
