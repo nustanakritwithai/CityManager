@@ -190,6 +190,7 @@ jobs:
             .test-output/building-issues/report.json
             .test-output/roads/*.png
             .test-output/roads/select-menu-report.json
+            .test-output/roads/grouped-tool-menu-report.json
             docs/population-preview/phone-population-2000.png
             .test-output/fallback/phone-population-2000.png
             docs/context-preview/home-tap-house-panel.png

@@ -8,6 +8,7 @@ import { roadDriveAllowed, roadLinked } from '../src/road-topology.ts';
 import { SAVE_KEY, ROAD_TOPOLOGY_BACKUP_KEY } from '../src/save-storage.ts';
 import { reachTouch } from './touch-reach.mjs';
 import { checkSelectMenu } from './select-menu-browser.mjs';
+import { checkGroupedToolMenus } from './grouped-tool-menu-browser.mjs';
 const output=resolve('.test-output/roads'), debugPort=9366;
 const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
 const allowed=new URL(url);assert.equal(allowed.hostname,'127.0.0.1');
@@ -99,6 +100,8 @@ try {
  checks.push('390px menu stacks above original button with same dimensions; chosen junction can be separated');
  const selectorReport = await checkSelectMenu({ evaluate, button, click, send, screenshot, load, close, paints, fixture: original, cell: cell(5,12), setTouch: value => { touchMode = value; } });
  checks.push(...selectorReport.checks); await writeFile(resolve(output,'select-menu-report.json'), JSON.stringify(selectorReport,null,2));
+ const groupedReport = await checkGroupedToolMenus({ evaluate, button, click, send, screenshot, load, close, paints, setTouch: value => { touchMode = value; } });
+ checks.push(...groupedReport.checks); await writeFile(resolve(output,'grouped-tool-menu-report.json'), JSON.stringify(groupedReport,null,2));
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log(JSON.stringify({checks,errors,external}));
 } catch(error){if(ws?.readyState===1){try{await screenshot('failure.png');}catch{}}console.error(JSON.stringify({checks,errors,external,error:String(error)}));throw error;}
 finally{clearTimeout(watchdog);if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();}
