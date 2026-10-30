@@ -17,11 +17,31 @@ const out=document.querySelector('#result'),assert=(ok,msg)=>{if(!ok)throw Error
  await reject(()=>saveActiveLocalSave({raw:baseline,token:{branchId:first.snapshot.branchId,revision:first.snapshot.revision},expectedMarker:first.marker.revision,fence,assertCurrent(){}}),/conflict/);
  await reject(()=>readActiveLocalSave({...fence,inventory:'another old tab added a backup'}),/choice-changed/);
  const options=()=>({raw:snap(c),token:{branchId:active.snapshot.branchId,revision:active.snapshot.revision},expectedMarker:active.marker.revision,fence,assertCurrent(){}});
- const before=JSON.stringify(await readActiveLocalSave(fence)),put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){const q=put.apply(this,args);this.transaction.abort();return q};await reject(()=>saveActiveLocalSave(options()),/abort|Abort/);IDBObjectStore.prototype.put=put;assert(JSON.stringify(await readActiveLocalSave(fence))===before,'aborted branch and pointer retain exact previous commit');
+ const before=JSON.stringify(await readActiveLocalSave(fence)),branchesBefore=JSON.stringify(await listRecoveryCopies()),put=IDBObjectStore.prototype.put;
+ let abortInjected=false,abortFailure;
+ try {
+  IDBObjectStore.prototype.put=function(...args){const q=put.apply(this,args);if(!abortInjected){this.transaction.abort();abortInjected=true;}return q};
+  try {await saveActiveLocalSave(options())} catch(error){abortFailure=error}
+ } finally {IDBObjectStore.prototype.put=put}
+ assert(abortInjected,'first-put transaction abort was injected');
+ assert(JSON.stringify(await readActiveLocalSave(fence))===before,'aborted branch and pointer retain exact previous commit');
+ assert(JSON.stringify(await listRecoveryCopies())===branchesBefore,'abort retains every current, previous, baseline and other-city snapshot');
+ // Edge can throw at the second objectStore lookup after the injected abort;
+ // engines that deliver onabort first use AbortError or our normalized error.
+ assert(abortFailure && (['AbortError','InvalidStateError','TransactionInactiveError'].includes(abortFailure.name)||abortFailure.message==='active-local-transaction-aborted'),'expected injected abort-state error, got '+String(abortFailure));
  await reject(()=>saveActiveLocalSave({...options(),factory:{open(){throw new DOMException('denied','SecurityError')}}}),/denied/);
  let checks=0;await reject(()=>saveActiveLocalSave({...options(),assertCurrent(){if(++checks>=2)throw Error('cross-tab changed')}}),/cross-tab/);assert(JSON.stringify(await readActiveLocalSave(fence))===before,'precommit race retained');
  // The transaction may succeed before the final cross-store fence changes: never report success or roll it back.
  checks=0;step(c);await reject(()=>saveActiveLocalSave({...options(),assertCurrent(){if(++checks===4)throw Error('postcommit changed')}}),/postcommit/);active=await readActiveLocalSave(fence);assert(active.snapshot.raw===snap(c),'uncertain committed snapshot preserved for review');
+ // Explicit switch A -> primary B -> quota must not mutate active-managed
+ // branches through the legacy fallback; confirmed rebind is atomic instead.
+ const cityA=active.snapshot,allA=JSON.stringify(await listRecoveryCopies()),markerA=JSON.stringify(active);
+ const cityB=snap(createCity(78));
+ await reject(()=>saveRecoveryCopy(cityB,null),/recovery-active-confirmation-required/);
+ assert(JSON.stringify(await listRecoveryCopies())===allA&&JSON.stringify(await readActiveLocalSave(fence))===markerA,'legacy quota fallback preserves all active A data');
+ active=await saveActiveLocalSave({raw:cityB,token:null,expectedMarker:active.marker.revision,fence,assertCurrent(){},allowRebind:true});
+ assert((await readActiveLocalSave(fence)).snapshot.raw===cityB,'confirmed second city reopens exactly');
+ assert((await listRecoveryCopies()).some(x=>x.branchId===cityA.branchId&&x.slot==='current'&&x.snapshot.raw===cityA.raw),'old active A retained after confirmed B');
  // Real market writer + actual active-save acceptance, then normal readonly restore.
  const financial=createCity(99),journal=marketJournalForTest(null),receipt='00000000-0000-4000-8000-000000000004';journal.guestId='00000000-0000-4000-8000-000000000003';journal.receipts[receipt]={claimId:'00000000-0000-4000-8000-000000000005',state:'applied',firmId:2,itemId:'crop:rice',quantity:1};financial.market=structuredClone(journal);localStorage.setItem(MARKET_SAVE_KEY,JSON.stringify(journal));let currentCity=financial,network=0;const runtime=createParkRuntime(financial),client=new MarketClient(()=>currentCity,'http://127.0.0.1:4317'),fetchBefore=window.fetch;window.fetch=()=>{network++;throw Error('network forbidden')};
  active=await withLocalCitySnapshot(financial,runtime,client,raw=>saveActiveLocalSave({raw,token:null,expectedMarker:active.marker.revision,fence,assertCurrent(){},allowRebind:true,marketClient:client}));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {saveActiveLocalSave,readActiveLocalSave,activeLocalRevision,requireExplicitActiveChoice} from '../src/active-local-save.ts';
+import {saveActiveLocalSave,readActiveLocalSave,activeLocalRevision,requireExplicitActiveChoice,canRetryActiveLocalSave} from '../src/active-local-save.ts';
 import {createCity,step} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
 
@@ -19,6 +19,7 @@ function fakeIdb(options:{stallWrite?:boolean;noAbortEvent?:boolean;abortThrowsC
   const dispatch=(fn:()=>void)=>{if(options.stallWrite&&mode==='readwrite')delayed.push(fn);else setImmediate(fn);};
   const t:any={objectStoreNames:names,error:null,abort(){if(options.abortThrowsComplete){setImmediate(()=>t.oncomplete?.());throw Error('abort failed');}if(options.noAbortEvent)return;aborted=true;setImmediate(()=>t.onabort?.());},objectStore(name:string){const data=draft.get(name)!;return {keyPath:null,autoIncrement:false,indexNames:[],...options.schema,
    openCursor(){pending++;const request:any={};const entries=[...data];let index=0;const next=()=>dispatch(()=>{if(aborted)return;const entry=entries[index++];request.result=entry?{key:entry[0],value:structuredClone(entry[1]),continue:next}:null;request.onsuccess?.();if(!entry){pending--;finish();}});next();return request;},
+   count(){pending++;const request:any={};dispatch(()=>{if(aborted)return;request.result=data.size;request.onsuccess?.();pending--;finish();});return request;},
    put(value:unknown,key:unknown){if(options.failWrites){t.error=new DOMException('quota','QuotaExceededError');t.abort();throw t.error;}if(aborted)throw new DOMException('aborted','TransactionInactiveError');puts++;data.set(key,structuredClone(value));return {};},
   };}};return t;
  }};
@@ -114,4 +115,33 @@ test('fresh suppression nonce invalidates an earlier active fence and delayed pr
  const {suppressRememberedChoice,rememberResumeChoice,RESUME_CHOICE_KEY}=await import('../src/save-choice.ts');const map=new Map<string,string>(),storage={getItem:(k:string)=>map.get(k)??null,setItem:(k:string,v:string)=>{map.set(k,v);}};const first=suppressRememberedChoice(storage),db=fakeIdb(),fixture=make(),oldFence={...fence,inventory:JSON.stringify([[RESUME_CHOICE_KEY,first]])};await saveActiveLocalSave({raw:fixture.raw(),token:null,expectedMarker:null,fence:oldFence,assertCurrent(){},factory:db.factory});const second=suppressRememberedChoice(storage);assert.notEqual(first,second);await assert.rejects(readActiveLocalSave({...oldFence,inventory:JSON.stringify([[RESUME_CHOICE_KEY,second]])},db.factory),/choice-changed/);
  map.delete(RESUME_CHOICE_KEY);const choice={id:'stored:current',label:'primary',raw:fixture.raw()};const pending=rememberResumeChoice(storage,choice,[choice]);const suppressed=suppressRememberedChoice(storage);await pending;assert.equal(storage.getItem(RESUME_CHOICE_KEY),suppressed);
  await assert.rejects(async()=>suppressRememberedChoice({getItem:()=>null,setItem(){throw new DOMException('full','QuotaExceededError')}}),/full/);
+});
+
+
+test('confirmed active-IDB quota abort permits retry only after exact durable-state verification',async()=>{
+ const options={failWrites:false},db=fakeIdb(options),fixture=make();
+ const saved=await saveActiveLocalSave({raw:fixture.raw(),token:null,expectedMarker:null,fence,assertCurrent(){},factory:db.factory});
+ const token={branchId:saved.snapshot.branchId,revision:saved.snapshot.revision},before=JSON.stringify([...db.stores].map(([k,v])=>[k,[...v]]));
+ step(fixture.city);options.failWrites=true;let failure:unknown;
+ try{await saveActiveLocalSave({raw:fixture.raw(),token,expectedMarker:saved.marker.revision,fence,assertCurrent(){},factory:db.factory});}catch(error){failure=error;}
+ assert.equal((failure as Error).name,'QuotaExceededError');assert.equal(JSON.stringify([...db.stores].map(([k,v])=>[k,[...v]])),before);
+ assert.equal(await canRetryActiveLocalSave(failure,saved,fence,db.factory),true);
+ assert.equal(await canRetryActiveLocalSave(Error('active-local-transaction-timeout-uncertain'),saved,fence,db.factory),false);
+ assert.equal(await canRetryActiveLocalSave(failure,{...saved,marker:{...saved.marker,revision:'stale'}},fence,db.factory),false);
+ assert.equal(await canRetryActiveLocalSave(failure,saved,{...fence,inventory:'changed'},db.factory),false);
+ options.failWrites=false;const retried=await saveActiveLocalSave({raw:fixture.raw(),token,expectedMarker:saved.marker.revision,fence,assertCurrent(){},factory:db.factory});assert.equal(retried.snapshot.raw,fixture.raw());
+ assert.equal(await canRetryActiveLocalSave(failure,saved,fence,db.factory),false,'successful commit can never be mistaken for unchanged state');
+});
+
+
+test('legacy emergency writer cannot invalidate active A; confirmed rebind saves B and retains A',async()=>{
+ const {saveRecoveryCopy}=await import('../src/recovery-idb.ts');
+ const db=fakeIdb(),a=make(),saved=await saveActiveLocalSave({raw:a.raw(),token:null,expectedMarker:null,fence,assertCurrent(){},factory:db.factory});
+ const before=JSON.stringify([...db.stores].map(([k,v])=>[k,[...v]]));const b=createCity(123),rawB=serializeParkSession(b,createParkRuntime(b));
+ await assert.rejects(saveRecoveryCopy(rawB,null,db.factory),{name:'ActiveLocalConfirmationRequired'});
+ assert.equal(JSON.stringify([...db.stores].map(([k,v])=>[k,[...v]])),before,'marker and every branch unchanged');
+ const switched=await saveActiveLocalSave({raw:rawB,token:null,expectedMarker:saved.marker.revision,fence,assertCurrent(){},allowRebind:true,factory:db.factory});
+ assert.equal((await readActiveLocalSave(fence,db.factory))?.snapshot.raw,rawB);
+ assert.notEqual(switched.snapshot.branchId,saved.snapshot.branchId);
+ assert.equal((db.stores.get('branches')!.get(saved.snapshot.branchId) as any).current.copy,a.raw());
 });

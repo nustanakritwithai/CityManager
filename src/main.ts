@@ -9,7 +9,7 @@ import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
 import { saveLocalCitySession, loadLocalCitySession, loadRecoveryCityReadOnly, exportLocalCitySession, withLocalCitySnapshot, hasOnlyKnownNonCityKeys } from './local-city-save.ts';
-import {saveActiveLocalSave,readActiveLocalSave,activeLocalRevision,requireExplicitActiveChoice,type LegacyFence} from './active-local-save.ts';
+import {saveActiveLocalSave,readActiveLocalSave,activeLocalRevision,requireExplicitActiveChoice,canRetryActiveLocalSave,type LegacyFence} from './active-local-save.ts';
 import { saveRecoveryCopy, listRecoveryCopies, type RecoveryToken, type RecoverySnapshot } from './recovery-idb.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
@@ -676,7 +676,7 @@ async function boot() {
           const saved=await saveRecoveryCopy(raw,recoveryToken);
           if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างสร้างสำเนา สำเนาของเมืองก่อนหน้าอาจอยู่ในเบราว์เซอร์');
           recoveryToken={branchId:saved.branchId,revision:saved.revision};return saved;
-        }catch(error){if(generation===saveGuard.generation&&capturedCity===city)recoveryUncertain=true;throw error;}
+        }catch(error){if(generation===saveGuard.generation&&capturedCity===city&&!(error instanceof Error&&error.name==='ActiveLocalConfirmationRequired'))recoveryUncertain=true;throw error;}
       });
     });
     recoveryQueue=work.then(()=>{},()=>{});return work;
@@ -686,7 +686,16 @@ async function boot() {
     if(recoveryUncertain||saveGuard.armed)throw Error('active-local-review-required');
     const fence=localFence(),marker=activeLocal?activeRevision:await activeLocalRevision(),marketBefore=JSON.stringify(captured.market),clientBefore=JSON.stringify(marketPanel?.client.exportSave());
     const assertCurrent=()=>{if(city!==captured||saveGuard.generation!==generation||JSON.stringify(localFence())!==JSON.stringify(fence)||JSON.stringify(captured.market)!==marketBefore||JSON.stringify(marketPanel?.client.exportSave())!==clientBefore||serializeParkSession(captured,runtime,JSON.parse(raw).market)!==raw)throw Error('เมืองหรือเซฟเปลี่ยน กรุณาตรวจแล้วเลือกอีกครั้ง');};
-    try{const result=await saveActiveLocalSave({raw,token:recoveryToken,expectedMarker:marker,fence,assertCurrent,allowRebind:!activeLocal,marketClient:marketPanel?.client});assertCurrent();activeLocal=true;activeRevision=result.marker.revision;recoveryToken={branchId:result.snapshot.branchId,revision:result.snapshot.revision};recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);return result.snapshot;}catch(error){if(city===captured&&saveGuard.generation===generation)recoveryUncertain=true;throw error;}
+    let retryBaseline:Awaited<ReturnType<typeof readActiveLocalSave>>=null;
+    try{if(activeLocal){retryBaseline=await readActiveLocalSave(fence);assertCurrent();}const result=await saveActiveLocalSave({raw,token:recoveryToken,expectedMarker:marker,fence,assertCurrent,allowRebind:!activeLocal,marketClient:marketPanel?.client});assertCurrent();activeLocal=true;activeRevision=result.marker.revision;recoveryToken={branchId:result.snapshot.branchId,revision:result.snapshot.revision};recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);return result.snapshot;}catch(error){
+      if(city===captured&&saveGuard.generation===generation){
+        recoveryUncertain=true;
+        if(activeLocal&&retryBaseline&&retryBaseline.marker.revision===marker&&await canRetryActiveLocalSave(error,retryBaseline,fence)){
+          try{assertCurrent();recoveryUncertain=false;}catch{/* Changed city or fence stays locked for review. */}
+        }
+      }
+      throw error;
+    }
   };
   const writeActiveLocal=async()=>{const captured=city,runtime=parkRuntime,generation=saveGuard.generation,wasPaused=paused;paused=true;try{return await withLocalCitySnapshot(captured,runtime,marketPanel?.client,raw=>persistActiveRaw(raw,captured,runtime,generation));}finally{if(city===captured&&saveGuard.generation===generation)paused=wasPaused;}};
   const runTrackedSave = async (explicit=false) => {
@@ -698,6 +707,9 @@ async function boot() {
       primaryAttempted=true;await writeLocalSave(); if(attemptGeneration!==saveGuard.generation||attemptCity!==city)throw Error('เมืองเปลี่ยนระหว่างบันทึก'); recoveryOnly=false;marketPanel?.client.setRecoveryReadOnly(false);refreshRecoveryInfo(); saveFeedback.succeeded(attempt); void rememberChoice({id:'stored:current',label:'',raw:readStoredCity(localStorage)!.raw});
     } catch (error) {
       if(attemptGeneration!==saveGuard.generation||attemptCity!==city){saveFeedback.cancel(attempt);throw error;}
+      // Never run the legacy emergency writer after an active-save failure:
+      // it would rotate branches without updating the atomic active marker.
+      if(activeLocal){saveFeedback.failed(`${error instanceof Error?error.message:'บันทึกไม่ได้'} · เซฟในเบราว์เซอร์ยังไม่สำเร็จ ข้อมูลเดิมยังอยู่`,attempt);throw error;}
       if(isQuotaError(error)||(error instanceof Error&&error.name==='RecoveryOnly')){
         if(primaryAttempted)status('บันทึกไม่ได้: เซฟหลักไม่สำเร็จ · กำลังพยายามสร้างสำเนากู้คืน');
         try{
@@ -708,6 +720,11 @@ async function boot() {
           saveFeedback.failed(message,attempt);throw Object.assign(Error(message),{name:'RecoveryCopyOnly'});
         }catch(recoveryError){
           if(attemptGeneration!==saveGuard.generation||attemptCity!==city){saveFeedback.cancel(attempt);throw recoveryError;}
+          if(recoveryError instanceof Error&&recoveryError.name==='ActiveLocalConfirmationRequired'){
+            recoveryOnly=true;recoveryToken=null;marketPanel?.client.setRecoveryReadOnly(true);
+            saveFeedback.failed('เมืองนี้ยังไม่ได้บันทึก · เซฟเดิมยังอยู่ กดบันทึกเพื่อยืนยันเก็บเมืองนี้แบบบีบอัดในเบราว์เซอร์ · พักตลาดออนไลน์',attempt);
+            throw recoveryError;
+          }
           if(recoveryError instanceof Error&&recoveryError.name==='RecoveryCopyOnly')throw recoveryError;
           saveFeedback.failed(`${primaryAttempted?'เซฟหลักไม่สำเร็จ':'ไม่ได้พยายามเขียนเซฟหลักในโหมดกู้คืน'} และยังยืนยันสำเนากู้คืนไม่ได้ (${recoveryError instanceof Error?recoveryError.message:'พื้นที่หรือเบราว์เซอร์ไม่พร้อม'}) · ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์`,attempt);
           throw recoveryError;
@@ -772,19 +789,23 @@ async function boot() {
     const requestGeneration=saveGuard.generation,requestCity=city;
     try { await trackedSave(true); if(requestGeneration!==saveGuard.generation||requestCity!==city)return; autosave.markSaved(city.tick); sound('ui-save'); status(activeLocal?'บันทึกในเบราว์เซอร์นี้แล้ว · พักตลาดออนไลน์':marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { if(requestGeneration!==saveGuard.generation||requestCity!==city)return; sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
   });
-  const preserveExplicitChoice=async(raw:string)=>{const captured=city,generation=saveGuard.generation;let fence=localFence(),active:Awaited<ReturnType<typeof readActiveLocalSave>>=null;const current=()=>{if(city!==captured||saveGuard.generation!==generation||JSON.stringify(localFence())!==JSON.stringify(fence))throw Error('เมืองเปลี่ยนระหว่างเลือก');};try{active=await readActiveLocalSave(fence);}catch{current();let hint:string;const rows=JSON.parse(fence.inventory) as [string,string|null][];try{hint=suppressRememberedChoice(localStorage);}catch{throw Error('ยังบันทึกการเลือกเมืองใหม่ไม่ได้ กรุณาเก็บเมืองเดิมไว้ก่อน');}fence={...fence,inventory:JSON.stringify([...rows.filter(([k])=>k!==RESUME_CHOICE_KEY),[RESUME_CHOICE_KEY,hint]].sort(([a],[b])=>a!.localeCompare(b!)))};}current();if(active&&active.snapshot.raw!==raw&&!active.marker.requireChoice)await requireExplicitActiveChoice(active,fence,current);current();};
+  const preserveExplicitChoice=async(raw:string)=>{const captured=city,generation=saveGuard.generation;let fence=localFence(),active:Awaited<ReturnType<typeof readActiveLocalSave>>=null,managed=false;const current=()=>{if(city!==captured||saveGuard.generation!==generation||JSON.stringify(localFence())!==JSON.stringify(fence))throw Error('เมืองเปลี่ยนระหว่างเลือก');};try{active=await readActiveLocalSave(fence);managed=!!active;}catch(readError){current();const unavailable=readError instanceof Error&&(readError.name==='SecurityError'||/^active-local-open-(timeout|blocked|failed)$/.test(readError.message));try{if(!unavailable)managed=(await activeLocalRevision())!==null;}catch(error){if(!(error instanceof Error)||!(error.name==='SecurityError'||/^active-local-open-(timeout|blocked|failed)$/.test(error.message)))throw error;}current();let hint:string;const rows=JSON.parse(fence.inventory) as [string,string|null][];try{hint=suppressRememberedChoice(localStorage);}catch{throw Error('ยังบันทึกการเลือกเมืองใหม่ไม่ได้ กรุณาเก็บเมืองเดิมไว้ก่อน');}fence={...fence,inventory:JSON.stringify([...rows.filter(([k])=>k!==RESUME_CHOICE_KEY),[RESUME_CHOICE_KEY,hint]].sort(([a],[b])=>a!.localeCompare(b!)))};}current();if(active&&active.snapshot.raw!==raw&&!active.marker.requireChoice)await requireExplicitActiveChoice(active,fence,current);current();return managed;};
   const loadStored = async (source: SaveSource, selectedRaw?:string) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return false; }
       if(selectedRaw!==undefined&&saved.raw!==selectedRaw)throw Error('เซฟที่เลือกเปลี่ยนแล้ว กรุณาตรวจใหม่');
-      await preserveExplicitChoice(saved.raw);
+      const managed=await preserveExplicitChoice(saved.raw);
       const oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
-      await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,restored=>{
+      const assertSource=()=>{if(selectedRaw!==undefined&&readStoredCity(localStorage,source)?.raw!==selectedRaw)throw Error('เซฟที่เลือกเปลี่ยนแล้ว กรุณาตรวจใหม่');};
+      const applyStored=(restored:ReturnType<typeof deserializeParkSession>)=>{
+        assertSource();
         if (!restored.city.education) adoptSavedEducation(restored.city);
-        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;activeLocal=false;activeRevision=null;recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);autosave.reset();
-      },()=>{if(selectedRaw!==undefined&&readStoredCity(localStorage,source)?.raw!==selectedRaw)throw Error('เซฟที่เลือกเปลี่ยนแล้ว กรุณาตรวจใหม่');});
+        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;activeLocal=false;activeRevision=null;recoveryOnly=managed;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(managed);autosave.reset();
+      };
+      if(managed){assertSource();await loadRecoveryCityReadOnly(saved.raw,marketPanel?.client,saveGuard,applyStored);}
+      else await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,applyStored,assertSource);
       saveFeedback.recovered();
-      void rememberChoice({id:`stored:${source}`,label:'',raw:saved.raw});
+      if(!managed)void rememberChoice({id:`stored:${source}`,label:'',raw:saved.raw});
       cueLimiter.reset();
       syncEducationTools();
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();

@@ -63,6 +63,31 @@ async function cell(index) {
 }
 async function shot(name) { stage = `Screenshot ${name}`; const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 75, captureBeyondViewport: false }); await writeFile(resolve(output, name + '.jpg'), Buffer.from(r.data, 'base64')); console.log(stage); }
 async function game() { if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector'); await button('#toggle-game-menu'); }
+// A quota fallback now requires the player's explicit existing-Save confirmation.
+async function retrySave() {
+  await game();await button('#save');
+  await until("!!document.querySelector('#save-promotion-confirm[open]')||document.querySelector('#save-failure-banner').hidden");
+  if(await evaluate("!!document.querySelector('#save-promotion-confirm[open]')")){
+    await button('#save-promotion-accept');
+    // A readonly Load has already cleared its warning. Wait for the actual
+    // asynchronous confirmation attempt to finish before injecting next faults.
+    await until("!document.querySelector('#save-promotion-confirm')");
+  }
+  await until("document.querySelector('#save-failure-banner').hidden");
+}
+// After accepting the compressed local save, writes use IDB rather than the
+// legacy primary. Fail only the backend under test; never synthesize UI warnings.
+async function failLocalWrites(label, backend='active') {
+  assert.ok(['active','legacy'].includes(backend));
+  await evaluate(`(()=>{window.__uxIdbPut??=IDBObjectStore.prototype.put;window.__uxIdbFailures=0;IDBObjectStore.prototype.put=function(...args){if(${JSON.stringify(backend)}==='active'&&this.transaction.db.name==='citymanager.emergency-recovery-v1'){window.__uxIdbFailures++;throw new DOMException(${JSON.stringify(label)},'QuotaExceededError')}return window.__uxIdbPut.apply(this,args)};Storage.prototype.setItem=function(k,v){if(${JSON.stringify(backend)}==='legacy'&&k.startsWith('citymanager.'))throw new DOMException(${JSON.stringify(label)},'QuotaExceededError');return window.__uxWrite.call(this,k,v)}})()`);
+}
+
+async function restoreLocalWrites() {await evaluate('Storage.prototype.setItem=window.__uxWrite;if(window.__uxIdbPut)IDBObjectStore.prototype.put=window.__uxIdbPut');}
+async function durableActiveState() {
+ return evaluate(`new Promise((resolve,reject)=>{const q=indexedDB.open('citymanager.emergency-recovery-v1');q.onerror=()=>reject(q.error);q.onsuccess=()=>{const db=q.result,names=[...db.objectStoreNames].sort(),t=db.transaction(names,'readonly'),rows={};for(const name of names){rows[name]=[];const c=t.objectStore(name).openCursor();c.onsuccess=()=>{if(c.result){rows[name].push([c.result.key,c.result.value]);c.result.continue()}}}t.oncomplete=()=>{db.close();resolve(JSON.stringify(rows))};t.onabort=()=>{db.close();reject(t.error)}}})`);
+}
+
+
 const city = createCity(3, { starter: true });
 const schoolCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'school') === null); assert.ok(buildCampus(city, schoolCell, 'school').ok);
 const universityCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'university') === null); assert.ok(buildCampus(city, universityCell, 'university').ok);
@@ -160,16 +185,21 @@ try {
   await button('#save-failure-export'); assert.equal(await evaluate('window.__uxDownloads'), 1);
   assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"), false, 'requesting export is not a successful local save');
   await evaluate('Storage.prototype.setItem=window.__uxWrite;HTMLAnchorElement.prototype.click=window.__uxAnchorClick');
-  await game(); await button('#save');
-  await until("document.querySelector('#save-failure-banner').hidden");
+  await retrySave();
   checks.push('manual quota failure preserves save, persists across tools/panels, export uses existing path, successful retry clears warning');
   // Advance actual game state so the periodic autosave has a changed revision to save.
   await button('#panel-pause'); const before = await evaluate('JSON.parse(cityManager.snapshot()).tick'); await until(`JSON.parse(cityManager.snapshot()).tick>${before}`); await button('#panel-pause');
-  await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic auto quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)};window.__uxIntervals.forEach(fn=>fn())");
+  const activeBeforeQuota=await durableActiveState(),legacyBeforeQuota=await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))');
+  await failLocalWrites('Synthetic active-IDB autosave quota');
+  await evaluate('window.__uxIntervals.forEach(fn=>fn())');
   await until("!document.querySelector('#save-failure-banner').hidden");
+  assert.ok(await evaluate('window.__uxIdbFailures>0'),'autosave failed a real active-IDB write');
+  assert.equal(await durableActiveState(),activeBeforeQuota,'failed active autosave cannot rotate emergency branches or marker');
+  assert.equal(await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))'),legacyBeforeQuota,'failed active autosave preserves every legacy byte');
   await shot('14-autosave-failure-after');
-  await evaluate('Storage.prototype.setItem=window.__uxWrite;window.__uxIntervals.forEach(fn=>fn())');
+  await restoreLocalWrites();await evaluate('window.__uxIntervals.forEach(fn=>fn())');
   await until("document.querySelector('#save-failure-banner').hidden"); checks.push('periodic autosave failure and real successful retry');
+  assert.equal(await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))'),legacyBeforeQuota,'successful active retry preserves every legacy byte');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Emulation.setTouchEmulationEnabled', { enabled: false });
   mobile = false;
@@ -179,7 +209,7 @@ try {
   await evaluate("document.querySelector('#education-details').scrollIntoView({block:'start'})");
   await shot('15-desktop-campus-after');
   await game();
-  await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic desktop quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
+  await failLocalWrites('Synthetic desktop local-storage quota');
   await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
   await button('#close-inspector'); await cell(schoolCell);
   assert.equal(await evaluate("document.querySelector('#inspector').getBoundingClientRect().bottom<=document.querySelector('.tool-dock').getBoundingClientRect().top"), true, 'desktop warning preserves space between the inspector and build tools');
@@ -187,8 +217,8 @@ try {
   await evaluate("document.querySelector('#education-details').scrollIntoView({block:'start'})");
   assert.equal(await evaluate("(()=>{const p=document.querySelector('#panel-pause').getBoundingClientRect(),b=document.querySelector('#save-failure-banner').getBoundingClientRect();return b.top>=0&&b.right<=innerWidth&&b.bottom<=p.top&&!!document.elementFromPoint(p.x+p.width/2,p.y+p.height/2)?.closest('#panel-pause')})()"), true, 'desktop warning leaves the panel clock reachable');
   await shot('16-desktop-save-warning-after');
-  await evaluate('Storage.prototype.setItem=window.__uxWrite');
-  await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
+  await restoreLocalWrites();
+  await retrySave();
   checks.push('desktop campus details and active persistent save warning at 1280x900, reachable panel clock, successful retry');
   await send('Emulation.setDeviceMetricsOverride', { width:844, height:390, screenWidth:844, screenHeight:390, deviceScaleFactor:1, mobile:true });
   await send('Emulation.setTouchEmulationEnabled', { enabled:true, maxTouchPoints:1 });
@@ -197,11 +227,15 @@ try {
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(cardCity))})`);
   await button('#load'); await until('JSON.parse(cityManager.snapshot()).tick===29');
   const cardSnapshot = await evaluate('cityManager.snapshot()');
+  const switchLegacy=await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))');
+  await retrySave();
+  assert.equal(await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))'),switchLegacy,'confirmed readonly city switch never writes legacy slots');
+  assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'confirmed switch saves exactly the chosen city');
   const matrixFailures = [];
   for (const warning of [false,true]) {
     if (warning) {
       await game();
-      await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic landscape quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
+      await failLocalWrites('Synthetic landscape active-IDB quota');
       await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
     }
     for (const [index, entry] of cardCases.entries()) {
@@ -241,10 +275,10 @@ try {
   await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'),false);
   await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'),true);
   assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"),false);
-  await evaluate('Storage.prototype.setItem=window.__uxWrite');
-  await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
+  await restoreLocalWrites();
+  await retrySave();
   checks.push('all six cards at landscape 844x390, warning on/off: complete identity and at least two complete labelled numeric metrics, unchanged city data, no horizontal overflow, 44px reachable controls and real save retry');
-  await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts });
+  await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts, failLocalWrites, restoreLocalWrites, retrySave });
   checks.push('seven tall reading panels across phone, short, landscape and wide-request viewports, warning on/off: >=90% panel height, contained scroll content, inline persistent warning, physical 44px controls, full primary values at normal reading heights, unchanged city data');
   assert.equal(errors.length, 0, JSON.stringify(errors));
   await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, readingLayouts, checks, errors }, null, 2));
@@ -256,6 +290,6 @@ try {
   throw error;
 } finally {
   if (injected) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier }).catch(() => {});
-  await evaluate('if(window.__uxWrite)Storage.prototype.setItem=window.__uxWrite').catch(() => {});
+  await evaluate('if(window.__uxWrite)Storage.prototype.setItem=window.__uxWrite;if(window.__uxIdbPut)IDBObjectStore.prototype.put=window.__uxIdbPut').catch(() => {});
   ws.close(); server.close();
 }

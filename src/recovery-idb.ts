@@ -16,10 +16,17 @@ function open(factory:IDBFactory,create:boolean):Promise<IDBDatabase|null>{retur
  request.onsuccess=()=>{if(settled){request.result.close();return;}settled=true;clearTimeout(timer);resolve(request.result);};
 });}
 function transaction<T>(db:IDBDatabase,mode:IDBTransactionMode,work:(store:IDBObjectStore,set:(x:T)=>void,abort:(reason:unknown)=>void)=>void):Promise<T>{return new Promise((resolve,reject)=>{
- const tx=db.transaction(STORE,mode);let result:T,reason:unknown;const timer=setTimeout(()=>{reason=Error('recovery-transaction-timeout');try{tx.abort();}catch{}},TIMEOUT);
+ const activeManaged=mode==='readwrite'&&db.objectStoreNames.contains('active-city');
+ const tx=db.transaction(activeManaged?[STORE,'active-city']:STORE,mode);let result:T,reason:unknown;const timer=setTimeout(()=>{reason=Error('recovery-transaction-timeout');try{tx.abort();}catch{}},TIMEOUT);
  const fail=(error:unknown)=>{reason=error;try{tx.abort();}catch{}};
  tx.oncomplete=()=>{clearTimeout(timer);resolve(result);};tx.onabort=()=>{clearTimeout(timer);reject(reason??tx.error??Error('recovery-transaction-aborted'));};tx.onerror=()=>{};
- try{work(tx.objectStore(STORE),value=>{result=value;},fail);}catch(error){fail(error);}
+ const run=()=>{try{work(tx.objectStore(STORE),value=>{result=value;},fail);}catch(error){fail(error);}};
+ try{
+  // Share the same transaction lock with active saves: standalone emergency
+  // writes must never invalidate the active marker's full branch inventory.
+  if(activeManaged){const metadata=tx.objectStore('active-city').count();metadata.onsuccess=()=>{if(metadata.result>0)fail(Object.assign(Error('recovery-active-confirmation-required'),{name:'ActiveLocalConfirmationRequired'}));else run();};}
+  else run();
+ }catch(error){fail(error);}
 });}
 function check(raw:string){const {city}=deserializeParkSession(raw);const parsed=JSON.parse(raw);if(Object.hasOwn(parsed,'market'))validateRecoveryMarketJournal(parsed.market);return {tick:city.tick,version:parsed.version};}
 export function valid(branchId:string,slot:'baseline'|'previous'|'current',entry:Entry):RecoverySnapshot{

@@ -44,3 +44,10 @@ export async function activeLocalRevision(factory:IDBFactory=indexedDB):Promise<
 export async function requireExplicitActiveChoice(active:ActiveLocalSave,fence:LegacyFence,assertCurrent:()=>void,factory:IDBFactory=indexedDB):Promise<void>{
  assertCurrent();const db=await open(factory,false);if(!db)throw Error('active-local-marker-missing');try{const before=await snapshot(db);if(JSON.stringify(before.marker)!==JSON.stringify(active.marker)||await hash(inventory(before.rows))!==active.marker.inventoryHash||!sameFence(active.marker,fence))throw Error('active-local-conflict');const next:Marker={...active.marker,revision:crypto.randomUUID(),requireChoice:true};assertCurrent();await tx<void>(db,true,(t,set,fail)=>read(t,(rows,marker)=>{try{assertCurrent();if(inventory(rows)!==inventory(before.rows)||JSON.stringify(marker)!==JSON.stringify(before.marker))throw Error('active-local-conflict');t.objectStore(META).put(next,KEY);set();}catch(e){fail(e);}},fail));const after=await snapshot(db);assertCurrent();if(JSON.stringify(after.marker)!==JSON.stringify(next)||inventory(after.rows)!==inventory(before.rows))throw Error('active-local-selection-uncertain');}finally{db.close();}
 }
+
+/** Only a known abort/quota with verified unchanged durable state permits retry.
+ * Timeouts, conflicts and uncertain readback still require explicit review. */
+export async function canRetryActiveLocalSave(error:unknown,before:ActiveLocalSave,fence:LegacyFence,factory:IDBFactory=indexedDB):Promise<boolean>{
+ if(!(error instanceof Error)||!['QuotaExceededError','AbortError'].includes(error.name))return false;
+ try{const active=await readActiveLocalSave(fence,factory);return !!active&&!active.marker.requireChoice&&JSON.stringify(active)===JSON.stringify(before);}catch{return false;}
+}

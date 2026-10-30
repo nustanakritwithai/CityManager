@@ -107,7 +107,11 @@ async function clickAt(x, y) {
 async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
-  await clickAt(p.x, p.y);
+  // Load now fences asynchronous IndexedDB selection before applying the city.
+  // Observe its real completion status, then retain every exact state assertion.
+  if(selector==='#load')await evaluate(`(()=>{window.__loadCompleted=false;window.__loadObserver?.disconnect();window.__loadObserver=new MutationObserver(()=>{if(/^(โหลดวันที่|นำเข้า v)/.test(document.querySelector('#status').textContent)){window.__loadCompleted=true;window.__loadObserver.disconnect()}});window.__loadObserver.observe(document.querySelector('#status'),{childList:true,subtree:true,characterData:true})})()`);
+  try {await clickAt(p.x, p.y);if(selector==='#load')await until('window.__loadCompleted===true');}
+  finally {if(selector==='#load')await evaluate('window.__loadObserver?.disconnect()');}
 }
 const cellPoint = index => evaluate(`window.cityManager.cellScreen(${index})`);
 async function cell(index) { const p = await cellPoint(index); await clickAt(p.x, p.y); }
