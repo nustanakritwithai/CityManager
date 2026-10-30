@@ -1,0 +1,10 @@
+{
+  "browser": "Edg/156.0.4314.50",
+  "url": "http://127.0.0.1:4182/CityManager/rail-preview.html",
+  "checks": [
+    "portrait: train/queues, close/reopen, atomic in-memory restore, inaccessible demand, occupied edit refusal, cancel/repair, native touch pan/cancel, repeated menus, layout, storage unchanged",
+    "landscape: train/queues, close/reopen, atomic in-memory restore, inaccessible demand, occupied edit refusal, cancel/repair, native touch pan/cancel, repeated menus, layout, storage unchanged"
+  ],
+  "errors": [],
+  "device": "Edge emulated touch; software WebGL; not Android or FPS evidence"
+}

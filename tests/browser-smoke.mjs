@@ -127,7 +127,7 @@ try {
   // Preserve a deterministic, paused baseline through the public Save control.
   await game(); await button('#save'); const saved = await state();
   assert.match(await text('#status'), /Saved day/);
-  await button('#new-city'); await button('dialog button:first-of-type');
+  await button('#new-city'); await button('dialog[open] button:first-of-type');
   await button('#new-city'); await key('Escape');
   assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), false);
   assert.deepEqual(await state(), saved); checks.push('Game-menu new-city cancel and Escape keep state'); await closeInspector();

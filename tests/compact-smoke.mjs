@@ -185,7 +185,7 @@ async function candidateAssertions() {
   await page('game');
   for (const id of ['save', 'load', 'new-city', 'inspector-status']) assert.equal(await evaluate(`!!document.querySelector('#${id}')?.closest('#game-content')`), true, `${id} belongs only to explicit Game page`);
   await tall('s22-game'); await button('#save'); await assertSavedCity(evaluate, fixture); await shot('game-menu.png');
-  await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
+  await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('dialog[open] button:first-of-type'); assert.deepEqual(await state(), city);
   await key('Escape'); assert.notEqual((await route()).open, 'true'); await mapRestored(); checks.push('Game menu owns persistence/status; actual Save, confirmation Cancel and Back/Escape preserve state and restore the map');
   for (const item of [
     { name: 'browser-height', width: 360, height: 600, screenWidth: 360, screenHeight: 780 },
@@ -200,7 +200,7 @@ async function candidateAssertions() {
     await page('game'); await tall(`${item.name}-game`);
     if (item.width === 980) {
       await button('#new-city'); const dialog = await evaluate('(()=>{const d=document.querySelector("dialog[open]"),r=d.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight,buttons:[...d.querySelectorAll("button")].map(e=>{const b=e.getBoundingClientRect();return{w:b.width*k,h:b.height*k,font:parseFloat(getComputedStyle(e).fontSize)*k,hit:!!document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest("dialog button")}})}})()');
-      assert.ok(dialog.left >= 0 && dialog.right <= dialog.width && dialog.top >= 0 && dialog.bottom <= dialog.height); assert.ok(dialog.buttons.every(b => b.w >= 43.5 && b.h >= 43.5 && b.font >= 13.5 && b.hit), 'Wide-request New/Cancel retain 44px physical targets and readable type'); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
+      assert.ok(dialog.left >= 0 && dialog.right <= dialog.width && dialog.top >= 0 && dialog.bottom <= dialog.height); assert.ok(dialog.buttons.every(b => b.w >= 43.5 && b.h >= 43.5 && b.font >= 13.5 && b.hit), 'Wide-request New/Cancel retain 44px physical targets and readable type'); await button('dialog[open] button:first-of-type'); assert.deepEqual(await state(), city);
     }
     await mapRestored();
   }

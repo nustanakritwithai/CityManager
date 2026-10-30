@@ -106,6 +106,62 @@ test('synchronous owner automation observes a complete boundary and can pause th
   assert.equal(r.minuteRemainder, 0); assert.equal(r.recreation.minute, c.tick * 1440);
 });
 
+test('minute observer publishes synchronized clocks before day callbacks and at the final partial day', () => {
+  for (const makeCity of [fresh, () => createCity(61025)]) {
+    const c = makeCity(), r = createParkRuntime(c), ref = deserialize(serialize(c)), expected = createParkRuntime(ref);
+    advanceParkRuntime(c, r, 1438.75, () => step(c));
+    advanceParkRuntime(ref, expected, 1438.75, () => step(ref));
+    let observed = r.recreation.minute, boundaries = 0;
+    const observations: number[] = [];
+    advanceParkRuntime(c, r, 3.5, () => step(c), () => {
+      boundaries++;
+      assert.equal(observed, c.tick * 1440, 'consumer is current before synchronous render/save');
+      assert.doesNotThrow(() => serializeParkSession(c, r));
+    }, undefined, minute => {
+      assert.ok(minute > observed);
+      assert.equal(minute, c.tick * 1440 + r.activity.minute);
+      assert.equal(minute, r.recreation.minute);
+      observed = minute; observations.push(minute);
+    });
+    advanceParkRuntime(ref, expected, 3.5, () => step(ref));
+    assert.equal(boundaries, 1);
+    assert.equal(observed, c.tick * 1440 + 2);
+    assert.equal(r.minuteRemainder, .25);
+    assert.equal(serializeParkSession(c, r), serializeParkSession(ref, expected));
+    if (!c.parks.length) assert.deepEqual(observations, [c.tick * 1440, c.tick * 1440 + 2]);
+  }
+});
+
+test('minute observer earns no time during pause or fractional-only advances and stops at the actual budget boundary', () => {
+  for (const makeCity of [fresh, () => createCity(61025)]) {
+    const c = makeCity(), r = createParkRuntime(c), ref = deserialize(serialize(c)), expected = createParkRuntime(ref);
+    let observed = r.recreation.minute, calls = 0;
+    const observe = (minute: number) => { observed = minute; calls++; };
+    const before = serializeParkSession(c, r);
+    advanceParkRuntime(c, r, 0, () => assert.fail('paused day'), undefined, undefined, observe);
+    assert.equal(serializeParkSession(c, r), before); assert.equal(calls, 0);
+    advanceParkRuntime(c, r, .25, () => assert.fail('fractional day'), undefined, undefined, observe);
+    assert.equal(calls, 0);
+    advanceParkRuntime(c, r, 2880.5, () => step(c), undefined, () => false, observe);
+    const processed = c.parks.length ? 1 : 1440;
+    assert.equal(observed, ref.tick * 1440 + processed);
+    assert.equal(observed, r.recreation.minute); assert.equal(calls, 1);
+    assert.equal(r.minuteRemainder, 0);
+    advanceParkRuntime(ref, expected, processed, () => step(ref));
+    assert.equal(serializeParkSession(c, r), serializeParkSession(ref, expected));
+  }
+});
+
+test('minute observer stops when the day callback pauses and never publishes the unprocessed remainder', () => {
+  const c = createCity(61025), r = createParkRuntime(c), observations: number[] = [];
+  const days = advanceParkRuntime(c, r, 2880.75, () => step(c), () => {
+    assert.equal(observations.at(-1), c.tick * 1440);
+    return false;
+  }, undefined, minute => observations.push(minute));
+  assert.equal(days, 1); assert.deepEqual(observations, [1440]);
+  assert.equal(r.minuteRemainder, 0); assert.equal(r.recreation.minute, 1440);
+});
+
 test('paused demolition cancels visitors immediately without crediting the reservation ledger', () => {
   const c = fresh(), r = createParkRuntime(c);
   advanceParkRuntime(c, r, 600, () => step(c)); assert.ok(r.activity.visitors.length > 0);

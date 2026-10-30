@@ -7,9 +7,10 @@ import { createParkActivity, advanceParkActivity, reconcileParkActivity, startPa
   parkActivityAbsoluteMinute, prepareParkActivity, restoreParkActivity, type ParkActivityState } from './park-activity.ts';
 import { createParkRecreation, advanceParkRecreation, restoreParkRecreation, type ParkRecreationState } from './park-recreation.ts';
 import { observeParkRecreationMinute, parkRecreationResidentIds, PROPOSED_PARK_COMFORT } from './park-recreation-activity.ts';
+import {RailNetworkRuntime,type RailSessionSave} from './rail/network-runtime.ts';
 
 export const GAME_MINUTES_PER_DAY = 1440;
-export type ParkRuntime = { version: 1; activity: ParkActivityState; recreation: ParkRecreationState; minuteRemainder: number };
+export type ParkRuntime = { version: 1; activity: ParkActivityState; recreation: ParkRecreationState; minuteRemainder: number; rail?:RailNetworkRuntime };
 
 export function createParkRuntime(city: City): ParkRuntime {
   const activity = createParkActivity(city);
@@ -29,8 +30,11 @@ export function reconcileParkRuntime(city: City, runtime: ParkRuntime): void {
 
 /** One economic day per 1440 actual minutes. A zero advance is a true pause.
  * Normal playback still requests 1440 minutes/second; citizen view requests one.
+ * observeMinute synchronizes other minute-state owners at each processed boundary,
+ * before afterDay can render/save. Fast paths may publish multiple minutes at once;
+ * fractional-only advances and unprocessed frame-budget time are never published.
  */
-export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean): number {
+export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean, observeMinute?: (absoluteMinute: number) => void): number {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440 * 120) throw new RangeError('Invalid park clock advance');
   if (minutes === 0) return 0;
   if (runtime.activity.day !== city.tick || runtime.recreation.minute !== parkActivityAbsoluteMinute(runtime.activity)) throw new Error('Park clocks differ');
@@ -75,23 +79,29 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
       reconcileParkRuntime(city, runtime);
       // UI/owner automation can render or pause synchronously. Publish the whole
       // boundary first, then stop this wall-time request at that explicit pause.
+      runtime.rail?.advanceTo(parkActivityAbsoluteMinute(runtime.activity));
+      observeMinute?.(parkActivityAbsoluteMinute(runtime.activity));
       if (afterDay?.() === false) { runtime.minuteRemainder = 0; break; }
       context = prepare();
-    }
+    } else {runtime.rail?.advanceTo(parkActivityAbsoluteMinute(runtime.activity));observeMinute?.(parkActivityAbsoluteMinute(runtime.activity));}
   }
   return days;
 }
 
-function restoreRuntime(city: City, value: unknown): ParkRuntime {
+function restoreRuntime(city: City, value: unknown, cityRaw?:string): ParkRuntime {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid park runtime');
   const raw = value as ParkRuntime;
-  if (Object.keys(raw).sort().join(',') !== 'activity,minuteRemainder,recreation,version' || raw.version !== 1
+  if (Object.keys(raw).sort().join(',') !== (Object.hasOwn(raw,'rail')?'activity,minuteRemainder,rail,recreation,version':'activity,minuteRemainder,recreation,version') || raw.version !== 1
     || !Number.isFinite(raw.minuteRemainder) || raw.minuteRemainder < 0 || raw.minuteRemainder >= 1) throw new Error('Invalid park runtime fields');
   const activity = restoreParkActivity(city, JSON.stringify(raw.activity));
   // Production saves always complete the economic boundary before becoming observable.
   if (activity.minute === 1440) throw new Error('Incomplete park day boundary');
   const runtime: ParkRuntime = { version: 1, activity, minuteRemainder: raw.minuteRemainder,
     recreation: restoreParkRecreation(raw.recreation, parkActivityAbsoluteMinute(activity)) };
+  if(Object.hasOwn(raw,'rail')){
+    if(raw.rail instanceof RailNetworkRuntime){raw.rail.assertCity(city,parkActivityAbsoluteMinute(activity));runtime.rail=raw.rail;}
+    else {if(cityRaw===undefined)throw Error('Unbound rail runtime');runtime.rail=RailNetworkRuntime.restore(city,raw.rail as unknown as RailSessionSave,cityRaw,parkActivityAbsoluteMinute(activity));}
+  }
   reconcileParkRuntime(city, runtime);
   return runtime;
 }
@@ -101,7 +111,9 @@ function restoreRuntime(city: City, value: unknown): ParkRuntime {
  */
 export function serializeParkSession(city: City, runtime: ParkRuntime, market?: City['market']): string {
   const validated = restoreRuntime(city, runtime);
-  const json = JSON.stringify({ ...JSON.parse(serialize(city, market)), parkRuntime: validated });
+  const cityRaw=serialize(city,market);
+  const savedRuntime={...validated,...(validated.rail?{rail:validated.rail.capture(city,cityRaw,parkActivityAbsoluteMinute(validated.activity))}:{})};
+  const json = JSON.stringify({ ...JSON.parse(cityRaw), parkRuntime: savedRuntime });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -113,6 +125,6 @@ export function deserializeParkSession(json: string): { city: City; runtime: Par
   const { parkRuntime, ...citySave } = parsed;
   if (parkRuntime !== undefined && !((parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12') || (parsed.version === 18 && parsed.rulesVersion === 'chain-13') || (parsed.version === 19 && parsed.rulesVersion === 'chain-14') || (parsed.version === 20 && parsed.rulesVersion === 'chain-15') || (parsed.version === 21 && parsed.rulesVersion === 'chain-16') || (parsed.version === 22 && parsed.rulesVersion === 'chain-17') || (parsed.version === 23 && parsed.rulesVersion === 'chain-18'))) throw new Error('Park runtime requires save v15 through v23 with matching rules');
   const city = deserialize(JSON.stringify(citySave));
-  const runtime = parkRuntime === undefined ? createParkRuntime(city) : restoreRuntime(city, parkRuntime);
+  const runtime = parkRuntime === undefined ? createParkRuntime(city) : restoreRuntime(city, parkRuntime,JSON.stringify(citySave));
   return { city, runtime };
 }

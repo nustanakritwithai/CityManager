@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CityManager · Passenger rail preview</title></head>
+<body><canvas id="city-canvas" aria-label="แผนที่ทดลองรถไฟ"></canvas>
+<header class="preview-header"><div><span class="eyebrow">CITYMANAGER / TRANSPORT LAB</span><h1>รถไฟโดยสาร</h1><p>สองสถานี · หนึ่งขบวน · จำนวนคนจากการจำลองจริง</p></div><span class="preview-badge">เมืองทดสอบแยก</span></header>
+<div class="preview-clock"><span id="clock">วัน 0 · 00:00</span><button id="pause" type="button">เดินเวลา</button><select id="speed" aria-label="ความเร็วเวลา"><option value="0.0006944444444444445">ดูรถ · 1 นาที/วินาที</option><option value="1">1× · 1 วัน/วินาที</option><option value="10">10×</option></select></div>
+<aside id="rail-panel" aria-label="บริหารรถไฟ"><div class="panel-heading"><div><span class="eyebrow">SHUTTLE A ↔ B</span><h2>สายรับส่งผู้โดยสาร</h2></div><button id="close-panel" aria-label="ปิดหน้าจัดการ">×</button></div>
+<p id="service-status" class="service-status"></p><div id="rail-metrics" class="metrics"></div><div id="station-rows"></div>
+<div class="panel-actions"><button id="toggle-service">พักบริการ</button><button id="add-trip">เพิ่มผู้โดยสารทดสอบ 24 คน</button><button id="add-inaccessible">ทดสอบจุดที่เดินไม่ถึง 10 คน</button></div>
+<details><summary>ตรวจสถานะและกู้คืนการทดลอง</summary><p>เก็บและกู้คืนทั้งเมือง คิว และตำแหน่งรถในหน่วยความจำ ปิดหน้านี้แล้วข้อมูลทดลองจะหาย</p><div class="panel-actions"><button id="capture">เก็บสถานะทดลอง</button><button id="restore" disabled>กู้คืนสถานะทดลอง</button></div></details>
+<p class="preview-note">ราคาก่อสร้าง ค่าโดยสาร และการเพิ่มระดับยังไม่กำหนด</p><button id="upgrade" disabled>เพิ่มความจุ · รอกำหนดระดับและราคา</button>
+<p class="preview-note">ชุดนี้ยังไม่เชื่อมกับจราจรถนน และไม่อ่านหรือเขียนเซฟผู้เล่น</p></aside>
+<section id="confirmation" hidden aria-label="ยืนยันแก้ราง"><p id="confirmation-text"></p><div><button id="confirm">ยืนยัน</button><button id="cancel-confirm">ยกเลิก</button></div></section>
+<div id="feedback" role="status" aria-live="polite">เปิดเมนูรถไฟเพื่อดูคิว หรือกดเดินเวลา</div>
+<nav class="tool-buttons" aria-label="เครื่องมือ"><button id="transport-tool" class="tool grouped-tool-anchor"><span>รถไฟ</span></button><button id="cancel-tool" class="tool">กลับ / ยกเลิก</button><button id="camera-home" class="tool">กลางแผนที่</button></nav>
+<script type="module" src="/src/rail/preview.ts"></script></body></html>
