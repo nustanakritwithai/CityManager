@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createCity, buildRoad, buildParallelRoad, bulldoze, SIZE, type City } from '../src/sim.ts';
 import { busStopAt, busStopSides } from '../src/bus/buildings.ts';
 import { BusEngine } from '../src/bus/engine.ts';
-import { forwardBusBoardEvents, setBusLiveSource } from '../src/bus/live.ts';
+import { connectPresentedBusEvents, getBusLiveSource, setBusLiveReader } from '../src/bus/live.ts';
 import { createBusLine } from '../src/bus/lines.ts';
 import { buildBusDepot, buildBusStop, busDepotReason, busStopSiteReason, defaultBusStopSide } from '../src/bus/placement.ts';
 import {
@@ -182,7 +182,7 @@ test('deleting a stop or depot warns and lists lines before anything is removed'
   assert.ok(!c.bus!.lines[0].stopIds.includes(stop.id));
 });
 
-test('live read uses snapshot, waiting, detail and totals and never drains events', () => {
+test('live read uses snapshot, waiting, detail and totals and never drains events', async () => {
   const c = city();
   assert.ok(buildBusDepot(c, depotCell(c), true).ok);
   const a = stopCell(c), b = farStop(c, a);
@@ -208,10 +208,16 @@ test('live read uses snapshot, waiting, detail and totals and never drains event
   assert.equal(model.totals?.accepted, 4);
   assert.equal(model.stops.find(stop => stop.id === c.bus!.stops[0].id)?.waiting, 4);
   assert.ok((model.waiting ?? 0) >= 4);
-  forwardBusBoardEvents([{ kind: 'board', busId: 'bus-1', lineId, stopId: c.bus!.stops[0].id, cell: a, minute: 360, persons: 4 }]);
   const noted = busPanelModel(c, true, null, [{ kind: 'board', busId: 'bus-1', lineId, stopId: c.bus!.stops[0].id, cell: a, minute: 360, persons: 4 }]);
   assert.match(noted.boardNote ?? '', /ขึ้น 4 คน/);
-  setBusLiveSource(null); forwardBusBoardEvents([]);
+  const pendingAfter = engine.pendingEvents;
+  setBusLiveReader(() => read);
+  assert.equal(getBusLiveSource(), read);
+  const stop = await connectPresentedBusEvents();
+  assert.equal(stop, null, 'frame.ts is owned by PR #134; this build only subscribes when it is present');
+  assert.equal(engine.pendingEvents, pendingAfter);
+  assert.deepEqual(seen.filter(name => name === 'drain'), []);
+  setBusLiveReader(() => null);
 });
 
 test('panel and composer buttons are touch targets and call the handlers', () => {
@@ -258,7 +264,9 @@ test('the dock button is hidden until the flag is on, and this PR does not drain
   assert.doesNotMatch(renderer, /busLineRoutes|polyline/);
   const main = readFileSync('src/main.ts', 'utf8');
   assert.match(main, /bulldozeGuarded/); assert.match(main, /busEnabled\(/);
-  assert.doesNotMatch(readFileSync('src/bus/player.ts', 'utf8'), /validateBus|traffic\/bridge/);
+  assert.match(main, /trafficLayer\?\.bus\?\.engine/);
+  assert.match(readFileSync('src/bus/live.ts', 'utf8'), /subscribeBusEvents/);
+  assert.doesNotMatch(readFileSync('src/bus/player.ts', 'utf8'), /validateBus|traffic\/bridge|src\/traffic\/layer|src\/traffic\/clock/);
 });
 
 type Fake = {

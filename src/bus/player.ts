@@ -2,7 +2,7 @@
  * Player-facing bus actions (PR B6). Placement, line drafts and the panel read model.
  * Writes go through the existing line/placement APIs. Fare and upkeep come from PR #129
  * and stay display-only. Live rows read snapshot / waitingAt / busesDetail / totals
- * when a host published an engine. This file never calls drainEvents().
+ * when trafficLayer.bus.engine is present. This file never calls drainEvents().
  */
 import { SIZE, type City, type Result } from '../sim.ts';
 import { busDepotAt, busStopAt } from './buildings.ts';
