@@ -26,7 +26,7 @@ try{
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw,'Startup did not write the original');checks.push('Automatic v22 resume preserves complete snapshot and original bytes');
  await button('#toggle-game-menu');await button('#save');await until('localStorage.getItem("citymanager.checkpoint.latest")!==null');
  assert.match(await evaluate('document.querySelector("#save-recovery-info").textContent'),/สำเนาอัตโนมัติ: วันที่ 65 · v22 · อ่านได้/);
- assert.equal(await evaluate('localStorage.getItem("citymanager.backup.before-autosave")'),raw);assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
+ assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.backup.before-autosave")')),raw);assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
  const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve(output,'saved-mobile.png'),Buffer.from(shot.data,'base64'));
  await button('#close-inspector');await button('[data-tool="R"]');
  const point=await evaluate(`(()=>{const c=JSON.parse(window.cityManager.snapshot());for(let i=0;i<c.cells.length;i++){const t=c.cells[i];if(t.road||t.building!==null||t.zone!==null||c.parks.some(p=>p.cell===i)||c.plants.some(p=>p.cell===i)||c.education?.campuses.some(p=>p.cell===i))continue;const p=window.cityManager.cellScreen(i);if(p.x>30&&p.x<innerWidth-30&&p.y>100&&p.y<innerHeight-130&&document.elementFromPoint(p.x,p.y)?.id==='city-canvas')return{...p,cell:i};}return null;})()`);assert.ok(point,'Visible empty map parcel');

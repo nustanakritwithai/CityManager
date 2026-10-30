@@ -1,3 +1,4 @@
+import {decodeSaveCopy} from '../src/save-copy-codec.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {buildCampus,createCity,step,householdWorkerCount,adoptSavedEducation,serialize,deserialize} from '../src/sim.ts';
@@ -34,7 +35,7 @@ test('previous v22 owner/student overlap loads without losing assets or rewritin
  assert.ok(householdWorkerCount(restored.city,h.id)<=h.workforce);
  for(const key of ['accounts','ledger','goods','goodsLedger','crops','cropLedger','households','firms','education','market','buildings','parks','plants'] as const)assert.deepEqual(restored.city[key],city[key],`${key} survives assignment repair`);
  const next=serializeParkSession(restored.city,restored.runtime);restored.guard.write(next,null);
- assert.equal(storage.getItem(PRE_AUTOSAVE_BACKUP),raw);
+ assert.equal(decodeSaveCopy(storage.getItem(PRE_AUTOSAVE_BACKUP)),raw);
  assert.deepEqual(deserialize(next).accounts,city.accounts);
 });
 

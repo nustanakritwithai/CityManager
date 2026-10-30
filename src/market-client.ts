@@ -13,6 +13,9 @@ export type MarketItem = typeof MARKET_ITEMS[number];
 export type MarketOperation = { opId: string; guestId: string; cityId: string; kind: 'deposit' | 'listing' | 'buy' | 'cancel' | 'claim' | 'ack'; payload: Record<string, unknown>; state: 'pending' | 'confirmed' | 'quarantined'; createdAt: string };
 export type MarketEscrow = { opId: string; cityId: string; firmId: number; itemId: MarketItem; quantity: number; value?: number; state: 'pending' | 'confirmed' | 'cancelled' };
 export type MarketJournal = { version: 10; rulesVersion: typeof MARKET_RULES; guestId: string | null; cityId: string; operations: MarketOperation[]; escrow: MarketEscrow[]; receipts: Record<string, { claimId: string; state: 'claimed' | 'applied' | 'delivered'; firmId?: number; itemId?: MarketItem; quantity?: number }>; seq: string };
+export function isPristineMarketJournal(j:NonNullable<City['market']>):boolean {
+ return Object.keys(j).sort().join(',')==='cityId,escrow,guestId,operations,receipts,rulesVersion,seq,version'&&j.guestId===null&&j.seq==='0'&&j.operations.length===0&&j.escrow.length===0&&Object.keys(j.receipts).length===0;
+}
 export type MarketReceipt = { receipt_id: string; item_code: string; quantity: number; state?: string };
 export type MarketListing = { id: string; item_code: MarketItem; unit_price: number; quantity: number; status: string; expires_at?: string };
 
@@ -44,6 +47,8 @@ export class MarketClient {
   private readonly city: () => City;
   private readonly recoveryEnabled: boolean;
   private journalUnavailable = false;
+  private recoveryReadOnly = false;
+  setRecoveryReadOnly(value:boolean) { this.recoveryReadOnly=value; }
   private readDurableCity: (cityId: string) => string | null;
   private revision: string | null = null;
   constructor(city: () => City, baseUrl = '', options: { recoveryEnabled?: boolean; readDurableCity?: (cityId: string) => string | null } = {}) { this.city = city; this.readDurableCity = options.readDurableCity ?? (() => globalThis.localStorage.getItem(SAVE_KEY)); this.recoveryEnabled = options.recoveryEnabled === true; let safeBase = ''; if (/^\/citymanager-api\/?$/.test(baseUrl)) safeBase = '/citymanager-api'; else if (baseUrl.replace(/\/$/, '') === PAGES_MARKET_BASE && typeof window !== 'undefined' && window.location.origin === PAGES_ORIGIN) safeBase = PAGES_MARKET_BASE; else try { const u = new URL(baseUrl); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '4317' && !u.username && !u.password && !u.search && !u.hash) safeBase = u.origin; } catch { /* disabled by default */ } this.baseUrl = safeBase; if (!safeBase) { this.journal = safeJournal(null); return; } let raw: string | null = null; try { if (!globalThis.localStorage) throw new Error('storage unavailable'); raw = globalThis.localStorage.getItem(MARKET_SAVE_KEY); this.revision = raw; this.journal = safeJournal(raw); } catch { this.journalUnavailable = true; this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
@@ -92,15 +97,23 @@ export class MarketClient {
       }
       throw error;
     }
-  }); }
+  },true); }
+  /** Compare under the existing writer lock, without persisting or changing either journal. */
+  async bindLoadedCityReadOnly(value:unknown,apply:()=>void,assertCurrent:()=>void=()=>{}) { return this.writer(async()=>{
+    assertCurrent();
+    if(value==null){if(!isPristineMarketJournal(this.journal))throw Error('saved-market-reconciliation-required');}
+    else {const imported=safeJournal(JSON.stringify(value));const hasState=(j:MarketJournal)=>!isPristineMarketJournal(j);if((hasState(imported)||hasState(this.journal))&&JSON.stringify(imported)!==JSON.stringify(this.journal))throw Error('saved-market-reconciliation-required');}
+    assertCurrent();apply();
+  },true); }
   async importSave(value: unknown) { return this.bindLoadedCity(value, () => {}); }
   private save() { if (globalThis.localStorage) { persist(this.journal); this.revision = JSON.stringify(this.journal); } }
-  async saveLocalCity(write: (journal: MarketJournal) => void) { return this.writer(async () => { const current = this.city().market; const hasState = Boolean(this.journal.operations.length || this.journal.escrow.length || Object.keys(this.journal.receipts).length); if (hasState && (!current || current.cityId !== this.journal.cityId || current.guestId !== this.guestId)) throw new Error('saved-city-recovery-required'); for (const [id, r] of Object.entries(this.journal.receipts)) if (r.state === 'applied' || r.state === 'delivered') { const saved = current?.receipts[id] as typeof r | undefined; if (!saved || !['applied', 'delivered'].includes(saved.state) || saved.claimId !== r.claimId || saved.firmId !== r.firmId || saved.itemId !== r.itemId || saved.quantity !== r.quantity) throw new Error('saved-city-recovery-required'); } write(this.exportSave()); }); }
-  private async writer<T>(work: () => Promise<T>): Promise<T> {
+  async saveLocalCity(write: (journal: MarketJournal) => void | Promise<void>) { return this.writer(async () => { const current = this.city().market; const hasState = Boolean(this.journal.operations.length || this.journal.escrow.length || Object.keys(this.journal.receipts).length); if (hasState && (!current || current.cityId !== this.journal.cityId || current.guestId !== this.guestId)) throw new Error('saved-city-recovery-required'); for (const [id, r] of Object.entries(this.journal.receipts)) if (r.state === 'applied' || r.state === 'delivered') { const saved = current?.receipts[id] as typeof r | undefined; if (!saved || !['applied', 'delivered'].includes(saved.state) || saved.claimId !== r.claimId || saved.firmId !== r.firmId || saved.itemId !== r.itemId || saved.quantity !== r.quantity) throw new Error('saved-city-recovery-required'); } await write(this.exportSave()); },true); }
+  private async writer<T>(work: () => Promise<T>, allowRecoveryReadOnly=false): Promise<T> {
     if (this.journalUnavailable) throw new Error('market-journal-unavailable');
-    if (typeof window === 'undefined') return work(); // Node-only integration harness; browsers must provide Web Locks.
+    const checked=async()=>{if(this.recoveryReadOnly&&!allowRecoveryReadOnly)throw Error('market-disabled-in-recovery');return work();};
+    if (typeof window === 'undefined') return checked(); // Node-only integration harness; browsers must provide Web Locks.
     const locks = globalThis.navigator?.locks as MarketWriterLocks | undefined;
-    return withMarketWriter({ locks, expectedJournal: this.revision, readJournal: () => globalThis.localStorage.getItem(MARKET_SAVE_KEY), work });
+    return withMarketWriter({ locks, expectedJournal: this.revision, readJournal: () => globalThis.localStorage.getItem(MARKET_SAVE_KEY), work:checked });
   }
   private async request(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers); headers.set('Accept', 'application/json');
