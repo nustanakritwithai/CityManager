@@ -19,6 +19,9 @@ export const TAXI_NIGHT = Object.freeze({ from: 23 * 60, to: 5 * 60 });
 export const DEPOT_UNITS = TAXI_DEPOT_UNITS;
 /** Roam only when the best RRT branch beats parking by this factor (demand-gain threshold). */
 export const TAXI_ROAM_GAIN = 1.5;
+/** Anti-bunching: a cell's demand is divided by 1 + (other taxis parked at or roaming to a cell within
+ *  this many grid steps, Manhattan). Idle taxis decide in id order, so later taxis see earlier claims. */
+export const TAXI_SPREAD_RADIUS = 3;
 
 /**
  * Local adapter for modal ownership. There is no stable lease API yet (#114 is rail-only and
@@ -170,13 +173,18 @@ export class TaxiEngine {
     this.origins = this.origins.filter(o => t - o.minute < TAXI_DEMAND_WINDOW_MIN);
     const mod = ((t % 1440) + 1440) % 1440, night = mod >= TAXI_NIGHT.from || mod < TAXI_NIGHT.to;
     const w = this.demandWeights(t), total = [...w.values()].reduce((a, b) => a + b, 0), mean = total / Math.max(1, this.zones.size);
-    for (const u of this.units) if (u.state === 'idle') {
+    const W = this.width, ordered = [...this.units].sort((a, b) => (a.id < b.id ? -1 : 1));
+    const claimOf = (x: Unit) => (x.state === 'idle' ? x.cell : x.state === 'roaming' ? x.target ?? x.cell : -1);
+    const claims = new Map<Unit, number>(); for (const x of ordered) { const c = claimOf(x); if (c >= 0) claims.set(x, c); }
+    const crowd = (self: Unit, c: number) => { let n = 0; const cx = c % W, cy = Math.floor(c / W); for (const [x, k] of claims) if (x !== self && Math.abs(k % W - cx) + Math.abs(Math.floor(k / W) - cy) <= TAXI_SPREAD_RADIUS) n++; return n; };
+    for (const u of ordered) if (u.state === 'idle') {
       const home = this.depots.find(d => d.id === u.depotId)!.cell;
-      if (night || total < TAXI_DEMAND_FLOOR) { if (u.cell !== home) this.go(u, home, 'home', t, 0, false); continue; }
-      const plan = planRoam(this.net, this.times, u.cell, { seed: this.seed, taxiId: u.id, period: Math.floor(t / 60), width: this.width, weight: c => w.get(c) ?? 0, demandCells: [...w.keys()] });
-      const baseline = Math.max(w.get(u.cell) ?? 0, mean);
+      if (night || total < TAXI_DEMAND_FLOOR) { claims.delete(u); if (u.cell !== home) this.go(u, home, 'home', t, 0, false); continue; }
+      const memo = new Map<number, number>(), weight = (c: number) => { let v = memo.get(c); if (v === undefined) memo.set(c, v = (w.get(c) ?? 0) / (1 + crowd(u, c))); return v; };
+      const plan = planRoam(this.net, this.times, u.cell, { seed: this.seed, taxiId: u.id, period: Math.floor(t / 60), width: this.width, weight, demandCells: [...w.keys()] });
+      const baseline = Math.max(weight(u.cell), mean);
       if (plan.path.length < 2 || plan.score < baseline * TAXI_ROAM_GAIN) { this.totals.parked++; continue; }
-      this.drive(u, plan.path, false, t, 'roaming', 0); this.totals.roamLegs++; this.totals.roamMinutes += plan.minutes;
+      this.drive(u, plan.path, false, t, 'roaming', 0); claims.set(u, u.target!); this.totals.roamLegs++; this.totals.roamMinutes += plan.minutes;
     }
   }
   private demandWeights(t: number): Map<number, number> {

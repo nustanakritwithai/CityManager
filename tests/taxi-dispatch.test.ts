@@ -6,7 +6,7 @@ import { configureRoadPath, setRoadJunction, type RoadMap } from '../src/road-to
 import { dispatchZones, travelTree, treeMinutes, TAXI_DISPATCH_MINUTES } from '../src/taxi/coverage.ts';
 import { planRoam } from '../src/taxi/rrt-roam.ts';
 import * as dispatchApi from '../src/taxi/dispatch.ts';
-import { TaxiEngine, TAXI_ROAM_GAIN, TAXI_MAX_WAIT_MIN, DEPOT_UNITS, type TaxiLeaseAdapter, type TaxiRequest } from '../src/taxi/dispatch.ts';
+import { TaxiEngine, TAXI_ROAM_GAIN, TAXI_SPREAD_RADIUS, TAXI_MAX_WAIT_MIN, DEPOT_UNITS, type TaxiLeaseAdapter, type TaxiRequest } from '../src/taxi/dispatch.ts';
 
 const S = 24, at = (x: number, y: number) => y * S + x;
 const blank = (): RoadMap => ({ cells: Array.from({ length: S * S }, () => ({ road: false })) });
@@ -178,4 +178,23 @@ test('dispatch uses the shared taxi site types', async () => {
   const shared = await import('../src/taxi/sites.ts'); assert.equal(DEPOT_UNITS, shared.TAXI_DEPOT_UNITS);
   const saved: import('../src/taxi/sites.ts').TaxiDepot = { id: 4, cell: at(0, 2), tick: 3, level: 2, open: true };
   const net = buildNetwork(grid()); assert.equal(new TaxiEngine(net, free(net), [saved], 0, { width: S }).units.length, 8);
+});
+
+test('anti-bunching: taxis from one depot spread over two hotspots, deterministically', () => {
+  const net = buildNetwork(grid()), A = at(8, 2), B = at(0, 10), big = { ...depot, level: 2 as const };
+  const two = (c: number) => (c === A ? 10 : c === B ? 8 : 0.01);
+  const run = () => { const e = new TaxiEngine(net, free(net), [big], 8 * 60, { width: S, seed: 5, expected: two }); e.advanceTo(8 * 60 + 5); return e; };
+  const e = run(), near = (c: number, h: number) => Math.abs(c % S - h % S) + Math.abs(Math.floor(c / S) - Math.floor(h / S)) <= TAXI_SPREAD_RADIUS;
+  const goal = e.units.filter(u => u.state === 'roaming').map(u => u.target!);
+  assert.ok(e.units.length >= 3 && goal.length >= 2, `roamers ${goal.length}`);
+  const nA = goal.filter(c => near(c, A)).length, nB = goal.filter(c => near(c, B)).length;
+  assert.ok(nA >= 2 && nB >= 2, `A ${nA} B ${nB}`); // demand 10:8 supports both (unspread: 7:1)
+  const counts = new Map<number, number>(); for (const c of goal) counts.set(c, (counts.get(c) ?? 0) + 1);
+  assert.ok(Math.max(...counts.values()) < goal.length, 'no single cell takes every roamer');
+  for (const l of e.legs) legal(net, l.path);
+  assert.deepEqual(run().units.map(u => [u.id, u.state, u.target, u.cell]), e.units.map(u => [u.id, u.state, u.target, u.cell]));
+});
+test('anti-bunching keeps uniform demand parked', () => {
+  const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [{ ...depot, level: 2 as const }], 8 * 60, { width: S, expected: () => 1 });
+  e.advanceTo(12 * 60); assert.equal(e.totals.roamLegs, 0); assert.ok(e.totals.parked > 0);
 });
