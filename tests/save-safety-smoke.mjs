@@ -13,6 +13,7 @@ async function send(method,params={}){const n=++id;const promise=new Promise((re
 async function evaluate(expression){const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
 async function until(expression,timeout=60000){const start=Date.now();while(Date.now()-start<timeout){if(await evaluate(expression))return;await sleep(100);}throw Error(`Timeout ${expression}`);}
 async function enter(){await until("!!document.querySelector('.guest-entry-card')||!!window.cityManager");if(await evaluate("!!document.querySelector('.guest-entry-card')")){await until("!document.querySelector('.guest-entry-card button').disabled");await button(guestMode?'.guest-entry-card button:first-of-type':'.guest-entry-card button:nth-of-type(2)');}}
+async function reloadFresh(){const boot=await evaluate('window.__saveSafetyBoot');await send('Page.reload',{ignoreCache:true});await until(`window.__saveSafetyBoot!==${JSON.stringify(boot)}`);await enter();await until(`window.__saveSafetyBoot!==${JSON.stringify(boot)}&&!!window.cityManager&&window.cityManager.visuals().ready`);}
 async function button(selector){if(await reachTouch(evaluate,button,selector))return;const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height}})()`);assert.ok(p.w&&p.h,selector);for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,x:p.x,y:p.y,button:'left',clickCount:1});}
 try{
  let page;for(let i=0;i<100;i++){try{const tabs=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();page=tabs.find(t=>t.type==='page'&&t.url==='about:blank');if(page)break;}catch{}await sleep(100);}assert.ok(page);
@@ -35,5 +36,24 @@ try{
  const oldBoot=await evaluate('window.__saveSafetyBoot');await send('Page.reload');await until(`window.__saveSafetyBoot!==${JSON.stringify(oldBoot)}`);await enter();await until(`window.__saveSafetyBoot!==${JSON.stringify(oldBoot)}&&!!window.cityManager&&window.cityManager.visuals().ready`);assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),edited,'Paused edit survives real reload/lifecycle save');checks.push('Paused map edit is saved on native reload and restored exactly');
  // Simulate another tab updating the origin after this tab loaded its expected revision.
  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)})`);await button('#toggle-game-menu');await button('#save');await until('document.body.textContent.includes("อีกแท็บ")');assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);checks.push('Stale writer blocked; independent newest checkpoint retained');
+ // Both snapshots are valid but differ: startup must protect them, then explicit recovery is read-only.
+ await reloadFresh();await button('#toggle-game-menu');
+ await until('!document.querySelector("#save-failure-banner").hidden');
+ assert.match(await evaluate('document.querySelector("#save-failure-banner").textContent'),/เซฟหลักกับสำเนาอัตโนมัติไม่ตรงกัน/);
+ assert.match(await evaluate('document.querySelector("#save-recovery-info").textContent'),/วันที่ 65/);
+ assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
+ assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);
+ await button('#load-autosave-copy');await until('document.querySelector("#save-failure-banner").hidden');
+ assert.match(await evaluate('document.querySelector("#autosave-status").textContent'),/ยังไม่มีการบันทึกสำเร็จในรอบนี้/);
+ assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),edited);
+ assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
+ assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);
+ await send('Page.captureScreenshot',{format:'png'}).then(r=>writeFile(resolve(output,guestMode?'guest-recovered.png':'recovered.png'),Buffer.from(r.data,'base64')));
+ await button('#save');await until('document.querySelector("#autosave-status").textContent.includes("บันทึกสำเร็จล่าสุด")');
+ assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),edited);
+ await reloadFresh();
+ assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),edited);
+ assert.equal(await evaluate('document.querySelector("#save-failure-banner").hidden'),true);
+ checks.push('Conflicting startup preserves both; explicit recovery clears warning without false Save; real Save and reload retain selected city');
  assert.equal(guestCreates,0,'Returning Guest must not create a replacement identity');if(guestMode){assert.equal(await evaluate('JSON.parse(window.cityManager.sessionSnapshot()).market.guestId'),journal.guestId);checks.push('Native Guest login and reload restore exact old city and ID using isolated mock API');}assert.deepEqual(errors,[]);await writeFile(resolve(output,guestMode?'guest-report.json':'report.json'),JSON.stringify({checks,sourceVersion:22,fixtureDay:65,viewport:'390x844',note:'Synthetic local-only browser profile; no player saves'},null,2));console.log(JSON.stringify({checks}));
 }catch(error){try{await writeFile(resolve(output,'failure.json'),JSON.stringify({error:String(error),errors,page:await evaluate('({url:location.href,text:document.body.innerText.slice(-5000)})')},null,2));}catch{}throw error;}finally{ws?.close();child.kill();api.close();}

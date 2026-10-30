@@ -2,6 +2,8 @@ import { buildingIssueRevision, issuePlaceRoute } from './building-issues.ts';
 import { renderBuildingIssues } from './building-issue-panel.ts';
 import './building-issues.css';
 import { restoreStartupCity } from './startup-save.ts';
+import { startupSaveFailureMessage } from './startup-save-feedback.ts';
+import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
 import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
@@ -636,10 +638,14 @@ async function boot() {
     autosaveFailed = !r.ok;
   } });
   installAutosave(document, window, autosave, () => document.hidden);
-  if(startupSaveError){saveFeedback.failed('โหลดเซฟเดิมไม่สำเร็จ: ปิด autosave เพื่อรักษาต้นฉบับ · กรุณากู้คืนหรือส่งออก ห้ามล้างข้อมูลเว็บไซต์');status(startupSaveError+' · เซฟเดิมยังอยู่ กรุณากู้คืนหรือส่งออก ห้ามล้างข้อมูลเว็บไซต์');}
+  if(startupSaveError){const message=startupSaveFailureMessage(startupSaveError);saveFeedback.failed(message);status(message);}
   $('#save').addEventListener('click', async () => {
     try { await trackedSave(); autosave.markSaved(city.tick); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
   });
+  const recoveryInfo=document.createElement('p');recoveryInfo.id='save-recovery-info';recoveryInfo.style.whiteSpace='pre-line';
+  const refreshRecoveryInfo=()=>{recoveryInfo.textContent=recoverySummary({getItem:key=>localStorage.getItem(key)});};
+  $('#save').closest('.save-group')?.prepend(recoveryInfo);refreshRecoveryInfo();
+  $('#toggle-game-menu').addEventListener('click',refreshRecoveryInfo);
   const loadStored = async (source: SaveSource) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
@@ -648,12 +654,14 @@ async function boot() {
         if (!restored.city.education) adoptSavedEducation(restored.city);
         city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;autosave.reset();
       });
+      saveFeedback.recovered();
       cueLimiter.reset();
       syncEducationTools();
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; render();
       status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว${oldVersion === 7 ? ' · เซฟรุ่น 1.x แปลงเป็นสินค้า 3 สายแล้ว (เก็บสำเนาเดิมไว้ตอนบันทึก)' : ''} · หยุดเวลาให้ตรวจข้อมูล`);
-    } catch (error) { status(`โหลดไม่สำเร็จ เมืองปัจจุบันยังอยู่ · ${error instanceof Error ? error.message : 'ข้อมูลบันทึกไม่ถูกต้อง'}`); }
+    } catch (error) { const message=loadFailureMessage(error);saveFeedback.failed(message);status(message); }
+    finally {refreshRecoveryInfo();}
   };
   $('#load').addEventListener('click', () => loadStored('current'));
   $('#load-legacy').addEventListener('click', () => loadStored('legacy'));

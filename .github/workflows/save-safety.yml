@@ -6,10 +6,13 @@ on:
       - 'src/autosave.ts'
       - 'src/save-*.ts'
       - 'src/startup-save.ts'
+      - 'src/startup-save-feedback.ts'
       - 'src/local-city-save.ts'
       - 'src/market-client.ts'
       - 'src/entry-gate.ts'
       - 'tests/save-safety*'
+      - 'tests/save-startup*'
+      - 'tests/save-recovery-info.test.ts'
       - 'tests/load-authority.test.ts'
       - '.github/workflows/save-safety.yml'
   workflow_dispatch:
@@ -32,7 +35,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: node --experimental-strip-types --test tests/save-safety.test.ts tests/load-authority.test.ts tests/autosave.test.ts tests/education-session.test.ts
+      - run: node --experimental-strip-types --test tests/save-safety.test.ts tests/save-startup-diagnosis.test.ts tests/save-startup-feedback.test.ts tests/save-recovery-info.test.ts tests/load-authority.test.ts tests/autosave.test.ts tests/education-session.test.ts
       - run: npm run build
         env:
           VITE_MARKET_URL: http://127.0.0.1:4317

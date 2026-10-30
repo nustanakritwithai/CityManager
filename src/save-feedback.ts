@@ -6,6 +6,8 @@ export function createSaveFeedback(onChange: (state: SaveFeedbackState) => void,
   let lastSuccess: number | null = null, failure: string | null = null;
   const emit = () => onChange({ pending: pending.size, lastSuccess, failure });
   return {
+    // Recovery authorizes the loaded city, but is not a successful storage write.
+    recovered() { failure = null; failureAttempt = ++sequence; emit(); },
     begin() { const attempt = ++sequence; pending.add(attempt); emit(); return attempt; },
     succeeded(attempt: number) {
       pending.delete(attempt);
