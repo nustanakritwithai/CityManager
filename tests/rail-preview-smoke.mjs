@@ -20,7 +20,7 @@ async function until(expression){const start=Date.now();while(Date.now()-start<2
 async function tap(x,y){await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}
 async function button(selector){if(selector!=='#rail-panel details summary'&&await evaluate(`document.querySelector(${JSON.stringify(selector)})?.closest('details')?.open===false`))await button('#rail-panel details summary');await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest'})`);await sleep(25);const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:e.disabled}})()`);assert.notEqual(p.disabled,true,selector+' enabled');assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`),true,selector+' hit target');await tap(p.x,p.y);await sleep(35);}
 async function manage(){if(await evaluate('document.querySelector("#rail-panel").hidden')){await button('#transport-tool');await button('[data-rail-tool="manage"]');}}
-const state=()=>evaluate('window.railPreview.snapshot()');const diag=()=>evaluate('window.railPreview.diagnostics()');
+const railState=()=>evaluate('window.railPreview.snapshot()');const diag=()=>evaluate('window.railPreview.diagnostics()');
 async function tool(mode){if(!await evaluate('document.querySelector("#rail-panel").hidden'))await button('#close-panel');await button('#transport-tool');await button(`[data-rail-tool="${mode}"]`);}
 async function cell(n){const p=await evaluate(`window.railPreview.cellScreen(${n})`);assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`),'city-canvas');await tap(p.x,p.y);}
 async function shot(name){const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(resolve(output,name+'.png'),Buffer.from(r.data,'base64'));}
@@ -33,18 +33,18 @@ try{
   const browser=await send('Browser.getVersion');
   for(const [name,width,height] of [['portrait',390,844],['landscape',844,390]]){
     await send('Emulation.setDeviceMetricsOverride',{width,height,screenWidth:width,screenHeight:height,deviceScaleFactor:1,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
-    await reload();const initial=await state();assert.equal((await diag()).trains,1);assert.equal((await diag()).paused,true);
+    await reload();const initial=await railState();assert.equal((await diag()).trains,1);assert.equal((await diag()).paused,true);
     await evaluate('localStorage.setItem("rail-qa-sentinel","synthetic-preserve-me")');const storage=await evaluate('JSON.stringify({...localStorage})');
     await shot(name+'-map');
-    await manage();await button('#add-trip');await button('#step-ten');const moving=await state();const d=await diag();assert.ok(d.onboard>0&&d.waiting>0);assert.equal(d.conservationError,0);assert.equal(d.completed,0);
+    await manage();await button('#add-trip');await button('#step-ten');const moving=await railState();const d=await diag();assert.ok(d.onboard>0&&d.waiting>0);assert.equal(d.conservationError,0);assert.equal(d.completed,0);
     await button('#capture');await button('#station-b');await button('#step-ten');await button('#step-ten');assert.equal((await diag()).completed,0);assert.ok((await diag()).onboard>0);
-    await button('#station-b');await button('#step-ten');assert.ok((await diag()).completed>0);await button('#restore');assert.deepEqual(await state(),moving);
+    await button('#station-b');await button('#step-ten');assert.ok((await diag()).completed>0);await button('#restore');assert.deepEqual(await railState(),moving);
     await button('#add-inaccessible');assert.equal((await diag()).roadAssignable,10);assert.equal((await diag()).modalConservationError,0);
     await shot(name+'-queues');
     await tool('remove');await cell(250);await cell(251);const graph=await evaluate('window.railPreview.graph()');await button('#confirm');assert.deepEqual(await evaluate('window.railPreview.graph()'),graph);assert.match(await evaluate('document.querySelector("#feedback").textContent'),/occupied/);
     await manage();for(let i=0;i<40&&!(await diag()).completed;i++)await button('#step-ten');
     // A fresh fixture is the same deterministic preview, never a player-save reset.
-    await reload();assert.deepEqual(await state(),initial);
+    await reload();assert.deepEqual(await railState(),initial);
     await tool('remove');const before=await evaluate('window.railPreview.graph()');await cell(250);await cell(251);await button('#cancel-confirm');assert.deepEqual(await evaluate('window.railPreview.graph()'),before);
     await cell(250);await cell(251);await button('#confirm');assert.equal((await diag()).connected,false);
     await manage();await button('#add-trip');assert.equal((await diag()).roadAssignable,24);assert.equal((await diag()).offered,0);
