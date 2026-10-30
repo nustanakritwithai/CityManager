@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:city-saves": "node --experimental-strip-types --test tests/city-saves-service.test.mjs tests/city-saves-http.test.mjs tests/city-saves-pg.test.mjs tests/city-slot-picker.test.ts tests/server-save-outbox.test.ts tests/server-save-import.test.ts tests/server-save-financial.test.ts",
     "test:browser": "node tests/browser-smoke.mjs",
     "test:submenus": "node tests/submenus-smoke.mjs",
     "assets:verify": "node scripts/admit-city-assets.mjs --verify && node scripts/admit-ui-assets.mjs --verify && node scripts/admit-audio-assets.mjs --verify && node scripts/admit-road-icons.mjs --verify",

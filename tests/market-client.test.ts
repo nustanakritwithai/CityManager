@@ -210,3 +210,24 @@ test('receipt ACK checks the selected city durable save, never the legacy save o
     selected = valid; await client.ack(receipt); assert.equal(requests, 1);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('receipt ACK rejects unreadable, stale or mismatched confirmed saves without requests or journal changes', async () => {
+  const city=createCity(1,{starter:false}), store=new Map<string,string>();
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(k:string)=>store.get(k)??null,setItem:(k:string,v:string)=>void store.set(k,v)}});
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{cookie:'cm_csrf=test'}});
+  const oldFetch=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;return new Response('{}');};
+  try {
+    let reader:()=>string|null=()=>null;
+    const client=new MarketClient(()=>city,'http://127.0.0.1:4317',{readDurableCity:()=>reader()});
+    client.guestId='00000000-0000-4000-8000-000000000003';client.journal.guestId=client.guestId;
+    const receipt='00000000-0000-4000-8000-000000000004';
+    client.journal.receipts[receipt]={claimId:'00000000-0000-4000-8000-000000000005',state:'applied',firmId:2,itemId:'crop:rice',quantity:1};
+    city.market=client.exportSave();
+    const wrongGuest=structuredClone(city.market);wrongGuest.guestId='00000000-0000-4000-8000-000000000006';
+    const wrongCity=structuredClone(city.market);wrongCity.cityId='00000000-0000-4000-8000-000000000007';
+    const wrongReceipt=structuredClone(city.market);wrongReceipt.receipts[receipt].quantity=2;
+    const stale=structuredClone(city);stale.tick++;
+    const cases:Array<()=>string|null>=[()=>{throw Error('disk failed');},()=>'{bad',()=>serialize(city,wrongGuest),()=>serialize(city,wrongCity),()=>serialize(stale,city.market),()=>serialize(city,wrongReceipt)];
+    for(const source of cases){reader=source;const before=JSON.stringify(client.journal), disk=store.get('citymanager.market.v10');await assert.rejects(client.ack(receipt),/saved-city-recovery-required/);assert.equal(JSON.stringify(client.journal),before);assert.equal(store.get('citymanager.market.v10'),disk);assert.equal(calls,0);}
+  } finally {globalThis.fetch=oldFetch;}
+});
