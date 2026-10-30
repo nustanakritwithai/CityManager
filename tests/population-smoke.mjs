@@ -3,7 +3,7 @@ import { assertSavedCity } from './park-session-assertions.mjs';
 // Household/housing acceptance on worker schema v6. Root runs suites sequentially.
 // The browser receives only strict-valid public-simulation fixtures via real Load.
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
@@ -80,7 +80,9 @@ const keys = ['citymanager.save.v7', 'citymanager.save.v6', 'citymanager.save.v5
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Run browser suites sequentially; CDP 9349 is occupied');
-const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${resolve(output, 'edge-profile')}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+// Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
+const profile = await mkdtemp(resolve(output, 'edge-population-'));
+const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {

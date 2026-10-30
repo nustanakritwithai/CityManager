@@ -2,7 +2,7 @@ import { assertSavedCity } from './park-session-assertions.mjs';
 // Real browser acceptance for worker-count/skill hiring. Root runs CDP sequentially.
 // Fixtures are frozen old saves or replayed public simulation states, never forged jobs.
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
@@ -68,7 +68,9 @@ const keys = ['citymanager.save.v7', 'citymanager.save.v6', 'citymanager.save.v5
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Worker browser suite must run sequentially; CDP9349 is occupied');
-const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${resolve(output, 'edge-profile')}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+// Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
+const profile = await mkdtemp(resolve(output, 'edge-worker-'));
+const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map(), sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) { const id = ++sequence; const promise = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id, method, params })); return promise; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
@@ -153,5 +155,5 @@ try {
   checks.push('360 phone, landscape and 980-layout/screen390 keep exact capability rows and 44px navigation contained; open-panel camera isolation, Back/Escape, v4 roundtrip and old-save preservation pass without unexpected errors');
   const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, checks, errors, expectedModelErrors: expectedErrors.length, fixture, payrollTick: payrollAfter.tick, wageEntries, layouts, screenshots, note: 'Installed headless Edge with viewport/touch emulation; no physical-phone or individual-person simulation claim.' };
   await writeFile(resolve(output, 'worker-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
-} catch (error) { if (ws?.readyState === 1) try { await screenshot('worker-failure.png'); console.error('Route:', await route()); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
+} catch (error) { if (ws?.readyState === 1) try { await screenshot('worker-failure.png'); console.error('Route:', await route()); console.error('Startup recovery:', await evaluate('({open:!!document.querySelector("#startup-recovery-chooser[open]"),message:document.querySelector("#startup-recovery-status")?.textContent??null})')); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
 finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }

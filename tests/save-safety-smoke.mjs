@@ -38,14 +38,26 @@ try{
  // Simulate another tab updating the origin after this tab loaded its expected revision.
  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)})`);await button('#toggle-game-menu');await button('#save');await until('document.body.textContent.includes("อีกแท็บ")');assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);checks.push('Stale writer blocked; independent newest checkpoint retained');
  // Both snapshots are valid but differ: startup must protect them, then explicit recovery is read-only.
- await reloadFresh();await button('#toggle-game-menu');
+ await reloadFresh();await until('!!document.querySelector("#startup-recovery-chooser[open]")');
+ await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape'});
+ assert.equal(await evaluate('!!document.querySelector("#startup-recovery-chooser[open]")'),true,'Escape cannot expose fallback gameplay');
+ await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space'});
+ assert.equal(await evaluate('!!document.querySelector("#startup-recovery-chooser[open]")'),true,'Space cannot play or silently choose a source');
+ assert.equal(await evaluate('window.cityManager.parks().paused'),true);
  await until('!document.querySelector("#save-failure-banner").hidden');
  assert.match(await evaluate('document.querySelector("#save-failure-banner").textContent'),/เซฟหลักกับสำเนาอัตโนมัติไม่ตรงกัน/);
  assert.match(await evaluate('document.querySelector("#save-recovery-info").textContent'),/วันที่ 65/);
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
  assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);
  await send('Page.captureScreenshot',{format:'png'}).then(r=>writeFile(resolve(output,guestMode?'guest-protected-startup.png':'protected-startup.png'),Buffer.from(r.data,'base64')));
- await button('#load-autosave-copy');await until('document.querySelector("#save-failure-banner").hidden');
+ await evaluate("localStorage.setItem('citymanager.save.v7','{broken')");await button('#startup-recover-current');
+ await until('document.querySelector("#startup-recovery-status").textContent.includes("โหลดไม่สำเร็จ")');
+ assert.equal(await evaluate('!!document.querySelector("#startup-recovery-chooser[open]")'),true);
+ assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),'{broken');
+ assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);
+ await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)})`);
+ await button('#startup-recover-checkpoint');await until('!document.querySelector("#startup-recovery-chooser")');await button('#toggle-game-menu');
+ await until('document.querySelector("#save-failure-banner").hidden');
  assert.match(await evaluate('document.querySelector("#autosave-status").textContent'),/ยังไม่มีการบันทึกสำเร็จในรอบนี้/);
  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),edited);
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
@@ -57,5 +69,16 @@ try{
  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),edited);
  assert.equal(await evaluate('document.querySelector("#save-failure-banner").hidden'),true);
  checks.push('Conflicting startup preserves both; explicit recovery clears warning without false Save; real Save and reload retain selected city');
+ const formatted=JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(edited)).reverse()),null,2);
+ await evaluate(`localStorage.setItem('citymanager.checkpoint.latest',${JSON.stringify(formatted)})`);await reloadFresh();
+ assert.equal(await evaluate('!!document.querySelector("#startup-recovery-chooser")'),false);
+ assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),edited);
+ assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),edited);
+ assert.equal(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")'),formatted);
+ await button('#toggle-game-menu');await button('#save');
+ const archived=await evaluate('Object.entries(localStorage).filter(([key])=>/^citymanager\\.backup\\.save-conflict\\.[0-9]+$/.test(key)).map(([,value])=>value)');
+ assert.ok(archived.map(decodeSaveCopy).includes(formatted),'Formatting-only alternate original is archived before Save');
+ checks.push('Formatting-only equivalent saves resume automatically without writes; next Save preserves alternate bytes');
+
  assert.equal(guestCreates,0,'Returning Guest must not create a replacement identity');if(guestMode){assert.equal(await evaluate('JSON.parse(window.cityManager.sessionSnapshot()).market.guestId'),journal.guestId);checks.push('Native Guest login and reload restore exact old city and ID using isolated mock API');}assert.deepEqual(errors,[]);await writeFile(resolve(output,guestMode?'guest-report.json':'report.json'),JSON.stringify({checks,sourceVersion:22,fixtureDay:65,viewport:'390x844',note:'Synthetic local-only browser profile; no player saves'},null,2));console.log(JSON.stringify({checks}));
 }catch(error){try{await writeFile(resolve(output,'failure.json'),JSON.stringify({error:String(error),errors,page:await evaluate('({url:location.href,text:document.body.innerText.slice(-5000)})')},null,2));}catch{}throw error;}finally{ws?.close();child.kill();api.close();}
