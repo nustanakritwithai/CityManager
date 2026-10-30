@@ -186,3 +186,27 @@ test('expired guest preserves its journal and receipts across a panel resume and
   const originalFetch = globalThis.fetch; let expired = false, creates = 0; globalThis.fetch = async (input: RequestInfo | URL) => { if (String(input).endsWith('/v1/me')) return new Response(JSON.stringify(expired ? { error: 'expired' } : { guest_id: '00000000-0000-4000-8000-000000000003', seq: '0' }), { status: expired ? 401 : 200 }); creates++; throw new Error('unexpected guest creation'); };
   try { const client = new MarketClient(() => createCity(1, { starter: false }), 'http://127.0.0.1:4317'); const old = client.journal; old.guestId = '00000000-0000-4000-8000-000000000003'; old.operations.push({ opId: '00000000-0000-4000-8000-000000000002', guestId: old.guestId, cityId: old.cityId, kind: 'buy', payload: { listing_id: 'l', quantity: 1 }, state: 'confirmed', createdAt: '2026-10-27T00:00:00.000Z' }); old.receipts['00000000-0000-4000-8000-000000000004'] = { claimId: '00000000-0000-4000-8000-000000000005', state: 'applied', firmId: 2, itemId: 'crop:rice', quantity: 1 }; client.guestId = old.guestId; store.set('citymanager.market.v10', JSON.stringify(old)); await client.reconcileSession(await client.checkSession()); const before = store.get('citymanager.market.v10'); expired = true; await assert.rejects(client.resume(), (error: any) => error.status === 401); assert.equal(store.get('citymanager.market.v10'), before); assert.equal(client.guestId, old.guestId); assert.equal(client.journal.receipts['00000000-0000-4000-8000-000000000004'].state, 'applied'); expired = false; await client.resume(); assert.equal(store.get('citymanager.market.v10'), before); assert.equal(creates, 0); } finally { globalThis.fetch = originalFetch; }
 });
+
+test('receipt ACK checks the selected city durable save, never the legacy save or another city', async () => {
+  const city = createCity(1, { starter: false });
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'cm_csrf=test' } });
+  const originalFetch = globalThis.fetch; let requests = 0;
+  globalThis.fetch = async () => { requests++; return new Response('{}', { status: 200 }); };
+  try {
+    let selected: string | null = null; let requestedId = '';
+    const client = new MarketClient(() => city, 'http://127.0.0.1:4317', { readDurableCity: id => { requestedId = id; return selected; } });
+    client.guestId = '00000000-0000-4000-8000-000000000003'; client.journal.guestId = client.guestId;
+    const receipt = '00000000-0000-4000-8000-000000000004';
+    client.journal.receipts[receipt] = { claimId: '00000000-0000-4000-8000-000000000005', state: 'applied', firmId: 2, itemId: 'crop:rice', quantity: 1 };
+    city.market = client.exportSave(); const valid = serialize(city, city.market);
+    store.set('citymanager.save.v7', valid);
+    await assert.rejects(client.ack(receipt), /saved-city-recovery-required/);
+    assert.equal(requestedId, client.journal.cityId); assert.equal(requests, 0);
+    const other = structuredClone(city.market); other.cityId = '00000000-0000-4000-8000-000000000006';
+    selected = serialize(city, other);
+    await assert.rejects(client.ack(receipt), /saved-city-recovery-required/); assert.equal(requests, 0);
+    selected = valid; await client.ack(receipt); assert.equal(requests, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
