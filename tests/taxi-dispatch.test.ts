@@ -204,3 +204,32 @@ test('cruising covers the whole road network over time, beyond the dispatch zone
   for (const l of e.legs) { legal(net, l.path); assert.ok(l.path.length >= 2); }
   assert.deepEqual(run().legs, e.legs);
 });
+
+test('kerb stops: toPickup → boarding (1 min) → carrying → alighting (1 min) → cruising, with events', () => {
+  const net = buildNetwork(grid());
+  const run = () => {
+    const e = new TaxiEngine(net, free(net), [depot], 8 * 60, { width: S, seed: 2, expected: c => (c === at(10, 6) ? 5 : 0.01) });
+    e.submit([{ id: 'k', from: at(4, 2), to: at(10, 6), persons: 3, minute: 8 * 60 }]);
+    const tl: [number, string, number][] = [], ev: dispatchApi.TaxiStopEvent[] = [];
+    for (let m = 8 * 60; m <= 9 * 60; m += 0.125) {
+      if (Math.floor(m / 5) * 5 > e.now) { e.advanceTo(m); ev.push(...e.events); }
+      const s = e.snapshot(m).find(x => x.persons > 0 || x.id === ev.find(v => v.kind === 'pickup')?.unitId);
+      if (s) tl.push([m, s.phase, s.persons]);
+    }
+    return { e, tl, ev };
+  };
+  const { e, tl, ev } = run();
+  const seq = tl.map(x => x[1]).filter((p, i, a) => p !== a[i - 1]);
+  const i = seq.indexOf('boarding');
+  assert.deepEqual(seq.slice(i, i + 3), ['boarding', 'carrying', 'alighting'], seq.join(','));
+  assert.ok(seq.slice(i + 3).includes('cruising'), seq.join(','));
+  const span = (p: string) => tl.filter(x => x[1] === p).length * 0.125;
+  assert.ok(Math.abs(span('boarding') - 1) <= 0.25 && Math.abs(span('alighting') - 1) <= 0.25, `${span('boarding')} ${span('alighting')}`);
+  assert.ok(tl.filter(x => x[1] === 'carrying' || x[1] === 'alighting').every(x => x[2] === 3));
+  const pu = ev.find(v => v.kind === 'pickup')!, dr = ev.find(v => v.kind === 'dropoff')!;
+  assert.equal(pu.cell, at(4, 2)); assert.equal(dr.cell, at(10, 6)); assert.equal(pu.persons, 3);
+  assert.ok(Math.abs(dr.tripMinutes! - (dr.minute + 1 - pu.minute)) < 1e-9, 'trip includes both dwells');
+  assert.equal(e.totals.tripMinutesSum, dr.tripMinutes! * 3);
+  assert.ok(Object.isFrozen(e.snapshot()) && Object.isFrozen(e.snapshot()[0]));
+  const again = run(); assert.deepEqual(again.tl, tl); assert.deepEqual(again.ev, ev);
+});

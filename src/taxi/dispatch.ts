@@ -47,7 +47,14 @@ type State = 'idle' | 'toPickup' | 'riding' | 'roaming' | 'home' | 'stranded';
 type Unit = { id: string; depotId: number; cell: number; state: State; until: number; job?: Job; target?: number; resume?: State; route?: number[]; at?: number[]; leg?: RoadLeg };
 type Job = { requestId: string; part: string; from: number; to: number; persons: number; minute: number };
 export type RoadLeg = { unitId: string; from: number; to: number; loaded: boolean; minute: number; path: number[] };
-export type TaxiTotals = { accepted: number; rejected: number; completed: number; released: number; waitMinutesSum: number; pickups: number; legs: number; emptyLegs: number; roamLegs: number; roamMinutes: number; parked: number; interrupted: number; replans: number };
+/** Renderer-facing phase. Boarding/alighting = stopped at the kerb for TAXI_DWELL_MIN game minutes. */
+export type TaxiPhase = 'idle' | 'toPickup' | 'boarding' | 'carrying' | 'alighting' | 'cruising' | 'home' | 'stranded';
+/** Read-only per-taxi view at a game minute: `cell` → `next` with `progress` ∈ [0,1) along that link. */
+export type TaxiSnapshot = Readonly<{ id: string; depotId: number; phase: TaxiPhase; cell: number; next: number; progress: number; persons: number }>;
+/** Kerb events. `minute` = when the stop starts; dropoff `tripMinutes` = boarding start → alighting end
+ *  (both dwells included: drive minutes + 2 × TAXI_DWELL_MIN). */
+export type TaxiStopEvent = Readonly<{ kind: 'pickup' | 'dropoff'; unitId: string; requestId: string; persons: number; cell: number; minute: number; tripMinutes?: number }>;
+export type TaxiTotals = { accepted: number; rejected: number; completed: number; released: number; waitMinutesSum: number; pickups: number; legs: number; emptyLegs: number; roamLegs: number; roamMinutes: number; parked: number; interrupted: number; replans: number; tripMinutesSum: number };
 
 export class TaxiEngine {
   private net: LinkNetwork; private times: ReadonlyMap<string, number>;
@@ -59,7 +66,9 @@ export class TaxiEngine {
   private cursor: number;
   readonly legs: RoadLeg[] = [];
   readonly waits: number[] = [];
-  totals: TaxiTotals = { accepted: 0, rejected: 0, completed: 0, released: 0, waitMinutesSum: 0, pickups: 0, legs: 0, emptyLegs: 0, roamLegs: 0, roamMinutes: 0, parked: 0, interrupted: 0, replans: 0 };
+  /** Pickup/dropoff events emitted by the last advanceTo() call (cleared at its start). */
+  events: TaxiStopEvent[] = [];
+  totals: TaxiTotals = { accepted: 0, rejected: 0, completed: 0, released: 0, waitMinutesSum: 0, pickups: 0, legs: 0, emptyLegs: 0, roamLegs: 0, roamMinutes: 0, parked: 0, interrupted: 0, replans: 0, tripMinutesSum: 0 };
   private readonly depots: readonly TaxiDepotSite[];
   private readonly lease: TaxiLeaseAdapter; private readonly seed: number; private readonly width: number;
   private readonly expected?: (cell: number, minute: number) => number;
@@ -116,6 +125,7 @@ export class TaxiEngine {
   }
   advanceTo(minute: number, paused = false): void {
     if (paused) return;
+    this.events = [];
     while (this.cursor + TAXI_QUANTUM_MIN <= minute) { this.cursor += TAXI_QUANTUM_MIN; this.quantum(this.cursor); }
   }
   private drive(u: Unit, path: number[], loaded: boolean, t: number, state: State, dwell: number): void {
@@ -124,6 +134,11 @@ export class TaxiEngine {
     u.state = state; u.target = path.at(-1)!; u.route = path; u.at = at; u.leg = undefined;
     u.until = t + Math.max(path.length > 1 ? 1 : 0, Math.ceil(at.at(-1)! - t + dwell));
     if (path.length > 1) { const leg = { unitId: u.id, from: path[0], to: u.target, loaded, minute: t, path }; this.legs.push(leg); u.leg = leg; this.totals.legs++; if (!loaded) this.totals.emptyLegs++; }
+  }
+  /** Riding leg after boarding at `boardStart`: drive starts once the dwell ends. */
+  private board(u: Unit, boardStart: number): void {
+    const j = u.job!; this.events.push(Object.freeze({ kind: 'pickup' as const, unitId: u.id, requestId: j.requestId, persons: j.persons, cell: u.cell, minute: boardStart }));
+    this.go(u, j.to, 'riding', boardStart + TAXI_DWELL_MIN, TAXI_DWELL_MIN, true);
   }
   private go(u: Unit, to: number, state: State, t: number, dwell: number, loaded: boolean): void {
     const path = Number.isFinite(this.minutes(u.cell, to)) ? treePath(this.tree(u.cell), to) : null;
@@ -137,10 +152,14 @@ export class TaxiEngine {
         const resume = u.resume!; this.go(u, u.target, resume, t, resume === 'home' ? 0 : TAXI_DWELL_MIN, resume === 'riding');
       }
       if (u.state === 'stranded' || u.state === 'idle' || u.until > t) continue;
+      const arrived = u.at ? u.at.at(-1)! : t, start = u.at ? u.at[0] : t;
       u.cell = u.target!; u.route = u.at = u.leg = undefined;
-      if (u.state === 'toPickup') { this.go(u, u.job!.to, 'riding', t, TAXI_DWELL_MIN, true); continue; }
+      if (u.state === 'toPickup') { this.board(u, Math.min(arrived, t)); continue; }
       if (u.state === 'riding') {
-        const j = u.job!, done = (this.completedBy.get(j.requestId) ?? 0) + j.persons;
+        const j = u.job!, trip = arrived + TAXI_DWELL_MIN - (start - TAXI_DWELL_MIN);
+        this.events.push(Object.freeze({ kind: 'dropoff' as const, unitId: u.id, requestId: j.requestId, persons: j.persons, cell: u.cell, minute: arrived, tripMinutes: trip }));
+        this.totals.tripMinutesSum += trip * j.persons;
+        const done = (this.completedBy.get(j.requestId) ?? 0) + j.persons;
         this.completedBy.set(j.requestId, done); this.lease.complete(j.requestId, done); this.totals.completed += j.persons; u.job = undefined;
       }
       u.state = 'idle'; u.target = undefined;
@@ -168,7 +187,7 @@ export class TaxiEngine {
       taken.add(pick);
       const wait = t - pick.minute + eta; this.waits.push(wait); this.totals.waitMinutesSum += wait * pick.persons; this.totals.pickups += pick.persons;
       u.job = pick;
-      if (u.cell === pick.from) this.go(u, pick.to, 'riding', t, TAXI_DWELL_MIN, true);
+      if (u.cell === pick.from) this.board(u, t);
       else this.go(u, pick.from, 'toPickup', t, TAXI_DWELL_MIN, false);
     }
     this.waiting = this.waiting.filter(j => !taken.has(j));
@@ -200,6 +219,31 @@ export class TaxiEngine {
     if (this.expected) { for (const c of [...this.zones.keys()].sort((a, b) => a - b)) { const v = this.expected(c, t); if (v > 0) w.set(c, v); } return w; }
     for (const o of this.origins) w.set(o.cell, (w.get(o.cell) ?? 0) + o.persons);
     return w;
+  }
+  /** Read-only snapshot at game minute `m` (default: engine now; valid up to the next quantum). Phases
+   *  are derived from each planned route: before a riding route starts = boarding, after a riding or
+   *  pickup route ends = alighting / boarding at the kerb. */
+  snapshot(m = this.cursor): readonly TaxiSnapshot[] {
+    return Object.freeze([...this.units].sort((a, b) => (a.id < b.id ? -1 : 1)).map(u => {
+      let r = u.route, at = u.at; const carried = u.job?.persons ?? 0;
+      let state = u.state;
+      // Pickup reached and dwell over before the next quantum: show the (deterministic) riding leg now.
+      if (state === 'toPickup' && r && at && m >= at.at(-1)! + TAXI_DWELL_MIN && u.job) {
+        const p = Number.isFinite(this.minutes(r.at(-1)!, u.job.to)) ? treePath(this.tree(r.at(-1)!), u.job.to) : null;
+        if (p) { const t0 = at.at(-1)! + TAXI_DWELL_MIN, a2 = [t0]; for (let i = 1; i < p.length; i++) a2.push(a2[i - 1] + (this.times.get(linkKey(p[i - 1], p[i])) ?? Infinity) / 60); r = p; at = a2; state = 'riding'; }
+      }
+      let phase: TaxiPhase = state === 'riding' ? 'carrying' : state === 'roaming' ? 'cruising' : state;
+      let cell = u.cell, next = u.cell, progress = 0, persons = state === 'riding' ? carried : 0;
+      if (r && at) {
+        let k = 0; while (k + 1 < at.length && at[k + 1] <= m + 1e-9) k++;
+        cell = r[k];
+        if (m < at[0]) { cell = r[0]; if (state === 'riding') phase = 'boarding'; }
+        else if (k + 1 < r.length) { next = r[k + 1]; progress = Math.min(1, Math.max(0, (m - at[k]) / (at[k + 1] - at[k]))); }
+        if (k + 1 >= r.length && m >= at.at(-1)!) { next = cell; if (state === 'riding') { if (m < at.at(-1)! + TAXI_DWELL_MIN) phase = 'alighting'; else { phase = 'idle'; persons = 0; } } else if (state === 'toPickup') { phase = 'boarding'; persons = carried; } }
+        if (next === cell) progress = 0;
+      }
+      return Object.freeze({ id: u.id, depotId: u.depotId, phase, cell, next, progress, persons });
+    }));
   }
   ledger() {
     const waiting = this.waiting.reduce((n, j) => n + j.persons, 0), assigned = this.units.reduce((n, u) => n + (u.job?.persons ?? 0), 0);
