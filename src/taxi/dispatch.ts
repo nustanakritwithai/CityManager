@@ -1,4 +1,6 @@
-import type { LinkNetwork } from '../traffic/network.ts';
+import { linkKey, type LinkNetwork } from '../traffic/network.ts';
+import { TAXI_DEPOT_UNITS, type TaxiDepotSite } from './sites.ts';
+export type { TaxiDepotSite } from './sites.ts';
 import { planRoam } from './rrt-roam.ts';
 import { dispatchZones, travelTree, treeMinutes, treePath, TAXI_DISPATCH_MINUTES, type TravelTree } from './coverage.ts';
 /**
@@ -14,7 +16,9 @@ export const TAXI_QUANTUM_MIN = 5, TAXI_MAX_WAIT_MIN = 20, TAXI_DWELL_MIN = 1, T
 export const TAXI_LOCAL_RADIUS_MIN = 10, TAXI_DEMAND_FLOOR = 0.5, TAXI_DEMAND_WINDOW_MIN = 60;
 /** Night: minute-of-day window where idle taxis return to their depot. */
 export const TAXI_NIGHT = Object.freeze({ from: 23 * 60, to: 5 * 60 });
-export const DEPOT_UNITS: Readonly<Record<1 | 2, number>> = Object.freeze({ 1: 4, 2: 8 });
+export const DEPOT_UNITS = TAXI_DEPOT_UNITS;
+/** Roam only when the best RRT branch beats parking by this factor (demand-gain threshold). */
+export const TAXI_ROAM_GAIN = 1.5;
 
 /**
  * Local adapter for modal ownership. There is no stable lease API yet (#114 is rail-only and
@@ -31,13 +35,15 @@ export interface TaxiLeaseAdapter {
 }
 export const nullLeaseAdapter: TaxiLeaseAdapter = { reserve() {}, release() {}, complete() {} };
 
-export type TaxiDepotSite = { id: number; cell: number; level: 1 | 2; open: boolean };
-export type TaxiEngineOptions = { seed?: number; width?: number; lease?: TaxiLeaseAdapter; expected?: (cell: number, minute: number) => number };
+/** `width` = map width in cells (required: the RRT samples on the real grid). */
+export type TaxiEngineOptions = { width: number; seed?: number; lease?: TaxiLeaseAdapter; expected?: (cell: number, minute: number) => number };
 export type TaxiRequest = { id: string; from: number; to: number; persons: number; minute: number };
-type Unit = { id: string; depotId: number; cell: number; state: 'idle' | 'toPickup' | 'riding' | 'roaming' | 'home' | 'stranded'; until: number; job?: Job; target?: number };
+type State = 'idle' | 'toPickup' | 'riding' | 'roaming' | 'home' | 'stranded';
+/** `route` = planned cells, `at[k]` = absolute minute the unit reaches route[k]; `leg` = its recorded road leg. */
+type Unit = { id: string; depotId: number; cell: number; state: State; until: number; job?: Job; target?: number; resume?: State; route?: number[]; at?: number[]; leg?: RoadLeg };
 type Job = { requestId: string; part: string; from: number; to: number; persons: number; minute: number };
 export type RoadLeg = { unitId: string; from: number; to: number; loaded: boolean; minute: number; path: number[] };
-export type TaxiTotals = { accepted: number; rejected: number; completed: number; released: number; waitMinutesSum: number; pickups: number; legs: number; emptyLegs: number; roamLegs: number; roamMinutes: number };
+export type TaxiTotals = { accepted: number; rejected: number; completed: number; released: number; waitMinutesSum: number; pickups: number; legs: number; emptyLegs: number; roamLegs: number; roamMinutes: number; parked: number; interrupted: number; replans: number };
 
 export class TaxiEngine {
   private net: LinkNetwork; private times: ReadonlyMap<string, number>;
@@ -49,12 +55,14 @@ export class TaxiEngine {
   private cursor: number;
   readonly legs: RoadLeg[] = [];
   readonly waits: number[] = [];
-  totals: TaxiTotals = { accepted: 0, rejected: 0, completed: 0, released: 0, waitMinutesSum: 0, pickups: 0, legs: 0, emptyLegs: 0, roamLegs: 0, roamMinutes: 0 };
-  private readonly depots: readonly TaxiDepotSite[]; private readonly lease: TaxiLeaseAdapter; private readonly seed: number; private readonly width: number;
+  totals: TaxiTotals = { accepted: 0, rejected: 0, completed: 0, released: 0, waitMinutesSum: 0, pickups: 0, legs: 0, emptyLegs: 0, roamLegs: 0, roamMinutes: 0, parked: 0, interrupted: 0, replans: 0 };
+  private readonly depots: readonly TaxiDepotSite[];
+  private readonly lease: TaxiLeaseAdapter; private readonly seed: number; private readonly width: number;
   private readonly expected?: (cell: number, minute: number) => number;
   private origins: { cell: number; minute: number; persons: number }[] = [];
-  constructor(net: LinkNetwork, times: ReadonlyMap<string, number>, depots: readonly TaxiDepotSite[], startMinute: number, opts: TaxiEngineOptions = {}) {
-    this.depots = depots; this.lease = opts.lease ?? nullLeaseAdapter; this.seed = opts.seed ?? 0; this.width = opts.width ?? 64; this.expected = opts.expected;
+  constructor(net: LinkNetwork, times: ReadonlyMap<string, number>, depots: readonly TaxiDepotSite[], startMinute: number, opts: TaxiEngineOptions) {
+    if (!opts || !Number.isSafeInteger(opts.width) || opts.width < 1) throw RangeError('TaxiEngine needs the map width');
+    this.depots = depots; this.lease = opts.lease ?? nullLeaseAdapter; this.seed = opts.seed ?? 0; this.width = opts.width; this.expected = opts.expected;
     this.net = net; this.times = times; this.cursor = Math.floor(startMinute / TAXI_QUANTUM_MIN) * TAXI_QUANTUM_MIN;
     this.zones = this.computeZones();
     for (const d of [...depots].sort((a, b) => a.id - b.id)) if (d.open) for (let k = 0; k < DEPOT_UNITS[d.level]; k++) this.units.push({ id: `taxi-${d.id}-${k}`, depotId: d.id, cell: d.cell, state: 'idle', until: this.cursor });
@@ -62,11 +70,9 @@ export class TaxiEngine {
   private computeZones() { return dispatchZones(this.net, this.times, this.depots.filter(d => d.open), TAXI_DISPATCH_MINUTES); }
   private tree(from: number) { let t = this.trees.get(from); if (!t) this.trees.set(from, t = travelTree(this.net, this.times, from)); return t; }
   private minutes(a: number, b: number) { return treeMinutes(this.tree(a), b); }
-  /** Coverage lookup: which depot serves this curb cell (null = outside coverage). */
   zoneOf(cell: number) { return this.zones.get(cell) ?? null; }
   get now() { return this.cursor; }
 
-  /** Offer requests. Outside coverage or unreachable → rejected (stays with private cars, no lease). */
   submit(requests: readonly TaxiRequest[]): { accepted: string[]; rejected: string[] } {
     const accepted: string[] = [], rejected: string[] = [];
     for (const r of [...requests].sort((a, b) => a.minute - b.minute || (a.id < b.id ? -1 : 1))) {
@@ -77,34 +83,54 @@ export class TaxiEngine {
     }
     return { accepted, rejected };
   }
-  /** Replace the network after a road edit or a new period's congested times. Mid-trip units re-check reachability. */
+  /** Index of the last route cell reached by minute `t`. */
+  private reached(u: Unit, t: number): number { const at = u.at!; let k = 0; while (k + 1 < at.length && at[k + 1] <= t + 1e-9) k++; return k; }
+  /** Stop a moving unit where it is at `t`: trims its recorded leg to the driven part. */
+  private stopAt(u: Unit, t: number): void {
+    if (!u.route) return;
+    const k = this.reached(u, t); u.cell = u.route[k];
+    if (u.leg) { u.leg.path = u.route.slice(0, k + 1); u.leg.to = u.cell; if (u.leg.path.length < 2) { const i = this.legs.indexOf(u.leg); if (i >= 0) { this.legs.splice(i, 1); this.totals.legs--; if (!u.leg.loaded) this.totals.emptyLegs--; } } }
+    u.route = u.at = u.leg = undefined;
+  }
+  /** Replace the network after a road edit or new congested times. Every moving unit's remaining route
+   *  is re-checked link by link; a gone link stops it at its current cell and it replans from there. */
   setNetwork(net: LinkNetwork, times: ReadonlyMap<string, number>): void {
     this.net = net; this.times = times; this.trees.clear(); this.zones = this.computeZones();
-    for (const u of this.units) if (u.state !== 'idle' && u.target !== undefined && !Number.isFinite(this.minutes(u.cell, u.target))) u.state = 'stranded';
+    const t = this.cursor;
+    for (const u of [...this.units].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      if (!u.route || u.state === 'stranded') continue;
+      const k = this.reached(u, t), r = u.route;
+      let ok = true; for (let i = k + 1; i < r.length; i++) if (!net.links.has(linkKey(r[i - 1], r[i]))) { ok = false; break; }
+      if (ok) continue;
+      this.totals.replans++;
+      const state = u.state, target = u.target!; this.stopAt(u, t);
+      if (state === 'roaming') { u.state = 'idle'; u.target = undefined; continue; } // replans next quantum from here
+      this.go(u, target, state, t, state === 'riding' ? TAXI_DWELL_MIN : state === 'toPickup' ? TAXI_DWELL_MIN : 0, state === 'riding');
+    }
   }
-  /** Run all whole quanta up to `minute`. Paused → nothing moves and the cursor stays (no loss, no replay). */
   advanceTo(minute: number, paused = false): void {
     if (paused) return;
     while (this.cursor + TAXI_QUANTUM_MIN <= minute) { this.cursor += TAXI_QUANTUM_MIN; this.quantum(this.cursor); }
   }
-  private leg(u: Unit, from: number, to: number, loaded: boolean, minute: number) {
-    const path = treePath(this.tree(from), to) ?? [from];
-    if (from !== to) { this.legs.push({ unitId: u.id, from, to, loaded, minute, path }); this.totals.legs++; if (!loaded) this.totals.emptyLegs++; }
+  private drive(u: Unit, path: number[], loaded: boolean, t: number, state: State, dwell: number): void {
+    const at = [t]; for (let i = 1; i < path.length; i++) at.push(at[i - 1] + (this.times.get(linkKey(path[i - 1], path[i])) ?? Infinity) / 60);
+    u.state = state; u.target = path.at(-1)!; u.route = path; u.at = at; u.leg = undefined;
+    u.until = t + Math.max(path.length > 1 ? 1 : 0, Math.ceil(at.at(-1)! - t + dwell));
+    if (path.length > 1) { const leg = { unitId: u.id, from: path[0], to: u.target, loaded, minute: t, path }; this.legs.push(leg); u.leg = leg; this.totals.legs++; if (!loaded) this.totals.emptyLegs++; }
   }
-  private go(u: Unit, to: number, state: Unit['state'], t: number, dwell: number, loaded: boolean): void {
-    const m = this.minutes(u.cell, to);
-    if (!Number.isFinite(m)) { u.state = 'stranded'; u.target = to; return; }
-    this.leg(u, u.cell, to, loaded, t); u.state = state; u.target = to; u.until = t + Math.ceil(m + dwell);
+  private go(u: Unit, to: number, state: State, t: number, dwell: number, loaded: boolean): void {
+    const path = Number.isFinite(this.minutes(u.cell, to)) ? treePath(this.tree(u.cell), to) : null;
+    if (!path) { u.state = 'stranded'; u.resume = state; u.target = to; u.route = u.at = u.leg = undefined; return; }
+    this.drive(u, path, loaded, t, state, dwell);
   }
   private quantum(t: number): void {
-    // 1. Arrivals.
+    // 1. Arrivals; stranded units resume from where they stopped.
     for (const u of this.units) {
       if (u.state === 'stranded' && u.target !== undefined && Number.isFinite(this.minutes(u.cell, u.target))) {
-        const resume = u.job && u.cell === u.job.from ? 'riding' : u.job ? 'toPickup' : 'home';
-        this.go(u, u.target, resume, t, resume === 'riding' ? TAXI_DWELL_MIN : 0, resume === 'riding');
+        const resume = u.resume!; this.go(u, u.target, resume, t, resume === 'home' ? 0 : TAXI_DWELL_MIN, resume === 'riding');
       }
       if (u.state === 'stranded' || u.state === 'idle' || u.until > t) continue;
-      u.cell = u.target!;
+      u.cell = u.target!; u.route = u.at = u.leg = undefined;
       if (u.state === 'toPickup') { this.go(u, u.job!.to, 'riding', t, TAXI_DWELL_MIN, true); continue; }
       if (u.state === 'riding') {
         const j = u.job!, done = (this.completedBy.get(j.requestId) ?? 0) + j.persons;
@@ -117,19 +143,21 @@ export class TaxiEngine {
       if (t - j.minute <= TAXI_MAX_WAIT_MIN) return true;
       this.lease.release(j.requestId, j.persons); this.totals.released += j.persons; return false;
     });
-    // 3. Local decisions: each free taxi (id order) looks at requests within its ETA radius and takes
-    //    the oldest it can still reach in time (tie → nearer → part id). No central dispatcher.
-    const free = this.units.filter(u => u.state === 'idle').sort((a, b) => (a.id < b.id ? -1 : 1));
+    // 3. Local decisions by free taxis (idle, roaming or heading home; id order), from their current
+    //    position along the route: oldest reachable request within the ETA radius (tie → nearer → part).
+    const free = this.units.filter(u => u.state === 'idle' || u.state === 'roaming' || u.state === 'home').sort((a, b) => (a.id < b.id ? -1 : 1));
     const taken = new Set<Job>();
     for (const u of free) {
+      const here = u.route ? u.route[this.reached(u, t)] : u.cell;
       let pick: Job | null = null, eta = Infinity;
       for (const j of this.waiting) {
         if (j.minute > t || taken.has(j)) continue;
-        const m = this.minutes(u.cell, j.from);
+        const m = this.minutes(here, j.from);
         if (!(m <= TAXI_LOCAL_RADIUS_MIN + 1e-9) || t + m - j.minute > TAXI_MAX_WAIT_MIN) continue;
         if (!pick || j.minute < pick.minute || (j.minute === pick.minute && (m < eta - 1e-9 || (Math.abs(m - eta) <= 1e-9 && j.part < pick.part)))) { pick = j; eta = m; }
       }
       if (!pick) continue;
+      if (u.route) { this.stopAt(u, t); this.totals.interrupted++; }
       taken.add(pick);
       const wait = t - pick.minute + eta; this.waits.push(wait); this.totals.waitMinutesSum += wait * pick.persons; this.totals.pickups += pick.persons;
       u.job = pick;
@@ -137,29 +165,26 @@ export class TaxiEngine {
       else this.go(u, pick.from, 'toPickup', t, TAXI_DWELL_MIN, false);
     }
     this.waiting = this.waiting.filter(j => !taken.has(j));
-    // 4. Remaining idle taxis roam (seeded RRT toward expected demand), or go home at night / when
-    //    demand is near zero. Taxis already home with nothing to do stay put.
+    // 4. Idle taxis: go home at night / near-zero demand; otherwise roam (RRT) only if the best branch
+    //    beats parking by TAXI_ROAM_GAIN, else park where they are.
     this.origins = this.origins.filter(o => t - o.minute < TAXI_DEMAND_WINDOW_MIN);
     const mod = ((t % 1440) + 1440) % 1440, night = mod >= TAXI_NIGHT.from || mod < TAXI_NIGHT.to;
-    const w = this.demandWeights(t), total = [...w.values()].reduce((a, b) => a + b, 0);
+    const w = this.demandWeights(t), total = [...w.values()].reduce((a, b) => a + b, 0), mean = total / Math.max(1, this.zones.size);
     for (const u of this.units) if (u.state === 'idle') {
       const home = this.depots.find(d => d.id === u.depotId)!.cell;
       if (night || total < TAXI_DEMAND_FLOOR) { if (u.cell !== home) this.go(u, home, 'home', t, 0, false); continue; }
       const plan = planRoam(this.net, this.times, u.cell, { seed: this.seed, taxiId: u.id, period: Math.floor(t / 60), width: this.width, weight: c => w.get(c) ?? 0, demandCells: [...w.keys()] });
-      const to = plan.path.at(-1)!;
-      if (to === u.cell) continue;
-      this.legs.push({ unitId: u.id, from: u.cell, to, loaded: false, minute: t, path: plan.path }); this.totals.legs++; this.totals.emptyLegs++; this.totals.roamLegs++; this.totals.roamMinutes += plan.minutes;
-      u.state = 'roaming'; u.target = to; u.until = t + Math.max(1, Math.ceil(plan.minutes));
+      const baseline = Math.max(w.get(u.cell) ?? 0, mean);
+      if (plan.path.length < 2 || plan.score < baseline * TAXI_ROAM_GAIN) { this.totals.parked++; continue; }
+      this.drive(u, plan.path, false, t, 'roaming', 0); this.totals.roamLegs++; this.totals.roamMinutes += plan.minutes;
     }
   }
-  /** Expected pickup weight per covered curb cell: host forecast if given, else recent accepted origins. */
   private demandWeights(t: number): Map<number, number> {
     const w = new Map<number, number>();
     if (this.expected) { for (const c of [...this.zones.keys()].sort((a, b) => a - b)) { const v = this.expected(c, t); if (v > 0) w.set(c, v); } return w; }
     for (const o of this.origins) w.set(o.cell, (w.get(o.cell) ?? 0) + o.persons);
     return w;
   }
-  /** People currently owned by the taxi engine, by state. */
   ledger() {
     const waiting = this.waiting.reduce((n, j) => n + j.persons, 0), assigned = this.units.reduce((n, u) => n + (u.job?.persons ?? 0), 0);
     const { accepted, completed, released } = this.totals;

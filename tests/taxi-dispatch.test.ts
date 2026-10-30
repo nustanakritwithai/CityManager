@@ -6,7 +6,7 @@ import { configureRoadPath, setRoadJunction, type RoadMap } from '../src/road-to
 import { dispatchZones, travelTree, treeMinutes, TAXI_DISPATCH_MINUTES } from '../src/taxi/coverage.ts';
 import { planRoam } from '../src/taxi/rrt-roam.ts';
 import * as dispatchApi from '../src/taxi/dispatch.ts';
-import { TaxiEngine, TAXI_MAX_WAIT_MIN, DEPOT_UNITS, type TaxiLeaseAdapter, type TaxiRequest } from '../src/taxi/dispatch.ts';
+import { TaxiEngine, TAXI_ROAM_GAIN, TAXI_MAX_WAIT_MIN, DEPOT_UNITS, type TaxiLeaseAdapter, type TaxiRequest } from '../src/taxi/dispatch.ts';
 
 const S = 24, at = (x: number, y: number) => y * S + x;
 const blank = (): RoadMap => ({ cells: Array.from({ length: S * S }, () => ({ road: false })) });
@@ -80,7 +80,7 @@ const legal = (net: LinkNetwork, path: number[]) => { for (let i = 1; i < path.l
 test('RRT roaming is deterministic per (seed, taxi, period) and bounded', () => {
   const net = buildNetwork(grid()), t = free(net), o = { seed: 42, taxiId: 'taxi-1-0', period: 8, width: S, weight: (c: number) => (c === at(10, 6) ? 5 : 0), demandCells: [at(10, 6)] };
   const a = planRoam(net, t, at(0, 2), o); assert.deepEqual(planRoam(net, t, at(0, 2), o), a);
-  assert.ok(a.expanded <= 48 && a.minutes <= 5 + 1e-9);
+  assert.ok(a.expanded <= 48 && a.minutes <= 15 + 1e-9);
   const others = [1, 2, 3, 4, 5].map(seed => planRoam(net, t, at(0, 6), { ...o, seed, weight: () => 1, demandCells: [] }).path.join());
   assert.ok(new Set(others).size > 1, 'different seeds explore differently');
 });
@@ -105,7 +105,7 @@ test('no stands; depot is home: no demand or night → taxis go home and stay', 
   assert.ok(!Object.keys(dispatchApi).some(k => /stand/i.test(k)));
   const net = buildNetwork(grid()), idle = new TaxiEngine(net, free(net), [depot], 0, { width: S });
   idle.advanceTo(24 * 60); assert.equal(idle.legs.length, 0);
-  const e = new TaxiEngine(net, free(net), [depot], 20 * 60, { width: S, expected: () => 1 });
+  const e = new TaxiEngine(net, free(net), [depot], 20 * 60, { width: S, expected: c => (c === at(10, 6) ? 10 : 0.01) });
   e.advanceTo(23 * 60 + 30); assert.ok(e.totals.roamLegs > 0);
   e.advanceTo(26 * 60); for (const u of e.units) assert.equal(u.cell, depot.cell);
   const n = e.legs.length; e.advanceTo(28 * 60); assert.equal(e.legs.length, n);
@@ -121,4 +121,61 @@ test('legs carry routed paths, loaded and empty, for road loading later', () => 
   e.submit(reqs(3)); e.advanceTo(120);
   assert.ok(e.legs.some(l => l.loaded) && e.legs.some(l => !l.loaded));
   for (const l of e.legs) { assert.equal(l.path[0], l.from); assert.equal(l.path.at(-1), l.to); }
+});
+
+const hotspot = (c: number) => (c === at(10, 6) ? 10 : 0.01);
+test('uniform demand: idle taxis park instead of roaming (gain threshold)', () => {
+  assert.ok(TAXI_ROAM_GAIN > 1);
+  const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [depot], 8 * 60, { width: S, expected: () => 1 });
+  e.advanceTo(12 * 60); assert.equal(e.totals.roamLegs, 0); assert.equal(e.legs.length, 0); assert.ok(e.totals.parked > 0);
+  const h = new TaxiEngine(net, free(net), [depot], 8 * 60, { width: S, expected: hotspot }); h.advanceTo(12 * 60); assert.ok(h.totals.roamLegs > 0);
+});
+test('map width is required', () => {
+  const net = buildNetwork(grid());
+  assert.throws(() => new TaxiEngine(net, free(net), [depot], 0, undefined as any), /width/);
+  assert.throws(() => new TaxiEngine(net, free(net), [depot], 0, { width: 0 }), /width/);
+});
+test('a roaming taxi is interrupted mid-route and picks up from its current position', () => {
+  const net = buildNetwork(grid()), times = linkTimes(net, new Map()), slow = new Map([...times].map(([k, v]) => [k, v * 5]));
+  const e = new TaxiEngine(net, slow, [{ id: 1, cell: at(0, 2), level: 1, open: true }], 8 * 60, { width: S, expected: c => (c === at(10, 2) ? 10 : 0.01) });
+  e.advanceTo(8 * 60 + 5);
+  const u = e.units.find(x => x.state === 'roaming' && x.until > 8 * 60 + 10)!; assert.ok(u, 'some taxi roams a multi-link route');
+  const leg = u.leg!, full = leg.path.length;
+  const loadedStart = (en: TaxiEngine) => en.legs.find(l => l.loaded)?.from;
+  const k = u.route ? (u.at as number[]).filter(m => m <= 8 * 60 + 10).length - 1 : -1; assert.ok(k >= 1 && k < full - 1, 'mid-route');
+  const pos = u.route![k];
+  e.submit([{ id: 'p', from: pos, to: at(20, 10), persons: 2, minute: 8 * 60 + 5 }]); e.advanceTo(8 * 60 + 10); // taxi is part-way along
+  assert.equal(loadedStart(e), pos);
+  assert.ok(e.totals.interrupted >= 1);
+  assert.equal(leg.to, leg.path.at(-1)); assert.ok(leg.path.length < full, 'roam leg trimmed to the driven part');
+  const loaded = e.legs.find(l => l.loaded && l.to === at(20, 10))!; assert.ok(loaded); assert.ok(e.units.some(x => x.job?.requestId === 'p'));
+  assert.equal(e.ledger().conservationError, 0);
+});
+test('road edit: remaining route re-validated, taxi replans from where it is', () => {
+  const c = grid(), net = buildNetwork(c), times = free(net), slow = new Map([...times].map(([k, v]) => [k, v * 20]));
+  const e = new TaxiEngine(net, slow, [depot], 0, { width: S });
+  e.submit([{ id: 'x', from: at(0, 2), to: at(20, 2), persons: 3, minute: 0 }]); e.advanceTo(10);
+  const u = e.units.find(x => x.job)!; assert.equal(u.state, 'riding'); assert.ok(u.route!.includes(at(15, 2)));
+  setRoadJunction(c, at(14, 2), at(15, 2), false); const cut = buildNetwork(c), cs = linkTimes(cut, new Map()); e.setNetwork(cut, new Map([...cs].map(([k, v]) => [k, v * 20])));
+  assert.equal(e.totals.replans, 1);
+  assert.ok(u.route![0] !== at(0, 2), 'replanned from the current cell, not the trip start'); assert.ok(!u.route!.includes(at(15, 2)) || u.route!.indexOf(at(15, 2)) < u.route!.indexOf(at(14, 2)) || !u.route!.includes(at(14, 2)));
+  for (let i = 1; i < u.route!.length; i++) assert.ok(cut.links.has(`${u.route![i - 1]}>${u.route![i]}`));
+  e.advanceTo(400); assert.equal(e.ledger().completed, 3); assert.equal(e.ledger().conservationError, 0);
+});
+test('stranded taxi resumes from its current position, not the trip start', () => {
+  const c = grid(), net = buildNetwork(c), times = free(net), slow = new Map([...times].map(([k, v]) => [k, v * 20]));
+  const e = new TaxiEngine(net, slow, [depot], 0, { width: S });
+  e.submit([{ id: 'x', from: at(0, 2), to: at(20, 10), persons: 4, minute: 0 }]); e.advanceTo(10);
+  for (const n of [at(20, 9), at(19, 10)]) setRoadJunction(c, at(20, 10), n, false);
+  const cut = buildNetwork(c); e.setNetwork(cut, new Map([...linkTimes(cut, new Map())].map(([k, v]) => [k, v * 20])));
+  const u = e.units.find(x => x.job)!; assert.equal(u.state, 'stranded'); assert.notEqual(u.cell, at(0, 2));
+  const stoppedAt = u.cell;
+  for (const n of [at(20, 9), at(19, 10)]) setRoadJunction(c, at(20, 10), n, true);
+  const ok = buildNetwork(c); e.setNetwork(ok, new Map([...linkTimes(ok, new Map())].map(([k, v]) => [k, v * 20]))); e.advanceTo(15);
+  assert.equal(u.route?.[0] ?? u.cell, stoppedAt); e.advanceTo(600); assert.equal(e.ledger().completed, 4);
+});
+test('dispatch uses the shared taxi site types', async () => {
+  const shared = await import('../src/taxi/sites.ts'); assert.equal(DEPOT_UNITS, shared.TAXI_DEPOT_UNITS);
+  const saved: import('../src/taxi/sites.ts').TaxiDepot = { id: 4, cell: at(0, 2), tick: 3, level: 2, open: true };
+  const net = buildNetwork(grid()); assert.equal(new TaxiEngine(net, free(net), [saved], 0, { width: S }).units.length, 8);
 });

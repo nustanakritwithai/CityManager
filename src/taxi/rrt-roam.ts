@@ -5,7 +5,7 @@ import { linkKey, type LinkNetwork } from '../traffic/network.ts';
  * biased toward expected demand; the plan ends at the tree node with the best demand per minute.
  * Cost is bounded by `maxNodes` tree nodes and `maxMinutes` of driving.
  */
-export const RRT_MAX_NODES = 48, RRT_MAX_MINUTES = 5, RRT_DEMAND_BIAS = 0.8;
+export const RRT_MAX_NODES = 48, RRT_MAX_MINUTES = 15, RRT_DEMAND_BIAS = 0.8;
 export type RoamOptions = { seed: number; taxiId: string; period: number; width: number; weight: (cell: number) => number; demandCells: readonly number[]; maxNodes?: number; maxMinutes?: number };
 export type RoamPlan = { path: number[]; minutes: number; score: number; expanded: number };
 
