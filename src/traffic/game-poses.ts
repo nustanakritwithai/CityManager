@@ -28,7 +28,7 @@ function spatialSample(candidates:readonly Candidate[],size:number,limit:number)
  * The optional cap exists for equivalence tests, not to change model mass. */
 export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGroup[],size=24,unit=2,limit=GAME_VISUAL_CAR_CAP,includeTaxi=false):CitizenVehiclePose[] {
  if(!Number.isSafeInteger(limit)||limit<0||limit>128)throw Error('Invalid visual traffic cap');
- const fleet=includeTaxi?cars:cars.filter(c=>!c.taxi);
+ const fleet=includeTaxi?cars:cars.filter(c=>!(c as GameCar & {taxi?:boolean}).taxi);
  const byLink=new Map<string,GameCar[]>(),groupByKey=new Map(groups.map(g=>[g.key,g]));
  for(const car of fleet){const key=`${car.from}>${car.to}`;(byLink.get(key)??byLink.set(key,[]).get(key)!).push(car);}
  const result:Candidate[]=[];

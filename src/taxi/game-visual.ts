@@ -10,7 +10,7 @@ export function taxiPoseFromCitizen(p: CitizenVehiclePose): TaxiRoadPose {
 /** Yellow poses for taxi actors already admitted by the traffic game.
  *  Private cars stay on the citizen fleet; these ids are not drawn twice. */
 export function trafficTaxiPoses(cars: readonly GameCar[], groups: readonly GameRenderGroup[]): TaxiRoadPose[] {
-  const taxis = cars.filter(c => c.taxi);
+  const taxis = cars.filter(c => (c as GameCar & { taxi?: boolean }).taxi);
   if (!taxis.length) return [];
   return gamePoses(taxis, groups, 24, 2, GAME_VISUAL_CAR_CAP, true).map(taxiPoseFromCitizen);
 }

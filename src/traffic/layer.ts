@@ -3,7 +3,7 @@ import type {City} from '../sim.ts';
 import {SceneCitizenVehicles} from '../scene-citizen-vehicles.ts';
 import {taxiEnabled} from '../taxi/buildings.ts';
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
-import {captureTrafficGameInput,type TrafficGameInput,type TrafficGameFrame} from './game.ts';
+import {captureTrafficGameInput,gameCarIsTaxi,type TrafficGameInput,type TrafficGameFrame} from './game.ts';
 import {gamePoses,blendGamePoses} from './game-poses.ts';
 import {createTrafficGameClient} from './game-worker-client.ts';
 export {trafficModelEnabled} from './flag.ts';
@@ -80,6 +80,6 @@ export class TrafficLayer {
  /** Taxi cars already tagged on the latest frame. Null when the taxi flag is off. Bus does not use this. */
  taxiFleet(): {cars: TrafficGameFrame['cars']; groups: TrafficGameFrame['groups']} | null {
   if(!this.taxiOn||!this.latest)return null;
-  return {cars:this.latest.cars.filter(c=>c.taxi),groups:this.latest.groups};
+  return {cars:this.latest.cars.filter(c=>gameCarIsTaxi(c)),groups:this.latest.groups};
  }
 }

@@ -108,11 +108,6 @@ let city: City;
 let parkRuntime: ParkRuntime;
 /** Independent, ephemeral traffic-allocation game; never changes economic state or saves. */
 let trafficLayer: TrafficLayer | null = null;
-let trafficOn = false;
-let taxiFeature = false;
-const taxiSession = sharedTaxiSession();
-let taxiView: SceneTaxiVehicles | undefined;
-let taxiButton: HTMLButtonElement | undefined;
 let parkScene: SceneParkActivity | undefined;
 let parkPanel: HTMLElement;
 let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
@@ -136,6 +131,11 @@ let panelTime: ReturnType<typeof installPanelTimeControls> | undefined;
 let parkFrameMs = 0, parkFramePeakMs = 0;
 let pausedByTyphoonAuto = false;
 let importedLegacyRaw: string | null = null;
+let trafficOn = false;
+let taxiFeature = false;
+const taxiSession = sharedTaxiSession();
+let taxiView: SceneTaxiVehicles | undefined;
+let taxiButton: HTMLButtonElement | undefined;
 type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
 let route: Route | null = null;
 function syncEducationTools() {
@@ -245,6 +245,23 @@ function roadCommand(a: number, b: number) {
   if (roadMode === 'split') return editRoadJunction(city, a, b, false);
   return buildParallelRoad(city, a, b, roadMode === 'oneway');
 }
+function activate(index: number) {
+  if (tool !== 'select') ownerDecisionSession.beforeExternal(city);
+  selected = index;
+  if (tool === 'road') {
+    roadMenu?.close();
+    if (roadStart === null) { roadStart = index; status(roadMode === 'split' ? 'เลือกถนนแล้ว · แตะถนนช่องที่ติดกันเพื่อแก้ทางเชื่อม' : 'เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
+    else { const result = resultSound(roadCommand(roadStart, index), 'ui-road'); roadStart = null; status(result.message); }
+  } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
+  else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
+  else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
+  else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
+  else if (tool === 'bulldoze') status(resultSound(bulldoze(city, index), 'ui-bulldoze').message);
+  else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
+  if (tool !== 'select') ownerDecisionSession.syncExternal(city, 'player-map-command');
+  trafficLayer?.afterMapEdit(city, paused || document.hidden);
+  render();
+}
 function publishTaxi(resync = false) {
   setTaxiPlayTraffic(trafficOn);
   if (!taxiFeature) { bindTaxiSessionDepots(null); return; }
@@ -270,23 +287,6 @@ function taxiActivate(index: number) {
   }
   if (taxiOccupies([index]) && tool !== 'select' && tool !== 'road') { status('มีอู่แท็กซี่อยู่ ต้องรื้อก่อน'); render(); return; }
   activate(index);
-}
-function activate(index: number) {
-  if (tool !== 'select') ownerDecisionSession.beforeExternal(city);
-  selected = index;
-  if (tool === 'road') {
-    roadMenu?.close();
-    if (roadStart === null) { roadStart = index; status(roadMode === 'split' ? 'เลือกถนนแล้ว · แตะถนนช่องที่ติดกันเพื่อแก้ทางเชื่อม' : 'เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
-    else { const result = resultSound(roadCommand(roadStart, index), 'ui-road'); roadStart = null; status(result.message); }
-  } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
-  else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
-  else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
-  else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
-  else if (tool === 'bulldoze') status(resultSound(bulldoze(city, index), 'ui-bulldoze').message);
-  else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
-  if (tool !== 'select') ownerDecisionSession.syncExternal(city, 'player-map-command');
-  trafficLayer?.afterMapEdit(city, paused || document.hidden);
-  render();
 }
 function node(tag: string, className = '', content?: string): HTMLElement {
   const element = document.createElement(tag); if (className) element.className = className; if (content !== undefined) element.textContent = content; return element;

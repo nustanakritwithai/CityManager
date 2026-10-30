@@ -9,7 +9,7 @@ import { buildNetwork } from '../src/traffic/network.ts';
 import { linkTimes } from '../src/traffic/routing.ts';
 import { gamePoses } from '../src/traffic/game-poses.ts';
 import { allocateGameModes, compileGameModal } from '../src/traffic/game-modal.ts';
-import { TrafficGame, bindTaxiSessionDepots, captureTrafficGameInput, type TrafficGameSample } from '../src/traffic/game.ts';
+import { TrafficGame, bindTaxiSessionDepots, captureTrafficGameInput, demandTaxiRate, gameCarIsTaxi, type GameCar, type TrafficGameSample } from '../src/traffic/game.ts';
 import type { RoadMap } from '../src/road-topology.ts';
 
 const map = (): RoadMap => ({ cells: Array.from({ length: 576 }, (_, i) => ({ road: [25, 26, 27, 28].includes(i) })) });
@@ -23,13 +23,13 @@ test('taxi demand follows traffic density inside depot coverage only', () => {
   assert.deepEqual(sample, before, 'allocation does not mutate the captured sample');
   const covered = allocated.sample.demand.find(row => row.from === 25 && row.to === 28);
   const remote = allocated.sample.demand.find(row => row.from === 300);
-  assert.ok(covered && covered.taxiRate && covered.taxiRate > 0 && covered.taxiRate < covered.rate);
-  assert.equal(remote?.taxiRate, undefined);
+  assert.ok(covered && demandTaxiRate(covered) > 0 && demandTaxiRate(covered) < covered.rate);
+  assert.equal(remote ? demandTaxiRate(remote) : 0, 0);
   assert.ok(allocated.stats.taxiDiverted > 0);
   assert.ok(allocated.stats.roadAfter < allocated.stats.roadBefore);
   const closed = allocateGameModes(sample, compileGameModal(sample.map, { taxis: [{ ...depot, open: false }], rail: [] }));
   assert.equal(closed.stats.taxiDiverted, 0);
-  assert.equal(closed.sample.demand.find(row => row.from === 25)?.taxiRate, undefined);
+  assert.equal(demandTaxiRate(closed.sample.demand.find(row => row.from === 25)!), 0);
 });
 
 test('dispatch sends taxis along the density OD and lowers private road load', () => {
@@ -42,9 +42,9 @@ test('dispatch sends taxis along the density OD and lowers private road load', (
     const seen: { from: number; to: number }[] = [];
     for (let step = 0; step < 40; step++) {
       const frame = game.step();
-      for (const car of frame.cars) if (car.taxi) { taxis++; seen.push({ from: car.from, to: car.to }); }
+      for (const car of frame.cars) if (gameCarIsTaxi(car)) { taxis++; seen.push({ from: car.from, to: car.to }); }
     }
-    return { offered: game.frame.offered, taxis, seen, private: game.frame.cars.filter(car => !car.taxi).length };
+    return { offered: game.frame.offered, taxis, seen, private: game.frame.cars.filter(car => !gameCarIsTaxi(car)).length };
   };
   const served = drive(withTaxi.sample), carsOnly = drive(without.sample);
   assert.ok(served.offered < carsOnly.offered, 'taxi service lowers the road load the game offers');
@@ -89,7 +89,7 @@ test('session depots stay out of the save and do nothing while traffic or the fl
 test('yellow taxi poses are separate from the private-car fleet', () => {
   const cars = [
     { id: 1, from: 25, to: 26, blocked: false },
-    { id: 2, from: 26, to: 27, blocked: false, taxi: true },
+    Object.assign({ id: 2, from: 26, to: 27, blocked: false } satisfies GameCar, { taxi: true }),
   ];
   const groups = [
     { key: '25>26', from: 25, to: 26, amount: 1, queued: 0, storage: 4, closed: false },

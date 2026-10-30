@@ -96,7 +96,7 @@ export function allocateGameModes(sample:TrafficGameSample,context:ReturnType<ty
  // taxiRate is the cab flow dispatched on that OD (loaded trip plus empty reposition),
  // already included in `rate`. Private cars are the remainder. Omitted when zero so a
  // city without taxis keeps the previous demand objects.
- const demand:GameDemand[]=ranges.map(range=>{const rate=afterRows.slice(range.start,range.end).reduce((a,b)=>a+b,0),taxiRate=taxiVehicle.slice(range.start,range.end).reduce((a,b)=>a+b,0);const row:GameDemand={...range.representative,rate};if(taxiRate>1e-12)row.taxiRate=taxiRate;else delete row.taxiRate;return row;});
+ const demand:GameDemand[]=ranges.map(range=>{const rate=afterRows.slice(range.start,range.end).reduce((a,b)=>a+b,0),taxiRate=taxiVehicle.slice(range.start,range.end).reduce((a,b)=>a+b,0);const row:GameDemand & {taxiRate?:number}={...range.representative,rate};if(taxiRate>1e-12)row.taxiRate=taxiRate;else delete row.taxiRate;return row;});
  const railDiverted=railShift.reduce((a,b)=>a+b,0),taxiDiverted=taxiShift.reduce((a,b)=>a+b,0),taxiLoaded=taxiDiverted*GAME_TAXI_LOADED_FACTOR,taxiEmpty=taxiDiverted*GAME_TAXI_EMPTY_FACTOR;
  const rawRoadBefore=raw.reduce((n,d)=>n+d.rate,0),rawRoadAfter=rawRoadBefore-railDiverted-taxiDiverted+taxiLoaded+taxiEmpty;
  const roadBefore=normalized.sample.demand.reduce((n,d)=>n+d.rate,0),roadAfter=demand.reduce((n,d)=>n+d.rate,0);
