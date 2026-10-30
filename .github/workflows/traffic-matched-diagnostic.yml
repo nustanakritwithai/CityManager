@@ -1,0 +1,68 @@
+name: Matched traffic base-candidate diagnostic
+on:
+  pull_request:
+    paths:
+      - .github/workflows/traffic-matched-diagnostic.yml
+      - scripts/traffic-matched-diagnostic.mjs
+      - tests/traffic-seeded-city-entry.test.mjs
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Immutable base application commit
+        required: true
+        default: '74e51d89637c9cfccc70e5a93c427f9c41fea33f'
+      candidate_sha:
+        description: Immutable candidate application commit
+        required: true
+        default: 'b6ce68152c98217363080ef85339d083b9ad228c'
+permissions:
+  contents: read
+jobs:
+  matched:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.base_sha || '74e51d89637c9cfccc70e5a93c427f9c41fea33f' }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.candidate_sha || 'b6ce68152c98217363080ef85339d083b9ad228c' }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: One fixed base then candidate comparison; retain every result
+        env:
+          BASE_SHA: ${{ inputs.base_sha || '74e51d89637c9cfccc70e5a93c427f9c41fea33f' }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha || 'b6ce68152c98217363080ef85339d083b9ad228c' }}
+          TRAFFIC_GAME_EXPECT_DEFAULT: '0'
+          TRAFFIC_GAME_CASE: full
+          CITYMANAGER_BLOCK_MODELS: '0'
+          CITYMANAGER_SOFTWARE_WEBGL: '0'
+          VITE_MARKET_URL: ''
+          VITE_CITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
+        run: node harness/scripts/traffic-matched-diagnostic.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: matched-traffic-all-results
+          path: |
+            matched-traffic-manifest.json
+            base/.test-output/traffic-game/*/report.json
+            base/.test-output/traffic-game/*/failure.json
+            base/.test-output/traffic-game/*/*.png
+            candidate/.test-output/traffic-game/*/report.json
+            candidate/.test-output/traffic-game/*/failure.json
+            candidate/.test-output/traffic-game/*/*.png
+          retention-days: 3
+          if-no-files-found: error

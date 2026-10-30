@@ -15,6 +15,16 @@ export async function enterSeededCity({evaluate,button,send,until,raw}) {
   const evidence=()=>evaluate("({notice:document.querySelector('#startup-recovery-notice')?.textContent,idb:window.__recoveryIdb,choices:[...(document.querySelector('#startup-city-choice')?.options??[])].map(o=>({id:o.value,label:o.textContent}))})");
   try{
     assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),raw,'Known fixture primary is unchanged before deliberate entry');
+    // Matched diagnostic also exercises the pre-PR141 chooser through its real button.
+    // This is not a bypass: the same exact fixture and loaded-session assertions apply.
+    if(await evaluate("!!document.querySelector('#startup-recover-current') && !document.querySelector('#startup-city-choice')")) {
+      console.log('Explicit legacy seeded primary entry',JSON.stringify(await evidence()));
+      await button('#startup-recover-current');
+      await until("!document.querySelector('#startup-recovery-chooser[open]')");
+      assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),raw,'Legacy entered session exactly matches the known fixture');
+      assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),raw,'Legacy entry never rewrites the fixture');
+      return;
+    }
     await until("[...(document.querySelector('#startup-city-choice')?.options??[])].some(o=>o.value==='stored:current')");
     if(await evaluate("document.querySelector('#startup-city-choice').hidden"))await button('#startup-change-city');
     await button('#startup-city-choice');
