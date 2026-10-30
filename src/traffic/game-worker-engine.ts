@@ -24,6 +24,8 @@ export function createTrafficGameWorkerEngine(){
    else if(message.epoch!==epoch)throw Error('Traffic game worker epoch mismatch');
    if(message.commitPrevious){if(!candidate)throw Error('Missing traffic game candidate');base=candidate;}
    candidate=base.clone();candidate.setSample(sample);
+   // Bus (optional): absent input keeps the game byte-identical. Validated inside setBus.
+   if(message.sample.bus!==undefined)candidate.setBus(message.sample.bus);
    const frame={...(message.advance?candidate.step(false):candidate.frame),modal};seq=message.seq;
    return {kind:'frame',epoch,seq,frame};
   }catch(error){faulted=true;return {kind:'error',epoch:epoch||message?.epoch||'',seq:message?.seq??0,message:error instanceof Error?error.message:String(error)};}
