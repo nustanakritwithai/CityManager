@@ -1,0 +1,13 @@
+{
+  "browser": "Edg/156.0.4314.50",
+  "url": "http://127.0.0.1:4183/CityManager/",
+  "checks": [
+    "portrait: real retained queues/train, station closure/service pause, occupied edit refusal, fresh confirm/cancel, pan/touchcancel, repeated panel, exact save/reload and Guest identity",
+    "portrait: idle track removal, line/station removal, explicit planning confirmation/cancel, no ghost train, planned state saved atomically",
+    "landscape: real retained queues/train, station closure/service pause, occupied edit refusal, fresh confirm/cancel, pan/touchcancel, repeated panel, exact save/reload and Guest identity",
+    "landscape: idle track removal, line/station removal, explicit planning confirmation/cancel, no ghost train, planned state saved atomically"
+  ],
+  "errors": [],
+  "device": "Edge native emulated touch and software WebGL; not Android/FPS evidence",
+  "profile": "Isolated synthetic fixture; offline entry; no market backend"
+}

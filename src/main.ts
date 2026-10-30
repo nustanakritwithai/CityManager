@@ -86,6 +86,8 @@ import { installEducationPanel } from './education-panel.ts';
 import { installPanelTimeControls } from './panel-time-controls.ts';
 import { installSaveFeedback } from './save-feedback-panel.ts';
 import './player-feedback.css';
+import {installRailManagement} from './rail/management.ts';
+import {durableCityProjection} from './rail/durable-city.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -103,6 +105,7 @@ let parkRuntime: ParkRuntime;
 /** Aggregate traffic model (flag OFF by default; dev: ?traffic=1). Null keeps the old behaviour exactly. */
 let trafficLayer: TrafficLayer | null = null;
 let parkScene: SceneParkActivity | undefined;
+let railUi:ReturnType<typeof installRailManagement>|undefined;
 let parkPanel: HTMLElement;
 let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
@@ -163,6 +166,7 @@ function farmHint(index: number | null): string {
   return `ฟาร์ม · ความอุดมสมบูรณ์ ${fertility}% · ${access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
 }
 function setTool(next: string) {
+  railUi?.close();
   roadMenu?.close();
   selectMenu?.close(); selectMenu?.sync(next);
   servicesMenu?.close(); servicesMenu?.sync(next);
@@ -208,6 +212,7 @@ function openRoute(next: Route) {
 }
 function cancel() {
   view?.abortGesture();
+  if(railUi?.cancel())return;
   if (selectMenu?.isOpen()) { selectMenu.close(true); return; }
   if (servicesMenu?.isOpen()) { servicesMenu.close(true); return; }
   if (constructionMenu?.isOpen()) { constructionMenu.close(true); return; }
@@ -235,6 +240,8 @@ function roadCommand(a: number, b: number) {
   return buildParallelRoad(city, a, b, roadMode === 'oneway');
 }
 function activate(index: number) {
+  if(railUi?.activate(index))return;
+  if(tool!=='select'&&railUi?.isReserved(index)){status('ช่องนี้อยู่ในแผนรถไฟ กรุณาจัดการสถานีหรือรางก่อน');return;}
   if (tool !== 'select') ownerDecisionSession.beforeExternal(city);
   selected = index;
   if (tool === 'road') {
@@ -457,6 +464,7 @@ function renderEducationOverview() {
 }
 function render() {
   if (!view) return;
+  railUi?.sync();
   reconcileParkRuntime(city, parkRuntime);
   parkScene?.setQuality(atmosphere?.diagnostics.quality ?? 'medium');
   parkScene?.sync(parkRuntime.activity);
@@ -574,6 +582,7 @@ async function boot() {
     ownerDecisionSession.syncExternal(city, 'player-drag-road'); render();
   });
   parkScene = new SceneParkActivity(view);
+  railUi=installRailManagement({view,city:()=>city,runtime:()=>parkRuntime,selectTool:()=>setTool('select'),changed:()=>render(),status,enabled:SIGNAL_ENV.VITE_PASSENGER_RAIL==='true'});
   view.traffic.setWalkersEnabled(false);
   if (trafficModelEnabled()) { view.traffic.setCarsEnabled(false); const canvas = $('#city-canvas') as HTMLCanvasElement; trafficLayer = new TrafficLayer(view.app, screenCull(i => view.project(i), () => ({ width: canvas.clientWidth, height: canvas.clientHeight }))); }
   const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
@@ -620,7 +629,7 @@ async function boot() {
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
-  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveGuard.write(serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
+  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveGuard.write(serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); },cityId=>durableCityProjection(readStoredCity(localStorage,'current')?.raw??null,cityId));
   installHudRow();
   const writeLocalSave = async () => {const generation=saveGuard.generation,legacy=importedLegacyRaw;await saveLocalCitySession(city,parkRuntime,marketPanel?.client,raw=>saveGuard.write(raw,legacy,generation));};
   // Autosave: every minute, plus on tab hide / close. Failures (e.g. localStorage quota) are shown, never swallowed.
@@ -767,13 +776,14 @@ async function boot() {
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
+    railUi?.sync();
     if (monthEnded(tickBefore, city.tick)) sound('ev-month');
     if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, rail: () => ({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });
   if(startupSaveError)installStartupRecoveryChooser({summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,status:()=>$('#inspector-status').textContent??''});
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
