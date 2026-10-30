@@ -15,7 +15,7 @@ import {TrafficGame,captureTrafficGameSample} from '../src/traffic/game.ts';
 import {reachTouch} from './touch-reach.mjs';
 import {trafficGameCase} from './traffic-game-cases.mjs';
 import {fallbackMetrics} from './traffic-game-fallback-metrics.mjs';
-import {peakMetrics} from './traffic-game-peak-metrics.mjs';
+import {peakTriplicateMetrics} from './traffic-game-peak-metrics.mjs';
 const cell=(x,y)=>y*SIZE+x;
 // Strictly imported real simulation with actual earned freight/factory effects.
 const old=legacyCity(61025);for(let d=0;d<29;d++)legacyStep(old);
@@ -58,7 +58,7 @@ function setStage(name){stage=name;stageAt=Date.now();stages.push({name,elapsedM
 child.on('error',error=>{launchError=error;});
 // The deadline remains 240 seconds. Write already-available context synchronously;
 // do not wait on a potentially hung CDP connection or extend the watchdog.
-const watchdog=setTimeout(()=>{const state={error:'Allocation game acceptance exceeded bounded run',stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,checks,stages,lastDiagnostic,lastDiagnosticAt,bypassTraces,lastBypassTrace,errors,externalRequests,pending:[...pending.values()].map(x=>({method:x.method,elapsedMs:Date.now()-x.startedAt}))};console.error(JSON.stringify(state));try{writeFileSync(resolve(output,'failure.json'),JSON.stringify(state,null,2));}catch{}child.kill();process.exit(1);},240_000);const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const watchdog=setTimeout(()=>{const state={error:'Allocation game acceptance exceeded bounded run',stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,checks,stages,lastDiagnostic,lastDiagnosticAt,frameIntervals,peakComparison,bypassTraces,lastBypassTrace,errors,externalRequests,pending:[...pending.values()].map(x=>({method:x.method,elapsedMs:Date.now()-x.startedAt}))};console.error(JSON.stringify(state));try{writeFileSync(resolve(output,'failure.json'),JSON.stringify(state,null,2));}catch{}child.kill();process.exit(1);},240_000);const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function send(method,params={}){const id=++sequence,result=new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout ${method} at ${stage}`));},30000);pending.set(id,{method,startedAt:Date.now(),resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});});ws.send(JSON.stringify({id,method,params}));return result;}
 async function evaluate(expression){const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
 async function until(expression,timeout=60000,onProgress){const start=Date.now();while(Date.now()-start<timeout){const result=await evaluate(expression);if(onProgress)onProgress(result);if(onProgress?result.done:result)return;await sleep(60);}throw Error(`Timeout ${expression}`);}
@@ -152,7 +152,7 @@ try{
  {setStage('mobile dense OFF baseline');d=await navigate(denseRaw,'?traffic=0');assert.equal(d.traffic,null);await citizenSpeed();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));await button('#pause');await sleep(1250);
   offBefore=await diag();{const sample=await (blocked?fallbackRaf():mobileRaf());offRaf={...summarizeRaf(sample),...(blocked?{elapsedMs:sample.elapsedMs,trailingMs:sample.trailingMs,intervalsMs:sample.intervals,longTaskDurationsMs:sample.longTasks}:{})};}offAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));if(blocked)await assertProtectedSaveUnchanged(denseRaw);await button('#pause');await until('window.cityManager.parks().paused');}
 
- setStage('mobile dense ON setup');d=await navigate(denseRaw,'?traffic=1');await waitModel();d=await diag();assert.ok(d.traffic.demandRate>0);assert.equal(d.traffic.roads,dense.cells.filter(c=>c.road).length);assert.equal(d.traffic.failure,null);await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await evaluate("document.querySelector('#traffic-game-status').scrollIntoView({block:'nearest'})");await paints();const statusLayout=await evaluate(`(()=>{const e=document.querySelector('#traffic-game-status'),r=e.getBoundingClientRect();return {text:e.innerText,hidden:e.hidden,x:r.x,right:r.right,width:r.width,screen:innerWidth}})()`);assert.equal(statusLayout.hidden,false);assert.ok(/จำลอง/.test(statusLayout.text)&&/ไม่ใช่/.test(statusLayout.text),'UI explicitly identifies the allocation as simulated, not real trips');assert.ok(statusLayout.width>0&&statusLayout.x>=0&&statusLayout.right<=statusLayout.screen+1,JSON.stringify(statusLayout));await screenshot('mobile-dense-game-paused.png');await button('#park-recreation button[data-speed]');await closeInspector();
+ setStage('mobile dense ON setup');d=await navigate(denseRaw,'?traffic=1');await waitModel();d=await diag();assert.ok(d.traffic.demandRate>0);assert.equal(d.traffic.roads,dense.cells.filter(c=>c.road).length);assert.equal(d.traffic.failure,null);await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await evaluate("document.querySelector('#traffic-game-status').scrollIntoView({block:'nearest'})");await paints();const statusLayout=await evaluate(`(()=>{const e=document.querySelector('#traffic-game-status'),r=e.getBoundingClientRect();return {text:e.innerText,hidden:e.hidden,x:r.x,right:r.right,width:r.width,screen:innerWidth}})()`);assert.equal(statusLayout.hidden,false);assert.ok(/จำลอง/.test(statusLayout.text)&&/ไม่ใช่/.test(statusLayout.text),'UI explicitly identifies the allocation as simulated, not real trips');assert.ok(/64/.test(statusLayout.text)&&/128/.test(statusLayout.text),'UI discloses the representative visual/model caps');assert.ok(/บางช่วงถนน/.test(statusLayout.text)&&/แม้แบบจำลองมีรถอยู่/.test(statusLayout.text),'UI discloses that modeled traffic may not be drawn on every road');assert.ok(statusLayout.width>0&&statusLayout.x>=0&&statusLayout.right<=statusLayout.screen+1,JSON.stringify(statusLayout));await screenshot('mobile-dense-game-paused.png');await button('#park-recreation button[data-speed]');await closeInspector();
  await button('#pause');await until('window.cityManager.traffic()?.step>=1&&window.cityManager.traffic()?.moving>0',30000);await screenshot('mobile-dense-game-moving.png');
  setStage('mobile dense ON paired frame measurement');const onBefore=await diag(),onSample=await (blocked?fallbackRaf():mobileRaf()),onRaf={...summarizeRaf(onSample),...(blocked?{elapsedMs:onSample.elapsedMs,trailingMs:onSample.trailingMs,intervalsMs:onSample.intervals,longTaskDurationsMs:onSample.longTasks}:{})},onAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));if(blocked)await assertProtectedSaveUnchanged(denseRaw);
  const fallbackAssessment=blocked?fallbackMetrics(offRaf,onRaf,onAfter.traffic?.timing):null;
@@ -161,27 +161,35 @@ try{
  else assert.ok(onRaf.p95<100&&onRaf.max<1000,JSON.stringify(onRaf));
  assert.equal(onAfter.traffic.failure,null);
  await button('#pause');await waitPausedModel();checks.push(blocked?'Fallback paired 390px OFF/ON fixed-walltime browser intervals and worker/timing diagnostics captured':'Paired 390px OFF/ON browser frame intervals and worker/timing diagnostics captured on the same dense City; broad CI thresholds are not smoothness certification');
- // Normal-browser-only near-cap gate uses a validated synthetic city, not
- // naturally grown load. No synthetic traffic actors are injected.
+ // Preregistered fixed three-pair OFF→ON protocol: each condition starts
+ // from a fresh copy of the same validated city, same camera and speed. Never
+ // repeat, replace, or selectively discard any pair. One 240 s watchdog applies.
  if(!blocked){
-  setStage('mobile peak OFF baseline');
   const peak=trafficGamePeakFixture(),peakCityRaw=serialize(peak),peakRaw=serializeParkSession(peak,createParkRuntime(peak));
   assert.equal(serialize(deserializeParkSession(peakRaw).city),peakCityRaw);
-  d=await navigate(peakRaw,'?traffic=0');assert.equal(d.traffic,null);await citizenSpeed();await button('#pause');await sleep(1250);
-  const offBefore=await diag(),offSample=await mobileRaf(),off={...summarizeRaf(offSample),intervalsMs:offSample.intervals,longTaskDurationsMs:offSample.longTasks},offAfter=await diag();
-  assert.equal(await evaluate('window.cityManager.snapshot()'),peakCityRaw);await button('#pause');await until('window.cityManager.parks().paused');
-  setStage('mobile peak ON model warmup');d=await navigate(peakRaw,'?traffic=1');await waitModel();await citizenSpeed();await button('#pause');
-  // Require the actual model and renderer to reach near-cap within 25 s.
-  const attainment=await evaluate(`new Promise(resolve=>{const start=performance.now();let done=false;const finish=reason=>{if(done)return;done=true;clearTimeout(timer);const t=window.cityManager.traffic();resolve({reason,elapsedMs:performance.now()-start,step:t?.step??null,moving:t?.moving??null,cars:t?.cars??null})};const timer=setTimeout(()=>finish('observation-limit'),25000);const watch=()=>{if(done)return;const t=window.cityManager.traffic();if(t?.moving===128&&t?.cars>=120)finish('near-cap');else requestAnimationFrame(watch)};requestAnimationFrame(watch)})`);
-  setStage('mobile peak ON frame measurement');const onBefore=await diag(),onSample=await mobileRaf(),on={...summarizeRaf(onSample),intervalsMs:onSample.intervals,longTaskDurationsMs:onSample.longTasks},onAfter=await diag();
-  const cityBytesEqual=await evaluate('window.cityManager.snapshot()')===peakCityRaw;
-  const assessment=peakMetrics(attainment,off,on,onBefore.traffic,onAfter.traffic);
-  peakComparison={fixture:{population:2000,roads:490,buildings:peak.buildings.length},attainment,off,on,offBefore,offAfter,onBefore,onAfter,cityBytesEqual,assessment,
-   note:'Synthetic reconciled 2,000-person city, same economic bytes; OFF retains decorative cars, ON uses real model cars. Thresholds are CI gates, not physical-mobile proof.'};
-  assert.equal(cityBytesEqual,true,'Peak measurement keeps economic city unchanged');
-  assert.deepEqual(assessment.issues,[],JSON.stringify(assessment));
-  await button('#pause');await waitPausedModel();
-  checks.push('Normal browser peak fixture ON/OFF gate passed without injecting traffic actors');
+  const pairs=[];
+  peakComparison={fixture:{population:2000,roads:490,buildings:peak.buildings.length},protocol:{pairCount:3,order:['OFF','ON'],frameIntervalsPerCondition:120,warmupDiscardedFrames:10,attainmentLimitMs:25000,retries:0,perPairOnP95StrictlyBelowMs:100,perPairRelativeFactor:1.25,perPairRelativeAllowanceMs:10,performanceRule:'ALL_PAIRS',median:'summary-only',modelActors:128,renderedActors:64},pairs,assessment:null,
+   note:'Three fixed alternating pairs, same synthetic City bytes; OFF retains decorative cars, ON renders a representative 64-car sample of the real 128-actor model. Every pair must pass the original thresholds; medians are summary only. CI heuristics do not certify physical-device performance.'};
+  console.log('Preregistered peak protocol:',JSON.stringify(peakComparison.protocol));
+  for(let index=1;index<=3;index++){
+   setStage(`mobile peak pair ${index} OFF baseline`);
+   d=await navigate(peakRaw,'?traffic=0');assert.equal(d.traffic,null);await citizenSpeed();await button('#pause');await sleep(1250);
+   const offBefore=await diag(),offSample=await mobileRaf(),off={...summarizeRaf(offSample),intervalsMs:offSample.intervals,longTaskDurationsMs:offSample.longTasks},offAfter=await diag();
+   const offCityBytesEqual=await evaluate('window.cityManager.snapshot()')===peakCityRaw;
+   const pair={index,off,on:null,offBefore,offAfter,onBefore:null,onAfter:null,offCityBytesEqual,onCityBytesEqual:null,cityBytesEqual:false,attainment:null};pairs.push(pair);
+   await button('#pause');await until('window.cityManager.parks().paused');
+   setStage(`mobile peak pair ${index} ON warmup`);
+   d=await navigate(peakRaw,'?traffic=1');await waitModel();await citizenSpeed();await button('#pause');
+   const attainment=await evaluate(`new Promise(resolve=>{const start=performance.now();let done=false;const finish=reason=>{if(done)return;done=true;clearTimeout(timer);const t=window.cityManager.traffic();resolve({reason,elapsedMs:performance.now()-start,step:t?.step??null,moving:t?.moving??null,cars:t?.cars??null})};const timer=setTimeout(()=>finish('observation-limit'),25000);const watch=()=>{if(done)return;const t=window.cityManager.traffic();if(t?.moving===128&&t?.cars===64)finish('near-cap');else requestAnimationFrame(watch)};requestAnimationFrame(watch)})`);
+   setStage(`mobile peak pair ${index} ON frame measurement`);
+   const onBefore=await diag(),onSample=await mobileRaf(),on={...summarizeRaf(onSample),intervalsMs:onSample.intervals,longTaskDurationsMs:onSample.longTasks},onAfter=await diag();
+   const onCityBytesEqual=await evaluate('window.cityManager.snapshot()')===peakCityRaw;
+   Object.assign(pair,{attainment,on,onBefore,onAfter,onCityBytesEqual,cityBytesEqual:offCityBytesEqual&&onCityBytesEqual});
+   await button('#pause');await waitPausedModel();
+  }
+  peakComparison.assessment=peakTriplicateMetrics(pairs);
+  assert.deepEqual(peakComparison.assessment.issues,[],JSON.stringify(peakComparison.assessment));
+  checks.push('Normal browser fixed three-pair near-cap ON/OFF gate passed without injecting traffic actors');
  }
  }
  setStage('final evidence and assertions');assert.equal(checks.length,testPlan.expectedChecks,'All checks required for the selected case must run');assert.deepEqual(errors,[]);assert.deepEqual(externalRequests,[]);if(blocked)assert.ok(expectedErrors.length>=41);

@@ -10,8 +10,9 @@ export {trafficModelEnabled} from './flag.ts';
 
 /** Ephemeral traffic-allocation game, independent of economic time and saves.
  * A dedicated worker handles routing; render objects never drive the model.
- * The model hard-caps 128 actors; drawing this bounded set even offscreen avoids
- * stale culling while panning. Mobile frame cost still requires browser testing. */
+ * The model hard-caps 128 actors; a camera-independent spatial sample draws at
+ * most 64, so panning does not leave stale viewport-only selection. Mobile frame
+ * cost and visual coverage still require browser testing. */
 export class TrafficLayer {
  private readonly cars:Pick<SceneCitizenVehicles,'sync'|'setEnabled'|'destroy'|'diagnostics'>;
  private client:ReturnType<typeof createTrafficGameClient<TrafficGameInput,TrafficGameFrame>>|null=null;
