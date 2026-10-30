@@ -41,8 +41,10 @@ export class SceneTraffic {
   private walkersEnabled = true;
   private clock = 0;
   private lastCity: City | null = null;
+  private readonly view: CityView;
 
-  constructor(private readonly view: CityView) {
+  constructor(view: CityView) {
+    this.view = view;
     view.app.root.addChild(this.root);
     this.puffMaterial.name = 'Factory smoke'; this.puffMaterial.diffuse = new Color(.78, .78, .8); this.puffMaterial.opacity = .5;
     this.puffMaterial.blendType = BLEND_NORMAL; this.puffMaterial.depthWrite = false; this.puffMaterial.useLighting = false;
@@ -92,6 +94,9 @@ export class SceneTraffic {
 
   /** Cheap to call every render; the plan is rebuilt only when the day or the road network changes. */
   sync(city: City) {
+    // A loaded or new city is a different simulation even if its tick and topology match.
+    // Retiring actors belong to the previous city and must not survive a replacement.
+    if (this.lastCity && this.lastCity !== city) { this.clear(); this.signature = ''; this.topologySignature = ''; }
     this.lastCity = city;
     if (!this.enabled) return;
     const roads = city.cells.reduce((n, cell) => n + (cell.road ? 1 : 0), 0);
