@@ -175,6 +175,11 @@ function educationBlocked(c: City, building: { id: number; zone: 'R' | 'C' | 'I'
   if (!c.education) return [];
   return educationGate(c.education, educationView(c), { id: building.id, zone: building.zone, level: building.level, firmId: building.firmId ?? null }).blocked;
 }
+/** Read-only education facts in the same review view used by the existing upgrade panels. */
+export function buildingEducationStatus(live: City, building: Building) {
+  const c = reviewView(live), b = c.buildings.find(item => item.id === building.id) ?? building;
+  return educationGate(c.education, educationView(c), { id: b.id, zone: b.zone, level: b.level, firmId: c.firms.find(f => f.building === b.id)?.id ?? null });
+}
 export function enableEducation(c: City, origin: EducationState['origin'] = 'new-city'): EducationState {
   c.education ??= createEducation(origin);
   return c.education;

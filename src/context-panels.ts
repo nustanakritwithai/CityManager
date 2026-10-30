@@ -427,7 +427,7 @@ function cardHero(data: CardData, city: City): HTMLElement {
   copy.append(el('span', 'bc-type-label', labels[data.kind]), el('div', 'bc-identity', identity), ...goods, period); hero.append(icon, copy);
   const cell = data.kind === 'household' ? null : city.buildings.find(b => b.id === data.identity.buildingId)?.cell;
   if (cell != null) {
-    const issue = buildingIssues(city).find(i => i.cell === cell), badge = el('span', `bc-status-badge ${issue ? 'bad' : 'good'}`, issue ? issue.text : 'ไม่พบปัญหา');
+    const issue = buildingIssues(city).find(i => i.cell === cell), badge = el('span', `bc-status-badge ${issue ? issue.tone : 'good'}`, issue ? issue.text : 'ไม่พบปัญหา');
     badge.dataset.issue = issue?.kind ?? 'none'; copy.prepend(badge);
   }
   return hero;

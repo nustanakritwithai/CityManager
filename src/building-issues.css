@@ -1,0 +1,29 @@
+/* Keep the existing compact symbols, with a 44px transparent touch surface. */
+.map-markers .map-issue {
+  width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 8px;
+  margin: -22px 0 0 -22px; border: 0; border-radius: 50%;
+  background: transparent; color: #fff; box-shadow: none;
+  pointer-events: none; touch-action: none; cursor: pointer;
+}
+.map-markers[data-interactive="true"] .map-issue { pointer-events: auto; }
+.map-markers .map-issue[hidden] { display: none; }
+.map-issue-symbol { width: 28px; height: 28px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 50%; background: #a82f2b; box-shadow: 0 2px 6px #0008; }
+.map-issue.warn .map-issue-symbol { color: #382400; background: #f5cb65; }
+.map-issue.inactive .map-issue-symbol { background: #516071; }
+.map-issue.upgrade .map-issue-symbol { background: #354d87; }
+.map-issue-count { position: absolute; right: -2px; top: -1px; min-width: 19px; padding: 2px 3px; border: 1px solid #fff; border-radius: 9px; background: #15243b; color: #fff; font: 700 11px/1.2 sans-serif; }
+.map-markers .map-issue:focus-visible { outline: 3px solid #fff; outline-offset: 1px; background: #0b183bcc; }
+.bc-issue-list { min-width: 0; max-width: 100%; margin: 10px 0; padding: 10px; border: 1px solid var(--pnl-line, #62738b); border-radius: 12px; background: var(--pnl-card, #13233a); }
+.bc-issue-list h3 { margin: 0 0 8px; font-size: 14px; }
+.bc-issue-row { min-width: 0; display: flex; align-items: flex-start; gap: 9px; padding: 6px 0; color: var(--pnl-text, #edf5ff); }
+.bc-issue-row > .ui-icon { flex: 0 0 23px; width: 23px; height: 23px; color: #ff9e91; }
+.bc-issue-row.warn > .ui-icon { color: #f5cb65; }
+.bc-issue-row.inactive > .ui-icon { color: #b7c4d4; }
+.bc-issue-row.upgrade > .ui-icon { color: #a8c1ff; }
+.bc-issue-row > div { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.bc-issue-row strong { font-size: 13px; }
+.bc-issue-row p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; }
+
+#inspector .bc-status-badge.warn { color: #f5cb65; background: #f5cb651a; }
+#inspector .bc-status-badge.inactive { color: #b7c4d4; background: #b7c4d41a; }
+#inspector .bc-status-badge.upgrade { color: #a8c1ff; background: #a8c1ff1a; }
