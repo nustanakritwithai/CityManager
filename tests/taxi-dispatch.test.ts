@@ -212,7 +212,7 @@ test('kerb stops: toPickup → boarding (1 min) → carrying → alighting (1 mi
     e.submit([{ id: 'k', from: at(4, 2), to: at(10, 6), persons: 3, minute: 8 * 60 }]);
     const tl: [number, string, number][] = [], ev: dispatchApi.TaxiStopEvent[] = [];
     for (let m = 8 * 60; m <= 9 * 60; m += 0.125) {
-      if (Math.floor(m / 5) * 5 > e.now) { e.advanceTo(m); ev.push(...e.events); }
+      e.advanceTo(m); ev.push(...e.events);
       const s = e.snapshot(m).find(x => x.persons > 0 || x.id === ev.find(v => v.kind === 'pickup')?.unitId);
       if (s) tl.push([m, s.phase, s.persons]);
     }
@@ -232,4 +232,33 @@ test('kerb stops: toPickup → boarding (1 min) → carrying → alighting (1 mi
   assert.equal(e.totals.tripMinutesSum, dr.tripMinutes! * 3);
   assert.ok(Object.isFrozen(e.snapshot()) && Object.isFrozen(e.snapshot()[0]));
   const again = run(); assert.deepEqual(again.tl, tl); assert.deepEqual(again.ev, ev);
+});
+
+test('a taxi serves waiting people immediately after alighting, without extra batching delay', () => {
+  const net = buildNetwork(grid()), times = free(net), origin = at(0, 2), destination = at(1, 2);
+  const run = (steps: number[]) => {
+    const lease = new Ledger(), e = new TaxiEngine(net, times, [depot], 480, { width: S, lease });
+    e.submit([{ id: 'first', from: origin, to: destination, persons: 40, minute: 480 },
+      { id: 'second', from: destination, to: origin, persons: 10, minute: 480 }]);
+    const events: dispatchApi.TaxiStopEvent[] = [];
+    for (const t of steps) { e.advanceTo(t); events.push(...e.events); assert.equal(e.ledger().conservationError, 0); lease.check(); }
+    return { e, events };
+  };
+  const coarse = run([490]), fine = run(Array.from({ length: 81 }, (_, i) => 480 + i / 8));
+  assert.deepEqual(fine.events, coarse.events);
+  assert.deepEqual(fine.e.ledger(), coarse.e.ledger());
+  const firstDrop = coarse.events.find(e => e.kind === 'dropoff' && e.requestId === 'first')!;
+  const secondPickup = coarse.events.find(e => e.kind === 'pickup' && e.requestId === 'second')!;
+  assert.ok(firstDrop && secondPickup);
+  assert.ok(Math.abs(secondPickup.minute - (firstDrop.minute + 1)) < 1e-9, 'ready after exactly one minute alighting');
+  assert.ok(secondPickup.minute < 485, 'does not wait for the next five-minute decision');
+});
+
+test('a future request becomes eligible at its own minute, including when advancing in one batch', () => {
+  const net = buildNetwork(grid());
+  const e = new TaxiEngine(net, free(net), [depot], 480, { width: S });
+  e.submit([{ id: 'later', from: depot.cell, to: at(1, 2), persons: 1, minute: 481 }]);
+  e.advanceTo(480, true); assert.equal(e.ledger().waiting, 1);
+  e.advanceTo(481); assert.equal(e.events[0]?.kind, 'pickup'); assert.equal(e.events[0]?.minute, 481);
+  assert.equal(e.ledger().conservationError, 0);
 });
