@@ -93,3 +93,9 @@ test('before-taxi backup is written once before the first taxi save', () => {
   buildTaxiDepot(c, sites(c)[0], true); saveStoredCity(st as any, serialize(c), null);
   assert.equal(mem.get(TAXI_BACKUP_KEY), plain); assert.equal(mem.get(`${TAXI_BACKUP_KEY}.1`), undefined);
 });
+test('taxi site types come from the shared sites module', async () => {
+  const shared = await import('../src/taxi/sites.ts'), b = await import('../src/taxi/buildings.ts');
+  assert.equal(b.TAXI_DEPOT.units, shared.TAXI_DEPOT_UNITS);
+  const d: import('../src/taxi/sites.ts').TaxiDepot = { id: 1, cell: 2, tick: 0, level: 1, open: true };
+  const site: import('../src/taxi/sites.ts').TaxiDepotSite = d; assert.equal(site.cell, 2);
+});

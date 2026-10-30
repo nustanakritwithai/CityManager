@@ -14,10 +14,10 @@ export function taxiEnabled(search = globalThis.location?.search ?? '', storage:
   try { if (storage?.getItem(TAXI_STORAGE_KEY) === '1') return true; } catch { /* ignore */ }
   return TAXI_ENABLED;
 }
-export const TAXI_DEPOT = Object.freeze({ footprint: 1, units: Object.freeze({ 1: 4, 2: 8 }) as Readonly<Record<1 | 2, number>>, cost: 250_000, upgrade: 200_000, upkeep: 6_000 });
+import { TAXI_DEPOT_UNITS, type TaxiDepot, type TaxiState } from './sites.ts';
+export type { TaxiDepot, TaxiState } from './sites.ts';
+export const TAXI_DEPOT = Object.freeze({ footprint: 1, units: TAXI_DEPOT_UNITS, cost: 250_000, upgrade: 200_000, upkeep: 6_000 });
 export const MAX_TAXI_DEPOTS = 4;
-export type TaxiDepot = { id: number; cell: number; tick: number; level: 1 | 2; open: boolean };
-export type TaxiState = { version: 1; rules: 'taxi-1'; depots: TaxiDepot[] };
 export const createTaxi = (): TaxiState => ({ version: 1, rules: 'taxi-1', depots: [] });
 type Host = { taxi?: TaxiState };
 export const taxiDepotAt = (c: Host, i: number) => c.taxi?.depots.find(d => d.cell === i);
