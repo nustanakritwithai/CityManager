@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'src/traffic/**'
+      - 'src/rail/**'
+      - 'src/taxi/**'
+      - 'index.html'
       - 'src/citizen-vehicle-poses.ts'
       - 'src/citizen-road-queue.ts'
       - 'src/scene-citizen-vehicles.ts'
@@ -12,11 +15,15 @@ on:
       - 'src/park-runtime.ts'
       - 'src/road-topology.ts'
       - 'tests/traffic-*'
+      - 'scripts/traffic-game-*'
       - '.github/workflows/traffic-enabled.yml'
   push:
     branches: [main]
     paths:
       - 'src/traffic/**'
+      - 'src/rail/**'
+      - 'src/taxi/**'
+      - 'index.html'
       - 'src/citizen-vehicle-poses.ts'
       - 'src/citizen-road-queue.ts'
       - 'src/scene-citizen-vehicles.ts'
@@ -26,13 +33,14 @@ on:
       - 'src/park-runtime.ts'
       - 'src/road-topology.ts'
       - 'tests/traffic-*'
+      - 'scripts/traffic-game-*'
       - '.github/workflows/traffic-enabled.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   enabled:
-    name: Enabled fleet / fallback / save isolation
+    name: Allocation game / fallback / save isolation
     runs-on: windows-latest
     timeout-minutes: 10
     defaults:
@@ -49,13 +57,26 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: node --experimental-strip-types --test tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
+      - run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-modal.test.ts
+      - run: node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
+      - name: Bounded synthetic game throughput and worker isolation
+        run: |
+          New-Item -ItemType Directory -Force .test-output | Out-Null
+          node --experimental-strip-types scripts/traffic-game-stress.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000 > .test-output/traffic-game-stress.json
+          if ($LASTEXITCODE -ne 0) { throw 'Bounded allocation-game throughput/accounting gate failed.' }
+          node --experimental-strip-types scripts/traffic-game-capture-benchmark.mjs > .test-output/traffic-game-capture.json
+          if ($LASTEXITCODE -ne 0) { throw 'Allocation-game capture benchmark failed.' }
+          node --experimental-strip-types scripts/traffic-game-worker-benchmark.mjs > .test-output/traffic-game-worker.json
+          if ($LASTEXITCODE -ne 0) { throw 'Allocation-game worker benchmark failed.' }
       - run: npm run build
         env:
           VITE_MARKET_URL: ''
           VITE_CITY_ADVISOR_ONLINE: 'false'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
-      - name: Real enabled browser, then missing-model/software-WebGL fallback
+      - name: Opt-in game browser acceptance, then missing-model/software-WebGL fallback
+        env:
+          TRAFFIC_GAME_EXPECT_DEFAULT: '0'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           $preview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4195', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/traffic-preview.log -RedirectStandardError .test-output/traffic-preview-error.log
@@ -66,21 +87,24 @@ jobs:
               Start-Sleep -Milliseconds 500
             }
             if (-not $ready) { throw 'Traffic preview did not start.' }
-            node --experimental-strip-types tests/traffic-enabled-smoke.mjs
-            if ($LASTEXITCODE -ne 0) { throw 'Enabled traffic acceptance failed.' }
+            node --experimental-strip-types tests/traffic-game-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Allocation-game acceptance failed.' }
             Start-Sleep -Seconds 2
             $env:CITYMANAGER_BLOCK_MODELS = '1'
             $env:CITYMANAGER_SOFTWARE_WEBGL = '1'
-            node --experimental-strip-types tests/traffic-enabled-smoke.mjs
-            if ($LASTEXITCODE -ne 0) { throw 'Enabled fallback traffic acceptance failed.' }
+            node --experimental-strip-types tests/traffic-game-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Allocation-game fallback acceptance failed.' }
           } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: traffic-enabled-browser-evidence
+          name: traffic-game-browser-evidence
           path: |
-            .test-output/traffic-enabled/*/*.png
-            .test-output/traffic-enabled/*/report.json
-            .test-output/traffic-enabled/*/failure.json
+            .test-output/traffic-game/*/*.png
+            .test-output/traffic-game/*/report.json
+            .test-output/traffic-game/*/failure.json
+            .test-output/traffic-game-stress.json
+            .test-output/traffic-game-worker.json
+            .test-output/traffic-game-capture.json
           if-no-files-found: warn
           retention-days: 3

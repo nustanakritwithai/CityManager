@@ -1,41 +1,60 @@
-import type { AppBase } from 'playcanvas';
-import { roadTopologyKey } from '../road-topology.ts';
-import type { City } from '../sim.ts';
-import { SceneCitizenVehicles } from '../scene-citizen-vehicles.ts';
-import { TrafficClock, gameMinute } from './clock.ts';
-import { changedRoadCells } from './flag.ts';
-import { activeCars, createFleet, fleetPoses, setFleetDemand, stepFleet, type FleetState } from './fleet.ts';
-export { trafficModelEnabled } from './flag.ts';
-/**
- * Game-side glue, created only when the flag is on. Owns the clock, the fleet and the instanced
- * renderer; reads City, never writes it. Road changes from any source are detected by comparing
- * the road signature every frame, and rebuild only the changed region.
- */
+import type {AppBase} from 'playcanvas';
+import type {City} from '../sim.ts';
+import {SceneCitizenVehicles} from '../scene-citizen-vehicles.ts';
+import {taxiEnabled} from '../taxi/buildings.ts';
+import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
+import {captureTrafficGameInput,type TrafficGameInput,type TrafficGameFrame} from './game.ts';
+import {gamePoses,blendGamePoses} from './game-poses.ts';
+import {createTrafficGameClient} from './game-worker-client.ts';
+export {trafficModelEnabled} from './flag.ts';
+
+/** Ephemeral traffic-allocation game, independent of economic time and saves.
+ * A dedicated worker handles routing; render objects never drive the model.
+ * The model hard-caps 128 actors; drawing this bounded set even offscreen avoids
+ * stale culling while panning. Mobile frame cost still requires browser testing. */
 export class TrafficLayer {
-  readonly clock = new TrafficClock({ enabled: true });
-  fleet: FleetState = createFleet();
-  private readonly cars: SceneCitizenVehicles;
-  private readonly onScreen: (cell: number) => boolean;
-  private roads: boolean[] = []; private topo = ''; private sig = ''; private city: City | null = null;
-  constructor(app: AppBase, onScreen: (cell: number) => boolean = () => true) { this.cars = new SceneCitizenVehicles(app); this.onScreen = onScreen; }
-  /** Optional explicit nudge after a map command; frame() also catches every other edit path. */
-  afterMapEdit(c: City): void { this.checkRoads(c); }
-  private checkRoads(c: City): void {
-    const sig = c.cells.map(x => x.road ? '1' : '0').join('') + roadTopologyKey(c);
-    if (c === this.city && sig === this.sig) return;
-    const roads = c.cells.map(x => x.road), topo = roadTopologyKey(c);
-    if (c === this.city) { const changed = changedRoadCells(this.roads, roads, this.topo, topo); if (changed.length) this.clock.roadEdited(c, changed); }
-    else this.fleet = createFleet();
-    this.city = c; this.roads = roads; this.topo = topo; this.sig = sig;
+ private readonly cars:Pick<SceneCitizenVehicles,'sync'|'setEnabled'|'destroy'|'diagnostics'>;
+ private client:ReturnType<typeof createTrafficGameClient<TrafficGameInput,TrafficGameFrame>>|null=null;
+ private city:City|null=null;private latest:TrafficGameFrame|null=null;
+ private previous:CitizenVehiclePose[]=[];private target:CitizenVehiclePose[]=[];private drawn:CitizenVehiclePose[]=[];
+ private elapsed=0;private phase=1;private paused=true;private visible=true;private dirty=false;private renderDirty=true;private failure:string|null=null;
+ constructor(private readonly app:AppBase,_onScreen:(cell:number)=>boolean=()=>true,private readonly onFailure:(message:string)=>void=()=>{},
+   private readonly makeWorker:()=>Worker=()=>new Worker(new URL('./game-worker-entry.ts',import.meta.url),{type:'module'}),
+   scene?:Pick<SceneCitizenVehicles,'sync'|'setEnabled'|'destroy'|'diagnostics'>,private readonly taxiOn=taxiEnabled()){this.cars=scene??new SceneCitizenVehicles(app);}
+ private fail(error:unknown):void {
+  this.failure=error instanceof Error?error.message:String(error);try{this.client?.dispose();}catch{/* isolated visual feature */}
+  try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
+ }
+ private reset(city:City):void {
+  this.client?.dispose();this.client=null;this.city=city;this.latest=null;this.previous=[];this.target=[];this.drawn=[];this.elapsed=0;this.phase=1;this.dirty=false;this.renderDirty=true;this.failure=null;this.cars.setEnabled(this.visible);this.cars.sync([]);
+  try {
+   const worker=this.makeWorker(),epoch=crypto.randomUUID();
+   this.client=createTrafficGameClient<TrafficGameInput,TrafficGameFrame>(worker,epoch,{onFrame:frame=>{
+    this.latest=frame;this.previous=this.drawn;this.target=gamePoses(frame.cars,frame.groups);this.phase=0;this.renderDirty=true;
+   },onFailure:message=>this.fail(message)});
+   this.client.submit(captureTrafficGameInput(city,{taxiEnabled:this.taxiOn}),{advance:false,paused:this.paused});
+  } catch(error){this.fail(error);}
+ }
+ /** Every city replacement starts a fresh game epoch; nothing is read from or
+  * written to the player's save. Map edits replace the current sample. */
+ afterMapEdit(city:City,paused=this.paused):void {
+  try{if(city!==this.city){this.paused=paused;this.reset(city);return;}this.dirty=true;}catch(error){this.fail(error);}
+ }
+ setVisible(visible:boolean):void {if(this.visible===visible)return;this.visible=visible;this.renderDirty=true;try{this.cars.setEnabled(visible&&!this.failure);}catch(error){this.fail(error);}}
+ frame(city:City,_minuteOfDay:number,paused:boolean,dt:number):void {
+  try{if(city!==this.city){this.paused=paused;this.reset(city);}
+  const pauseChanged=paused!==this.paused;this.paused=paused;let advance=false;
+  if(!paused&&this.client&&!this.failure){
+   this.elapsed+=Math.min(.25,Math.max(0,dt));this.phase=Math.min(1,this.phase+Math.min(.25,Math.max(0,dt)));
+   if(this.elapsed>=1){this.elapsed-=1;advance=true;}
   }
-  frame(c: City, minuteOfDay: number, paused: boolean, dt: number): void {
-    this.checkRoads(c);
-    const ran = this.clock.advance(c, gameMinute(c.tick, minuteOfDay), paused), net = this.clock.network, last = this.clock.last;
-    if (ran.length && net && last) setFleetDemand(this.fleet, net, this.clock.lastOd, last.assigned, last.times);
-    if (!net) { this.cars.sync([]); return; }
-    if (!paused) stepFleet(this.fleet, net, Math.min(dt, .25));
-    const seen = new Map<number, boolean>(), visible = (cell: number) => { let v = seen.get(cell); if (v === undefined) seen.set(cell, v = this.onScreen(cell)); return v; };
-    this.cars.sync(fleetPoses(this.fleet, net, visible));
-  }
-  get diagnostics() { return { ...this.cars.diagnostics, active: activeCars(this.fleet), simulated: this.fleet.cars.length, totals: this.clock.totals }; }
+  if((advance||pauseChanged||this.dirty)&&this.client&&!this.failure){this.dirty=false;this.client.submit(captureTrafficGameInput(city,{taxiEnabled:this.taxiOn}),{advance,paused});}
+  if(this.visible&&!this.failure&&(this.renderDirty||(!paused&&this.phase<1))){this.drawn=blendGamePoses(this.previous,this.target,this.phase);this.cars.sync(this.drawn);this.renderDirty=false;}
+  }catch(error){this.fail(error);}
+ }
+ destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
+ get diagnostics(){const f=this.latest;return {...this.cars.diagnostics,mode:'allocation-game' as const,paused:this.paused,
+  step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
+  completed:f?.completed??0,dropped:f?.dropped??0,cancelled:f?.cancelled??0,clippedRate:f?.clippedRate??0,
+  roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker:this.client?.status??null};}
 }

@@ -208,7 +208,7 @@ test('denied global localStorage getter preserves default-off and explicit traff
     assert.equal(mem.get(TRAFFIC_STORAGE_KEY), '1');
     assert.equal(trafficModelEnabled('', storage), true);
     assert.equal(trafficModelEnabled('?traffic=0', storage), false);
-    assert.equal(mem.has(TRAFFIC_STORAGE_KEY), false);
+    assert.equal(mem.get(TRAFFIC_STORAGE_KEY), '0');
   } finally {
     if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
     else Reflect.deleteProperty(globalThis, 'localStorage');

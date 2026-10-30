@@ -3,7 +3,7 @@ import { renderBuildingIssues } from './building-issue-panel.ts';
 import './building-issues.css';
 import { restoreStartupCity } from './startup-save.ts';
 import { TrafficLayer, trafficModelEnabled } from './traffic/layer.ts';
-import { screenCull } from './traffic/flag.ts';
+import { screenCull, storeTrafficModel } from './traffic/flag.ts';
 import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
@@ -100,7 +100,7 @@ let entityExplanationPanel: ReturnType<typeof createEntityExplanationPanel> | un
 const STARTER = new URLSearchParams(location.search).get('starter') === '1';
 let city: City;
 let parkRuntime: ParkRuntime;
-/** Aggregate traffic model (flag OFF by default; dev: ?traffic=1). Null keeps the old behaviour exactly. */
+/** Independent, ephemeral traffic-allocation game; never changes economic state or saves. */
 let trafficLayer: TrafficLayer | null = null;
 let parkScene: SceneParkActivity | undefined;
 let parkPanel: HTMLElement;
@@ -248,7 +248,7 @@ function activate(index: number) {
   else if (tool === 'bulldoze') status(resultSound(bulldoze(city, index), 'ui-bulldoze').message);
   else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
   if (tool !== 'select') ownerDecisionSession.syncExternal(city, 'player-map-command');
-  trafficLayer?.afterMapEdit(city);
+  trafficLayer?.afterMapEdit(city, paused || document.hidden);
   render();
 }
 function node(tag: string, className = '', content?: string): HTMLElement {
@@ -571,11 +571,33 @@ async function boot() {
   view = await CityView.create($('#city-canvas'), activate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
     ownerDecisionSession.beforeExternal(city);
     selected = b; roadStart = null; status(resultSound(roadCommand(a, b), 'ui-road').message);
-    ownerDecisionSession.syncExternal(city, 'player-drag-road'); render();
+    ownerDecisionSession.syncExternal(city, 'player-drag-road'); trafficLayer?.afterMapEdit(city, paused || document.hidden); render();
   });
   parkScene = new SceneParkActivity(view);
   view.traffic.setWalkersEnabled(false);
-  if (trafficModelEnabled()) { view.traffic.setCarsEnabled(false); const canvas = $('#city-canvas') as HTMLCanvasElement; trafficLayer = new TrafficLayer(view.app, screenCull(i => view.project(i), () => ({ width: canvas.clientWidth, height: canvas.clientHeight }))); }
+  let trafficEnabled=trafficModelEnabled();
+  const trafficSection=document.createElement('section');trafficSection.id='traffic-game-status';trafficSection.className='growth-section';
+  const trafficTitle=document.createElement('h3');trafficTitle.textContent='การจราจรจำลอง';
+  const trafficInfo=document.createElement('p');trafficInfo.textContent='กำลังเตรียมแบบจำลอง';trafficInfo.setAttribute('role','status');
+  const trafficNote=document.createElement('small');trafficNote.textContent='รถและคิวเป็นตัวแทนจำนวนจำกัดเพื่อวางแผนถนน ไม่ใช่การเดินทางหรือการส่งสินค้าจริง และไม่เปลี่ยนเศรษฐกิจหรือเซฟ';
+  const trafficFocus=document.createElement('button');trafficFocus.id='traffic-game-focus';trafficFocus.type='button';trafficFocus.textContent='ไปดูจุดรถติด';trafficFocus.hidden=true;
+  let bottleneckCell:number|null=null;trafficFocus.addEventListener('click',()=>{if(bottleneckCell!==null){view.focus(bottleneckCell);inspector(false);render();}});
+  trafficSection.append(trafficTitle,trafficInfo,trafficFocus,trafficNote);$('#growth-anchor').insertAdjacentElement('beforebegin',trafficSection);
+  const trafficControl=document.createElement('section');trafficControl.className='save-group';
+  const trafficControlTitle=document.createElement('h4');trafficControlTitle.textContent='การจราจรจำลอง';
+  const trafficButton=document.createElement('button');trafficButton.id='traffic-game-toggle';trafficButton.type='button';
+  const trafficControlNote=document.createElement('small');trafficControlNote.textContent='ปิดหรือเปิดแบบจำลองได้ รถจำลองเริ่มใหม่เมื่อโหลดเมือง';
+  trafficControl.append(trafficControlTitle,trafficButton,trafficControlNote);$('#game-content .game-menu').prepend(trafficControl);
+  const setTrafficEnabled=(enabled:boolean,persist=false)=>{
+    trafficEnabled=enabled;trafficLayer?.destroy();trafficLayer=null;view.traffic.setCarsEnabled(!enabled);
+    if(enabled){try{const canvas=$('#city-canvas') as HTMLCanvasElement;trafficLayer=new TrafficLayer(view.app,screenCull(i=>view.project(i),()=>({width:canvas.clientWidth,height:canvas.clientHeight})),()=>{view.traffic.setCarsEnabled(true);status('แบบจำลองจราจรไม่พร้อม · กลับไปใช้รถตกแต่ง โดยไม่กระทบเซฟ');});}catch{view.traffic.setCarsEnabled(true);trafficInfo.textContent='แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน';}}
+    trafficButton.textContent=enabled?'ปิดการจราจรจำลอง':'เปิดการจราจรจำลอง';trafficButton.setAttribute('aria-pressed',String(enabled));
+    trafficSection.hidden=!enabled;
+    if(persist){const saved=storeTrafficModel(enabled);try{const u=new URL(location.href);u.searchParams.delete('traffic');history.replaceState(history.state,'',u);}catch{/* preference still applies */}
+      status(saved?(enabled?'เปิดการจราจรจำลองแล้ว':'ปิดการจราจรจำลองแล้ว'):'เปลี่ยนเฉพาะรอบนี้: เบราว์เซอร์ไม่อนุญาตให้จำการตั้งค่า');}
+  };
+  trafficButton.addEventListener('click',()=>setTrafficEnabled(!trafficEnabled,true));setTrafficEnabled(trafficEnabled);
+  let trafficText='';
   const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
   const selectButton = document.querySelector<HTMLButtonElement>('[data-tool="select"]')!;
@@ -745,7 +767,10 @@ async function boot() {
     visual.update(dt);
     minimap?.redraw();
     view.traffic.update(dt, !paused && !document.hidden);
+    trafficLayer?.setVisible(visual.settings.traffic);
     trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt);
+    if(trafficLayer){const d=trafficLayer.diagnostics;view.traffic.setCarsEnabled(Boolean(d.failure));const text=d.failure?'แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน':`ความต้องการ ${(d.demandRate+d.clippedRate).toFixed(1)} หน่วย/รอบ · รอ ${d.waiting.toFixed(1)} · รถติด ${d.blocked} คันตัวแทน · ถนนแออัด ${d.congestedLinks} ช่วง${d.clippedRate>0||d.dropped>0?' · ความต้องการบางส่วนเกินขีดจำลอง':''}${d.modal&&d.modal.taxiDiverted>0?` · แท็กซี่จำลอง: ภาระถนน ${d.modal.roadBefore.toFixed(1)} → ${d.modal.roadAfter.toFixed(1)} (รวมรถรับส่งและรถเปล่า)`:''}`;if(text!==trafficText){trafficText=text;trafficInfo.textContent=text;}const hotspot=d.loadByCell.reduce<typeof d.loadByCell[number]|null>((best,row)=>row.queued>0&&(!best||row.queued>best.queued)?row:best,null);bottleneckCell=hotspot?.cell??null;trafficFocus.hidden=bottleneckCell===null;}
+
     if (city.tick !== soundTick) {
       soundTick = city.tick;
       traffic = Math.min(1, city.households.reduce((n, h) => n + h.members, 0) / 40);
