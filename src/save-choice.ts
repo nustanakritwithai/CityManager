@@ -14,3 +14,6 @@ export function sameResumeInventory(a:ResumeChoice[],b:ResumeChoice[]):boolean{r
 export function suppressRememberedChoice(storage:Pick<Storage,'getItem'|'setItem'>):string{
  const raw=JSON.stringify({version:1,requireChoice:true,revision:crypto.randomUUID()});storage.setItem(RESUME_CHOICE_KEY,raw);if(storage.getItem(RESUME_CHOICE_KEY)!==raw)throw Error('choice-suppression-unverified');return raw;
 }
+
+/** Explicit unresolved choice overrides every older preference, regardless of storage. */
+export function resolveResumePreference(remembered:string|null,active:{id:string;requireChoice?:true}|null):string|null{return active?.requireChoice?null:remembered??active?.id??null;}

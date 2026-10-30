@@ -39,3 +39,8 @@ test('market-enabled promotion keeps ACK blocked on quota/readback failure and p
   data.set(SAVE_KEY,first);await assert.rejects(client.ack(receipt),/saved-city-recovery-required/);assert.equal(sends,0);data.set(SAVE_KEY,durable);runtime.minuteRemainder=0.5;await assert.rejects(client.ack(receipt),/saved-city-recovery-required/);assert.equal(sends,0);runtime.minuteRemainder=0;await client.ack(receipt);assert.equal(sends,1);assert.equal(client.journal.receipts[receipt].state,'delivered');
  }finally{keys.forEach((key,i)=>descriptors[i]?Object.defineProperty(globalThis,key,descriptors[i]!):Reflect.deleteProperty(globalThis,key));}
 });
+
+
+test('unresolved explicit choice suppresses even a valid-looking stale localStorage preference',async()=>{
+ const {resolveResumePreference}=await import('../src/save-choice.ts');assert.equal(resolveResumePreference('stored:current',{id:'recovery:old',requireChoice:true}),null);assert.equal(resolveResumePreference(null,{id:'recovery:old',requireChoice:true}),null);assert.equal(resolveResumePreference(null,{id:'recovery:confirmed'}),'recovery:confirmed');assert.equal(resolveResumePreference('stored:checkpoint',{id:'recovery:old'}),'stored:checkpoint');
+});

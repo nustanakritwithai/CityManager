@@ -39,7 +39,7 @@ import { PARK, PARK_STAFF } from './parks.ts';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
 import { decodeSaveCopy } from './save-copy-codec.ts';
 import { primaryFence, promoteRecoverySave } from './save-promotion.ts';
-import { RESUME_CHOICE_KEY, suppressRememberedChoice, rememberResumeChoice, rememberedResumeChoice, sameResumeInventory, type ResumeChoice } from './save-choice.ts';
+import { RESUME_CHOICE_KEY, resolveResumePreference, suppressRememberedChoice, rememberResumeChoice, rememberedResumeChoice, sameResumeInventory, type ResumeChoice } from './save-choice.ts';
 import { growthStatusText } from './context-data.ts';
 import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
@@ -860,7 +860,7 @@ async function boot() {
   };
   const rememberChoice=async(choice:ResumeChoice)=>{try{if(JSON.parse(localStorage.getItem(RESUME_CHOICE_KEY)??'null')?.requireChoice===true)return;}catch{return;}const generation=saveGuard.generation,captured=city;const inventory=await readResumeChoices();if(inventory.complete&&inventory.choices.some(c=>c.id===choice.id&&c.raw===choice.raw))await rememberResumeChoice(localStorage,choice,inventory.choices,()=>city===captured&&saveGuard.generation===generation&&JSON.parse(localStorage.getItem(RESUME_CHOICE_KEY)??'null')?.requireChoice!==true);};
   let offeredChoices:ResumeChoice[]=[],offeredComplete=false;
-  const loadChoices=async()=>{const inventory=await readResumeChoices();offeredChoices=inventory.choices;offeredComplete=inventory.complete;let selected=recoveryUnavailable||!inventory.complete?null:await rememberedResumeChoice(localStorage,offeredChoices);if(inventory.complete){try{const active=await readActiveLocalSave(localFence());if(active&&!active.marker.requireChoice&&!selected)selected=recoveryChoiceId(active.snapshot);}catch{selected=null;}}const unique=new Map<string,ResumeChoice>();for(const choice of offeredChoices.filter(c=>!c.advanced)){if(!unique.has(choice.raw)||choice.id===selected)unique.set(choice.raw,choice);}return {choices:[...unique.values()],selected,complete:inventory.complete};};
+  const loadChoices=async()=>{const inventory=await readResumeChoices();offeredChoices=inventory.choices;offeredComplete=inventory.complete;let selected=recoveryUnavailable||!inventory.complete?null:await rememberedResumeChoice(localStorage,offeredChoices);if(inventory.complete){try{const active=await readActiveLocalSave(localFence());selected=resolveResumePreference(selected,active?{id:recoveryChoiceId(active.snapshot),requireChoice:active.marker.requireChoice}:null);}catch{selected=null;}}const unique=new Map<string,ResumeChoice>();for(const choice of offeredChoices.filter(c=>!c.advanced)){if(!unique.has(choice.raw)||choice.id===selected)unique.set(choice.raw,choice);}return {choices:[...unique.values()],selected,complete:inventory.complete};};
   const loadChoice=async(id:string)=>{
     const generation=saveGuard.generation,captured=city;
     const offered=offeredChoices.find(c=>c.id===id);if(!offered)return false;
