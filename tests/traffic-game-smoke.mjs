@@ -14,6 +14,8 @@ import {trafficGamePeakFixture} from './traffic-game-peak-fixture.ts';
 import {TrafficGame,captureTrafficGameSample} from '../src/traffic/game.ts';
 import {reachTouch} from './touch-reach.mjs';
 import {trafficGameCase} from './traffic-game-cases.mjs';
+import {fallbackMetrics} from './traffic-game-fallback-metrics.mjs';
+import {peakMetrics} from './traffic-game-peak-metrics.mjs';
 const cell=(x,y)=>y*SIZE+x;
 // Strictly imported real simulation with actual earned freight/factory effects.
 const old=legacyCity(61025);for(let d=0;d<29;d++)legacyStep(old);
@@ -77,7 +79,14 @@ async function navigate(raw,query=''){
 async function tapCell(i){await paints();const p=await evaluate(`window.cityManager.cellScreen(${i})`);assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`),'city-canvas');await click(p.x,p.y);}
 async function closeInspector(){if(await evaluate('document.querySelector("#inspector").dataset.open==="true"'))await button('#close-inspector');}
 async function mobileRaf(){return evaluate(`new Promise(resolve=>{const a=[],longTasks=[];let previous,observer=null;try{if(globalThis.PerformanceObserver?.supportedEntryTypes?.includes('longtask')){observer=new PerformanceObserver(list=>{for(const e of list.getEntries())longTasks.push(e.duration)});observer.observe({entryTypes:['longtask']})}}catch{}const sample=t=>{if(previous!==undefined)a.push(t-previous);previous=t;if(a.length>=130){if(observer){for(const e of observer.takeRecords())longTasks.push(e.duration);observer.disconnect()}resolve({intervals:a.slice(10),longTasks,longTaskSupported:!!observer,visibility:document.visibilityState})}else requestAnimationFrame(sample)};requestAnimationFrame(sample)})`);}
+// Wall-time bound avoids requiring 130 frames on a software renderer. The
+// timer ends even with too few frames; downstream marks those results UNKNOWN.
+async function fallbackRaf(){return evaluate(`new Promise(resolve=>{const a=[],longTasks=[],start=performance.now();let previous,observer=null,done=false;try{if(globalThis.PerformanceObserver?.supportedEntryTypes?.includes('longtask')){observer=new PerformanceObserver(list=>{for(const e of list.getEntries())longTasks.push(e.duration)});observer.observe({entryTypes:['longtask']})}}catch{}const finish=()=>{done=true;if(observer){for(const e of observer.takeRecords())longTasks.push(e.duration);observer.disconnect()}resolve({intervals:a,longTasks,longTaskSupported:!!observer,visibility:document.visibilityState,elapsedMs:performance.now()-start,trailingMs:previous===undefined?null:Math.max(0,performance.now()-previous)})};const sample=t=>{if(done)return;if(previous!==undefined)a.push(t-previous);previous=t;requestAnimationFrame(sample)};setTimeout(finish,12000);requestAnimationFrame(sample)})`);}
 function summarizeRaf(sample){const sorted=[...sample.intervals].sort((a,b)=>a-b);return {count:sorted.length,p50:sorted[Math.floor((sorted.length-1)*.5)],p95:sorted[Math.floor((sorted.length-1)*.95)],max:sorted.at(-1),over50ms:sorted.filter(v=>v>50).length,over100ms:sorted.filter(v=>v>100).length,longTaskSupported:sample.longTaskSupported,longTaskCount:sample.longTasks.length,longTaskMaxMs:Math.max(0,...sample.longTasks),visibility:sample.visibility};}
+async function assertProtectedSaveUnchanged(raw){
+ assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),raw,'Fallback sample does not change primary save bytes');
+ assert.deepEqual(await evaluate("window.__trafficWrites.filter(x=>/^citymanager\\.(save|backup|checkpoint|market)/.test(x.key))"),[],'Fallback sample does not write protected storage');
+}
 async function citizenSpeed(){await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await button('#park-recreation button[data-speed]');await closeInspector();}
 async function gameMenu(){await closeInspector();await button('#toggle-game-menu');await until('document.querySelector("#inspector").dataset.page==="game"');}
 async function waitModel(){await until("window.cityManager.traffic()?.mode==='allocation-game' && window.cityManager.traffic()?.worker?.applied>0 && !window.cityManager.traffic()?.failure");}
@@ -140,39 +149,43 @@ try{
  // so the economic City remains byte-identical during each short measurement.
  // OFF keeps decorative cars; ON replaces them with representative game cars.
  await viewport(true);let offBefore=null,offRaf=null,offAfter=null;
- if(!blocked){setStage('mobile dense OFF baseline');d=await navigate(denseRaw,'?traffic=0');assert.equal(d.traffic,null);await citizenSpeed();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));await button('#pause');await sleep(1250);
-  offBefore=await diag();offRaf=summarizeRaf(await mobileRaf());offAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));await button('#pause');await until('window.cityManager.parks().paused');}
- else setStage('fallback skips extra OFF frame sample to preserve watchdog budget');
+ {setStage('mobile dense OFF baseline');d=await navigate(denseRaw,'?traffic=0');assert.equal(d.traffic,null);await citizenSpeed();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));await button('#pause');await sleep(1250);
+  offBefore=await diag();{const sample=await (blocked?fallbackRaf():mobileRaf());offRaf={...summarizeRaf(sample),...(blocked?{elapsedMs:sample.elapsedMs,trailingMs:sample.trailingMs,intervalsMs:sample.intervals,longTaskDurationsMs:sample.longTasks}:{})};}offAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));if(blocked)await assertProtectedSaveUnchanged(denseRaw);await button('#pause');await until('window.cityManager.parks().paused');}
+
  setStage('mobile dense ON setup');d=await navigate(denseRaw,'?traffic=1');await waitModel();d=await diag();assert.ok(d.traffic.demandRate>0);assert.equal(d.traffic.roads,dense.cells.filter(c=>c.road).length);assert.equal(d.traffic.failure,null);await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await evaluate("document.querySelector('#traffic-game-status').scrollIntoView({block:'nearest'})");await paints();const statusLayout=await evaluate(`(()=>{const e=document.querySelector('#traffic-game-status'),r=e.getBoundingClientRect();return {text:e.innerText,hidden:e.hidden,x:r.x,right:r.right,width:r.width,screen:innerWidth}})()`);assert.equal(statusLayout.hidden,false);assert.ok(/จำลอง/.test(statusLayout.text)&&/ไม่ใช่/.test(statusLayout.text),'UI explicitly identifies the allocation as simulated, not real trips');assert.ok(statusLayout.width>0&&statusLayout.x>=0&&statusLayout.right<=statusLayout.screen+1,JSON.stringify(statusLayout));await screenshot('mobile-dense-game-paused.png');await button('#park-recreation button[data-speed]');await closeInspector();
  await button('#pause');await until('window.cityManager.traffic()?.step>=1&&window.cityManager.traffic()?.moving>0',30000);await screenshot('mobile-dense-game-moving.png');
- setStage('mobile dense ON paired frame measurement');const onBefore=await diag(),onRaf=summarizeRaf(await mobileRaf()),onAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));
- frameIntervals={paired:!blocked,off:offRaf,on:onRaf,cityBytesEqual:true,offBefore,offAfter,onBefore,onAfter,worker:{before:onBefore.traffic?.worker??null,after:onAfter.traffic?.worker??null},gameTiming:{before:onBefore.traffic?.timing??null,after:onAfter.traffic?.timing??null},note:blocked?'Fallback runs ON only to preserve the original watchdog budget; no paired OFF result. Worker round-trip includes worker queue, compute and message transfer after submit, not time before submit. Browser emulation does not establish smoothness or physical-device FPS.':'Same fixture and economic City at citizen-view speed; OFF uses decorative cars, ON uses allocation-game cars. Worker round-trip includes worker queue, compute and message transfer after submit, not time before submit. Browser emulation and broad thresholds do not establish smoothness or physical-device FPS.'};
- assert.ok(onRaf.p95<100&&onRaf.max<1000,JSON.stringify(onRaf));assert.equal(onAfter.traffic.failure,null);
- await button('#pause');await waitPausedModel();checks.push(blocked?'Fallback 390px ON browser intervals and worker/timing diagnostics captured; paired OFF omitted to preserve watchdog budget':'Paired 390px OFF/ON browser frame intervals and worker/timing diagnostics captured on the same dense City; broad CI thresholds are not smoothness certification');
- // Normal-browser-only diagnostic with near-cap real TrafficGame actors. The
- // fixture is a validated synthetic city, not a claim of naturally grown load.
- // No synthetic cars are injected; missing peak attainment is reported, not
- // converted into a new uncalibrated frame-performance gate.
+ setStage('mobile dense ON paired frame measurement');const onBefore=await diag(),onSample=await (blocked?fallbackRaf():mobileRaf()),onRaf={...summarizeRaf(onSample),...(blocked?{elapsedMs:onSample.elapsedMs,trailingMs:onSample.trailingMs,intervalsMs:onSample.intervals,longTaskDurationsMs:onSample.longTasks}:{})},onAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));if(blocked)await assertProtectedSaveUnchanged(denseRaw);
+ const fallbackAssessment=blocked?fallbackMetrics(offRaf,onRaf,onAfter.traffic?.timing):null;
+ frameIntervals={paired:true,off:offRaf,on:onRaf,cityBytesEqual:true,offBefore,offAfter,onBefore,onAfter,worker:{before:onBefore.traffic?.worker??null,after:onAfter.traffic?.worker??null},gameTiming:{before:onBefore.traffic?.timing??null,after:onAfter.traffic?.timing??null},fallbackAssessment,note:blocked?'Paired 12 s visible OFF/ON sampling. Poor/unknown status remains explicit; epoch maxima include startup. Worker round-trip includes queue, compute and message transfer after submit. Software renderer and browser emulation are not physical-device FPS certification.':'Same fixture and economic City at citizen-view speed; OFF uses decorative cars, ON uses allocation-game cars. Worker round-trip includes worker queue, compute and message transfer after submit, not time before submit. Browser emulation and broad thresholds do not establish smoothness or physical-device FPS.'};
+ if(blocked)assert.deepEqual(fallbackAssessment.issues,[],JSON.stringify(fallbackAssessment));
+ else assert.ok(onRaf.p95<100&&onRaf.max<1000,JSON.stringify(onRaf));
+ assert.equal(onAfter.traffic.failure,null);
+ await button('#pause');await waitPausedModel();checks.push(blocked?'Fallback paired 390px OFF/ON fixed-walltime browser intervals and worker/timing diagnostics captured':'Paired 390px OFF/ON browser frame intervals and worker/timing diagnostics captured on the same dense City; broad CI thresholds are not smoothness certification');
+ // Normal-browser-only near-cap gate uses a validated synthetic city, not
+ // naturally grown load. No synthetic traffic actors are injected.
  if(!blocked){
   setStage('mobile peak OFF baseline');
   const peak=trafficGamePeakFixture(),peakCityRaw=serialize(peak),peakRaw=serializeParkSession(peak,createParkRuntime(peak));
   assert.equal(serialize(deserializeParkSession(peakRaw).city),peakCityRaw);
   d=await navigate(peakRaw,'?traffic=0');assert.equal(d.traffic,null);await citizenSpeed();await button('#pause');await sleep(1250);
-  const offBefore=await diag(),off=summarizeRaf(await mobileRaf()),offAfter=await diag();
+  const offBefore=await diag(),offSample=await mobileRaf(),off={...summarizeRaf(offSample),intervalsMs:offSample.intervals,longTaskDurationsMs:offSample.longTasks},offAfter=await diag();
   assert.equal(await evaluate('window.cityManager.snapshot()'),peakCityRaw);await button('#pause');await until('window.cityManager.parks().paused');
   setStage('mobile peak ON model warmup');d=await navigate(peakRaw,'?traffic=1');await waitModel();await citizenSpeed();await button('#pause');
-  // Bound observation without making an uncalibrated performance threshold a
-  // CI failure. Preserve the actual count if the model cannot reach the cap.
+  // Require the actual model and renderer to reach near-cap within 25 s.
   const attainment=await evaluate(`new Promise(resolve=>{const start=performance.now();let done=false;const finish=reason=>{if(done)return;done=true;clearTimeout(timer);const t=window.cityManager.traffic();resolve({reason,elapsedMs:performance.now()-start,step:t?.step??null,moving:t?.moving??null,cars:t?.cars??null})};const timer=setTimeout(()=>finish('observation-limit'),25000);const watch=()=>{if(done)return;const t=window.cityManager.traffic();if(t?.moving===128&&t?.cars>=120)finish('near-cap');else requestAnimationFrame(watch)};requestAnimationFrame(watch)})`);
-  setStage('mobile peak ON frame measurement');const onBefore=await diag(),on=summarizeRaf(await mobileRaf()),onAfter=await diag();
-  assert.equal(await evaluate('window.cityManager.snapshot()'),peakCityRaw);assert.equal(onAfter.traffic.failure,null);await button('#pause');await waitPausedModel();
-  peakComparison={fixture:{population:2000,roads:490,buildings:peak.buildings.length},attainment,off,on,offBefore,offAfter,onBefore,onAfter,cityBytesEqual:true,
-   note:'Synthetic reconciled 2,000-person city, same economic bytes; OFF retains decorative cars, ON uses real model cars. Near-cap attainment is diagnostic, not a new frame-time gate. Emulation is not physical-mobile proof.'};
-  checks.push('Normal browser peak fixture ON/OFF diagnostics captured without injecting traffic actors');
+  setStage('mobile peak ON frame measurement');const onBefore=await diag(),onSample=await mobileRaf(),on={...summarizeRaf(onSample),intervalsMs:onSample.intervals,longTaskDurationsMs:onSample.longTasks},onAfter=await diag();
+  const cityBytesEqual=await evaluate('window.cityManager.snapshot()')===peakCityRaw;
+  const assessment=peakMetrics(attainment,off,on,onBefore.traffic,onAfter.traffic);
+  peakComparison={fixture:{population:2000,roads:490,buildings:peak.buildings.length},attainment,off,on,offBefore,offAfter,onBefore,onAfter,cityBytesEqual,assessment,
+   note:'Synthetic reconciled 2,000-person city, same economic bytes; OFF retains decorative cars, ON uses real model cars. Thresholds are CI gates, not physical-mobile proof.'};
+  assert.equal(cityBytesEqual,true,'Peak measurement keeps economic city unchanged');
+  assert.deepEqual(assessment.issues,[],JSON.stringify(assessment));
+  await button('#pause');await waitPausedModel();
+  checks.push('Normal browser peak fixture ON/OFF gate passed without injecting traffic actors');
  }
  }
  setStage('final evidence and assertions');assert.equal(checks.length,testPlan.expectedChecks,'All checks required for the selected case must run');assert.deepEqual(errors,[]);assert.deepEqual(externalRequests,[]);if(blocked)assert.ok(expectedErrors.length>=41);
  const report={browser:await send('Browser.getVersion'),blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,expectDefault,fixtures:{economy:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length}},checks,stages,errors,externalRequests,screenshots,frameIntervals,peakComparison,bypassTraces,note:'Installed Edge desktop/mobile emulation; not physical Android, FPS certification or live-site acceptance.'};
  await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
-}catch(error){const failure={error:String(error),stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,testCase:testPlan.name,stages,errors,externalRequests,bypassTraces,lastBypassTrace};try{await writeFile(resolve(output,'failure.json'),JSON.stringify(failure,null,2));}catch{}try{await screenshot('failure.png');await writeFile(resolve(output,'failure.json'),JSON.stringify({...failure,state:await diag(),page:await evaluate('({url:location.href,text:document.body.innerText.slice(-3000)})')},null,2));}catch{}throw error;}
+}catch(error){const failure={error:String(error),stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,testCase:testPlan.name,stages,errors,externalRequests,frameIntervals,peakComparison,bypassTraces,lastBypassTrace};try{await writeFile(resolve(output,'failure.json'),JSON.stringify(failure,null,2));}catch{}try{await screenshot('failure.png');await writeFile(resolve(output,'failure.json'),JSON.stringify({...failure,state:await diag(),page:await evaluate('({url:location.href,text:document.body.innerText.slice(-3000)})')},null,2));}catch{}throw error;}
 finally{clearTimeout(watchdog);if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();}
