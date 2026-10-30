@@ -5,3 +5,16 @@
 .grouped-tool-submenu .tool-option > span:last-child { max-width:100%; overflow-wrap:anywhere; }
 /* Education controls keep their existing availability rule after moving into the portal. */
 .grouped-tool-submenu [hidden] { display:none !important; }
+/* Match the existing parcel palette and carry each tool's colour into its dock
+   anchor. Labels, selected borders, focus rings and original target sizes stay. */
+:is(.grouped-tool-submenu [data-tool=R], .grouped-tool-anchor[data-active-tool=R]) { --group-tool-tone:#9fe3bb; }
+:is(.grouped-tool-submenu [data-tool=C], .grouped-tool-anchor[data-active-tool=C]) { --group-tool-tone:#abccff; }
+:is(.grouped-tool-submenu [data-tool=I], .grouped-tool-anchor[data-active-tool=I]) { --group-tool-tone:#f3c29a; }
+:is(.grouped-tool-submenu [data-tool=F], .grouped-tool-anchor[data-active-tool=F]) { --group-tool-tone:#cfe69a; }
+:is(.grouped-tool-submenu [data-tool=power], .grouped-tool-anchor[data-active-tool=power]) { --group-tool-tone:#ffe27a; }
+:is(.grouped-tool-submenu [data-tool=water], .grouped-tool-anchor[data-active-tool=water]) { --group-tool-tone:#9fdcf3; }
+:is(.grouped-tool-submenu [data-tool=park], .grouped-tool-anchor[data-active-tool=park]) { --group-tool-tone:#9fe3bb; }
+:is(.grouped-tool-submenu [data-tool=school], .grouped-tool-anchor[data-active-tool=school]) { --group-tool-tone:#abccff; }
+:is(.grouped-tool-submenu [data-tool=university], .grouped-tool-anchor[data-active-tool=university]) { --group-tool-tone:#d1b3ff; }
+.grouped-tool-submenu .tool.tool-option :is(.tool-icon, .zone-icon),
+.tool.grouped-tool-anchor[data-active-tool]:not([data-active-tool=""]) .tool-icon { color:var(--group-tool-tone); }
