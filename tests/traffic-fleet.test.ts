@@ -194,3 +194,23 @@ test('visual route weights describe current loaded volumes, not next-period prop
   }
   assert.deepEqual(volumes, a.volumes);
 });
+
+
+test('denied global localStorage getter preserves default-off and explicit traffic query semantics', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new DOMException('Storage denied', 'SecurityError'); } });
+  try {
+    assert.equal(trafficModelEnabled(''), false);
+    assert.equal(trafficModelEnabled('?traffic=0'), false);
+    assert.equal(trafficModelEnabled('?traffic=1'), true);
+    const mem = new Map<string, string>(), storage = { getItem: (key: string) => mem.get(key) ?? null, setItem: (key: string, value: string) => void mem.set(key, value), removeItem: (key: string) => void mem.delete(key) };
+    assert.equal(trafficModelEnabled('?traffic=1', storage), true);
+    assert.equal(mem.get(TRAFFIC_STORAGE_KEY), '1');
+    assert.equal(trafficModelEnabled('', storage), true);
+    assert.equal(trafficModelEnabled('?traffic=0', storage), false);
+    assert.equal(mem.has(TRAFFIC_STORAGE_KEY), false);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});

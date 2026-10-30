@@ -1,8 +1,10 @@
 import { TRAFFIC_MODEL_ENABLED } from './clock.ts';
 export const TRAFFIC_STORAGE_KEY = 'citymanager.traffic';
 /** Feature flag with a dev override: `?traffic=1` / `?traffic=0`, or localStorage[TRAFFIC_STORAGE_KEY] = '1'. */
-export function trafficModelEnabled(search = globalThis.location?.search ?? '', storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined = globalThis.localStorage): boolean {
+export function trafficModelEnabled(search = globalThis.location?.search ?? '', storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): boolean {
   const q = new URLSearchParams(search).get('traffic');
+  // Some browser policies throw when merely obtaining localStorage, before getItem.
+  if (storage === undefined) { try { storage = globalThis.localStorage; } catch { /* denied getter: keep in memory */ } }
   try {
     if (q === '1') storage?.setItem(TRAFFIC_STORAGE_KEY, '1');
     if (q === '0') storage?.removeItem(TRAFFIC_STORAGE_KEY);
