@@ -12,13 +12,14 @@ import { dispatchZones, travelTree, treeMinutes, treePath, TAXI_DISPATCH_MINUTES
  * Released people go back to private cars through the lease adapter; nobody is dropped.
  */
 export const TAXI_QUANTUM_MIN = 5, TAXI_MAX_WAIT_MIN = 20, TAXI_DWELL_MIN = 1, TAXI_SEATS_PER_UNIT = 10;
-/** Local pickup radius (ETA minutes); taxis only consider requests this close. Demand below this → go home. */
-export const TAXI_LOCAL_RADIUS_MIN = 10, TAXI_DEMAND_FLOOR = 0.5, TAXI_DEMAND_WINDOW_MIN = 60;
+/** Local pickup radius (ETA minutes); taxis only consider requests this close. */
+export const TAXI_LOCAL_RADIUS_MIN = 10, TAXI_DEMAND_WINDOW_MIN = 60;
 /** Night: minute-of-day window where idle taxis return to their depot. */
 export const TAXI_NIGHT = Object.freeze({ from: 23 * 60, to: 5 * 60 });
 export const DEPOT_UNITS = TAXI_DEPOT_UNITS;
-/** Roam only when the best RRT branch beats parking by this factor (demand-gain threshold). */
-export const TAXI_ROAM_GAIN = 1.5;
+/** City-wide cruising: every road cell earns an exploration bonus of TAXI_EXPLORE_WEIGHT × mean demand,
+ *  growing linearly to full after TAXI_EXPLORE_HORIZON_MIN minutes without a taxi passing through. */
+export const TAXI_EXPLORE_WEIGHT = 1, TAXI_EXPLORE_HORIZON_MIN = 60;
 /** Anti-bunching: a cell's demand is divided by 1 + (other taxis parked at or roaming to a cell within
  *  this many grid steps, Manhattan). Idle taxis decide in id order, so later taxis see earlier claims. */
 export const TAXI_SPREAD_RADIUS = 3;
@@ -62,6 +63,8 @@ export class TaxiEngine {
   private readonly depots: readonly TaxiDepotSite[];
   private readonly lease: TaxiLeaseAdapter; private readonly seed: number; private readonly width: number;
   private readonly expected?: (cell: number, minute: number) => number;
+  /** Minute a taxi last (plannedly) passed each cell; drives the exploration bonus. */
+  private lastSeen = new Map<number, number>();
   private origins: { cell: number; minute: number; persons: number }[] = [];
   constructor(net: LinkNetwork, times: ReadonlyMap<string, number>, depots: readonly TaxiDepotSite[], startMinute: number, opts: TaxiEngineOptions) {
     if (!opts || !Number.isSafeInteger(opts.width) || opts.width < 1) throw RangeError('TaxiEngine needs the map width');
@@ -117,6 +120,7 @@ export class TaxiEngine {
   }
   private drive(u: Unit, path: number[], loaded: boolean, t: number, state: State, dwell: number): void {
     const at = [t]; for (let i = 1; i < path.length; i++) at.push(at[i - 1] + (this.times.get(linkKey(path[i - 1], path[i])) ?? Infinity) / 60);
+    for (let i = 0; i < path.length; i++) this.lastSeen.set(path[i], at[i]);
     u.state = state; u.target = path.at(-1)!; u.route = path; u.at = at; u.leg = undefined;
     u.until = t + Math.max(path.length > 1 ? 1 : 0, Math.ceil(at.at(-1)! - t + dwell));
     if (path.length > 1) { const leg = { unitId: u.id, from: path[0], to: u.target, loaded, minute: t, path }; this.legs.push(leg); u.leg = leg; this.totals.legs++; if (!loaded) this.totals.emptyLegs++; }
@@ -169,7 +173,9 @@ export class TaxiEngine {
     }
     this.waiting = this.waiting.filter(j => !taken.has(j));
     // 4. Idle taxis: go home at night / near-zero demand; otherwise roam (RRT) only if the best branch
-    //    beats parking by TAXI_ROAM_GAIN, else park where they are.
+    //    Service hours: idle taxis always cruise (chained RRT legs ≤ 15 min) over the whole road network,
+    //    toward demand plus not-recently-visited cells, discounted by nearby claimed supply. Home only at
+    //    night or when the city has zero demand; park only if no legal move exists.
     this.origins = this.origins.filter(o => t - o.minute < TAXI_DEMAND_WINDOW_MIN);
     const mod = ((t % 1440) + 1440) % 1440, night = mod >= TAXI_NIGHT.from || mod < TAXI_NIGHT.to;
     const w = this.demandWeights(t), total = [...w.values()].reduce((a, b) => a + b, 0), mean = total / Math.max(1, this.zones.size);
@@ -177,13 +183,15 @@ export class TaxiEngine {
     const claimOf = (x: Unit) => (x.state === 'idle' ? x.cell : x.state === 'roaming' ? x.target ?? x.cell : -1);
     const claims = new Map<Unit, number>(); for (const x of ordered) { const c = claimOf(x); if (c >= 0) claims.set(x, c); }
     const crowd = (self: Unit, c: number) => { let n = 0; const cx = c % W, cy = Math.floor(c / W); for (const [x, k] of claims) if (x !== self && Math.abs(k % W - cx) + Math.abs(Math.floor(k / W) - cy) <= TAXI_SPREAD_RADIUS) n++; return n; };
+    const explore = (c: number) => TAXI_EXPLORE_WEIGHT * mean * Math.min(1, (t - (this.lastSeen.get(c) ?? -Infinity)) / TAXI_EXPLORE_HORIZON_MIN);
+    const stale = [...this.net.out.keys()].filter(c => !(t - (this.lastSeen.get(c) ?? -Infinity) < TAXI_EXPLORE_HORIZON_MIN));
+    const targets = [...new Set([...w.keys(), ...stale])];
     for (const u of ordered) if (u.state === 'idle') {
       const home = this.depots.find(d => d.id === u.depotId)!.cell;
-      if (night || total < TAXI_DEMAND_FLOOR) { claims.delete(u); if (u.cell !== home) this.go(u, home, 'home', t, 0, false); continue; }
-      const memo = new Map<number, number>(), weight = (c: number) => { let v = memo.get(c); if (v === undefined) memo.set(c, v = (w.get(c) ?? 0) / (1 + crowd(u, c))); return v; };
-      const plan = planRoam(this.net, this.times, u.cell, { seed: this.seed, taxiId: u.id, period: Math.floor(t / 60), width: this.width, weight, demandCells: [...w.keys()] });
-      const baseline = Math.max(weight(u.cell), mean);
-      if (plan.path.length < 2 || plan.score < baseline * TAXI_ROAM_GAIN) { this.totals.parked++; continue; }
+      if (night || !(total > 0)) { claims.delete(u); if (u.cell !== home) this.go(u, home, 'home', t, 0, false); continue; }
+      const memo = new Map<number, number>(), weight = (c: number) => { let v = memo.get(c); if (v === undefined) memo.set(c, v = ((w.get(c) ?? 0) + explore(c)) / (1 + crowd(u, c))); return v; };
+      const plan = planRoam(this.net, this.times, u.cell, { seed: this.seed, taxiId: u.id, period: Math.floor(t / 60), width: this.width, weight, demandCells: targets });
+      if (plan.path.length < 2) { this.totals.parked++; continue; }
       this.drive(u, plan.path, false, t, 'roaming', 0); claims.set(u, u.target!); this.totals.roamLegs++; this.totals.roamMinutes += plan.minutes;
     }
   }

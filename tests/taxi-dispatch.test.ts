@@ -6,7 +6,7 @@ import { configureRoadPath, setRoadJunction, type RoadMap } from '../src/road-to
 import { dispatchZones, travelTree, treeMinutes, TAXI_DISPATCH_MINUTES } from '../src/taxi/coverage.ts';
 import { planRoam } from '../src/taxi/rrt-roam.ts';
 import * as dispatchApi from '../src/taxi/dispatch.ts';
-import { TaxiEngine, TAXI_ROAM_GAIN, TAXI_SPREAD_RADIUS, TAXI_MAX_WAIT_MIN, DEPOT_UNITS, type TaxiLeaseAdapter, type TaxiRequest } from '../src/taxi/dispatch.ts';
+import { TaxiEngine, TAXI_EXPLORE_HORIZON_MIN, TAXI_SPREAD_RADIUS, TAXI_MAX_WAIT_MIN, DEPOT_UNITS, type TaxiLeaseAdapter, type TaxiRequest } from '../src/taxi/dispatch.ts';
 
 const S = 24, at = (x: number, y: number) => y * S + x;
 const blank = (): RoadMap => ({ cells: Array.from({ length: S * S }, () => ({ road: false })) });
@@ -124,10 +124,10 @@ test('legs carry routed paths, loaded and empty, for road loading later', () => 
 });
 
 const hotspot = (c: number) => (c === at(10, 6) ? 10 : 0.01);
-test('uniform demand: idle taxis park instead of roaming (gain threshold)', () => {
-  assert.ok(TAXI_ROAM_GAIN > 1);
+test('uniform demand: idle taxis keep cruising instead of parking', () => {
   const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [depot], 8 * 60, { width: S, expected: () => 1 });
-  e.advanceTo(12 * 60); assert.equal(e.totals.roamLegs, 0); assert.equal(e.legs.length, 0); assert.ok(e.totals.parked > 0);
+  e.advanceTo(12 * 60); assert.ok(e.totals.roamLegs > 0); assert.equal(e.totals.parked, 0);
+  for (const l of e.legs) legal(net, l.path);
   const h = new TaxiEngine(net, free(net), [depot], 8 * 60, { width: S, expected: hotspot }); h.advanceTo(12 * 60); assert.ok(h.totals.roamLegs > 0);
 });
 test('map width is required', () => {
@@ -194,7 +194,13 @@ test('anti-bunching: taxis from one depot spread over two hotspots, deterministi
   for (const l of e.legs) legal(net, l.path);
   assert.deepEqual(run().units.map(u => [u.id, u.state, u.target, u.cell]), e.units.map(u => [u.id, u.state, u.target, u.cell]));
 });
-test('anti-bunching keeps uniform demand parked', () => {
-  const net = buildNetwork(grid()), e = new TaxiEngine(net, free(net), [{ ...depot, level: 2 as const }], 8 * 60, { width: S, expected: () => 1 });
-  e.advanceTo(12 * 60); assert.equal(e.totals.roamLegs, 0); assert.ok(e.totals.parked > 0);
+test('cruising covers the whole road network over time, beyond the dispatch zone, deterministically', () => {
+  const g = grid(); draw(g, col(20, 10, 23)); draw(g, row(23, 0, 20)); // a long loop reaching past the 8-min zone
+  const net = buildNetwork(g), hot = (c: number) => (c === at(8, 2) ? 10 : 0.01);
+  const run = () => { const e = new TaxiEngine(net, free(net), [{ ...depot, level: 2 as const }], 8 * 60, { width: S, seed: 9, expected: hot }); e.advanceTo(8 * 60 + 3 * TAXI_EXPLORE_HORIZON_MIN); return e; };
+  const e = run(), seen = new Set(e.legs.flatMap(l => l.path));
+  assert.equal(seen.size, net.out.size, `visited ${seen.size}/${net.out.size}`);
+  const outside = [...net.out.keys()].filter(c => !e.zoneOf(c)); assert.ok(outside.length > 0 && outside.every(c => seen.has(c)), 'cruises past the dispatch zone');
+  for (const l of e.legs) { legal(net, l.path); assert.ok(l.path.length >= 2); }
+  assert.deepEqual(run().legs, e.legs);
 });
