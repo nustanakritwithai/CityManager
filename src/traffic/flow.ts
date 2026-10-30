@@ -1,9 +1,14 @@
-import { freeFlowSeconds, linkKey, resolveTrafficZone, type LinkNetwork } from './network.ts';
+import { freeFlowSeconds, linkKey, resolveTrafficZone, type Link, type LinkNetwork } from './network.ts';
 import { shortestPath, type OdDemand } from './routing.ts';
+import { roadNeighbors } from '../road-topology.ts';
+import { movementMask } from './movements.ts';
 
 /** Provisional gameplay budgets, in the SAME ten-person representative trip units as demand.
  * Numeric cohorts, not draw objects, own all transport mass. No population/render cap applies. */
-export const FLOW_LANE_CAPACITY = 30, FLOW_JUNCTION_CAPACITY = 12, FLOW_STORAGE_PER_LANE = 4;
+export const FLOW_LANE_CAPACITY = 30, FLOW_STORAGE_PER_LANE = 4;
+/** One lane of service per conflict quadrant. Widening an approach does not widen
+ * the intersection. Gameplay units remain provisional until runtime playtesting. */
+export const FLOW_JUNCTION_CAPACITY = FLOW_LANE_CAPACITY;
 const MINUTES_PER_HOUR = 60, EPS = 1e-7;
 type Waiting = { from: number; to: number; amount: number };
 type Batch = { destination: number; path: number[]; index: number; amount: number; blocked: number };
@@ -12,8 +17,10 @@ export type FlowRenderGroup = { key: string; from: number; to: number; path: num
 export type FlowLink = { key: string; from: number; to: number; amount: number; queued: number; storage: number; capacityPerHour: number; closed: boolean };
 export type FlowDiagnostics = { offered: number; admitted: number; completed: number; onRoad: number; waiting: number; unreachable: number; queued: number; peakQueued: number; conservationError: number; periods: number; lastAdmitted: number; lastCompleted: number; links: FlowLink[]; bottlenecks: { cell: number; queued: number; capacityPerHour: number }[] };
 const clone = <T>(v: T): T => structuredClone(v);
-const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= Number.MAX_SAFE_INTEGER;
 const zone = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+const fields = (v: unknown, expected: string) => !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === expected;
+const equalMass = (a: number, b: number) => Math.abs(a - b) <= Math.max(EPS, Number.EPSILON * 32 * Math.max(a, b));
 const keyOf = (b: Batch) => linkKey(b.path[b.index], b.path[b.index + 1]);
 const batchKey = (b: Batch) => `${b.destination}|${b.path.slice(b.index).join(',')}`;
 function junctions(net: LinkNetwork) {
@@ -25,14 +32,15 @@ function occupancy(batches: Batch[]) { const out = new Map<string, number>(); fo
 function storage(net: LinkNetwork, key: string) { return (net.links.get(key)?.lanes ?? 0) * FLOW_STORAGE_PER_LANE; }
 /** Same legal shortest-path implementation as the assignment model, with current storage delay.
  * A cache belongs to one immutable routing snapshot, never across a road edit. */
-function routes(net: LinkNetwork, occupied: ReadonlyMap<string, number>) {
+function routes(net: LinkNetwork, occupied: ReadonlyMap<string, number>, entryAllowed?: (link: Link) => boolean) {
   const times = new Map([...net.links].map(([key, l]) => [key, freeFlowSeconds(l) + (occupied.get(key) ?? 0) / l.capacityPerHour * 3600]));
   const cache = new Map<string, number[] | null>();
   return (from: number, to: number): number[] | null => {
     const key = `${from}:${to}`; if (cache.has(key)) return cache.get(key)!;
     let best: number[] | null = null, cost = Infinity;
     for (const a of resolveTrafficZone(net, from)) for (const b of resolveTrafficZone(net, to)) {
-      const p = shortestPath(net, times, a, b); if (!p) continue;
+      const graph = entryAllowed ? { ...net, out: new Map(net.out).set(a, (net.out.get(a) ?? []).filter(entryAllowed)) } : net;
+      const p = shortestPath(graph, times, a, b); if (!p) continue;
       const t = p.slice(1).reduce((n, cell, i) => n + times.get(linkKey(p[i], cell))!, 0);
       if (t < cost || (t === cost && p.join(',') < (best?.join(',') ?? '~'))) { best = p; cost = t; }
     }
@@ -51,13 +59,22 @@ export class TrafficFlow {
   exportState(): TrafficFlowState { return this.snapshot; }
   static restore(value: unknown): TrafficFlow {
     const s = value as TrafficFlowState;
-    if (!s || s.version !== 1 || !zone(s.minute) || s.minute % 60 !== 0 || ![s.offered, s.admitted, s.completed, s.peakQueued].every(finite) || !Array.isArray(s.waiting) || !Array.isArray(s.batches)) throw Error('Invalid traffic flow snapshot');
+    if (!fields(s, 'admitted,batches,completed,minute,offered,peakQueued,version,waiting') || s.version !== 1 || !zone(s.minute) || s.minute % 60 !== 0 || ![s.offered, s.admitted, s.completed, s.peakQueued].every(finite) || !Array.isArray(s.waiting) || !Array.isArray(s.batches)) throw Error('Invalid traffic flow snapshot fields');
     if (s.admitted > s.offered + EPS || s.completed > s.admitted + EPS) throw Error('Invalid traffic flow cumulative totals');
     const keys = new Set<string>();
-    for (const w of s.waiting) { const key = `${w.from}:${w.to}`; if (!zone(w.from) || !zone(w.to) || !finite(w.amount) || w.amount === 0 || keys.has(key)) throw Error('Invalid waiting traffic'); keys.add(key); }
-    for (const b of s.batches) if (!zone(b.destination) || !Array.isArray(b.path) || b.path.length < 2 || b.path.some(n => !zone(n) || n >= 576) || !zone(b.index) || b.index >= b.path.length - 1 || !finite(b.amount) || b.amount === 0 || !finite(b.blocked) || b.blocked > b.amount + EPS) throw Error('Invalid admitted traffic');
-    const pending = s.waiting.reduce((n, w) => n + w.amount, 0) + s.batches.reduce((n, b) => n + b.amount, 0);
-    if (Math.abs(s.offered - s.completed - pending) > EPS * Math.max(1, s.offered)) throw Error('Traffic flow conservation mismatch');
+    for (const w of s.waiting) {
+      if (!fields(w, 'amount,from,to') || !zone(w.from) || !zone(w.to) || !finite(w.amount) || w.amount === 0) throw Error('Invalid waiting traffic');
+      const key = `${w.from}:${w.to}`; if (keys.has(key)) throw Error('Duplicate waiting traffic'); keys.add(key);
+    }
+    const batches = new Set<string>();
+    for (const b of s.batches) {
+      if (!fields(b, 'amount,blocked,destination,index,path') || !zone(b.destination) || !Array.isArray(b.path) || b.path.length < 2 || b.path.length > 576 || b.path.some(n => !zone(n) || n >= 576) || b.path.slice(1).some((n, i) => !roadNeighbors(b.path[i]).includes(n)) || !zone(b.index) || b.index >= b.path.length - 1 || !finite(b.amount) || b.amount === 0 || !finite(b.blocked) || b.blocked > b.amount + EPS) throw Error('Invalid admitted traffic path or fields');
+      const key = batchKey(b); if (batches.has(key)) throw Error('Duplicate admitted traffic'); batches.add(key);
+    }
+    const waiting = s.waiting.reduce((n, w) => n + w.amount, 0), onRoad = s.batches.reduce((n, b) => n + b.amount, 0);
+    if (!equalMass(s.offered, s.completed + waiting + onRoad)) throw Error('Traffic flow conservation mismatch');
+    // Total mass alone cannot detect invented admissions. Validate both boundaries.
+    if (!equalMass(s.admitted, s.completed + onRoad) || !equalMass(s.offered, s.admitted + waiting)) throw Error('Traffic admission conservation mismatch');
     const flow = new TrafficFlow(); flow.state = clone(s); return flow;
   }
   /** No advancement or new demand: only legal route repair. Removed occupied links remain
@@ -92,10 +109,11 @@ export class TrafficFlow {
     if (Math.abs(d.conservationError) > EPS * Math.max(1, d.offered)) throw Error('Traffic flow lost demand');
   }
   private quantum(net: LinkNetwork, nodes: Set<number>) {
-    const s = this.state, occ = occupancy(s.batches), route = routes(net, occ);
-    const input = new Map([...net.links].map(([k, l]) => [k, l.capacityPerHour / 60])), output = new Map(input), service = new Map([...nodes].map(n => [n, FLOW_JUNCTION_CAPACITY / 60]));
-    const takeNode = (n: number, amount: number) => { if (service.has(n)) service.set(n, service.get(n)! - amount); };
-    const nodeRoom = (n: number) => service.get(n) ?? Infinity;
+    const s = this.state, occ = occupancy(s.batches);
+    const input = new Map([...net.links].map(([k, l]) => [k, l.capacityPerHour / 60])), output = new Map(input);
+    const service = new Map([...nodes].map(n => [n, Array<number>(4).fill(FLOW_JUNCTION_CAPACITY / 60)]));
+    const takeNode = (n: number, mask: number, amount: number) => { const room = service.get(n); if (room) for (let i = 0; i < 4; i++) if (mask & (1 << i)) room[i] -= amount; };
+    const nodeRoom = (n: number, mask: number) => { const room = service.get(n); return room ? Math.min(...room.filter((_, i) => mask & (1 << i))) : Infinity; };
     const additions: Batch[] = [];
     const groups = new Map<string, Batch[]>(); for (const b of s.batches) { const k = keyOf(b); (groups.get(k) ?? groups.set(k, []).get(k)!).push(b); }
     // Rotate link/origin priority deterministically so a permanent low-ID source cannot monopolize a shared junction.
@@ -107,10 +125,11 @@ export class TrafficFlow {
       const next = atGoal ? null : linkKey(head, b.path[b.index + 2]);
       const legal = atGoal || b.index + 2 < b.path.length && net.links.has(next!);
       if (!legal) { b.blocked = b.amount; continue; }
+      const mask = atGoal ? 15 : movementMask(b.path[b.index], head, b.path[b.index + 2]);
       const room = next ? Math.max(0, storage(net, next) - (occ.get(next) ?? 0)) : Infinity;
-      const moved = Math.min(b.amount, output.get(key) ?? 0, nodeRoom(head), room, next ? input.get(next)! : Infinity);
+      const moved = Math.min(b.amount, output.get(key) ?? 0, nodeRoom(head, mask), room, next ? input.get(next)! : Infinity);
       if (moved > 0) {
-        b.amount -= moved; output.set(key, output.get(key)! - moved); takeNode(head, moved);
+        b.amount -= moved; output.set(key, output.get(key)! - moved); takeNode(head, mask, moved);
         // Reserve next-link storage now; vacated storage is released only after all existing cohorts
         // were considered, so cars cannot leap across a full downstream queue within one quantum.
         if (next) { occ.set(next, (occ.get(next) ?? 0) + moved); input.set(next, input.get(next)! - moved); additions.push({ destination: b.destination, path: b.path, index: b.index + 1, amount: moved, blocked: 0 }); }
@@ -122,13 +141,18 @@ export class TrafficFlow {
     for (const b of additions) s.batches.push(b);
     const after = occupancy(s.batches), originOrder = [...s.waiting], offset = originOrder.length ? s.minute % originOrder.length : 0;
     for (const w of [...originOrder.slice(offset), ...originOrder.slice(0, offset)]) {
-      const path = route(w.from, w.to); if (!path) continue;
-      if (path.length === 1) { s.admitted += w.amount; s.completed += w.amount; w.amount = 0; continue; }
+     // An OD may use several independent entrances in a quantum. Exhausted input
+     // links are excluded only from its first step; shared downstream limits still apply.
+     while (w.amount > EPS) {
+      const route = routes(net, after, l => (input.get(linkKey(l.from, l.to)) ?? 0) > EPS && storage(net, linkKey(l.from, l.to)) - (after.get(linkKey(l.from, l.to)) ?? 0) > EPS && nodeRoom(l.from, 15) > EPS);
+      const path = route(w.from, w.to); if (!path) break;
+      if (path.length === 1) { s.admitted += w.amount; s.completed += w.amount; w.amount = 0; break; }
       const key = linkKey(path[0], path[1]), room = Math.max(0, storage(net, key) - (after.get(key) ?? 0));
-      const moved = Math.min(w.amount, input.get(key) ?? 0, room, nodeRoom(path[0]));
-      if (moved <= 0) continue;
-      w.amount -= moved; input.set(key, input.get(key)! - moved); takeNode(path[0], moved); after.set(key, (after.get(key) ?? 0) + moved); s.admitted += moved;
+      const moved = Math.min(w.amount, input.get(key) ?? 0, room, nodeRoom(path[0], 15));
+      if (moved <= 0) break;
+      w.amount -= moved; input.set(key, input.get(key)! - moved); takeNode(path[0], 15, moved); after.set(key, (after.get(key) ?? 0) + moved); s.admitted += moved;
       s.batches.push({ destination: w.to, path, index: 0, amount: moved, blocked: 0 });
+     }
     }
     s.waiting = s.waiting.filter(w => w.amount > 0);
     const merged = new Map<string, Batch>();

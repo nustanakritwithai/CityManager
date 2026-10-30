@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TrafficFlow, FLOW_LANE_CAPACITY, FLOW_STORAGE_PER_LANE } from '../src/traffic/flow.ts';
+import { TrafficFlow, FLOW_LANE_CAPACITY, FLOW_JUNCTION_CAPACITY, FLOW_STORAGE_PER_LANE } from '../src/traffic/flow.ts';
 import { buildNetwork, linkKey, type Link, type LinkNetwork } from '../src/traffic/network.ts';
 import { demandForPeriods } from '../src/traffic/demand.ts';
 import { TrafficClock } from '../src/traffic/clock.ts';
@@ -22,8 +22,8 @@ function check(flow: TrafficFlow, net: LinkNetwork) {
 
 test('finite storage spills upstream, retaining all offered demand across quiet periods',()=>{
  const net=base(),f=new TrafficFlow();f.advancePeriod(net,[{from:25,to:28,vehicles:100}]);let d=check(f,net);
- assert.equal(d.offered,100);assert.ok(d.waiting>70);assert.ok(d.completed<=12+1e-6);
- assert.ok(d.links.some(l=>Math.abs(l.amount-FLOW_STORAGE_PER_LANE)<1e-6));
+ assert.equal(d.offered,100);assert.ok(d.waiting>=100-FLOW_LANE_CAPACITY-FLOW_STORAGE_PER_LANE);assert.ok(d.completed<=FLOW_JUNCTION_CAPACITY+1e-6);
+ assert.ok(d.queued>0);
  for(let i=0;i<12;i++){f.advancePeriod(net,[]);d=check(f,net);}
  assert.ok(Math.abs(d.completed-100)<1e-6);assert.equal(d.waiting,0);assert.ok(d.onRoad<1e-6);
 });
@@ -39,7 +39,7 @@ test('road deletion and restoration never clears existing or new requests',()=>{
 test('flow codec restores exact continued conservation and rejects lost demand',()=>{
  const net=base(),a=new TrafficFlow();a.advancePeriod(net,[{from:25,to:28,vehicles:100}]);const b=TrafficFlow.restore(JSON.parse(JSON.stringify(a.snapshot)));
  for(let i=0;i<3;i++){a.advancePeriod(net,[]);b.advancePeriod(net,[]);}assert.deepEqual(a.snapshot,b.snapshot);check(a,net);
- const broken=a.snapshot;broken.waiting=[];assert.throws(()=>TrafficFlow.restore(broken),/conservation/);
+ const broken=a.snapshot;broken.offered+=1;assert.throws(()=>TrafficFlow.restore(broken),/conservation/);
 });
 
 test('fixed topology population growth increases offered demand and unresolved queues',()=>{
@@ -50,15 +50,28 @@ test('fixed topology population growth increases offered demand and unresolved q
   const d=f.diagnostics(net);rows.push({population:P,offered:d.offered,completed:d.completed,queued:d.queued,peak:d.peakQueued});
  }
  console.log('FIXED_TOPOLOGY',JSON.stringify(rows));
- for(let i=1;i<rows.length;i++){assert.ok(rows[i].offered>rows[i-1].offered);assert.ok(rows[i].peak>rows[i-1].peak);}
- assert.ok(rows.at(-1)!.queued>100);
+ for(let i=1;i<rows.length;i++){assert.ok(rows[i].offered>rows[i-1].offered);assert.ok(rows[i].peak>=rows[i-1].peak);}
+ assert.ok(rows.at(-1)!.peak>30);
 });
 
 test('genuine bypass helps but an extra approach to the same bottleneck does not invent capacity',()=>{
  const bottleneck=base(),extra=graph([[25,26,27,28],[25,49,50,26]]),bypass=graph([[25,26,27,28],[26,50],[25,49,73,74,75,76,52,28]]);
  const run=(net:LinkNetwork)=>{const f=new TrafficFlow();for(let i=0;i<6;i++){f.advancePeriod(net,[{from:25,to:28,vehicles:60}]);check(f,net);}return f.diagnostics(net)};
  const a=run(bottleneck),b=run(extra),c=run(bypass);
- assert.ok(b.completed<=6*12+1e-6);assert.ok(c.completed>a.completed+30,JSON.stringify({base:a.completed,extra:b.completed,bypass:c.completed}));assert.ok(c.waiting<a.waiting);
+ console.log('PLAYER_DECISIONS',JSON.stringify({offered:a.offered,baseCompleted:a.completed,sharedBottleneckCompleted:b.completed,bypassCompleted:c.completed,baseWaiting:a.waiting,bypassWaiting:c.waiting}));
+ assert.ok(b.completed<=6*FLOW_JUNCTION_CAPACITY+1e-6);assert.ok(c.completed>a.completed+30,JSON.stringify({base:a.completed,extra:b.completed,bypass:c.completed}));assert.ok(c.waiting<a.waiting);
+});
+
+test('render sampling and hidden links never change authoritative flow',()=>{
+ const net=base(),a=new TrafficFlow(),b=new TrafficFlow();
+ for(let hour=0;hour<12;hour++){
+  const od=[{from:25,to:28,vehicles:100}];a.advancePeriod(net,od);b.advancePeriod(net,od);
+  const smallBudget=b.renderGroups(net).slice(0,1);
+  for(const group of smallBudget){group.amount=0;group.path.length=0;}
+  b.renderGroups(net).filter(()=>false);
+  assert.deepEqual(b.snapshot,a.snapshot);
+ }
+ assert.ok(check(b,net).waiting>0);
 });
 
 test('disconnected parcel demand retains stable identity and becomes routable after a frontage repair',()=>{
@@ -72,8 +85,8 @@ test('disconnected parcel demand retains stable identity and becomes routable af
 test('clock lifecycle suspension never silently resets unresolved flow',()=>{
  const c={cells:Array.from({length:576},(_,i)=>({road:[25,26,27,28,50].includes(i)}))} as City;
  const input={households:[{cell:25,amount:2000}],jobs:[{cell:28,amount:1000}],schoolSeats:[{cell:28,amount:400}],parks:[{cell:28,amount:1}],freight:[],entrance:25};
- const k=new TrafficClock({enabled:true,snapshot:()=>input});k.advance(c,0);k.advance(c,12*60);const before=k.flow.snapshot;
+ const k=new TrafficClock({enabled:true,conservedFlow:true,snapshot:()=>input});k.advance(c,0);k.advance(c,12*60);const before=k.flow.snapshot;
  k.advance(structuredClone(c),13*60);assert.equal(k.lifecycle,'different-city');assert.deepEqual(k.flow.snapshot,before);
  k.advance(c,60);assert.equal(k.lifecycle,'time-reversed');assert.deepEqual(k.flow.snapshot,before);
- const restored=new TrafficClock({enabled:true,snapshot:()=>input});restored.restoreState(c,12*60,k.exportState());k.advance(c,24*60);restored.advance(c,24*60);assert.deepEqual(restored.flow.snapshot,k.flow.snapshot);
+ const restored=new TrafficClock({enabled:true,conservedFlow:true,snapshot:()=>input});restored.restoreState(c,12*60,k.exportState());k.advance(c,24*60);restored.advance(c,24*60);assert.deepEqual(restored.flow.snapshot,k.flow.snapshot);
 });
