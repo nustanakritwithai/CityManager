@@ -52,7 +52,7 @@ test('congestion goes up with buses on (flow throughput and BPR times)',()=>{
   assert.deepEqual(assignPeriod(net,od,new Map(),0,new Map()),a,'empty background = unchanged');
 });
 test('flag off: no sink connected → traffic clock identical; hook still no-op without sink',()=>{
-  assert.equal(BUS_ENABLED,false);
+  assert.equal(BUS_ENABLED,true);
   const go=(connect:boolean)=>{const c=createCity(),k=new TrafficClock({enabled:true});if(connect)k.busRoadSink().applyBusLoad(0,new Map());k.advance(c,0);k.advance(c,8*60);return JSON.stringify([k.totals,k.lastOd]);};
   assert.equal(go(false),go(true));
   const h=createBusTrafficHook();let n=0;h.push(0,()=>{n++;return new Map();});assert.equal(n,0);

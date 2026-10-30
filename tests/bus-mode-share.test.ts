@@ -11,7 +11,7 @@ const W = 24, at = (x: number, y: number) => y * W + x;
 class Mem { m = new Map<string, string>(); getItem(k: string) { return this.m.get(k) ?? null; } setItem(k: string, v: string) { this.m.set(k, v); } removeItem(k: string) { this.m.delete(k); } }
 
 test('constants match the design placeholders', () => {
-  assert.equal(bus.BUS_ENABLED, false);
+  assert.equal(bus.BUS_ENABLED, true);
   assert.equal(bus.BUS_WALK_RADIUS, 4); assert.equal(bus.BUS_DWELL_MIN, 1);
   assert.deepEqual({ ...bus.BUS_SERVICE }, { from: 300, to: 1380 });
   assert.deepEqual({ ...bus.BUS_CAPACITY }, { 1: 40, 2: 60, 3: 80 });
@@ -21,14 +21,14 @@ test('constants match the design placeholders', () => {
   assert.ok(!bus.BUS_PURPOSES.has('freight'));
   for (const o of [bus.BUS_SERVICE, bus.BUS_CAPACITY, bus.BUS_DEPOT_BUSES, bus.BUS_LIMITS]) assert.ok(Object.isFrozen(o));
 });
-test('flag: off by default, ?bus=1 remembered, ?bus=0 forgets, denied storage never throws', () => {
+test('flag: on by default, ?bus=1 remembered, ?bus=0 remembered opt-out, denied storage never throws', () => {
   const s = new Mem();
-  assert.equal(bus.busEnabled('', s), false);
+  assert.equal(bus.busEnabled('', s), true);
   assert.equal(bus.busEnabled('?bus=1', s), true); assert.equal(bus.busEnabled('', s), true);
   assert.equal(bus.busEnabled('?bus=0', s), false); assert.equal(bus.busEnabled('', s), false);
   const bad = { getItem() { throw Error('denied'); }, setItem() { throw Error('denied'); }, removeItem() { throw Error('denied'); } };
-  assert.equal(bus.busEnabled('?bus=1', bad), true); assert.equal(bus.busEnabled('', bad), false);
-  assert.equal(bus.busEnabled('?taxi=1', s), false);
+  assert.equal(bus.busEnabled('?bus=1', bad), true); assert.equal(bus.busEnabled('', bad), true);
+  assert.equal(bus.busEnabled('?taxi=1', s), false); // still opted out from ?bus=0 above
 });
 test('flag has a single source: BUS_ENABLED is defined only in src/bus/types.ts', () => {
   const hits = readdirSync('src', { recursive: true }).map(String).filter(f => f.endsWith('.ts')).filter(f => /BUS_ENABLED\s*=/.test(readFileSync(`src/${f}`, 'utf8')));

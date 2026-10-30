@@ -33,13 +33,13 @@ const farStop = (c: City, from: number) => {
 
 test('flag off: placement, drafts and the panel stay inert', () => {
   const c = city(), cell = stopCell(c);
-  assert.equal(busEnabled(), false);
-  assert.equal(placeBusStop(c, cell, null).ok, false);
+  assert.equal(busEnabled(), true);
+  assert.equal(placeBusStop(c, cell, null, false).ok, false);
   assert.equal(c.bus, undefined);
-  assert.equal(busToolPreview(c, 'bus-stop', cell, emptyBusUi())?.label, 'ระบบรถเมล์ยังไม่เปิดใช้');
-  assert.equal(busPanelModel(c).enabled, false);
-  assert.equal(commitDraft(c, emptyBusUi()).result.ok, false);
-  assert.equal(upgradeLine(c, 1).ok, false);
+  assert.equal(busToolPreview(c, 'bus-stop', cell, emptyBusUi(), false)?.label, 'ระบบรถเมล์ยังไม่เปิดใช้');
+  assert.equal(busPanelModel(c, false).enabled, false);
+  assert.equal(commitDraft(c, emptyBusUi(), false).result.ok, false);
+  assert.equal(upgradeLine(c, 1, false).ok, false);
 });
 
 test('stop tool repeats the placement reason: straight road, junction, side, spacing', () => {

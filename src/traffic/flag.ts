@@ -1,5 +1,5 @@
 /** This independent game layer is enabled only after integration acceptance. */
-export const TRAFFIC_GAME_DEFAULT = false;
+export const TRAFFIC_GAME_DEFAULT = true;
 export const TRAFFIC_STORAGE_KEY = 'citymanager.traffic';
 type TrafficStorage = Pick<Storage, 'getItem' | 'setItem'>;
 function defaultStorage():TrafficStorage|undefined { try { return globalThis.localStorage; } catch { return undefined; } }

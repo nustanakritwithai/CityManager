@@ -6,16 +6,16 @@
 import type { TripPurpose } from '../traffic/types.ts';
 
 /** Feature flag — the single source of truth for bus. OFF: no bus demand is split, nothing changes. */
-export const BUS_ENABLED = false;
+export const BUS_ENABLED = true;
 export const BUS_STORAGE_KEY = 'citymanager.bus';
 type FlagStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 /** Flag with a dev override: `?bus=1` (remembered) / `?bus=0` (forgotten). Never throws. */
 export function busEnabled(search = globalThis.location?.search ?? '', storage?: FlagStorage): boolean {
   let q: string | null = null; try { q = new URLSearchParams(search).get('bus'); } catch { q = null; }
   try { storage ??= globalThis.localStorage; } catch { /* storage getter can be denied */ }
-  try { if (q === '1') storage?.setItem(BUS_STORAGE_KEY, '1'); if (q === '0') storage?.removeItem(BUS_STORAGE_KEY); } catch { /* private mode */ }
+  try { if (q === '1') storage?.setItem(BUS_STORAGE_KEY, '1'); if (q === '0') storage?.setItem(BUS_STORAGE_KEY, '0'); } catch { /* private mode */ }
   if (q === '1') return true; if (q === '0') return false;
-  try { if (storage?.getItem(BUS_STORAGE_KEY) === '1') return true; } catch { /* ignore */ }
+  try { const saved = storage?.getItem(BUS_STORAGE_KEY); if (saved === '1') return true; if (saved === '0') return false; } catch { /* ignore */ }
   return BUS_ENABLED;
 }
 

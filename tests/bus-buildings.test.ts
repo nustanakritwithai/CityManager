@@ -41,8 +41,8 @@ test('pure stop sides: straight two-way, one-way left kerb, junction and corner 
 });
 test('flag off: no placement, no bus key', () => {
   const c = grown(), i = lots(c)[0];
-  assert.equal(buildBusDepot(c, i).ok, false); assert.equal(c.bus, undefined);
-  const s = stopCells(c)[0]; assert.equal(buildBusStop(c, s).ok, false); assert.equal(c.bus, undefined);
+  assert.equal(buildBusDepot(c, i, false).ok, false); assert.equal(c.bus, undefined);
+  const s = stopCells(c)[0]; assert.equal(buildBusStop(c, s, undefined, false).ok, false); assert.equal(c.bus, undefined);
 });
 test('a city without bus saves byte-identical and never gains a bus key', () => {
   const c = grown(), before = serialize(c); assert.ok(!before.includes('"bus"'));

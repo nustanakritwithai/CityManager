@@ -85,9 +85,9 @@ test('?bus=1 upgrades 1 → 2 → 3 and ?bus=0 leaves the line alone', () => {
   assert.equal(off.lines[0].busLevel, 1);
 });
 
-test('default flag is off, so an unguarded call does not change busLevel', () => {
+test('explicitly disabled call does not change busLevel', () => {
   const idle = state([line()]);
-  assert.equal(upgradeBusLine(idle, 7).ok, false);
+  assert.equal(upgradeBusLine(idle, 7, false).ok, false);
   assert.equal(idle.lines[0].busLevel, 1);
 });
 

@@ -27,10 +27,10 @@ const persons = (od: readonly OdEntry[]) => Math.round(od.reduce((n, e) => n + e
 const OD: OdEntry[] = [{ purpose: 'commute', from: at(4, 3), to: at(20, 7), vehicles: 30 }, { purpose: 'freight', from: at(4, 3), to: at(20, 7), vehicles: 5 }];
 const ok = (b: BusIntegration) => { const l = b.ledger(); assert.equal(l.conservationError, 0, JSON.stringify(l)); assert.equal(l.releaseError, 0, JSON.stringify(l)); };
 
-test('flag off by default: BUS_ENABLED false, busEnabled() false without ?bus=1', () => {
-  assert.equal(BUS_ENABLED, false);
+test('flag on by default: BUS_ENABLED true, ?bus=0 opts out', () => {
+  assert.equal(BUS_ENABLED, true);
   const mem = new Map<string, string>(), st = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
-  assert.equal(busEnabled('', st), false); assert.equal(busEnabled('?bus=1', st), true); assert.equal(busEnabled('?bus=0', st), false);
+  assert.equal(busEnabled('', st), true); assert.equal(busEnabled('?bus=1', st), true); assert.equal(busEnabled('?bus=0', st), false); assert.equal(busEnabled('', st), false);
 });
 test('flag off: traffic clock without a filter is identical to before (no bus split)', () => {
   const run = (o: ConstructorParameters<typeof TrafficClock>[0]) => { const c = createCity(), k = new TrafficClock(o); k.advance(c, 0); const r = k.advance(c, 6 * 60); return { r: JSON.stringify(r.map(a => a.unserved)), od: JSON.stringify(k.lastOd), t: JSON.stringify(k.totals) }; };

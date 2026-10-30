@@ -118,7 +118,7 @@ test('decorative plan keeps trucks and smoke when cars are hidden', () => {
 });
 test('flag defaults off; dev toggle via ?traffic=1 or localStorage', () => {
   const mem = new Map<string, string>(), st = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
-  assert.equal(trafficModelEnabled('', st), false);
+  assert.equal(trafficModelEnabled('', st), true);
   assert.equal(trafficModelEnabled('?traffic=1', st), true); assert.equal(mem.get(TRAFFIC_STORAGE_KEY), '1');
   assert.equal(trafficModelEnabled('', st), true);
   assert.equal(trafficModelEnabled('?traffic=0', st), false); assert.equal(trafficModelEnabled('', st), false);
@@ -200,7 +200,7 @@ test('denied global localStorage getter preserves default-off and explicit traff
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new DOMException('Storage denied', 'SecurityError'); } });
   try {
-    assert.equal(trafficModelEnabled(''), false);
+    assert.equal(trafficModelEnabled(''), true);
     assert.equal(trafficModelEnabled('?traffic=0'), false);
     assert.equal(trafficModelEnabled('?traffic=1'), true);
     const mem = new Map<string, string>(), storage = { getItem: (key: string) => mem.get(key) ?? null, setItem: (key: string, value: string) => void mem.set(key, value), removeItem: (key: string) => void mem.delete(key) };

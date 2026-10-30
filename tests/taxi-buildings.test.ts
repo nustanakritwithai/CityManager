@@ -14,16 +14,16 @@ const sites = (c: City) => { const r = connectedRoads(c); return c.cells.flatMap
 const withTaxi = () => { const c = grown(), s = sites(c); assert.ok(buildTaxiDepot(c, s[0], true).ok); assert.ok(buildTaxiDepot(c, s[1], true).ok); return c; };
 
 test('flag off by default; dev toggle; placement refused while off', () => {
-  assert.equal(TAXI_ENABLED, false);
+  assert.equal(TAXI_ENABLED, true);
   const mem = new Map<string, string>(), st = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
-  assert.equal(taxiEnabled('', st), false); assert.equal(taxiEnabled('?taxi=1', st), true); assert.equal(taxiEnabled('', st), true); assert.equal(taxiEnabled('?taxi=0', st), false);
+  assert.equal(taxiEnabled('', st), true); assert.equal(taxiEnabled('?taxi=1', st), true); assert.equal(taxiEnabled('', st), true); assert.equal(taxiEnabled('?taxi=0', st), false); assert.equal(taxiEnabled('', st), false);
   const c = grown(); assert.equal(buildTaxiDepot(c, sites(c)[0], false).ok, false); assert.equal(c.taxi, undefined);
 });
 test('denied localStorage getter preserves default and explicit taxi overrides', () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   try {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new DOMException('Storage denied', 'SecurityError'); } });
-    assert.equal(taxiEnabled(), false);
+    assert.equal(taxiEnabled(), true);
     assert.equal(taxiEnabled('?taxi=0'), false);
     assert.equal(taxiEnabled('?taxi=1'), true);
     const injected = { getItem: () => '1', setItem: () => {}, removeItem: () => {} };
