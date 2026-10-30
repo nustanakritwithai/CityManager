@@ -1,20 +1,12 @@
-name: Matched traffic base-candidate diagnostic
+name: Matched traffic reverse candidate-base diagnostic
 on:
   pull_request:
     paths:
       - .github/workflows/traffic-matched-diagnostic.yml
       - scripts/traffic-matched-diagnostic.mjs
       - tests/traffic-seeded-city-entry.test.mjs
+      - tests/traffic-matched-diagnostic.test.mjs
   workflow_dispatch:
-    inputs:
-      base_sha:
-        description: Immutable base application commit
-        required: true
-        default: '74e51d89637c9cfccc70e5a93c427f9c41fea33f'
-      candidate_sha:
-        description: Immutable candidate application commit
-        required: true
-        default: 'b6ce68152c98217363080ef85339d083b9ad228c'
 permissions:
   contents: read
 jobs:
@@ -28,21 +20,23 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ inputs.base_sha || '74e51d89637c9cfccc70e5a93c427f9c41fea33f' }}
+          ref: 74e51d89637c9cfccc70e5a93c427f9c41fea33f
           path: base
           persist-credentials: false
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ inputs.candidate_sha || 'b6ce68152c98217363080ef85339d083b9ad228c' }}
+          ref: b6ce68152c98217363080ef85339d083b9ad228c
           path: candidate
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
-      - name: One fixed base then candidate comparison; retain every result
+      - name: Validate fixed diagnostic protocol and actual UI adapters
+        run: node --test harness/tests/traffic-matched-diagnostic.test.mjs harness/tests/traffic-seeded-city-entry.test.mjs
+      - name: One predeclared candidate then base comparison; retain every result
         env:
-          BASE_SHA: ${{ inputs.base_sha || '74e51d89637c9cfccc70e5a93c427f9c41fea33f' }}
-          CANDIDATE_SHA: ${{ inputs.candidate_sha || 'b6ce68152c98217363080ef85339d083b9ad228c' }}
+          BASE_SHA: 74e51d89637c9cfccc70e5a93c427f9c41fea33f
+          CANDIDATE_SHA: b6ce68152c98217363080ef85339d083b9ad228c
           TRAFFIC_GAME_EXPECT_DEFAULT: '0'
           TRAFFIC_GAME_CASE: full
           CITYMANAGER_BLOCK_MODELS: '0'
@@ -55,7 +49,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: matched-traffic-all-results
+          name: matched-traffic-candidate-base-all-results
           path: |
             matched-traffic-manifest.json
             base/.test-output/traffic-game/*/report.json
