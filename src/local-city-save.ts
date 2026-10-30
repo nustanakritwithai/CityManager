@@ -53,7 +53,7 @@ export async function bindLocalCitySession(client:MarketClient|undefined,loaded:
 /** Conservative local inventory for the IDB-unavailable escape paths. */
 export function hasOnlyKnownNonCityKeys(storage:Pick<Storage,'length'|'key'>,allowMarket:boolean):boolean{
  const benign=new Set(['citymanager.advanced.v1','citymanager.visual.v1','citymanager.audio.v1','citymanager.guide.v1','citymanager.traffic','citymanager.taxi']);
- try{for(let i=0;i<storage.length;i++){const key=storage.key(i);if(key?.startsWith('citymanager.')&&!benign.has(key)&&!(allowMarket&&key==='citymanager.market.v10'))return false;}return true;}catch{return false;}
+ try{for(let i=0;i<storage.length;i++){const key=storage.key(i);if(key?.startsWith('citymanager.')&&!benign.has(key)&&!(allowMarket&&(key==='citymanager.market.v10'||key==='citymanager.resume-choice.v1')))return false;}return true;}catch{return false;}
 }
 /** A recovery preview must never persist a market journal or replace browser save slots. */
 export async function loadRecoveryCityReadOnly(raw:string,client:MarketClient|undefined,guard:ReturnType<typeof createSaveGuard>,apply:(restored:{city:City;runtime:ParkRuntime})=>void):Promise<void>{
@@ -64,14 +64,15 @@ export async function loadRecoveryCityReadOnly(raw:string,client:MarketClient|un
  else applyChecked();
 }
 
-export async function loadLocalCitySession(raw:string,client:MarketClient|undefined,guard:ReturnType<typeof createSaveGuard>,apply:(restored:{city:City;runtime:ParkRuntime})=>void):Promise<void>{
+export async function loadLocalCitySession(raw:string,client:MarketClient|undefined,guard:ReturnType<typeof createSaveGuard>,apply:(restored:{city:City;runtime:ParkRuntime})=>void,assertSource:()=>void=()=>{}):Promise<void>{
+ assertSource();
  // Invalidate pending writers before awaiting the market lock. A failed or
  // superseded Load must never authorize saving the city that was already open.
  guard.block();
  const generation=guard.generation;
  const restored=deserializeParkSession(raw);
  if(restored.city.market)client?.validateSave(restored.city.market);
- const assertCurrent=()=>{if(guard.generation!==generation)throw Error('City changed while loading; cancelled the older Load');};
+ const assertCurrent=()=>{if(guard.generation!==generation)throw Error('City changed while loading; cancelled the older Load');assertSource();};
  await bindLocalCitySession(client,restored.city,()=>{
   assertCurrent();
   try{

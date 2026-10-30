@@ -4,6 +4,10 @@
 // Returns true when the target speed is already selected (nothing left to click).
 export async function reachTouch(evaluate, button, selector) {
   const target = JSON.stringify(selector);
+  // Recovery controls are intentionally collapsed. Exercise the real summary first.
+  for (const id of ['save-recovery-details','startup-recovery-details']) {
+    if (selector !== `#${id} > summary` && await evaluate(`!!document.querySelector(${target})?.closest('#${id}:not([open])')`)) await button(`#${id} > summary`);
+  }
   if (await evaluate(`!!document.querySelector(${target})?.closest('#select-submenu[hidden]')`)) {
     if (await evaluate(`!document.querySelector('[data-tool="select"]').getBoundingClientRect().width && document.querySelector('#inspector').dataset.open==='true'`)) await button('#close-inspector');
     await button('[data-tool="select"]');

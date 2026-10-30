@@ -1,5 +1,6 @@
 import { factoryCropCapacity } from './factory-levels.ts';
 import { deserialize, isMarket, type City } from './sim.ts';
+import { deserializeParkSession } from './park-runtime.ts';
 import { withMarketWriter, type MarketWriterLocks } from './market-writer.ts';
 import { SAVE_KEY } from './save-storage.ts';
 import { PAGES_MARKET_BASE, PAGES_ORIGIN, pagesSession } from './pages-auth.ts';
@@ -60,8 +61,9 @@ export class MarketClient {
   private recoveryReadOnly = false;
   setRecoveryReadOnly(value:boolean) { this.recoveryReadOnly=value; }
   private readDurableCity: (cityId: string) => string | null;
+  private readonly readCurrentSession?: () => string;
   private revision: string | null = null;
-  constructor(city: () => City, baseUrl = '', options: { recoveryEnabled?: boolean; readDurableCity?: (cityId: string) => string | null } = {}) { this.city = city; this.readDurableCity = options.readDurableCity ?? (() => globalThis.localStorage.getItem(SAVE_KEY)); this.recoveryEnabled = options.recoveryEnabled === true; let safeBase = ''; if (/^\/citymanager-api\/?$/.test(baseUrl)) safeBase = '/citymanager-api'; else if (baseUrl.replace(/\/$/, '') === PAGES_MARKET_BASE && typeof window !== 'undefined' && window.location.origin === PAGES_ORIGIN) safeBase = PAGES_MARKET_BASE; else try { const u = new URL(baseUrl); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '4317' && !u.username && !u.password && !u.search && !u.hash) safeBase = u.origin; } catch { /* disabled by default */ } this.baseUrl = safeBase; if (!safeBase) { this.journal = safeJournal(null); return; } let raw: string | null = null; try { if (!globalThis.localStorage) throw new Error('storage unavailable'); raw = globalThis.localStorage.getItem(MARKET_SAVE_KEY); this.revision = raw; this.journal = safeJournal(raw); } catch { this.journalUnavailable = true; this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
+  constructor(city: () => City, baseUrl = '', options: { recoveryEnabled?: boolean; readCurrentSession?: () => string; readDurableCity?: (cityId: string) => string | null } = {}) { this.city = city; this.readCurrentSession = options.readCurrentSession; this.readDurableCity = options.readDurableCity ?? (() => globalThis.localStorage.getItem(SAVE_KEY)); this.recoveryEnabled = options.recoveryEnabled === true; let safeBase = ''; if (/^\/citymanager-api\/?$/.test(baseUrl)) safeBase = '/citymanager-api'; else if (baseUrl.replace(/\/$/, '') === PAGES_MARKET_BASE && typeof window !== 'undefined' && window.location.origin === PAGES_ORIGIN) safeBase = PAGES_MARKET_BASE; else try { const u = new URL(baseUrl); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '4317' && !u.username && !u.password && !u.search && !u.hash) safeBase = u.origin; } catch { /* disabled by default */ } this.baseUrl = safeBase; if (!safeBase) { this.journal = safeJournal(null); return; } let raw: string | null = null; try { if (!globalThis.localStorage) throw new Error('storage unavailable'); raw = globalThis.localStorage.getItem(MARKET_SAVE_KEY); this.revision = raw; this.journal = safeJournal(raw); } catch { this.journalUnavailable = true; this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
   get enabled() { return Boolean(this.baseUrl); }
   get usesPagesAuth() { return this.baseUrl === PAGES_MARKET_BASE; }
   get pagesAuthenticated() { return this.usesPagesAuth && Boolean(pagesSession.verifiedGuest); }
@@ -234,8 +236,9 @@ export class MarketClient {
   private assertAppliedReceiptDurable(receiptId: string) {
     const receipt = this.journal.receipts[receiptId]; if (!receipt || !['applied', 'delivered'].includes(receipt.state) || !Number.isSafeInteger(receipt.firmId) || !receipt.itemId || !MARKET_ITEMS.includes(receipt.itemId) || !Number.isSafeInteger(receipt.quantity) || receipt.quantity! < 1) throw new Error('saved-city-recovery-required');
     try {
-      const raw = this.readDurableCity(this.journal.cityId); if (!raw) throw new Error('missing save'); const savedCity = deserialize(raw); const market = savedCity.market ? safeJournal(JSON.stringify(savedCity.market)) : null; const saved = market?.receipts[receiptId];
-      const { market: _currentMarket, ...currentCity } = this.city(); const { market: _savedMarket, ...durableCity } = savedCity;
+      const raw = this.readDurableCity(this.journal.cityId); if (!raw) throw new Error('missing save'); deserializeParkSession(raw); const savedCity = deserialize(raw); const market = savedCity.market ? safeJournal(JSON.stringify(savedCity.market)) : null; const saved = market?.receipts[receiptId];
+      const currentRaw = this.readCurrentSession?.(); if (this.readCurrentSession) { if (!currentRaw) throw new Error('missing current session'); deserializeParkSession(currentRaw); }
+      const { market: _currentMarket, ...currentCity } = currentRaw ? deserialize(currentRaw) : this.city(); const { market: _savedMarket, ...durableCity } = savedCity;
       if (!market || market.cityId !== this.journal.cityId || market.guestId !== this.guestId || !saved || !['applied', 'delivered'].includes(saved.state) || saved.claimId !== receipt.claimId || saved.firmId !== receipt.firmId || saved.itemId !== receipt.itemId || saved.quantity !== receipt.quantity || JSON.stringify(currentCity) !== JSON.stringify(durableCity)) throw new Error('mismatch');
     } catch { throw new Error('saved-city-recovery-required'); }
   }

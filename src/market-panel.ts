@@ -66,10 +66,10 @@ export const isOpenMarketListing = (row: { status?: unknown }) => row.status ===
 export const activeMarketListings = <T extends { status?: unknown }>(rows: T[]) => rows.filter(isOpenMarketListing);
 export const mergeMarketListings = <T extends { id: string; status?: unknown }>(publicRows: T[], ownRows: T[]) => { const allOwnRows = ((ownRows as T[] & { allRows?: T[] }).allRows ?? ownRows); const ownedIds = new Set(allOwnRows.map(row => row.id)); const byId = new Map(activeMarketListings(publicRows).filter(row => !ownedIds.has(row.id)).map(row => [row.id, { ...row, own: false }])); for (const row of activeMarketListings(ownRows)) byId.set(row.id, { ...row, own: true }); return [...byId.values()]; };
 
-export function installMarketPanel(city: () => City, onChanged: () => void, saveCity: () => void) {
+export function installMarketPanel(city: () => City, onChanged: () => void, saveCity: () => void, readCurrentSession?: () => string) {
   void import('./market-panel.css');
   const base = (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '';
-  const client = new MarketClient(city, base, { recoveryEnabled: recoveryApiEnabled });
+  const client = new MarketClient(city, base, { recoveryEnabled: recoveryApiEnabled, readCurrentSession });
   const host = document.querySelector<HTMLElement>('.page-buttons');
   if (!host || !client.enabled) return {client, render: () => undefined};
   const gate = new MarketAsync();

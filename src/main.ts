@@ -9,7 +9,7 @@ import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
 import { saveLocalCitySession, loadLocalCitySession, loadRecoveryCityReadOnly, exportLocalCitySession, withLocalCitySnapshot, hasOnlyKnownNonCityKeys } from './local-city-save.ts';
-import { saveRecoveryCopy, listRecoveryCopies, type RecoveryToken } from './recovery-idb.ts';
+import { saveRecoveryCopy, listRecoveryCopies, type RecoveryToken, type RecoverySnapshot } from './recovery-idb.ts';
 import { createAutosave, installAutosave, describeAutosave, isQuotaError } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
@@ -36,6 +36,9 @@ import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
 import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
+import { decodeSaveCopy } from './save-copy-codec.ts';
+import { primaryFence, promoteRecoverySave } from './save-promotion.ts';
+import { rememberResumeChoice, rememberedResumeChoice, sameResumeInventory, type ResumeChoice } from './save-choice.ts';
 import { growthStatusText } from './context-data.ts';
 import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
@@ -649,7 +652,7 @@ async function boot() {
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
   $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
-  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveGuard.write(serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); });
+  marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveGuard.write(serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); }, () => serializeParkSession(city, parkRuntime));
   installHudRow();
   const writeLocalSave = async () => {const generation=saveGuard.generation,legacy=importedLegacyRaw;await saveLocalCitySession(city,parkRuntime,marketPanel?.client,raw=>saveGuard.write(raw,legacy,generation));};
   // Autosave: every minute, plus on tab hide / close. Failures (e.g. localStorage quota) are shown, never swallowed.
@@ -681,7 +684,7 @@ async function boot() {
     try {
       if(previewOnly)throw Error('เมืองชั่วคราวสำหรับดูเท่านั้น ไม่บันทึก');
       if(recoveryOnly&&!saveGuard.armed)throw Object.assign(Error('recovery-only'),{name:'RecoveryOnly'});
-      primaryAttempted=true;await writeLocalSave(); if(attemptGeneration!==saveGuard.generation||attemptCity!==city)throw Error('เมืองเปลี่ยนระหว่างบันทึก'); recoveryOnly=false;marketPanel?.client.setRecoveryReadOnly(false);refreshRecoveryInfo(); saveFeedback.succeeded(attempt);
+      primaryAttempted=true;await writeLocalSave(); if(attemptGeneration!==saveGuard.generation||attemptCity!==city)throw Error('เมืองเปลี่ยนระหว่างบันทึก'); recoveryOnly=false;marketPanel?.client.setRecoveryReadOnly(false);refreshRecoveryInfo(); saveFeedback.succeeded(attempt); void rememberChoice({id:'stored:current',label:'',raw:readStoredCity(localStorage)!.raw});
     } catch (error) {
       if(attemptGeneration!==saveGuard.generation||attemptCity!==city){saveFeedback.cancel(attempt);throw error;}
       if(isQuotaError(error)||(error instanceof Error&&error.name==='RecoveryOnly')){
@@ -708,6 +711,51 @@ async function boot() {
     const generation=saveGuard.generation,capturedCity=city;
     return enqueueSave(async()=>{if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');return runTrackedSave();});
   };
+  let promotionDialog:HTMLDialogElement|null=null;
+  const confirmRecoveryPromotion=async()=>{
+    if(promotionDialog||!recoveryOnly||saveGuard.armed)return;
+    paused=true;render();
+    const capturedCity=city,capturedRuntime=parkRuntime,generation=saveGuard.generation,tick=city.tick,branch=recoveryToken?.branchId.slice(0,8)??'ใหม่';
+    let expected:ReturnType<typeof primaryFence>;try{expected=primaryFence(localStorage);}catch{status('ยังอ่านช่องเซฟไม่ได้ ข้อมูลเดิมยังอยู่');return;}
+    const dialog=document.createElement('dialog');promotionDialog=dialog;dialog.id='save-promotion-confirm';
+    const title=document.createElement('h2');title.textContent=`บันทึกเมืองที่เปิดอยู่ วันที่ ${tick}?`;
+    const note=document.createElement('p');note.textContent=`ใช้เมืองที่กำลังดู สาขา ${branch} เป็นเมืองหลัก สำเนาอื่นจะเก็บไว้ ไม่รวมเมือง หากพื้นที่ไม่พอจะยังอยู่ในโหมดกู้คืน`;
+    const confirm=document.createElement('button');confirm.id='save-promotion-accept';confirm.textContent='ยืนยันบันทึกเมืองนี้';
+    const cancel=document.createElement('button');cancel.id='save-promotion-cancel';cancel.textContent='กลับ';
+    const resultText=document.createElement('p');resultText.setAttribute('role','status');let busy=false;
+    const finish=()=>{dialog.close();dialog.remove();promotionDialog=null;};
+    cancel.onclick=()=>{if(!busy)finish();};dialog.addEventListener('cancel',event=>{event.preventDefault();if(!busy)finish();});
+    confirm.onclick=async()=>{
+      if(busy)return;busy=true;confirm.disabled=cancel.disabled=true;resultText.textContent='กำลังเก็บสำเนาและตรวจการบันทึก…';
+      const attempt=saveFeedback.begin();let copySaved=false;
+      try{
+        await enqueueSave(async()=>{
+          if(city!==capturedCity||saveGuard.generation!==generation||city.tick!==tick)throw Error('เมืองเปลี่ยน กรุณาตรวจแล้วบันทึกใหม่');
+          await withLocalCitySnapshot(capturedCity,capturedRuntime,marketPanel?.client,async raw=>{
+            const cityMarketBefore=JSON.stringify(capturedCity.market),clientMarketBefore=JSON.stringify(marketPanel?.client.exportSave());
+            const result=await promoteRecoverySave({raw,validateSnapshot:()=>{if(JSON.stringify(capturedCity.market)!==cityMarketBefore||JSON.stringify(marketPanel?.client.exportSave())!==clientMarketBefore||serializeParkSession(capturedCity,capturedRuntime,JSON.parse(raw).market)!==raw)throw Error('เมืองเปลี่ยนระหว่างบันทึก กรุณาตรวจแล้วลองใหม่');},storage:localStorage,guard:saveGuard,expected,generation,isCurrent:()=>city===capturedCity,preserve:async()=>{
+              if(recoveryUncertain)throw Error('recovery-review-required');
+              let saved:RecoverySnapshot;try{saved=await saveRecoveryCopy(raw,recoveryToken);}catch(error){if(city===capturedCity&&saveGuard.generation===generation)recoveryUncertain=true;throw error;}
+              if(city!==capturedCity||saveGuard.generation!==generation)throw Error('เมืองเปลี่ยนระหว่างเก็บสำเนา');
+              recoveryToken={branchId:saved.branchId,revision:saved.revision};copySaved=true;
+            }});
+            if(!result.ok){
+              if(!result.owned){saveFeedback.cancel(attempt);return;}
+              recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);autosave.reset();
+              const reason=result.error instanceof Error?result.error.message:'ยังตรวจสอบไม่ได้';
+              const message=`${copySaved?'เก็บสำเนากู้คืนแล้ว แต่ยังไม่ได้กลับมาเซฟปกติ':'ยังยืนยันการบันทึกไม่ได้'} · ${reason} · สำเนาเดิมยังอยู่`;
+              saveFeedback.failed(message,attempt);status(message);return;
+            }
+            recoveryOnly=false;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);autosave.reset();autosave.markSaved(city.tick);saveFeedback.succeeded(attempt);refreshRecoveryInfo();
+            void rememberChoice({id:'stored:current',label:'',raw});
+            status(`บันทึกเมืองวันที่ ${city.tick} เป็นเมืองหลักแล้ว · สำเนาอื่นยังเก็บไว้`);sound('ui-save');
+          });
+        });
+      }catch(error){if(city===capturedCity&&saveGuard.generation===generation){saveFeedback.failed(`${error instanceof Error?error.message:'บันทึกไม่ได้'} · ข้อมูลเดิมยังอยู่`,attempt);status('ยังบันทึกเป็นเมืองหลักไม่ได้ ข้อมูลเดิมยังอยู่');}else saveFeedback.cancel(attempt);}
+      finally{finish();}
+    };
+    dialog.append(title,note,confirm,cancel,resultText);document.body.append(dialog);dialog.showModal();cancel.focus();
+  };
   let autosaveFailed = false;
   let autoWriteStarted = false;let autoGeneration=saveGuard.generation;
   const autosave = createAutosave({ save: () => { autoWriteStarted = true;autoGeneration=saveGuard.generation; return trackedSave(); }, tick: () => city.tick, revision:()=>serializeParkSession(city,parkRuntime,city.market), canSave:()=>saveGuard.armed||recoveryOnly, onResult: r => {
@@ -721,18 +769,21 @@ async function boot() {
   installAutosave(document, window, autosave, () => document.hidden);
   if(startupSaveError){const message=startupSaveError==='idb-recovery-available'?'พบสำเนากู้คืนในเบราว์เซอร์ · หยุด autosave ไว้ เลือกตรวจเซฟหลักหรือสำเนากู้คืนก่อนเล่นต่อ ห้ามล้างข้อมูลเว็บไซต์':startupSaveError==='idb-recovery-unavailable'?'ยังตรวจสำเนากู้คืนในเบราว์เซอร์ไม่ได้ · หยุด autosave ไว้ เลือกชุดที่จะเปิดอย่างระมัดระวัง ห้ามล้างข้อมูลเว็บไซต์':startupSaveFailureMessage(startupSaveError);saveFeedback.failed(message);status(message);}
   $('#save').addEventListener('click', async () => {
+    if(recoveryOnly&&!saveGuard.armed){await confirmRecoveryPromotion();return;}
     const requestGeneration=saveGuard.generation,requestCity=city;
     try { await trackedSave(); if(requestGeneration!==saveGuard.generation||requestCity!==city)return; autosave.markSaved(city.tick); sound('ui-save'); status(marketPanel?.client.enabled || city.market ? `บันทึกเมืองและข้อมูลตลาดเดิมแล้ว · Saved day ${city.tick}` : `บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day ${city.tick}`); } catch (error) { if(requestGeneration!==saveGuard.generation||requestCity!==city)return; sound('ui-error'); status(isQuotaError(error) ? 'บันทึกไม่ได้: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) เซฟเดิมยังอยู่' : `บันทึกไม่ได้: ${error instanceof Error ? error.message : 'ตรวจสอบเมืองและรายการตลาดก่อน'} เซฟเดิมยังอยู่`); }
   });
-  const loadStored = async (source: SaveSource) => {
+  const loadStored = async (source: SaveSource, selectedRaw?:string) => {
     try {
       const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return false; }
+      if(selectedRaw!==undefined&&saved.raw!==selectedRaw)throw Error('เซฟที่เลือกเปลี่ยนแล้ว กรุณาตรวจใหม่');
       const oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,restored=>{
         if (!restored.city.education) adoptSavedEducation(restored.city);
         city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);autosave.reset();
-      });
+      },()=>{if(selectedRaw!==undefined&&readStoredCity(localStorage,source)?.raw!==selectedRaw)throw Error('เซฟที่เลือกเปลี่ยนแล้ว กรุณาตรวจใหม่');});
       saveFeedback.recovered();
+      void rememberChoice({id:`stored:${source}`,label:'',raw:saved.raw});
       cueLimiter.reset();
       syncEducationTools();
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
@@ -752,6 +803,16 @@ async function boot() {
   $('#load-backup').addEventListener('click', () => loadStored('backup'));
   const checkpointButton=document.createElement('button');checkpointButton.id='load-autosave-copy';checkpointButton.textContent='โหลดสำเนาอัตโนมัติล่าสุด';checkpointButton.onclick=()=>void loadStored('checkpoint');$('#load-backup').insertAdjacentElement('afterend',checkpointButton);
   const conflictButton=document.createElement('button');conflictButton.id='load-save-conflict';conflictButton.textContent='กู้คืนสำเนางานที่ขัดแย้ง';conflictButton.onclick=()=>void loadStored('conflict');checkpointButton.insertAdjacentElement('afterend',conflictButton);
+  const recoveryChoiceId=(saved:RecoverySnapshot)=>`recovery:${saved.branchId}:${saved.slot}:${saved.revision}`;
+  const applyEmergencySnapshot=async(saved:RecoverySnapshot)=>{
+  await loadRecoveryCityReadOnly(saved.raw,marketPanel?.client,saveGuard,restored=>{
+    city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=null;previewOnly=false;recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);recoveryToken=saved.slot==='current'?{branchId:saved.branchId,revision:saved.revision}:null;recoveryUncertain=false;autosave.reset();
+  });
+  saveGuard.block();saveFeedback.recovered();paused=true;syncEducationTools();ownerDecisionSession.reset(city);ownerDecisionPanel?.reset();render();
+  status(`เปิดสำเนากู้คืนวันที่ ${saved.tick} แล้ว · เซฟหลักไม่ถูกแทนที่ การบันทึกต่อใช้สำเนากู้คืนเท่านั้น และพักการทำรายการตลาด`);
+    void rememberChoice({id:recoveryChoiceId(saved),label:'',raw:saved.raw});
+    return true;
+  };
   const chooseEmergency=async(mode:'load'|'export'):Promise<boolean>=>{
     const generation=saveGuard.generation, capturedCity=city;
     try{
@@ -767,11 +828,7 @@ async function boot() {
           button.onclick=async()=>{if(busy)return;busy=true;try{
             if(generation!==saveGuard.generation||capturedCity!==city)throw Error('เมืองเปลี่ยนระหว่างเลือกรายการ');
             if(mode==='export'){const url=URL.createObjectURL(new Blob([saved.raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-recovery-day-${saved.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งสำเนากู้คืนให้เบราว์เซอร์ดาวน์โหลดแล้ว ตรวจไฟล์ก่อนปิดเกม');finish(true);return;}
-            await loadRecoveryCityReadOnly(saved.raw,marketPanel?.client,saveGuard,restored=>{
-              city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=null;previewOnly=false;recoveryOnly=true;marketPanel?.client.setRecoveryReadOnly(true);recoveryToken=saved.slot==='current'?{branchId:saved.branchId,revision:saved.revision}:null;recoveryUncertain=false;autosave.reset();
-            });
-            saveGuard.block();saveFeedback.recovered();paused=true;syncEducationTools();ownerDecisionSession.reset(city);ownerDecisionPanel?.reset();render();
-            status(`เปิดสำเนากู้คืนวันที่ ${saved.tick} แล้ว · เซฟหลักไม่ถูกแทนที่ การบันทึกต่อใช้สำเนากู้คืนเท่านั้น และพักการทำรายการตลาด`);finish(true);
+            await applyEmergencySnapshot(saved);finish(true);
           }catch(error){status(`ใช้สำเนากู้คืนไม่ได้: ${error instanceof Error?error.message:'ตรวจสอบข้อมูลก่อน'} · ข้อมูลเดิมยังอยู่`);finish(false);}finally{busy=false;}};row.append(button);dialog.append(row);
         }
         const cancel=document.createElement('button');cancel.textContent='ยกเลิก';cancel.onclick=()=>finish(false);dialog.append(cancel);dialog.addEventListener('cancel',event=>{event.preventDefault();finish(false);});document.body.append(dialog);dialog.showModal();cancel.focus();
@@ -782,6 +839,33 @@ async function boot() {
   const emergencyButton=document.createElement('button');emergencyButton.id='load-idb-recovery';emergencyButton.textContent='เลือกเปิดสำเนากู้คืนในเบราว์เซอร์';emergencyButton.onclick=()=>void loadEmergency();conflictButton.insertAdjacentElement('afterend',emergencyButton);
   const exportEmergency=document.createElement('button');exportEmergency.id='export-idb-recovery';exportEmergency.textContent='เลือกส่งออกสำเนากู้คืน';exportEmergency.onclick=()=>void chooseEmergency('export');emergencyButton.insertAdjacentElement('afterend',exportEmergency);
   const exportButton=document.createElement('button');exportButton.id='export-city-save';exportButton.textContent='ส่งออกเซฟเมืองเป็นไฟล์';exportButton.onclick=async()=>{try{const raw=await exportLocalCitySession(city,parkRuntime,marketPanel?.client),url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-day-${city.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งไฟล์เซฟให้เบราว์เซอร์ดาวน์โหลดแล้ว ตรวจไฟล์ก่อนปิดเกม');}catch(error){status(`ส่งออกไม่สำเร็จ: ${error instanceof Error?error.message:'ตรวจสอบข้อมูลเมืองและรายการตลาดก่อน'} · อย่าปิดเกมหรือล้างข้อมูล`);}};$('#save').insertAdjacentElement('afterend',exportButton);
+  // Ordinary menu has one Save action; recovery/history remain available but collapsed.
+  const recoveryDetails=document.createElement('details');recoveryDetails.id='save-recovery-details';
+  const recoveryHeading=document.createElement('summary');recoveryHeading.textContent='ตัวเลือกกู้คืนและเซฟเดิม';recoveryDetails.append(recoveryHeading,recoveryInfo);
+  for(const id of ['load','load-backup','load-autosave-copy','load-save-conflict','load-idb-recovery','export-idb-recovery'])recoveryDetails.append($('#'+id));
+  const legacyGroup=document.querySelector<HTMLElement>('.save-group.legacy');if(legacyGroup)recoveryDetails.append(legacyGroup);
+  $('#save').closest('.save-group')?.append(recoveryDetails);
+  const readResumeChoices=async()=>{
+    const choices:ResumeChoice[]=[];let complete=true;
+    for(const [source,label] of [['current','เมืองหลัก'],['checkpoint','สำเนาอัตโนมัติ'],['backup','สำเนาเดิม'],['conflict','สำเนางานที่ขัดแย้ง']] as const){try{const saved=readStoredCity(localStorage,source);if(saved){const restored=deserializeParkSession(saved.raw);choices.push({id:`stored:${source}`,raw:saved.raw,advanced:source==='backup'||source==='conflict',label:`${label} · วันที่ ${restored.city.tick}`});}}catch{complete=false;/* Leave unreadable originals untouched in advanced recovery. */}}
+    try{for(const item of await listRecoveryCopies()){if(!item.snapshot){complete=false;continue;}{const saved=item.snapshot;choices.push({id:recoveryChoiceId(saved),raw:saved.raw,label:`เมืองกู้คืน · วันที่ ${saved.tick} · ${saved.branchId.slice(0,8)} · ${saved.slot==='current'?'ล่าสุด':saved.slot==='previous'?'ก่อนหน้า':'ต้นฉบับ'}`});}}}catch{complete=false;/* Unknown recovery state never invents a choice. */}
+    // Include every retained slot, including an archive whose pointer publication failed.
+    try{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(!key||!/^citymanager\.(save\.|backup\.|checkpoint\.)/.test(key))continue;const raw=localStorage.getItem(key);if(raw===null){complete=false;continue;}choices.push({id:`inventory:${key}`,label:'',raw,advanced:true});if(!key.endsWith('.latest')&&!key.endsWith('.index')){try{deserializeParkSession(decodeSaveCopy(raw)!);}catch{complete=false;}}}}catch{complete=false;}
+    return {choices,complete};
+  };
+  const rememberChoice=async(choice:ResumeChoice)=>{const generation=saveGuard.generation,captured=city;const inventory=await readResumeChoices();if(inventory.complete&&inventory.choices.some(c=>c.id===choice.id&&c.raw===choice.raw))await rememberResumeChoice(localStorage,choice,inventory.choices,()=>city===captured&&saveGuard.generation===generation);};
+  let offeredChoices:ResumeChoice[]=[],offeredComplete=false;
+  const loadChoices=async()=>{const inventory=await readResumeChoices();offeredChoices=inventory.choices;offeredComplete=inventory.complete;const selected=recoveryUnavailable||!inventory.complete?null:await rememberedResumeChoice(localStorage,offeredChoices);const unique=new Map<string,ResumeChoice>();for(const choice of offeredChoices.filter(c=>!c.advanced)){if(!unique.has(choice.raw)||choice.id===selected)unique.set(choice.raw,choice);}return {choices:[...unique.values()],selected,complete:inventory.complete};};
+  const loadChoice=async(id:string)=>{
+    const generation=saveGuard.generation,captured=city;
+    const offered=offeredChoices.find(c=>c.id===id);if(!offered)return false;
+    const freshInventory=await readResumeChoices();if(city!==captured||saveGuard.generation!==generation)return false;if(freshInventory.complete!==offeredComplete||!sameResumeInventory(offeredChoices,freshInventory.choices)){status('รายการเมืองเปลี่ยนแล้ว กรุณาเลือกอีกครั้ง ข้อมูลเดิมยังอยู่');return false;}const fresh=freshInventory.choices.find(c=>c.id===id);if(!fresh||fresh.raw!==offered.raw){status('เมืองที่เลือกเปลี่ยนแล้ว กรุณาเปิดรายการใหม่ ข้อมูลเดิมยังอยู่');return false;}
+    if(id==='stored:current'||id==='stored:checkpoint')return loadStored(id==='stored:current'?'current':'checkpoint',offered.raw);
+    const saved=(await listRecoveryCopies()).find(x=>x.snapshot&&recoveryChoiceId(x.snapshot)===id)?.snapshot;
+    if(city!==captured||saveGuard.generation!==generation)return false;
+    if(!saved||saved.raw!==offered.raw){status('สำเนาที่เลือกเปลี่ยนแล้ว ข้อมูลเดิมยังอยู่');return false;}
+    return applyEmergencySnapshot(saved);
+  };
   const campusAction = (action: typeof toggleCampus) => {
     const campus = route?.page === 'place' ? campusAt(city, route.cell) : undefined;
     if (!campus) return;
@@ -882,7 +966,7 @@ async function boot() {
   const noCityStorage=()=>onlyBenignOrMarket(false);
   const previewOnlyAfterUnknown=async()=>{if(startup.restored||startup.error||!recoveryUnavailable||!onlyBenignOrMarket(true)){status('ยังยืนยันสถานะเซฟเดิมไม่ได้');return false;}saveGuard.block();previewOnly=true;marketPanel?.client.setRecoveryReadOnly(true);paused=true;saveFeedback.failed('เมืองชั่วคราวสำหรับดูเท่านั้น · ไม่บันทึกและพักตลาด · ยังตรวจสำเนากู้คืนไม่ได้ ห้ามล้างข้อมูล');status('เมืองชั่วคราวสำหรับดูเท่านั้น ไม่ใช่เซฟเดิมและไม่บันทึก');return true;};
   const startFreshAfterUnknown=async()=>{if(startup.restored||startup.error||!recoveryUnavailable||!noCityStorage()){status('ไม่สามารถยืนยันว่าช่องเซฟเดิมว่าง จึงไม่เริ่มเมืองใหม่');return false;}try{saveGuard.acceptLoaded(serializeParkSession(city,parkRuntime,city.market));autosave.reset();saveFeedback.recovered();paused=true;status('เข้าเมืองใหม่ตามที่เลือก · ยังตรวจสำเนากู้คืนในเบราว์เซอร์ไม่ได้');return true;}catch{status('ยังยืนยันการเริ่มเมืองใหม่ไม่ได้');return false;}};
-  if(startupSaveError)installStartupRecoveryChooser({summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,loadEmergency,exportEmergency:()=>chooseEmergency('export'),recoveryState:recoveryUnavailable?'unavailable':recoveryFound?'available':'none',startFresh:!startup.restored&&!startup.error&&recoveryUnavailable&&noCityStorage()?startFreshAfterUnknown:undefined,previewOnly:!startup.restored&&!startup.error&&recoveryUnavailable&&!noCityStorage()&&onlyBenignOrMarket(true)?previewOnlyAfterUnknown:undefined,status:()=>$('#inspector-status').textContent??''});
+  if(startupSaveError)installStartupRecoveryChooser({loadChoices,loadChoice,summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,loadEmergency,exportEmergency:()=>chooseEmergency('export'),recoveryState:recoveryUnavailable?'unavailable':recoveryFound?'available':'none',startFresh:!startup.restored&&!startup.error&&recoveryUnavailable&&noCityStorage()?startFreshAfterUnknown:undefined,previewOnly:!startup.restored&&!startup.error&&recoveryUnavailable&&!noCityStorage()&&onlyBenignOrMarket(true)?previewOnlyAfterUnknown:undefined,status:()=>$('#inspector-status').textContent??''});
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

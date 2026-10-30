@@ -41,7 +41,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: node --experimental-strip-types --test tests/save-safety.test.ts tests/save-startup-diagnosis.test.ts tests/save-startup-feedback.test.ts tests/save-recovery-info.test.ts tests/save-equivalence.test.ts tests/load-authority.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/save-quota-lossless.test.ts
+      - run: node --experimental-strip-types --test tests/save-safety.test.ts tests/save-startup-diagnosis.test.ts tests/save-startup-feedback.test.ts tests/save-recovery-info.test.ts tests/save-equivalence.test.ts tests/load-authority.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/save-quota-lossless.test.ts tests/save-promotion.test.ts
       - run: npm run build
         env:
           VITE_MARKET_URL: http://127.0.0.1:4317
