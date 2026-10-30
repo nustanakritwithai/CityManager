@@ -4,13 +4,14 @@ import {createCity,step,zoneCell} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
 import {SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP,readStoredCity} from '../src/save-storage.ts';
 import {createSaveGuard} from '../src/save-guard.ts';import {restoreStartupCity} from '../src/startup-save.ts';
+import {decodeSaveCopy} from '../src/save-copy-codec.ts';
 import {createAutosave} from '../src/autosave.ts';import {saveLocalCitySession} from '../src/local-city-save.ts';import {marketJournalForTest,MarketClient} from '../src/market-client.ts';
 const memory=()=>{const data=new Map<string,string>();return{data,getItem:(k:string)=>data.get(k)??null,setItem:(k:string,v:string)=>{data.set(k,v);}};};
 const fresh=()=>createCity(61025,{starter:false});const snapshot=(c:ReturnType<typeof fresh>)=>serializeParkSession(c,createParkRuntime(c));
 test('startup restores prior played city before autosave without changing original bytes',()=>{
  const s=memory(),old=fresh();for(let i=0;i<65;i++)step(old);const raw=snapshot(old);s.setItem(SAVE_KEY,raw);
  const loaded=restoreStartupCity(s,fresh);assert.equal(loaded.restored,true);assert.equal(loaded.city.tick,65);assert.deepEqual(loaded.city,old);assert.equal(s.getItem(SAVE_KEY),raw);assert.equal(s.data.size,1);assert.equal(loaded.guard.armed,true);
- loaded.guard.write(raw,null);assert.equal(s.getItem(PRE_AUTOSAVE_BACKUP),raw);assert.equal(s.getItem(AUTOSAVE_CHECKPOINT_KEY),raw);
+ loaded.guard.write(raw,null);assert.equal(decodeSaveCopy(s.getItem(PRE_AUTOSAVE_BACKUP)),raw);assert.equal(decodeSaveCopy(s.getItem(AUTOSAVE_CHECKPOINT_KEY)),raw);
 });
 test('corrupt or unknown-version save blocks all replacement writes and keeps bytes',()=>{
  for(const raw of ['{broken',JSON.stringify({version:999,tick:65})]){const s=memory();s.setItem(SAVE_KEY,raw);const loaded=restoreStartupCity(s,fresh);assert.ok(loaded.error);assert.equal(loaded.guard.armed,false);assert.throws(()=>loaded.guard.write(snapshot(fresh()),null));assert.equal(s.getItem(SAVE_KEY),raw);}

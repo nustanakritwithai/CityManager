@@ -9,6 +9,7 @@ export function createSaveFeedback(onChange: (state: SaveFeedbackState) => void,
     // Recovery authorizes the loaded city, but is not a successful storage write.
     recovered() { failure = null; failureAttempt = ++sequence; emit(); },
     begin() { const attempt = ++sequence; pending.add(attempt); emit(); return attempt; },
+    cancel(attempt: number) { pending.delete(attempt); emit(); },
     succeeded(attempt: number) {
       pending.delete(attempt);
       if (attempt >= successAttempt) { successAttempt = attempt; lastSuccess = now(); }
@@ -21,4 +22,14 @@ export function createSaveFeedback(onChange: (state: SaveFeedbackState) => void,
       emit();
     },
   };
+}
+
+/** Serialize manual and lifecycle attempts so older completions cannot overwrite newer mode. */
+export function createSaveAttemptQueue() {
+ let tail:Promise<void>=Promise.resolve();
+ return <T>(work:()=>Promise<T>):Promise<T>=>{
+  const current=tail.then(work);
+  tail=current.then(()=>{},()=>{});
+  return current;
+ };
 }

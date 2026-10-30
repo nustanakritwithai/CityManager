@@ -9,6 +9,10 @@ on:
       - 'src/startup-save-feedback.ts'
       - 'src/startup-recovery-chooser.ts'
       - 'src/local-city-save.ts'
+      - 'src/recovery-idb.ts'
+      - 'tests/recovery-idb-*'
+      - 'tests/recovery-unavailable-browser.mjs'
+      - 'tests/save-quota-lossless.test.ts'
       - 'src/market-client.ts'
       - 'src/entry-gate.ts'
       - 'tests/save-safety*'
@@ -37,7 +41,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: node --experimental-strip-types --test tests/save-safety.test.ts tests/save-startup-diagnosis.test.ts tests/save-startup-feedback.test.ts tests/save-recovery-info.test.ts tests/save-equivalence.test.ts tests/load-authority.test.ts tests/autosave.test.ts tests/education-session.test.ts
+      - run: node --experimental-strip-types --test tests/save-safety.test.ts tests/save-startup-diagnosis.test.ts tests/save-startup-feedback.test.ts tests/save-recovery-info.test.ts tests/save-equivalence.test.ts tests/load-authority.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/save-quota-lossless.test.ts
       - run: npm run build
         env:
           VITE_MARKET_URL: http://127.0.0.1:4317
@@ -59,6 +63,25 @@ jobs:
             node --experimental-strip-types tests/save-safety-smoke.mjs
             if ($LASTEXITCODE -ne 0) { throw 'Guest save browser acceptance failed.' }
           } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
+      - name: Verify IndexedDB fallback and recovery in real Edge
+        run: |
+          $dev = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '4191', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/recovery-vite.log -RedirectStandardError .test-output/recovery-vite-error.log
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4191/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $ready = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) { throw 'Recovery dev server did not start.' }
+            node --experimental-strip-types tests/recovery-idb-browser.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'IndexedDB recovery browser acceptance failed.' }
+            $env:RECOVERY_SCENARIO = 'preferences'
+            node --experimental-strip-types tests/recovery-unavailable-browser.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Unavailable IDB preferences acceptance failed.' }
+            $env:RECOVERY_SCENARIO = 'market'
+            node --experimental-strip-types tests/recovery-unavailable-browser.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Unavailable IDB market preview acceptance failed.' }
+          } finally { Stop-Process -Id $dev.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -66,5 +89,9 @@ jobs:
           path: |
             .test-output/save-safety/*.png
             .test-output/save-safety/*.json
+            .test-output/recovery-idb/*.json
+            .test-output/recovery-idb/*.png
+            .test-output/recovery-vite*.log
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 3
