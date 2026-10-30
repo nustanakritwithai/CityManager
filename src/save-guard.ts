@@ -1,5 +1,6 @@
 import {encodeSaveCopy,decodeSaveCopy} from './save-copy-codec.ts';
 import {deserializeParkSession} from './park-runtime.ts';
+import {equivalentStoredSessions} from './save-equivalence.ts';
 /** Existing formats are unchanged. The new checkpoint is independent of old tabs. */
 import {readStoredCity,saveStoredCity,SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP,saveConflictBackupKeys,LATEST_BACKUP_KEY,SAVE_CONFLICT_LATEST_KEY,SAVE_CONFLICT_INDEX_KEY} from './save-storage.ts';
 type Store=Pick<Storage,'getItem'|'setItem'>;
@@ -20,8 +21,9 @@ export function createSaveGuard(backing:Store){
   get armed(){return armed;},get generation(){return generation;},
   acceptLoaded(raw:string,explicit=false){
    const current=storage.getItem(SAVE_KEY),copy=storage.getItem(AUTOSAVE_CHECKPOINT_KEY);
-   if(!explicit&&copy!==null&&copy!==raw)throw Error('พบเซฟช่องเดิมกับสำเนาอัตโนมัติต่างกัน กรุณาเลือกโหลดชุดที่ต้องการก่อน');
-   pendingArchive=explicit?[...new Set([copy,current].filter((value):value is string=>value!==null&&value!==raw))]:[];
+   if(!explicit&&copy!==null&&copy!==raw&&!equivalentStoredSessions(raw,copy))throw Error('พบเซฟช่องเดิมกับสำเนาอัตโนมัติต่างกัน กรุณาเลือกโหลดชุดที่ต้องการก่อน');
+   // Formatting-only resume still retains alternate original bytes before any later write.
+   pendingArchive=explicit?[...new Set([copy,current].filter((value):value is string=>value!==null&&value!==raw))]:copy!==null&&copy!==raw?[copy]:[];
    expected=current;checkpoint=copy;armed=true;replacement=explicit;generation++;
   },
   block(){armed=false;generation++;},

@@ -2,6 +2,7 @@ import { buildingIssueRevision, issuePlaceRoute } from './building-issues.ts';
 import { renderBuildingIssues } from './building-issue-panel.ts';
 import './building-issues.css';
 import { restoreStartupCity } from './startup-save.ts';
+import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
 import { saveLocalCitySession, loadLocalCitySession } from './local-city-save.ts';
@@ -648,7 +649,7 @@ async function boot() {
   });
   const loadStored = async (source: SaveSource) => {
     try {
-      const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return; }
+      const saved = readStoredCity(localStorage, source); if (!saved) { status(source === 'backup' ? 'ยังไม่มีสำเนากู้คืนเซฟเดิม' : 'ยังไม่มีเมืองที่บันทึกในช่องนี้'); return false; }
       const oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,restored=>{
         if (!restored.city.education) adoptSavedEducation(restored.city);
@@ -660,7 +661,8 @@ async function boot() {
       ownerDecisionSession.reset(city); ownerDecisionPanel?.reset();
       selected = roadStart = null; if (route?.page === 'place' || route?.page === 'household') inspector(false); paused = true; render();
       status(legacy ? `นำเข้า v${oldVersion} วันที่ ${city.tick} แล้ว · ${oldVersion >= 3 ? 'คงทักษะเดิม' : 'ทักษะเดิมสมมติเป็นแรงงานทั่วไป'}${oldVersion === 1 ? ' และสมาชิกเป็นสมมติฐานขั้นต่ำ' : ''} · ${oldVersion >= 4 ? 'คงเงิน สต็อก เจ้าของ และแรงงาน · ไม่แจกทุนขยายกิจการ' : 'เริ่มพืชผลที่ศูนย์ · วางฟาร์มและพาณิชย์ระดับ 1'} · ยังไม่เขียนทับเซฟใด` : `โหลดวันที่ ${city.tick} แล้ว${oldVersion === 7 ? ' · เซฟรุ่น 1.x แปลงเป็นสินค้า 3 สายแล้ว (เก็บสำเนาเดิมไว้ตอนบันทึก)' : ''} · หยุดเวลาให้ตรวจข้อมูล`);
-    } catch (error) { const message=loadFailureMessage(error);saveFeedback.failed(message);status(message); }
+      return true;
+    } catch (error) { const message=loadFailureMessage(error);saveFeedback.failed(message);status(message);return false; }
     finally {refreshRecoveryInfo();}
   };
   $('#load').addEventListener('click', () => loadStored('current'));
@@ -765,6 +767,7 @@ async function boot() {
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
   Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics } });
+  if(startupSaveError)installStartupRecoveryChooser({summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,status:()=>$('#inspector-status').textContent??''});
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

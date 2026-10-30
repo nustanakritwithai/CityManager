@@ -1126,3 +1126,7 @@ dialog button {
     min-height:14px
   }
 }
+/* Unresolved startup recovery must never look like a fresh playable city. */
+#startup-recovery-chooser::backdrop { background: #10182b; }
+#startup-recovery-chooser { max-height: calc(100dvh - 32px); overflow-y: auto; }
+#startup-recovery-chooser button { display: block; width: 100%; margin: 8px 0; }
