@@ -7,6 +7,8 @@ import { createAutosave, installAutosave, describeAutosave, isQuotaError } from 
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
 import { installSelectMenu } from './select-menu.ts';
+import { installServicesMenu, installConstructionMenu } from './grouped-tool-menu.ts';
+import './grouped-tool-menu.css';
 import './tool-menu.css';
 import '@fontsource/ibm-plex-sans-thai/thai-400.css';
 import '@fontsource/ibm-plex-sans-thai/thai-600.css';
@@ -108,6 +110,7 @@ const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: ''
 let view: CityView;
 let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
 let selectMenu: ReturnType<typeof installSelectMenu> | undefined;
+let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
 let educationPanel: ReturnType<typeof installEducationPanel> | undefined;
@@ -155,6 +158,8 @@ function farmHint(index: number | null): string {
 function setTool(next: string) {
   roadMenu?.close();
   selectMenu?.close(); selectMenu?.sync(next);
+  servicesMenu?.close(); servicesMenu?.sync(next);
+  constructionMenu?.close(); constructionMenu?.sync(next);
   tool = next; roadStart = null; hover = null;
   if (next !== 'select') inspector(false);
   if (view) { view.abortGesture(); view.mode = next === 'road' && (roadMode === 'split') ? 'select' : next; view.dragStart = null; }
@@ -197,6 +202,8 @@ function openRoute(next: Route) {
 function cancel() {
   view?.abortGesture();
   if (selectMenu?.isOpen()) { selectMenu.close(true); return; }
+  if (servicesMenu?.isOpen()) { servicesMenu.close(true); return; }
+  if (constructionMenu?.isOpen()) { constructionMenu.close(true); return; }
   if (cityNetwork?.open) { cityNetwork.toggle(false); return; }
   if (cityStatsPanel?.open) { cityStatsPanel.toggle(false); return; }
   if (dashboard?.modalOpen) { dashboard.closeModal(); return; }
@@ -564,6 +571,8 @@ async function boot() {
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
   const selectButton = document.querySelector<HTMLButtonElement>('[data-tool="select"]')!;
   selectMenu = installSelectMenu(selectButton, next => { sound('ui-select'); setTool(next); });
+  servicesMenu = installServicesMenu(next => { sound('ui-select'); setTool(next); });
+  constructionMenu = installConstructionMenu(next => { sound('ui-select'); setTool(next); });
   document.querySelectorAll<HTMLElement>('.tool-buttons [data-tool]').forEach(b => {
     if (b === selectButton) return; // Select's popup owns its arrow and explicit demolition option.
     b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); });
