@@ -6,6 +6,7 @@ import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
 import {captureTrafficGameInput,type TrafficGameInput,type TrafficGameFrame} from './game.ts';
 import {gamePoses,blendGamePoses} from './game-poses.ts';
 import {createTrafficGameClient} from './game-worker-client.ts';
+import type {BusIntegration} from '../bus/integration.ts';
 export {trafficModelEnabled} from './flag.ts';
 
 /** Ephemeral traffic-allocation game, independent of economic time and saves.
@@ -14,6 +15,9 @@ export {trafficModelEnabled} from './flag.ts';
  * most 64, so panning does not leave stale viewport-only selection. Mobile frame
  * cost and visual coverage still require browser testing. */
 export class TrafficLayer {
+ /** Bus integration slot (integrate/transport): #132/#133 wired BusEngine to the old TrafficClock layer, which #126
+  * replaced with this worker game. Re-wiring onto the worker game is pending, so this stays null (bus engine off). */
+ readonly bus:BusIntegration|null=null;
  private readonly cars:Pick<SceneCitizenVehicles,'sync'|'setEnabled'|'destroy'|'diagnostics'>;
  private client:ReturnType<typeof createTrafficGameClient<TrafficGameInput,TrafficGameFrame>>|null=null;
  private city:City|null=null;private latest:TrafficGameFrame|null=null;
