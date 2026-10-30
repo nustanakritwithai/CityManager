@@ -19,6 +19,7 @@ test('invalid/missing/denied candidates remain isolated and never expose raw con
  for(const name of ['SecurityError','QuotaExceededError'])assert.match(recoverySummary({getItem:()=>{throw Object.assign(Error('private_guest_secret'),{name});}}),/อ่านหรือตรวจสอบไม่ได้/);
 });
 test('load failures are allowlisted and do not disclose identity or server details',()=>{
+ assert.match(loadFailureMessage(Error('Park recreation: sidecar clock mismatch')),/โหลดไม่สำเร็จ.*sidecar clock mismatch/);
  assert.match(loadFailureMessage(Error('market guest identity mismatch')),/Guest.*ไม่ตรงกัน/);
  assert.match(loadFailureMessage(Object.assign(Error('private data'),{name:'SecurityError'})),/ไม่อนุญาต/);
  assert.match(loadFailureMessage(Object.assign(Error('private data'),{name:'QuotaExceededError'})),/ไม่เพียงพอ/);
