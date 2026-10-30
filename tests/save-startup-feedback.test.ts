@@ -53,3 +53,9 @@ test('failed recovery keeps original warning; only successful recovery calls rec
  await assert.rejects(async()=>{await loadLocalCitySession('{broken',undefined,guard,()=>{});feedback.recovered();});
  assert.equal(state!.failure,warning);assert.equal(state!.lastSuccess,null);assert.equal(guard.armed,false);
 });
+
+
+test('switching from a saved local branch clears its success before a different city fails',async()=>{
+ const {createSaveFeedback}=await import('../src/save-feedback.ts');
+ let latest;const feedback=createSaveFeedback(state=>{latest=state;},()=>123);const saved=feedback.begin();feedback.succeeded(saved);assert.equal(latest.lastSuccess,123);feedback.recovered();assert.equal(latest.lastSuccess,null);const next=feedback.begin();feedback.failed('other city quota',next);assert.equal(latest.lastSuccess,null);assert.equal(latest.failure,'other city quota');
+});

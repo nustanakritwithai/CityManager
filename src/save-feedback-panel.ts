@@ -1,6 +1,6 @@
 import { createSaveFeedback } from './save-feedback.ts';
 
-export function installSaveFeedback(badge: HTMLElement, exportSave: () => void) {
+export function installSaveFeedback(badge: HTMLElement, exportSave: () => void, successLabel:()=>string|undefined=()=>undefined) {
   const banner = document.createElement('aside'); banner.id = 'save-failure-banner'; banner.hidden = true;
   banner.setAttribute('aria-label', 'สถานะการบันทึก');
   const message = document.createElement('div'); message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite'); message.setAttribute('aria-atomic', 'true');
@@ -29,7 +29,7 @@ export function installSaveFeedback(badge: HTMLElement, exportSave: () => void) 
   new ResizeObserver(measure).observe(banner);
   place();
   return createSaveFeedback(state => {
-    const saved = state.lastSuccess === null ? 'ยังไม่มีการบันทึกสำเร็จในรอบนี้' : `บันทึกสำเร็จล่าสุด ${new Date(state.lastSuccess).toLocaleTimeString()}`;
+    const saved = state.lastSuccess === null ? 'ยังไม่มีการบันทึกสำเร็จในรอบนี้' : `${successLabel()??'บันทึกสำเร็จล่าสุด'} ${new Date(state.lastSuccess).toLocaleTimeString()}`;
     badge.textContent = state.failure ? `บันทึกไม่สำเร็จ · ${saved}` : state.pending ? `กำลังบันทึก… · ${saved}` : saved;
     badge.dataset.failed = String(!!state.failure);
     banner.hidden = !state.failure;

@@ -57,9 +57,9 @@ export function hasOnlyKnownNonCityKeys(storage:Pick<Storage,'length'|'key'>,all
 }
 /** A recovery preview must never persist a market journal or replace browser save slots. */
 export async function loadRecoveryCityReadOnly(raw:string,client:MarketClient|undefined,guard:ReturnType<typeof createSaveGuard>,apply:(restored:{city:City;runtime:ParkRuntime})=>void):Promise<void>{
- guard.block();const generation=guard.generation;const restored=deserializeParkSession(raw);
+ guard.block();client?.setRecoveryReadOnly(true);const generation=guard.generation;const restored=deserializeParkSession(raw);
  const assertCurrent=()=>{if(guard.generation!==generation)throw Error('City changed while loading; cancelled the older Load');};
- const applyChecked=()=>{assertCurrent();apply(restored);};
+ const applyChecked=()=>{assertCurrent();client?.setRecoveryReadOnly(true);apply(restored);};
  if(client?.enabled)await client.bindLoadedCityReadOnly(restored.city.market,applyChecked,assertCurrent);
  else applyChecked();
 }
