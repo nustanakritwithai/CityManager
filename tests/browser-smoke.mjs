@@ -104,14 +104,10 @@ async function clickAt(x, y) {
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
 }
-async function button(selector, expectedLoad='success') {
+async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
-  // Load now fences asynchronous IndexedDB selection before applying the city.
-  // Observe its real completion status, then retain every exact state assertion.
-  if(selector==='#load')await evaluate(`(()=>{window.__loadCompleted=false;window.__loadObserver?.disconnect();window.__loadObserver=new MutationObserver(()=>{if(new RegExp(${JSON.stringify(expectedLoad==='failure'?'^โหลดไม่สำเร็จ:':'^(โหลดวันที่|นำเข้า v)')}).test(document.querySelector('#status').textContent)){window.__loadCompleted=true;window.__loadObserver.disconnect()}});window.__loadObserver.observe(document.querySelector('#status'),{childList:true,subtree:true,characterData:true})})()`);
-  try {await clickAt(p.x, p.y);if(selector==='#load')await until('window.__loadCompleted===true');}
-  finally {if(selector==='#load')await evaluate('window.__loadObserver?.disconnect()');}
+  await clickAt(p.x, p.y);
 }
 const cellPoint = index => evaluate(`window.cityManager.cellScreen(${index})`);
 async function cell(index) { const p = await cellPoint(index); await clickAt(p.x, p.y); }
@@ -299,7 +295,7 @@ try {
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
   const corruptSession = JSON.parse(sessionSaved); corruptSession.parkRuntime.recreation.minute++;
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(JSON.stringify(corruptSession))})`);
-  await button('#load','failure'); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
+  await button('#load'); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
   assert.match(await text('#inspector-status'), /โหลดไม่สำเร็จ.*sidecar clock mismatch/);
   await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await closeInspector();
   checks.push('Real citizen identities, staffed visit benefit, citizen-speed pause, persistent provenance table, atomic fractional save/load, corrupt-sidecar rejection');

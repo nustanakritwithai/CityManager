@@ -1,8 +1,29 @@
+// Synchronize actual stored-Load controls across every native-input smoke suite.
+// This waits for a terminal UI result, not success: callers retain their exact
+// loaded-state, unchanged-state, and expected-error assertions.
+const storedLoadActions=new Set(['#load','#load-legacy','#load-v2','#load-v3','#load-v4','#load-v5','#load-v6','#load-backup','#load-autosave-copy','#load-save-conflict']);
+const loading=new WeakSet();
+export async function withStoredLoadCompletion(evaluate,activate,timeout=15000){
+  try{
+    await evaluate(`(()=>{window.__storedLoadObserver?.disconnect();window.__storedLoadResult=null;window.__storedLoadObserver=new MutationObserver(()=>{const text=document.querySelector('#status')?.textContent??'';if(/^(โหลดวันที่|นำเข้า v|โหลดไม่สำเร็จ:|ยังไม่มีเมืองที่บันทึกในช่องนี้|ยังไม่มีสำเนากู้คืนเซฟเดิม|Loaded day )/.test(text)){window.__storedLoadResult=text;window.__storedLoadObserver.disconnect()}});const status=document.querySelector('#status');if(!status)throw Error('Missing load status');window.__storedLoadObserver.observe(status,{childList:true,subtree:true,characterData:true})})()`);
+    await activate();const started=Date.now();
+    while(Date.now()-started<timeout){if(await evaluate('window.__storedLoadResult!==null&&window.__storedLoadResult!==undefined'))return;await new Promise(resolve=>setTimeout(resolve,50));}
+    throw Error('Stored Load did not reach a terminal result: '+await evaluate("document.querySelector('#status')?.textContent"));
+  }finally{await evaluate('window.__storedLoadObserver?.disconnect();delete window.__storedLoadObserver;delete window.__storedLoadResult');}
+}
+
 // Touch layout (src/hud-row.ts): the page buttons live in the ☰ menu and the speeds behind
 // one cycle button. Dock submenus are body-portaled on every viewport.
 // Before a suite clicks a hidden control, reveal it using the actual user-facing buttons.
-// Returns true when the target speed is already selected (nothing left to click).
+// Returns true when this helper completed the native Load action, or when the
+// target speed is already selected (nothing left for the caller to click).
 export async function reachTouch(evaluate, button, selector) {
+  if(storedLoadActions.has(selector)&&!loading.has(evaluate)){
+    loading.add(evaluate);
+    try{await withStoredLoadCompletion(evaluate,()=>button(selector));return true;}
+    finally{loading.delete(evaluate);}
+  }
+
   const target = JSON.stringify(selector);
   // Recovery controls are intentionally collapsed. Exercise the real summary first.
   for (const id of ['save-recovery-details','startup-recovery-details']) {
