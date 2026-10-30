@@ -40,7 +40,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++nextId;
   const promise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 30000);
+    const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}${method === 'Runtime.evaluate' ? ` (${String(params.expression).slice(0, 160)})` : ''}`)); }, 30000);
     pending.set(id, { resolve: result => { clearTimeout(timer); resolve(result); }, reject: error => { clearTimeout(timer); reject(error); } });
   });
   ws.send(JSON.stringify({ id, method, params })); return promise;
