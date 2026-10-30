@@ -57,7 +57,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: node --experimental-strip-types --test tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
-      - run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-modal.test.ts
+      - run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-modal.test.ts
       - run: node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
       - name: Bounded synthetic game throughput and worker isolation
         run: |

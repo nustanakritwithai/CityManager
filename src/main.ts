@@ -3,6 +3,7 @@ import { renderBuildingIssues } from './building-issue-panel.ts';
 import './building-issues.css';
 import { restoreStartupCity } from './startup-save.ts';
 import { TrafficLayer, trafficModelEnabled } from './traffic/layer.ts';
+import { trafficGameStatus } from './traffic/game-status.ts';
 import { screenCull, storeTrafficModel } from './traffic/flag.ts';
 import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
@@ -597,6 +598,7 @@ async function boot() {
       status(saved?(enabled?'เปิดการจราจรจำลองแล้ว':'ปิดการจราจรจำลองแล้ว'):'เปลี่ยนเฉพาะรอบนี้: เบราว์เซอร์ไม่อนุญาตให้จำการตั้งค่า');}
   };
   trafficButton.addEventListener('click',()=>setTrafficEnabled(!trafficEnabled,true));setTrafficEnabled(trafficEnabled);
+  document.addEventListener('visibilitychange',()=>trafficLayer?.pageVisibilityChanged(document.hidden));
   let trafficText='';
   const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
@@ -769,7 +771,7 @@ async function boot() {
     view.traffic.update(dt, !paused && !document.hidden);
     trafficLayer?.setVisible(visual.settings.traffic);
     trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt);
-    if(trafficLayer){const d=trafficLayer.diagnostics;view.traffic.setCarsEnabled(Boolean(d.failure));const text=d.failure?'แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน':`ความต้องการ ${(d.demandRate+d.clippedRate).toFixed(1)} หน่วย/รอบ · รอ ${d.waiting.toFixed(1)} · รถติด ${d.blocked} คันตัวแทน · ถนนแออัด ${d.congestedLinks} ช่วง${d.clippedRate>0||d.dropped>0?' · ความต้องการบางส่วนเกินขีดจำลอง':''}${d.modal&&d.modal.taxiDiverted>0?` · แท็กซี่จำลอง: ภาระถนน ${d.modal.roadBefore.toFixed(1)} → ${d.modal.roadAfter.toFixed(1)} (รวมรถรับส่งและรถเปล่า)`:''}`;if(text!==trafficText){trafficText=text;trafficInfo.textContent=text;}const hotspot=d.loadByCell.reduce<typeof d.loadByCell[number]|null>((best,row)=>row.queued>0&&(!best||row.queued>best.queued)?row:best,null);bottleneckCell=hotspot?.cell??null;trafficFocus.hidden=bottleneckCell===null;}
+    if(trafficLayer){const d=trafficLayer.diagnostics;view.traffic.setCarsEnabled(Boolean(d.failure));const text=trafficGameStatus(d);if(text!==trafficText){trafficText=text;trafficInfo.textContent=text;}const hotspot=d.loadByCell.reduce<typeof d.loadByCell[number]|null>((best,row)=>row.queued>0&&(!best||row.queued>best.queued)?row:best,null);bottleneckCell=hotspot?.cell??null;trafficFocus.hidden=bottleneckCell===null;}
 
     if (city.tick !== soundTick) {
       soundTick = city.tick;

@@ -42,3 +42,11 @@ test('a frame callback may synchronously request next sample without losing comm
  client.submit({value:1},{advance:true,paused:false});p.emit({kind:'frame',epoch:'city-a',seq:1,frame:{value:1}});
  assert.equal(p.commands[1].commitPrevious,true);client.dispose();
 });
+
+test('pause fence survives an unpause replacement until the pre-pause candidate is discarded',()=>{
+ const p=new Port(),frames:number[]=[],client=open(p,frames);client.submit({value:1},{advance:true,paused:false});
+ client.submit({value:2},{advance:false,paused:true});client.submit({value:3},{advance:false,paused:false});
+ p.emit({kind:'frame',epoch:'city-a',seq:1,frame:{value:1}});assert.equal(p.commands.length,2);assert.equal(p.commands[1].seq,3);assert.equal(p.commands[1].commitPrevious,false);assert.deepEqual(frames,[]);
+ p.emit({kind:'frame',epoch:'city-a',seq:3,frame:{value:3}});assert.deepEqual(frames,[3]);
+ client.submit({value:4},{advance:true,paused:false});assert.equal(p.commands[2].commitPrevious,true,'later accepted candidate can advance normally');client.dispose();
+});
