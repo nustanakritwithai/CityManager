@@ -90,6 +90,8 @@ jobs:
             .test-output/save-safety/*.png
             .test-output/save-safety/*.json
             .test-output/recovery-idb/*.json
+            .test-output/recovery-idb/*.png
             .test-output/recovery-vite*.log
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 3
