@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 // Observation only: delegate every native IDB operation and leave its handlers intact.
 export const observeRecoveryIdb = `(()=>{window.__recoveryIdb=[];const native=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){if(args[0]!=='citymanager.emergency-recovery-v1')return native.apply(this,args);const row={at:Date.now(),events:[]};window.__recoveryIdb.push(row);let req;try{req=native.apply(this,args)}catch(e){row.events.push({type:'throw',name:e.name,message:e.message});throw e}for(const type of ['upgradeneeded','blocked','error','success'])req.addEventListener(type,()=>row.events.push({type,at:Date.now(),error:type==='error'?req.error?.name??null:null,message:type==='error'?req.error?.message??null:null}));return req;}})();`;
-/** Deterministic storage-denied fixture for the bounded full traffic benchmark.
+/** Deterministic storage-denied fixture for the bounded core/full traffic fixtures.
  * It exercises the real protected chooser without unrelated 10 s browser IDB
  * startup stalls. Native IDB success/failure is covered by save-safety CI; this
- * profile does not claim normal-storage coverage or cure the observed stall.
+ * profile does not claim normal-storage coverage or cure the observed stall;
+ * extended traffic and separate save-safety/UX suites retain native IDB.
  */
 export const denyRecoveryIdbForTraffic = `(()=>{window.__trafficRecoveryStorage={mode:'synthetic-recovery-idb-denied',denials:0};const native=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){if(args[0]!=='citymanager.emergency-recovery-v1')return native.apply(this,args);window.__trafficRecoveryStorage.denials++;throw new DOMException('Synthetic traffic fixture: recovery IndexedDB denied','SecurityError');};})();`;
 /** The fixture is a known primary, not a production default or newest-day guess.
