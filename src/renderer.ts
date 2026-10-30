@@ -420,7 +420,7 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'school', 'university', 'bulldoze'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), online = utilityService(city, connected).online;

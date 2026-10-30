@@ -121,7 +121,9 @@ test('integration retains shortcuts and command dispatch; demolition has no stan
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert.equal(html.includes('data-tool="bulldoze"'), false); assert.equal((html.match(/data-tool="select"/g) ?? []).length, 1);
   assert.match(main, /b: 'bulldoze'/); assert.match(main, /v: 'select'/); assert.match(main, /p: 'select'/);
-  assert.match(main, /tool === 'bulldoze'\) status\(resultSound\(bulldoze\(city, index\), 'ui-bulldoze'\)\.message\)/);
+  assert.match(main, /tool === 'bulldoze'/);
+  assert.match(main, /bulldozeGuarded\(city, index, busEnabled\(\)/);
+  assert.match(main, /resultSound\(bulldoze\(city, cell\), 'ui-bulldoze'\)/);
   assert.match(main, /selectMenu\?\.close\(\); selectMenu\?\.sync\(next\)/);
   assert.match(main, /if \(selectMenu\?\.isOpen\(\)\) \{ selectMenu.close\(true\); return; \}/);
 });
