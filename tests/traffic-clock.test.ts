@@ -28,12 +28,17 @@ test('snapshot reads the starter city without mutating it', () => {
   const roads = new Set(c.cells.flatMap((x, i) => x.road ? [i] : []));
   for (const src of [...s.households, ...s.jobs]) assert.ok(roads.has(src.cell));
 });
-test('clock pauses and does not replay paused time', () => {
+test('clock pauses; hours that pass while paused run once on resume', () => {
   const c = city(), k = new TrafficClock({ enabled: true });
   k.advance(c, gameMinute(0, 0));
   k.advance(c, gameMinute(0, 600)); assert.equal(k.totals.periods, 10);
-  k.advance(c, gameMinute(0, 900), true); assert.equal(k.totals.periods, 10);
-  k.advance(c, gameMinute(0, 960)); assert.equal(k.totals.periods, 11);
+  k.advance(c, gameMinute(0, 900), true); k.advance(c, gameMinute(0, 900), true); assert.equal(k.totals.periods, 10);
+  k.advance(c, gameMinute(0, 960)); assert.equal(k.totals.periods, 16);
+  k.advance(c, gameMinute(0, 960)); assert.equal(k.totals.periods, 16);
+});
+test('new city object restarts the clock', () => {
+  const k = new TrafficClock({ enabled: true }), a = city(); k.advance(a, 0); k.advance(a, 600);
+  const b = city(); k.advance(b, 600); assert.equal(k.totals.periods, 0); k.advance(b, 660); assert.equal(k.totals.periods, 1);
 });
 test('speed-up gives identical totals', () => {
   const c = city(), slow = new TrafficClock({ enabled: true }), fast = new TrafficClock({ enabled: true });
