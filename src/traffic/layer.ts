@@ -17,6 +17,7 @@ export class TrafficLayer {
  private client:ReturnType<typeof createTrafficGameClient<TrafficGameInput,TrafficGameFrame>>|null=null;
  private city:City|null=null;private latest:TrafficGameFrame|null=null;
  private previous:CitizenVehiclePose[]=[];private target:CitizenVehiclePose[]=[];private drawn:CitizenVehiclePose[]=[];
+ private timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
  private elapsed=0;private phase=1;private paused=true;private visible=true;private dirty=false;private renderDirty=true;private failure:string|null=null;
  constructor(private readonly app:AppBase,_onScreen:(cell:number)=>boolean=()=>true,private readonly onFailure:(message:string)=>void=()=>{},
    private readonly makeWorker:()=>Worker=()=>new Worker(new URL('./game-worker-entry.ts',import.meta.url),{type:'module'}),
@@ -26,14 +27,20 @@ export class TrafficLayer {
   try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
  }
  private reset(city:City):void {
+  this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
   this.client?.dispose();this.client=null;this.city=city;this.latest=null;this.previous=[];this.target=[];this.drawn=[];this.elapsed=0;this.phase=1;this.dirty=false;this.renderDirty=true;this.failure=null;this.cars.setEnabled(this.visible);this.cars.sync([]);
   try {
    const worker=this.makeWorker(),epoch=crypto.randomUUID();
    this.client=createTrafficGameClient<TrafficGameInput,TrafficGameFrame>(worker,epoch,{onFrame:frame=>{
-    this.latest=frame;this.previous=this.drawn;this.target=gamePoses(frame.cars,frame.groups);this.phase=0;this.renderDirty=true;
+    const start=performance.now();this.latest=frame;this.previous=this.drawn;this.target=gamePoses(frame.cars,frame.groups);this.phase=0;this.renderDirty=true;
+    const ms=performance.now()-start;this.timing.projections++;this.timing.lastProjectionMs=ms;this.timing.maxProjectionMs=Math.max(this.timing.maxProjectionMs,ms);
    },onFailure:message=>this.fail(message)});
-   this.client.submit(captureTrafficGameInput(city,{taxiEnabled:this.taxiOn}),{advance:false,paused:this.paused});
+   this.submit(city,false,this.paused);
   } catch(error){this.fail(error);}
+ }
+ private submit(city:City,advance:boolean,paused:boolean):void {
+  const start=performance.now();this.client?.submit(captureTrafficGameInput(city,{taxiEnabled:this.taxiOn}),{advance,paused});
+  const ms=performance.now()-start;this.timing.samples++;this.timing.lastCaptureSubmitMs=ms;this.timing.maxCaptureSubmitMs=Math.max(this.timing.maxCaptureSubmitMs,ms);
  }
  /** Every city replacement starts a fresh game epoch; nothing is read from or
   * written to the player's save. Map edits replace the current sample. */
@@ -42,19 +49,20 @@ export class TrafficLayer {
  }
  setVisible(visible:boolean):void {if(this.visible===visible)return;this.visible=visible;this.renderDirty=true;try{this.cars.setEnabled(visible&&!this.failure);}catch(error){this.fail(error);}}
  frame(city:City,_minuteOfDay:number,paused:boolean,dt:number):void {
+  const frameStart=performance.now();
   try{if(city!==this.city){this.paused=paused;this.reset(city);}
   const pauseChanged=paused!==this.paused;this.paused=paused;let advance=false;
   if(!paused&&this.client&&!this.failure){
    this.elapsed+=Math.min(.25,Math.max(0,dt));this.phase=Math.min(1,this.phase+Math.min(.25,Math.max(0,dt)));
    if(this.elapsed>=1){this.elapsed-=1;advance=true;}
   }
-  if((advance||pauseChanged||this.dirty)&&this.client&&!this.failure){this.dirty=false;this.client.submit(captureTrafficGameInput(city,{taxiEnabled:this.taxiOn}),{advance,paused});}
+  if((advance||pauseChanged||this.dirty)&&this.client&&!this.failure){this.dirty=false;this.submit(city,advance,paused);}
   if(this.visible&&!this.failure&&(this.renderDirty||(!paused&&this.phase<1))){this.drawn=blendGamePoses(this.previous,this.target,this.phase);this.cars.sync(this.drawn);this.renderDirty=false;}
-  }catch(error){this.fail(error);}
+  }catch(error){this.fail(error);}finally{const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);}
  }
  destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
  get diagnostics(){const f=this.latest;return {...this.cars.diagnostics,mode:'allocation-game' as const,paused:this.paused,
   step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
   completed:f?.completed??0,dropped:f?.dropped??0,cancelled:f?.cancelled??0,clippedRate:f?.clippedRate??0,
-  roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker:this.client?.status??null};}
+  roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker:this.client?.status??null,timing:{...this.timing}};}
 }

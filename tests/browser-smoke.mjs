@@ -18,6 +18,43 @@ assert.equal(fixture.version, 9);
 for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(fixture[key], legacy[key]);
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], legacy[key]);
 
+/** Capture every intentionally intercepted request and settle the CDP response.
+ * Rejections remain test failures; teardown cancellation is recorded separately. */
+function createInterceptionTracker(dispatch, isClosing = () => false) {
+  const records = [];
+  return {
+    handle(params) {
+      const record = { requestId: params.requestId, url: params.request?.url ?? null, startedAt: Date.now(), status: 'pending' };
+      records.push(record);
+      let result; try { result = Promise.resolve(dispatch('Fetch.failRequest', { requestId: params.requestId, errorReason: 'Failed' })); }
+      catch (error) { result = Promise.reject(error); }
+      record.promise = result.then(() => { record.status = 'acknowledged'; record.finishedAt = Date.now(); }, error => {
+        record.status = isClosing() ? 'cancelled-during-cleanup' : 'failed'; record.finishedAt = Date.now(); record.error = String(error);
+        if (!isClosing()) console.error('Model interception CDP failure:', JSON.stringify({requestId:record.requestId,url:record.url,error:record.error}));
+      });
+    },
+    async settle() {
+      let count = 0; while (count < records.length) { const batch = records.slice(count); count += batch.length; await Promise.all(batch.map(r => r.promise)); }
+      const failures = records.filter(r => r.status !== 'acknowledged');
+      if (failures.length) throw Error(`Model interception did not complete: ${JSON.stringify(failures.map(({promise,...r}) => r))}`);
+    },
+    snapshot() { return records.map(({promise,...record}) => ({...record})); },
+  };
+}
+// Deterministic protocol bookkeeping probe. It does not start Edge or change storage.
+if (process.argv.includes('--intercept-preflight')) {
+  const good = createInterceptionTracker(async () => ({})); good.handle({requestId:'ok',request:{url:'http://127.0.0.1/model.glb'}}); await good.settle();
+  assert.equal(good.snapshot()[0].status,'acknowledged');
+  const bad = createInterceptionTracker(async () => { throw Error('injected CDP failure'); }); bad.handle({requestId:'bad',request:{url:'http://127.0.0.1/bad.glb'}});
+  await assert.rejects(() => bad.settle(),/injected CDP failure/); assert.equal(bad.snapshot()[0].status,'failed');
+  let closing = false, rejectPending;
+  const held = createInterceptionTracker(() => new Promise((_, reject) => { rejectPending = reject; }), () => closing);
+  held.handle({requestId:'held',request:{url:'http://127.0.0.1/held.glb'}}); assert.equal(held.snapshot()[0].status,'pending');
+  closing = true; rejectPending(Error('injected cleanup cancellation'));
+  await assert.rejects(() => held.settle(),/cancelled-during-cleanup/); assert.equal(held.snapshot()[0].status,'cancelled-during-cleanup');
+  console.log('Interception success/failure/pending-cleanup bookkeeping preflight passed'); process.exit(0);
+}
+
 const root = process.cwd(), output = resolve(root, '.test-output');
 const screenshots = resolve(root, process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/screenshots');
 const targetUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -28,16 +65,19 @@ const softwareFlags = process.env.CITYMANAGER_SOFTWARE_WEBGL === '1' ? ['--use-a
 // A fresh disposable profile isolates normal/fallback runs from prior autosaves.
 const profile = await mkdtemp(resolve(output, `edge-profile-${debugPort}-`));
 const child = spawn(edge, ['--headless=new', ...softwareFlags, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-let ws, sequence = 0; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
+let ws, sequence = 0, closing = false; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
   const result = new Promise((resolve, reject) => {
     const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method} ${String(params.expression ?? '').slice(0, 160)}`)); }, 60000);
-    pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject });
+    const finish = fn => value => { clearTimeout(timer); pending.delete(id); fn(value); };
+    pending.set(id, { method, startedAt: Date.now(), resolve: finish(resolve), reject: finish(reject) });
+    try { ws.send(JSON.stringify({ id, method, params })); } catch (error) { pending.get(id)?.reject(error); }
   });
-  ws.send(JSON.stringify({ id, method, params })); return result;
+  return result;
 }
+const interceptions = createInterceptionTracker(send, () => closing);
 async function evaluate(expression) {
   const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails));
@@ -97,7 +137,7 @@ try {
         /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(args[0]?.value) && args[1]?.value === 'Network error';
       (deliberatelyBlocked ? expectedAssetErrors : errors).push(args);
     }
-    if (message.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'Failed' });
+    if (message.method === 'Fetch.requestPaused') interceptions.handle(message.params);
   };
   await send('Runtime.enable'); await send('Page.enable');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
@@ -107,6 +147,7 @@ try {
   await until('!!window.cityManager');
   console.log('Game started; awaiting admitted models');
   await until('window.cityManager.visuals().ready');
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await interceptions.settle();
   const visualStatus = await evaluate('window.cityManager.visuals()');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(visualStatus.failed.length, 41);
   else assert.equal(visualStatus.loaded.length, 41);
@@ -417,19 +458,35 @@ try {
   assert.ok((await evaluate('window.cityManager.parks()')).renderedVisitors > 0);
   await screenshot('mobile-park-recreation.png');
   checks.push('390px mobile real citizens, atomic reload and bounded horizontally scrolling recreation table');
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') { await interceptions.settle(); await send('Fetch.disable'); await interceptions.settle(); }
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 41, 'Only the 41 deliberately blocked model requests failed');
   const version = await send('Browser.getVersion');
-  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, ground: groundState, checks, errors, expectedAssetErrors, screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'desktop-park.png', 'mobile-park.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png', 'desktop-build-grid.png'] : []), 'mobile-inspector.png', 'mobile-ledger.png', 'mobile-firm.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
+  const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, ground: groundState, checks, errors, expectedAssetErrors, interceptions: interceptions.snapshot(), screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'desktop-park.png', 'mobile-park.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png', 'desktop-build-grid.png'] : []), 'mobile-inspector.png', 'mobile-ledger.png', 'mobile-firm.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
   await writeFile(resolve(output, 'browser-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {
+  // Do not let a screenshot, protocol hang or cleanup hide the actual failure.
+  console.error('Primary browser acceptance failure:', error instanceof Error ? error.stack : String(error));
+  console.error('Intercepted model requests at failure:', JSON.stringify(interceptions.snapshot()));
+  console.error('Pending CDP commands at failure:', JSON.stringify([...pending.values()].map(({method,startedAt}) => ({method,elapsedMs:Date.now()-startedAt}))));
   if (ws?.readyState === 1) {
-    try { await screenshot('smoke-failure.png'); console.error(await evaluate('({status:document.querySelector("#status")?.textContent,body:document.body.innerText.slice(0,1600)})')); } catch {}
+    // Best-effort visual context has its own bound; the regular 60 s CDP command
+    // timeout remains unchanged, and unresolved work is cancelled in finally.
+    const capture = (async () => { try { await screenshot('smoke-failure.png'); console.error(await evaluate('({status:document.querySelector("#status")?.textContent,body:document.body.innerText.slice(0,1600)})')); } catch (diagnosticError) { console.error('Failure diagnostic capture:',String(diagnosticError)); } })();
+    let timer; const result = await Promise.race([capture.then(() => 'done'), new Promise(resolve => { timer = setTimeout(() => resolve('timeout'),2000); })]); clearTimeout(timer);
+    if (result === 'timeout') console.error('Failure diagnostic capture exceeded 2 s; retaining primary error');
   }
   console.error('Browser errors:', errors);
   throw error;
 } finally {
-  if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); }
-  child.kill();
+  closing = true;
+  if (ws?.readyState === 1) {
+    let timer; try { await Promise.race([send('Browser.close').catch(error => console.error('Browser cleanup:',String(error))), new Promise(resolve => { timer = setTimeout(resolve,2000); })]); } catch {} finally { clearTimeout(timer); }
+    try { ws.close(); } catch {}
+  }
+  // Clear protocol timers and settle any explicitly handled in-flight promises;
+  // a cleanup-time rejection can no longer replace an earlier primary failure.
+  for (const item of [...pending.values()]) item.reject(Error('CDP cleanup cancelled pending command'));
+  try { child.kill(); } catch {}
 }

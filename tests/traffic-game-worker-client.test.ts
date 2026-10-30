@@ -17,6 +17,7 @@ test('one in-flight plus one latest detached sample; obsolete results never publ
  assert.equal(p.commands.length,1);assert.equal(p.commands[0].sample.value,1);assert.equal(client.status.coalesced,1);assert.equal(client.status.pending,true);
  p.emit({kind:'frame',epoch:'city-a',seq:1,frame:{value:1}});assert.deepEqual(frames,[]);assert.equal(p.commands[1].seq,3);assert.equal(p.commands[1].sample.value,3);assert.equal(p.commands[1].commitPrevious,true);
  p.emit({kind:'frame',epoch:'city-a',seq:3,frame:{value:3}});assert.deepEqual(frames,[3]);assert.equal(client.status.pending,false);
+ assert.equal(client.status.sent,2);assert.equal(client.status.received,2);assert.ok(client.status.lastRoundTripMs>=0);assert.ok(client.status.maxRoundTripMs>=client.status.lastRoundTripMs);
 });
 
 test('pause and road edits supersede pending steps and old city replies are fenced',()=>{
