@@ -79,7 +79,8 @@ jobs:
         with:
           name: traffic-enabled-browser-evidence
           path: |
-            .test-output/traffic-enabled/**/*.png
-            .test-output/traffic-enabled/**/*.json
+            .test-output/traffic-enabled/*/*.png
+            .test-output/traffic-enabled/*/report.json
+            .test-output/traffic-enabled/*/failure.json
           if-no-files-found: warn
           retention-days: 3
