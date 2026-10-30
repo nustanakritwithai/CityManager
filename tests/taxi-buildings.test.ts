@@ -19,6 +19,20 @@ test('flag off by default; dev toggle; placement refused while off', () => {
   assert.equal(taxiEnabled('', st), false); assert.equal(taxiEnabled('?taxi=1', st), true); assert.equal(taxiEnabled('', st), true); assert.equal(taxiEnabled('?taxi=0', st), false);
   const c = grown(); assert.equal(buildTaxiDepot(c, sites(c)[0], false).ok, false); assert.equal(c.taxi, undefined);
 });
+test('denied localStorage getter preserves default and explicit taxi overrides', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  try {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new DOMException('Storage denied', 'SecurityError'); } });
+    assert.equal(taxiEnabled(), false);
+    assert.equal(taxiEnabled('?taxi=0'), false);
+    assert.equal(taxiEnabled('?taxi=1'), true);
+    const injected = { getItem: () => '1', setItem: () => {}, removeItem: () => {} };
+    assert.equal(taxiEnabled('', injected), true);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
 test('a city without taxi saves byte-identical and never gains a taxi key', () => {
   const c = grown(), before = serialize(c);
   assert.ok(!before.includes('"taxi"'));

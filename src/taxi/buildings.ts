@@ -7,8 +7,9 @@
 export const TAXI_ENABLED = false;
 export const TAXI_STORAGE_KEY = 'citymanager.taxi';
 /** Feature flag with a dev override: `?taxi=1` (remembered) / `?taxi=0`. */
-export function taxiEnabled(search = globalThis.location?.search ?? '', storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined = globalThis.localStorage): boolean {
+export function taxiEnabled(search = globalThis.location?.search ?? '', storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): boolean {
   const q = new URLSearchParams(search).get('taxi');
+  try { storage ??= globalThis.localStorage; } catch { /* storage getter can be denied */ }
   try { if (q === '1') storage?.setItem(TAXI_STORAGE_KEY, '1'); if (q === '0') storage?.removeItem(TAXI_STORAGE_KEY); } catch { /* private mode */ }
   if (q === '1') return true; if (q === '0') return false;
   try { if (storage?.getItem(TAXI_STORAGE_KEY) === '1') return true; } catch { /* ignore */ }
