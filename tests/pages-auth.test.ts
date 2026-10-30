@@ -99,3 +99,18 @@ test('expired access requires reauthentication; exchange failure does not retry 
     host.popup.closed = false; await session.prepare(); let requests = 0; globalThis.fetch = async () => { requests++; throw new Error('network'); }; const failed = session.connect(guest); send(host, new URL(host.url).searchParams.get('state')!); await assert.rejects(failed, /network/); assert.equal(requests, 1); assert.equal(session.bearer(), null);
   } finally { Date.now = now; }
 }));
+
+test('Pages auth obtains the existing Guest from a v23 city and never binds a different identity', async () => harness(async (host, store) => {
+  const { businessFixture } = await import('./business-capacity-fixture.ts');
+  const { serialize } = await import('../src/sim.ts');
+  const { SAVE_KEY } = await import('../src/save-storage.ts');
+  const city = businessFixture(65), client = new MarketClient(() => city, PAGES_MARKET_BASE);
+  city.market = { ...client.journal, guestId: guest }; const raw = serialize(city); store.set(SAVE_KEY, raw);
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; return new Response(JSON.stringify({ access_token: token, token_type: 'Bearer', expires_in: 900, guest_id: other }), { status: 200 }); };
+  await client.preparePagesLogin(); const pending = client.connectPages(), state = new URL(host.url).searchParams.get('state')!;
+  host.message(MARKET_ORIGIN, host.popup, { type: 'citymanager-auth-ready', state });
+  assert.deepEqual(host.messages.at(-1)?.data, { type: 'citymanager-auth-intent', state, expectedGuest: guest });
+  send(host, state); await assert.rejects(pending, /identity-mismatch/);
+  assert.equal(requests, 1); assert.equal(store.get(SAVE_KEY), raw); assert.equal(client.guestId, null); assert.equal(client.pagesAuthenticated, false);
+}));

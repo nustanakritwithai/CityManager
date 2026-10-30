@@ -1,0 +1,85 @@
+name: Enabled traffic acceptance
+on:
+  pull_request:
+    paths:
+      - 'src/traffic/**'
+      - 'src/citizen-vehicle-poses.ts'
+      - 'src/citizen-road-queue.ts'
+      - 'src/scene-citizen-vehicles.ts'
+      - 'src/scene-traffic.ts'
+      - 'src/main.ts'
+      - 'src/sim.ts'
+      - 'src/park-runtime.ts'
+      - 'src/road-topology.ts'
+      - 'tests/traffic-*'
+      - '.github/workflows/traffic-enabled.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/traffic/**'
+      - 'src/citizen-vehicle-poses.ts'
+      - 'src/citizen-road-queue.ts'
+      - 'src/scene-citizen-vehicles.ts'
+      - 'src/scene-traffic.ts'
+      - 'src/main.ts'
+      - 'src/sim.ts'
+      - 'src/park-runtime.ts'
+      - 'src/road-topology.ts'
+      - 'tests/traffic-*'
+      - '.github/workflows/traffic-enabled.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  enabled:
+    name: Enabled fleet / fallback / save isolation
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: node --experimental-strip-types --test tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
+      - run: npm run build
+        env:
+          VITE_MARKET_URL: ''
+          VITE_CITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
+      - name: Real enabled browser, then missing-model/software-WebGL fallback
+        run: |
+          New-Item -ItemType Directory -Force .test-output | Out-Null
+          $preview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4195', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/traffic-preview.log -RedirectStandardError .test-output/traffic-preview-error.log
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4195/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $ready = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) { throw 'Traffic preview did not start.' }
+            node --experimental-strip-types tests/traffic-enabled-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Enabled traffic acceptance failed.' }
+            Start-Sleep -Seconds 2
+            $env:CITYMANAGER_BLOCK_MODELS = '1'
+            $env:CITYMANAGER_SOFTWARE_WEBGL = '1'
+            node --experimental-strip-types tests/traffic-enabled-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Enabled fallback traffic acceptance failed.' }
+          } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: traffic-enabled-browser-evidence
+          path: |
+            .test-output/traffic-enabled/**/*.png
+            .test-output/traffic-enabled/**/*.json
+          if-no-files-found: warn
+          retention-days: 3

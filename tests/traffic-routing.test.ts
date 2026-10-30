@@ -112,3 +112,32 @@ test('remote road deletion invalidates all affected origins and assigns the alte
   assert.deepEqual(before.state, prior);
   assert.deepEqual([...net.links.entries()].sort(), [...buildNetwork(c).links.entries()].sort());
 });
+
+test('quiet periods preserve learned shares exactly, pruning only broken inactive routes', () => {
+  const c = twoRoutes(), net = buildNetwork(c), od = [{ from: 0, to: 6, vehicles: 3000 }];
+  let learned = assignPeriod(net, od).state;
+  for (let i = 1; i < 11; i++) learned = assignPeriod(net, od, learned, i).state;
+  let quiet = learned;
+  for (let hour = 0; hour < 100; hour++) {
+    const a = assignPeriod(net, [], quiet, hour);
+    assert.deepEqual(a.state, learned); assert.equal(a.assigned.size, 0); assert.equal(a.volumes.size, 0);
+    quiet = a.state;
+  }
+  c.cells[4].road = false; forgetRoadTopology(c, 4); rebuildRegion(c, net, [4]);
+  const a = assignPeriod(net, [], quiet);
+  assert.ok(a.state.get('0:6')!.every(p => !p.path.includes(4)));
+  assert.ok(Math.abs(a.state.get('0:6')!.reduce((n, p) => n + p.share, 0) - 1) < 1e-12);
+  assert.deepEqual(quiet, learned);
+});
+
+test('assigned shares reconstruct current volumes, remain immutable, and differ from next state', () => {
+  const net = buildNetwork(twoRoutes()), od = [{ from: 0, to: 6, vehicles: 3000 }];
+  const a = assignPeriod(net, od), before = structuredClone(a.assigned), volumes = new Map<string, number>();
+  assert.notDeepEqual(a.assigned, a.state);
+  for (const d of od) for (const p of a.assigned.get(`${d.from}:${d.to}`)!) for (let i = 1; i < p.path.length; i++) {
+    const key = linkKey(p.path[i - 1], p.path[i]); volumes.set(key, (volumes.get(key) ?? 0) + d.vehicles * p.share);
+  }
+  assert.deepEqual(volumes, a.volumes);
+  assignPeriod(net, od, a.state, 1); assert.deepEqual(a.assigned, before);
+  a.state.get('0:6')![0].path.push(575); assert.deepEqual(a.assigned, before);
+});

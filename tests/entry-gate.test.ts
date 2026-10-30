@@ -50,3 +50,23 @@ test('entry gate waits for auth, blocks double click and leaves existing state o
     finally { Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: oldStorage }); } }
   finally { Object.defineProperty(globalThis, 'document', { configurable: true, value: oldDocument }); Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: oldHTMLElement }); }
 });
+
+test('v23 saved Guest blocks creating a replacement identity when authentication is missing', async () => {
+  class Element {
+    children: Element[] = []; inert = false; disabled = false; textContent = ''; className = ''; type = ''; id = ''; handler?: () => void; parent?: Element;
+    setAttribute() {} append(...nodes: Element[]) { for (const n of nodes) { n.parent = this; this.children.push(n); } } focus() {} addEventListener(_name: string, f: () => void) { this.handler = f; } remove() { if (this.parent) this.parent.children = this.parent.children.filter(n => n !== this); } contains(n: Element): boolean { return this.children.includes(n); }
+  }
+  const names = ['document', 'HTMLElement', 'localStorage'] as const, old = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
+  const { businessFixture } = await import('./business-capacity-fixture.ts'), { serialize } = await import('../src/sim.ts');
+  const city = businessFixture(65), journal = marketJournalForTest(null); journal.guestId = '00000000-0000-4000-8000-000000000003'; city.market = journal; const raw = serialize(city);
+  const body = new Element(), game = new Element(); body.append(game);
+  Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: Element }); Object.defineProperty(globalThis, 'document', { configurable: true, value: { body, createElement: () => new Element() } });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key: string) => key === 'citymanager.save.v7' ? raw : null } });
+  let created = 0, started = 0;
+  const client = { enabled: true, guestId: null, journal: marketJournalForTest(null), checkSession: async () => null, createGuest: async () => { created++; throw Error('Must not replace saved Guest'); } } as unknown as MarketClient;
+  try {
+    await requireGuestEntry(client, () => { started++; }); const card = body.children[1].children[0]; card.children[3].handler!(); await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(created, 0); assert.equal(started, 0); assert.equal(game.inert, true); assert.equal(globalThis.localStorage.getItem('citymanager.save.v7'), raw);
+    card.children[4].handler!(); await new Promise(resolve => setTimeout(resolve, 0)); assert.equal(started, 1); assert.equal(created, 0); assert.equal(game.inert, false);
+  } finally { names.forEach((name, i) => old[i] ? Object.defineProperty(globalThis, name, old[i]!) : Reflect.deleteProperty(globalThis, name)); }
+});

@@ -1,0 +1,92 @@
+name: Player feedback UX
+
+on:
+  pull_request:
+    paths:
+      - 'src/main.ts'
+      - 'src/renderer.ts'
+      - 'src/scene-decor.ts'
+      - 'src/education-panel*.ts'
+      - 'src/panel-time-controls.ts'
+      - 'src/player-feedback.css'
+      - 'src/save-feedback*.ts'
+      - 'tests/player-feedback*'
+      - 'tests/touch-reach.mjs'
+      - '.github/workflows/player-feedback.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    name: Verify campus and save feedback in isolated Edge
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Verify save feedback and actual education progress data
+        run: node --experimental-strip-types --test tests/player-feedback.test.ts
+      - name: Build local-only UX test artifact
+        env:
+          VITE_MARKET_URL: ''
+          VITE_CITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
+        run: npm run build
+      - name: Run full mobile and desktop UX smoke
+        run: |
+          New-Item -ItemType Directory -Force .test-output/player-feedback | Out-Null
+          $uxProfile = Join-Path $env:RUNNER_TEMP ('citymanager-ux-' + [guid]::NewGuid())
+          New-Item -ItemType Directory -Path $uxProfile | Out-Null
+          $uxPort = 9476
+          if (Get-NetTCPConnection -LocalPort $uxPort -State Listen -ErrorAction SilentlyContinue) { throw 'UX CDP port is occupied.' }
+          $uxBrowser = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+          if (-not (Test-Path -LiteralPath $uxBrowser)) { throw 'Installed Edge was not found.' }
+          $uxArguments = @('--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', "--remote-debugging-port=$uxPort", "--user-data-dir=`"$uxProfile`"", 'about:blank')
+          $uxEdge = Start-Process -FilePath $uxBrowser -ArgumentList $uxArguments -WindowStyle Hidden -PassThru
+          try {
+            $uxReady = $false
+            $uxTargets = @()
+            $uxStartupError = ''
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try {
+                $uxTargets = Invoke-RestMethod -Uri "http://127.0.0.1:$uxPort/json/list" -TimeoutSec 2
+                if ($uxTargets | Where-Object { $_.type -eq 'page' -and $_.url -eq 'about:blank' }) { $uxReady = $true; break }
+              } catch { $uxStartupError = $_.Exception.Message }
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $uxReady) {
+              @{ passed = $false; stage = 'Edge startup'; error = $uxStartupError; targets = $uxTargets; exited = $uxEdge.HasExited } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 .test-output/player-feedback/results.json
+              throw 'Isolated Edge did not expose the expected test tab.'
+            }
+            $env:CITYMANAGER_DEBUG_PORT = [string]$uxPort
+            $env:CITYMANAGER_SCREENSHOT_DIR = '.test-output/player-feedback'
+            $env:CITYMANAGER_UX_RUNTIME_ONLY = ''
+            $env:CITYMANAGER_UX_COMMIT = (git rev-parse HEAD).Trim()
+            node --experimental-strip-types tests/player-feedback-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Player feedback UX smoke failed.' }
+          } finally {
+            Stop-Process -Id $uxEdge.Id -ErrorAction SilentlyContinue
+          }
+      - name: Preserve bounded UX evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: player-feedback-ux-evidence
+          path: |
+            .test-output/player-feedback/*.jpg
+            .test-output/player-feedback/results.json
+          if-no-files-found: warn
+          retention-days: 3

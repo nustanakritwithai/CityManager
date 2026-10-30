@@ -1,4 +1,6 @@
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
+import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
+export { OWNER_DEVELOPMENT_SHARE_DENOMINATOR } from './owner-profit.ts';
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
 import { HOUSING_LEVELS, housingLevel, getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
@@ -9,15 +11,20 @@ import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyPr
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
 import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from './parks.ts';
-import { EDUCATION_COST, assertEducationInvariants, createEducation, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
+import { EDUCATION_COST, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
 import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
+/** Zoned one-cell parcels retain the existing city footprint. Every firm needs one. */
+export const MAX_CITY_BUILDINGS = 192;
+export const MAX_CITY_FIRMS = MAX_CITY_BUILDINGS;
+/** Frozen pre-capacity save formats, not the current construction limit. */
+const LEGACY_MAX_FIRMS = 64;
 /** Structural save bound: 192 residential parcels at the largest 32-household tier. */
-export const MAX_CITY_HOUSEHOLDS = 192 * Math.max(...HOUSING_LEVELS.map(level => level.households));
+export const MAX_CITY_HOUSEHOLDS = MAX_CITY_BUILDINGS * Math.max(...HOUSING_LEVELS.map(level => level.households));
 export const GATEWAY = 12 * SIZE;
 export const MONTH = 30;
 export const ROAD_COST = 5_000;
@@ -40,6 +47,7 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = {
   populationCapacityVersion?: 1;
+  businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
   foodDemandStartTick?: number;
   factoryProgressionStartTick?: number;
@@ -62,7 +70,8 @@ export type Result = { ok: boolean; message: string };
 const validIndex = (i: number) => Number.isInteger(i) && i >= 0 && i < SIZE * SIZE;
 const neighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(validIndex);
 const balance = (c: City, id: string) => c.accounts[id] ?? 0;
-export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - c.parks.reduce((n, p) => n + parkPayroll(p), 0) - educationPayroll(c.education));
+const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p), 0) + educationPayroll(c.education);
+export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - treasuryPayroll(c));
 export const parkEmploymentForHousehold = (c: City, id: number) => c.parks.flatMap(p => p.staffing?.allocations ?? []).filter(a => a.householdId === id);
 const parkEmployment = (c: City) => c.parks.flatMap(p => p.staffing?.allocations ?? []);
 /** ID-ordered funding shares prevent several parks promising the same treasury money. */
@@ -142,13 +151,22 @@ export function utilityAt(c: City, cell: number): boolean {
 export const plantAt = (c: City, i: number): Plant | undefined => c.plants.find(p => p.cell === i);
 export const parkAt = (c: City, i: number): Park | undefined => c.parks.find(p => p.cell === i);
 export const campusAt = (c: City, i: number) => c.education?.campuses.find(campus => campus.cell === i);
+function educationPosts(c: City): EducationView['posts'] {
+  return [...c.employment.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: e.workers, owner: false })), ...c.ownerLabor.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: 0, owner: true }))];
+}
+/** Current allocated qualifications, not every diploma held by a worker's household. */
+export function firmCredentialCounts(c: City, firmId: number): { basic: number; higher: number } {
+  if (!c.education) return { basic: 0, higher: 0 };
+  const view = { posts: educationPosts(c) };
+  return { basic: credentialPosts(c.education, view, firmId, 'basic'), higher: credentialPosts(c.education, view, firmId, 'higher') };
+}
 function educationView(c: City): EducationView {
   const roads = connectedRoads(c), spare = utilities(c).spare;
   return {
     tick: c.tick,
     households: c.households.map(h => ({ id: h.id, workforce: h.workforce, wallet: h.wallet, ownsFirm: c.firms.some(f => f.owner?.householdId === h.id) })),
     buildings: c.buildings.map(b => ({ id: b.id, zone: b.zone, level: b.level, firmId: c.firms.find(f => f.building === b.id)?.id ?? null })),
-    posts: [...c.employment.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: e.workers, owner: false })), ...c.ownerLabor.map(e => ({ firmId: e.firmId, householdId: e.householdId, workers: 0, owner: true }))],
+    posts: educationPosts(c),
     road: cell => neighbors(cell).some(n => roads.has(n)),
     sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c),
   };
@@ -156,6 +174,11 @@ function educationView(c: City): EducationView {
 function educationBlocked(c: City, building: { id: number; zone: 'R' | 'C' | 'I' | 'F'; level: number; firmId?: number | null }): string[] {
   if (!c.education) return [];
   return educationGate(c.education, educationView(c), { id: building.id, zone: building.zone, level: building.level, firmId: building.firmId ?? null }).blocked;
+}
+/** Read-only education facts in the same review view used by the existing upgrade panels. */
+export function buildingEducationStatus(live: City, building: Building) {
+  const c = reviewView(live), b = c.buildings.find(item => item.id === building.id) ?? building;
+  return educationGate(c.education, educationView(c), { id: b.id, zone: b.zone, level: b.level, firmId: c.firms.find(f => f.building === b.id)?.id ?? null });
 }
 export function enableEducation(c: City, origin: EducationState['origin'] = 'new-city'): EducationState {
   c.education ??= createEducation(origin);
@@ -217,8 +240,6 @@ export function upgradeCampus(c: City, id: number): Result {
 /** Proposed prototype finance policy, in integer satang; no credit or outside grant. */
 export const INDUSTRY_STARTUP_CAPITAL = 300_000;
 export const OWNER_STARTUP_CAPITAL = 60_000;
-/** One quarter of each month's after-tax profit stays in the business for development. */
-export const OWNER_DEVELOPMENT_SHARE_DENOMINATOR = 4;
 export const MARKET_CONVERSION_COST = 20_000;
 const INDUSTRY_WORKING_RESERVE = 20_000;
 /**
@@ -274,16 +295,23 @@ export function ownerFinance(c: City, firmId: number) {
   const f = c.firms.find(f => f.id === firmId), owner = f?.owner;
   const h = owner && c.households.find(h => h.id === owner.householdId);
   if (!f || !(isMarket(f) || isRetail(f)) || !owner || !h) return null;
-  const currentProfit = f.monthlyRevenue - f.monthlyExpense, taxReserve = Math.floor(Math.max(0, currentProfit) / 5);
-  const profit = BigInt(f.profit) + BigInt(currentProfit) - BigInt(owner.taxPaid) - BigInt(owner.withdrawn) - BigInt(taxReserve);
-  const distributable = profit <= 0n ? 0 : Number(profit > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : profit);
+  // Paid wages are already in monthlyExpense; only still-unpaid claims accrue here.
+  const earnedWages = payroll(f), currentProfit = BigInt(f.monthlyRevenue) - BigInt(f.monthlyExpense) - BigInt(earnedWages);
+  const tax = currentProfit > 0n ? currentProfit / 5n : 0n, taxReserve = Number(tax);
+  const history = ownerProfitHistory(c, f, currentProfit - tax);
+  // Spending retained earnings must not make that same profit available again.
+  const profit = BigInt(f.profit) + currentProfit - BigInt(owner.taxPaid) - BigInt(owner.withdrawn) - tax - history.invested - history.retained;
+  const bounded = (n: bigint) => Number(n < 0n ? 0n : n > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : n);
+  const distributable = history.reconciled ? bounded(profit) : 0;
+  const developmentReserve = bounded(history.retained), developmentSpent = bounded(history.invested);
   const contributeAvailable = Math.max(0, Math.min(balance(c, h.wallet), Number.MAX_SAFE_INTEGER - owner.capitalContributed, Number.MAX_SAFE_INTEGER - balance(c, f.wallet)));
-  const withdrawAvailable = Math.max(0, Math.min(distributable, spendable(c, f) - 20_000 - taxReserve, Number.MAX_SAFE_INTEGER - owner.withdrawn, Number.MAX_SAFE_INTEGER - balance(c, h.wallet)));
+  const withdrawAvailable = Math.max(0, Math.min(distributable, spendable(c, f) - 20_000 - taxReserve - developmentReserve, Number.MAX_SAFE_INTEGER - owner.withdrawn, Number.MAX_SAFE_INTEGER - balance(c, h.wallet)));
   return { ownerHouseholdId: h.id, capitalContributed: owner.capitalContributed, capitalReturned: owner.capitalReturned,
-    withdrawn: owner.withdrawn, taxPaid: owner.taxPaid, realizedProfit: f.profit + currentProfit, distributable, taxReserve,
+    withdrawn: owner.withdrawn, taxPaid: owner.taxPaid, realizedProfit: Number(BigInt(f.profit) + currentProfit), distributable, taxReserve,
+    earnedWages, developmentReserve, developmentSpent, historyReconciled: history.reconciled,
     contributeAvailable, withdrawAvailable, workingCashFloor: 20_000,
     contributeReason: contributeAvailable >= 10_000 ? 'พร้อมเติมทุนจากเงินครัวเรือนจริง' : 'เงินครัวเรือนไม่พอเติมทุน 100 ฿',
-    withdrawReason: withdrawAvailable >= 10_000 ? 'ถอนจากกำไรที่เกิดขึ้นจริงได้' : 'ต้องมีกำไรหลังสำรองภาษีและเงินหมุนเวียน 200 ฿' };
+    withdrawReason: !history.reconciled ? 'ประวัติกำไรไม่ตรงกับบัญชี จึงยังถอนกำไรไม่ได้' : withdrawAvailable >= 10_000 ? 'ถอนจากกำไรที่เกิดขึ้นจริงได้' : 'ต้องมีกำไรหลังกันค่าจ้าง ภาษี เงินพัฒนา และเงินหมุนเวียน 200 ฿' };
 }
 export function contributeOwnerCapital(c: City, firmId: number, amount: number): Result {
   const f = c.firms.find(f => f.id === firmId), facts = ownerFinance(c, firmId);
@@ -295,7 +323,7 @@ export function contributeOwnerCapital(c: City, firmId: number, amount: number):
 }
 export function withdrawOwnerProfit(c: City, firmId: number, amount: number): Result {
   const f = c.firms.find(f => f.id === firmId), facts = ownerFinance(c, firmId);
-  if (!facts || !f?.owner || !Number.isSafeInteger(amount) || amount <= 0 || amount > facts.withdrawAvailable) return { ok: false, message: 'Owner profit withdrawal rejected; earned profit, tax and working cash must remain sufficient.' };
+  if (!facts || !f?.owner || !Number.isSafeInteger(amount) || amount <= 0 || amount > facts.withdrawAvailable) return { ok: false, message: 'Owner profit withdrawal rejected; earned profit, wages, tax, development reserves and working cash must remain sufficient.' };
   const h = c.households.find(h => h.id === facts.ownerHouseholdId)!;
   if (transfer(c, f.wallet, h.wallet, amount, 'Owner profit distribution') !== amount) throw new Error('Owner draw invariant violated.');
   f.owner.withdrawn += amount;
@@ -386,9 +414,9 @@ function trimWorkAssignments(c: City): void {
 }
 
 /** Every transfer has a debit and credit. Outside is the sole permitted negative source account. */
-function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false): number {
+function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false, reservedTreasuryClaim = 0): number {
   const firm = c.firms.find(f => f.wallet === from);
-  const available = from === 'outside' ? amount : from === 'treasury' ? treasurySpendable(c) : firm ? spendable(c, firm) : balance(c, from);
+  const available = from === 'outside' ? amount : from === 'treasury' ? Math.min(balance(c, from), treasurySpendable(c) + reservedTreasuryClaim) : firm ? spendable(c, firm) : balance(c, from);
   const paid = Math.max(0, Math.min(Math.round(amount), available));
   if (!Number.isSafeInteger(paid) || paid === 0) return 0;
   c.accounts[from] = balance(c, from) - paid;
@@ -735,12 +763,12 @@ function blockers(c: City, i: number): string[] {
   const spare = utilities(c).spare, need = cell.zone === 'R' ? HOUSEHOLD_NEED : buildingNeed(cell.zone, 1);
   if (cell.zone !== 'I') for (const kind of UTILITY_KINDS) if (spare[kind] < need[kind]) reasons.push(`Not enough ${kind}: a new ${cell.zone === 'R' ? 'household' : 'building'} here needs ${need[kind]} unit(s); the network has ${spare[kind]} spare. Build a ${PLANT_NAMES[kind]} on road frontage.`);
   if (!canAllocateIds(c, cell.zone === 'R' ? 1 : 2)) reasons.push('Entity ID range exhausted. No new entity or investment can be created safely.');
-  if (c.buildings.length >= 192) reasons.push('Prototype building limit (192) reached.');
+  if (c.buildings.length >= MAX_CITY_BUILDINGS) reasons.push(`Prototype building limit (${MAX_CITY_BUILDINGS}) reached.`);
   if (cell.zone === 'R') {
     if (s.demand.R <= 0) reasons.push('No housing demand: usable vacant capacity already covers funded job opportunities and displaced households.');
     if (WAGES.C * .9 - 30 * 800 - 10_000 - HOUSEHOLD_BILL <= 0) reasons.push('Expected income cannot cover purchases, rent and the water/power bill.');
   } else {
-    if (c.firms.length >= 64) reasons.push('Firm limit (64) reached.');
+    if (c.firms.length >= MAX_CITY_FIRMS) reasons.push(`Firm limit (${MAX_CITY_FIRMS}) reached.`);
     if (cell.zone === 'C' && !ownerCandidate(c)) reasons.push('Raw market needs a connected household owner with one general/retail worker and 600 credits of actual capital.');
     if ((cell.zone === 'C' ? marketDemand(c) : s.demand[cell.zone]) <= 0) reasons.push(cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Raw market needs an actual farm, reachable buyers and a household owner with real capital and labour.' : 'No retail demand: existing shops cover the household market.');
   }
@@ -802,6 +830,7 @@ function createBuilding(c: City, i: number, shop = false) {
     c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : zone === 'F' ? { cropMode: 'auto' as const, cropChoices: [{ at: c.cropLedger.length, crop: automaticFarmCrop(c) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: 60_000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
+    if (c.firms.length > LEGACY_MAX_FIRMS) c.businessCapacityVersion = 1;
     const paidCapital = transfer(c, sponsor ? sponsor.wallet : owner ? owner.wallet : 'outside', wallet, owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL, sponsor ? `Industry expansion capital #${fid}` : owner ? 'Owner capital contribution' : zone === 'F' ? 'Outside farm equity investment' : retail ? 'Outside firm equity investment' : industry?.outside ? `Outside industry equity #${fid}` : `Outside industry bootstrap equity #${fid}`);
     if (paidCapital !== (owner ? OWNER_STARTUP_CAPITAL : INDUSTRY_STARTUP_CAPITAL)) throw new Error('Commissioned capital invariant violated.');
     transfer(c, wallet, 'construction', owner ? 10_000 : 40_000, owner ? retail ? 'Self-employed shop construction' : 'Self-employed market construction' : 'Firm building investment');
@@ -891,13 +920,16 @@ function trade(c: City) {
       if (isMarket(shop)) {
         while (purchased < h.members && balance(c, h.wallet) >= 800 && consumeMarketCrop(c, h, shop, sellable, hooks, true)) purchased++;
       } else {
-        const product = productPreference(h.id, c.tick).find(p => shop.products[p] > 0);
-        if (!product) continue;
-        const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
-        if (!quantity) continue;
-        transfer(c, h.wallet, shop.wallet, 800 * quantity, `Household #${h.id} purchase`, true);
-        moveProduct(c, shop, null, product, quantity); c.goods.consumed += quantity; h.lastPurchaseTick = c.tick;
-        goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); purchased += quantity;
+        // Preferences select the order, not a one-product limit: a family can fill its one
+        // daily basket from the remaining stocked products without inventing demand or credit.
+        for (const product of productPreference(h.id, c.tick)) {
+          if (purchased >= h.members || balance(c, h.wallet) < 800) break;
+          const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
+          if (!quantity) continue;
+          transfer(c, h.wallet, shop.wallet, 800 * quantity, `Household #${h.id} purchase`, true);
+          moveProduct(c, shop, null, product, quantity); c.goods.consumed += quantity; h.lastPurchaseTick = c.tick;
+          goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); purchased += quantity;
+        }
       }
     }
     h.needs = purchased === h.members ? 0 : unmetDays;
@@ -927,17 +959,35 @@ function payParkWages(c: City, p: Park, onlyWallet?: string): void {
     if (onlyWallet && wallet !== onlyWallet) continue;
     const owed = days * PARK_STAFF.dailyWage;
     delete p.staffing!.workDays[wallet];
-    if (transfer(c, 'treasury', wallet, owed, `Monthly park wages #${p.id}`) !== owed) throw new Error('Park payroll reserve invariant violated.');
+    // Park claims are already cash-backed. Legacy education arrears must not
+    // block their reserved payment or leave park claims across a month boundary.
+    if (transfer(c, 'treasury', wallet, owed, `Monthly park wages #${p.id}`, false, owed) !== owed) throw new Error('Park payroll reserve invariant violated.');
     transfer(c, wallet, 'treasury', Math.floor(owed / 10), 'Monthly household wage tax');
   }
 }
 const isWage = (reason: string): boolean => reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
-function payEducationWages(c: City, campusId?: number, onlyWallet?: string): void {
-  if (!c.education) return;
-  for (const claim of takeEducationWages(c.education, onlyWallet, campusId)) {
-    const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
-    if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
-    transfer(c, claim.wallet, 'treasury', Math.floor(claim.amount / 10), 'Monthly household wage tax');
+function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boolean {
+  if (!c.education) return true;
+  const claims = takeEducationWages(c.education, onlyWallet, campusId);
+  if (!claims.length) return true;
+  // Old saves can contain unfunded earned days. Keep the entire debt until
+  // cash covers payroll, rather than borrowing another worker's reservation.
+  if (balance(c, 'treasury') < treasuryPayroll(c)) return false;
+  const accounts = { ...c.accounts }, ledgerLength = c.ledger.length;
+  const workDays = new Map(claims.map(({ campus }) => [campus, { ...campus.workDays }]));
+  try {
+    for (const claim of claims) {
+      delete claim.campus.workDays[claim.wallet];
+      const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
+      if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
+      const tax = Math.floor(claim.amount / 10);
+      if (transfer(c, claim.wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Education wage tax invariant violated.');
+    }
+    return true;
+  } catch (error) {
+    c.accounts = accounts; c.ledger.length = ledgerLength;
+    for (const [campus, days] of workDays) campus.workDays = days;
+    throw error;
   }
 }
 function settleMonth(c: City) {
@@ -956,8 +1006,11 @@ function settleMonth(c: City) {
     if (f.owner) {
       const available = ownerFinance(c, f.id)?.withdrawAvailable ?? 0;
       const netProfit = Math.max(0, f.lastMonthProfit - taxPaid);
-      const retained = Math.ceil(netProfit / OWNER_DEVELOPMENT_SHARE_DENOMINATOR);
-      const amount = Math.min(netProfit - retained, Math.max(0, available - retained));
+      const retained = Number(developmentShare(BigInt(netProfit)));
+      const alreadyPaid = c.ledger.filter(e => e.from === f.wallet && e.reason === 'Owner profit distribution' && e.tick > c.tick - MONTH && e.tick <= c.tick).reduce((n, e) => n + e.amount, 0);
+      // ownerFinance already protects retention. Manual draws made this month
+      // count toward the same monthly automatic allowance, not a second payout.
+      const amount = Math.min(Math.max(0, netProfit - retained - alreadyPaid), available);
       if (amount > 0 && !withdrawOwnerProfit(c, f.id, amount).ok) throw new Error('Monthly owner income invariant violated.');
     }
   }
@@ -1026,15 +1079,18 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
   const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet))
     .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
+  let departed = 0;
   for (const h of leaving) {
     for (const p of c.parks) payParkWages(c, p, h.wallet);
-    if (c.education) { payEducationWages(c, undefined, h.wallet); forgetHouseholdEducation(c.education, h.id); }
+    // Preserve the creditor's identity while an old education claim is unpaid.
+    if (c.education) { if (!payEducationWages(c, undefined, h.wallet)) continue; forgetHouseholdEducation(c.education, h.id); }
     for (const f of c.firms) payWages(c, f, h.wallet); // no claim should remain after settlement; pay any that does
     transfer(c, h.wallet, 'outside', balance(c, h.wallet), 'Emigration savings');
     c.households = c.households.filter(x => x.id !== h.id);
     c.migration.departures = (c.migration.departures ?? 0) + 1;
+    departed++;
   }
-  return { retrained, departed: leaving.length };
+  return { retrained, departed };
 }
 
 export function moveHousehold(c: City, householdId: number, destinationId: number): Result {
@@ -1104,7 +1160,7 @@ function admitHousehold(c: City) {
 }
 /** The lowest-index vacant C parcel a shop could use: road frontage, utilities and the usual caps. */
 export function shopSite(c: City): number | null {
-  if (!fits(utilities(c).spare, buildingNeed('C', 2)) || !canAllocateIds(c, 2) || c.buildings.length >= 192 || c.firms.length >= 64) return null;
+  if (!fits(utilities(c).spare, buildingNeed('C', 2)) || !canAllocateIds(c, 2) || c.buildings.length >= MAX_CITY_BUILDINGS || c.firms.length >= MAX_CITY_FIRMS) return null;
   const i = c.cells.findIndex((cell, i) => cell.zone === 'C' && cell.building === null && access(c, i));
   return i < 0 ? null : i;
 }
@@ -1317,8 +1373,9 @@ export function serialize(c: City, market?: City['market']): string {
   if (c.roadTopology) validateRoadTopology(c, c.roadTopology);
   const expanded = c.populationCapacityVersion === 1 || c.households.length > 128 || c.employment.length > 256;
   const educated = c.education !== undefined;
+  const businesses = c.businessCapacityVersion === 1 || c.firms.length > LEGACY_MAX_FIRMS;
   if (c.education) assertEducationInvariants(c.education, c.households);
-  const json = JSON.stringify({ ...c, ...(expanded ? {populationCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
+  const json = JSON.stringify({ ...c, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
   if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
   return json;
 }
@@ -1363,16 +1420,16 @@ function migrateV8(old: City): City {
 }
 const RULES = { 7: 'chain-2', 8: 'chain-3', 9: 'chain-4' } as const;
 /** Every rule of a chain-2 (v7) save; chain-3 (v8) also reconciles typed stock, chain-4 (v9) its plants. */
-function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false, extendedFactories = false, retailMaxLevel = RETAIL_LEGACY_MAX_LEVEL, withFarmLevels = false, expandedPopulation = false): City {
+function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false, extendedFactories = false, retailMaxLevel = RETAIL_LEGACY_MAX_LEVEL, withFarmLevels = false, expandedPopulation = false, expandedBusinesses = false): City {
   const typed = version >= 8;
   const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${version} / ${RULES[version]}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
   if (!c || (c.version as number) !== version || (c.rulesVersion as string) !== RULES[version] || !int(c.growthStartTick) || c.growthStartTick > c.tick || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
   if (withParks ? !Array.isArray(c.parks) || c.parks.length > MAX_PARKS : c.parks !== undefined && (!Array.isArray(c.parks) || c.parks.length !== 0)) fail();
   if (!withParks) c.parks = [];
-  if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > 192 || !Array.isArray(c.households) || c.households.length > (expandedPopulation ? MAX_CITY_HOUSEHOLDS : 128) || !Array.isArray(c.firms) || c.firms.length > 64) fail();
+  if (!Array.isArray(c.cells) || c.cells.length !== SIZE * SIZE || !Array.isArray(c.buildings) || c.buildings.length > MAX_CITY_BUILDINGS || !Array.isArray(c.households) || c.households.length > (expandedPopulation ? MAX_CITY_HOUSEHOLDS : 128) || !Array.isArray(c.firms) || c.firms.length > (expandedBusinesses ? MAX_CITY_FIRMS : LEGACY_MAX_FIRMS)) fail();
   if (!c.migration || !int(c.migration.arrivals) || !int(c.migration.legacyHouseholds) || !Array.isArray(c.employment) || c.employment.length > (expandedPopulation ? MAX_CITY_HOUSEHOLDS * 2 : 256)) fail();
-  if (!Array.isArray(c.ownerLabor) || c.ownerLabor.length > 64 || c.ownerLabor.some(e => !e || !int(e.householdId, 1) || !int(e.firmId, 1) || e.workers !== 1 || !['general', 'retail'].includes(e.skill)) || !Array.isArray(c.cropLedger) || !c.crops || !['harvested', 'processed', 'consumed', 'writtenOff'].every(k => int(c.crops[k as keyof typeof c.crops])) || !int(c.agricultureStartTick) || c.agricultureStartTick > c.tick || !isCanonicalResourceMap(c.resources, c.seed)) fail();
+  if (!Array.isArray(c.ownerLabor) || c.ownerLabor.length > (expandedBusinesses ? MAX_CITY_FIRMS : LEGACY_MAX_FIRMS) || c.ownerLabor.some(e => !e || !int(e.householdId, 1) || !int(e.firmId, 1) || e.workers !== 1 || !['general', 'retail'].includes(e.skill)) || !Array.isArray(c.cropLedger) || !c.crops || !['harvested', 'processed', 'consumed', 'writtenOff'].every(k => int(c.crops[k as keyof typeof c.crops])) || !int(c.agricultureStartTick) || c.agricultureStartTick > c.tick || !isCanonicalResourceMap(c.resources, c.seed)) fail();
   const legacyUtilities = c.utilities as unknown as { power: unknown; water: unknown } | undefined, outside = c.utilities?.outside;
   if (version < 9 ? !legacyUtilities || typeof legacyUtilities.power !== 'boolean' || typeof legacyUtilities.water !== 'boolean'
     : Object.keys(c.utilities ?? {}).length !== 1 || !outside || Object.keys(outside).length !== 2 || !UTILITY_KINDS.every(k => int(outside[k]) && outside[k] >= OUTSIDE_SUPPLY[k] && outside[k] <= 1_000_000) || !Array.isArray(c.plants) || c.plants.length > MAX_PLANTS) fail();
@@ -1584,12 +1641,25 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
 }
 
 /** Validate old saves before migration; never advance time, RNG, money or admission history on load. */
-function deserializeVersioned(json: string, expandedPopulation = false): City {
+function deserializeVersioned(json: string, expandedPopulation = false, expandedBusinesses = false): City {
   if (typeof json !== 'string' || json.length > 12_000_000) throw new Error('Save is too large or invalid.');
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 23) {
+    const envelope = parsed as Record<string, unknown>;
+    if (envelope.rulesVersion !== 'chain-18' || envelope.businessCapacityVersion !== 1) throw new Error('Invalid business capacity save version');
+    const { businessCapacityVersion: _capacity, ...rest } = envelope;
+    const innerVersion = rest.education !== undefined ? 22 : rest.populationCapacityVersion !== undefined ? 21 : rest.roadTopology !== undefined ? 20 : 19;
+    const innerRules = innerVersion === 22 ? 'chain-17' : innerVersion === 21 ? 'chain-16' : innerVersion === 20 ? 'chain-15' : 'chain-14';
+    const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }), false, true);
+    city.businessCapacityVersion = 1;
+    // Keep original field order, including education and Guest market, on exact resume.
+    const ordered = Object.fromEntries(Object.keys(envelope).filter(key => Object.hasOwn(city, key)).map(key => [key, (city as unknown as Record<string, unknown>)[key]]));
+    return { ...ordered, ...city } as City;
+  }
+  if (parsed && typeof parsed === 'object' && 'businessCapacityVersion' in parsed) throw new Error('Expanded businesses require save v23');
   if (version === 22) {
     const envelope = parsed as Record<string, unknown>;
     if (envelope.rulesVersion !== 'chain-17' || !envelope.education || typeof envelope.education !== 'object') throw new Error('Invalid education save version');
@@ -1599,7 +1669,7 @@ function deserializeVersioned(json: string, expandedPopulation = false): City {
     const hasRoads = rest.roadTopology !== undefined;
     const innerVersion = expandedInner ? 21 : hasRoads ? 20 : 19;
     const innerRules = expandedInner ? 'chain-16' : hasRoads ? 'chain-15' : 'chain-14';
-    const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }));
+    const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }), expandedPopulation, expandedBusinesses);
     assertEducationInvariants(education, city.households);
     city.education = education;
     if (city.households.some(h => householdWorkerCount(city, h.id) > h.workforce)) trimWorkAssignments(city);
@@ -1615,7 +1685,7 @@ function deserializeVersioned(json: string, expandedPopulation = false): City {
     if (envelope.rulesVersion !== 'chain-16' || envelope.populationCapacityVersion !== 1) throw Error('Invalid population save version');
     const {populationCapacityVersion, ...base} = envelope;
     const hasRoads = 'roadTopology' in base;
-    const city = deserializeVersioned(JSON.stringify({...base, version: hasRoads ? 20 : 19, rulesVersion: hasRoads ? 'chain-15' : 'chain-14'}), true);
+    const city = deserializeVersioned(JSON.stringify({...base, version: hasRoads ? 20 : 19, rulesVersion: hasRoads ? 'chain-15' : 'chain-14'}), true, expandedBusinesses);
     city.populationCapacityVersion = 1;
     return city;
   }
@@ -1624,7 +1694,7 @@ function deserializeVersioned(json: string, expandedPopulation = false): City {
     const envelope = parsed as Record<string, unknown>;
     if(envelope.rulesVersion !== 'chain-15') throw Error('Invalid road save version');
     const {roadTopology,...base}=envelope;
-    const city=deserializeVersioned(JSON.stringify({...base,version:19,rulesVersion:'chain-14'}), expandedPopulation);
+    const city=deserializeVersioned(JSON.stringify({...base,version:19,rulesVersion:'chain-14'}), expandedPopulation, expandedBusinesses);
     validateRoadTopology(city,roadTopology); city.roadTopology=roadTopology; return city;
   }
   if(parsed && typeof parsed==='object' && 'roadTopology' in parsed) throw Error('Road topology requires save v20');
@@ -1638,7 +1708,7 @@ function deserializeVersioned(json: string, expandedPopulation = false): City {
     if (envelope.rulesVersion !== (version === 19 ? 'chain-14' : version === 18 ? 'chain-13' : version === 17 ? 'chain-12' : version === 16 ? 'chain-11' : version === 15 ? 'chain-10' : version === 14 ? 'chain-9' : 'chain-8') || !Number.isSafeInteger(envelope.foodDemandStartTick) || envelope.foodDemandStartTick! < 0 || envelope.foodDemandStartTick! > envelope.tick) throw new Error('Unsupported or corrupt CityManager food save.');
     const { market, ...base } = envelope;
     if (market && (market.version !== 10 || market.rulesVersion !== 'chain-5')) throw new Error('Unsupported or corrupt CityManager market save.');
-    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version >= 15, version >= 16, version >= 17, version >= 18 ? RETAIL_MAX_LEVEL : RETAIL_LEGACY_MAX_LEVEL, version === 19, expandedPopulation);
+    const loaded = validateV7({ ...base, version: 9, rulesVersion: 'chain-4' } as City, 9, version >= 14, version >= 15, version >= 16, version >= 17, version >= 18 ? RETAIL_MAX_LEVEL : RETAIL_LEGACY_MAX_LEVEL, version === 19, expandedPopulation, expandedBusinesses);
     if (market) loaded.market = market;
     return loaded;
   }

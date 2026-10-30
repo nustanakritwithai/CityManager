@@ -58,7 +58,13 @@ test('720-day four-seed fixed-growth benchmark keeps proposals inert and replays
     }
     assert(row.ruleExecution.final.households > 0 && row.ruleExecution.final.population >= row.ruleExecution.final.households);
   }
-  assert(report.rows.some(row => row.ruleExecution.decisions.applied > 0), 'At least one actual owner transfer exercises execution, not only holds');
+  for (const row of report.rows) {
+    assert.equal(row.ruleExecution.decisions.applied, 0, 'these seeded monthly payouts already paid available earnings; no second draw from development retention');
+    assert.equal(row.ruleExecution.decisions.withdrawnSatang, 0);
+    assert(row.ruleExecution.decisions.held > 0);
+  }
+  // Actual transfers still execute in owner-decision/session/e2e tests using
+  // open-month earned profit and recorded cash-shortfall fixtures.
   // The repaired growth rule, rather than the old 10/8 plateau, is the comparator.
   for (const row of report.rows.filter(row => row.seed === 61025 || row.seed === 20261023)) {
     assert(row.baseline.final.population > 10); assert(row.baseline.final.jobs > 8);

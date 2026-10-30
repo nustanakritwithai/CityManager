@@ -4,7 +4,7 @@
 import { deserialize, serialize, type City } from './sim.ts';
 import { parkWorkers, PARK_STAFF } from './parks.ts';
 import { createParkActivity, advanceParkActivity, reconcileParkActivity, startParkActivityDay,
-  parkActivityAbsoluteMinute, prepareParkActivity, restoreParkActivity, WORK_START_MINUTE, WORK_END_MINUTE, type ParkActivityState } from './park-activity.ts';
+  parkActivityAbsoluteMinute, prepareParkActivity, restoreParkActivity, type ParkActivityState } from './park-activity.ts';
 import { createParkRecreation, advanceParkRecreation, restoreParkRecreation, type ParkRecreationState } from './park-recreation.ts';
 import { observeParkRecreationMinute, parkRecreationResidentIds, PROPOSED_PARK_COMFORT } from './park-recreation-activity.ts';
 
@@ -40,13 +40,12 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
   reconcileParkRuntime(city, runtime);
   const prepare = () => {
     const activity = prepareParkActivity(city);
-    return { activity, onDuty: new Set(activity.citizens.filter(p => p.employed).map(p => p.citizenId)),
+    return { activity,
       parkPolicy: new Map(city.parks.map(p => [p.id, {
         qualityPermille: Math.round(parkWorkers(p) / PARK_STAFF.slots * 1000), comfortableCapacity: PROPOSED_PARK_COMFORT,
       }])) };
   };
   let context = prepare();
-  const offDuty = new Set<string>();
   while (remaining > 0) {
     // Application-only pacing budget: stop at an observed minute, never jump the
     // game clock or accumulate catch-up debt. Heavy frames slow playback.
@@ -61,7 +60,7 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
     } else {
       reconcileParkActivity(city, runtime.activity, context.activity);
       const frame = observeParkRecreationMinute(city, runtime.activity, { parkPolicy: context.parkPolicy,
-        unavailableCitizenIds: runtime.activity.minute >= WORK_START_MINUTE && runtime.activity.minute < WORK_END_MINUTE ? context.onDuty : offDuty });
+        activityContext: context.activity });
       const nextRecreation = advanceParkRecreation(runtime.recreation, frame);
       advanceParkActivity(city, runtime.activity, 1, context.activity);
       runtime.recreation = nextRecreation;
@@ -112,7 +111,7 @@ export function deserializeParkSession(json: string): { city: City; runtime: Par
   const parsed = JSON.parse(json);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid city save');
   const { parkRuntime, ...citySave } = parsed;
-  if (parkRuntime !== undefined && !((parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12') || (parsed.version === 18 && parsed.rulesVersion === 'chain-13') || (parsed.version === 19 && parsed.rulesVersion === 'chain-14') || (parsed.version === 20 && parsed.rulesVersion === 'chain-15') || (parsed.version === 21 && parsed.rulesVersion === 'chain-16') || (parsed.version === 22 && parsed.rulesVersion === 'chain-17'))) throw new Error('Park runtime requires save v15 through v22 with matching rules');
+  if (parkRuntime !== undefined && !((parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12') || (parsed.version === 18 && parsed.rulesVersion === 'chain-13') || (parsed.version === 19 && parsed.rulesVersion === 'chain-14') || (parsed.version === 20 && parsed.rulesVersion === 'chain-15') || (parsed.version === 21 && parsed.rulesVersion === 'chain-16') || (parsed.version === 22 && parsed.rulesVersion === 'chain-17') || (parsed.version === 23 && parsed.rulesVersion === 'chain-18'))) throw new Error('Park runtime requires save v15 through v23 with matching rules');
   const city = deserialize(JSON.stringify(citySave));
   const runtime = parkRuntime === undefined ? createParkRuntime(city) : restoreRuntime(city, parkRuntime);
   return { city, runtime };

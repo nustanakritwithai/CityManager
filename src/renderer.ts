@@ -420,7 +420,7 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'bulldoze'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'school', 'university', 'bulldoze'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), online = utilityService(city, connected).online;
@@ -434,12 +434,13 @@ export class CityView {
       // Buildings without connected frontage are suspended in the sim, so they render faded.
       const reach = !!b && access(city, i);
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}`;
+      const campus = city.education?.campuses.find(item => item.cell === i);
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
       this.tiles.set(i, { entity: tile, signature });
-      if (b && !reach || plant && !plantOn) fadeLater.push(tile);
+      if (b && !reach || plant && !plantOn || campus && !campus.open) fadeLater.push(tile);
       if (cell.road) {
         const horizontal = (roadLinked(city, i, i + (-1))) || (roadLinked(city, i, i + (1)));
         const vertical = (roadLinked(city, i, i + (-24))) || (roadLinked(city, i, i + (24)));
@@ -479,6 +480,8 @@ export class CityView {
             pool.setLocalPosition(px, .16, pz); pool.setLocalScale(1.7, 1, 1.7); tile.addChild(pool);
           }
         }
+      } else if (campus) {
+        this.campus(tile, campus.kind, campus.level);
       } else if (municipalPark) {
         this.municipalPark(tile);
       } else if (plant) {
@@ -552,6 +555,30 @@ export class CityView {
       for (const dz of [-0.92, 0.92]) this.box(this.markers, p.x, 0.18, p.z + dz, 1.94, 0.08, 0.07, this.material(color, true));
       for (const dx of [-0.92, 0.92]) this.box(this.markers, p.x + dx, 0.18, p.z, 0.07, 0.08, 1.94, this.material(color, true));
     }
+  }
+  /** Small procedural civic buildings, independent of downloaded assets and simulation data. */
+  private campus(tile: Entity, kind: 'school' | 'university', level: number) {
+    tile.name += kind === 'school' ? ' School' : ' University';
+    const university = kind === 'university', accent = university ? '#5d65aa' : '#b86339';
+    this.box(tile, 0, .08, 0, 1.82, .12, 1.82, '#c9c9af');
+    this.box(tile, 0, .6, -.12, 1.38, 1, 1.12, '#f3e1b2');
+    this.box(tile, 0, 1.17, -.12, 1.52, .15, 1.25, accent);
+    this.box(tile, 0, .37, .46, .27, .6, .06, '#32475c');
+    for (const x of [-.48, .48]) this.box(tile, x, .73, .46, .25, .3, .04, '#91cddd');
+    // A book-shaped crest identifies the school; university gets a columned entrance.
+    if (university) {
+      this.box(tile, 0, .97, .65, 1.04, .12, .45, accent);
+      for (const x of [-.42, .42]) this.box(tile, x, .5, .68, .13, .85, .13, '#faf0d3');
+    } else {
+      this.box(tile, -.1, .93, .49, .18, .18, .04, '#fff6d8');
+      this.box(tile, .1, .93, .49, .18, .18, .04, '#fff6d8');
+    }
+    if (level > 1) {
+      this.box(tile, -.56, .52, -.69, .52, .85, .42, '#f3e1b2');
+      this.box(tile, -.56, 1, -.69, .62, .12, .52, accent);
+    }
+    this.box(tile, .78, .73, .65, .045, 1.35, .045, '#e8e5d0');
+    this.box(tile, .6, 1.23, .65, .36, .25, .035, accent);
   }
   /** The complete garden stays inside one 2-unit tile, independently of roads. */
   private municipalPark(tile: Entity) {

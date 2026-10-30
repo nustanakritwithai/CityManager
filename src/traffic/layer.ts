@@ -31,7 +31,7 @@ export class TrafficLayer {
   frame(c: City, minuteOfDay: number, paused: boolean, dt: number): void {
     this.checkRoads(c);
     const ran = this.clock.advance(c, gameMinute(c.tick, minuteOfDay), paused), net = this.clock.network, last = this.clock.last;
-    if (ran.length && net && last) setFleetDemand(this.fleet, net, this.clock.lastOd, last.state, last.times);
+    if (ran.length && net && last) setFleetDemand(this.fleet, net, this.clock.lastOd, last.assigned, last.times);
     if (!net) { this.cars.sync([]); return; }
     if (!paused) stepFleet(this.fleet, net, Math.min(dt, .25));
     const seen = new Map<number, boolean>(), visible = (cell: number) => { let v = seen.get(cell); if (v === undefined) seen.set(cell, v = this.onScreen(cell)); return v; };

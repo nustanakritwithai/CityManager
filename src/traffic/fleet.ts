@@ -2,7 +2,7 @@ import { linkKey, type Link, type LinkNetwork } from './network.ts';
 import { roadNeighbors } from '../road-topology.ts';
 import { LANE_START, LANE_END, SLOT_PITCH, laneOffset } from '../citizen-road-queue.ts';
 import type { CitizenVehiclePose } from '../citizen-vehicle-poses.ts';
-import type { OdDemand, RouteState } from './routing.ts';
+import { linkTimes, shortestPath, type OdDemand, type RouteState } from './routing.ts';
 /**
  * Representative fleet (visual only; nothing here feeds back into the model or a save).
  *
@@ -64,7 +64,23 @@ const laneOn = (net: LinkNetwork, c: FleetCar, i = c.i) => Math.min(c.lane, (net
 
 /** Advance visual cars by dt real seconds. Deterministic for a given call sequence. */
 export function stepFleet(fleet: FleetState, net: LinkNetwork, dt: number): void {
-  const live = new Set<string>();
+  // Repair broken future routes before cars reach a permanently closed exit. A car already
+  // committed to a turn finishes that exit first; changing its turn mid-square would teleport it.
+  const repairs = new Map<string, number[] | null>();
+  let free: Map<string, number> | undefined;
+  for (const c of fleet.cars) {
+    if (c.phase === 'out' || !net.links.has(linkOf(c))) continue;
+    if (c.path.slice(c.i + 2).every((b, j) => net.links.has(linkKey(c.path[c.i + 1 + j], b)))) continue;
+    if (c.s > STOP) {
+      if (!net.links.has(linkKey(c.path[c.i + 1], c.path[c.i + 2]))) c.phase = 'out';
+      continue;
+    }
+    const from = c.path[c.i + 1], to = c.path.at(-1)!, key = `${from}:${to}`;
+    if (!repairs.has(key)) repairs.set(key, shortestPath(net, free ??= linkTimes(net, new Map()), from, to));
+    // No legal continuation: drain to the current link's head and fade at that endpoint.
+    const tail = repairs.get(key) ?? [from];
+    c.path = [...c.path.slice(0, c.i + 1), ...tail];
+  }
   // Fades; drop cars whose road vanished (they fade out where they stand).
   for (const c of fleet.cars) {
     if (c.phase !== 'out' && !net.links.has(linkOf(c))) c.phase = 'out';
@@ -81,7 +97,6 @@ export function stepFleet(fleet: FleetState, net: LinkNetwork, dt: number): void
   let occ = lanes();
   const order = [...fleet.cars].sort((a, b) => b.s - a.s || (a.id < b.id ? -1 : 1));
   for (const c of order) {
-    live.add(c.id);
     if (c.phase === 'out') continue;
     const last = c.i === c.path.length - 2, link = linkOf(c), lane = laneOn(net, c);
     let max = Infinity;
@@ -115,6 +130,8 @@ export function stepFleet(fleet: FleetState, net: LinkNetwork, dt: number): void
   for (const c of fleet.cars) if (c.phase !== 'out') count.set(c.pathKey, (count.get(c.pathKey) ?? 0) + 1);
   for (const [k, t] of fleet.targets) {
     if ((count.get(k) ?? 0) >= t.target || fleet.cars.length >= GLOBAL_VEHICLE_CAP) continue;
+    // Demand may be stale until the next analysis period after an edit. Never respawn a broken route.
+    if (t.path.slice(1).some((b, i) => !net.links.has(linkKey(t.path[i], b)))) continue;
     const first = linkKey(t.path[0], t.path[1]); if (!net.links.has(first) || fleet.held.has(t.path[0])) continue;
     const lane = Math.min(fleet.nextId % 2, net.links.get(first)!.lanes - 1);
     if ((occ.get(`${first}|${lane}`) ?? []).some(o => o.s < CLEAR + SLOT_PITCH)) continue;

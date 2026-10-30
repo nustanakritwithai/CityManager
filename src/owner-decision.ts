@@ -112,7 +112,7 @@ export function captureOwnerSnapshot(city: City, firmId: number): OwnerSnapshot 
             if (facts.firmCash !== null) {
               facts.firmCashShortfall = Math.max(0, reserved - facts.firmCash);
               if (facts.householdSurplus !== null) facts.safeContribute = Math.min(OWNER_MAX_TRANSFER, facts.firmCashShortfall, facts.householdSurplus, finance.contributeAvailable);
-              facts.safeWithdraw = Math.max(0, Math.min(OWNER_MAX_TRANSFER, finance.withdrawAvailable, facts.firmCash - reserved));
+              facts.safeWithdraw = Math.max(0, Math.min(OWNER_MAX_TRANSFER, finance.withdrawAvailable, facts.firmCash - reserved - finance.developmentReserve));
             }
           }
         }

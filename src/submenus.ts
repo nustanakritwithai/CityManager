@@ -2,7 +2,7 @@ import { iconElement } from './ui-icons.ts';
 import { GAME_VERSION } from './version.ts';
 import './submenus.css';
 import { FARM_MAX_LEVEL } from './agriculture.ts';
-import { MONTH, SIZE, ROAD_COST, utilityStatus, type City } from './sim.ts';
+import { MONTH, SIZE, MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, ROAD_COST, utilityStatus, type City } from './sim.ts';
 import { flowRows, cropFlowRows, walletGroups, formatMoney, type FlowKind, type FlowRow, type CropFlowRow } from './inspector-data.ts';
 
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
@@ -232,7 +232,7 @@ function setupRules() {
     ruleCard('goods', 'อาหารหนึ่งหน่วยต่อคนต่อวัน', 'สมาชิกแต่ละคนต้องการอาหารวันละหนึ่งหน่วย ซื้อพืชผลจากตลาดหรือสินค้าจากร้านค้า โดยจ่ายจากเงินร่วมครัวเรือนและตัดสต็อกจริง หากเงินหรือของไม่พอจะซื้อได้บางส่วน'),
     ruleCard('growth', 'พืชผลและวัตถุดิบมีต้นทาง', 'ฟาร์มเก็บเกี่ยวพืชผลหมุนเวียนตามความอุดมสมบูรณ์และแรงงาน โรงงานใช้พืชผลจริง 2 ล็อตเป็นสำเร็จรูป 8 หน่วยต่อชุด ตลาดไม่ผลิตเอง สต็อกที่เพิ่งซื้อเริ่มขายได้วันถัดไป บัญชีพืชผลแยกล็อตและต้นทุนจากสินค้าสำเร็จรูป เซฟเดิมไม่มีวัตถุดิบแจก ต้องสร้างห่วงโซ่เกษตรก่อน', 'agriculture'),
     ruleCard('wallets', 'ลูกจ้างและผู้ทำกิจการเอง', 'แรงงานรับจ้างรับค่าจ้างเข้ากระเป๋าครัวเรือน ตลาดขนาดเล็กใช้แรงงานเจ้าของ 1 คน ไม่มีเงินเดือนเจ้าของ ยอดขายอยู่บัญชีกิจการ ถอนเฉพาะกำไรที่มีสิทธิ์และเหลือเงินหมุนเวียน 200 บาท การเติมทุน ถอนกำไร และทุนขยายโรงงานไม่ใช่ยอดขายซ้ำ ยังไม่มีหน้าบริหารกลุ่มกิจการ ตลาดลงทุน หนี้ หรือผลตอบแทนรับประกัน', 'income-roles'),
-    ruleCard('limits', `แผนที่กริดราบ ${SIZE} × ${SIZE}`, 'ขอบเขต 192 อาคาร 64 บริษัท และ 32 โรงน้ำไฟ จำนวนครัวเรือนขึ้นกับที่พัก งาน และน้ำไฟ ไม่จำกัดที่ 128 ครัวเรือน; ความลื่นไหลขึ้นกับขนาดเมืองและอุปกรณ์'),
+    ruleCard('limits', `แผนที่กริดราบ ${SIZE} × ${SIZE}`, `ขอบเขต ${MAX_CITY_BUILDINGS} อาคารรวมบ้านและกิจการ (กิจการไม่เกิน ${MAX_CITY_FIRMS} แห่ง) และ 32 โรงน้ำไฟ จำนวนครัวเรือนขึ้นกับที่พัก งาน และน้ำไฟ ไม่จำกัดที่ 128 ครัวเรือน; ความลื่นไหลขึ้นกับขนาดเมืองและอุปกรณ์`),
     ruleCard('growth', 'ต้นแบบแรกที่ตรวจสอบได้', 'ได้รับแรงบันดาลใจด้านการเล่นจาก Cities: Skylines II ยังไม่ครอบคลุมระบบทั้งหมด โค้ดจำลองและถนนเขียนใหม่ทั้งหมด', 'version'),
   );
   const attribution = element('div', 'sm-attribution'); attribution.append(element('h4', '', 'แหล่งภาพและสิทธิ์ใช้งาน'), element('p', '', 'โมเดลเมือง 8 แบบและไอคอน GUI 4 ภาพจาก Kenney ภายใต้ CC0 สัญลักษณ์เส้นในคู่มือสร้างขึ้นใหม่ในโค้ด'));
