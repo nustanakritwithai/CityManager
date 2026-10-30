@@ -1,5 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
-const text=readFileSync(new URL('../.github/workflows/traffic-enabled.yml',import.meta.url),'utf8');
+const normalize=s=>s.replace(/\r\n/g,'\n');
+const text=normalize(readFileSync(new URL('../.github/workflows/traffic-enabled.yml',import.meta.url),'utf8'));
+assert.equal(normalize(text.replace(/\n/g,'\r\n')),text,'Windows CRLF and Unix LF must parse identically');
 const job=name=>{const marker=`\n  ${name}:\n`,start=text.indexOf(marker);assert.ok(start>=0,`Missing job ${name}`);const body=text.slice(start+marker.length),next=body.search(/\n  [a-z]+:\n/);return next<0?body:body.slice(0,next);};
 test('traffic acceptance partitions bounded cases and gates every result',()=>{
  const checks=job('checks'),fault=job('fault'),browser=job('browser'),gate=job('enabled');
