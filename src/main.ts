@@ -86,6 +86,12 @@ import { renderParkRecreationPanel } from './park-recreation-panel.ts';
 import { SceneParkActivity } from './scene-park-activity.ts';
 import './park-runtime.css';
 import { installEducationPanel } from './education-panel.ts';
+import { busEnabled } from './bus/types.ts';
+import { bulldozeGuarded, type BusRemovalImpact } from './bus/player.ts';
+import { confirmBusRemoval } from './bus/panel.ts';
+import { createBusController } from './bus/mount.ts';
+import { connectPresentedBusEvents, setBusLiveReader } from './bus/live.ts';
+import './bus/player.css';
 import { installPanelTimeControls } from './panel-time-controls.ts';
 import { installSaveFeedback } from './save-feedback-panel.ts';
 import './player-feedback.css';
@@ -126,6 +132,8 @@ let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, constructi
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
 let educationPanel: ReturnType<typeof installEducationPanel> | undefined;
+let busController: ReturnType<typeof createBusController> | undefined;
+let busLock = false;
 let panelTime: ReturnType<typeof installPanelTimeControls> | undefined;
 let parkFrameMs = 0, parkFramePeakMs = 0;
 let pausedByTyphoonAuto = false;
@@ -139,7 +147,7 @@ function syncEducationTools() {
     if (button) button.hidden = !on;
   }
 }
-const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน' };
+const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
 const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
@@ -152,7 +160,10 @@ const help: Record<string, string> = {
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
-  bulldoze: 'โหมดรื้อถอน · แตะสวน สถานศึกษา ถนน อาคาร หรือโรงน้ำไฟเพื่อรื้อ ฿20 · ประตูเชื่อมภายนอกรื้อไม่ได้ · ลูกศร/V/Esc เพื่อออก'
+  bulldoze: 'โหมดรื้อถอน · แตะสวน สถานศึกษา ถนน อาคาร หรือโรงน้ำไฟเพื่อรื้อ ฿20 · ป้ายและอู่รถเมล์จะถามก่อนลบ · ประตูเชื่อมภายนอกรื้อไม่ได้ · ลูกศร/V/Esc เพื่อออก',
+  'bus-depot': 'อู่รถเมล์ · แตะแปลงว่างที่ติดถนนเชื่อมประตูเมือง · รอบแรกไม่มีค่าใช้จ่าย',
+  'bus-stop': 'ป้ายรถเมล์ · แตะถนนตรงที่ไม่ใช่ทางแยกหรือหัวมุม · ห่างป้ายอื่นอย่างน้อย 2 ช่อง · เลือกฝั่งให้ตรงทิศรถ',
+  'bus-line': 'สายรถเมล์ · แตะป้ายตามลำดับ · ป้ายแรกซ้ำเป็นป้ายสุดท้ายคือสายวงกลม · กดสร้างสาย',
 };
 const WARN_TEXT = /ไม่พอ|ไม่ได้|ต้อง|ขวาง|ไม่ถูกต้อง|นอกแผนที่|ยังไม่เชื่อม|ไม่มีอยู่แล้ว|ไม่พบ/;
 function status(message: string) {
@@ -178,7 +189,8 @@ function setTool(next: string) {
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(button => {
     const active = button.dataset.tool === next; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
   });
-  $('#tool-help').textContent = next === 'road' ? roadHelp() : help[next]; status(`${toolNames[next]}พร้อมใช้งาน`); render();
+  $('#tool-help').textContent = next === 'road' ? roadHelp() : help[next] ?? '';
+  busController?.sync(next); status(`${toolNames[next] ?? next}พร้อมใช้งาน`); render();
 }
 function inspector(open: boolean) {
   if (!open) signalPanel?.close();
@@ -228,6 +240,7 @@ function cancel() {
     if (source) { openRoute({page:'place',cell:source.cell,buildingId:source.id}); return; }
   }
   if (route) { inspector(false); render(); status('กลับสู่แผนที่เมือง'); return; }
+  if (busController?.consumeCancel()) { render(); return; }
   if (roadStart !== null) { roadStart = null; status('ยกเลิกจุดเริ่มแล้ว · Road start cancelled'); render(); return; }
   if (tool !== 'select') { setTool('select'); return; }
   inspector(false); status('กลับสู่แผนที่เมือง');
@@ -239,8 +252,10 @@ function roadCommand(a: number, b: number) {
   if (roadMode === 'split') return editRoadJunction(city, a, b, false);
   return buildParallelRoad(city, a, b, roadMode === 'oneway');
 }
-function activate(index: number) {
+async function activate(index: number) {
+  if (busLock) return;
   if (tool !== 'select') ownerDecisionSession.beforeExternal(city);
+  if (busController?.handles(tool)) { busController.tap(tool as 'bus-depot' | 'bus-stop' | 'bus-line', index); return; }
   selected = index;
   if (tool === 'road') {
     roadMenu?.close();
@@ -250,7 +265,14 @@ function activate(index: number) {
   else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
   else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
   else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
-  else if (tool === 'bulldoze') status(resultSound(bulldoze(city, index), 'ui-bulldoze').message);
+  else if (tool === 'bulldoze') {
+    busLock = true;
+    try {
+      const result = await bulldozeGuarded(city, index, busEnabled(), impact => busController?.confirm(impact) ?? Promise.resolve(true), cell => resultSound(bulldoze(city, cell), 'ui-bulldoze'));
+      if (!result) { status('ยังไม่รื้อป้ายหรืออู่'); render(); return; }
+      status(result.message);
+    } finally { busLock = false; }
+  }
   else if (tool === 'select') openRoute({page:'place',cell:index,buildingId:city.cells[index].building});
   if (tool !== 'select') ownerDecisionSession.syncExternal(city, 'player-map-command');
   trafficLayer?.afterMapEdit(city, paused || document.hidden);
@@ -354,6 +376,7 @@ function renderPlace() {
     if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
+    const busCaption = busController?.caption(cellIndex); if (busCaption) $('#place-subtitle').textContent = busCaption;
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
@@ -484,8 +507,11 @@ function render() {
   $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); cityNetwork?.update(city); guide?.update(city); minimap?.update(city, selected); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
-  const placement = route ? null : previewPlacement(city, tool, start, hover);
-  view.render(city, selected, preview, new Set(placement?.cells.filter(cell => !cell.ok).map(cell => cell.cell)));
+  const busPreview = route ? null : busController?.preview(tool, hover) ?? null;
+  const placement = busPreview ?? (route ? null : previewPlacement(city, tool, start, hover));
+  const frames = busPreview ? busPreview.cells.map(cell => cell.cell) : preview;
+  view.render(city, selected, frames, new Set(placement?.cells.filter(cell => !cell.ok).map(cell => cell.cell)));
+  busController?.refresh();
   updateMapInfo(placement);
   cityHud?.update(city, paused, s);
 }
@@ -611,6 +637,31 @@ async function boot() {
   selectMenu = installSelectMenu(selectButton, next => { sound('ui-select'); setTool(next); });
   servicesMenu = installServicesMenu(next => { sound('ui-select'); setTool(next); });
   constructionMenu = installConstructionMenu(next => { sound('ui-select'); setTool(next); });
+  const busComposer = document.createElement('div'); busComposer.id = 'bus-composer'; busComposer.hidden = true;
+  $('#tool-help').before(busComposer);
+  const busPanel = document.createElement('section'); busPanel.id = 'bus-panel'; busPanel.hidden = true; busPanel.setAttribute('aria-label', 'จัดการสายรถเมล์');
+  document.body.append(busPanel);
+  const confirmRemoval = async (impact: BusRemovalImpact) => {
+    const wasPaused = paused; paused = true; render();
+    try { return await confirmBusRemoval(impact); }
+    finally { if (!wasPaused) paused = false; }
+  };
+  busController = createBusController({
+    anchor: $<HTMLButtonElement>('#bus-tool'), composer: busComposer, panel: busPanel, help: $('#tool-help'),
+    enabled: () => busEnabled(), getCity: () => city, getTool: () => tool, getHover: () => hover, setTool,
+    beforeChange: () => ownerDecisionSession.beforeExternal(city),
+    notice: ({ ok, message, mutated }) => {
+      status(message); sound(ok ? 'ui-place' : 'ui-error');
+      if (mutated) { ownerDecisionSession.syncExternal(city, 'player-map-command'); trafficLayer?.afterMapEdit(city); }
+      render();
+    },
+    focusCell: cell => { view.focus(cell); render(); },
+    confirm: confirmRemoval,
+  });
+  busController.sync(tool);
+  // Engine exists only when the traffic model and ?bus=1 are both on (PR #132). Never drain it.
+  setBusLiveReader(() => trafficLayer?.bus?.engine ?? null);
+  void connectPresentedBusEvents();
   document.querySelectorAll<HTMLElement>('.tool-buttons [data-tool]').forEach(b => {
     if (b === selectButton) return; // Select's popup owns its arrow and explicit demolition option.
     b.addEventListener('click', () => { const reopen = b === roadButton && !roadMenu?.isOpen(); sound('ui-select'); setTool(b.dataset.tool!); if (reopen) roadMenu?.open(roadMode); });
