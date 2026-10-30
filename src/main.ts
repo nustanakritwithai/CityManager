@@ -3,6 +3,8 @@ import { renderBuildingIssues } from './building-issue-panel.ts';
 import './building-issues.css';
 import { restoreStartupCity } from './startup-save.ts';
 import { TrafficLayer, trafficModelEnabled } from './traffic/layer.ts';
+import { busEnabled } from './bus/types.ts';
+import { BusPresentation } from './bus/presentation.ts';
 import { screenCull } from './traffic/flag.ts';
 import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
@@ -102,6 +104,8 @@ let city: City;
 let parkRuntime: ParkRuntime;
 /** Aggregate traffic model (flag OFF by default; dev: ?traffic=1). Null keeps the old behaviour exactly. */
 let trafficLayer: TrafficLayer | null = null;
+/** Bus drawings (`?bus=1`). Still draws nothing until `trafficLayer.bus` exists (traffic on too). */
+let busView: BusPresentation | null = null;
 let parkScene: SceneParkActivity | undefined;
 let parkPanel: HTMLElement;
 let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
@@ -576,6 +580,7 @@ async function boot() {
   parkScene = new SceneParkActivity(view);
   view.traffic.setWalkersEnabled(false);
   if (trafficModelEnabled()) { view.traffic.setCarsEnabled(false); const canvas = $('#city-canvas') as HTMLCanvasElement; trafficLayer = new TrafficLayer(view.app, screenCull(i => view.project(i), () => ({ width: canvas.clientWidth, height: canvas.clientHeight }))); }
+  if (busEnabled()) busView = new BusPresentation(view.app);
   const roadButton = document.querySelector<HTMLButtonElement>('[data-tool="road"]')!;
   roadMenu = installRoadMenu(roadButton, mode => { roadMode = mode; setTool('road'); status(roadHelp()); });
   const selectButton = document.querySelector<HTMLButtonElement>('[data-tool="select"]')!;
@@ -743,9 +748,11 @@ async function boot() {
   let soundTick = -1, traffic = 0, factories = 0;
   view.app.on('update', (dt: number) => {
     visual.update(dt);
-    minimap?.redraw();
     view.traffic.update(dt, !paused && !document.hidden);
     trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt);
+    // `trafficLayer.bus` is unset unless traffic and ?bus=1 are both on. Null draws nothing and does not drain.
+    busView?.frame(city, trafficLayer);
+    minimap?.redraw();
     if (city.tick !== soundTick) {
       soundTick = city.tick;
       traffic = Math.min(1, city.households.reduce((n, h) => n + h.members, 0) / 40);
@@ -773,7 +780,7 @@ async function boot() {
     else if (route?.page === 'city') renderParkPanel();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null } });
   if(startupSaveError)installStartupRecoveryChooser({summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,status:()=>$('#inspector-status').textContent??''});
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
