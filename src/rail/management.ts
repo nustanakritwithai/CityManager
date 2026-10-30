@@ -112,7 +112,7 @@ export function installRailManagement(options:RailManagementOptions){
     ask('ถอดช่วงรางนี้? ถ้ามีรถกำลังวิ่งหรือผู้โดยสารบนรถ จะยังถอดไม่ได้',()=>{rail.editTrack(from,cell,true);report('ถอดช่วงรางแล้ว ผู้โดยสารที่รอยังอยู่ในระบบ');});return true;
   }
   function cancel():boolean{if(popup.isOpen()){popup.close(true);return true;}if(pending){clearConfirmation();return true;}if(panel.open){closePanel();return true;}if(mode!=='select'||start!==null){clearMode();view.abortGesture();report('กลับสู่เครื่องมือเลือก');return true;}return false;}
-  anchor.onclick=()=>{if(popup.isOpen())popup.close();else{sync();popup.open();}};closeButton.onclick=closePanel;
+  anchor.onclick=()=>{if(popup.isOpen())popup.close();else{options.selectTool();sync();popup.open();}};closeButton.onclick=closePanel;
   panel.addEventListener('cancel',event=>{event.preventDefault();closePanel();});confirm.addEventListener('cancel',event=>{event.preventDefault();clearConfirmation();});
   panel.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closePanel();}});
   confirm.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();clearConfirmation();}});

@@ -64,6 +64,18 @@ try{
     await send('Emulation.setDeviceMetricsOverride',{width,height,screenWidth:width,screenHeight:height,deviceScaleFactor:1,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
     await navigate(name+'-moving','moving');assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),fixtures.moving);assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`),fixtures.moving,'Startup leaves original save bytes intact');
     let state=await snapshot();assert.equal((await diag()).trains,1);assert.ok(state.service.snapshot.train.destination);assert.ok(state.service.snapshot.batches[0].onboard>0);assert.ok(state.service.snapshot.batches[0].waiting>0);await shot(name+'-map');
+    for(const dismissal of ['map','escape']){
+      await button('[data-tool="bulldoze"]');assert.equal(await evaluate('document.querySelector("[data-tool=bulldoze]").getAttribute("aria-pressed")'),'true');
+      const untouched=await evaluate('window.cityManager.sessionSnapshot()');await button('#rail-tool');
+      assert.equal(await evaluate('document.querySelector("[data-tool=bulldoze]").getAttribute("aria-pressed")'),'false','Opening rail disarms demolition before any submenu choice');
+      assert.equal(await evaluate('document.querySelector("[data-tool=select]").getAttribute("aria-pressed")'),'true');
+      assert.equal(await evaluate('document.querySelector("#rail-tool").getAttribute("aria-expanded")'),'true');
+      if(dismissal==='escape'){await button('#rail-tool');await button('#rail-tool');await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape'});}
+      await cell(269);assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),untouched,'Map touch after opening/dismissing rail cannot demolish the road');
+      assert.equal(await evaluate('document.querySelector("#rail-tool").getAttribute("aria-expanded")'),'false');
+      if(await evaluate('document.querySelector("#inspector").dataset.open==="true"'))await button('#close-inspector');
+    }
+    checks.push(`${name}: rail popup disarms demolition, repeated toggle/Escape and outside map touch preserve the city`);
     await manage();assert.equal(await evaluate('document.querySelector("[data-rail-metric=onboard]").textContent'),String(state.service.snapshot.batches[0].onboard));
     await button('[data-rail-station="b"]');assert.equal((await snapshot()).service.snapshot.openStations.b,false);await button('[data-rail-station="b"]');assert.equal((await snapshot()).service.snapshot.openStations.b,true);
     await button('#rail-service-toggle');assert.equal((await snapshot()).service.snapshot.enabled,false);await button('#rail-service-toggle');assert.equal((await snapshot()).service.snapshot.enabled,true);await shot(name+'-panel');

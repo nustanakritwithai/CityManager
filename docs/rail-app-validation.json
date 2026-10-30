@@ -2,8 +2,10 @@
   "browser": "Edg/156.0.4314.50",
   "url": "http://127.0.0.1:4183/CityManager/",
   "checks": [
+    "portrait: rail popup disarms demolition, repeated toggle/Escape and outside map touch preserve the city",
     "portrait: real retained queues/train, station closure/service pause, occupied edit refusal, fresh confirm/cancel, pan/touchcancel, repeated panel, exact save/reload and Guest identity",
     "portrait: idle track removal, line/station removal, explicit planning confirmation/cancel, no ghost train, planned state saved atomically",
+    "landscape: rail popup disarms demolition, repeated toggle/Escape and outside map touch preserve the city",
     "landscape: real retained queues/train, station closure/service pause, occupied edit refusal, fresh confirm/cancel, pan/touchcancel, repeated panel, exact save/reload and Guest identity",
     "landscape: idle track removal, line/station removal, explicit planning confirmation/cancel, no ghost train, planned state saved atomically"
   ],
