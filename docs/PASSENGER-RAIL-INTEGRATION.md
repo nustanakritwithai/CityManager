@@ -130,3 +130,14 @@ with 69 focused combined/save/traffic checks and TypeScript. The host smoke fixt
 now retains a separate taxi depot while exercising rail touch/demolition and saves.
 Exact combined-head host and CI results are recorded in PR #124; older preview and
 host artifacts above are historical evidence, not acceptance of a later tree.
+
+The subsequent real three-way merge of main
+`dafab6edbf0bd02fa96a2e006af0e17c5aad9a21` preserves these guards and passes
+84 focused combined/save/traffic-bridge tests plus TypeScript. The feature-enabled
+host suite passed on the earlier `867a920f` combined source (Edge emulated touch,
+portrait/landscape, separate taxi depot, zero console errors), but its required
+rerun on the `dafab6e` combined source has NOT run: the low-disk preflight stopped
+before server/browser launch when available space fell below 30 MiB. Do not treat
+the earlier host result as acceptance of this newer tree. Keep the release on hold
+until that host regression and fresh exact-head CI pass; no heavy build/install,
+cleanup, merge, deployment or feature activation was performed for this checkpoint.

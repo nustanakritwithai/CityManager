@@ -1,7 +1,9 @@
 # Proposed traffic boundary for taxi and rail
 
-Status: integration proposal, not an exported or installed PR6 API. No worker should
-connect a live mode to aggregate traffic until identity and receipts below are in place.
+Historical proposal at the PR6 core checkpoint. The subsequent local
+[canonical bridge](traffic-bridge.md) now exports a tested pure-module boundary;
+its implementation and exact signatures supersede the proposed shapes below.
+Runtime, renderer, mode-engine and production save installation are still pending.
 
 ## Verified existing exports
 
