@@ -12,7 +12,7 @@ import { resolve, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
-const toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
+let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
 const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
@@ -157,6 +157,12 @@ async function run(){
   assert.equal(f.state.active.metadata.tick,JSON.parse(seed).tick);assert.equal(f.state.archives.size,1);assert.equal([...f.state.archives.values()][0].sources.length,2);await clean();
   const capture=async name=>{assert.match(name,/^[a-z0-9_-]+$/i);const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve(output,`${name}.png`),Buffer.from(shot.data,'base64'));};
   assert.equal(await evaluate("!!document.querySelector('#save:not(:disabled)')"),true,'real Save control available after authenticated entry');
+  if(process.env.CITYMANAGER_TOOLBAR_CHECKS==='classic'){
+   diagnostics.phase='classic toolbar interactions';
+   const {toolbarChecks}=await import('./visual-final-toolbar.mjs');
+   toolbarEvidence=await toolbarChecks({send,evaluate,capture});await clean();
+   console.log('PASS classic toolbar actual DOM checks',JSON.stringify(toolbarEvidence));
+  }
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
   const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();await clean();await capture('server-save-acknowledged');

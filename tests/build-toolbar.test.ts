@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { BUILD_DETAILS, BUILD_SHORTCUTS, blocksGameShortcuts, installBuildToolbar } from '../src/build-toolbar.ts';
-import { BUILD_ICONS } from '../src/ui-icons.ts';
 import { ROAD_COST } from '../src/sim.ts';
 import { PARK } from '../src/parks.ts';
 import { PLANTS } from '../src/utilities.ts';
@@ -17,26 +16,26 @@ class Stub {
   append(child: Stub) { this.children.push(child); }
   querySelector(selector: string) { return this.children.find(c => selector === '.build-price' ? c.className === 'build-price' : c.className.includes('tool-icon')) ?? null; }
 }
-test('actual controls gain fixed multitone icons, accessible costs and true shortcuts without replacing listeners', () => {
+test('classic artwork and layout stay unchanged while accessible costs and shortcuts remain', () => {
   const old = Object.getOwnPropertyDescriptor(globalThis,'document');
   const dock = new Stub(), buttons = [...Object.keys(BUILD_DETAILS),'taxi','rail','bus'].map(tool => {
     const b = new Stub(); b.dataset.tool = tool; const glyph = new Stub(); glyph.className = tool === 'road' ? 'tool-icon road-asset-icon' : 'tool-icon';
     if (tool === 'road') { glyph.style.maskImage = 'url(old-road.svg)'; glyph.style.width = glyph.style.height = '24px'; }
-    b.append(glyph); return b;
+    glyph.innerHTML = `original-${tool}`; b.append(glyph); return b;
   });
   const doc = { querySelector: () => dock, querySelectorAll: () => buttons, createElement: () => new Stub() };
   Object.defineProperty(globalThis,'document',{configurable:true,value:doc});
   try {
     installBuildToolbar(); installBuildToolbar();
-    assert.match(dock.className,/build-toolbar/);
+    assert.equal(dock.className,'');
     for (const b of buttons) {
       const detail = BUILD_DETAILS[b.dataset.tool];
       if (!detail) { assert.equal(b.children.length,1); continue; }
-      assert.equal(b.children.length,2); assert.equal(b.children[1].textContent,detail.price);
+      assert.equal(b.children.length,1, 'No visible price row or replacement control');
+      assert.equal(b.children[0].innerHTML,`original-${b.dataset.tool}`);
       assert.ok(b.attrs['aria-label'].includes(detail.label)); assert.ok(b.title.includes(detail.price));
       if (detail.key) assert.equal(BUILD_SHORTCUTS[detail.key.toLowerCase()], b.dataset.tool);
-      if (BUILD_ICONS[b.dataset.tool]) assert.match(b.children[0].innerHTML,/aria-hidden="true"/);
-      if (b.dataset.tool === 'road') { assert.equal(b.children[0].style.maskImage,'none'); assert.equal(b.children[0].style.width,''); assert.doesNotMatch(b.children[0].className,/road-asset-icon/); }
+      if (b.dataset.tool === 'road') { assert.equal(b.children[0].style.maskImage,'url(old-road.svg)'); assert.equal(b.children[0].style.width,'24px'); assert.match(b.children[0].className,/road-asset-icon/); }
     }
   } finally { if(old) Object.defineProperty(globalThis,'document',old); else Reflect.deleteProperty(globalThis,'document'); }
 });
@@ -59,13 +58,13 @@ test('keyboard guard preserves editing, IME and browser shortcuts', () => {
     assert.equal(blocksGameShortcuts({...event,target:new Stub(true)} as unknown as KeyboardEvent),true);
   } finally { if(old) Object.defineProperty(globalThis,'Element',old); else Reflect.deleteProperty(globalThis,'Element'); }
 });
-test('artwork is local fixed SVG and dock has scoped touch, focus, scroll and reduced-motion rules', () => {
-  for(const tool of ['select','road','R','C','I','F','park','bulldoze']) {
-    assert.ok(BUILD_ICONS[tool]); assert.doesNotMatch(BUILD_ICONS[tool], /<script|href=|url\(|\bid=/);
-    assert.ok(new Set(BUILD_ICONS[tool].match(/#[0-9a-f]{6}/g)).size >= 2);
-  }
+test('classic styling is not overridden and current keyboard safeguards stay installed', () => {
   const css = readFileSync(new URL('../src/build-toolbar.css',import.meta.url),'utf8');
-  for(const token of ['min-width:44px','min-height:70px','overflow-x:auto','prefers-reduced-motion','focus-visible','backdrop-filter','calc(44 * var(--reader-unit,1px))','calc(70 * var(--reader-unit,1px))']) assert.ok(css.includes(token));
+  assert.doesNotMatch(css, /[{}]/, 'Existing pre-dock styles remain authoritative');
+  for (const file of ['build-toolbar.ts','grouped-tool-menu.ts','select-menu.ts']) {
+    const source = readFileSync(new URL(`../src/${file}`,import.meta.url),'utf8');
+    assert.doesNotMatch(source, /BUILD_ICONS|build-price/, 'No modern artwork or price-row replacement');
+  }
   const main = readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
   assert.ok(main.includes('installHudIcons(); installKeycaps(); installBuildToolbar();'));
   assert.ok(main.includes('blocksGameShortcuts(e)')); assert.ok(main.includes('const shortcuts = BUILD_SHORTCUTS'));

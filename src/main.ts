@@ -400,7 +400,7 @@ function renderPlace() {
   } else if (route?.page === 'help') {
     $('#selection-title').textContent = 'คู่มือและสมมติฐาน'; $('#place-subtitle').textContent = 'วิธีเล่น · ขอบเขตต้นแบบ'; symbol(null, false);
   } else if (route?.page === 'game') {
-    $('#selection-title').textContent = 'เมนูเกม'; $('#place-subtitle').textContent = 'บันทึกในเบราว์เซอร์นี้'; symbol(null, false);
+    $('#selection-title').textContent = 'เมนูเกม'; $('#place-subtitle').textContent = 'บันทึกเมืองบนเซิร์ฟเวอร์'; symbol(null, false);
   } else if (household) {
     $('#selection-title').textContent = 'ครัวเรือน #' + household.id;
     $('#place-subtitle').textContent = 'ข้อมูลเฉพาะครัวเรือน · ไม่ใช่บุคคลรายคน'; symbol('R', false);

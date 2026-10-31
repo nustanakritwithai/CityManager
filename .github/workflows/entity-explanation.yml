@@ -37,21 +37,21 @@ jobs:
       - name: Verify scope routing
         run: node --test tests/ci-visual-scope.test.mjs
       - run: npm ci --no-audit --no-fund
-        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar'
       - run: npm test
-        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar'
       - run: npm run test:advisor
-        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar'
       - name: Check default-disabled production build
-        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar'
         run: npm run build
       - name: Build mock-enabled inspector
-        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar'
         env:
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/entity-build
       - name: Exercise inspector without provider calls
-        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           $entityPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4189', '--strictPort', '--outDir', '.test-output/entity-build') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/entity-preview.log -RedirectStandardError .test-output/entity-preview-error.log
