@@ -59,31 +59,25 @@ test('dispatch sends taxis along the density OD and lowers private road load', (
   assert.ok(engine.events.some(event => event.kind === 'pickup' && event.requestId === 'density'));
 });
 
-test('session depots stay out of the save and do nothing while traffic or the flag is off', () => {
+test('session depots are saved in city.taxi and do nothing while traffic or the flag is off', () => {
   const city = createCity(61025), before = serialize(city);
-  const session = createTaxiSession();
+  const session = createTaxiSession(); session.bind(city);
   const site = city.cells.findIndex((_, index) => taxiSiteReason(city, index, true) === null);
   assert.ok(site >= 0);
   assert.equal(session.place(city, site, true, false).ok, false);
-  assert.equal(session.depots().length, 0);
   assert.equal(session.place(city, site, false, true).ok, false);
-  assert.equal(session.place(city, site, true, true).ok, true);
   assert.equal(serialize(city), before);
   assert.equal(before.includes('"taxi"'), false);
-  bindTaxiSessionDepots(session.trafficSites(true, true));
-  try {
-    assert.equal(captureTrafficGameInput(city).taxis?.length, 0);
-    assert.equal(captureTrafficGameInput(city, { taxiEnabled: false }).taxis?.length, 0);
-    const live = captureTrafficGameInput(city, { taxiEnabled: true });
-    assert.equal(live.taxis?.length, 1);
-    assert.equal(live.taxis?.[0].cell, site);
-    assert.equal(serialize(city), before);
-  } finally { bindTaxiSessionDepots(null); }
+  assert.equal(session.place(city, site, true, true).ok, true);
+  assert.equal(city.taxi?.depots.length, 1);
+  assert.deepEqual(session.trafficSites(true, true), []);
+  assert.equal(captureTrafficGameInput(city).taxis?.length, 0);
+  assert.equal(captureTrafficGameInput(city, { taxiEnabled: true }).taxis?.[0].cell, site);
   session.upgrade(session.depots()[0].id);
   assert.equal(session.depots()[0].level, 2);
   assert.equal(session.toggle(session.depots()[0].id).ok, true);
   assert.equal(session.removeAt(site).ok, true);
-  assert.equal(serialize(city), before);
+  assert.equal(city.taxi?.depots.length, 0);
 });
 
 test('yellow taxi poses are separate from the private-car fleet', () => {
