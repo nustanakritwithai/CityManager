@@ -119,8 +119,11 @@ try {
   checks.push('Explicit frozen v2 import preserves original money/goods/earned claims/clock/jobs and labels all inferred capability counts as legacy assumptions; loading is idempotent and read-only');
 
   await evaluate('window.__workerStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v2"))throw new DOMException("Worker backup quota", "QuotaExceededError");return window.__workerStorageSet.call(this,k,v)}');
-  try { await button('#save'); assert.deepEqual(await storage(), originalStorage); assert.deepEqual(await state(), imported); }
+  try { await button('#save'); assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/บันทึกสำเนากู้คืนในเบราว์เซอร์แล้ว/); assert.deepEqual(await storage(), originalStorage); assert.deepEqual(await state(), imported); }
   finally { await evaluate('Storage.prototype.setItem=window.__workerStorageSet;delete window.__workerStorageSet'); }
+  // Explicitly choose the original import again: test normal-primary migration
+  // separately from the confirmed active-IDB path covered by save-safety.
+  await button('#load-v2');
   await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], v1Raw); assert.equal(backed['citymanager.save.v2'], oldRaw); assert.equal(backed['citymanager.backup.v2'], oldRaw); assert.equal(backed['citymanager.backup.latest'], 'citymanager.backup.v2'); const savedRaw = await assertSavedCity(evaluate, imported); const savedCity = deserializeParkSession(savedRaw).city; assert.deepEqual(savedCity.accounts, importedMoney, 'Saved money matches the imported city'); assert.deepEqual(savedCity.households, importedPeople, 'Saved people match the imported city'); assert.deepEqual(savedCity.goods, importedGoods, 'Saved goods match the imported city');
   await button('#save'); assert.deepEqual(await storage(), backed);
   await evaluate('localStorage.setItem("citymanager.save.v7","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#load-backup'); assert.deepEqual(await state(), imported); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);

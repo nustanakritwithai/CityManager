@@ -3,35 +3,42 @@ import {deserializeParkSession} from './park-runtime.ts';
 import {validateRecoveryMarketJournal} from './market-client.ts';
 const DB='citymanager.emergency-recovery-v1', STORE='branches', VERSION=1, TIMEOUT=10_000;
 export const MAX_RECOVERY_BRANCHES=16;
-type Entry={copy:string;capturedAt:number;tick:number;version:number;revision:string};
-type Branch={baseline:Entry;previous:Entry|null;current:Entry};
+export type Entry={copy:string;capturedAt:number;tick:number;version:number;revision:string};
+export type Branch={baseline:Entry;previous:Entry|null;current:Entry};
 export type RecoveryToken={branchId:string;revision:string};
 export type RecoverySnapshot=RecoveryToken&{raw:string;capturedAt:number;tick:number;version:number;slot:'baseline'|'previous'|'current'};
 export type RecoveryListing={branchId:string;slot:'baseline'|'previous'|'current';snapshot:RecoverySnapshot|null};
 function open(factory:IDBFactory,create:boolean):Promise<IDBDatabase|null>{return new Promise((resolve,reject)=>{
- let settled=false,absent=false;const request=factory.open(DB,VERSION);const timer=setTimeout(()=>{if(!settled){settled=true;reject(Error('recovery-open-timeout'));}},TIMEOUT);
- request.onupgradeneeded=()=>{if(!create){absent=true;request.transaction?.abort();return;}if(!request.result.objectStoreNames.contains(STORE))request.result.createObjectStore(STORE);};
+ let settled=false,absent=false;const request=factory.open(DB);const timer=setTimeout(()=>{if(!settled){settled=true;reject(Error('recovery-open-timeout'));}},TIMEOUT);
+ request.onupgradeneeded=()=>{if(settled){request.transaction?.abort();return;}if(!create){absent=true;request.transaction?.abort();return;}if(!request.result.objectStoreNames.contains(STORE))request.result.createObjectStore(STORE);};
  request.onblocked=()=>{if(!settled){settled=true;clearTimeout(timer);reject(Error('recovery-open-blocked'));}};
  request.onerror=()=>{if(!settled){settled=true;clearTimeout(timer);if(absent)resolve(null);else reject(request.error??Error('recovery-open-failed'));}};
  request.onsuccess=()=>{if(settled){request.result.close();return;}settled=true;clearTimeout(timer);resolve(request.result);};
 });}
 function transaction<T>(db:IDBDatabase,mode:IDBTransactionMode,work:(store:IDBObjectStore,set:(x:T)=>void,abort:(reason:unknown)=>void)=>void):Promise<T>{return new Promise((resolve,reject)=>{
- const tx=db.transaction(STORE,mode);let result:T,reason:unknown;const timer=setTimeout(()=>{reason=Error('recovery-transaction-timeout');try{tx.abort();}catch{}},TIMEOUT);
+ const activeManaged=mode==='readwrite'&&db.objectStoreNames.contains('active-city');
+ const tx=db.transaction(activeManaged?[STORE,'active-city']:STORE,mode);let result:T,reason:unknown;const timer=setTimeout(()=>{reason=Error('recovery-transaction-timeout');try{tx.abort();}catch{}},TIMEOUT);
  const fail=(error:unknown)=>{reason=error;try{tx.abort();}catch{}};
  tx.oncomplete=()=>{clearTimeout(timer);resolve(result);};tx.onabort=()=>{clearTimeout(timer);reject(reason??tx.error??Error('recovery-transaction-aborted'));};tx.onerror=()=>{};
- try{work(tx.objectStore(STORE),value=>{result=value;},fail);}catch(error){fail(error);}
+ const run=()=>{try{work(tx.objectStore(STORE),value=>{result=value;},fail);}catch(error){fail(error);}};
+ try{
+  // Share the same transaction lock with active saves: standalone emergency
+  // writes must never invalidate the active marker's full branch inventory.
+  if(activeManaged){const metadata=tx.objectStore('active-city').count();metadata.onsuccess=()=>{if(metadata.result>0)fail(Object.assign(Error('recovery-active-confirmation-required'),{name:'ActiveLocalConfirmationRequired'}));else run();};}
+  else run();
+ }catch(error){fail(error);}
 });}
 function check(raw:string){const {city}=deserializeParkSession(raw);const parsed=JSON.parse(raw);if(Object.hasOwn(parsed,'market'))validateRecoveryMarketJournal(parsed.market);return {tick:city.tick,version:parsed.version};}
-function valid(branchId:string,slot:'baseline'|'previous'|'current',entry:Entry):RecoverySnapshot{
+export function valid(branchId:string,slot:'baseline'|'previous'|'current',entry:Entry):RecoverySnapshot{
  const raw=decodeSaveCopy(entry.copy);if(raw===null)throw Error('recovery-copy-invalid');const info=check(raw);
  if(info.tick!==entry.tick||info.version!==entry.version||typeof entry.revision!=='string')throw Error('recovery-copy-invalid');
  return {branchId,slot,revision:entry.revision,raw,capturedAt:entry.capturedAt,...info};
 }
-function financialIdentity(raw:string):string{
+export function financialIdentity(raw:string):string{
  const market=JSON.parse(raw).market;if(!market)return 'no-market';
  return JSON.stringify([market.cityId??null,market.guestId??null]);
 }
-function knownBranch(id:string,branch:Branch):boolean{
+export function knownBranch(id:string,branch:Branch):boolean{
  try{
   if(!branch||typeof branch!=='object'||Object.keys(branch).sort().join(',')!=='baseline,current,previous')return false;
   const identity=financialIdentity(valid(id,'current',branch.current).raw);

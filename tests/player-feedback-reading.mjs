@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 // Shared mobile reading surfaces, using only native navigation and synthetic
 // local save failures. Collect the whole matrix before reporting any failure.
-export async function verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts }) {
+export async function verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts, failLocalWrites, restoreLocalWrites, retrySave }) {
   const views = [
     { name:'phone', width:360, height:740, screenWidth:360, screenHeight:780 },
     { name:'short', width:360, height:420, screenWidth:360, screenHeight:780 },
@@ -47,7 +47,7 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
     for (const warning of [false,true]) {
       if (warning) {
         await game();
-        await evaluate("Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic reading-panel quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
+        await failLocalWrites('Synthetic reading-panel quota');
         await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
       }
       for (const name of pages) {
@@ -87,8 +87,8 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
         }
       }
       if (warning) {
-        await evaluate('Storage.prototype.setItem=window.__uxWrite');
-        await game(); await button('#save'); await until("document.querySelector('#save-failure-banner').hidden");
+        await restoreLocalWrites();
+        await retrySave();
       }
     }
   }

@@ -1,0 +1,56 @@
+<!doctype html><html><body><pre id="result">RUNNING</pre><script type="module">
+import {saveActiveLocalSave,readActiveLocalSave} from '../src/active-local-save.ts';
+import {MarketClient,marketJournalForTest,MARKET_SAVE_KEY} from '../src/market-client.ts';
+import {withLocalCitySnapshot,loadRecoveryCityReadOnly} from '../src/local-city-save.ts';import {createSaveGuard} from '../src/save-guard.ts';
+import {saveRecoveryCopy,listRecoveryCopies} from '../src/recovery-idb.ts';
+import {createCity,step} from '../src/sim.ts';import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
+const out=document.querySelector('#result'),assert=(ok,msg)=>{if(!ok)throw Error(msg)},reject=async(fn,pattern)=>{try{await fn();throw Error('unexpected success')}catch(e){assert(pattern.test(String(e)),String(e))}},DB='citymanager.emergency-recovery-v1',fence={primary:'original primary',checkpoint:'original checkpoint',inventory:'all legacy originals'},snap=c=>serializeParkSession(c,createParkRuntime(c));
+(async()=>{
+ assert(await readActiveLocalSave(fence)===null,'absent read');assert(!(await indexedDB.databases()).some(d=>d.name===DB),'read creates nothing');
+ const c=createCity(37),baseline=snap(c),a=await saveRecoveryCopy(baseline,null),other=await saveRecoveryCopy(snap(createCity(41)),null);let token={branchId:a.branchId,revision:a.revision};
+ const held=await new Promise((r,j)=>{const q=indexedDB.open(DB,1);q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error)});
+ await reject(()=>saveActiveLocalSave({raw:baseline,token,expectedMarker:null,fence,assertCurrent(){}}),/blocked/);held.close();await new Promise(r=>setTimeout(r,100));assert((await indexedDB.databases()).find(d=>d.name===DB).version===1,'late upgrade aborted after blocked rejection');
+ let active=await saveActiveLocalSave({raw:baseline,token,expectedMarker:null,fence,assertCurrent(){}}),first=active,prior=baseline;
+ for(let i=0;i<20;i++){prior=snap(c);step(c);active=await saveActiveLocalSave({raw:snap(c),token:{branchId:active.snapshot.branchId,revision:active.snapshot.revision},expectedMarker:active.marker.revision,fence,assertCurrent(){}});}
+ await reject(()=>new Promise((resolve,reject)=>{const q=indexedDB.open(DB,1);q.onsuccess=()=>{q.result.close();resolve()};q.onerror=()=>reject(q.error)}),/VersionError/);
+ let loaded=await readActiveLocalSave(fence);assert(loaded.snapshot.raw===snap(c),'20 rotations exact restart');let list=await listRecoveryCopies();assert(list.find(x=>x.branchId===a.branchId&&x.slot==='baseline').snapshot.raw===baseline,'baseline retained');assert(list.find(x=>x.branchId===a.branchId&&x.slot==='previous').snapshot.raw===prior,'previous retained');assert(list.find(x=>x.branchId===other.branchId&&x.slot==='current').snapshot.raw===other.raw,'other city untouched');
+ await reject(()=>saveActiveLocalSave({raw:baseline,token:{branchId:first.snapshot.branchId,revision:first.snapshot.revision},expectedMarker:first.marker.revision,fence,assertCurrent(){}}),/conflict/);
+ await reject(()=>readActiveLocalSave({...fence,inventory:'another old tab added a backup'}),/choice-changed/);
+ const options=()=>({raw:snap(c),token:{branchId:active.snapshot.branchId,revision:active.snapshot.revision},expectedMarker:active.marker.revision,fence,assertCurrent(){}});
+ const before=JSON.stringify(await readActiveLocalSave(fence)),branchesBefore=JSON.stringify(await listRecoveryCopies()),put=IDBObjectStore.prototype.put;
+ let abortInjected=false,abortFailure;
+ try {
+  IDBObjectStore.prototype.put=function(...args){const q=put.apply(this,args);if(!abortInjected){this.transaction.abort();abortInjected=true;}return q};
+  try {await saveActiveLocalSave(options())} catch(error){abortFailure=error}
+ } finally {IDBObjectStore.prototype.put=put}
+ assert(abortInjected,'first-put transaction abort was injected');
+ assert(JSON.stringify(await readActiveLocalSave(fence))===before,'aborted branch and pointer retain exact previous commit');
+ assert(JSON.stringify(await listRecoveryCopies())===branchesBefore,'abort retains every current, previous, baseline and other-city snapshot');
+ // Edge can throw at the second objectStore lookup after the injected abort;
+ // engines that deliver onabort first use AbortError or our normalized error.
+ assert(abortFailure && (['AbortError','InvalidStateError','TransactionInactiveError'].includes(abortFailure.name)||abortFailure.message==='active-local-transaction-aborted'),'expected injected abort-state error, got '+String(abortFailure));
+ await reject(()=>saveActiveLocalSave({...options(),factory:{open(){throw new DOMException('denied','SecurityError')}}}),/denied/);
+ let checks=0;await reject(()=>saveActiveLocalSave({...options(),assertCurrent(){if(++checks>=2)throw Error('cross-tab changed')}}),/cross-tab/);assert(JSON.stringify(await readActiveLocalSave(fence))===before,'precommit race retained');
+ // The transaction may succeed before the final cross-store fence changes: never report success or roll it back.
+ checks=0;step(c);await reject(()=>saveActiveLocalSave({...options(),assertCurrent(){if(++checks===4)throw Error('postcommit changed')}}),/postcommit/);active=await readActiveLocalSave(fence);assert(active.snapshot.raw===snap(c),'uncertain committed snapshot preserved for review');
+ // Explicit switch A -> primary B -> quota must not mutate active-managed
+ // branches through the legacy fallback; confirmed rebind is atomic instead.
+ const cityA=active.snapshot,allA=JSON.stringify(await listRecoveryCopies()),markerA=JSON.stringify(active);
+ const cityB=snap(createCity(78));
+ await reject(()=>saveRecoveryCopy(cityB,null),/recovery-active-confirmation-required/);
+ assert(JSON.stringify(await listRecoveryCopies())===allA&&JSON.stringify(await readActiveLocalSave(fence))===markerA,'legacy quota fallback preserves all active A data');
+ active=await saveActiveLocalSave({raw:cityB,token:null,expectedMarker:active.marker.revision,fence,assertCurrent(){},allowRebind:true});
+ assert((await readActiveLocalSave(fence)).snapshot.raw===cityB,'confirmed second city reopens exactly');
+ assert((await listRecoveryCopies()).some(x=>x.branchId===cityA.branchId&&x.slot==='current'&&x.snapshot.raw===cityA.raw),'old active A retained after confirmed B');
+ // Real market writer + actual active-save acceptance, then normal readonly restore.
+ const financial=createCity(99),journal=marketJournalForTest(null),receipt='00000000-0000-4000-8000-000000000004';journal.guestId='00000000-0000-4000-8000-000000000003';journal.receipts[receipt]={claimId:'00000000-0000-4000-8000-000000000005',state:'applied',firmId:2,itemId:'crop:rice',quantity:1};financial.market=structuredClone(journal);localStorage.setItem(MARKET_SAVE_KEY,JSON.stringify(journal));let currentCity=financial,network=0;const runtime=createParkRuntime(financial),client=new MarketClient(()=>currentCity,'http://127.0.0.1:4317'),fetchBefore=window.fetch;window.fetch=()=>{network++;throw Error('network forbidden')};
+ active=await withLocalCitySnapshot(financial,runtime,client,raw=>saveActiveLocalSave({raw,token:null,expectedMarker:active.marker.revision,fence,assertCurrent(){},allowRebind:true,marketClient:client}));
+ const journalBefore=localStorage.getItem(MARKET_SAVE_KEY);for(const action of [()=>client.buy('00000000-0000-4000-8000-000000000008',1),()=>client.claim(receipt),()=>client.ack(receipt)])await reject(action,/market-disabled-in-recovery/);assert(network===0&&localStorage.getItem(MARKET_SAVE_KEY)===journalBefore,'activation blocks market and keeps full journal');
+ const restart=new MarketClient(()=>currentCity,'http://127.0.0.1:4317'),guard=createSaveGuard(localStorage);const reopened=await readActiveLocalSave(fence);await loadRecoveryCityReadOnly(reopened.snapshot.raw,restart,guard,restored=>{currentCity=restored.city});assert(!guard.armed,'restart keeps primary guard blocked');for(const action of [()=>restart.buy('00000000-0000-4000-8000-000000000008',1),()=>restart.claim(receipt),()=>restart.ack(receipt)])await reject(action,/market-disabled-in-recovery/);assert(network===0&&localStorage.getItem(MARKET_SAVE_KEY)===journalBefore,'restart blocks market without journal writes');window.fetch=fetchBefore;
+ // No IDB transaction events: bounded uncertain rejection, not a held promise forever.
+ const names=Object.assign(['branches','active-city'],{contains(x){return this.includes(x)}}),stuckFactory={open(){const request={};setTimeout(()=>{request.result={version:2,objectStoreNames:names,close(){},transaction(){return {objectStoreNames:names,abort(){},objectStore(){return {keyPath:null,autoIncrement:false,indexNames:[],openCursor(){return {}}}}}}};request.onsuccess()},0);return request}};
+ await reject(()=>readActiveLocalSave(fence,stuckFactory),/transaction-timeout-uncertain/);
+ const db=await new Promise((r,j)=>{const q=indexedDB.open(DB);q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error)});await new Promise((r,j)=>{const t=db.transaction('active-city','readwrite');t.objectStore('active-city').put({unknown:true},'future-key');t.oncomplete=r;t.onabort=()=>j(t.error)});db.close();await reject(()=>readActiveLocalSave(fence),/metadata-unknown/);await reject(()=>saveActiveLocalSave(options()),/metadata-unknown/);
+ out.textContent='PASS '+JSON.stringify({rotations:20,additiveUpgrade:true,blockedLateUpgradeAborted:true,exactReadback:true,priorAndOtherCitiesRetained:true,staleRejected:true,abortRetained:true,deniedRejected:true,crossTabFenced:true,unknownMetadataPreserved:true,marketBlockedAfterActivationAndRestart:true,boundedNoEventTimeout:true});
+})().catch(e=>out.textContent='FAIL '+(e.stack||e));
+</script></body></html>
