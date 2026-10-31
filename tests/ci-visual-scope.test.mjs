@@ -105,6 +105,6 @@ test('classic toolbar cosmetics require real toolbar changes and reject saving/s
 
 test('history economic/save route requires reviewed source diff and rejects unrelated visuals/backend',()=>{
  const paths=['src/city-history.ts','src/city-history-validation.ts','src/sim.ts','src/server-city-entry.ts','src/city-save-auth.ts','tests/city-history.test.ts','tests/history-validators.test.ts','tests/server-save-browser-smoke.mjs'];
- assert.equal(historyPathsOnly(paths),true);assert.equal(historyOnly(paths),false);assert.equal(historyOnly(paths,{historySourceDiff:'unreviewed source changes'}),false);assert.equal(visualKind(paths),'full');
+ assert.equal(historyPathsOnly(paths),true);assert.equal(historyPathsOnly([...paths,'src/save-storage.ts','tests/save-quota-lossless.test.ts']),true);assert.equal(historyOnly(paths),false);assert.equal(historyOnly(paths,{historySourceDiff:'unreviewed source changes'}),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/main.ts','index.html','src/renderer.ts','src/build-toolbar.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(historyPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });

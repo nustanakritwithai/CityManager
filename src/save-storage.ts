@@ -1,4 +1,5 @@
 import {decodeSaveCopy,encodeSaveCopy} from './save-copy-codec.ts';
+import {deserializeParkSession} from './park-runtime.ts';
 export const SAVE_CONFLICT_LATEST_KEY='citymanager.backup.save-conflict.latest';
 export const AUTOSAVE_CHECKPOINT_KEY='citymanager.checkpoint.latest';
 export const PRE_AUTOSAVE_BACKUP='citymanager.backup.before-autosave';
@@ -90,7 +91,15 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   return null;
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
-  const parsed = JSON.parse(raw);
+  let parsed = JSON.parse(raw);
+  if (parsed?.version === 24) {
+    // This legacy utility is not an application save path. Validate the full
+    // checkpoint/session before any write; only unwrap metadata for the existing
+    // migration-backup decisions below. The supplied raw bytes stay untouched.
+    deserializeParkSession(raw);
+    const rules: Record<number, string> = {19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18'};
+    parsed = {...parsed, version:parsed.historyBaseVersion, rulesVersion:rules[parsed.historyBaseVersion]};
+  }
   const market10 = parsed?.version === 10 && parsed?.rulesVersion === 'chain-5' && parsed?.market?.version === 10 && parsed?.market?.rulesVersion === 'chain-5' && typeof parsed.market.cityId === 'string' && typeof parsed.market.seq === 'string' && Array.isArray(parsed.market.operations) && Array.isArray(parsed.market.escrow) && parsed.market.receipts && typeof parsed.market.receipts === 'object';
   const farm11 = parsed?.version === 11 && parsed?.rulesVersion === 'chain-6' && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
   const factory12 = parsed?.version === 12 && parsed?.rulesVersion === 'chain-7' && (!parsed.market || (parsed.market.version === 10 && parsed.market.rulesVersion === 'chain-5'));
