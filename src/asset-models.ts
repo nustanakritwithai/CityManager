@@ -3,6 +3,7 @@ import {
   type AppBase, type ContainerResource, type RenderComponent
 } from 'playcanvas';
 import { TOWER_ROOFS, luxuryTower, luxuryTowerLayout, residentialVisualHeight, roomLights, towerGlassGeometry, type TowerName } from './building-visuals.ts';
+import { apartmentLayout, type ApartmentPart } from './apartment-visuals.ts';
 import type { RoadTile } from './road-tiles.ts';
 import { retailCapacity } from './retail-capacity.ts';
 
@@ -33,7 +34,7 @@ const glowRegion = (name: CityModelName): readonly [number, number, number, numb
 
 /** Visual variants per building level; a parcel hash picks one, never the sim RNG. */
 const LEVEL_VARIANTS: Readonly<Record<'R' | 'C' | 'I', readonly (readonly CityModelName[])[]>> = {
-  R: [['house-a', 'house-c', 'house-d'], ['house-b', 'house-e', 'house-f'], ['tower-a', 'tower-b', 'tower-c']],
+  R: [['house-a', 'house-c', 'house-d'], ['house-b', 'house-e', 'house-f'], ['house-g', 'house-h', 'house-i']],
   C: [['shop-a', 'shop-b', 'shop-c', 'shop-d'], ['shop-e', 'shop-f', 'shop-g'], ['tower-a', 'tower-b', 'tower-c']],
   I: [['factory-a', 'factory-c'], ['factory-b', 'factory-d'], ['factory-e', 'factory-f']],
 };
@@ -64,6 +65,7 @@ export class CityAssets {
   private readonly lit = new Map<StandardMaterial, StandardMaterial>();
   private readonly masks = new Map<string, Texture>();
   private readonly glassMeshes = new Map<Mesh, Mesh | null>();
+  private readonly apartmentMaterials = new Map<string, StandardMaterial>();
   private readonly luxuryMaterials = new Map<string, StandardMaterial>();
   private roomMaterial: StandardMaterial | null = null;
   private readonly tinted = new Map<StandardMaterial, StandardMaterial>();
@@ -77,6 +79,8 @@ export class CityAssets {
         mesh.decRefCount(); if (mesh.refCount < 1) mesh.destroy();
       }
       this.glassMeshes.clear();
+      for (const material of this.apartmentMaterials.values()) material.destroy();
+      this.apartmentMaterials.clear();
       for (const material of this.luxuryMaterials.values()) material.destroy();
       this.luxuryMaterials.clear();
       this.roomMaterial?.emissiveMap?.destroy(); this.roomMaterial?.destroy(); this.roomMaterial = null;
@@ -347,12 +351,42 @@ export class CityAssets {
     }
   }
 
+  private apartmentMaterial(finish: ApartmentPart['finish'], occupied: boolean): StandardMaterial {
+    const key = `${finish}:${(finish === 'window' || finish === 'lamp') && occupied}`;
+    const cached = this.apartmentMaterials.get(key); if (cached) return cached;
+    const material = new StandardMaterial(); material.name = `Apartment ${key}`;
+    material.diffuse = new Color().fromString({ wall: '#d7ae88', trim: '#eee0c7', rail: '#667b79', window: '#607b82', soil: '#947359', plant: '#708c54', lamp: '#e5be77' }[finish]);
+    material.emissiveIntensity = 0;
+    if ((finish === 'window' || finish === 'lamp') && occupied) {
+      material.emissive = new Color(1, .69, .34); this.glowRegistrar?.(material, 1.8);
+    }
+    material.update(); this.apartmentMaterials.set(key, material); return material;
+  }
+
+  private apartment(level: number, occupied: boolean): Entity {
+    const root = new Entity(`Apartment level ${level}`), layout = apartmentLayout(level);
+    for (const part of layout.parts) {
+      const entity = new Entity(part.name);
+      entity.addComponent('render', { type: 'box', material: this.apartmentMaterial(part.finish, occupied), castShadows: part.finish !== 'window' });
+      entity.setLocalPosition(...part.position); entity.setLocalScale(...part.size); root.addChild(entity);
+    }
+    // Existing admitted props are ground-centred by instantiate; tank height is explicitly fitted.
+    for (const x of level === 6 ? [-.4, -.03] : [-.36]) {
+      const tank = this.instantiate('tank', .32, 1, false, false, undefined, .2);
+      if (tank) { tank.name = 'Apartment rooftop tank'; tank.setLocalPosition(x, layout.roofY, -.35); root.addChild(tank); }
+    }
+    const awning = this.detail('awning', .28);
+    if (awning) { awning.name = 'Apartment entrance awning'; awning.setLocalPosition(-.12, .37, .32); root.addChild(awning); }
+    return root;
+  }
+
   /**
    * `level` is residential 1–9, commercial retail level minus one (1–6), or industrial model tier (1–3).
    * `lit` marks a building with residents or allocated workers; empty ones stay dark at night.
    */
   building(zone: 'R' | 'C' | 'I', level: number, cell: number, lit = false): Entity | null {
-    const family = LEVEL_VARIANTS[zone][Math.max(1, Math.min(3, level)) - 1];
+    if (zone === 'R' && level >= 4 && level <= 6) return this.apartment(level, lit);
+    const family = zone === 'R' && level >= 7 ? ['tower-a', 'tower-b', 'tower-c'] as const : LEVEL_VARIANTS[zone][Math.max(1, Math.min(3, level)) - 1];
     const name = family[cellHash(cell) % family.length];
     // Residential levels 4–9 retain their existing apartment/condo height progression.
     const tower = name.startsWith('tower-');

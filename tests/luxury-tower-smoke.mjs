@@ -41,7 +41,7 @@ try {
   await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
   await send('Page.navigate',{url}); await until('!!window.towerReview?.ready',30_000);
   const results=[];
-  for(const [zone,level] of [['R',3],['R',4],['R',9],['C',4],['C',7]]) for(const night of [false,true]) {
+  for(const [zone,level] of [['R',7],['R',9],['C',4],['C',7]]) for(const night of [false,true]) {
     await evaluate(`window.towerReview.show('${zone}',${level},${night})`);
     const rows=await evaluate('window.towerReview.inspect()'); assert.equal(rows.length,3);
     for(const row of rows) {

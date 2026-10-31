@@ -103,7 +103,7 @@ test('both groups, road and selector popups exclude each other; Cancel remains a
 }));
 test('grouping retains original placement command paths and shortcuts', () => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  for (const entry of ["'1': 'R'", "'2': 'C'", "'3': 'I'", "'4': 'F'", "'5': 'power'", "'6': 'water'", "'7': 'park'"]) assert.ok(main.includes(entry));
+  for (const entry of ["'1': 'R'", "'2': 'C'", "'3': 'I'", "'4': 'F'", "'5': 'power'", "'6': 'water'", "'7': 'park'"]) assert.ok(readFileSync(new URL('../src/build-toolbar.ts', import.meta.url), 'utf8').includes(entry));
   for (const command of ['zoneCell(city, index, tool as Zone)', 'buildPlant(city, index, tool)', 'buildPark(city, index)', 'buildCampus(city, index, tool)']) assert.ok(main.includes(command));
   assert.doesNotMatch(readFileSync(new URL('../src/grouped-tool-menu.ts', import.meta.url), 'utf8'), /from ['"]\.\/sim\.ts|buildPlant\(|buildPark\(|buildCampus\(|zoneCell\(/);
 });

@@ -534,11 +534,11 @@ export class CityView {
             if (b.zone === 'R' && b.level < 3 && hashCell(i) % 3 === 1) { const bush = this.assets?.detail('planter', .34); if (bush) { bush.setLocalPosition(-.7, .1, -.68); tile.addChild(bush); } }
             continue;
           }
-          const h = 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;
+          const h = b.zone === 'R' ? .75 + visualLevel * .2 : 0.9 + visualLevel * 0.75 + (i % 3) * 0.22;
           const tower = b.zone === 'I' ? h * 0.65 : h;
           this.box(tile, -0.1, tower / 2 + 0.1, 0, 1.25, tower, 1.2, { R: '#d7e5d1', C: '#b6d4df', I: '#d9c09a' }[b.zone]);
           this.box(tile, -0.1, tower + 0.17, 0, 1.34, 0.16, 1.3, { R: '#d0683f', C: '#4a62a6', I: '#8c6340' }[b.zone]);
-          for (let level = 0; level < Math.min(visualLevel + 1, 5); level++) {
+          for (let level = 0; level < (b.zone === 'R' ? Math.min(visualLevel, 2) : Math.min(visualLevel + 1, 5)); level++) {
             for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, lit ? this.windowLit : '#f9df9a', false);
           }
           if (b.zone === 'I') this.box(tile, 0.52, h * 0.65, -0.38, 0.2, h * 1.1, 0.22, '#786b60');

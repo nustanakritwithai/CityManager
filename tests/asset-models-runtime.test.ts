@@ -81,10 +81,23 @@ test('real engine tower assembly preserves base meshes, occupancy, shared rooms 
     assert.equal(assets.luxuryMaterials.size, materials + 1, 'only one shared beacon material for all commercial towers');
     assert.equal(registered.length, 2); assert.equal(registered[1].blink, true);
     assert.equal(registered[1].strength, 4);
-    const low = assets.building('R', 3, 0, false) as Entity;
+    const low = assets.building('R', 4, 0, false) as Entity;
     assert.equal(low.findByName('Luxury podium'), null); low.destroy();
+    for (let n = 0; n < 30; n++) {
+      const apartment = assets.building('R', 4 + n % 3, n, n % 2 === 0) as Entity; app.root.addChild(apartment);
+      assert.equal(apartment.findByName('Luxury podium'), null);
+      const windows = (apartment.findComponents('render') as any[]).filter(r => r.entity.name === 'Apartment warm window');
+      assert.equal(windows.length, (3 + n % 3) * 2);
+      const windowMaterial = windows[0].meshInstances[0].material as StandardMaterial;
+      assert.equal(windowMaterial, assets.apartmentMaterials.get(`window:${n % 2 === 0}`));
+      const disconnected = disconnectedBuildingMaterial(windowMaterial);
+      windowMaterial.emissiveIntensity = n % 2 === 0 ? 1.8 : 0;
+      assert.equal(disconnected.emissiveIntensity, 0); disconnected.destroy(); apartment.destroy();
+    }
+    assert.equal(assets.apartmentMaterials.size, 9, 'bounded shared palette across all apartment levels and occupancy');
+    assert.equal(registered.length, 4, 'one occupied apartment window and one courtyard lamp registration');
     dark.destroy(); assert.equal(mesh.refCount,1, 'source mesh remains owned by asset cache');
-    app.destroy(); assert.equal(assets.glassMeshes.size,0); assert.equal(assets.luxuryMaterials.size,0); assert.equal(sharedMesh.refCount,0);
+    app.destroy(); assert.equal(assets.glassMeshes.size,0); assert.equal(assets.apartmentMaterials.size,0); assert.equal(assets.luxuryMaterials.size,0); assert.equal(sharedMesh.refCount,0);
   } finally {
     globalThis.document = oldDocument;
     if (app.root) app.destroy();

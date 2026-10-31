@@ -26,15 +26,25 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
           cache: npm
+      - name: Select exact visual scope
+        id: scope
+        run: node scripts/ci-visual-scope.mjs
+      - name: Verify scope routing
+        run: node --test tests/ci-visual-scope.test.mjs
       - run: npm ci --no-audit --no-fund
+        if: steps.scope.outputs.kind != 'visual-final'
       - name: Verify decision and journal boundaries
+        if: steps.scope.outputs.kind != 'visual-final'
         run: node --experimental-strip-types --test tests/owner-decision.test.ts tests/owner-decision-session.test.ts
       - run: npm run build
+        if: steps.scope.outputs.kind != 'visual-final'
       - name: Exercise actual local rule controls without provider traffic
+        if: steps.scope.outputs.kind != 'visual-final'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           $ownerPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4191', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/owner-preview.log -RedirectStandardError .test-output/owner-preview-error.log

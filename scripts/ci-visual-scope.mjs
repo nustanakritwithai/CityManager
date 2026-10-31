@@ -28,12 +28,38 @@ const vehicleAllowed = new Set([
   '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml', '.github/workflows/traffic-enabled.yml',
   'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs',
 ]);
-export function visualKind(paths) {
+const finalAllowed = new Set([
+  'src/apartment-visuals.ts','src/asset-models.ts','src/building-visuals.ts','src/renderer.ts',
+  'src/build-toolbar.ts','src/build-toolbar.css','src/grouped-tool-menu.ts','src/select-menu.ts','src/ui-icons.ts','src/main.ts',
+  'tests/apartment-preview.ts','tests/apartment-preview.html','tests/apartment-visuals.test.ts','vite.apartment.config.ts',
+  'tests/asset-models-runtime.test.ts','tests/building-visuals.test.ts','tests/luxury-tower-smoke.mjs',
+  'tests/build-toolbar.test.ts','tests/grouped-tool-menu.test.ts','tests/select-menu.test.ts',
+  'tests/visual-final-smoke.mjs','tests/visual-final-toolbar.mjs',
+  'scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs',
+  '.github/workflows/citymanager.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml',
+  '.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/save-safety.yml',
+]);
+// Path allowlisting alone is insufficient for main.ts: permit exactly the five toolbar edits.
+export function toolbarMainOnly(before, after) {
+  if (typeof before !== 'string' || typeof after !== 'string') return false;
+  const edits = [
+    ["import './player-feedback.css';", "import './player-feedback.css';\nimport './build-toolbar.css';"],
+    ['installHudIcons(); installKeycaps(); installSheetHandle', 'installHudIcons(); installKeycaps(); installBuildToolbar(); installSheetHandle'],
+    ["if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || document.querySelector('dialog[open]')) return;", "if (blocksGameShortcuts(e) || document.querySelector('dialog[open]')) return;"],
+    ["const shortcuts: Record<string, string> = { v: 'select', r: 'road', '1': 'R', '2': 'C', '3': 'I', '4': 'F', '5': 'power', '6': 'water', '7': 'park', b: 'bulldoze', p: 'select' };", 'const shortcuts = BUILD_SHORTCUTS;'],
+  ];
+  let expected = before.replace(/\r\n/g,'\n');
+  for (const [from,to] of edits) { if (expected.split(from).length !== 2) return false; expected = expected.replace(from,to); }
+  expected = "import { installBuildToolbar, BUILD_SHORTCUTS, blocksGameShortcuts } from './build-toolbar.ts';\n" + expected;
+  return expected === after.replace(/\r\n/g,'\n');
+}
+export function visualKind(paths, evidence = {}) {
+  if (['src/apartment-visuals.ts','src/build-toolbar.ts','src/main.ts'].every(p=>paths.includes(p)) && paths.every(p=>finalAllowed.has(p)) && toolbarMainOnly(evidence.mainBefore,evidence.mainAfter)) return 'visual-final';
   if (paths.includes('src/vehicle-geometry.ts') && paths.every(p => vehicleAllowed.has(p))) return 'vehicle';
   if (paths.includes('src/factory-visuals.ts') && paths.every(p => factoryAllowed.has(p))) return 'factory';
   return towerOnly(paths) ? 'tower' : 'full';
 }
-export function changedPaths(eventName, event, git) {
+export function changedRange(eventName, event, git) {
   const sha = /^[0-9a-f]{40}$/;
   let base, head;
   if (eventName === 'pull_request') {
@@ -46,6 +72,10 @@ export function changedPaths(eventName, event, git) {
   } else throw Error('Full suite for manual or unknown events');
   if (!sha.test(base ?? '') || !sha.test(head ?? '') || /^0+$/.test(base) || /^0+$/.test(head)) throw Error('Invalid comparison range');
   if (git(['rev-parse', 'HEAD']).trim() !== head) throw Error('Checked-out SHA differs from event head');
+  return {base,head};
+}
+export function changedPaths(eventName,event,git) {
+  const {base,head}=changedRange(eventName,event,git);
   // --no-renames ensures both sides of a rename participate in the allowlist.
   return git(['diff', '--name-only', '--no-renames', '-z', base, head]).split('\0').filter(Boolean);
 }
@@ -53,8 +83,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let selected = 'full';
   try {
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-    const paths = changedPaths(process.env.GITHUB_EVENT_NAME, event, args => execFileSync('git', args, { encoding: 'utf8' }));
-    selected = visualKind(paths);
+    const git = args => execFileSync('git', args, { encoding: 'utf8' });
+    const paths = changedPaths(process.env.GITHUB_EVENT_NAME, event, git);
+    const evidence = {};
+    if (paths.includes('src/main.ts')) {
+      const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);
+      evidence.mainBefore=git(['show',`${base}:src/main.ts`]); evidence.mainAfter=git(['show',`${head}:src/main.ts`]);
+    }
+    selected = visualKind(paths,evidence);
     console.log(`Changed paths: ${JSON.stringify(paths)}`);
   } catch (error) { console.log(`Full-suite fallback: ${error.message}`); }
   console.log(`Visual check route: ${selected}`);

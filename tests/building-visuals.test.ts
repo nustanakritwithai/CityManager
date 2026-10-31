@@ -82,8 +82,8 @@ for (const [name, expectedTriangles] of [['tower-a', 14], ['tower-b', 20], ['tow
 }
 
 
-test('luxury scope uses real R4+/C4+ levels without changing industrial tiers', () => {
-  assert.equal(luxuryTower('R', 3), false); assert.equal(luxuryTower('R', 4), true);
+test('luxury scope uses real R7+/C4+ levels without changing industrial tiers', () => {
+  assert.equal(luxuryTower('R', 3), false); assert.equal(luxuryTower('R', 4), false); assert.equal(luxuryTower('R', 6), false); assert.equal(luxuryTower('R', 7), true);
   assert.equal(luxuryTower('C', 2), false); assert.equal(luxuryTower('C', 3), true);
   assert.equal(luxuryTower('I', 9), false);
 });
