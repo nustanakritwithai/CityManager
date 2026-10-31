@@ -863,8 +863,8 @@ async function boot() {
       const oldVersion = JSON.parse(saved.raw).version, legacy = oldVersion >= 1 && oldVersion <= 6;
       await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,restored=>{
         if (!restored.city.education) adoptSavedEducation(restored.city);
-        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);autosave.reset();
-        taxiSession.clear(); publishTaxi(true);
+        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);
+        taxiSession.clear(); publishTaxi(true); autosave.adoptLoaded();
       });
       saveFeedback.recovered();
       cueLimiter.reset();
