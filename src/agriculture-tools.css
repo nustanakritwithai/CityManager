@@ -1,4 +1,0 @@
-/* Agriculture is a land-use tool; markets use the existing commercial tool. */
-.zone-f,.demand-item.f{color:#badb78}
-button.zone-f.active{color:#badb78;border-color:#badb7899;background:#badb7818}
-#growth-summary .demand-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,96px),1fr))}

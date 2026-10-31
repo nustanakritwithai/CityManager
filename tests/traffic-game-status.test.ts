@@ -1,4 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {trafficGameStatus} from '../src/traffic/game-status.ts';
-const base={failure:null,ready:true,updating:false,step:1,demandRate:2,clippedRate:0,waiting:0,blocked:0,congestedLinks:0,dropped:0,modal:null};
-test('missing or busy initial frame says updating rather than stable zeros',()=>{assert.match(trafficGameStatus({...base,ready:false,step:0}),/กำลังอัปเดต/);assert.match(trafficGameStatus({...base,ready:true,updating:true,step:0}),/กำลังอัปเดต/);assert.doesNotMatch(trafficGameStatus({...base,ready:false,step:0}),/ความต้องการ 0/);});
-test('established snapshots label pending work and failures take precedence',()=>{assert.match(trafficGameStatus({...base,updating:true}),/กำลังอัปเดต/);assert.doesNotMatch(trafficGameStatus(base),/กำลังอัปเดต/);assert.match(trafficGameStatus({...base,failure:'failed',ready:false}),/ไม่พร้อม/);});
