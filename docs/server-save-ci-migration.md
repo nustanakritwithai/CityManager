@@ -16,3 +16,8 @@ These existing entrypoints inline localStorage seeds, load buttons and/or assert
 - Main-entry-dependent entity/owner/player/traffic browser scenarios, and production boots in visual fixtures, also require authenticated server setup.
 
 Follow-up migration must reuse the isolated server fixture, seed the service through its real contract, await the authenticated entry, and preserve every unrelated economy/UI assertion. Assertions requiring removed browser persistence must be explicitly replaced with equivalent server durability checks, not deleted or marked passed. Pure simulation/unit tests remain in place. A future default/full CityManager browser run fails with an actionable migration prerequisite rather than blindly invoking the known-incompatible legacy startup chain. Other scopes must receive their own reviewed server-fixture startup before being claimed compatible.
+
+
+## Reviewed save-management transition
+
+A separate exact-path and before/after main/index hash guard admits the delete/new-city management change to the existing mandatory server-save route. It adds fresh-world and management-dialog unit contracts while retaining server entry/auth/migration/save contracts and real Chrome/Windows built-browser lifecycle acceptance. Installer, database migration and production PostgreSQL adapter files are outside this frontend route. Unknown or mixed changes still fail closed. No unrelated toolbar/traffic matrix is reintroduced.

@@ -35,9 +35,9 @@ async function stopBrowser(child,ws){
 }
 
 function fixtureService(){
- let state={active:null,requests:new Map(),archives:new Map()},tail=Promise.resolve();
+ let state={active:null,fence:0,snapshots:[],requests:new Map(),archives:new Map()},tail=Promise.resolve();
  const store={read:async()=>structuredClone(state.active),listArchives:async()=>[...state.archives.values()].map(({raw,...info})=>structuredClone(info)),readArchive:async(_,id)=>structuredClone(state.archives.get(id)??null),
-  transaction:(_,work)=>{const job=tail.then(async()=>{const next=structuredClone(state);const result=await work({request:async id=>next.requests.get(id),requestCount:async()=>next.requests.size,current:async()=>next.active,bytes:async()=>0,publish:async v=>{next.active=structuredClone(v);},record:async(id,payloadHash,response)=>{next.requests.set(id,{payloadHash,response:structuredClone(response)});},hasArchive:async id=>next.archives.has(id),archive:async(id,raw,source)=>{const old=next.archives.get(id)??{hash:id,raw,sources:[]};if(!old.sources.includes(source))old.sources.push(source);next.archives.set(id,old);}});state=next;return result;});tail=job.catch(()=>{});return job;}};
+  transaction:(_,work)=>{const job=tail.then(async()=>{const next=structuredClone(state);const result=await work({request:async id=>next.requests.get(id),requestCount:async()=>next.requests.size,current:async()=>next.active,deletionFence:async()=>next.fence,wasRetired:async cityId=>[...next.requests.values()].some(r=>r.response.deleted&&r.response.cityId===cityId),resetAllowed:async()=>true,bytes:async()=>0,publish:async v=>{next.active=structuredClone(v);next.snapshots.push(structuredClone(v));next.snapshots=next.snapshots.slice(-2);},retire:async marker=>{for(const copy of next.snapshots){const archived=next.archives.get(copy.rawHash)??{hash:copy.rawHash,raw:copy.raw,sources:[]};assert.equal(archived.raw,copy.raw);const source=`deleted:${copy.cityId}:${marker.revision}:snapshot:${copy.revision}`;if(!archived.sources.includes(source))archived.sources.push(source);next.archives.set(copy.rawHash,archived);}next.snapshots=[];next.active=structuredClone(marker);next.fence=marker.revision;},record:async(id,payloadHash,response)=>{const {raw,...receipt}=response;next.requests.set(id,{payloadHash,response:structuredClone(receipt)});},hasArchive:async id=>next.archives.has(id),archive:async(id,raw,source)=>{const old=next.archives.get(id)??{hash:id,raw,sources:[]};if(!old.sources.includes(source))old.sources.push(source);next.archives.set(id,old);}});state=next;return result;});tail=job.catch(()=>{});return job;}};
  const service=createServerCityService(store);
  return {service,get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0};
 }
@@ -54,7 +54,21 @@ async function selfTest(){
  await assert.rejects(f.service.mutate(OWNER,randomUUID(),body),e=>e.status===409);
  await f.service.archive(OWNER,{raw:body.raw,source:'primary'});await f.service.archive(OWNER,{raw:body.raw,source:'checkpoint'});
  assert.deepEqual((await f.service.readArchive(OWNER,hash(body.raw))).sources,['primary','checkpoint']);
- assert.equal(f.state.active.revision,1);console.log('PASS fixture service self-test (not browser acceptance)');
+ assert.equal(f.state.active.revision,1);
+ const deleteId=randomUUID(),remove={action:'delete',cityId,expectedRevision:1};
+ const tombstone=await f.service.mutate(OWNER,deleteId,remove);
+ assert.deepEqual(tombstone,{owner:OWNER,cityId,revision:2,deleted:true,archiveHash:hash(body.raw)});
+ assert.deepEqual(await f.service.read(OWNER),tombstone,'reload returns tombstone, not old city');
+ assert.deepEqual(await f.service.mutate(OWNER,deleteId,remove),tombstone,'uncertain delete retry is idempotent');
+ assert.equal(f.state.snapshots.length,0);assert.equal((await f.service.readArchive(OWNER,tombstone.archiveHash)).raw,body.raw);
+ await assert.rejects(f.service.mutate(OWNER,id,body),e=>e.status===409,'old create receipt cannot resurrect deleted city');
+ const newCityId=randomUUID(),market={version:10,rulesVersion:'chain-5',guestId:OWNER,cityId:newCityId,seq:'0',operations:[],escrow:[],receipts:{}};
+ const fresh={action:'create',cityId:newCityId,expectedRevision:2,raw:JSON.stringify({version:23,tick:0,market}),metadata:{name:'fixture fresh',population:0,tick:0}};
+ const created=await f.service.mutate(OWNER,randomUUID(),fresh);assert.equal(created.revision,3);assert.equal(created.owner,OWNER);assert.notEqual(created.cityId,cityId);
+ await assert.rejects(f.service.mutate(OWNER,randomUUID(),{action:'save',cityId,expectedRevision:1,raw:body.raw,metadata:body.metadata}),e=>e.status===409);
+ await assert.rejects(f.service.mutate(OWNER,deleteId,remove),e=>e.status===409,'old delete receipt cannot retire new city');
+ assert.equal(f.state.active.cityId,newCityId);
+ console.log('PASS fixture service self-test (not browser acceptance)');
 }
 async function run(){
  const dist=resolve('dist');await readFile(resolve(dist,'index.html'));const f=fixtureService();
@@ -71,7 +85,7 @@ async function run(){
     if(f.mode==='disconnect'){req.socket.destroy();return;}
     if(f.mode==='conflict')throw Object.assign(Error('save-conflict'),{status:409});
     if(f.delay)await sleep(f.delay);
-    result=await f.service.mutate(OWNER,req.headers['idempotency-key'],data);f.acknowledged++;
+    result=await f.service.mutate(OWNER,req.headers['idempotency-key'],data);if(f.mode==='drop-delete-ack'&&data.action==='delete'){req.socket.destroy();return;}f.acknowledged++;
    }else if(route==='/v1/city-save'){if(f.mode==='load-error')throw Object.assign(Error('fixture-load-unavailable'),{status:503});result=await f.service.read(OWNER);}
    else if(route==='/v1/city-save/archives')result=req.method==='POST'?await f.service.archive(OWNER,data):await f.service.listArchives(OWNER);
    else if(route.startsWith('/v1/city-save/archives/'))result=await f.service.readArchive(OWNER,route.split('/').at(-1));
@@ -138,10 +152,36 @@ async function run(){
   // Failed network request stays pending in memory, never local fallback. Retry same key/body.
   f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure');assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
   const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'retry acknowledgement');await settled();assert.deepEqual(f.posts[start+1],pendingCommand);
+  // Management is an explicit two-step lifecycle; Cancel has no mutation.
+  diagnostics.phase='management cancel';const beforeCancel=f.state.active,cancelPosts=f.posts.length;
+  await click('#new-city');await until(()=>evaluate("!!document.querySelector('#save-management-dialog[open]')"),'management dialog');await click('#save-management-cancel');
+  assert.equal(await evaluate("!!document.querySelector('#save-management-dialog')"),false);assert.equal(f.posts.length,cancelPosts);assert.deepEqual(f.state.active,beforeCancel);await clean();
+  // Simulate a committed delete with lost response. No create control until exact ACK retry.
+  await click('#new-city');f.mode='drop-delete-ack';const deletePost=f.posts.length;await click('#save-management-delete');
+  await until(()=>evaluate("document.querySelector('#save-management-dialog [role=status]')?.textContent.includes('ยังไม่สำเร็จ')"),'uncertain delete visible');
+  assert.equal(f.state.active.deleted,true);assert.equal(await evaluate("!!document.querySelector('#save-management-create')"),false);
+  assert.equal(await evaluate("document.querySelector('#save-management-cancel').disabled"),true);await clean();
+  const deleteCommand=f.posts[deletePost],deletedId=f.state.active.cityId,deletedRevision=f.state.active.revision;
+  f.mode='ok';await click('#save-management-delete');await until(()=>evaluate("!!document.querySelector('#save-management-create:not(:disabled)')"),'verified delete acknowledgement');
+  assert.deepEqual(f.posts[deletePost+1],deleteCommand,'same delete key and body on uncertain retry');
+  assert.equal(f.state.active.revision,deletedRevision);assert.ok(f.state.archives.has(f.state.active.archiveHash));
+  await click('#save-management-create');await until(()=>evaluate("!document.querySelector('#save-management-dialog')"),'fresh server city acknowledgement');
+  const fresh=f.state.active;assert.equal(fresh.owner,OWNER);assert.notEqual(fresh.cityId,deletedId);assert.equal(fresh.revision,deletedRevision+1);
+  const journal=JSON.parse(fresh.raw).market;assert.equal(journal.guestId,OWNER);assert.equal(journal.cityId,fresh.cityId);assert.equal(journal.seq,'0');assert.deepEqual(journal.operations,[]);assert.deepEqual(journal.escrow,[]);assert.deepEqual(journal.receipts,{});await clean();await capture('server-save-management-fresh');
+  await assert.rejects(f.service.mutate(OWNER,randomUUID(),{action:'delete',cityId:deletedId,expectedRevision:beforeCancel.revision}),e=>e.status===409);assert.equal(f.state.active.cityId,fresh.cityId,'stale delete cannot replace fresh city');
+  // Another device deletes the synthetic city. Reload must honor the tombstone,
+  // not reactivate the untouched legacy browser migration input.
+  const remoteDeleted=await f.service.mutate(OWNER,randomUUID(),{action:'delete',cityId:fresh.cityId,expectedRevision:fresh.revision});
+  diagnostics.phase='reload deleted marker';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});
+  await until(()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')"),'tombstone entry');await click('.guest-entry-card button');
+  await until(()=>evaluate("document.querySelector('.guest-entry-card button')?.textContent==='เริ่มเมืองใหม่'&&!document.querySelector('.guest-entry-card button').disabled"),'explicit fresh choice after tombstone');expectReloadDialog=false;
+  assert.equal(await evaluate('!!window.cityManager'),false);assert.deepEqual(f.state.active,remoteDeleted);assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),seed);await clean();
+  await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'fresh entry after tombstone');
+  assert.equal(f.state.active.owner,OWNER);assert.notEqual(f.state.active.cityId,fresh.cityId);assert.equal(f.state.active.metadata.tick,0);await clean();
   // A 409 never overwrites another revision and no automatic retry silently wins.
   f.mode='conflict';rev=f.state.active.revision;await click('#save');await until(failed,'conflict failure');assert.equal(f.state.active.revision,rev);await clean();await capture('server-save-conflict');
   assert.equal(await evaluate("!!document.querySelector('.market-launch')"),false,'trading stays disabled');
-  console.log('PASS built server-save browser acceptance: load failure+retry/migration/manual ACK/autosave/reload/quota/network retry/conflict/no browser city writes');
+  console.log('PASS built server-save browser acceptance: load failure+retry/migration/manual ACK/autosave/reload/quota/network retry/management cancel-delete-fresh/tombstone reload/conflict/no browser city writes');
  }catch(error){acceptanceError=error;diagnostics.acceptanceError=String(error?.stack??error);}
  finally{
   diagnostics.server={acknowledged:f.acknowledged,posts:f.posts.length,revision:f.state.active?.revision??null,mode:f.mode};
