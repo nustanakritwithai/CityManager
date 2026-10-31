@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { roomLights, residentialVisualHeight, towerGlassGeometry, TOWER_ROOFS } from '../src/building-visuals.ts';
+import { roomLights, luxuryTower, luxuryTowerLayout, aviationBeaconPulse, residentialVisualHeight, towerGlassGeometry, TOWER_ROOFS } from '../src/building-visuals.ts';
 
 function towerData(name: string) {
   const bytes = readFileSync(new URL(`../public/assets/kenney-city/models/${name}.glb`, import.meta.url));
@@ -80,3 +80,32 @@ for (const [name, expectedTriangles] of [['tower-a', 14], ['tower-b', 20], ['tow
     }
   });
 }
+
+
+test('luxury scope uses real R4+/C4+ levels without changing industrial tiers', () => {
+  assert.equal(luxuryTower('R', 3), false); assert.equal(luxuryTower('R', 4), true);
+  assert.equal(luxuryTower('C', 2), false); assert.equal(luxuryTower('C', 3), true);
+  assert.equal(luxuryTower('I', 9), false);
+});
+test('setback envelope retains height and parcel footprint; crown supports all pool corners', () => {
+  for (const height of [2.35, 2.7, 3.3, 3.9, 4.4, 5, 5.6, 6.8]) {
+    const l = luxuryTowerLayout(height);
+    assert.ok(Math.abs(l.podiumHeight + l.shaftHeight + l.crownHeight - height) < 1e-12);
+    assert.ok(Math.abs(l.crownBase + l.crownHeight - height) < 1e-12);
+    assert.equal(l.roofY, height); assert.equal(l.podiumWidth, 1.35);
+    assert.ok(l.shaftWidth < l.crownWidth && l.crownWidth < l.podiumWidth);
+    for (const x of [.22 - .25, .22 + .25]) for (const z of [.23 - .28, .23 + .28]) {
+      assert.ok(Math.abs(x) <= l.crownWidth / 2 && Math.abs(z) <= l.crownWidth / 2);
+    }
+    for (const x of [-.25 - .15, -.25 + .15]) for (const z of [-.22 - .15, -.22 + .15]) {
+      assert.ok(Math.abs(x) <= l.crownWidth / 2 && Math.abs(z) <= l.crownWidth / 2);
+    }
+  }
+});
+test('aviation beacon actually alternates at night, never emits during daylight', () => {
+  for (const t of [0, .2, .55, 1, 1.99, 2, 2.2, 20]) assert.equal(aviationBeaconPulse(t, 0), 0);
+  assert.equal(aviationBeaconPulse(.2, .49), 0);
+  assert.equal(aviationBeaconPulse(.2, 1), 1); assert.equal(aviationBeaconPulse(.6, 1), 0);
+  assert.equal(aviationBeaconPulse(1.9, 1), 0); assert.equal(aviationBeaconPulse(2.2, 1), 1);
+  assert.equal(aviationBeaconPulse(2.2, .75), .75);
+});

@@ -44,3 +44,18 @@ export function towerGlassGeometry(positions: readonly number[], normals: readon
   }
   return out;
 }
+
+/** Retail's renderer tier is its actual level minus one. */
+export function luxuryTower(zone: 'R' | 'C' | 'I', visualLevel: number): boolean {
+  return zone === 'R' ? visualLevel >= 4 : zone === 'C' && visualLevel >= 3;
+}
+/** The envelope retains its original height/footprint; fittings sit on a supported flat crown. */
+export function luxuryTowerLayout(height: number) {
+  return { podiumHeight: height * .22, shaftHeight: height * .72, crownHeight: height * .06,
+    shaftBase: height * .22, crownBase: height * .94, roofY: height,
+    podiumWidth: 1.35, shaftWidth: 1.0, crownWidth: 1.08 };
+}
+/** One slow pulse per two real seconds, including when the simulation clock is paused. */
+export function aviationBeaconPulse(seconds: number, night: number): number {
+  return night >= .5 && ((seconds % 2) + 2) % 2 < .55 ? night : 0;
+}
