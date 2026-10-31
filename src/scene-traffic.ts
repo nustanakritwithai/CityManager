@@ -1,6 +1,8 @@
+import { registerVehicleGlow } from './vehicle-lighting.ts';
+import { vehicleParts, vehicleMeshData, vehicleVariant, type VehicleKind } from './vehicle-geometry.ts';
 import { roadTopologyKey } from './road-topology.ts';
 import { decorativePlan } from './traffic/flag.ts';
-import { Entity, StandardMaterial, Color, BLEND_NORMAL } from 'playcanvas';
+import { Entity, Mesh, MeshInstance, StandardMaterial, Color, BLEND_NORMAL, type AppBase } from 'playcanvas';
 import type { CityView } from './renderer.ts';
 import { MAX_CARS, MAX_TRUCKS, commuteGoal, keyHash, leaderAhead, overlapping, trafficPlan, type CommuteGoal, type Mover, type TrafficPlan } from './traffic-plan.ts';
 import type { City } from './sim.ts';
@@ -34,7 +36,6 @@ export class SceneTraffic {
   private readonly actors = new Map<string, Actor>();
   private readonly smoke = new Map<number, Entity>();
   private readonly puffMaterial = new StandardMaterial();
-  private readonly lightMaterial = new StandardMaterial();
   private signature = '';
   private topologySignature = '';
   private enabled = true;
@@ -49,9 +50,7 @@ export class SceneTraffic {
     this.puffMaterial.name = 'Factory smoke'; this.puffMaterial.diffuse = new Color(.78, .78, .8); this.puffMaterial.opacity = .5;
     this.puffMaterial.blendType = BLEND_NORMAL; this.puffMaterial.depthWrite = false; this.puffMaterial.useLighting = false;
     this.puffMaterial.emissive = new Color(.7, .7, .72); this.puffMaterial.update();
-    this.lightMaterial.name = 'Vehicle lights'; this.lightMaterial.diffuse = new Color(.9, .85, .6);
-    this.lightMaterial.emissive = new Color(1, .86, .55); this.lightMaterial.emissiveIntensity = 0; this.lightMaterial.update();
-    view.atmosphere.registerGlow(this.lightMaterial, 2.2);
+
   }
 
   get count() { return this.actors.size; }
@@ -149,11 +148,11 @@ export class SceneTraffic {
     const existing = this.actors.get(key);
     if (existing) { existing.retire = false; return; }
     const entity = new Entity(`${kind} ${key}`), view = this.view, box = (x: number, y: number, z: number, sx: number, sy: number, sz: number, c: string | StandardMaterial) => view.box(entity, x, y, z, sx, sy, sz, c, false);
-    if (kind === 'car') {
-      const c = CAR_COLOURS[colour % CAR_COLOURS.length];
-      box(0, .1, 0, .3, .1, .6, c); box(0, .19, -.03, .24, .09, .3, '#cfe3ee'); box(0, .11, .31, .24, .04, .03, this.lightMaterial);
-    } else if (kind === 'truck') {
-      box(0, .12, .2, .32, .16, .22, '#e8e0cf'); box(0, .15, -.12, .36, .22, .5, '#4a6572'); box(0, .27, -.12, .3, .03, .44, CARGO_COLOURS[colour % CARGO_COLOURS.length]); box(0, .09, .32, .26, .04, .03, this.lightMaterial);
+    if (kind === 'car' || kind === 'truck') {
+      const paint = kind === 'car' ? CAR_COLOURS[colour % CAR_COLOURS.length] : '#e8e0cf';
+      addVehicleDetail(entity, view, kind === 'truck' ? 'truck' : vehicleVariant(key), paint,
+        CARGO_COLOURS[colour % CARGO_COLOURS.length],
+        kind === 'car' ? .3 / .28 : 1, kind === 'car' ? .6 / .42 : 1);
     } else {
       const c = WALKER_COLOURS[colour % WALKER_COLOURS.length];
       box(0, .05, 0, .07, .1, .06, '#3b4258'); box(0, .15, 0, .1, .13, .08, c); box(0, .26, 0, .075, .075, .075, '#f1c9a5');
@@ -281,4 +280,54 @@ export class SceneTraffic {
     actor.entity.setLocalPosition(x, .14, z);
     actor.entity.setLocalEulerAngles(0, Math.atan2(hx, hz) * 180 / Math.PI, 0);
   }
+}
+
+/** Small app-owned cache, pinned while actors are recycled on road edits / city replacement.
+ * Two shared materials; each actor gets two draw instances, never a light or timer.
+ */
+type DetailCache = { body: StandardMaterial; lamps: StandardMaterial; meshes: Map<string, readonly [Mesh, Mesh]> };
+const detailCaches = new WeakMap<AppBase, DetailCache>();
+function detailCache(app: AppBase): DetailCache {
+  const existing = detailCaches.get(app); if (existing) return existing;
+  const body = new StandardMaterial(); body.diffuse = new Color(1, 1, 1); body.diffuseVertexColor = true; body.gloss = .22; body.update();
+  const lamps = new StandardMaterial(); lamps.diffuse = new Color(1, 1, 1); lamps.diffuseVertexColor = true;
+  lamps.emissive = new Color(1, 1, 1); lamps.emissiveVertexColor = true; lamps.update();
+  const unregister = registerVehicleGlow(app, lamps), cache: DetailCache = { body, lamps, meshes: new Map() };
+  detailCaches.set(app, cache);
+  app.once('destroy', () => {
+    unregister();
+    for (const pair of cache.meshes.values()) for (const mesh of pair) { mesh.decRefCount(); if (mesh.refCount < 1) mesh.destroy(); }
+    cache.meshes.clear(); body.destroy(); lamps.destroy(); detailCaches.delete(app);
+  });
+  return cache;
+}
+/** The actual shipped decorative vehicle assembler, shared with the isolated fixture.
+ * Fallback cars retain .30 x .60 scale; trucks retain their existing road envelope.
+ */
+export function addVehicleDetail(parent: Entity, view: Pick<CityView, 'app'>, kind: VehicleKind,
+  paint: string, cargo: string, widthScale = 1, lengthScale = 1): void {
+  const cache = detailCache(view.app), key = `${kind}:${paint}:${kind === 'truck' ? cargo : ''}`;
+  let pair = cache.meshes.get(key);
+  if (!pair) {
+    const parts = vehicleParts(kind);
+    pair = [false, true].map(lights => {
+      const data = vehicleMeshData(parts.filter(p => (p.role === 'headlight' || p.role === 'taillight') === lights), paint, cargo);
+      const mesh = new Mesh(view.app.graphicsDevice);
+      mesh.setPositions(data.positions); mesh.setNormals(data.normals); mesh.setColors32(data.colors); mesh.setIndices(data.indices); mesh.update();
+      mesh.incRefCount(); // Actor removal must not destroy geometry still owned by this cache.
+      return mesh;
+    }) as [Mesh, Mesh];
+    cache.meshes.set(key, pair);
+  }
+  pair.forEach((mesh, i) => {
+    const entity = new Entity(i ? 'Vehicle detail lamps' : 'Vehicle detail body'); parent.addChild(entity);
+    entity.setLocalScale(widthScale, 1, lengthScale);
+    const instance = new MeshInstance(mesh, i ? cache.lamps : cache.body, entity);
+    instance.castShadow = false; instance.receiveShadow = false;
+    entity.addComponent('render', { meshInstances: [instance], castShadows: false, receiveShadows: false });
+  });
+}
+export function vehicleDetailDiagnostics(app: AppBase) {
+  const cache = detailCaches.get(app), meshes = cache ? [...cache.meshes.values()].flat() : [];
+  return { meshes: meshes.length, materials: cache ? 2 : 0, actorMeshReferences: meshes.reduce((n, mesh) => n + Math.max(0, mesh.refCount - 1), 0) };
 }
