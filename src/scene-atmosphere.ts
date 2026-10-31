@@ -3,6 +3,7 @@ import {
   FOG_LINEAR, TONEMAP_ACES, SSAOTYPE_LIGHTING, SSAOTYPE_NONE, SHADOW_PCF3_32F, CULLFACE_FRONT, BLEND_ADDITIVE,
   PIXELFORMAT_SRGBA8, FILTER_LINEAR, ADDRESS_CLAMP_TO_EDGE, type AppBase
 } from 'playcanvas';
+import { aviationBeaconPulse } from './building-visuals.ts';
 import type { Atmosphere, Quality, Rgb } from './atmosphere.ts';
 
 const SKY_RINGS = 10, SKY_SEGMENTS = 32, SKY_RADIUS = 210;
@@ -15,6 +16,8 @@ export class SceneAtmosphere {
   private readonly skyMesh: Mesh;
   private readonly skyDirections: Vec3[] = [];
   private readonly glow = new Map<StandardMaterial, number>();
+  private readonly blinking = new Set<StandardMaterial>();
+  private beaconSeconds = 0;
   private frame: CameraFrame | null = null;
   private quality: Quality = 'high';
   private current: Atmosphere | null = null;
@@ -22,6 +25,8 @@ export class SceneAtmosphere {
   readonly lampPool: StandardMaterial;
 
   constructor(private readonly app: AppBase, private readonly camera: Entity) {
+    app.on('update', this.animateBeacons, this);
+    app.once('destroy', () => { app.off('update', this.animateBeacons, this); this.blinking.clear(); this.glow.clear(); });
     this.sun = new Entity('Sun and moon light');
     this.sun.addComponent('light', {
       type: 'directional', color: new Color(1, .93, .81), intensity: 1.25, castShadows: false,
@@ -75,10 +80,20 @@ export class SceneAtmosphere {
   }
 
   /** Emissive strength follows night; strength is the full-night emissiveIntensity. */
-  registerGlow(material: StandardMaterial, strength: number) {
+  private animateBeacons(dt: number) {
+    this.beaconSeconds = (this.beaconSeconds + Math.max(0, dt)) % 2;
+    for (const material of this.blinking) {
+      const intensity = this.glow.get(material)! * aviationBeaconPulse(this.beaconSeconds, this.current?.night ?? 0);
+      if (material.emissiveIntensity === intensity) continue;
+      material.emissiveIntensity = intensity; material.update(); this.app.renderNextFrame = true;
+    }
+  }
+
+  registerGlow(material: StandardMaterial, strength: number, blink = false) {
+    if (blink) this.blinking.add(material);
     this.glow.set(material, strength);
     const night = this.current?.night ?? 0;
-    material.emissiveIntensity = strength * night; material.update();
+    material.emissiveIntensity = strength * (blink ? aviationBeaconPulse(this.beaconSeconds, night) : night); material.update();
   }
 
   setQuality(quality: Quality) {
@@ -140,7 +155,7 @@ export class SceneAtmosphere {
     }
     this.skyMesh.setColors32(colors); this.skyMesh.update();
 
-    for (const [material, strength] of this.glow) { material.emissiveIntensity = strength * a.night; material.update(); }
+    for (const [material, strength] of this.glow) { material.emissiveIntensity = strength * (this.blinking.has(material) ? aviationBeaconPulse(this.beaconSeconds, a.night) : a.night); material.update(); }
     if (this.frame) {
       const frame = this.frame;
       frame.bloom.intensity = .008 + a.night * .045;

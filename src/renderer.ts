@@ -75,7 +75,7 @@ export class CityView {
     view.setup();
     app.start();
     void CityAssets.load(app).then(assets => {
-      assets.glowRegistrar = (material, strength) => view.atmosphere.registerGlow(material, strength);
+      assets.glowRegistrar = (material, strength, blink) => view.atmosphere.registerGlow(material, strength, blink);
       view.assets = assets; view.visualRevision++;
       view.tileHighway();
       for (const tree of view.forest) {

@@ -19,8 +19,8 @@ test('real engine tower assembly preserves base meshes, occupancy, shared rooms 
   const oldDocument = globalThis.document;
   const fills: string[] = [];
   globalThis.document = { createElement() { return { width: 512, height: 512, getContext() { return { fillStyle: '', fillRect() { fills.push(this.fillStyle); } }; } }; }, removeEventListener() {} } as unknown as Document;
-  const assets = new CityAssets(app), registered: { material: StandardMaterial; strength: number }[] = [];
-  assets.glowRegistrar = (material: StandardMaterial, strength: number) => registered.push({ material, strength });
+  const assets = new CityAssets(app), registered: { material: StandardMaterial; strength: number; blink?: boolean }[] = [];
+  assets.glowRegistrar = (material: StandardMaterial, strength: number, blink?: boolean) => registered.push({ material, strength, blink });
   const mesh = new Mesh(app.graphicsDevice);
   mesh.setPositions([-.5,0,0, .5,0,0, .5,3,0, -.5,3,0]);
   mesh.setNormals([0,0,1, 0,0,1, 0,0,1, 0,0,1]);
@@ -35,10 +35,11 @@ test('real engine tower assembly preserves base meshes, occupancy, shared rooms 
   });
   try {
     const dark = assets.building('R',7,0,false) as Entity; assert.ok(dark); app.root.addChild(dark);
-    assert.equal(dark.findComponents('render').length, 1); assert.equal(registered.length, 0);
+    assert.equal(dark.findByName('Tower room overlays'), null);
+    assert.ok(dark.findByName('Luxury podium')); assert.ok(dark.findByName('Turquoise infinity pool')); assert.equal(registered.length, 0);
     const first = assets.building('R',7,0,true) as Entity; app.root.addChild(first);
     const renders = first.findComponents('render') as any[];
-    assert.equal(renders.length, 2);
+    assert.equal(renders.filter(r => r.entity.name === 'Tower room overlays').length, 2, 'podium and shaft share occupied room overlays');
     assert.equal(renders[0].meshInstances[0].mesh, mesh, 'adding overlays must not destroy base render instances');
     assert.equal(renders[0].meshInstances[0].material, material);
     const overlay = renders[1].meshInstances[0], sharedMesh = overlay.mesh;
@@ -66,12 +67,53 @@ test('real engine tower assembly preserves base meshes, occupancy, shared rooms 
     }
     assert.equal(sharedMesh.refCount,1); assert.equal(assets.glassMeshes.size,1); assert.equal(fills.length,fillCount);
     assert.equal(registered.length,1, 'no material/texture allocation per parcel or rebuild');
+    const materials = assets.luxuryMaterials.size;
+    for (let n = 0; n < 24; n++) {
+      const commercial = assets.building('C', 3 + n % 4, n, n % 2 === 0) as Entity; app.root.addChild(commercial);
+      assert.ok(commercial.findByName('Aviation spire'));
+      assert.equal(commercial.findByName('Turquoise infinity pool'), null);
+      const beacon = (commercial.findByName('Aviation beacon') as Entity).render!.meshInstances[0].material as StandardMaterial;
+      assert.equal(beacon, assets.luxuryMaterials.get('beacon'));
+      const fadedBeacon = disconnectedBuildingMaterial(beacon);
+      beacon.emissiveIntensity = 4; assert.equal(fadedBeacon.emissiveIntensity, 0);
+      fadedBeacon.destroy(); commercial.destroy();
+    }
+    assert.equal(assets.luxuryMaterials.size, materials + 1, 'only one shared beacon material for all commercial towers');
+    assert.equal(registered.length, 2); assert.equal(registered[1].blink, true);
+    assert.equal(registered[1].strength, 4);
+    const low = assets.building('R', 3, 0, false) as Entity;
+    assert.equal(low.findByName('Luxury podium'), null); low.destroy();
     dark.destroy(); assert.equal(mesh.refCount,1, 'source mesh remains owned by asset cache');
-    app.destroy(); assert.equal(assets.glassMeshes.size,0); assert.equal(sharedMesh.refCount,0);
+    app.destroy(); assert.equal(assets.glassMeshes.size,0); assert.equal(assets.luxuryMaterials.size,0); assert.equal(sharedMesh.refCount,0);
   } finally {
     globalThis.document = oldDocument;
     if (app.root) app.destroy();
     mesh.decRefCount(); if (mesh.refCount < 1) mesh.destroy(); material.destroy();
     await rm(out, { recursive: true, force: true });
   }
+});
+
+test('central beacon animation uses shared material, requests frames only on transitions and respects night/fade', async () => {
+  const out = await mkdtemp(resolve('.test-output/beacon-runtime-'));
+  await build({ configFile: false, logLevel: 'silent', build: { ssr: resolve('src/scene-atmosphere.ts'), outDir: out, emptyOutDir: true } });
+  const { SceneAtmosphere } = await import(pathToFileURL(resolve(out, 'scene-atmosphere.js')).href);
+  // Exercise the actual central animation methods, without pretending NullGraphicsDevice renders pixels.
+  const atmosphere = Object.create(SceneAtmosphere.prototype);
+  atmosphere.glow = new Map(); atmosphere.blinking = new Set(); atmosphere.beaconSeconds = 0;
+  atmosphere.current = { night: 0 }; atmosphere.app = { renderNextFrame: false };
+  const beacon = new StandardMaterial(), room = new StandardMaterial();
+  try {
+    atmosphere.registerGlow(beacon, 4, true); atmosphere.registerGlow(room, 2.2);
+    atmosphere.animateBeacons(.2); assert.equal(beacon.emissiveIntensity, 0);
+    assert.equal(atmosphere.app.renderNextFrame, false);
+    atmosphere.current = { night: 1 }; atmosphere.animateBeacons(.1);
+    assert.equal(beacon.emissiveIntensity, 4); assert.equal(atmosphere.app.renderNextFrame, true);
+    atmosphere.app.renderNextFrame = false; atmosphere.animateBeacons(.1);
+    assert.equal(atmosphere.app.renderNextFrame, false, 'steady pulse does not dirty material/frame');
+    atmosphere.animateBeacons(.2); assert.equal(beacon.emissiveIntensity, 0);
+    atmosphere.animateBeacons(1.5); assert.equal(beacon.emissiveIntensity, 4);
+    atmosphere.current = { night: 0 }; atmosphere.animateBeacons(.01);
+    assert.equal(beacon.emissiveIntensity, 0); assert.equal(room.emissiveIntensity, 0, 'beacon clock does not animate rooms');
+    assert.equal(atmosphere.glow.size, 2); assert.equal(atmosphere.blinking.size, 1);
+  } finally { beacon.destroy(); room.destroy(); await rm(out, { recursive: true, force: true }); }
 });

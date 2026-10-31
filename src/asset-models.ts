@@ -1,8 +1,8 @@
 import {
-  BoundingBox, Color, Entity, Mesh, MeshInstance, StandardMaterial, Texture, PIXELFORMAT_SRGBA8, FILTER_LINEAR, BLEND_ADDITIVE,
+  BoundingBox, Color, Entity, Mesh, MeshInstance, StandardMaterial, Texture, PIXELFORMAT_SRGBA8, FILTER_LINEAR, BLEND_ADDITIVE, BLEND_NORMAL,
   type AppBase, type ContainerResource, type RenderComponent
 } from 'playcanvas';
-import { TOWER_ROOFS, residentialVisualHeight, roomLights, towerGlassGeometry, type TowerName } from './building-visuals.ts';
+import { TOWER_ROOFS, luxuryTower, luxuryTowerLayout, residentialVisualHeight, roomLights, towerGlassGeometry, type TowerName } from './building-visuals.ts';
 import type { RoadTile } from './road-tiles.ts';
 import { retailCapacity } from './retail-capacity.ts';
 
@@ -44,7 +44,7 @@ const LEVEL_VARIANTS: Readonly<Record<'R' | 'C' | 'I', readonly (readonly CityMo
 const ROOF_PALETTES: readonly (readonly [light: string, dark: string])[] = [['#ff9144', '#ff7e44'], ['#6282d1', '#5a63c3'], ['#f36743', '#dd5b4a'], ['#787d95', '#626880']];
 const ROOF_SWATCHES: readonly [x: number, y: number][] = [[0, 128], [0, 192]];
 const cellHash = (cell: number, salt = 0) => ((Math.imul((cell + salt * 977) >>> 0, 1103515245) + 12345) >>> 16) & 0x7fff;
-export type GlowRegistrar = (material: StandardMaterial, strength: number) => void;
+export type GlowRegistrar = (material: StandardMaterial, strength: number, blink?: boolean) => void;
 
 /** Keep additive night overlays black when a disconnected building is greyed out. */
 export function disconnectedBuildingMaterial(source: StandardMaterial): StandardMaterial {
@@ -64,6 +64,7 @@ export class CityAssets {
   private readonly lit = new Map<StandardMaterial, StandardMaterial>();
   private readonly masks = new Map<string, Texture>();
   private readonly glassMeshes = new Map<Mesh, Mesh | null>();
+  private readonly luxuryMaterials = new Map<string, StandardMaterial>();
   private roomMaterial: StandardMaterial | null = null;
   private readonly tinted = new Map<StandardMaterial, StandardMaterial>();
   private readonly roofed = new Map<StandardMaterial, StandardMaterial[]>();
@@ -76,6 +77,8 @@ export class CityAssets {
         mesh.decRefCount(); if (mesh.refCount < 1) mesh.destroy();
       }
       this.glassMeshes.clear();
+      for (const material of this.luxuryMaterials.values()) material.destroy();
+      this.luxuryMaterials.clear();
       this.roomMaterial?.emissiveMap?.destroy(); this.roomMaterial?.destroy(); this.roomMaterial = null;
     });
   }
@@ -282,8 +285,70 @@ export class CityAssets {
     }
   }
 
+  /** Small, app-owned palette shared by every luxury fitting (never one material per parcel). */
+  private luxuryMaterial(kind: 'stone' | 'metal' | 'water' | 'glass' | 'beacon'): StandardMaterial {
+    const existing = this.luxuryMaterials.get(kind); if (existing) return existing;
+    const material = new StandardMaterial(); material.name = `Luxury tower ${kind}`;
+    material.diffuse = new Color().fromString({ stone: '#e2e7df', metal: '#6a8090', water: '#28d9d5', glass: '#a0e6ee', beacon: '#70191d' }[kind]);
+    if (kind === 'water' || kind === 'glass') {
+      material.blendType = BLEND_NORMAL; material.opacity = kind === 'water' ? .72 : .34;
+      material.depthWrite = false; material.shininess = 85;
+    }
+    if (kind === 'beacon') { material.emissive = new Color(1, .015, .01); material.emissiveIntensity = 0; }
+    material.update(); this.luxuryMaterials.set(kind, material);
+    if (kind === 'beacon') this.glowRegistrar?.(material, 4, true);
+    return material;
+  }
+
+  private luxuryBox(parent: Entity, name: string, x: number, y: number, z: number,
+    width: number, height: number, depth: number, kind: 'stone' | 'metal' | 'water' | 'glass' | 'beacon') {
+    const part = new Entity(name);
+    part.addComponent('render', { type: 'box', material: this.luxuryMaterial(kind), castShadows: kind !== 'glass' && kind !== 'water' && kind !== 'beacon' });
+    part.setLocalPosition(x, y, z); part.setLocalScale(width, height, depth); parent.addChild(part);
+  }
+
+  private luxuryDetails(building: Entity, model: Entity, name: CityModelName, zone: 'R' | 'C', lit: boolean): void {
+    // Measure the already fitted model: commercial authoring bounds differ among tower-a/b/c.
+    let bounds: BoundingBox | undefined;
+    for (const render of model.findComponents('render') as RenderComponent[]) for (const instance of render.meshInstances) {
+      if (bounds) bounds.add(instance.aabb); else bounds = instance.aabb.clone();
+    }
+    if (!bounds) return;
+    const height = bounds.halfExtents.y * 2, layout = luxuryTowerLayout(height);
+    const podium = this.instantiate(name, layout.podiumWidth, 1, lit, false, undefined, layout.podiumHeight);
+    if (!podium) return;
+    podium.name = 'Luxury podium'; building.addChild(podium);
+    const scale = model.getLocalScale().clone();
+    model.setLocalScale(scale.x * layout.shaftWidth / 1.35, scale.y * .72, scale.z * layout.shaftWidth / 1.35);
+    model.setLocalPosition(0, layout.shaftBase, 0); model.name = 'Luxury setback shaft';
+    this.luxuryBox(building, 'Luxury flat crown', 0, layout.crownBase + layout.crownHeight / 2, 0,
+      layout.crownWidth, layout.crownHeight, layout.crownWidth, 'stone');
+    // Continuous balcony at the podium setback, with translucent rails and solid coping.
+    const deck = layout.podiumHeight;
+    this.luxuryBox(building, 'Setback balcony deck', 0, deck, 0, 1.35, .035, 1.35, 'stone');
+    for (const side of [-1, 1]) {
+      this.luxuryBox(building, 'Glass balcony rail', 0, deck + .09, side * .65, 1.3, .16, .018, 'glass');
+      this.luxuryBox(building, 'Glass balcony rail', side * .65, deck + .09, 0, .018, .16, 1.3, 'glass');
+      this.luxuryBox(building, 'Balcony coping', 0, deck + .175, side * .65, 1.32, .018, .025, 'metal');
+      this.luxuryBox(building, 'Balcony coping', side * .65, deck + .175, 0, .025, .018, 1.32, 'metal');
+    }
+    const roof = layout.roofY;
+    if (zone === 'R') {
+      // A solid basin supports translucent water with a rimless outer edge, fully inside the crown.
+      this.luxuryBox(building, 'Infinity pool basin', .22, roof + .025, .23, .50, .05, .56, 'metal');
+      this.luxuryBox(building, 'Turquoise infinity pool', .22, roof + .058, .23, .48, .025, .54, 'water');
+      const lounge = this.detail('parasol-a', .30);
+      if (lounge) { lounge.name = 'Luxury rooftop parasol'; lounge.setLocalPosition(-.25, roof + .004, -.22); building.addChild(lounge); }
+      for (const z of [-.13, .12]) this.luxuryBox(building, 'Poolside lounge seat', -.26, roof + .035, z, .22, .07, .13, 'stone');
+    } else {
+      this.luxuryBox(building, 'Aviation spire base', 0, roof + .045, 0, .20, .09, .20, 'metal');
+      this.luxuryBox(building, 'Aviation spire', 0, roof + .27, 0, .045, .48, .045, 'metal');
+      this.luxuryBox(building, 'Aviation beacon', 0, roof + .53, 0, .085, .07, .085, 'beacon');
+    }
+  }
+
   /**
-   * `level` is residential 1–9, otherwise the visual tier (1–3). Tower heights preserve housing progression.
+   * `level` is residential 1–9, commercial retail level minus one (1–6), or industrial model tier (1–3).
    * `lit` marks a building with residents or allocated workers; empty ones stay dark at night.
    */
   building(zone: 'R' | 'C' | 'I', level: number, cell: number, lit = false): Entity | null {
@@ -297,7 +362,9 @@ export class CityAssets {
     if (!model || !tower) return model;
     // Props use parcel coordinates, not the model's authoring scale or commercial height stretch.
     const building = new Entity(`Detailed ${name}`); building.addChild(model);
-    if (zone === 'R') {
+    const luxury = luxuryTower(zone, level);
+    if (luxury && zone !== 'I') this.luxuryDetails(building, model, name, zone, lit);
+    if (zone === 'R' && !luxury) {
       const roof = TOWER_ROOFS[name as TowerName], y = targetHeight! * roof.deckRatio;
       const lounge = this.detail('parasol-a', .36);
       if (lounge) { lounge.setLocalPosition(roof.lounge[0], y + .004, roof.lounge[1]); building.addChild(lounge); }
