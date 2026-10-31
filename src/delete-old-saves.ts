@@ -20,13 +20,16 @@ function deleteDb(factory: IDBFactory, name: string): Promise<void> {
   });
 }
 /** Keep exactly `keepRaw` as the primary save; delete every other CityManager save copy.
- * Order is safe: the kept city is written and verified BEFORE anything is deleted. */
+ * Old copies are deleted first (frees quota), then the kept city is written and verified. */
 export async function deleteOldSaves(keepRaw: string, storage: Store = localStorage, factory: IDBFactory | undefined = globalThis.indexedDB): Promise<{ removed: string[] }> {
   if (!keepRaw) throw Error('เลือกเมืองที่จะเก็บไว้ก่อน');
   JSON.parse(keepRaw);
-  storage.setItem(SAVE_KEY, keepRaw);
-  if (storage.getItem(SAVE_KEY) !== keepRaw) throw Error('บันทึกเมืองที่เลือกไม่สำเร็จ · ยังไม่ได้ลบอะไร');
+  // Free space first: with a full localStorage the primary write would fail before anything was deleted.
   if (factory) await deleteDb(factory, CITY_RECOVERY_DB);
   const removed = oldSaveKeys(storage); for (const k of removed) storage.removeItem(k);
+  if (storage.getItem(SAVE_KEY) !== keepRaw) {
+    try { storage.setItem(SAVE_KEY, keepRaw); } catch { throw Error('บันทึกเมืองที่เลือกไม่สำเร็จ · กรุณาส่งออกเมืองก่อนลองใหม่'); }
+    if (storage.getItem(SAVE_KEY) !== keepRaw) throw Error('บันทึกเมืองที่เลือกไม่สำเร็จ');
+  }
   return { removed };
 }

@@ -10,7 +10,7 @@ const CAR_COLOURS = ['#d9534f', '#e8a53a', '#4a90d9', '#58b368', '#e6e6e0', '#8e
 const WALKER_COLOURS = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f', '#9b72aa', '#d9d9d9'];
 // Cargo beds, in traffic-plan CARGO order: rice, vegetables, sugarcane, milled rice, canned food, sugar.
 const CARGO_COLOURS = ['#e9cf6a', '#5fae4e', '#7cc5d9', '#f2ecdc', '#c8573f', '#ffffff'];
-const CELL = 2, LANE = .36, SIDEWALK = .8;
+const CELL = 2, LANE = .36, SIDEWALK = .8, PARK = .68;
 /** Car following: stop this far behind the vehicle ahead, drive at full pace from SAFE_GAP. */
 const MIN_GAP = .14, SAFE_GAP = .75, ACCEL = 3, WAIT_LIMIT = 3, GHOST = 1.2;
 /** Seconds a truck spends loading or unloading at each end of its delivery route. */
@@ -112,13 +112,18 @@ export class SceneTraffic {
   setCarsEnabled(enabled: boolean) {
     if (enabled === this.carsEnabled) return;
     this.carsEnabled = enabled;
-    if (!enabled) for (const [id, actor] of this.actors) if (actor.kind === 'car') { actor.entity.destroy(); this.actors.delete(id); }
+    // Moving decorative cars give way to the fleet, but commuters' parked cars stay at the kerb.
+    if (!enabled) for (const [id, actor] of this.actors) if (actor.kind === 'car' && !actor.parked) {
+      const goal = this.goal(actor);
+      if (goal === 'cruise' || actor.retire) { actor.entity.destroy(); this.actors.delete(id); }
+      else if (actor.outbound) this.parkDirected(actor, goal); else this.park(actor, goal === 'work' ? actor.route.length - 1 : 0);
+    }
     this.signature = '';
     if (this.lastCity) this.sync(this.lastCity);
   }
 
   private apply(plan: TrafficPlan, city: City) {
-    plan = decorativePlan(plan, { cars: this.carsEnabled, walkers: this.walkersEnabled });
+    plan = decorativePlan(plan, { cars: true, walkers: this.walkersEnabled });
     const wanted = new Map([...plan.cars, ...plan.trucks, ...plan.walkers].map(v => [v.key, v.route] as const));
     // Gone from the plan: finish the trip, then leave. A changed road network re-routes at once.
     for (const actor of this.actors.values()) {
@@ -164,7 +169,8 @@ export class SceneTraffic {
     if (returnRoute) { actor.outbound = route; actor.inbound = returnRoute; actor.leg = seed < .5 ? 'work' : 'home'; actor.route = actor.leg === 'work' ? route : returnRoute; actor.dir = 1; actor.p = seed * Math.max(0, actor.route.length - 1); }
     // A commuter appears where the hour puts it: parked at home or at work, or out on an errand.
     if (kind === 'car') { const goal = this.goal(actor); if (goal !== 'cruise') { if (actor.outbound) this.parkDirected(actor, goal); else this.park(actor, goal === 'work' ? route.length - 1 : 0); } }
-    this.actors.set(key, actor); this.move(actor, 0); // placed at once, even while the game is paused
+    if (kind === 'car' && !this.carsEnabled && !actor.parked) { entity.destroy(); return; }
+    this.actors.set(key, actor); if (actor.parked) this.placeParked(actor); else this.move(actor, 0); // placed at once, even while the game is paused
   }
 
   private goal(actor: Actor): CommuteGoal { return commuteGoal(this.view.atmosphere.hour ?? START_HOUR, actor.depart, actor.errand); }
@@ -172,11 +178,23 @@ export class SceneTraffic {
   private parkDirected(actor: Actor, reached: 'home' | 'work') {
     actor.leg = reached === 'home' ? 'work' : 'home';
     actor.route = actor.leg === 'work' ? actor.outbound! : actor.inbound!;
-    actor.p = 0; actor.dir = 1; actor.parked = true; actor.entity.enabled = false; actor.v = 0;
+    actor.p = 0; actor.dir = 1; actor.parked = true; actor.v = 0; this.placeParked(actor);
   }
 
   private park(actor: Actor, at: number) {
-    actor.p = at; actor.dir = at === 0 ? 1 : -1; actor.parked = true; actor.entity.enabled = false; actor.v = 0;
+    actor.p = at; actor.dir = at === 0 ? 1 : -1; actor.parked = true; actor.v = 0; this.placeParked(actor);
+  }
+
+  /** Parked vehicles sit visibly at the kerb, outside the driving lane, spread along the block. */
+  private placeParked(actor: Actor) {
+    const route = actor.route; if (!route.length) return;
+    const i = Math.min(Math.max(Math.round(actor.p), 0), route.length - 1), j = i === 0 ? Math.min(1, route.length - 1) : i - 1;
+    const from = this.view.position(route[i]), to = this.view.position(route[j]);
+    let hx = to.x - from.x, hz = to.z - from.z; const len = Math.hypot(hx, hz);
+    if (len) { hx /= len; hz /= len; } else { hx = 0; hz = 1; }
+    const along = (actor.rank - .5) * 1.1, x = from.x + hx * along + hz * PARK, z = from.z + hz * along - hx * PARK;
+    actor.x = x; actor.z = z; actor.hx = hx; actor.hz = hz; actor.entity.enabled = true;
+    actor.entity.setLocalPosition(x, .14, z); actor.entity.setLocalEulerAngles(0, Math.atan2(hx, hz) * 180 / Math.PI, 0);
   }
 
   private makePlume(cell: number, level: number): Entity {
@@ -199,7 +217,11 @@ export class SceneTraffic {
       if (actor.retire) { actor.entity.destroy(); this.actors.delete(actor.key); continue; }
       // Trucks load for a moment; commuters leave when their rush (or an errand) comes.
       const leave = actor.kind === 'truck' ? (actor.dwell -= step) <= 0 : this.goal(actor) !== (actor.leg ? (actor.leg === 'work' ? 'home' : 'work') : actor.p === 0 ? 'home' : 'work');
-      if (leave) { actor.parked = false; actor.entity.enabled = true; actor.v = 0; }
+      if (leave && actor.kind === 'car' && !this.carsEnabled) {
+        // The fleet drives; a decorative car just turns up parked at its next stop.
+        const goal = this.goal(actor);
+        if (goal !== 'cruise') { if (actor.outbound) this.parkDirected(actor, goal); else this.park(actor, goal === 'work' ? actor.route.length - 1 : 0); }
+      } else if (leave) { actor.parked = false; actor.entity.enabled = true; actor.v = 0; }
     }
     this.follow(step);
     for (const actor of [...this.actors.values()]) if (!actor.parked) this.move(actor, step);

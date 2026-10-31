@@ -18,3 +18,11 @@ test('blocked recovery DB deletes nothing else; missing choice deletes nothing',
   assert.equal(s.getItem('citymanager.save.v6'), '{"v":6}'); assert.equal(s.getItem('citymanager.checkpoint.latest'), 'y');
   const t = seed(); await assert.rejects(deleteOldSaves('', t, factory('success', []))); assert.equal(t.getItem('citymanager.save.v7'), '{"old":1}'); assert.equal(t.getItem('citymanager.save.v6'), '{"v":6}');
 });
+test('full localStorage: frees old copies before writing the kept city', async () => {
+  const s = seed(); const limit = [...s.m.values()].reduce((n, v) => n + v.length, 0);
+  const full = Object.assign(Object.create(Object.getPrototypeOf(s)), s, { setItem(k: string, v: string) { const used = [...this.m].reduce((n: number, [kk, vv]: [string, string]) => n + (kk === k ? 0 : vv.length), 0); if (used + v.length > limit) throw new DOMException('full', 'QuotaExceededError'); this.m.set(k, v); } });
+  const keep = '{"keep":1}';
+  assert.throws(() => full.setItem('citymanager.save.v7', keep), 'primary write must fail while old copies fill the quota');
+  await deleteOldSaves(keep, full, factory('success', []));
+  assert.equal(full.getItem('citymanager.save.v7'), keep); assert.equal(full.getItem('citymanager.save.v6'), null); assert.equal(full.getItem('strategy-game.save'), 'KEEP');
+});
