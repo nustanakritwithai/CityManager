@@ -1,6 +1,7 @@
 // A narrow visual-only route; unknown events/ranges/paths retain the full suite.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, appendFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 export const visualSources = ['src/asset-models.ts', 'src/building-visuals.ts', 'src/renderer.ts', 'src/scene-atmosphere.ts'];
@@ -53,7 +54,17 @@ export function toolbarMainOnly(before, after) {
   expected = "import { installBuildToolbar, BUILD_SHORTCUTS, blocksGameShortcuts } from './build-toolbar.ts';\n" + expected;
   return expected === after.replace(/\r\n/g,'\n');
 }
+const serverSaveAllowed = new Set(['tests/visual-final-toolbar.mjs','.github/workflows/citymanager.yml', '.github/workflows/save-safety.yml', '.github/workflows/save-smoke.yml', 'docs/server-only-city-entry.md', 'index.html', 'server/city-saves/service.mjs', 'src/city-migration-inventory.ts', 'src/city-save-auth.ts', 'src/main.ts', 'src/server-city-entry.ts', 'src/server-city-save.ts', 'tests/city-migration-inventory.test.ts', 'tests/fixtures/pages-login/existing-login-20261031.html', 'tests/pages-login-public-contract.test.mjs', 'tests/server-city-entry-flow.test.ts', 'tests/server-city-entry.test.ts', 'tests/server-city-save.test.ts', 'tests/server-save-browser-smoke.mjs', 'tests/server-save-live-readonly.mjs', 'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs', 'docs/server-save-ci-migration.md', '.github/workflows/entity-explanation.yml', '.github/workflows/owner-decisions.yml', '.github/workflows/player-feedback.yml', '.github/workflows/traffic-enabled.yml']);
+// One reviewed server-only startup transition. Broad main/index paths cannot admit unrelated edits.
+export function matchesReviewedSources(evidence, hashes) {
+  return Object.entries(hashes).every(([key,hash])=>typeof evidence[key]==='string' && createHash('sha256').update(evidence[key].replace(/\r\n/g,'\n')).digest('hex')===hash);
+}
+export function serverSaveEntryOnly(evidence = {}) {
+  const hashes = {'mainBefore': '0ca81c4354234b06539e0c42df80ffa692e0770938b0a8b40d72f84ad6a80123', 'mainAfter': 'bac1b8b3f976597e7ab5c014c13fb917d0e8e0329658c967c0bbfdc113f1f20a', 'indexBefore': '272e1d25d1578187de2d14514de2fadaeb7227edd871da858226e19aa247ae57', 'indexAfter': 'ab8849cf8e4804dfe2063b3cf56f6f64f1c794805d53b82ad0a674e62ac48209'};
+  return matchesReviewedSources(evidence,hashes);
+}
 export function visualKind(paths, evidence = {}) {
+  if (['src/server-city-save.ts','src/server-city-entry.ts','src/city-save-auth.ts','src/main.ts','index.html'].every(p=>paths.includes(p)) && paths.every(p=>serverSaveAllowed.has(p)) && serverSaveEntryOnly(evidence)) return 'server-save';
   if (['src/apartment-visuals.ts','src/build-toolbar.ts','src/main.ts'].every(p=>paths.includes(p)) && paths.every(p=>finalAllowed.has(p)) && toolbarMainOnly(evidence.mainBefore,evidence.mainAfter)) return 'visual-final';
   if (paths.includes('src/vehicle-geometry.ts') && paths.every(p => vehicleAllowed.has(p))) return 'vehicle';
   if (paths.includes('src/factory-visuals.ts') && paths.every(p => factoryAllowed.has(p))) return 'factory';
@@ -89,6 +100,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (paths.includes('src/main.ts')) {
       const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);
       evidence.mainBefore=git(['show',`${base}:src/main.ts`]); evidence.mainAfter=git(['show',`${head}:src/main.ts`]);
+      if(paths.includes('index.html')) { evidence.indexBefore=git(['show',`${base}:index.html`]); evidence.indexAfter=git(['show',`${head}:index.html`]); }
     }
     selected = visualKind(paths,evidence);
     console.log(`Changed paths: ${JSON.stringify(paths)}`);
