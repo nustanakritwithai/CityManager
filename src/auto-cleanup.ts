@@ -2,7 +2,9 @@
  * CityManager city as the primary slot, drop every other CityManager save copy so the
  * primary write fits in localStorage again. Never touches non-CityManager keys
  * (Strategy-Game shares this origin). The kept city is written + verified first. */
-import {SAVE_KEY} from './save-storage.ts';
+import {SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP} from './save-storage.ts';
+// Only these hold current-format (v7) city snapshots; legacy slots go through migrations, never copied raw into v7.
+const V7_SOURCE=(k:string)=>k===SAVE_KEY||k===AUTOSAVE_CHECKPOINT_KEY||k===PRE_AUTOSAVE_BACKUP||/^citymanager\.backup\.save-conflict\.[0-9]+$/.test(k)||k.startsWith('idb:');
 import {decodeSaveCopy} from './save-copy-codec.ts';
 import {deserializeParkSession} from './park-runtime.ts';
 import {CITY_SAVE_KEY_PATTERN,CITY_RECOVERY_DB,oldSaveKeys} from './delete-old-saves.ts';
@@ -24,9 +26,9 @@ export async function autoCleanupOnce(storage:Store=localStorage,factory:IDBFact
  if(!idbOk)return {ran:false,removed:[],reason:'idb-unreadable'};
  if(!cands.length){try{storage.setItem(AUTO_CLEANUP_FLAG,String(Date.now()));}catch{}return {ran:true,removed:[],reason:'no-city'};}
  const order=(a:Candidate,b:Candidate)=>b.tick-a.tick||b.at-a.at||(a.source===SAVE_KEY?-1:b.source===SAVE_KEY?1:0);
- cands.sort(order);const keep=cands.find(c=>c.valid);
+ cands.sort(order);const keep=cands.find(c=>c.valid&&V7_SOURCE(c.source));
  // Never discard a newer city we cannot load in the current format.
- if(!keep||cands[0].tick>keep.tick)return {ran:false,removed:[],reason:'newest-unreadable'};
+ if(!keep||cands[0].tick>keep.tick)return {ran:false,removed:[],reason:keep?'newest-unreadable':'no-current-format-city'};
  const removed:string[]=[];
  if(storage.getItem(SAVE_KEY)!==keep.raw){
   try{storage.setItem(SAVE_KEY,keep.raw);}catch(e){if(!isQuota(e))throw e;
