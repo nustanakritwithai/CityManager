@@ -82,6 +82,22 @@ jobs:
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
         run: npm run build
 
+      # Always runs (every scope, including [save-hotfix-89]): never publish a build that cannot save.
+      - name: Save smoke on built bundle (deploy gate)
+        run: |
+          New-Item -ItemType Directory -Force .test-output | Out-Null
+          $savePreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4191', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/save-smoke-preview.log -RedirectStandardError .test-output/save-smoke-preview-error.log
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4191/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $ready = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) { throw 'Save smoke preview did not start.' }
+            node tests/save-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Save smoke failed: saving is broken in this build. Not publishing.' }
+          } finally { Stop-Process -Id $savePreview.Id -ErrorAction SilentlyContinue }
+
       - name: Upload Pages market verification artifact
         if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -344,3 +360,28 @@ jobs:
       - name: Deploy tested artifact to existing Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  live-save-smoke:
+    name: Live save smoke (post-deploy, no auto-revert)
+    if: github.ref == 'refs/heads/main'
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Live site still saves (fails loudly; revert manually if red)
+        env:
+          CITYMANAGER_URL: https://nustanakritwithai.github.io/CityManager/
+          CITYMANAGER_BROWSER: google-chrome
+          SAVE_SMOKE_LIVE: '1'
+        run: |
+          sleep 30
+          node tests/save-smoke.mjs || { echo "::error title=LIVE SAVE BROKEN::Live site failed the save smoke after deploy ${GITHUB_SHA}. Revert this commit manually."; exit 1; }
