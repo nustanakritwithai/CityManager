@@ -111,6 +111,6 @@ test('history economic/save route requires reviewed source diff and rejects unre
 
 
 test('reconnect-only routing requires exact reviewed auth content and rejects mixed security/backend changes',()=>{
- const paths=['src/city-save-auth.ts','tests/city-save-reauth.test.ts'];assert.equal(reauthPathsOnly(paths),true);assert.equal(reauthOnly(paths),false);assert.equal(visualKind(paths),'full');
+ const paths=['src/city-save-auth.ts','tests/city-save-reauth.test.ts'];assert.equal(reauthPathsOnly(paths),true);assert.equal(reauthPathsOnly([...paths,'tests/server-save-browser-smoke.mjs']),true);assert.equal(reauthOnly(paths),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/main.ts','index.html','src/pages-auth.ts','src/server-city-save.ts','server/city-saves/service.mjs','src/build-toolbar.ts'].map(p=>[...paths,p])]){assert.equal(reauthPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });

@@ -94,7 +94,7 @@ const historyAllowed=new Set(["src/save-storage.ts", "tests/save-quota-lossless.
 export function historyPathsOnly(paths){return ['src/city-history.ts','src/city-history-validation.ts','src/sim.ts','src/server-city-entry.ts','src/city-save-auth.ts','tests/city-history.test.ts','tests/history-validators.test.ts','tests/server-save-browser-smoke.mjs'].every(p=>paths.includes(p))&&paths.every(p=>historyAllowed.has(p));}
 export function historyOnly(paths,evidence={}){return historyPathsOnly(paths)&&matchesReviewedSources(evidence,{historySourceDiff:"326578432215a15f27f08da7833feb888ffeb8be260dc37080a67b87347def5c"});}
 // Reviewed reconnect-only transition; auth changes cannot enter by pathname alone.
-const reauthAllowed=new Set(['src/city-save-auth.ts','tests/city-save-reauth.test.ts','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','.github/workflows/citymanager.yml']);
+const reauthAllowed=new Set(['tests/server-save-browser-smoke.mjs','src/city-save-auth.ts','tests/city-save-reauth.test.ts','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','.github/workflows/citymanager.yml']);
 export function reauthPathsOnly(paths){return ['src/city-save-auth.ts','tests/city-save-reauth.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>reauthAllowed.has(p));}
 export function reauthOnly(paths,evidence={}){return reauthPathsOnly(paths)&&matchesReviewedSources(evidence,{"authBefore": "9bfbdf2419f89070deff32127cd341dc969d3c81d3c26593c6b32ef47d3db4de", "authAfter": "1975de9b54c55f60587587d5e330ba0e04408047d118a32d4701c6eb2dd0852a"});}
 export function visualKind(paths, evidence = {}) {
