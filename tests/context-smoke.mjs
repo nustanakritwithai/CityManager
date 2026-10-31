@@ -53,7 +53,7 @@ async function evaluate(expression) {
 }
 async function until(expression, timeout = 15000) {
   const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(80); }
-  throw Error(`Timed out: ${expression}`);
+  throw Error(`Timed out: ${expression} · status=${await evaluate("document.querySelector(\"#status\")?.textContent").catch(()=>"?")} · tick=${await evaluate("JSON.parse(window.cityManager.snapshot()).tick").catch(()=>"?")}`);
 }
 const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
