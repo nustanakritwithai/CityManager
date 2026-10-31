@@ -4,7 +4,8 @@ export function saveManagementError(error:unknown):string{
  return ({
   'market-reconciliation-required':'ยังลบเมืองไม่ได้ มีรายการตลาดหรือเงิน/สินค้าค้างยืนยัน ต้องตรวจรายการเดิมก่อน โดยบัญชีและเครดิตยังอยู่ครบ',
   'market-contract-unverified':'ยังลบเมืองไม่ได้ เซิร์ฟเวอร์ยังตรวจข้อมูลรายการตลาดเดิมไม่ครบ กรุณาให้ผู้ดูแลตรวจระบบก่อน',
-  'city-lifecycle-changed':'สถานะเมืองเปลี่ยนจากอีกหน้าต่างแล้ว กรุณาโหลดหน้าใหม่ ไม่ใช้คำขอเก่ากับเมืองใหม่',
+  'city-lifecycle-changed':'สถานะเมืองบนเซิร์ฟเวอร์เปลี่ยนแล้ว ต้องตรวจเมืองหลักก่อน ไม่ใช้คำขอเก่ากับเมืองใหม่',
+  'server-save-conflict':'คำขอก่อนหน้าถูกปฏิเสธและยังไม่ได้ตรวจสถานะล่าสุด ไม่ได้ส่งคำขอลบซ้ำ กรุณากลับไปตรวจเซฟหลัก',
   'save-conflict':'เมืองบนเซิร์ฟเวอร์เปลี่ยนแล้ว ไม่ได้ลบหรือเขียนทับเมืองใหม่ กรุณาตรวจเซฟล่าสุดก่อน',
   'fresh-city-market-required':'ยังสร้างเมืองใหม่ไม่ได้ ข้อมูลตัวตนเมืองใหม่ไม่ถูกต้อง โดยข้อมูลบัญชีเดิมยังอยู่',
   'owner-save-capacity':'พื้นที่สำเนาบนเซิร์ฟเวอร์ไม่พอ จึงยังไม่ลบเมืองเดิม กรุณาให้ผู้ดูแลตรวจพื้นที่ก่อน'
@@ -16,6 +17,7 @@ export type SaveManagementActions={
  remove:()=>Promise<void>;
  createFresh:()=>Promise<void>;
  uncertain:()=>boolean;
+ rejected?:()=>boolean;
  canReload?:()=>boolean;
  reload?:()=>void;
  cancel:()=>void;
@@ -40,7 +42,7 @@ export function installSaveManagement(button:HTMLButtonElement,actions:SaveManag
   const cancel=()=>{if(busy||phase!=='confirm'||actions.uncertain())return;actions.cancel();close();};
   back.onclick=cancel;dialog.addEventListener('cancel',event=>{event.preventDefault();cancel();});
   confirm.onclick=async()=>{
-   if(busy)return;busy=true;confirm.disabled=back.disabled=true;confirm.setAttribute('aria-busy','true');
+   if(busy||actions.rejected?.())return;busy=true;confirm.disabled=back.disabled=true;confirm.setAttribute('aria-busy','true');
    try{
     if(phase==='confirm'){
      state.textContent='กำลังเก็บสำเนาและรอเซิร์ฟเวอร์ยืนยันการลบ…';
@@ -52,8 +54,8 @@ export function installSaveManagement(button:HTMLButtonElement,actions:SaveManag
      state.textContent='กำลังสร้างเมืองใหม่บนเซิร์ฟเวอร์…';
      await actions.createFresh();actions.complete();close();
     }
-   }catch(error){state.textContent=`ยังไม่สำเร็จ: ${saveManagementError(error)} · ข้อมูลในเบราว์เซอร์ไม่ถูกลบ ${actions.uncertain()?'อย่าปิดหน้านี้ กดปุ่มเดิมเพื่อตรวจและลองคำขอเดิมอีกครั้ง':'กรุณาตรวจแล้วลองใหม่'}`;}
-   finally{busy=false;confirm.disabled=false;const reload=actions.canReload?.()===true;back.textContent=reload?'กลับหน้าเข้าเกม':'กลับโดยไม่ลบ';back.disabled=!reload&&(phase!=='confirm'||actions.uncertain());back.onclick=reload?()=>{if(!busy&&actions.canReload?.())actions.reload?.();}:cancel;confirm.setAttribute('aria-busy','false');}
+   }catch(error){state.textContent=`ยังไม่สำเร็จ: ${saveManagementError(error)} · ข้อมูลในเบราว์เซอร์ไม่ถูกลบ ${actions.rejected?.()?(actions.canReload?.()?'คำขอนี้ถูกปฏิเสธ ไม่ส่งซ้ำ กดกลับหน้าเข้าเกมเพื่อตรวจเมืองหลัก':'คำขอนี้ถูกปฏิเสธ ไม่ส่งลบซ้ำ กดกลับโดยไม่ลบ แล้วใช้ปุ่มบันทึกเพื่อตรวจเซฟหลักก่อน'):actions.uncertain()?'อย่าปิดหน้านี้ กดปุ่มเดิมเพื่อตรวจและลองคำขอเดิมอีกครั้ง':'กรุณาตรวจแล้วลองใหม่'}`;}
+   finally{busy=false;confirm.disabled=actions.rejected?.()===true;const reload=actions.canReload?.()===true;back.textContent=reload?'กลับหน้าเข้าเกม':'กลับโดยไม่ลบ';back.disabled=!reload&&(phase!=='confirm'||actions.uncertain());back.onclick=reload?()=>{if(!busy&&actions.canReload?.())actions.reload?.();}:cancel;confirm.setAttribute('aria-busy','false');}
   };
   dialog.append(title,detail,state,confirm,back);document.body.append(dialog);dialog.showModal();back.focus();
  });

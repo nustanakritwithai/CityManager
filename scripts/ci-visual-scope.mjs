@@ -72,7 +72,17 @@ export function serverSaveManagementOnly(evidence={}){
  const hashes={"mainBefore": "bac1b8b3f976597e7ab5c014c13fb917d0e8e0329658c967c0bbfdc113f1f20a", "mainAfter": "eb537a7892772e8805fc0c3bba5e2e47af1713cb9564b857d23ed5cb43441e04", "indexBefore": "ab8849cf8e4804dfe2063b3cf56f6f64f1c794805d53b82ad0a674e62ac48209", "indexAfter": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5"};
  return matchesReviewedSources(evidence,hashes);
 }
+// UI-only conflict feedback: no index/backend/entry/auth changes are admitted.
+const conflictFeedbackAllowed=new Set(['src/main.ts','src/server-city-save.ts','src/save-management-dialog.ts','tests/server-city-save.test.ts','tests/save-management-dialog.test.ts','tests/server-save-browser-smoke.mjs','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs']);
+export function conflictFeedbackPathsOnly(paths){
+ return ['src/main.ts','src/server-city-save.ts','src/save-management-dialog.ts','tests/server-city-save.test.ts','tests/save-management-dialog.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>conflictFeedbackAllowed.has(p));
+}
+export function serverSaveConflictFeedbackOnly(evidence={}){
+ const hashes={"mainBefore": "eb537a7892772e8805fc0c3bba5e2e47af1713cb9564b857d23ed5cb43441e04", "mainAfter": "da3e8ec81343cdf3a66e60748ee2686122c70b8b16700b6382f144c9b2265f49", "indexBefore": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5", "indexAfter": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5"};
+ return matchesReviewedSources(evidence,hashes);
+}
 export function visualKind(paths, evidence = {}) {
+  if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
   if(managementPathsOnly(paths)&&serverSaveManagementOnly(evidence))return 'server-save';
   if (['src/server-city-save.ts','src/server-city-entry.ts','src/city-save-auth.ts','src/main.ts','index.html'].every(p=>paths.includes(p)) && paths.every(p=>serverSaveAllowed.has(p)) && serverSaveEntryOnly(evidence)) return 'server-save';
   if (['src/apartment-visuals.ts','src/build-toolbar.ts','src/main.ts'].every(p=>paths.includes(p)) && paths.every(p=>finalAllowed.has(p)) && toolbarMainOnly(evidence.mainBefore,evidence.mainAfter)) return 'visual-final';
@@ -110,7 +120,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (paths.includes('src/main.ts')) {
       const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);
       evidence.mainBefore=git(['show',`${base}:src/main.ts`]); evidence.mainAfter=git(['show',`${head}:src/main.ts`]);
-      if(paths.includes('index.html')) { evidence.indexBefore=git(['show',`${base}:index.html`]); evidence.indexAfter=git(['show',`${head}:index.html`]); }
+      // Also prove unchanged index content for reviewed UI-only main transitions.
+      evidence.indexBefore=git(['show',`${base}:index.html`]); evidence.indexAfter=git(['show',`${head}:index.html`]);
     }
     selected = visualKind(paths,evidence);
     console.log(`Changed paths: ${JSON.stringify(paths)}`);

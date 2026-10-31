@@ -34,3 +34,13 @@ test('archive failure or unresolved financial obligations never removes active c
 test('two tabs deleting same revision cannot delete new city or reuse any retired city id',async()=>{const h=harness();await h.client.load();const first=await h.client.create(freshRaw(),meta);const stale={action:'delete',cityId:first.cityId,expectedRevision:1};await h.client.delete();await assert.rejects(h.service.mutate(owner,crypto.randomUUID(),stale),/save-conflict/);await h.client.create(freshRaw(),meta);await h.client.delete();await assert.rejects(h.service.mutate(owner,crypto.randomUUID(),{action:'create',cityId:first.cityId,expectedRevision:4,raw:first.raw,metadata:meta}),/save-conflict/);assert.equal((await h.service.read(owner)).revision,4);});
 
 test('malformed historical journal item refuses deletion with explicit reconciliation error',async()=>{for(const key of ['operations','escrow','receipts']){const h=harness();await h.client.load();const data=JSON.parse(freshRaw());data.market[key]=key==='receipts'?{bad:null}:[null];await h.client.create(JSON.stringify(data),meta);await assert.rejects(h.client.delete(),/market-reconciliation-required/);assert.equal((await h.service.read(owner)).revision,1);}});
+
+test('known delete rejection retains its original reason and retry never sends another request',async()=>{
+ for(const reason of ['save-conflict','market-reconciliation-required','market-contract-unverified']){
+  const h=harness();await h.client.load();const current=await h.client.create(raw,meta);
+  let calls=0;const rejected=new ServerCitySaveClient(async(path,init)=>{if(!init?.method)return current;calls++;throw Object.assign(Error(reason),{status:409});},owner);
+  await rejected.load();await assert.rejects(rejected.delete(),new RegExp(reason));assert.equal(rejected.conflictReason,reason);assert.equal(rejected.conflict,true);
+  for(let n=0;n<2;n++)await assert.rejects(rejected.retry(),(error:any)=>error.message===reason&&error.status===409);
+  assert.equal(calls,1);assert.equal(rejected.confirmed?.raw,current.raw);assert.equal(rejected.deleted,null);assert.equal(rejected.pending,true);
+ }
+});

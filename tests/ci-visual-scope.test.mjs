@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -82,4 +82,14 @@ test('management route requires exact lifecycle markers and excludes backend ins
  for(const invalid of [[],paths.slice(1),['tests/save-management-dialog.test.ts'],...['src/sim.ts','src/build-toolbar.ts','src/city-save-auth.ts','server/city-saves/pg-store.mjs','server/city-saves/migration-management.sql','server/city-saves/management-installer/database-management.mjs'].map(p=>[...paths,p])])assert.equal(managementPathsOnly(invalid),false);
  assert.equal(serverSaveManagementOnly({}),false);
  assert.equal(visualKind(paths),'full','paths without reviewed main/index evidence cannot select management');
+});
+
+
+test('conflict feedback scope admits only required UI/client contracts, never backend or index edits',()=>{
+ const paths=['src/main.ts','src/server-city-save.ts','src/save-management-dialog.ts','tests/server-city-save.test.ts','tests/save-management-dialog.test.ts'];
+ assert.equal(conflictFeedbackPathsOnly(paths),true);
+ assert.equal(conflictFeedbackPathsOnly([...paths,'tests/server-save-browser-smoke.mjs']),true);
+ for(const invalid of [[],paths.slice(1),...['index.html','src/server-city-entry.ts','src/city-save-auth.ts','server/city-saves/service.mjs','.github/workflows/citymanager.yml','src/sim.ts'].map(p=>[...paths,p])])assert.equal(conflictFeedbackPathsOnly(invalid),false);
+ assert.equal(serverSaveConflictFeedbackOnly({}),false);
+ assert.equal(visualKind(paths),'full','reviewed main and unchanged index evidence is mandatory');
 });

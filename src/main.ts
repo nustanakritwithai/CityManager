@@ -816,7 +816,7 @@ async function boot() {
     try{
       if(serverSave.conflict||resolvingConflict){
         paused=true;
-        if(!window.confirm('เซฟบนเซิร์ฟเวอร์เปลี่ยนจากอุปกรณ์อื่น เก็บเมืองที่กำลังเล่นเป็นสำเนาบนเซิร์ฟเวอร์ แล้วเปิดเมืองหลักล่าสุดหรือไม่?'))return;
+        if(!window.confirm('คำขอเซฟล่าสุดยังใช้ต่อไม่ได้ ต้องตรวจสถานะบนเซิร์ฟเวอร์ เก็บเมืองที่กำลังเล่นเป็นสำเนาบนเซิร์ฟเวอร์ แล้วเปิดเมืองหลักล่าสุดหรือไม่?'))return;
         const authenticated=serverEntry.auth.connect();void authenticated.catch(()=>{});
         await enqueueSave(async()=>{
           saveBusy=true;try{
@@ -859,8 +859,9 @@ async function boot() {
       deletedAcknowledgement=null;freshRaw=null;createdAcknowledgement=null;paused=true;render();
       return {cityId:confirmed.cityId,tick:city.tick};
     },
+    rejected:()=>serverSave.conflict,
     uncertain:()=>!!deletedAcknowledgement||serverSave.pending&&!serverSave.conflict||!!serverSave.deleted,
-    canReload:()=>!!deletedAcknowledgement&&!serverSave.pending,
+    canReload:()=>!!deletedAcknowledgement&&(!serverSave.pending||serverSave.conflict),
     reload:()=>location.reload(),
     remove:()=>{
       const authentication=serverEntry.auth.connect();void authentication.catch(()=>{});
