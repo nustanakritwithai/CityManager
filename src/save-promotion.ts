@@ -15,7 +15,7 @@ export async function promoteRecoverySave(options:{raw:string;storage:Store;guar
   // acceptLoaded alone is NOT success. write archives both divergent slots first.
   guard.acceptLoaded(raw,true);ownedGeneration=guard.generation;
   guard.write(raw,null,ownedGeneration);
-  if(!current()||storage.getItem(SAVE_KEY)!==raw||decodeSaveCopy(storage.getItem(AUTOSAVE_CHECKPOINT_KEY))!==raw)throw Error('ยังยืนยันเซฟหลักที่อ่านกลับไม่ได้');
+  if(!current()||storage.getItem(SAVE_KEY)!==raw||(storage.getItem(AUTOSAVE_CHECKPOINT_KEY)!==null&&decodeSaveCopy(storage.getItem(AUTOSAVE_CHECKPOINT_KEY))!==raw))throw Error('ยังยืนยันเซฟหลักที่อ่านกลับไม่ได้');
   return {ok:true as const,generation:ownedGeneration};
  } catch(error) {
   const owned=current();if(owned){guard.block();ownedGeneration=guard.generation;}
