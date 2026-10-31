@@ -12,6 +12,7 @@ import { trafficGameStatus } from './traffic/game-status.ts';
 import { screenCull, storeTrafficModel } from './traffic/flag.ts';
 import { busEnabled } from './bus/types.ts';
 import { BusPresentation } from './bus/presentation.ts';
+import { deleteOldSaves } from './delete-old-saves.ts';
 import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
@@ -933,8 +934,8 @@ async function boot() {
       const applyStored=(restored:ReturnType<typeof deserializeParkSession>)=>{
         assertSource();
         if (!restored.city.education) adoptSavedEducation(restored.city);
-        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;activeLocal=false;activeRevision=null;recoveryOnly=managed;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(managed);
-        taxiSession.clear(); publishTaxi(true); autosave.adoptLoaded();
+        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;activeLocal=false;activeRevision=null;recoveryOnly=managed;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(managed);autosave.adoptLoaded();
+        taxiSession.clear(); publishTaxi(true);
       };
       if(managed){assertSource();await loadRecoveryCityReadOnly(saved.raw,marketPanel?.client,saveGuard,applyStored);}
       else await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,applyStored,assertSource);
@@ -1134,7 +1135,7 @@ async function boot() {
   const noCityStorage=()=>onlyBenignOrMarket(false);
   const previewOnlyAfterUnknown=async()=>{if(startup.restored||startup.error||!recoveryUnavailable||!onlyBenignOrMarket(true)){status('ยังยืนยันสถานะเซฟเดิมไม่ได้');return false;}saveGuard.block();previewOnly=true;marketPanel?.client.setRecoveryReadOnly(true);paused=true;saveFeedback.failed('เมืองชั่วคราวสำหรับดูเท่านั้น · ไม่บันทึกและพักตลาด · ยังตรวจสำเนากู้คืนไม่ได้ ห้ามล้างข้อมูล');status('เมืองชั่วคราวสำหรับดูเท่านั้น ไม่ใช่เซฟเดิมและไม่บันทึก');return true;};
   const startFreshAfterUnknown=async()=>{if(startup.restored||startup.error||!recoveryUnavailable||!noCityStorage()){status('ไม่สามารถยืนยันว่าช่องเซฟเดิมว่าง จึงไม่เริ่มเมืองใหม่');return false;}try{saveGuard.acceptLoaded(serializeParkSession(city,parkRuntime,city.market));autosave.reset();saveFeedback.recovered();paused=true;status('เข้าเมืองใหม่ตามที่เลือก · ยังตรวจสำเนากู้คืนในเบราว์เซอร์ไม่ได้');return true;}catch{status('ยังยืนยันการเริ่มเมืองใหม่ไม่ได้');return false;}};
-  if(startupSaveError)installStartupRecoveryChooser({loadChoices,loadChoice,summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,loadEmergency,exportEmergency:()=>chooseEmergency('export'),recoveryState:recoveryUnavailable?'unavailable':recoveryFound?'available':'none',startFresh:!startup.restored&&!startup.error&&recoveryUnavailable&&noCityStorage()?startFreshAfterUnknown:undefined,previewOnly:!startup.restored&&!startup.error&&recoveryUnavailable&&!noCityStorage()&&onlyBenignOrMarket(true)?previewOnlyAfterUnknown:undefined,status:()=>$('#inspector-status').textContent??''});
+  if(startupSaveError)installStartupRecoveryChooser({loadChoices,loadChoice,summary:()=>recoverySummary({getItem:key=>localStorage.getItem(key)}),load:loadStored,loadEmergency,exportEmergency:()=>chooseEmergency('export'),recoveryState:recoveryUnavailable?'unavailable':recoveryFound?'available':'none',startFresh:!startup.restored&&!startup.error&&recoveryUnavailable&&noCityStorage()?startFreshAfterUnknown:undefined,previewOnly:!startup.restored&&!startup.error&&recoveryUnavailable&&!noCityStorage()&&onlyBenignOrMarket(true)?previewOnlyAfterUnknown:undefined,status:()=>$('#inspector-status').textContent??'',deleteOldSaves:async(id:string)=>{const offered=offeredChoices.find(c=>c.id===id);if(!offered?.raw){status('เลือกเมืองที่จะเก็บไว้ก่อน');return false;}try{await deleteOldSaves(offered.raw);status('ลบเซฟเก่าแล้ว · กำลังเปิดเมืองที่เก็บไว้');location.reload();return false;}catch(error){status(error instanceof Error?error.message:'ลบเซฟเก่าไม่สำเร็จ · ข้อมูลยังอยู่');return false;}}});
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });
