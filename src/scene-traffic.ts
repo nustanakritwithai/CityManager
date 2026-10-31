@@ -5,6 +5,7 @@ import { decorativePlan } from './traffic/flag.ts';
 import { Entity, Mesh, MeshInstance, StandardMaterial, Color, BLEND_NORMAL, type AppBase } from 'playcanvas';
 import type { CityView } from './renderer.ts';
 import { MAX_CARS, MAX_TRUCKS, commuteGoal, keyHash, leaderAhead, overlapping, trafficPlan, type CommuteGoal, type Mover, type TrafficPlan } from './traffic-plan.ts';
+import { TRAFFIC_SPACING, followingTargetSpeed } from './traffic/spacing.ts';
 import type { City } from './sim.ts';
 import { START_HOUR } from './atmosphere.ts';
 
@@ -13,8 +14,8 @@ const WALKER_COLOURS = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f', '#9b72aa', '
 // Cargo beds, in traffic-plan CARGO order: rice, vegetables, sugarcane, milled rice, canned food, sugar.
 const CARGO_COLOURS = ['#e9cf6a', '#5fae4e', '#7cc5d9', '#f2ecdc', '#c8573f', '#ffffff'];
 const CELL = 2, LANE = .36, SIDEWALK = .8, PARK = .68;
-/** Car following: stop this far behind the vehicle ahead, drive at full pace from SAFE_GAP. */
-const MIN_GAP = .14, SAFE_GAP = .75, ACCEL = 3, WAIT_LIMIT = 3, GHOST = 1.2;
+/** Same-lane queues use TRAFFIC_SPACING. Ghosting only clears a crossing deadlock. */
+const WAIT_LIMIT = 3, GHOST = 1.2;
 /** Seconds a truck spends loading or unloading at each end of its delivery route. */
 const DWELL = 3;
 type Actor = {
@@ -231,7 +232,7 @@ export class SceneTraffic {
     this.view.app.renderNextFrame = true;
   }
 
-  private mover(a: Actor): Mover { return { x: a.x, z: a.z, hx: a.hx, hz: a.hz, length: a.kind === 'truck' ? .72 : .6, width: a.kind === 'truck' ? .36 : .3, rank: a.rank }; }
+  private mover(a: Actor): Mover { return { x: a.x, z: a.z, hx: a.hx, hz: a.hz, length: a.kind === 'truck' ? TRAFFIC_SPACING.lengths.truck : TRAFFIC_SPACING.lengths.decorativeCar, width: a.kind === 'truck' ? .36 : .3, rank: a.rank }; }
 
   /** Each vehicle slows behind the one ahead in its lane and stops short of it, so lines queue instead of overlapping. */
   private follow(dt: number) {
@@ -242,9 +243,15 @@ export class SceneTraffic {
       // Two vehicles waiting on each other (a crossing): the lower rank goes first.
       if (leader >= 0 && ahead[leader].leader === i && a.rank < vehicles[leader].rank) leader = -1;
       // Nothing waits forever: after a long stop, creep through for a moment.
-      if (a.ghost > 0) { a.ghost -= dt; leader = -1; }
-      const target = leader < 0 ? a.speed : a.speed * Math.min(1, Math.max(0, (gap - MIN_GAP) / (SAFE_GAP - MIN_GAP)));
-      a.v = target < a.v ? target : Math.min(target, a.v + ACCEL * dt);
+      if (a.ghost > 0) {
+        a.ghost -= dt;
+        if (leader >= 0 && Math.abs(a.hx * vehicles[leader].hx + a.hz * vehicles[leader].hz) < .5) leader = -1;
+      }
+      const leaderSpeed = leader < 0 ? null : vehicles[leader].v;
+      const target = followingTargetSpeed(gap, a.v, a.speed, leaderSpeed);
+      let v = target < a.v ? target : Math.min(target, a.v + TRAFFIC_SPACING.accel * dt);
+      if (leader >= 0) v = Math.min(v, Math.max(0, gap - TRAFFIC_SPACING.standstillGap) / Math.max(dt, 1e-4));
+      a.v = v;
       a.waited = a.v < .05 ? a.waited + dt : 0;
       if (a.waited > WAIT_LIMIT) { a.waited = 0; a.ghost = GHOST; }
     });

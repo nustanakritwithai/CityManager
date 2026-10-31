@@ -7,7 +7,9 @@ import {captureTrafficGameInput,gameCarIsTaxi,type TrafficGameInput,type Traffic
 import {gamePoses,blendGamePoses} from './game-poses.ts';
 import {createTrafficGameClient} from './game-worker-client.ts';
 import {BusGameBridge} from '../bus/game-bridge.ts';
+import {busPoses} from '../bus/poses.ts';
 import {busEnabled} from '../bus/types.ts';
+import {separateCarsFromBuses} from './spacing.ts';
 export {trafficModelEnabled} from './flag.ts';
 
 /** Ephemeral traffic-allocation game, independent of economic time and saves.
@@ -80,8 +82,16 @@ export class TrafficLayer {
   if(this.busOn&&!this.bus&&!this.failure)this.bus=new BusGameBridge(city,this.minute);
   if(this.bus&&!paused&&!this.failure){this.minute+=Math.min(.25,Math.max(0,dt))/60;this.bus.tick(this.minute);}
   if((advance||pauseChanged||this.dirty)&&this.client&&!this.failure){this.dirty=false;this.submit(city,advance,paused);}
-  if(this.visible&&!this.failure&&(this.renderDirty||(!paused&&this.phase<1))){this.drawn=blendGamePoses(this.previous,this.target,this.phase);this.cars.sync(this.drawn);this.renderDirty=false;}
+  if(this.visible&&!this.failure&&(this.renderDirty||(!paused&&this.phase<1))){this.drawn=this.clearOfBuses(blendGamePoses(this.previous,this.target,this.phase));this.cars.sync(this.drawn);this.renderDirty=false;}
   }catch(error){this.fail(error);}finally{const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);}
+ }
+ /** Buses keep their stop pose. Cars slide back along the lane until the bodies no longer intersect. */
+ private clearOfBuses(poses:CitizenVehiclePose[]):CitizenVehiclePose[] {
+  if(!this.bus||!this.city||!poses.length)return poses;
+  try {
+   const buses=busPoses(this.bus.engine.snapshot(this.minute),{stops:this.city.bus?.stops??[]});
+   return buses.length?separateCarsFromBuses(poses,buses):poses;
+  } catch { return poses; }
  }
  destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
  get diagnostics(){const f=this.latest,worker=this.client?.status??null;return {...this.cars.diagnostics,mode:'allocation-game' as const,paused:this.paused,
