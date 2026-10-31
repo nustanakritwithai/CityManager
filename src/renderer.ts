@@ -4,7 +4,7 @@ import {
   RenderComponentSystem, CameraComponentSystem, LightComponentSystem,
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
-import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, farmCrop, type City } from './sim.ts';
+import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, type UtilityKind } from './utilities.ts';
@@ -18,9 +18,6 @@ import { SceneTraffic } from './scene-traffic.ts';
 import { CityWorld } from './scene-world.ts';
 import type { Atmosphere, Quality } from './atmosphere.ts';
 import type { Overlay, Tone } from './map-overlay.ts';
-
-import { buildFarmVisual, type FarmPart } from './farm-visuals.ts';
-import type { CropId } from './goods.ts';
 
 const UNIT = 2;
 const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
@@ -142,19 +139,22 @@ export class CityView {
     parent.addChild(entity);
     return entity;
   }
-  private farmSurface(kind: NonNullable<FarmPart['surface']>, active: boolean) {
-    const key = `farm:${kind}:${active}`;
-    const cached = this.materials.get(key); if (cached) return cached;
-    const material = new StandardMaterial();
-    material.diffuse = new Color().fromString(kind === 'glass' ? '#b2e0d7' : kind === 'grow' ? '#b566e8' : '#ffdb8a');
-    if (kind === 'glass') { material.opacity = .17; material.blendType = BLEND_NORMAL; material.depthWrite = false; material.gloss = .7; }
-    else if (active) { material.emissive = material.diffuse.clone(); this.atmosphere.registerGlow(material, kind === 'grow' ? 2 : 1.4); }
-    else material.emissiveIntensity = 0;
-    material.update(); this.materials.set(key, material); return material;
-  }
-  private farm(tile: Entity, fertility: number, level: number, crop: CropId, active: boolean) {
+  private farm(tile: Entity, fertility: number, level: number) {
     const plot = new Entity('Original farm plot'); tile.addChild(plot);
-    buildFarmVisual({ box: this.box.bind(this), surface: this.farmSurface.bind(this) }, plot, level, crop, fertility, active);
+    this.box(plot, 0, .09, 0, 1.68, .035, 1.68, this.ground.soilMaterial);
+    this.box(plot, -.17, .12, .12, 1.2, .035, 1.24, '#725b3e');
+    const cropHeight = .12 + Math.max(0, Math.min(100, fertility)) * .0007;
+    for (const [row, x] of [-.62, -.36, -.1, .16].entries()) {
+      const crop = this.box(plot, x, .15 + cropHeight / 2, .12, .17, cropHeight, 1.14, row % 2 ? '#86ad58' : '#b0bc61');
+      crop.name = 'Renewable crop row';
+    }
+    for (let tier = 4; tier <= level; tier++) {
+      const marker = this.box(plot, .4 + (tier - 4) * .15, .69, -.46, .1, .1, .1, '#e3bd55'); marker.name = `Farm level ${tier} marker`;
+    }
+    const shed = this.box(plot, .55, .32, -.46, .5, .43, .48, '#d7dec9'); shed.name = 'Original farm shed';
+    this.box(plot, .55, .58, -.46, .6, .13, .57, '#4c7056');
+    this.box(plot, .55, .29, -.208, .14, .27, .025, '#536754');
+    this.box(plot, -.03, .28, .8, 1.5, .065, .045, '#b9ae87');
   }
   private cropMarket(tile: Entity, cell: number, lit: boolean) {
     const stall = new Entity('Crop market'); tile.addChild(stall);
@@ -420,8 +420,6 @@ export class CityView {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
       const links = cell.road ? [roadLinked(city, i, i + (-1)), roadLinked(city, i, i + (1)), roadLinked(city, i, i + (-24)), roadLinked(city, i, i + (24))].map(Number).join('') : '';
       const fertility = cell.zone === 'F' ? city.resources.fertility[i] : '';
-      const farmFirm = b?.zone === 'F' ? city.firms.find(f => f.building === b.id) : undefined;
-      const crop = b?.zone === 'F' ? farmCrop(city, farmFirm ?? { building: b.id }) : undefined;
       // Night lights only for real occupancy: residents at home or allocated workers on site.
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
       // Buildings without connected frontage are suspended in the sim, so they render faded.
@@ -432,7 +430,7 @@ export class CityView {
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
       const campus = city.education?.campuses.find(item => item.cell === i);
       const stand = this.taxiDepots.find(d => d.cell === i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${crop}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -501,7 +499,7 @@ export class CityView {
         for (const dz of [-.86, .86]) this.box(tile, 0, .075, dz, 1.8, .03, .08, color, false);
         for (const dx of [-.86, .86]) this.box(tile, dx, .075, 0, .08, .03, 1.8, color, false);
         if (b) {
-          if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level, crop!, lit && reach); continue; }
+          if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level); continue; }
           if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
           if (b.zone === 'I' && b.level >= 4) {

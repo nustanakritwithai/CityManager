@@ -34,6 +34,8 @@ import '@fontsource/ibm-plex-sans-thai/latin-400.css';
 import '@fontsource/ibm-plex-sans-thai/latin-600.css';
 import '@fontsource/ibm-plex-sans-thai/latin-700.css';
 import './style.css';
+// Static: a lazy import('./market-panel.css') made Vite emit a CSS preload that failed on Pages.
+import './market-panel.css';
 import './tokens.css';
 import { setupSubmenus, renderSubmenus } from './submenus.ts';
 import { setupSubmenuNavigation, closeSubmenus, hasOpenSubmenu } from './submenu-navigation.ts';
