@@ -46,10 +46,10 @@ test('explicit Load remains read-only; replacement copies are deferred until Sav
  g.acceptLoaded(other,true);assert.deepEqual([...s.data],before);g.write(other,null);assert.ok([...s.data.values()].includes(current));assert.equal(s.getItem(SAVE_KEY),other);
 });
 
-test('legacy backup quota never blocks the primary save and never touches the original legacy slot',()=>{
+test('required legacy backup quota fails before any new recovery metadata is published',()=>{
  const old=readFileSync(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),loaded=deserializeParkSession(old),s=memory(),sentinel=snapshot(createCity(91));s.setItem(SAVE_KEY,sentinel);s.setItem('citymanager.save.v1',old);const before=[...s.data];
  const g=createSaveGuard({...s,setItem:(key,value)=>{if(key.startsWith('citymanager.backup.v1'))throw Error('backup quota');s.setItem(key,value);}});g.acceptLoaded(old,true);
- const next=serializeParkSession(loaded.city,loaded.runtime);g.write(next,old);assert.equal(s.getItem(SAVE_KEY),next);assert.equal(s.getItem('citymanager.save.v1'),old);void before;
+ assert.throws(()=>g.write(serializeParkSession(loaded.city,loaded.runtime),old),/backup quota/);assert.deepEqual([...s.data],before);
 });
 
 test('corrupt primary recovery preserves the valid legacy-backup pointer',()=>{

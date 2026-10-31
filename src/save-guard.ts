@@ -6,6 +6,8 @@ import {readStoredCity,saveStoredCity,SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOS
 import {isQuotaError} from './autosave.ts';
 type Store=Pick<Storage,'getItem'|'setItem'>&Partial<Pick<Storage,'removeItem'|'key'>>&{readonly length?:number};
 const COPY_PREFIX='cm-copy-lz1:';
+/** Explicit v1-v6 import backups keep their original contract: raw bytes, written before the primary, failure aborts. */
+const LEGACY_BACKUP=/^citymanager\.backup\.v[0-9]/;
 /** CityManager-only keys. Strategy-Game shares the origin: never read-modify-delete anything else. */
 const ownKeys=(s:Store)=>{const out:string[]=[];if(typeof s.key!=='function'||typeof s.length!=='number')return out;for(let i=0;i<s.length;i++){const k=s.key(i);if(k&&k.startsWith('citymanager.'))out.push(k);}return out;};
 /** #153 (live 13:01-13:49, reverted) wrote a raw full-size taxi migration copy. Only that raw form is an orphan; compressed copies (#161) are kept. */
@@ -14,7 +16,7 @@ export const isOrphanTaxiBackup=(key:string,value:string|null)=>/^citymanager\.b
 export function freeSaveSpace(s:Store):number{
  let freed=0;
  for(const key of ownKeys(s)){
-  if(key===SAVE_KEY||!key.startsWith('citymanager.backup.'))continue;
+  if(key===SAVE_KEY||!key.startsWith('citymanager.backup.')||LEGACY_BACKUP.test(key))continue;
   const value=s.getItem(key);if(value===null)continue;
   try{
    if(isOrphanTaxiBackup(key,value)&&s.removeItem){s.removeItem(key);freed+=value.length;continue;}
@@ -28,7 +30,7 @@ export function freeSaveSpace(s:Store):number{
 export function removeOrphanSaveKeys(s:Store):number{let n=0;for(const key of ownKeys(s)){const v=s.getItem(key);if(isOrphanTaxiBackup(key,v)&&s.removeItem){s.removeItem(key);n++;}}return n;}
 export function createSaveGuard(backing:Store){
  try{removeOrphanSaveKeys(backing);}catch{/* unavailable storage */}
- const isCopy=(key:string)=>key===AUTOSAVE_CHECKPOINT_KEY||key===PRE_AUTOSAVE_BACKUP||/^citymanager\.backup\.(?!latest$|save-conflict\.index$)/.test(key);
+ const isCopy=(key:string)=>key===AUTOSAVE_CHECKPOINT_KEY||key===PRE_AUTOSAVE_BACKUP||/^citymanager\.backup\.(?!latest$|save-conflict\.index$|v[0-9])/.test(key);
  const storage:Store={getItem:key=>isCopy(key)?decodeSaveCopy(backing.getItem(key)):backing.getItem(key),setItem:(key,value)=>backing.setItem(key,isCopy(key)?encodeSaveCopy(value):value)};
  let expected:string|null=null,checkpoint:string|null=null,armed=false,replacement=false,generation=0;let pendingArchive:string[]=[];
  try{expected=storage.getItem(SAVE_KEY);checkpoint=storage.getItem(AUTOSAVE_CHECKPOINT_KEY);armed=readStoredCity(storage)===null&&!checkpoint;}catch{/* unavailable storage never authorizes replacing data */}
@@ -69,6 +71,7 @@ export function createSaveGuard(backing:Store){
    const primary=staged.get(SAVE_KEY)!;
    if(storage.getItem(SAVE_KEY)!==expected||storage.getItem(AUTOSAVE_CHECKPOINT_KEY)!==checkpoint){armed=false;archive(raw);throw Error('เซฟถูกเปลี่ยนจากอีกแท็บ เก็บสำเนาเมืองนี้แล้ว');}
    const original=expected;
+   for(const [key,value] of staged)if(LEGACY_BACKUP.test(key))storage.setItem(key,value);
    // The checkpoint must never disagree with the new primary: clear it before the primary changes, rewrite after.
    const dropCheckpoint=()=>{if(backing.removeItem&&backing.getItem(AUTOSAVE_CHECKPOINT_KEY)!==null){backing.removeItem(AUTOSAVE_CHECKPOINT_KEY);}};
    const writePrimary=()=>backing.setItem(SAVE_KEY,primary);
@@ -77,7 +80,7 @@ export function createSaveGuard(backing:Store){
    const best=(fn:()=>void)=>{try{fn();}catch(error){if(!isQuotaError(error))throw error;try{freeSaveSpace(backing);fn();}catch{/* copy skipped: primary already durable */}}};
    let checkpointOk=false;best(()=>{storage.setItem(AUTOSAVE_CHECKPOINT_KEY,raw);checkpointOk=true;});
    if(checkpointOk)checkpoint=raw;else{try{dropCheckpoint();}catch{/* ignore */}checkpoint=storage.getItem(AUTOSAVE_CHECKPOINT_KEY);}
-   for(const [key,value] of staged)if(key!==SAVE_KEY&&key!==LATEST_BACKUP_KEY)best(()=>storage.setItem(key,value));
+   for(const [key,value] of staged)if(key!==SAVE_KEY&&key!==LATEST_BACKUP_KEY&&!LEGACY_BACKUP.test(key))best(()=>storage.setItem(key,value));
    let pointer:string|undefined;
    for(const prior of pendingArchive)best(()=>{pointer=archive(prior,false)??pointer;});
    pendingArchive=[];
