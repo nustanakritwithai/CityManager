@@ -1,3 +1,4 @@
+import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -62,4 +63,14 @@ test('server-only scope uses exact reviewed main/index content and never a path-
   const paths=['src/server-city-save.ts','src/server-city-entry.ts','src/city-save-auth.ts','src/main.ts','index.html'];
   assert.equal(visualKind(paths,evidence),'full','synthetic content is not the reviewed server transition');
   assert.equal(visualKind([...paths,'src/sim.ts'],evidence),'full');
+});
+
+test('shortcut badge assertions enforce both pointer-capable and non-hover media branches', () => {
+  const facts={minWidth:true,hover:true,finePointer:true,anyCoarse:false,maxTouchPoints:0,touchUi:false};
+  const visible=['1','2','3','4'].map(key=>({key,content:JSON.stringify(key)})),hidden=visible.map(c=>({...c,content:'none'}));
+  assert.equal(assertKeycapContract({facts,caps:visible}).eligible,true);
+  assert.equal(assertKeycapContract({facts:{...facts,hover:false},caps:hidden}).eligible,false);
+  assert.throws(()=>assertKeycapContract({facts,caps:hidden}));
+  assert.throws(()=>assertKeycapContract({facts:{...facts,hover:false},caps:visible}));
+  assert.throws(()=>assertKeycapContract({facts:{...facts,touchUi:true},caps:hidden}));
 });

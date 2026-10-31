@@ -1,6 +1,17 @@
 // Actual production DOM only: select/dismiss controls, never place, load, serialize or save a city.
 import assert from 'node:assert/strict';
 
+export function assertKeycapContract({facts,caps}) {
+  const eligible=facts.minWidth&&facts.hover&&facts.finePointer&&!facts.touchUi;
+  assert.equal(facts.touchUi,facts.anyCoarse||facts.maxTouchPoints>0,'Touch layout matches actual input capabilities');
+  assert.equal(caps.length,4);assert.deepEqual(caps.map(c=>c.key),['1','2','3','4']);
+  for(const c of caps) {
+    if(eligible)assert.ok(c.content.includes(c.key),`Eligible shortcut badge rendered: ${JSON.stringify({facts,c})}`);
+    else assert.ok(c.content==='none'||c.content==='normal'||c.content==='""',`Ineligible shortcut badge hidden: ${JSON.stringify({facts,c})}`);
+  }
+  return {eligible,facts,caps};
+}
+
 export async function toolbarChecks({ send, evaluate, capture }) {
   const checks = [], layouts = [];
   const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
@@ -30,8 +41,9 @@ export async function toolbarChecks({ send, evaluate, capture }) {
   const viewport = async (width,height,mobile,screenWidth=width) => {
     await key('Escape');await key('v');
     touch=mobile;
-    await send('Emulation.setDeviceMetricsOverride',{width,height,screenWidth,screenHeight:height,deviceScaleFactor:1,mobile});
+    // Set input capability before resize, so app resize observers read the new touch state.
     await send('Emulation.setTouchEmulationEnabled',mobile?{enabled:true,maxTouchPoints:2}:{enabled:false});
+    await send('Emulation.setDeviceMetricsOverride',{width,height,screenWidth,screenHeight:height,deviceScaleFactor:1,mobile});
     await paints();
   };
   // The fresh profile may show onboarding; dismiss only UI, not city/save state.
@@ -78,8 +90,8 @@ export async function toolbarChecks({ send, evaluate, capture }) {
   await viewport(1440,1000,false);
   for(const [keyName,tool] of Object.entries({'1':'R','2':'C','3':'I','4':'F','5':'power','6':'water','7':'park',b:'bulldoze',r:'road',v:'select'})) {await key(keyName);assert.equal(await selected(tool),true);}
   await tap('#construction-tool');
-  const caps=await evaluate(`[...document.querySelectorAll('#construction-submenu [data-key]')].map(b=>({key:b.dataset.key,content:getComputedStyle(b,'::before').content}))`);
-  assert.equal(caps.length,4);for(const c of caps)assert.ok(c.content.includes(c.key),'True shortcut badge rendered');
+  const keycaps=assertKeycapContract(await evaluate(`({facts:{minWidth:matchMedia('(min-width:861px)').matches,hover:matchMedia('(hover:hover)').matches,finePointer:matchMedia('(pointer:fine)').matches,anyCoarse:matchMedia('(any-pointer:coarse)').matches,maxTouchPoints:navigator.maxTouchPoints,touchUi:document.documentElement.dataset.touchUi==='true'},caps:[...document.querySelectorAll('#construction-submenu [data-key]')].map(b=>({key:b.dataset.key,content:getComputedStyle(b,'::before').content}))})`));
+  console.log('Actual keycap media contract',JSON.stringify(keycaps));
   await key('Escape');await key('v');
   // Native focus + reduced-motion checks affect only presentation.
   await evaluate(`document.querySelector('[data-tool="select"]').focus()`);
@@ -88,6 +100,6 @@ export async function toolbarChecks({ send, evaluate, capture }) {
   assert.equal(motion.matches,true);assert.ok(motion.transition.split(',').every(v=>parseFloat(v)===0));assert.equal(motion.focused,true);
   await capture('toolbar-desktop-reduced-motion');
   await send('Emulation.setEmulatedMedia',{features:[]});
-  checks.push('Existing keyboard bindings and actual desktop badges retained; reduced-motion transition disabled and keyboard focus reachable');
-  return {checks,layouts,details,motion};
+  checks.push('Existing keyboard bindings and capability-conditional badge contract verified; reduced-motion transition disabled and keyboard focus reachable');
+  return {checks,layouts,details,motion,keycaps};
 }
