@@ -13,10 +13,17 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
 const toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
-const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],server:null};
+const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Only read-only entry predicates immediately following our explicit reload may retry.
+async function reloadEntryRead(read,onRetry=()=>{}){
+ try{return await read();}catch(error){
+  if(error?.cdpError?.code!==-32000||!['Inspected target navigated or closed','Execution context was destroyed.','Cannot find context with specified id'].includes(error.cdpError.message))throw error;
+  onRetry(error.cdpError);return false;
+ }
+}
 const failureAfterCleanup=(primary,errors)=>primary??(errors.length?new AggregateError(errors,'Browser fixture cleanup failed'):null);
 async function stopBrowser(child,ws){
  if(!child)return;
@@ -42,6 +49,13 @@ function fixtureService(){
  return {service,get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0};
 }
 async function selfTest(){
+ let retryCount=0;
+ for(const message of ['Inspected target navigated or closed','Execution context was destroyed.','Cannot find context with specified id']){
+  assert.equal(await reloadEntryRead(async()=>{throw Object.assign(Error(message),{cdpError:{code:-32000,message}});},()=>retryCount++),false);
+ }
+ assert.equal(retryCount,3);assert.equal(await reloadEntryRead(async()=>true),true);
+ for(const error of [Error('CDP timeout'),Object.assign(Error('wrong code'),{cdpError:{code:-1,message:'Inspected target navigated or closed'}}),Object.assign(Error('other CDP error'),{cdpError:{code:-32000,message:'Permission denied'}})])await assert.rejects(reloadEntryRead(async()=>{throw error;}),actual=>actual===error);
+
  const primary=Error('original acceptance failure'),cleanup=Error('profile busy');
  assert.equal(failureAfterCleanup(primary,[cleanup]),primary,'Cleanup cannot mask acceptance failure');
  assert.ok(failureAfterCleanup(null,[cleanup]) instanceof AggregateError,'Cleanup-only failure must fail acceptance');
@@ -114,7 +128,7 @@ async function run(){
     if(dialog.expected){expectReloadDialog=false;void send('Page.handleJavaScriptDialog',{accept:true}).catch(error=>{unexpectedDialog=error;});}
     else {unexpectedDialog=Error(`Unexpected browser dialog: ${JSON.stringify(dialog)}`);for(const p of pending.values())p.reject(unexpectedDialog);pending.clear();}
    }
-   if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(Error(JSON.stringify(m.error))):p?.resolve(m.result);}};
+   if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(Object.assign(Error(JSON.stringify(m.error)),{cdpError:m.error})):p?.resolve(m.result);}};
   await new Promise((ok,bad)=>{ws.onopen=ok;ws.onerror=bad;});
   const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Error(`CDP timeout: ${method}; phase=${diagnostics.phase}; expression=${diagnostics.lastExpression}`));},30_000);pending.set(n,{resolve:v=>{clearTimeout(t);resolve(v);},reject:e=>{clearTimeout(t);reject(e);}});ws.send(JSON.stringify({id:n,method,params}));});
   const evaluate=async expression=>{if(unexpectedDialog)throw unexpectedDialog;diagnostics.lastExpression=expression.slice(0,240);const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
@@ -129,7 +143,9 @@ async function run(){
    const transaction=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(stores,mode,...rest){if(mode==='readwrite'&&/citymanager/.test(this.name))window.__cityWrites.push('IDB:'+this.name);return transaction.call(this,stores,mode,...rest);};
    const si=window.setInterval;window.setInterval=function(fn,ms,...args){return si.call(this,fn,ms===60000?1500:ms,...args);};})();`});
   const click=selector=>{diagnostics.phase=`click ${selector}`;return evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
-  const enter=async()=>{await until(()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')"),'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');};
+  const entryPredicate=()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
+  const reloadEntryPredicate=()=>reloadEntryRead(entryPredicate,error=>{diagnostics.navigationRetries.push({phase:diagnostics.phase,...error});console.log('Post-reload entry context retry',JSON.stringify(error));});
+  const enter=async({afterReload=false}={})=>{await until(afterReload?reloadEntryPredicate:entryPredicate,'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');};
   const clean=async()=>assert.deepEqual(await evaluate('window.__cityWrites'),[],'browser city writes prohibited');
   const failed=()=>evaluate("!!document.querySelector('#save-failure-banner:not([hidden])')");
   const settled=()=>until(()=>evaluate("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')"),'acknowledged save UI');
@@ -148,7 +164,7 @@ async function run(){
   rev=f.state.active.revision;await click('[data-speed="10"]');if(await evaluate('window.cityManager.parks().paused'))await click('#pause');await until(async()=>f.state.active.revision>rev,'autosave commit');await settled();if(!await evaluate('window.cityManager.parks().paused'))await click('#pause');
   rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'save before reload');await settled();const saved=JSON.parse(f.state.active.raw);await clean();
   // A real beforeunload guard may protect changes after the ACK. Explicit reload is the tested user choice.
-  diagnostics.phase='explicit reload after acknowledged save';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter();expectReloadDialog=false;const loaded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.equal(loaded.tick,saved.tick);assert.deepEqual(loaded.accounts,saved.accounts);assert.deepEqual(loaded.bus,saved.bus);await clean();
+  diagnostics.phase='explicit reload after acknowledged save';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;const loaded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.equal(loaded.tick,saved.tick);assert.deepEqual(loaded.accounts,saved.accounts);assert.deepEqual(loaded.bus,saved.bus);await clean();
   // Failed network request stays pending in memory, never local fallback. Retry same key/body.
   f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure');assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
   const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'retry acknowledgement');await settled();assert.deepEqual(f.posts[start+1],pendingCommand);
@@ -173,7 +189,7 @@ async function run(){
   // not reactivate the untouched legacy browser migration input.
   const remoteDeleted=await f.service.mutate(OWNER,randomUUID(),{action:'delete',cityId:fresh.cityId,expectedRevision:fresh.revision});
   diagnostics.phase='reload deleted marker';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});
-  await until(()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')"),'tombstone entry');await click('.guest-entry-card button');
+  await until(reloadEntryPredicate,'tombstone entry');await click('.guest-entry-card button');
   await until(()=>evaluate("document.querySelector('.guest-entry-card button')?.textContent==='เริ่มเมืองใหม่'&&!document.querySelector('.guest-entry-card button').disabled"),'explicit fresh choice after tombstone');expectReloadDialog=false;
   assert.equal(await evaluate('!!window.cityManager'),false);assert.deepEqual(f.state.active,remoteDeleted);assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),seed);await clean();
   await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'fresh entry after tombstone');
