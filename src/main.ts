@@ -13,7 +13,7 @@ import { screenCull, storeTrafficModel } from './traffic/flag.ts';
 import { busEnabled } from './bus/types.ts';
 import { BusPresentation } from './bus/presentation.ts';
 import { deleteOldSaves } from './delete-old-saves.ts';
-import { autoCleanupOnce } from './auto-cleanup.ts';
+import { autoWipeOnce } from './auto-cleanup.ts';
 import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
@@ -596,8 +596,8 @@ function updateMapInfo(placement: Preview | null) {
 async function boot() {
   const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
-  // [save-hotfix-89] One-time cleanup BEFORE reading slots: keep newest city only, free localStorage for the primary slot.
-  try{const r=await autoCleanupOnce();if(r.ran||r.reason!=='already-done')console.info('[save-hotfix-89] auto-cleanup',r);}catch(error){console.warn('[save-hotfix-89] auto-cleanup failed; data untouched',error);}
+  // [save-hotfix-89] One-time FULL wipe of CityManager saves BEFORE reading slots (owner decision): fresh city, no chooser, primary slot has room.
+  try{const r=location.hostname.endsWith('github.io')?await autoWipeOnce():{ran:false,removed:[],reason:'not-production-origin'};if(r.ran||r.reason!=='already-done')console.info('[save-hotfix-89] auto-cleanup',r);}catch(error){console.warn('[save-hotfix-89] auto-cleanup failed; data untouched',error);}
   const startup=restoreStartupCity({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)},()=>createCity(61025,{starter:STARTER}));
   // Never silently resume an older primary when emergency branches exist.
   let recoveryFound=false,recoveryUnavailable=false;try{recoveryFound=(await listRecoveryCopies()).length>0;}catch{recoveryUnavailable=true;}
