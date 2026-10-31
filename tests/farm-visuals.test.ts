@@ -10,6 +10,15 @@ test('all six farm levels have distinct bounded, deterministic geometry', () => 
   for(const p of parts) for(const axis of [0,2]) assert.ok(Math.abs(p.position[axis])+p.size[axis]/2<=.840001,`${level} ${p.name} stays on parcel`);
   assert.equal(parts.filter(p=>p.name==='Greenhouse glass roof').length,level===6?2:level===5?1:0);
   assert.equal(parts.some(p=>p.name==='Farm yard lamp'),level===6);
+  const silos=parts.filter(p=>p.name==='Large farm silo');
+  assert.equal(silos.length,level===6?2:level===5?1:0);
+  for(const silo of silos) {
+   assert.ok(silo.size[1]>1,'High-tier silo is visibly taller than lower-tier storage');
+   for(const part of parts.filter(p=>p.name.startsWith('Greenhouse')||p.name.startsWith('Renewable crop row'))) {
+    const gap=part.position[2]-part.size[2]/2-(silo.position[2]+.19);
+    assert.ok(gap>.1,'Silo including cap stays clear of greenhouse and crops');
+   }
+  }
   assert.equal(parts.some(p=>p.name==='Irrigation channel'),level===3||level===4);
  }
  assert.equal(new Set(layouts).size,6);
