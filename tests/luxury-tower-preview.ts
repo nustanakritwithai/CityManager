@@ -54,5 +54,13 @@ function inspect() {
       width: bounds!.halfExtents.x * 2, depth: bounds!.halfExtents.z * 2, height: bounds!.halfExtents.y * 2 };
   });
 }
+// Capture only an observed live phase. Freeze dt atomically with the observation;
+// screenshots may take longer than a pulse on CI, but no material value is fabricated.
+function freezeBeaconPhase(on: boolean) {
+  const rows = inspect();
+  if (!rows.length || !rows.every(row => row.beacon && (on ? row.intensity > 0 : row.intensity === 0))) return false;
+  app.timeScale = 0; return true;
+}
+function resumeAnimation() { app.timeScale = 1; }
 show('R',4); app.start();
-Object.assign(window, { towerReview: { ready: assets.status.failed.length === 0, status: assets.status, show, inspect } });
+Object.assign(window, { towerReview: { ready: assets.status.failed.length === 0, status: assets.status, show, inspect, freezeBeaconPhase, resumeAnimation } });

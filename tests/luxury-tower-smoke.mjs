@@ -54,10 +54,12 @@ try {
     results.push({zone,level,night,rows}); await capture(`${zone}${level}-${night?'night':'day'}`);
   }
   await until('window.towerReview.inspect().every(r=>r.intensity===0)');
-  await until('window.towerReview.inspect().every(r=>r.intensity>0)'); await capture('C7-night-beacon-on');
-  assert.ok((await evaluate('window.towerReview.inspect()')).every(r=>r.intensity>0), 'On screenshot captured inside actual illuminated pulse');
-  await until('window.towerReview.inspect().every(r=>r.intensity===0)'); await capture('C7-night-beacon-off');
-  assert.ok((await evaluate('window.towerReview.inspect()')).every(r=>r.intensity===0), 'Off screenshot captured inside actual dark pulse');
+  await until('window.towerReview.freezeBeaconPhase(true)'); await capture('C7-night-beacon-on');
+  assert.ok((await evaluate('window.towerReview.inspect()')).every(r=>r.intensity>0), 'On screenshot preserves observed live illuminated pulse');
+  await evaluate('window.towerReview.resumeAnimation()');
+  await until('window.towerReview.freezeBeaconPhase(false)'); await capture('C7-night-beacon-off');
+  assert.ok((await evaluate('window.towerReview.inspect()')).every(r=>r.intensity===0), 'Off screenshot preserves observed live dark pulse');
+  await evaluate('window.towerReview.resumeAnimation()');
   await evaluate("window.towerReview.show('R',9,true,false)"); assert.ok((await evaluate('window.towerReview.inspect()')).every(r=>r.rooms===0)); await capture('R9-night-unoccupied');
   await evaluate("window.towerReview.show('C',7,true,true,true)");
   await sleep(2100);assert.ok((await evaluate('window.towerReview.inspect()')).every(r=>r.intensity===0));await capture('C7-night-disconnected');
