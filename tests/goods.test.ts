@@ -58,7 +58,8 @@ test('the catalog: three farm-to-table lines, crops by fertility band, daily rot
 });
 
 test('a city farming all three bands runs all three recipes and households buy a mix', { timeout: 240_000 }, () => {
-  const c = threeCropCity();
+  const fresh = new Set<string>();
+  const c = threeCropCity(city => { for (const e of city.cropLedger) if (e.tick === city.tick && e.kind === 'consumption') fresh.add(e.crop!); });
   const recipes = new Set(c.firms.filter(f => f.zone === 'I').map(f => f.recipe));
   assert.deepEqual([...recipes].sort(), [...RECIPES].sort(), 'rice mill, cannery and sugar mill');
   for (const f of c.firms) {
@@ -71,7 +72,7 @@ test('a city farming all three bands runs all three recipes and households buy a
   assert.deepEqual([...bought.keys()].sort(), [...PRODUCTS].sort(), 'households bought every product');
   const counts = [...bought.values()]; assert.ok(Math.min(...counts) > Math.max(...counts) / 3, `a real mix, not one product: ${JSON.stringify(Object.fromEntries(bought))}`);
   // Late in the run factories take the market's stock, so look at the whole run for fresh sales.
-  const fresh = new Set(c.cropLedger.filter(e => e.kind === 'consumption').map(e => e.crop));
+  // Observe past events as they occur: checkpoint retention intentionally removes their detailed rows.
   assert.ok(fresh.has('rice') && fresh.has('vegetables'), 'markets sell more than one fresh crop');
   assert.deepEqual(deserialize(serialize(c)), c);
 });
@@ -88,7 +89,7 @@ test('typed saves reject goods that do not add up', { timeout: 240_000 }, () => 
     (x: any) => { x.cropLedger[harvest].crop = CROPS.find(k => k !== x.cropLedger[harvest].crop); },
     (x: any) => { x.goodsLedger[sale].product = PRODUCTS.find(p => p !== x.goodsLedger[sale].product); },
     (x: any) => { delete x.goodsLedger[sale].product; },
-    (x: any) => { x.typeBaseline.cropEntries = x.cropLedger.length + 1; },
+    (x: any) => { x.typeBaseline.cropEntries = (x.history?.cropOffset ?? 0) + x.cropLedger.length + 1; },
     (x: any) => { delete x.typeBaseline; },
   ]) { const bad = structuredClone(raw); mutate(bad); assert.throws(() => deserialize(JSON.stringify(bad)), /corrupt/); }
 });

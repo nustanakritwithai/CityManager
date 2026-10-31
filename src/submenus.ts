@@ -1,3 +1,4 @@
+import { auditMoney } from './city-history.ts';
 import { iconElement } from './ui-icons.ts';
 import { GAME_VERSION } from './version.ts';
 import './submenus.css';
@@ -245,7 +246,7 @@ function updateRules() {
   const utilities = root('simulation-rules').querySelector('[data-rule=utilities]')!;
   let status = utilities.querySelector('.sm-rule-status'); if (!status) { status = element('div', 'sm-rule-status'); utilities.append(status); }
   const u = utilityStatus(current), power = u.power, water = u.water; status.replaceChildren(image(power && water ? 'status-ok' : 'status-alert'), document.createTextNode(`ขณะนี้: ไฟฟ้า ${u.used.power}/${u.capacity.power} ${power ? 'พร้อม' : 'ไม่พอ'} · น้ำ ${u.used.water}/${u.capacity.water} ${water ? 'พร้อม' : 'ไม่พอ'}`));
-  const bootstrap = root('simulation-rules').querySelector('[data-rule=bootstrap]')!, grant = current.ledger.find(entry => entry.reason === 'Initial municipal grant');
+  const bootstrap = root('simulation-rules').querySelector('[data-rule=bootstrap]')!, grant = auditMoney(current).find(entry => entry.reason === 'Initial municipal grant');
   let grantLabel = bootstrap.querySelector('.sm-rule-status'); if (!grantLabel) { grantLabel = element('div', 'sm-rule-status'); bootstrap.append(grantLabel); }
   grantLabel.textContent = grant ? `ทุนตั้งเมืองที่บันทึก: ${formatMoney(grant.amount)} บาท` : 'ยังไม่มีรายการทุนตั้งเมืองในบัญชีนี้';
   const version = root('simulation-rules').querySelector('[data-rule=version]')!;

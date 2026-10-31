@@ -75,7 +75,7 @@ test('owner capital, drawn earnings and paid tax reconcile real counterparties a
     (c: City) => { market(c).owner!.withdrawn++; },
     (c: City) => { market(c).owner!.taxPaid++; },
     (c: City) => { market(c).monthlyRevenue += 60_000; },
-    (c: City) => { const t = market(c); c.ledger.find(e => e.reason === 'Owner capital contribution' && e.to === t.wallet)!.from = 'outside'; },
+    (c: City) => { const t = market(c), entry = c.ledger.find(e => e.reason === 'Owner capital contribution' && e.to === t.wallet); if (entry) entry.from = 'outside'; else c.ledger.push({ tick: c.tick, from: 'outside', to: t.wallet, amount: 1, reason: 'Owner capital contribution' }); },
     (c: City) => { const t = market(c); c.ledger.push({ tick: c.tick, from: 'outside', to: t.wallet, amount: 1, reason: 'Outside firm equity investment' }); },
     (c: City) => { c.firms.find(f => f.zone === 'I')!.owner = { ...market(c).owner! }; },
   ]) rejects(mutate);

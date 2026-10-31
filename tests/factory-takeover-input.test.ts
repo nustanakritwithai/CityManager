@@ -8,12 +8,13 @@ test('factory takeover waits for usable crop supply and recovers when the farm r
     const farm = city.firms.find(f => f.zone === 'F')!;
     const cell = city.buildings.find(b => b.id === farm.building)!.cell;
     assert.equal(bulldoze(city, cell).ok, true);
-    for (let d = 0; d < 160; d++) step(city);
-    assert.equal(city.ledger.filter(e => e.tick > 200 && /^Outside industry equity #/.test(e.reason)).length, 0, 'no outside investment without crops');
+    const observed = [...city.ledger];
+    for (let d = 0; d < 160; d++) { step(city); observed.push(...city.ledger.filter(e => e.tick === city.tick)); }
+    assert.equal(observed.filter(e => e.tick > 200 && /^Outside industry equity #/.test(e.reason)).length, 0, 'no outside investment without crops');
     assert.deepEqual(deserialize(serialize(city)), city);
     assert.equal(zoneCell(city, cell, 'F').ok, true);
-    for (let d = 0; d < 180; d++) step(city);
-    assert.ok(city.ledger.some(e => e.tick > 360 && /^Outside industry equity #/.test(e.reason)), 'investment resumes when crops return');
+    for (let d = 0; d < 180; d++) { step(city); observed.push(...city.ledger.filter(e => e.tick === city.tick)); }
+    assert.ok(observed.some(e => e.tick > 360 && /^Outside industry equity #/.test(e.reason)), 'investment resumes when crops return');
     assert.ok(city.goodsLedger.some(e => e.tick > 360 && e.from === 'production'), 'factory actually produces again');
     assert.deepEqual(deserialize(serialize(city)), city);
   }
@@ -36,8 +37,9 @@ test('a disconnected farm cannot justify factory takeover until road access retu
   const farm = c.firms.find(f => f.zone === 'F')!, cell = c.buildings.find(b => b.id === farm.building)!.cell;
   const roads = [cell - 1, cell + 1, cell - SIZE, cell + SIZE].filter(i => c.cells[i]?.road);
   assert.equal(roads.length, 1); assert.equal(bulldoze(c, roads[0]).ok, true); assert.equal(access(c, cell), false);
-  for (let d = 0; d < 160; d++) step(c);
-  assert.equal(c.ledger.filter(e => e.tick > 200 && /^Outside industry equity #/.test(e.reason)).length, 0);
+  const observed = [...c.ledger];
+  for (let d = 0; d < 160; d++) { step(c); observed.push(...c.ledger.filter(e => e.tick === c.tick)); }
+  assert.equal(observed.filter(e => e.tick > 200 && /^Outside industry equity #/.test(e.reason)).length, 0);
   assert.equal(buildRoad(c, roads[0], roads[0]).ok, true); assert.equal(access(c, cell), true);
   for (let d = 0; d < 180; d++) step(c);
   assert.ok(c.goodsLedger.some(e => e.tick > 360 && e.from === 'production'));

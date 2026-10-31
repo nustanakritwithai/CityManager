@@ -7,7 +7,7 @@ const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 const wages = (f: Firm) => sum(Object.values(f.workDays)) * firmWage(f) / 30;
 const seeded = (day: number) => { const c = createCity(42); for (let i = 0; i < day; i++) step(c); return c; };
 function conserved(c: City) {
-  const replay: Record<string, number> = {};
+  const replay: Record<string, number> = {...c.history?.accounts};
   for (const e of c.ledger) { replay[e.from] = (replay[e.from] ?? 0) - e.amount; replay[e.to] = (replay[e.to] ?? 0) + e.amount; }
   for (const wallet of new Set([...Object.keys(replay), ...Object.keys(c.accounts)])) assert.equal(c.accounts[wallet] ?? 0, replay[wallet] ?? 0);
   assert.equal(sum(Object.values(c.accounts)), 0);
@@ -18,7 +18,7 @@ function conserved(c: City) {
 // the runtime. They isolate finance math; full-world replay is covered separately.
 function fixture() {
   const c = seeded(62), f = c.firms.find(f => f.id === 16)!;
-  c.tick = 35; c.ledger = []; c.cropLedger = [];
+  c.tick = 35; delete c.history; c.ledger = []; c.cropLedger = [];
   f.profit = 0; f.lastMonthProfit = 0; f.monthlyRevenue = 0; f.monthlyExpense = 0; f.workDays = {};
   Object.assign(f.owner!, { withdrawn: 0, taxPaid: 0, capitalContributed: 60_000, capitalReturned: 0 });
   c.accounts[f.wallet] = 60_000;

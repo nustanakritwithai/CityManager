@@ -60,7 +60,7 @@ export class ChartModal {
     if (key === this.key) return; this.key = key;
     const series = dailySeries(city, this.days), def = this.def;
     this.title.textContent = def.title;
-    this.note.textContent = `วันที่ ${series.ticks[0]}–${series.ticks.at(-1)} · ${series.ticks.length.toLocaleString('th-TH')} วัน`;
+    this.note.textContent = `วันที่ ${series.ticks[0]}–${series.ticks.at(-1)} · ${series.ticks.length.toLocaleString('th-TH')} วัน${city.history?' · เก็บสรุปย้อนหลังไม่เกิน 90 วัน':''}`;
     for (const b of this.ranges.querySelectorAll<HTMLButtonElement>('.chart-range')) { const on = Number(b.dataset.days) === this.days; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
     const width = Math.max(320, Math.min(1040, this.body.clientWidth || innerWidth - 80) - 20);
     const chart = renderChart(def, series, width, Math.round(Math.min(340, Math.max(200, innerHeight * .36))), {

@@ -1,3 +1,4 @@
+import { assertServerCitySize } from './server-save-size.ts';
 /** The only active-city persistence transport. No local/session storage or IndexedDB. */
 export type ServerCityMetadata = {name:string;population:number;tick:number};
 export type ServerCity = {owner:string;cityId:string;revision:number;raw:string;rawHash:string;metadata:ServerCityMetadata};
@@ -44,6 +45,7 @@ export class ServerCitySaveClient {
  }
  async delete():Promise<ServerCityDeleted>{if(!this.loaded||!this.value)throw Error('server-load-required');const ack=await this.begin({action:'delete',cityId:this.value.cityId,expectedRevision:this.value.revision});if(!('deleted' in ack))throw Error('invalid-server-delete-ack');return ack;}
  private async begin(command:Command):Promise<ServerCity|ServerCityDeleted>{
+  if(command.action!=='delete')assertServerCitySize(command.raw);
   if(this.busy||this.intent)throw Error('server-save-pending');if(this.conflicted)throw Object.assign(Error(this.rejection??'server-save-conflict'),{status:409});
   this.intent={id:crypto.randomUUID(),command:clone(command)};return this.retry();
  }
@@ -67,6 +69,7 @@ export class ServerCitySaveClient {
  /** Explicit conflict resolution discards only this in-memory attempt; caller must preserve/archive it first. */
  discardConflictedAttempt(){if(this.busy||!this.conflicted)throw Error('server-save-not-conflicted');this.intent=null;this.value=null;this.tombstone=null;this.loaded=false;this.rejection=null;}
  async archive(input:{source:string;raw:string}):Promise<{hash:string;rawHash:string}>{
+  assertServerCitySize(input.raw);
   const expected=await serverSaveHash(input.raw);const v=await this.request('/v1/city-save/archives',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)}) as {hash:string;rawHash:string};
   if(!v||v.hash!==expected||v.rawHash!==expected)throw Error('invalid-archive-ack');
   const read=await this.readArchive(expected);if(read.raw!==input.raw||!read.sources.includes(input.source))throw Error('archive-verification-failed');return {hash:expected,rawHash:expected};

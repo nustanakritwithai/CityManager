@@ -1,3 +1,4 @@
+import { moneyJournalLength } from './city-history.ts';
 /**
  * The city as a network of linked variables. Nodes read live values from the city; edges state
  * how one rule of the simulator feeds another, with a sign (+ moves the same way, − the
@@ -163,7 +164,7 @@ const kindOf = (city: City, buildingId: number, zone: string) => {
   const firm = city.firms.find(f => f.building === buildingId); return firm && !isMarket(firm) ? 'shop' : 'market';
 };
 export function networkSnapshot(city: City): NetSnapshot {
-  return { tick: city.tick, ledger: city.ledger.length, buildings: new Map(city.buildings.map(b => [b.id, kindOf(city, b.id, b.zone)])), utilities: utilitiesOk(city) };
+  return { tick: city.tick, ledger: moneyJournalLength(city), buildings: new Map(city.buildings.map(b => [b.id, kindOf(city, b.id, b.zone)])), utilities: utilitiesOk(city) };
 }
 const BUILT: Record<string, [node: string, icon: string, name: string]> = {
   R: ['homes', 'R', 'บ้าน'], I: ['factories', 'I', 'โรงงาน'], F: ['farms', 'F', 'ฟาร์ม'], market: ['markets', 'market', 'ตลาด'], shop: ['shops', 'shop', 'ร้านค้า'],
@@ -171,10 +172,10 @@ const BUILT: Record<string, [node: string, icon: string, name: string]> = {
 const baht = (satang: number) => `${Math.round(satang / 100).toLocaleString('th-TH')} ฿`;
 /** What happened since the snapshot, in the words a player would use, oldest first. */
 export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
-  if (city.ledger.length < before.ledger || city.tick < before.tick) return [];
+  if (moneyJournalLength(city) < before.ledger || city.tick < before.tick) return [];
   const out: NetEvent[] = [], wages = new Map<number, number>(), taxes = new Map<number, number>();
   const add = (map: Map<number, number>, tick: number, amount: number) => map.set(tick, (map.get(tick) ?? 0) + amount);
-  for (let i = before.ledger; i < city.ledger.length; i++) {
+  for (let i = Math.max(0,before.ledger-(city.history?.moneyCount??0)); i < city.ledger.length; i++) {
     const e = city.ledger[i], road = /^Build (\d+) road cells$/.exec(e.reason);
     if (road) out.push({ node: 'roads', icon: 'road', text: `สร้างถนน ${road[1]} ช่อง · ${baht(e.amount)}`, tick: e.tick });
     else if (e.reason === 'New household arrival savings') out.push({ node: 'households', icon: 'people', text: 'ครัวเรือนใหม่ย้ายเข้า', tick: e.tick });
@@ -199,7 +200,7 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
 /** A snapshot as the city stood `days` ago, as far as the ledger and building ages can tell. */
 export function pastSnapshot(city: City, days: number): NetSnapshot {
   const from = Math.max(0, city.tick - days + 1), ledger = city.ledger.findIndex(e => e.tick >= from);
-  return { tick: from - 1, ledger: ledger < 0 ? city.ledger.length : ledger, utilities: utilitiesOk(city),
+  return { tick: from - 1, ledger: (city.history?.moneyCount??0)+(ledger < 0 ? city.ledger.length : ledger), utilities: utilitiesOk(city),
     buildings: new Map(city.buildings.filter(b => city.tick - b.age < from).map(b => [b.id, kindOf(city, b.id, b.zone)])) };
 }
 

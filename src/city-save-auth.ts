@@ -1,5 +1,4 @@
 /** Save authentication is independent of the disabled trading feature. No city or token storage. */
-import { decodeSaveCopy } from './save-copy-codec.ts';
 import { pagesSession, PAGES_ORIGIN, PAGES_MARKET_BASE } from './pages-auth.ts';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 /** Read legacy identity only; never create a replacement identity when it is unreadable. */
@@ -7,8 +6,8 @@ export function legacySaveOwner(storage:Pick<Storage,'getItem'>):string|null {
  const readGuest=(raw:string):string|null=>{const data=JSON.parse(raw);if(!data||typeof data!=='object')throw Error('legacy-identity-unreadable');const guest=data.guestId;if(guest===null||guest===undefined)return null;if(typeof guest!=='string'||!UUID.test(guest))throw Error('legacy-identity-unreadable');return guest;};
  const journal=storage.getItem('citymanager.market.v10');
  if(journal!==null){const guest=readGuest(journal);if(guest)return guest;}
- // A city can retain its identity when the old standalone journal is absent.
- for(const version of [7,6,5,4,3,2,1]){const copy=storage.getItem(`citymanager.save.v${version}`);if(copy===null)continue;const raw=decodeSaveCopy(copy);if(raw===null)throw Error('legacy-city-unreadable');const data=JSON.parse(raw);if(data.market){const guest=readGuest(JSON.stringify(data.market));if(guest)return guest;}break;}
+ // Browser-only city files are obsolete. Only the separate remembered Guest journal pins identity.
+
  return null;
 }
 export function createCitySaveAuth(configured?:string) {

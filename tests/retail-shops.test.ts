@@ -19,15 +19,16 @@ function conserved(c: City) {
 
 test('a working factory opens shops that sell local goods to households, with money and goods conserved', () => {
   const c = strip(true);
-  for (let d = 0; d < 180; d++) { step(c); if (d % 30 === 0) conserved(c); }
+  const observed = [...c.ledger];
+  for (let d = 0; d < 180; d++) { step(c); observed.push(...c.ledger.filter(e => e.tick === c.tick)); if (d % 30 === 0) conserved(c); }
   const shops = c.firms.filter(isRetail);
   assert.ok(shops.length >= 1, 'at least one shop opened');
   for (const shop of shops) {
     const b = c.buildings.find(b => b.id === shop.building)!;
     assert.equal(b.zone, 'C'); assert.ok(b.level >= 2);
     assert.ok(shop.owner
-      ? c.ledger.some(e => e.reason === 'Owner capital contribution' && e.from === `household:${shop.owner!.householdId}` && e.to === shop.wallet)
-      : c.ledger.some(e => e.reason === 'Outside firm equity investment' && e.from === 'outside' && e.to === shop.wallet));
+      ? observed.some(e => e.reason === 'Owner capital contribution' && e.from === `household:${shop.owner!.householdId}` && e.to === shop.wallet)
+      : observed.some(e => e.reason === 'Outside firm equity investment' && e.from === 'outside' && e.to === shop.wallet));
     assert.ok((shop.convertedAt ?? c.tick - b.age) % 3 === 1, 'shops open (or markets convert) on their own day of the growth cycle');
   }
   assert.ok(c.goodsLedger.some(e => e.reason === 'Wholesale stock delivery'), 'shops buy from local factories');
@@ -72,13 +73,14 @@ test('shops show chain bottlenecks on the map: empty shelf, and stock imported b
 
 test('a household with savings opens the shop itself: its own capital, its own labour, hires only beside it', () => {
   const c = strip(true);
-  for (let d = 0; d < 360; d++) { step(c); if (d % 30 === 0) conserved(c); }
+  const observed = [...c.ledger];
+  for (let d = 0; d < 360; d++) { step(c); observed.push(...c.ledger.filter(e => e.tick === c.tick)); if (d % 30 === 0) conserved(c); }
   const shop = c.firms.find(f => isRetail(f) && f.owner)!;
   assert.ok(shop, 'a household-owned shop opened');
   const owner = shop.owner!, wallet = `household:${owner.householdId}`, b = c.buildings.find(b => b.id === shop.building)!;
-  assert.ok(c.ledger.some(e => e.reason === 'Owner capital contribution' && e.from === wallet && e.to === shop.wallet && e.amount === 60_000));
-  assert.ok(c.ledger.some(e => e.reason === 'Self-employed shop construction' && e.from === shop.wallet && e.amount === 10_000));
-  assert.ok(!c.ledger.some(e => e.to === shop.wallet && e.from === 'outside'), 'no outside equity in an owned shop');
+  assert.ok(observed.some(e => e.reason === 'Owner capital contribution' && e.from === wallet && e.to === shop.wallet && e.amount === 60_000));
+  assert.ok(observed.some(e => e.reason === 'Self-employed shop construction' && e.from === shop.wallet && e.amount === 10_000));
+  assert.ok(!observed.some(e => e.to === shop.wallet && e.from === 'outside'), 'no outside equity in an owned shop');
   assert.ok(c.ownerLabor.some(e => e.firmId === shop.id && e.householdId === owner.householdId));
   const hired = c.employment.filter(e => e.firmId === shop.id).reduce((n, e) => n + e.workers, 0);
   assert.ok(hired <= firmCapacity(b) - 1, 'the owner takes one of the shop slots');
