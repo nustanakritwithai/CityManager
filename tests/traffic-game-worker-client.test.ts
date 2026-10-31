@@ -50,3 +50,25 @@ test('pause fence survives an unpause replacement until the pre-pause candidate 
  p.emit({kind:'frame',epoch:'city-a',seq:3,frame:{value:3}});assert.deepEqual(frames,[3]);
  client.submit({value:4},{advance:true,paused:false});assert.equal(p.commands[2].commitPrevious,true,'later accepted candidate can advance normally');client.dispose();
 });
+
+test('failure cleanup is exactly once when the owning layer synchronously disposes the client',()=>{
+ const p=new Port(),frames:number[]=[],faults:string[]=[];
+ let client:ReturnType<typeof createTrafficGameClient<{value:number},{value:number}>>;
+ client=createTrafficGameClient(p as never,'city-a',{onFrame:f=>frames.push(f.value),onFailure:message=>{faults.push(message);client.dispose();}},200);
+ client.submit({value:1},{advance:true,paused:false});client.submit({value:2},{advance:true,paused:false});
+ p.error();assert.equal(p.terminated,1,'stop and reentrant layer dispose share one owned-worker termination');
+ assert.equal(client.status.disposed,true);assert.equal(client.status.inflight,false);assert.equal(client.status.pending,false);
+ assert.match(client.status.failure??'',/worker failed/);assert.equal(faults.length,1);
+ p.error();p.emit({kind:'frame',epoch:'city-a',seq:1,frame:{value:99}});client.dispose();client.dispose();
+ assert.equal(p.terminated,1,'late faults and city destroy must not terminate again');assert.equal(faults.length,1);assert.deepEqual(frames,[]);
+ assert.equal(client.submit({value:3},{advance:true,paused:false}),false,'cleanup never restarts a failed worker');
+});
+
+test('throwing termination remains latched before reentrant failure cleanup',()=>{
+ const p=new Port();p.terminate=()=>{p.terminated++;throw Error('injected terminate failure');};let faults=0;
+ let client:ReturnType<typeof createTrafficGameClient<{value:number},{value:number}>>;
+ client=createTrafficGameClient(p as never,'city-a',{onFrame:()=>assert.fail('failed worker must not publish'),onFailure:()=>{faults++;client.dispose();}},200);
+ client.submit({value:1},{advance:true,paused:false});assert.doesNotThrow(()=>p.error());client.dispose();p.error();
+ assert.equal(p.terminated,1);assert.equal(faults,1);assert.equal(client.status.disposed,true);assert.equal(client.status.inflight,false);
+ assert.equal(client.submit({value:2},{advance:true,paused:false}),false);
+});
