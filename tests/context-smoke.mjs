@@ -79,8 +79,18 @@ async function openPage(page) {
 async function load(json) {
   await openPage('game');
   if ((await route()).submenu) await button('#submenu-back');
-  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(json)})`); await button('#load');
-  const expected = deserialize(json); adoptSavedEducation(expected); await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); await assertOriginalSave(evaluate, json);
+  const expected = deserialize(json); adoptSavedEducation(expected);
+  // The fixture is injected behind the running game; a legitimate autosave of the running city can
+  // overwrite citymanager.save.v7 before the native Load press (seen on Edge CI: loaded day 104, not 65).
+  // Retry ONLY when the slot was proven overwritten; the loaded-state assertions below are unchanged.
+  for (let attempt = 0; ; attempt++) {
+    await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(json)})`); await button('#load');
+    if (await evaluate(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`)) break;
+    const overwritten = await evaluate(`localStorage.getItem('citymanager.save.v7')!==${JSON.stringify(json)}`);
+    if (!overwritten || attempt >= 2) break;
+    console.log('Fixture slot was overwritten by autosave before Load; re-injecting', attempt + 1);
+  }
+  await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); await assertOriginalSave(evaluate, json);
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
 }
 async function cell(index, close = true) {
