@@ -7,6 +7,8 @@ import { TrafficFlow, FLOW_LANE_CAPACITY } from './flow.ts';
 import { cityDemandInput } from './snapshot.ts';
 import type { DemandCarry, DemandInput, OdEntry } from './types.ts';
 import { roadNeighbors } from '../road-topology.ts';
+import { freeFlowSeconds } from './network.ts';
+import { createBusLoadSink, type BusLoadSink } from './bridge.ts';
 /**
  * Feature flag for the aggregate traffic model. OFF by default: nothing in gameplay, decorative
  * cars, economy or saves reads it. The clock holds all its state in memory only.
@@ -21,6 +23,8 @@ export type TrafficClockOptions = {
   /** Prototype conserved engine. Keep opt-in until city-bound save/runtime integration lands. */
   conservedFlow?: boolean;
   snapshot?: (c: City) => DemandInput;
+  /** Optional per-period OD filter (bus mode share, PR B5). Absent = unchanged behaviour. */
+  demandFilter?: (od: OdEntry[], periodStartMinute: number) => OdEntry[];
 };
 /** Absolute game minute from the economy clock (tick = day) and the minute within the day. */
 export const gameMinute = (tick: number, minuteOfDay: number) => tick * MINUTES_PER_DAY + Math.floor(minuteOfDay);
@@ -32,6 +36,7 @@ export class TrafficClock {
   lifecycle: 'new' | 'running' | 'different-city' | 'time-reversed' = 'new';
   pendingPeriods = 0;
   private readonly snapshot: (c: City) => DemandInput;
+  readonly demandFilter?: (od: OdEntry[], periodStartMinute: number) => OdEntry[];
   private lastPeriod: number | null = null;
   private observedPeriod: number | null = null;
   private city: City | null = null;
@@ -46,6 +51,7 @@ export class TrafficClock {
   constructor(o: TrafficClockOptions = {}) {
     this.enabled = o.enabled ?? TRAFFIC_MODEL_ENABLED;
     this.conservedFlow = o.conservedFlow ?? false;
+    this.demandFilter = o.demandFilter;
     this.snapshot = o.snapshot ?? (c => cityDemandInput(c, this.conservedFlow));
   }
   /**
@@ -56,6 +62,15 @@ export class TrafficClock {
    * explicitly for conserved clocks without erasing pending journeys; matching sidecar restore
    * is caller-controlled. The released representative-only clock retains its reset lifecycle.
    */
+  private busPcu: ReadonlyMap<string, number> = new Map();
+  /** Bus road-load sink (`trafficLayer.bus?.hook.connect(clock.busRoadSink())`). Never connected = unchanged. */
+  busRoadSink(): BusLoadSink { return createBusLoadSink(load => { this.busPcu = load; this.flow.setBusLoad(load); }); }
+  /** Present bus PCU → hourly volume by Little's law (PCU × 3600 / free-flow seconds). */
+  private busVolumes(): Map<string, number> | undefined {
+    if (!this.busPcu.size || !this.net) return undefined;
+    const v = new Map<string, number>(); for (const [k, p] of this.busPcu) { const l = this.net.links.get(k); if (l) v.set(k, p * 3600 / Math.max(1, freeFlowSeconds(l))); }
+    return v;
+  }
   advance(c: City, minute: number, paused = false): Assignment[] {
     if (!Number.isSafeInteger(minute) || minute < 0) throw Error('Invalid traffic clock minute');
     const period = Math.floor(minute / MINUTES_PER_PERIOD);
@@ -77,10 +92,11 @@ export class TrafficClock {
     const out: Assignment[] = [];
     for (const r of demandForPeriods(this.snapshot(c), start % 24, n, this.carry)) {
       this.carry = r.carry;
-      const { rows: resolved, unreachable } = this.conservedFlow ? this.routingDemand(r.od) : { rows: r.od, unreachable: 0 };
-      const a = assignPeriod(this.net, resolved, this.state, this.iterations);
+      const od = this.demandFilter ? this.demandFilter(r.od, (start + out.length) * MINUTES_PER_PERIOD) : r.od;
+      const { rows: resolved, unreachable } = this.conservedFlow ? this.routingDemand(od) : { rows: od, unreachable: 0 };
+      const a = assignPeriod(this.net, resolved, this.state, this.iterations, this.busVolumes());
       a.unserved += unreachable;
-      if (this.conservedFlow) this.flow.advancePeriod(this.net, r.od);
+      if (this.conservedFlow) this.flow.advancePeriod(this.net, od);
       // Age only ODs actually assigned, once even when multiple purposes share the route.
       for (const key of this.iterations.keys()) if (!a.state.has(key)) this.iterations.delete(key);
       for (const key of new Set(resolved.filter(d => d.vehicles > 0).map(d => `${d.from}:${d.to}`))) {

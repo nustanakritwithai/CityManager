@@ -256,11 +256,12 @@ try {
   while(replayed2000.tick<actual2000.tick)step(replayed2000);
   assert.deepEqual(actual2000,replayed2000);assert.equal(summary(actual2000).population,2000);
   const frameTimes=await evaluate('window.__populationFrames'),frameSorted=[...frameTimes].sort((a,b)=>a-b);
-  const traffic2000=await evaluate('window.cityManager.atmosphere()');assert.equal(traffic2000.settings.traffic,true);assert.ok(traffic2000.traffic.actors>0,'Current enabled traffic survives automatic quality selection');
+  const traffic2000=await evaluate('window.cityManager.atmosphere()');assert.equal(traffic2000.settings.traffic,true);const allocation2000=await evaluate('window.cityManager.traffic()');if(!allocation2000)assert.ok(traffic2000.traffic.actors>0,'Current enabled traffic survives automatic quality selection');else{assert.equal(allocation2000.mode,'allocation-game');assert.equal(allocation2000.failure,null,'Allocation traffic has no failure under automatic quality selection');}
   checks.push('2000-person current traffic diagnostics: '+JSON.stringify({quality:traffic2000.quality,traffic:traffic2000.traffic})+'; population is not vehicle count');
   checks.push(`2000-person 1x mobile-emulated scene: ${frameTimes.length} frame intervals, median ${frameSorted[60].toFixed(1)}ms, P95 ${frameSorted[113].toFixed(1)}ms, max ${frameSorted.at(-1).toFixed(1)}ms. Headless CI only, not physical Android.`);
   await cityMetrics(actual2000);await layout();await screenshot('phone-population-2000.png');
   await page('game');await button('#save');await assertSavedCity(evaluate,actual2000);await button('#load');assert.deepEqual(await state(),actual2000);
+  if(allocation2000){await close();await button('#pause');await until('(window.cityManager.traffic()?.cars??0)>0');const moving2000=await evaluate('window.cityManager.traffic()');await button('#pause');assert.ok(moving2000.cars>0,'Current enabled traffic survives automatic quality selection');checks.push('2000-person allocation traffic under automatic quality: '+JSON.stringify({cars:moving2000.cars,moving:moving2000.moving,failure:moving2000.failure}));}
   checks.push('Exactly 2000 real people / 668 households retain complete simulation state, balanced accounts and session bytes through mobile Load, running at1x, Save and reload; job shortages remain explicit');
 
   // Restore the intended v4 test city after recovery-button layout exercises.

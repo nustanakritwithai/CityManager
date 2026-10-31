@@ -6,14 +6,14 @@ import {roadNeighbors} from '../road-topology.ts';
 /** The accepted save/session owner supplies these opaque identifiers. No storage I/O here. */
 export type TrafficScope = {cityId:string; revisionId:string; epoch:string};
 export type PassengerOffer = {scope:TrafficScope; requestId:string; purpose:Exclude<TripPurpose,'freight'>; from:number; to:number; persons:number};
-export type ModeLeaseRequest = {scope:TrafficScope; requestId:string; leaseId:string; mode:'taxi'|'rail'; persons:number};
+export type ModeLeaseRequest = {scope:TrafficScope; requestId:string; leaseId:string; mode:'taxi'|'rail'|'bus'; persons:number};
 export type ModeServiceReceipt = {scope:TrafficScope; leaseId:string; boardedPersons:number; releasedPersons:number; completedPersons:number};
 export type TaxiRegistration = {scope:TrafficScope; unitId:string; cell:number};
 export type TaxiRoadMove = {scope:TrafficScope; moveId:string; unitId:string; from:number; to:number; carriedPersons:number; leaseId?:string};
 export type FreightOffer = {scope:TrafficScope; requestId:string; from:number; to:number; vehicleUnits:number};
 export type RoadAdmissionReceipt = {scope:TrafficScope; moveId:string; offeredVehicleUnits:number; admittedVehicleUnits:number; completedVehicleUnits:number; waitingVehicleUnits:number; activeVehicleUnits:number; arrived:boolean};
-export type ModeLeaseReceipt = {scope:TrafficScope; requestId:string; leaseId:string; mode:'taxi'|'rail'; reservedPersons:number; boardedPersons:number; releasedPersons:number; completedPersons:number; pendingPersons:number};
-export type PassengerReceipt = {scope:TrafficScope; requestId:string; offeredPersons:number; privateWaitingPersons:number; privateAdmittedPersons:number; privateActivePersons:number; privateCompletedPersons:number; taxiPendingPersons:number; taxiCompletedPersons:number; railPendingPersons:number; railCompletedPersons:number; conservationError:number};
+export type ModeLeaseReceipt = {scope:TrafficScope; requestId:string; leaseId:string; mode:'taxi'|'rail'|'bus'; reservedPersons:number; boardedPersons:number; releasedPersons:number; completedPersons:number; pendingPersons:number};
+export type PassengerReceipt = {scope:TrafficScope; requestId:string; offeredPersons:number; privateWaitingPersons:number; privateAdmittedPersons:number; privateActivePersons:number; privateCompletedPersons:number; taxiPendingPersons:number; taxiCompletedPersons:number; railPendingPersons:number; railCompletedPersons:number; busPendingPersons:number; busCompletedPersons:number; conservationError:number};
 type Passenger = Omit<PassengerOffer,'scope'> & {roadIds:string[]};
 type Lease = Omit<ModeLeaseReceipt,'scope'|'pendingPersons'>;
 type Taxi = {unitId:string; cell:number; moveIds:string[]};
@@ -21,6 +21,20 @@ type Move = Omit<TaxiRoadMove,'scope'>;
 type Freight = Omit<FreightOffer,'scope'>;
 export type TrafficBridgeState = {version:1; scope:TrafficScope; baseMinute:number; minute:number; observedMinute:number; passengers:Passenger[]; leases:Lease[]; taxis:Taxi[]; moves:Move[]; freight:Freight[]; flow:TrafficFlowState};
 export const MAX_BRIDGE_CATCHUP_MINUTES=1440;
+const MODES:readonly string[]=['taxi','rail','bus'];
+/** Bus road-load sink (contract of src/bus/traffic-hook.ts). `load` = linkKey → PCU of buses on that link
+ * (BUS_PCU = 2 each). Each call REPLACES the previous load; empty map clears; same call again is a no-op;
+ * non-finite/≤0 values and unknown links are ignored (never throw). Only consumes road capacity:
+ * no passenger request, lease or road move is created. */
+export type BusLoadSink = {readonly acceptsBus:true; applyBusLoad(minute:number,load:ReadonlyMap<string,number>):void; readonly load:ReadonlyMap<string,number>};
+export function createBusLoadSink(apply:(load:ReadonlyMap<string,number>)=>void,knownLink:(key:string)=>boolean=()=>true):BusLoadSink {
+  let current:ReadonlyMap<string,number>=new Map();
+  return {acceptsBus:true,get load(){return current;},applyBusLoad(_minute,load){
+    const next=new Map<string,number>();
+    try{for(const [k,v] of load??[])if(typeof k==='string'&&typeof v==='number'&&Number.isFinite(v)&&v>0&&knownLink(k))next.set(k,v);}catch{/* malformed input → treat as empty */}
+    current=next;apply(next);
+  }};
+}
 const EPS=1e-7;
 const clone=<T>(v:T):T=>structuredClone(v);
 const id=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=96&&!/[\u0000-\u001f]/.test(v);
@@ -84,7 +98,7 @@ export class TrafficBridge {
   }
   reserveMode(command:ModeLeaseRequest):ModeLeaseReceipt {
     this.guard(command.scope,true);
-    requireValid(fields(command,'leaseId,mode,persons,requestId,scope')&&id(command.leaseId)&&id(command.requestId)&&['taxi','rail'].includes(command.mode)&&whole(command.persons)&&command.persons>0,'Invalid mode reservation');
+    requireValid(fields(command,'leaseId,mode,persons,requestId,scope')&&id(command.leaseId)&&id(command.requestId)&&MODES.includes(command.mode)&&whole(command.persons)&&command.persons>0,'Invalid mode reservation');
     const old=this.leases.get(command.leaseId);
     if(old) {
       requireValid(old.requestId===command.requestId&&old.mode===command.mode&&old.reservedPersons===command.persons,'Mode lease ID reused');
@@ -167,6 +181,8 @@ export class TrafficBridge {
     }
     return {minute:this.minute,observedMinute:this.observedMinute,pendingMinutes:this.observedMinute-this.minute};
   }
+  /** Sink for `trafficLayer.bus?.hook.connect(...)`: bus PCU reduce this bridge's link capacity. */
+  busRoadSink():BusLoadSink {return createBusLoadSink(load=>this.flow.setBusLoad(load));}
   roadEdited(scope:TrafficScope,net:LinkNetwork):void {this.guard(scope,true);this.flow.roadEdited(net);}
   private arrived(key:string) {const r=this.flow.receipt(key)!;return r.completed+EPS>=r.offered;}
   private deliveredTaxiPersons(leaseId:string) {return [...this.moves.values()].filter(m=>m.leaseId===leaseId&&this.arrived(flowId('taxi',m.moveId))).reduce((n,m)=>n+m.carriedPersons,0);}
@@ -185,12 +201,12 @@ export class TrafficBridge {
   passengerReceipt(scope:TrafficScope,requestId:string):PassengerReceipt {
     this.guard(scope);const p=this.passengers.get(requestId);requireValid(p,'Unknown passenger request');
     const road=p.roadIds.map(key=>this.flow.receipt(key)!);
-    const result:PassengerReceipt={scope:this.scope,requestId,offeredPersons:p.persons,privateWaitingPersons:road.reduce((n,r)=>n+r.waiting,0)*PEOPLE_PER_VEHICLE,privateAdmittedPersons:road.reduce((n,r)=>n+r.admitted,0)*PEOPLE_PER_VEHICLE,privateActivePersons:road.reduce((n,r)=>n+r.active,0)*PEOPLE_PER_VEHICLE,privateCompletedPersons:road.reduce((n,r)=>n+r.completed,0)*PEOPLE_PER_VEHICLE,taxiPendingPersons:0,taxiCompletedPersons:0,railPendingPersons:0,railCompletedPersons:0,conservationError:0};
+    const result:PassengerReceipt={scope:this.scope,requestId,offeredPersons:p.persons,privateWaitingPersons:road.reduce((n,r)=>n+r.waiting,0)*PEOPLE_PER_VEHICLE,privateAdmittedPersons:road.reduce((n,r)=>n+r.admitted,0)*PEOPLE_PER_VEHICLE,privateActivePersons:road.reduce((n,r)=>n+r.active,0)*PEOPLE_PER_VEHICLE,privateCompletedPersons:road.reduce((n,r)=>n+r.completed,0)*PEOPLE_PER_VEHICLE,taxiPendingPersons:0,taxiCompletedPersons:0,railPendingPersons:0,railCompletedPersons:0,busPendingPersons:0,busCompletedPersons:0,conservationError:0};
     for(const l of this.leases.values())if(l.requestId===requestId) {
-      result[l.mode==='taxi'?'taxiPendingPersons':'railPendingPersons']+=l.reservedPersons-l.completedPersons-l.releasedPersons;
-      result[l.mode==='taxi'?'taxiCompletedPersons':'railCompletedPersons']+=l.completedPersons;
+      result[`${l.mode}PendingPersons` as const]+=l.reservedPersons-l.completedPersons-l.releasedPersons;
+      result[`${l.mode}CompletedPersons` as const]+=l.completedPersons;
     }
-    result.conservationError=p.persons-result.privateWaitingPersons-result.privateActivePersons-result.privateCompletedPersons-result.taxiPendingPersons-result.taxiCompletedPersons-result.railPendingPersons-result.railCompletedPersons;
+    result.conservationError=p.persons-result.privateWaitingPersons-result.privateActivePersons-result.privateCompletedPersons-result.taxiPendingPersons-result.taxiCompletedPersons-result.railPendingPersons-result.railCompletedPersons-result.busPendingPersons-result.busCompletedPersons;
     return result;
   }
   diagnostics(net:LinkNetwork) {return this.flow.diagnostics(net);}
@@ -224,7 +240,7 @@ export class TrafficBridge {
       this.passengers.set(p.requestId,clone(p));
     }
     for(const l of s.leases) {
-      requireValid(fields(l,'boardedPersons,completedPersons,leaseId,mode,releasedPersons,requestId,reservedPersons')&&id(l.leaseId)&&!this.leases.has(l.leaseId)&&this.passengers.has(l.requestId)&&['taxi','rail'].includes(l.mode)&&[l.reservedPersons,l.boardedPersons,l.releasedPersons,l.completedPersons].every(whole)&&l.reservedPersons>0&&l.completedPersons<=l.boardedPersons&&l.boardedPersons+l.releasedPersons<=l.reservedPersons,'Invalid mode lease snapshot');
+      requireValid(fields(l,'boardedPersons,completedPersons,leaseId,mode,releasedPersons,requestId,reservedPersons')&&id(l.leaseId)&&!this.leases.has(l.leaseId)&&this.passengers.has(l.requestId)&&MODES.includes(l.mode)&&[l.reservedPersons,l.boardedPersons,l.releasedPersons,l.completedPersons].every(whole)&&l.reservedPersons>0&&l.completedPersons<=l.boardedPersons&&l.boardedPersons+l.releasedPersons<=l.reservedPersons,'Invalid mode lease snapshot');
       this.leases.set(l.leaseId,clone(l));
     }
     for(const t of s.taxis) {

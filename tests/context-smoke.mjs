@@ -13,6 +13,7 @@ import { reachTouch } from './touch-reach.mjs';
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/context-preview');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
+const stepLog = [], startedAt = Date.now(); let lastCommand = '';
 const checks = [], screenshots = [], errors = [], expectedErrors = [], layouts = [];
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 const legacySha256 = createHash('sha256').update(legacyRaw).digest('hex');
@@ -40,9 +41,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++nextId;
   const promise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 30000);
+    const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method} [${String(params.expression ?? params.url ?? params.type ?? '').slice(0, 200)}] after step #${checks.length} "${checks.at(-1) ?? 'start'}" at +${Date.now() - startedAt}ms; recent commands: ${JSON.stringify(stepLog.slice(-6))}`)); }, 30000);
     pending.set(id, { resolve: result => { clearTimeout(timer); resolve(result); }, reject: error => { clearTimeout(timer); reject(error); } });
   });
+  stepLog.push(`+${Date.now() - startedAt}ms ${method} ${String(params.expression ?? params.url ?? params.type ?? '').slice(0, 100)}`); if (stepLog.length > 40) stepLog.shift();
   ws.send(JSON.stringify({ id, method, params })); return promise;
 }
 async function evaluate(expression) {
@@ -269,5 +271,5 @@ try {
   checks.push(blocked ? 'Fallback rendering has exactly eight expected model failures and no unexpected errors' : 'All eight admitted visual models load with no runtime/console errors');
   const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, checks, errors, expectedModelErrors: expectedErrors.length, layouts, screenshots, fixture: { seed: fixture.seed, tick: fixture.tick, households: fixture.households.length, firms: fixture.firms.length }, note: 'Installed headless Edge. Viewport, physical-screen ratio and touch are emulated; no real-device or real phone browser-mode claim.' };
   await writeFile(resolve(output, 'context-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
-} catch (error) { if (ws?.readyState === 1) try { await screenshot('context-failure.png'); console.error(await route()); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
+} catch (error) { if (ws?.readyState === 1) try { await screenshot('context-failure.png'); console.error(await route()); } catch {} console.error('Unexpected browser errors:', errors); console.error('Last completed step:', checks.length, checks.at(-1)); console.error('Recent CDP commands:', stepLog.slice(-15)); throw error; }
 finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }

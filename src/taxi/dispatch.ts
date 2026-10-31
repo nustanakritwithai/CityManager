@@ -5,7 +5,8 @@ import { planRoam } from './rrt-roam.ts';
 import { dispatchZones, travelTree, treeMinutes, treePath, TAXI_DISPATCH_MINUTES, type TravelTree } from './coverage.ts';
 /**
  * Pure taxi dispatch engine (phase D3, taxi-design.th.md). Economy-neutral: no money, labour, saves
- * or UI. Driven by absolute GAME minutes; works in fixed quanta so 1× and 10× give identical results.
+ * or UI. Driven by absolute GAME minutes. Demand/roam decisions retain periodic ticks; arrivals
+ * and subsequent dispatch happen at their actual estimated times in this pure foundation.
  *
  * Conservation (whole people): accepted = waiting + assigned (to pickup / riding / stranded)
  *                                         + completed + released.
@@ -64,6 +65,7 @@ export class TaxiEngine {
   private waiting: Job[] = [];
   private completedBy = new Map<string, number>();
   private cursor: number;
+  private decisionsPending = false;
   readonly legs: RoadLeg[] = [];
   readonly waits: number[] = [];
   /** Pickup/dropoff events emitted by the last advanceTo() call (cleared at its start). */
@@ -78,7 +80,7 @@ export class TaxiEngine {
   constructor(net: LinkNetwork, times: ReadonlyMap<string, number>, depots: readonly TaxiDepotSite[], startMinute: number, opts: TaxiEngineOptions) {
     if (!opts || !Number.isSafeInteger(opts.width) || opts.width < 1) throw RangeError('TaxiEngine needs the map width');
     this.depots = depots; this.lease = opts.lease ?? nullLeaseAdapter; this.seed = opts.seed ?? 0; this.width = opts.width; this.expected = opts.expected;
-    this.net = net; this.times = times; this.cursor = Math.floor(startMinute / TAXI_QUANTUM_MIN) * TAXI_QUANTUM_MIN;
+    this.net = net; this.times = times; this.cursor = startMinute;
     this.zones = this.computeZones();
     for (const d of [...depots].sort((a, b) => a.id - b.id)) if (d.open) for (let k = 0; k < DEPOT_UNITS[d.level]; k++) this.units.push({ id: `taxi-${d.id}-${k}`, depotId: d.id, cell: d.cell, state: 'idle', until: this.cursor });
   }
@@ -96,6 +98,7 @@ export class TaxiEngine {
       this.lease.reserve(r.id, r.persons); this.origins.push({ cell: r.from, minute: r.minute, persons: r.persons }); accepted.push(r.id); this.totals.accepted += r.persons;
       for (let left = r.persons, k = 0; left > 0; k++) { const n = Math.min(TAXI_SEATS_PER_UNIT, left); left -= n; this.waiting.push({ requestId: r.id, part: `${r.id}#${k}`, from: r.from, to: r.to, persons: n, minute: Math.max(r.minute, this.cursor) }); }
     }
+    if (accepted.length) this.decisionsPending = true;
     return { accepted, rejected };
   }
   /** Index of the last route cell reached by minute `t`. */
@@ -111,6 +114,7 @@ export class TaxiEngine {
    *  is re-checked link by link; a gone link stops it at its current cell and it replans from there. */
   setNetwork(net: LinkNetwork, times: ReadonlyMap<string, number>): void {
     this.net = net; this.times = times; this.trees.clear(); this.zones = this.computeZones();
+    this.decisionsPending = true;
     const t = this.cursor;
     for (const u of [...this.units].sort((a, b) => (a.id < b.id ? -1 : 1))) {
       if (!u.route || u.state === 'stranded') continue;
@@ -125,14 +129,26 @@ export class TaxiEngine {
   }
   advanceTo(minute: number, paused = false): void {
     if (paused) return;
+    if (!Number.isFinite(minute) || minute < this.cursor) throw RangeError('Taxi time must be finite and monotonic');
     this.events = [];
-    while (this.cursor + TAXI_QUANTUM_MIN <= minute) { this.cursor += TAXI_QUANTUM_MIN; this.quantum(this.cursor); }
+    if (this.decisionsPending) { this.decisionsPending = false; this.quantum(this.cursor, false); }
+    while (this.cursor < minute) {
+      const periodic = (Math.floor(this.cursor / TAXI_QUANTUM_MIN) + 1) * TAXI_QUANTUM_MIN;
+      let event = periodic;
+      for (const u of this.units) if (u.state !== 'idle' && u.state !== 'stranded' && u.until > this.cursor) event = Math.min(event, u.until);
+      for (const j of this.waiting) if (j.minute > this.cursor) event = Math.min(event, j.minute);
+      const next = Math.min(minute, event);
+      this.cursor = next;
+      if (next === event) this.quantum(next, next === periodic);
+    }
   }
   private drive(u: Unit, path: number[], loaded: boolean, t: number, state: State, dwell: number): void {
     const at = [t]; for (let i = 1; i < path.length; i++) at.push(at[i - 1] + (this.times.get(linkKey(path[i - 1], path[i])) ?? Infinity) / 60);
     for (let i = 0; i < path.length; i++) this.lastSeen.set(path[i], at[i]);
     u.state = state; u.target = path.at(-1)!; u.route = path; u.at = at; u.leg = undefined;
-    u.until = t + Math.max(path.length > 1 ? 1 : 0, Math.ceil(at.at(-1)! - t + dwell));
+    // Pickup transitions at arrival; boarding begins immediately and lasts one minute.
+    // Riding completes only after alighting dwell. Roam/home become free on arrival.
+    u.until = at.at(-1)! + (state === 'riding' ? dwell : 0);
     if (path.length > 1) { const leg = { unitId: u.id, from: path[0], to: u.target, loaded, minute: t, path }; this.legs.push(leg); u.leg = leg; this.totals.legs++; if (!loaded) this.totals.emptyLegs++; }
   }
   /** Riding leg after boarding at `boardStart`: drive starts once the dwell ends. */
@@ -145,7 +161,7 @@ export class TaxiEngine {
     if (!path) { u.state = 'stranded'; u.resume = state; u.target = to; u.route = u.at = u.leg = undefined; return; }
     this.drive(u, path, loaded, t, state, dwell);
   }
-  private quantum(t: number): void {
+  private quantum(t: number, periodic: boolean): void {
     // 1. Arrivals; stranded units resume from where they stopped.
     for (const u of this.units) {
       if (u.state === 'stranded' && u.target !== undefined && Number.isFinite(this.minutes(u.cell, u.target))) {
@@ -191,6 +207,7 @@ export class TaxiEngine {
       else this.go(u, pick.from, 'toPickup', t, TAXI_DWELL_MIN, false);
     }
     this.waiting = this.waiting.filter(j => !taken.has(j));
+    if (!periodic) return;
     // 4. Idle taxis: go home at night / near-zero demand; otherwise roam (RRT) only if the best branch
     //    Service hours: idle taxis always cruise (chained RRT legs ≤ 15 min) over the whole road network,
     //    toward demand plus not-recently-visited cells, discounted by nearby claimed supply. Home only at
@@ -220,9 +237,9 @@ export class TaxiEngine {
     for (const o of this.origins) w.set(o.cell, (w.get(o.cell) ?? 0) + o.persons);
     return w;
   }
-  /** Read-only snapshot at game minute `m` (default: engine now; valid up to the next quantum). Phases
-   *  are derived from each planned route: before a riding route starts = boarding, after a riding or
-   *  pickup route ends = alighting / boarding at the kerb. */
+  /** Read-only snapshot of the estimated foundation state. Call advanceTo(m) first; future snapshots
+   *  are predictions, not road execution receipts. Before a riding route starts the taxi is boarding;
+   *  after it ends the taxi is alighting at the kerb. */
   snapshot(m = this.cursor): readonly TaxiSnapshot[] {
     return Object.freeze([...this.units].sort((a, b) => (a.id < b.id ? -1 : 1)).map(u => {
       let r = u.route, at = u.at; const carried = u.job?.persons ?? 0;

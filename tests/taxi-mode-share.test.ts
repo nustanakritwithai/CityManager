@@ -6,7 +6,7 @@ import { demandForPeriods } from '../src/traffic/demand.ts';
 import type { DemandInput, OdEntry } from '../src/traffic/types.ts';
 
 const base = { carMinutes: 10, taxiMinutes: 10, waitMinutes: 5, km: 3 };
-test('flag defaults off', () => assert.equal(TAXI_ENABLED, false));
+test('flag defaults on', () => assert.equal(TAXI_ENABLED, true));
 test('share stays within [0, cap] and fare is integer satang', () => {
   for (const car of [0, 5, 30, 300]) for (const wait of [0, 20, 200]) { const p = taxiShare({ ...base, carMinutes: car, waitMinutes: wait }); assert.ok(p >= 0 && p <= TAXI_AVAILABILITY_CAP); }
   assert.ok(Number.isInteger(taxiFareSatang(2.37, 7.1)));

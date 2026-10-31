@@ -1,0 +1,55 @@
+#bus-tool { touch-action: manipulation; }
+#bus-panel, #bus-composer {
+  touch-action: manipulation;
+  background: var(--panel, #243352);
+  color: #f4f7ff;
+  border: 1px solid var(--line, #899fc6);
+  border-radius: 12px;
+  box-shadow: var(--shadow, 0 8px 24px #0008);
+}
+#bus-panel {
+  position: fixed;
+  z-index: 28;
+  left: max(8px, env(safe-area-inset-left));
+  right: max(8px, env(safe-area-inset-right));
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  max-height: min(46vh, 440px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px 14px;
+}
+#bus-panel[hidden], #bus-composer[hidden], .bus-confirm[hidden] { display: none; }
+#bus-composer { width: min(640px, 100%); margin-bottom: 6px; padding: 8px; max-height: 28vh; overflow: auto; }
+.bus-head, .bus-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bus-head { justify-content: space-between; }
+.bus-head h3, #bus-panel h4 { margin: 8px 0 4px; }
+.bus-row, .bus-line { border-top: 1px solid #899fc655; padding: 6px 0; }
+.bus-line p, .bus-row p, .bus-message { margin: 2px 0; line-height: 1.4; overflow-wrap: anywhere; }
+.bus-touch {
+  min-height: 44px;
+  min-width: 44px;
+  touch-action: manipulation;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #899fc6;
+  background: #344769;
+  color: #f4f7ff;
+  font: inherit;
+}
+.bus-touch.is-selected, .bus-touch[aria-pressed="true"] { border-color: #e7c36c; background: #526382; }
+.bus-touch:focus-visible { outline: 2px solid #f1d78d; outline-offset: 2px; }
+.bus-count { min-width: 44px; text-align: center; }
+.bus-confirm {
+  border: 0;
+  border-radius: 12px;
+  padding: 16px;
+  max-width: min(440px, calc(100vw - 24px));
+  background: #243352;
+  color: #f4f7ff;
+}
+.bus-confirm::backdrop { background: #0d1526cc; }
+.bus-confirm .bus-actions { flex-direction: column; }
+.bus-confirm .bus-touch { width: 100%; }
+@media (max-width: 720px) {
+  #bus-panel { bottom: calc(128px + env(safe-area-inset-bottom)); max-height: 42vh; }
+}

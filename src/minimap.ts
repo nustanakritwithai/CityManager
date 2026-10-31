@@ -6,6 +6,8 @@
 import './minimap.css';
 import { SIZE, GATEWAY, isMarket, type City } from './sim.ts';
 import { buildingIssues } from './map-overlay.ts';
+import { busCellNote, paintBusOverlay } from './bus/map-paint.ts';
+import { busMapRevision } from './bus/map-state.ts';
 
 type View = { target: { x: number; z: number }; yaw: number; radius: number };
 const UNIT = 2;
@@ -60,6 +62,7 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     }
     label('ประตูเมือง', GATEWAY);
   }
+  paintBusOverlay(ctx, cell, !!opts.labels);
 }
 
 function setupCanvas(canvas: HTMLCanvasElement, size: number) {
@@ -129,14 +132,16 @@ export class Minimap {
   /** Called every frame: redraws only when the camera or the city changed. */
   redraw(force = false) {
     if (!this.city) return;
-    const camera = `${this.view.target.x.toFixed(1)}:${this.view.target.z.toFixed(1)}:${this.view.yaw.toFixed(2)}:${this.view.radius.toFixed(0)}`;
+    const camera = `${this.view.target.x.toFixed(1)}:${this.view.target.z.toFixed(1)}:${this.view.yaw.toFixed(2)}:${this.view.radius.toFixed(0)}:${busMapRevision()}`;
     if (!force && camera === this.camera) return; this.camera = camera;
     draw(this.ctx, this.city, 152, { view: this.view, selected: this.selected, issues: this.issues });
+    if (!this.map.hidden) this.toggleMap(true);
   }
   private describe(cell: number | null) {
     if (cell === null || !this.city) return;
     const c = this.city.cells[cell], col = cell % SIZE + 1, row = Math.floor(cell / SIZE) + 1, b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
     const kind = c.road ? (cell === GATEWAY ? 'ประตูเมือง' : 'ถนน') : !c.zone ? 'ที่ดินว่าง' : b ? `${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} #${b.id} · ระดับ ${b.level}` : `โซน${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} (ว่าง)`;
-    this.mapInfo.textContent = `${col},${row} · ${kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}`;
+    const bus = busCellNote(cell);
+    this.mapInfo.textContent = `${col},${row} · ${kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}${bus ? ` · ${bus}` : ''}`;
   }
 }

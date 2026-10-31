@@ -39,7 +39,7 @@ on:
 permissions:
   contents: read
 env:
-  TRAFFIC_GAME_EXPECT_DEFAULT: '0'
+  TRAFFIC_GAME_EXPECT_DEFAULT: '1'
 # Each browser case has its own unchanged watchdog and a fresh runner.  The
 # final job keeps the original check name and fails unless every case passes.
 jobs:

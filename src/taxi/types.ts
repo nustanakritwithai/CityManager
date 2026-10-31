@@ -4,7 +4,7 @@
  */
 import type { TripPurpose } from '../traffic/types.ts';
 /** Feature flag. OFF: no taxi demand is split, nothing changes. */
-export const TAXI_ENABLED = false;
+export const TAXI_ENABLED = true;
 /** Logit sensitivity per minute of generalized cost difference. */
 export const TAXI_THETA = .15;
 /** Extra minutes a private car pays for parking (city-wide default for now). */
