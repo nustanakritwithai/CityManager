@@ -1,3 +1,4 @@
+import {installRailManagement} from './rail/management.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { installSaveManagement } from './save-management-dialog.ts';
 import { freshServerCityRaw } from './fresh-server-city.ts';
@@ -120,6 +121,7 @@ let trafficLayer: TrafficLayer | null = null;
 /** Bus drawings (`?bus=1`). Still draws nothing until `trafficLayer.bus` exists (traffic on too). */
 let busView: BusPresentation | null = null;
 let parkScene: SceneParkActivity | undefined;
+let railUi:ReturnType<typeof installRailManagement>|undefined;
 let parkPanel: HTMLElement;
 let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
@@ -190,6 +192,7 @@ function farmHint(index: number | null): string {
   return `ฟาร์ม · ความอุดมสมบูรณ์ ${fertility}% · ${access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
 }
 function setTool(next: string) {
+  railUi?.close();
   roadMenu?.close();
   selectMenu?.close(); selectMenu?.sync(next);
   servicesMenu?.close(); servicesMenu?.sync(next);
@@ -235,6 +238,7 @@ function openRoute(next: Route) {
   if (next.page === 'signals') signalPanel?.refresh();
 }
 function cancel() {
+  if(railUi?.cancel())return;
   view?.abortGesture();
   if (selectMenu?.isOpen()) { selectMenu.close(true); return; }
   if (servicesMenu?.isOpen()) { servicesMenu.close(true); return; }
@@ -302,6 +306,8 @@ function taxiOccupies(cells: readonly number[]) {
 }
 /** Runs before activate so bus can keep the activate lines. Taxi is a no-op while traffic is off. */
 function taxiActivate(index: number) {
+  if(railUi?.activate(index))return;
+  if(tool!=='select'&&railUi?.isReserved(index)){status('ช่องนี้มีสถานีหรือรางรถไฟ กรุณาจัดการรถไฟก่อน');return;}
   if (taxiFeature && tool === 'taxi') {
     status(resultSound(taxiSession.place(city, index, true, trafficOn), 'ui-place').message);
     publishTaxi(true); render(); return;
@@ -526,6 +532,7 @@ function render() {
   parkScene?.setQuality(atmosphere?.diagnostics.quality ?? 'medium');
   parkScene?.sync(parkRuntime.activity);
   signalPanel?.sync();
+  railUi?.sync();
   validateRoute(); const s = summary(city);
   // Before the pause button is drawn: reaching stage 5 while running pauses for the win screen.
   const goals = cityGoals(city, s); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
@@ -659,6 +666,8 @@ async function boot() {
     ownerDecisionSession.syncExternal(city, 'player-drag-road'); trafficLayer?.afterMapEdit(city, paused || document.hidden); render();
   });
   parkScene = new SceneParkActivity(view);
+  railUi=installRailManagement({view,city:()=>city,runtime:()=>parkRuntime,selectTool:()=>{setTool('select');inspector(false);},changed:()=>render(),status,enabled:true});
+  view.app.once('destroy',()=>railUi?.destroy());
   view.traffic.setWalkersEnabled(false);
   let trafficEnabled=trafficModelEnabled();
   const trafficSection=document.createElement('section');trafficSection.id='traffic-game-status';trafficSection.className='growth-section';
@@ -979,13 +988,14 @@ async function boot() {
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
+    railUi?.sync();
     if (monthEnded(tickBefore, city.tick)) sound('ev-month');
     if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

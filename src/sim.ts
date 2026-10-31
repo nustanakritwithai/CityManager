@@ -1,3 +1,4 @@
+import {isRailReserved,RAIL_PARCEL_MESSAGE} from './rail/reserved-parcels.ts';
 import { compactCityHistory, cropJournalLength, goodsJournalLength, moneyJournalLength, auditMoney } from './city-history.ts';
 import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
@@ -218,6 +219,7 @@ export function campusSiteReason(c: City, i: number, kind: CampusKind): string |
   return null;
 }
 export function buildCampus(c: City, i: number, kind: CampusKind): Result {
+  if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   const reason = campusSiteReason(c, i, kind);
   const education = c.education;
   if (reason || !education) return { ok: false, message: reason ?? 'เมืองนี้ยังไม่มีข้อมูลการศึกษา' };
@@ -530,6 +532,7 @@ export function roadPath(a: number, b: number): number[] {
 export function buildRoad(c: City, a: number, b: number): Result {
   const path = roadPath(a, b);
   if (!path.length) return { ok: false, message: 'Road is outside the bounded map.' };
+  if(path.some(i=>isRailReserved(c,i)))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   if (path.some(i => parkAt(c, i))) return { ok: false, message: 'มีสวนสาธารณะขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => campusAt(c, i))) return { ok: false, message: 'มีสถานศึกษาขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => taxiAt(c, i))) return { ok: false, message: 'มีอู่แท็กซี่ขวางทาง ต้องรื้อก่อนสร้างถนน' };
@@ -568,6 +571,7 @@ export function editRoadJunction(c:City,a:number,b:number,connect:boolean):Resul
   return {ok:true,message:c.lastEvent};
 }
 export function zoneCell(c: City, i: number, zone: Zone): Result {
+  if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   if (!validIndex(i) || ![null, 'R', 'C', 'I', 'F'].includes(zone)) return { ok: false, message: 'Invalid parcel or zone.' };
   const cell = c.cells[i];
   if (cell.road) return { ok: false, message: 'Road cells cannot be zoned.' };
@@ -583,6 +587,7 @@ export function zoneCell(c: City, i: number, zone: Zone): Result {
   return { ok: true, message };
 }
 export function bulldoze(c: City, i: number): Result {
+  if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   if (!validIndex(i)) return { ok: false, message: 'Outside the map.' };
   if (i === GATEWAY) return { ok: false, message: 'The outside gateway is reserved.' };
   const taxi = taxiAt(c, i);
@@ -649,6 +654,7 @@ export function bulldoze(c: City, i: number): Result {
  * Its units join the network along the roads; upkeep is charged each month.
  */
 export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
+  if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   if (!validIndex(i) || !UTILITY_KINDS.includes(kind)) return { ok: false, message: 'Invalid parcel or plant.' };
   const cell = c.cells[i], plant = PLANTS[kind];
   if (cell.road || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return { ok: false, message: 'A plant needs an empty parcel; roads, buildings and other plants stay where they are.' };
@@ -664,6 +670,7 @@ export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
 
 /** One empty, unzoned parcel. Parks need neither roads nor utility supply. */
 export function buildPark(c: City, i: number): Result {
+  if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   if (!validIndex(i)) return { ok: false, message: 'ตำแหน่งสวนอยู่นอกแผนที่' };
   const cell = c.cells[i];
   if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return { ok: false, message: 'สวนต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน' };

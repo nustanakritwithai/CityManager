@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { railPathsOnly, railOnly, commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -120,4 +120,11 @@ test('unified commercial route requires exact reviewed economic source and fails
  const paths=['src/sim.ts','src/agriculture-validation.ts','src/main.ts','src/commercial-visuals.ts','tests/commercial-accounting.test.ts','tests/server-save-browser-smoke.mjs'];
  assert.equal(commercialPathsOnly(paths),true);assert.equal(commercialOnly(paths),false);assert.equal(commercialOnly(paths,{commercialSourceDiff:'unreviewed economics'}),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/city-save-auth.ts','src/pages-auth.ts','index.html','src/build-toolbar.ts','server/city-saves/service.mjs','package.json','src/unknown.ts'].map(p=>[...paths,p])]){assert.equal(commercialPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+
+test('rail scope requires exact reviewed runtime diff and rejects unrelated allocation, auth and backend edits',()=>{
+ const paths=['src/sim.ts','src/park-runtime.ts','src/main.ts','src/rail/network-runtime.ts','tests/rail-activation.test.ts','tests/rail-browser-checks.mjs'];
+ assert.equal(railPathsOnly(paths),true);assert.equal(railOnly(paths),false);assert.equal(railOnly(paths,{railSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/traffic/game.ts','src/pages-auth.ts','src/city-save-auth.ts','server/city-saves/service.mjs','index.html','src/commercial-visuals.ts','package.json'].map(p=>[...paths,p])]){assert.equal(railPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
