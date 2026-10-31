@@ -22,3 +22,10 @@ test('full storage + many old saves: newest kept, others removed, foreign keys u
 });
 test('never discards newer unreadable city',async()=>{const s=quotaStore(1e7);s.setItem(SAVE_KEY,snap(city(5)));s.setItem('citymanager.backup.v6',JSON.stringify({city:{tick:999}}));const r=await autoCleanupOnce(s as unknown as Storage,undefined);assert.equal(r.ran,false);assert(s.getItem('citymanager.backup.v6'));});
 test('dropOldCopies keeps primary + checkpoint and foreign keys',()=>{const s=quotaStore(1e7);for(const k of [SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP,'citymanager.market.v10','other'])s.setItem(k,'1');dropOldCopies(s as unknown as Storage,[AUTOSAVE_CHECKPOINT_KEY]);assert.deepEqual([...s.data.keys()].sort(),[SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,'citymanager.market.v10','other'].sort());});
+test('one-time full wipe removes every CityManager save copy, keeps foreign + settings keys',async()=>{
+ const {autoWipeOnce,FULL_WIPE_FLAG}=await import('../src/auto-cleanup.ts');const s=quotaStore(1e7);
+ for(const k of [SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP,'citymanager.backup.v6','citymanager.save.v1','citymanager.resume-choice.v1','citymanager.audio.v1','strategy-game.save'])s.setItem(k,'1');
+ const r=await autoWipeOnce(s as unknown as Storage,undefined);assert.equal(r.ran,true);
+ assert.deepEqual([...s.data.keys()].sort(),['citymanager.audio.v1',FULL_WIPE_FLAG,'strategy-game.save'].sort());
+ s.setItem(SAVE_KEY,'new');assert.equal((await autoWipeOnce(s as unknown as Storage,undefined)).ran,false);assert.equal(s.getItem(SAVE_KEY),'new');
+});

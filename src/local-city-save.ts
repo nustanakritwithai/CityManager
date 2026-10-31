@@ -52,7 +52,7 @@ export async function bindLocalCitySession(client:MarketClient|undefined,loaded:
 
 /** Conservative local inventory for the IDB-unavailable escape paths. */
 export function hasOnlyKnownNonCityKeys(storage:Pick<Storage,'length'|'key'>,allowMarket:boolean):boolean{
- const benign=new Set(['citymanager.advanced.v1','citymanager.visual.v1','citymanager.audio.v1','citymanager.guide.v1','citymanager.traffic','citymanager.taxi','citymanager.auto-cleanup.v1']);
+ const benign=new Set(['citymanager.advanced.v1','citymanager.visual.v1','citymanager.audio.v1','citymanager.guide.v1','citymanager.traffic','citymanager.taxi','citymanager.auto-cleanup.v1','citymanager.auto-wipe.v1']);
  try{for(let i=0;i<storage.length;i++){const key=storage.key(i);if(key?.startsWith('citymanager.')&&!benign.has(key)&&!(allowMarket&&(key==='citymanager.market.v10'||key==='citymanager.resume-choice.v1')))return false;}return true;}catch{return false;}
 }
 /** A recovery preview must never persist a market journal or replace browser save slots. */

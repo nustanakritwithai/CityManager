@@ -41,3 +41,18 @@ export async function autoCleanupOnce(storage:Store=localStorage,factory:IDBFact
  try{storage.setItem(AUTO_CLEANUP_FLAG,String(Date.now()));}catch{}
  return {ran:true,kept:keep.source,tick:keep.tick,removed};
 }
+
+export const FULL_WIPE_FLAG='citymanager.auto-wipe.v1';
+/** [save-hotfix-89] Owner decision: ONE-TIME wipe of every CityManager save copy
+ * (primary, checkpoints, backups, resume hint, IndexedDB recovery/active-local DB) so the
+ * game starts a fresh city with no chooser. Non-CityManager keys (Strategy-Game) untouched;
+ * settings and the market journal key are not saves and are kept. */
+export async function autoWipeOnce(storage:Store=localStorage,factory:IDBFactory|undefined=globalThis.indexedDB):Promise<{ran:boolean;removed:string[];reason?:string}>{
+ if(storage.getItem(FULL_WIPE_FLAG)!==null)return {ran:false,removed:[],reason:'already-done'};
+ const removed:string[]=[];
+ if(factory){if(!await deleteDb(factory,CITY_RECOVERY_DB))return {ran:false,removed,reason:'idb-delete-blocked'};removed.push('idb:'+CITY_RECOVERY_DB);}
+ const keys:string[]=[];for(let i=0;i<storage.length;i++){const k=storage.key(i);if(k&&(CITY_SAVE_KEY_PATTERN.test(k)||k==='citymanager.resume-choice.v1'||k===AUTO_CLEANUP_FLAG))keys.push(k);}
+ for(const k of keys){storage.removeItem(k);removed.push(k);}
+ try{storage.setItem(FULL_WIPE_FLAG,String(Date.now()));}catch{}
+ return {ran:true,removed};
+}
