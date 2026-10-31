@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { towerOnly, visualKind, toolbarMainOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -49,4 +50,16 @@ test('combined apartment/toolbar route verifies main content, not just its path'
   }
   for(const extra of ['src/save-storage.ts','src/traffic/layer.ts','server/city-advisor/index.ts','src/vehicle-geometry.ts']) assert.equal(visualKind([...paths,extra],{mainBefore:before,mainAfter:after}),'full');
   assert.equal(visualKind(paths.slice(1),{mainBefore:before,mainAfter:after}),'full');
+});
+
+test('server-only scope uses exact reviewed main/index content and never a path-only bypass', () => {
+  const evidence={mainBefore:'old main\n',mainAfter:'reviewed server main\n',indexBefore:'old html\n',indexAfter:'reviewed html\n'};
+  const hashes=Object.fromEntries(Object.entries(evidence).map(([key,value])=>[key,createHash('sha256').update(value).digest('hex')]));
+  assert.equal(matchesReviewedSources(evidence,hashes),true);
+  assert.equal(matchesReviewedSources({...evidence,mainAfter:'unreviewed main\n'},hashes),false);
+  assert.equal(matchesReviewedSources({...evidence,indexAfter:'unreviewed html\n'},hashes),false);
+  assert.equal(matchesReviewedSources({},hashes),false);assert.equal(serverSaveEntryOnly({}),false);
+  const paths=['src/server-city-save.ts','src/server-city-entry.ts','src/city-save-auth.ts','src/main.ts','index.html'];
+  assert.equal(visualKind(paths,evidence),'full','synthetic content is not the reviewed server transition');
+  assert.equal(visualKind([...paths,'src/sim.ts'],evidence),'full');
 });

@@ -1,13 +1,13 @@
 name: Save smoke
-# Required check: saving must keep working on the built bundle (manual save, autosave, reload,
-# saves from previous builds, nearly-full storage, size budget, Strategy-Game keys untouched).
+# Required check: production bundle + isolated existing-login fixture verifies server ACK, CAS,
+# migration, reload, failures and zero browser city writes. Live mode is read-only, not authenticated proof.
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
       live:
-        description: 'Run against the live GitHub Pages site instead of a local build'
+        description: 'Probe live assets/auth boundary read-only (does not test authenticated saves)'
         type: boolean
         default: false
 permissions:
@@ -39,22 +39,17 @@ jobs:
         run: npm run build
       - name: Save smoke on built bundle
         if: ${{ !inputs.live }}
-        run: |
-          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4191 --strictPort > preview.log 2>&1 &
-          for i in $(seq 1 40); do curl -sf http://127.0.0.1:4191/CityManager/ >/dev/null && break; sleep 0.5; done
-          CITYMANAGER_BROWSER=google-chrome node tests/save-smoke.mjs
-      - name: Save smoke on live site
+        run: CITYMANAGER_BROWSER=google-chrome node tests/server-save-browser-smoke.mjs
+      - name: Live public assets and unauthenticated boundary (read-only)
         if: ${{ inputs.live }}
         env:
           CITYMANAGER_URL: https://nustanakritwithai.github.io/CityManager/
-          CITYMANAGER_BROWSER: google-chrome
-          SAVE_SMOKE_LIVE: '1'
-        run: node tests/save-smoke.mjs
+        run: node tests/server-save-live-readonly.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: save-smoke-evidence
-          path: .test-output/save-smoke/*.*
+          path: .test-output/server-save-smoke/*.*
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 5

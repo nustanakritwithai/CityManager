@@ -37,14 +37,14 @@ jobs:
       - name: Verify scope routing
         run: node --test tests/ci-visual-scope.test.mjs
       - run: npm ci --no-audit --no-fund
-        if: steps.scope.outputs.kind != 'visual-final'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
       - name: Verify decision and journal boundaries
-        if: steps.scope.outputs.kind != 'visual-final'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         run: node --experimental-strip-types --test tests/owner-decision.test.ts tests/owner-decision-session.test.ts
       - run: npm run build
-        if: steps.scope.outputs.kind != 'visual-final'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
       - name: Exercise actual local rule controls without provider traffic
-        if: steps.scope.outputs.kind != 'visual-final'
+        if: steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           $ownerPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4191', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/owner-preview.log -RedirectStandardError .test-output/owner-preview-error.log

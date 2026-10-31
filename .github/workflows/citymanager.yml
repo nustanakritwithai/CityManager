@@ -65,13 +65,16 @@ jobs:
           } elseif ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') {
             node --experimental-strip-types --test tests/apartment-visuals.test.ts tests/asset-models-runtime.test.ts tests/building-visuals.test.ts tests/atmosphere.test.ts tests/build-toolbar.test.ts tests/grouped-tool-menu.test.ts tests/select-menu.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Apartment and toolbar regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'server-save') {
+            node --experimental-strip-types --test tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/city-migration-inventory.test.ts tests/server-city-save.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Server save/auth/migration contract failed.' }
           } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
             node --experimental-strip-types --test tests/save-safety.test.ts tests/save-storage.test.ts tests/save-quota-hotfix.test.ts tests/save-promotion.test.ts tests/save-equivalence.test.ts tests/save-startup-diagnosis.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/entry-gate.test.ts tests/market-client.test.ts tests/market-writer.test.ts tests/market-safety.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Save boundary regressions failed.' }
           } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Simulation tests failed.' } }
 
       - name: Verify preserved advisor contract offline
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         run: npm run test:advisor
 
       - name: Verify admitted asset integrity
@@ -88,21 +91,11 @@ jobs:
       # Always runs (every scope, including [save-hotfix-89]): never publish a build that cannot save.
       - name: Save smoke on built bundle (deploy gate)
         run: |
-          New-Item -ItemType Directory -Force .test-output | Out-Null
-          $savePreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4191', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/save-smoke-preview.log -RedirectStandardError .test-output/save-smoke-preview-error.log
-          try {
-            $ready = $false
-            for ($attempt = 0; $attempt -lt 40; $attempt++) {
-              try { if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4191/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $ready = $true; break } } catch {}
-              Start-Sleep -Milliseconds 500
-            }
-            if (-not $ready) { throw 'Save smoke preview did not start.' }
-            node tests/save-smoke.mjs
-            if ($LASTEXITCODE -ne 0) { throw 'Save smoke failed: saving is broken in this build. Not publishing.' }
-          } finally { Stop-Process -Id $savePreview.Id -ErrorAction SilentlyContinue }
+          node tests/server-save-browser-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Server save smoke failed; not publishing.' }
 
       - name: Upload Pages market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-pages-market-verification-dist
@@ -111,7 +104,7 @@ jobs:
           retention-days: 3
 
       - name: Build loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         env:
           VITE_MARKET_URL: 'http://127.0.0.1:4317'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
@@ -119,7 +112,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/market-sandbox-dist
 
       - name: Upload loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-market-sandbox-dist
@@ -128,7 +121,7 @@ jobs:
           retention-days: 3
 
       - name: Build same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         env:
           VITE_MARKET_URL: '/citymanager-api'
           VITE_BASE_PATH: '/citymanager/'
@@ -137,7 +130,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/citymanager-public-test-dist
 
       - name: Upload same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-public-test-dist
@@ -162,8 +155,12 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --config vite.apartment.config.ts
 
       - name: Verify the built game in installed Edge
+        if: steps.scope.outputs.kind != 'server-save'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
+          if ('${{ steps.scope.outputs.kind }}' -notin @('tower','factory','vehicle','visual-final') -and (Test-Path 'src/server-city-entry.ts')) {
+            throw 'Legacy browser entrypoints require server-fixture migration; see docs/server-save-ci-migration.md. Not claiming legacy acceptance.'
+          }
           $previewArgs = @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort')
           if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') { $previewArgs += @('--config', 'vite.luxury-tower.config.ts') }
           if ('${{ steps.scope.outputs.kind }}' -eq 'factory') { $previewArgs += @('--config', 'vite.factory.config.ts') }
@@ -309,7 +306,7 @@ jobs:
           retention-days: 3
 
       - name: Preserve building progression browser evidence
-        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: building-progression-browser-evidence
@@ -332,7 +329,7 @@ jobs:
           retention-days: 3
 
       - name: Verify preserved signal GUI without provider calls
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save'
         run: |
           $env:VITE_CITY_SIGNALS = 'false'
           $env:VITE_CITY_ADVISOR_ONLINE = 'false'
@@ -385,7 +382,7 @@ jobs:
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
   live-save-smoke:
-    name: Live save smoke (post-deploy, no auto-revert)
+    name: Live save boundary (read-only; authenticated save not tested)
     if: github.ref == 'refs/heads/main'
     needs: deploy
     runs-on: ubuntu-latest
@@ -400,11 +397,9 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
-      - name: Live site still saves (fails loudly; revert manually if red)
+      - name: Public assets and unauthenticated save boundary
         env:
           CITYMANAGER_URL: https://nustanakritwithai.github.io/CityManager/
-          CITYMANAGER_BROWSER: google-chrome
-          SAVE_SMOKE_LIVE: '1'
         run: |
           sleep 30
-          node tests/save-smoke.mjs || { echo "::error title=LIVE SAVE BROKEN::Live site failed the save smoke after deploy ${GITHUB_SHA}. Revert this commit manually."; exit 1; }
+          node tests/server-save-live-readonly.mjs || { echo "::error title=LIVE SAVE BOUNDARY FAILED::Public asset or unauthenticated boundary failed after ${GITHUB_SHA}. Authenticated saving was not tested."; exit 1; }
