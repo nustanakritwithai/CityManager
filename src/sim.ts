@@ -419,6 +419,15 @@ function trimWorkAssignments(c: City): void {
   }
 }
 
+/** Taxi fare per completed passenger trip, integer satang: base + per road tile driven. */
+export const TAXI_TRIP_FARE = Object.freeze({ base: 50, perTile: 10 });
+export const taxiTripFare = (trips: number, tiles: number): number => Math.max(0, Math.floor(trips)) * TAXI_TRIP_FARE.base + Math.max(0, Math.floor(tiles)) * TAXI_TRIP_FARE.perTile;
+/** Credit completed taxi trips' fares to the treasury (riders pay from outside the modelled wallets). Returns satang paid. */
+export function collectTaxiFares(c: City, trips: number, tiles: number): number {
+  const fare = taxiTripFare(trips, tiles);
+  return fare > 0 ? transfer(c, 'outside', 'treasury', fare, 'Taxi fares') : 0;
+}
+
 /** Every transfer has a debit and credit. Outside is the sole permitted negative source account. */
 function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false, reservedTreasuryClaim = 0): number {
   const firm = c.firms.find(f => f.wallet === from);
