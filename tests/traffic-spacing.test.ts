@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LANE_SLOTS, LANE_END, SLOT_PITCH, CAR_LENGTH, QUEUE_GAP } from '../src/citizen-road-queue.ts';
 import { overlappingPairs } from '../src/citizen-road-queue.ts';
-import { TRAFFIC_SPACING, bumperGap, desiredFollowingGap, updateVehicleFollowing, separateCarsFromBuses, vehicleBox, boxesOverlap, type LaneVehicle } from '../src/traffic/spacing.ts';
+import { TRAFFIC_SPACING, bumperGap, desiredFollowingGap, updateVehicleFollowing, vehicleBox, type LaneVehicle } from '../src/traffic/spacing.ts';
 import { TrafficGame, type TrafficGameSample } from '../src/traffic/game.ts';
 import { gamePoses } from '../src/traffic/game-poses.ts';
 
@@ -76,12 +76,50 @@ test('a straight road platoons more than one car per tile without clipping', () 
   assert.deepEqual(overlappingPairs(gamePoses(frame.cars, frame.groups)), []);
 });
 
-test('cars yield backward to a bus and leave the bus on its stop', () => {
-  const bus = { x: 0, z: 0, headingX: 1, headingZ: 0, length: 1.32, width: 0.38 };
-  const carPose = { vehicleId: 'game:1', x: 0.2, z: 0, headingX: 1, headingZ: 0, paint: 0 };
-  assert.equal(boxesOverlap(vehicleBox(carPose, 0.42, 0.3), vehicleBox(bus, bus.length, bus.width)), true);
-  const [shifted] = separateCarsFromBuses([carPose], [bus]);
-  assert.equal(boxesOverlap(vehicleBox(shifted, 0.42, 0.3), vehicleBox(bus, bus.length, bus.width), 0.01), false);
-  assert.ok(shifted.x < carPose.x);
-  assert.equal(bus.x, 0);
+test('mixed sedan/truck/bus lengths halt, remain paused and resume without closing bumper gap',()=>{
+ for(const length of[TRAFFIC_SPACING.lengths.truck,.78,1.02,1.32]){
+  const leader={...car(3,0),length},follower=car(0,2);
+  for(let i=0;i<100;i++)updateVehicleFollowing(follower,leader,.05);
+  assert.ok(bumperGap(follower,leader)>=TRAFFIC_SPACING.standstillGap-1e-9);
+  const paused={...follower};updateVehicleFollowing(follower,leader,0);assert.deepEqual(follower,paused);
+  leader.speed=1;for(let i=0;i<100;i++){leader.posOnLane+=.05;updateVehicleFollowing(follower,leader,.05);assert.ok(bumperGap(follower,leader)>=TRAFFIC_SPACING.standstillGap-1e-9);}
+  assert.ok(follower.posOnLane>paused.posOnLane);assert.ok(follower.speed>0);
+ }
+});
+test('actual substep bodies clear perpendicular junction queues without cosmetic collision filtering',()=>{
+ const roads=new Set([49,50,51,26,74]);const game=new TrafficGame({map:{cells:Array.from({length:576},(_,i)=>({road:roads.has(i)}))},demand:[{from:49,to:51,rate:2},{from:26,to:74,rate:2},{from:51,to:26,rate:2},{from:74,to:49,rate:2}]});
+ const internal=game as unknown as {substep:(dt:number,grant:Map<number,number>)=>void},original=internal.substep.bind(game);let samples=0;
+ internal.substep=(dt,grant)=>{original(dt,grant);const f=game.frame,raw=f.cars.flatMap(c=>gamePoses([c],f.groups,24,2,128,true));assert.equal(raw.length,f.cars.length);assert.deepEqual(overlappingPairs(raw),[],`step ${f.step} sample ${samples}`);samples++;};
+ for(let n=0;n<60;n++)game.step();assert.equal(samples,300);assert.ok(game.frame.completed>0);
+});
+
+test('two-arm bends and junction-source admission keep actual substep bodies apart',()=>{
+ for(const [cells,ods]of [
+  [[49,50,26],[[49,26],[26,49]]],
+  [[25,26,27,51,75],[[25,75],[75,25]]],
+  [[49,50,51,26,74],[[50,51],[26,74],[49,51],[74,49]]],
+ ] as [number[],number[][]][]){
+  const roads=new Set(cells),game=new TrafficGame({map:{cells:Array.from({length:576},(_,i)=>({road:roads.has(i)}))},demand:ods.map(([from,to])=>({from,to,rate:2}))});
+  const internal=game as unknown as {substep:(dt:number,grant:Map<number,number>)=>void},original=internal.substep.bind(game);
+  internal.substep=(dt,grant)=>{original(dt,grant);const f=game.frame,poses=f.cars.flatMap(c=>gamePoses([c],f.groups,24,2,128,true));assert.equal(poses.length,f.cars.length);assert.deepEqual(overlappingPairs(poses),[],`${cells} step${f.step}`);};
+  for(let n=0;n<60;n++)game.step();assert.ok(game.frame.completed>0);
+ }
+});
+test('ordinary acceleration and braking are bounded; emergency spacing still wins',()=>{
+ const free=car(0,0);for(let i=0;i<15;i++){const prior=free.speed;updateVehicleFollowing(free,null,.05);assert.ok(free.speed-prior<=TRAFFIC_SPACING.accel*.05+1e-9);}
+ free.maxSpeed=.6;for(let i=0;i<10;i++){const prior=free.speed;updateVehicleFollowing(free,null,.05);assert.ok(prior-free.speed<=TRAFFIC_SPACING.brake*.05+1e-9);}
+ assert.ok(free.speed<=.6+1e-9);assert.ok(desiredFollowingGap(2)>desiredFollowingGap(.5));
+ const leader=car(free.posOnLane+.42+.09,0);free.speed=2;updateVehicleFollowing(free,leader,.05);assert.ok(bumperGap(free,leader)>=.09-1e-9,'hard safety bound overrides smooth braking if an obstacle appears');
+});
+test('crossing ownership survives worker boundaries without backward position snaps',()=>{
+ const roads=new Set([49,50,51,26,74]);const game=new TrafficGame({map:{cells:Array.from({length:576},(_,i)=>({road:roads.has(i)}))},demand:[{from:49,to:51,rate:2},{from:26,to:74,rate:2},{from:51,to:26,rate:2},{from:74,to:49,rate:2}]});
+ const internal=game as unknown as {cars:{id:number;index:number;progress:number}[];substep:(dt:number,grant:Map<number,number>)=>void},original=internal.substep.bind(game),last=new Map<number,number>();
+ internal.substep=(dt,grant)=>{original(dt,grant);for(const c of internal.cars){const position=c.index+c.progress;assert.ok(position>=(last.get(c.id)??position)-1e-9,`car${c.id} moved backward`);last.set(c.id,position);}};
+ for(let n=0;n<80;n++)game.step();assert.ok(game.frame.completed>0);
+});
+
+test('rendered turn envelope includes both axes instead of pretending a diagonal car is grid aligned',()=>{
+ const diagonal=vehicleBox({x:0,z:0,headingX:Math.SQRT1_2,headingZ:Math.SQRT1_2},.42,.3);
+ assert.ok(Math.abs(diagonal.maxX-(.42+.3)/2*Math.SQRT1_2)<1e-12);assert.equal(diagonal.maxX,diagonal.maxZ);
+ assert.deepEqual(vehicleBox({x:0,z:0,headingX:1,headingZ:0},.42,.3),{minX:-.21,maxX:.21,minZ:-.15,maxZ:.15});
 });

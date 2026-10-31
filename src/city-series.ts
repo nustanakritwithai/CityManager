@@ -1,13 +1,13 @@
 /**
  * Daily time series for the dashboard charts, rebuilt from what a save already holds: the
- * money, goods and crop journals (every day since the city began), household arrival
+ * retained money, goods and crop journals plus bounded daily checkpoints, household arrival
  * entries (population) and building ages (buildings standing today). Read-only.
  */
-import { isMarket, type City } from './sim.ts';
+import { type City } from './sim.ts';
 
 export type BuildingKind = 'shop' | 'I' | 'R' | 'F' | 'market';
 /** Fixed entity order; chart colours follow this order so each kind keeps its colour everywhere. */
-export const BUILDING_ORDER: readonly BuildingKind[] = Object.freeze(['shop', 'I', 'R', 'F', 'market']);
+export const BUILDING_ORDER: readonly BuildingKind[] = Object.freeze(['shop', 'I', 'R', 'F']);
 export type CityMarker = { tick: number; kind: 'building' | 'road' | 'arrival' | 'closure'; icon: string; text: string };
 export type DailySeries = {
   ticks: number[];
@@ -23,12 +23,13 @@ export type DailySeries = {
   markers: CityMarker[];
 };
 
-const KIND_NAME: Record<BuildingKind, string> = { shop: 'ร้านค้า', I: 'โรงงาน', R: 'บ้าน', F: 'ฟาร์ม', market: 'ตลาด' };
+const KIND_NAME: Record<BuildingKind, string> = { shop: 'พาณิชย์ทุกระดับ', I: 'โรงงาน', R: 'บ้าน', F: 'ฟาร์ม', market: 'ตลาด' };
 const KIND_ICON: Record<BuildingKind, string> = { shop: 'shop', I: 'I', R: 'R', F: 'F', market: 'market' };
 
-/** The last `days` days ending today (inclusive); `Infinity` means since day 0. */
+/** Last requested days ending today; compacted cities expose at most 90 real daily bins. */
 export function dailySeries(city: City, days = 30): DailySeries {
-  const to = city.tick, from = Number.isFinite(days) ? Math.max(0, to - Math.max(1, Math.floor(days)) + 1) : 0, n = to - from + 1;
+  const to = city.tick, requested = Number.isFinite(days) ? Math.max(0,to-Math.max(1,Math.floor(days))+1):0;
+  const from=Math.max(requested,city.history?Math.max(0,to-89):0),n=to-from+1;
   const zeros = () => new Array<number>(n).fill(0), at = (tick: number) => tick - from;
   const inWindow = (tick: number) => tick >= from && tick <= to;
   const s: DailySeries = {
@@ -39,7 +40,10 @@ export function dailySeries(city: City, days = 30): DailySeries {
   };
   // Money: daily treasury flows; the balance walks back from today's actual account.
   const net = zeros();
-  const arrival = new Map<string, number>();
+  const arrival = new Map<string, number>((city.history?.structuralProofs??[]).filter(e=>e.reason==='New household arrival savings').map(e=>[e.to,e.tick]));
+  for(const d of city.history?.daily??[]){if(!inWindow(d.tick))continue;const i=at(d.tick);s.income[i]+=d.income;s.expense[i]+=d.expense;net[i]+=d.income-d.expense;
+    for(const key of ['cropsHarvested','cropsProcessed','cropsConsumed','goodsProduced','goodsConsumed','goodsExported','goodsImported'] as const)s[key][i]+=d[key];}
+
   for (const e of city.ledger) {
     if (e.reason === 'New household arrival savings' && !arrival.has(e.to)) arrival.set(e.to, e.tick);
     if (e.tick > to) continue;
@@ -79,7 +83,9 @@ export function dailySeries(city: City, days = 30): DailySeries {
   s.population = people; s.households = homes;
   // Buildings: built on the day `age` days ago; demolished buildings are no longer in the save.
   for (const b of city.buildings) {
-    const firm = city.firms.find(f => f.building === b.id), kind: BuildingKind = b.zone === 'C' ? (firm && !isMarket(firm) ? 'shop' : 'market') : b.zone as BuildingKind;
+    // Ages establish original construction dates, not historical level transitions.
+    // Count each commercial business once instead of inventing past tier changes.
+    const kind: BuildingKind = b.zone === 'C' ? 'shop' : b.zone as BuildingKind;
     const built = to - b.age, start = Math.max(0, built - from);
     if (built > to) continue;
     for (let i = start; i < n; i++) s.buildings[kind][i]++;

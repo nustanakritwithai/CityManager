@@ -249,7 +249,7 @@ export class SceneTraffic {
       }
       const leaderSpeed = leader < 0 ? null : vehicles[leader].v;
       const target = followingTargetSpeed(gap, a.v, a.speed, leaderSpeed);
-      let v = target < a.v ? target : Math.min(target, a.v + TRAFFIC_SPACING.accel * dt);
+      let v = target < a.v ? Math.max(target,a.v-TRAFFIC_SPACING.brake*dt) : Math.min(target, a.v + TRAFFIC_SPACING.accel * dt);
       if (leader >= 0) v = Math.min(v, Math.max(0, gap - TRAFFIC_SPACING.standstillGap) / Math.max(dt, 1e-4));
       a.v = v;
       a.waited = a.v < .05 ? a.waited + dt : 0;

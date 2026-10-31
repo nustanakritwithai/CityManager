@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {createCity,step} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
 import {createSaveGuard} from '../src/save-guard.ts';
-import {readStoredCity,SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP} from '../src/save-storage.ts';
+import {readStoredCity,saveStoredCity,SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP} from '../src/save-storage.ts';
 import {decodeSaveCopy,encodeSaveCopy} from '../src/save-copy-codec.ts';
 import {marketJournalForTest,MarketClient,MARKET_SAVE_KEY} from '../src/market-client.ts';
 import {exportLocalCitySession} from '../src/local-city-save.ts';
@@ -43,8 +43,8 @@ test('export refuses stale empty market client after another tab changes persist
  }finally{for(const [key,desc] of d)if(desc)Object.defineProperty(globalThis,key,desc);else Reflect.deleteProperty(globalThis,key);}
 });
 
-test('v23 business-capacity save round trips losslessly without reducing ledger or market fields',async()=>{
- const {businessFixture}=await import('./business-capacity-fixture.ts');const c=businessFixture(65),j=market();c.market=j;const raw=snap(c),copy=encodeSaveCopy(raw);assert.equal(JSON.parse(raw).version,23);assert.equal(decodeSaveCopy(copy),raw);assert.deepEqual(deserializeParkSession(decodeSaveCopy(copy)!).city.market,j);assert.deepEqual(JSON.parse(decodeSaveCopy(copy)!).ledger,JSON.parse(raw).ledger);
+test('v25 business-capacity save round trips losslessly without reducing ledger or market fields',async()=>{
+ const {businessFixture}=await import('./business-capacity-fixture.ts');const c=businessFixture(65),j=market();c.market=j;const raw=snap(c),copy=encodeSaveCopy(raw);assert.equal(JSON.parse(raw).version,25);assert.equal(JSON.parse(raw).commercialBaseVersion,23);assert.equal(decodeSaveCopy(copy),raw);assert.deepEqual(deserializeParkSession(decodeSaveCopy(copy)!).city.market,j);assert.deepEqual(JSON.parse(decodeSaveCopy(copy)!).ledger,JSON.parse(raw).ledger);
 });
 
 test('nonzero sequence or unknown market fields are not pristine',async()=>{
@@ -83,4 +83,20 @@ test('overlapping failed and successful save attempts settle in order',async()=>
  const {createSaveAttemptQueue}=await import('../src/save-feedback.ts');const enqueue=createSaveAttemptQueue(),events:string[]=[];let release!:()=>void;
  const gate=new Promise<void>(r=>{release=r;});const first=enqueue(async()=>{events.push('first-start');await gate;events.push('first-fail');throw Error('quota');});
  const second=enqueue(async()=>{events.push('second-start');events.push('second-success');return 1;});await Promise.resolve();assert.deepEqual(events,['first-start']);release();await assert.rejects(first,/quota/);assert.equal(await second,1);assert.deepEqual(events,['first-start','first-fail','second-start','second-success']);
+});
+
+
+test('legacy storage utility validates v25 history checkpoints before writes and preserves exact bytes on success or quota failure',()=>{
+ const c=createCity(91,{starter:false});for(let i=0;i<65;i++)step(c);
+ const raw=snap(c);assert.equal(JSON.parse(raw).version,25);assert.equal(JSON.parse(raw).commercialBaseVersion,24);
+ const s=memory();saveStoredCity(s,raw,null);assert.equal(s.getItem(SAVE_KEY),raw);
+ const before=[...s.data];let writes=0;
+ for(const mutate of [
+  (v:any)=>{v.history.moneyCount=-1;},
+  (v:any)=>{v.historyBaseVersion=999;},
+  (v:any)=>{v.rulesVersion='chain-18';},
+ ]){const invalid=JSON.parse(raw);mutate(invalid);assert.throws(()=>saveStoredCity({...s,setItem:()=>{writes++;}},JSON.stringify(invalid),null));}
+ assert.equal(writes,0);assert.deepEqual([...s.data],before);
+ assert.throws(()=>saveStoredCity({...s,setItem:()=>{throw Error('quota');}},raw,null),/quota/);
+ assert.deepEqual([...s.data],before);
 });

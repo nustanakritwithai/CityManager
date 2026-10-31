@@ -1,5 +1,5 @@
 /** Read-only, current-state explanations shared by the map and the existing place panel. */
-import { access, buildingEducationStatus, economicSignals, firmCapacity, firmWorkerCount, homeOccupancy, housingUpgradeStatus, isMarket, isRetail, marketConversionStatus, parkStaffingStatus, productionUpgradeStatus, retailGrowthStatus, reviewIsTomorrow, utilities, withRoadScope, type City } from './sim.ts';
+import { access, buildingEducationStatus, economicSignals, firmCapacity, firmWorkerCount, homeOccupancy, housingUpgradeStatus, isCommercial, commercialGrowthStatus, parkStaffingStatus, productionUpgradeStatus, reviewIsTomorrow, utilities, withRoadScope, withGrowthReviewScope, type City } from './sim.ts';
 import { contextRevision } from './context-data.ts';
 import { CROP_RECIPE, farmStockCapacity } from './agriculture.ts';
 import { CROP_LABELS, RECIPE } from './goods.ts';
@@ -26,7 +26,7 @@ export function buildingIssueRevision(city: City): string {
 export function buildingIssues(city: City): Issue[] {
   const revision = buildingIssueRevision(city), hit = cache.get(city);
   if (hit?.revision === revision) return hit.issues;
-  const issues = withRoadScope(city, () => collect(city));
+  const issues = withRoadScope(city, () => withGrowthReviewScope(city, () => collect(city)));
   cache.set(city, { revision, issues }); return issues;
 }
 function collect(city: City): Issue[] {
@@ -50,19 +50,16 @@ function collect(city: City): Issue[] {
     else {
       const workers = firmWorkerCount(city, f.id), cash = city.accounts[f.wallet];
       if (cash === 0 && workers === 0) add(b.cell, 'broke', 'เงินกิจการ 0 เครดิต และคนทำงาน 0 คน · ดูเงินทุนและการรับช่วงกิจการในแผงอาคาร');
-      if (workers === 0) numeric(b.cell, 'no-workers', 'คนทำงานจริง', workers, 1, 'คนขั้นต่ำ', isMarket(f) ? 'ต้องมีเจ้าของทำงานที่ตลาด' : `เต็มอัตรา ${firmCapacity(b)} คน · ตรวจแรงงานและเงินสำรองค่าจ้าง`);
+      if (workers === 0) numeric(b.cell, 'no-workers', 'คนทำงานจริง', workers, 1, 'คนขั้นต่ำ', `เต็มอัตรา ${firmCapacity(b)} คน · ตรวจเจ้าของ แรงงาน และเงินสำรองค่าจ้าง`);
       if (f.zone === 'I') {
         const recipe = f.recipe && RECIPE[f.recipe], have = recipe ? f.crops?.[recipe.crop] : undefined;
         if (!recipe || !Number.isFinite(have)) add(b.cell, 'missing-data', 'ไม่มีข้อมูลสูตรหรือพืชผลที่ใช้ จึงไม่เดาว่าขาดวัตถุดิบชนิดใด', 'warn');
         else if (have! < CROP_RECIPE.crop) numeric(b.cell, 'no-input', CROP_LABELS[recipe.crop], have!, CROP_RECIPE.crop, 'ล็อตต่อรอบผลิต', 'ตรวจฟาร์ม/ตลาดที่ส่งพืชผลชนิดนี้และเงินซื้อวัตถุดิบ');
       }
       if (f.zone === 'F' && f.cropInventory >= farmStockCapacity(b.level)) numeric(b.cell, 'stock-cap', 'พืชผลในคลัง', f.cropInventory, farmStockCapacity(b.level), 'ล็อต', 'ต้องระบายสต็อกก่อนเก็บเกี่ยวเพิ่ม', 'warn');
-      if (isRetail(f)) {
-        if (f.inventory === 0) numeric(b.cell, 'no-stock', 'สินค้าพร้อมขาย', 0, 1, 'หน่วยขั้นต่ำ', 'ตรวจเงินซื้อสินค้าและผู้ผลิต', 'warn');
-        else if (city.goodsLedger.some(e => e.reason === 'Imported shop stock' && e.to === f.wallet && e.tick > city.tick - 3)) add(b.cell, 'importing', 'มีรายการนำเข้าสินค้าใน 3 วันที่ผ่านมา · เป็นประวัติการซื้อ ไม่ใช่หลักฐานว่าขณะนี้โรงงานหยุดผลิต', 'warn');
-      } else if (isMarket(f)) {
-        if (signals.get(f.id) === 'agriculture.no-buyer') add(b.cell, 'no-buyer', 'ตัวตรวจเศรษฐกิจปัจจุบันไม่พบผู้ซื้อที่เข้าถึงได้ · ตรวจผู้ซื้อและกำลังซื้อ', 'warn');
-        if (f.cropInventory === 0) numeric(b.cell, 'no-stock', 'พืชผลพร้อมขาย', 0, 1, 'ล็อตขั้นต่ำ', 'ตรวจฟาร์มที่เข้าถึงได้และทุนซื้อพืชผล', 'warn');
+      if (isCommercial(f)) {
+        if (f.inventory === 0 && f.cropInventory === 0) numeric(b.cell,'no-stock','พืชผลและสินค้าพร้อมขาย',0,1,'หน่วยขั้นต่ำ','ตรวจเงินซื้อสินค้า ฟาร์ม และโรงงาน','warn');
+        if(city.goodsLedger.some(e=>e.reason==='Imported shop stock'&&e.to===f.wallet&&e.tick>city.tick-3))add(b.cell,'importing','มีรายการนำเข้าสินค้าใน 3 วันที่ผ่านมา · เป็นประวัติการซื้อ ไม่ใช่หลักฐานว่าขณะนี้โรงงานหยุดผลิต','warn');
       }
     }
     // These are the simulator's existing growth explanations, NOT new operation gates.
@@ -71,8 +68,7 @@ function collect(city: City): Issue[] {
       let reasons: string[] = [];
       if (b.zone === 'R') { const status = housingUpgradeStatus(city, b); if (status.next) reasons = status.blocked; }
       else if (f?.zone === 'I' || f?.zone === 'F') { const status = productionUpgradeStatus(city, f); if (status.nextLevel !== null) reasons = status.reasons; }
-      else if (f && isRetail(f)) { const status = retailGrowthStatus(city, f); if (status.next) reasons = status.reasons; }
-      else if (f && isMarket(f)) reasons = marketConversionStatus(city, f).reasons;
+      else if (f && isCommercial(f)) reasons = commercialGrowthStatus(city, f).reasons;
       if (reasons.length && city.education) {
         const gate = buildingEducationStatus(city, b), educational = reasons.filter(reason => gate.blocked.includes(reason));
         if (educational.length) {
@@ -81,7 +77,7 @@ function collect(city: City): Issue[] {
           reasons = reasons.filter(reason => !gate.blocked.includes(reason));
         }
       }
-      if (reasons.length) add(b.cell, 'upgrade', `${reviewIsTomorrow(city) && !(f && isMarket(f)) ? 'เงื่อนไขรอบตรวจวันถัดไป' : 'เงื่อนไขระดับถัดไป'} (ไม่ใช่การหยุดทำงานวันนี้): ${reasons.join(' · ')}`, 'upgrade');
+      if (reasons.length) add(b.cell, 'upgrade', `${reviewIsTomorrow(city) ? 'เงื่อนไขรอบตรวจวันถัดไป' : 'เงื่อนไขระดับถัดไป'} (ไม่ใช่การหยุดทำงานวันนี้): ${reasons.join(' · ')}`, 'upgrade');
     }
   }
   for (const p of city.plants) if (!svc.online.has(p.id)) add(p.cell, 'no-road', 'โรงผลิตยังไม่จ่ายเข้าเครือข่าย · ต่อถนนข้างแปลงให้เชื่อมประตูเมือง');

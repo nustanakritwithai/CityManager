@@ -1,4 +1,4 @@
-import {LANE_SLOTS,laneOffset,laneSlotCentres} from '../citizen-road-queue.ts';
+import {LANE_SLOTS,LANE_START,laneOffset,laneSlotCentres} from '../citizen-road-queue.ts';
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
 import type {GameCar,GameRenderGroup} from './game.ts';
 import {TRAFFIC_SPACING} from './spacing.ts';
@@ -47,12 +47,12 @@ export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGrou
    for(let lane=0;lane<lanes;lane++){
     const people=perLane[lane].sort((a,b)=>(a.progress??0)-(b.progress??0)).slice(-TRAFFIC_SPACING.maxPerLanePerTile);
     for(const c of people){const s=Math.min(1,Math.max(0,c.progress??0)),offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane})*unit;
-     result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6}});}
+     result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
    }
   }else for(let lane=0;lane<lanes;lane++){
    const people=selected.slice(lane*LANE_SLOTS,(lane+1)*LANE_SLOTS), slots=laneSlotCentres(people.length,people.some(c=>c.blocked)?1:.5);
    for(let i=0;i<people.length;i++){const c=people[i],s=slots[i],offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane})*unit;
-    result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6}});}
+    result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
   }
  }
  return spatialSample(result,size,limit);

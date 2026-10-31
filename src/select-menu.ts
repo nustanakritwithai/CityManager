@@ -16,7 +16,7 @@ export function installSelectMenu(anchor: HTMLButtonElement, choose: (tool: stri
     const active = tool === 'bulldoze';
     anchor.dataset.demolitionActive = String(active);
     anchorLabel.textContent = active ? 'รื้ออยู่' : 'เลือก';
-    anchor.title = active ? 'โหมดรื้อถอนกำลังทำงาน · แตะเพื่อกลับไปเลือก/เลื่อน (V)' : 'เลือก/เลื่อน · เปิดเมนูรื้อถอน (V)';
+    anchor.title = active ? 'โหมดรื้อถอนกำลังทำงาน · 0–20 เครดิต/ช่อง · แตะเพื่อกลับไปเลือก/เลื่อน (V)' : 'เลือก/เลื่อน · ไม่เสียค่าใช้จ่าย · เปิดเมนูรื้อถอน (V)';
     anchor.setAttribute('aria-label', anchor.title);
     demolition.classList.toggle('active', active); demolition.setAttribute('aria-pressed', String(active));
   };

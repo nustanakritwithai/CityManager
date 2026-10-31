@@ -1,0 +1,55 @@
+name: Save smoke
+# Required check: production bundle + isolated existing-login fixture verifies server ACK, CAS,
+# migration, reload, failures and zero browser city writes. Live mode is read-only, not authenticated proof.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      live:
+        description: 'Probe live assets/auth boundary read-only (does not test authenticated saves)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: save-smoke-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  save-smoke:
+    name: Save smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build exactly like the Pages deploy
+        if: ${{ !inputs.live }}
+        env:
+          VITE_MARKET_URL: 'https://citymanager.157-85-96-139.sslip.io/citymanager-api'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
+        run: npm run build
+      - name: Save smoke on built bundle
+        if: ${{ !inputs.live }}
+        run: CITYMANAGER_BROWSER=google-chrome node tests/server-save-browser-smoke.mjs
+      - name: Live public assets and unauthenticated boundary (read-only)
+        if: ${{ inputs.live }}
+        env:
+          CITYMANAGER_URL: https://nustanakritwithai.github.io/CityManager/
+        run: node tests/server-save-live-readonly.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: save-smoke-evidence
+          path: .test-output/server-save-smoke/*.*
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 5

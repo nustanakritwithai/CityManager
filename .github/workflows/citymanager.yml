@@ -62,13 +62,38 @@ jobs:
           } elseif ('${{ steps.scope.outputs.kind }}' -eq 'vehicle') {
             node --experimental-strip-types --test tests/vehicle-visuals.test.ts tests/citizen-vehicle-poses.test.ts tests/taxi-vehicle-poses.test.ts tests/atmosphere.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Vehicle visual regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') {
+            node --experimental-strip-types --test tests/apartment-visuals.test.ts tests/asset-models-runtime.test.ts tests/building-visuals.test.ts tests/atmosphere.test.ts tests/build-toolbar.test.ts tests/grouped-tool-menu.test.ts tests/select-menu.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Apartment and toolbar regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'traffic-gap') {
+            node --experimental-strip-types --test tests/traffic-gap-browser-checks.test.mjs tests/traffic-presentation.test.ts tests/traffic-spacing.test.ts tests/traffic-fleet.test.ts tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts tests/taxi-vehicle-poses.test.ts tests/traffic-autosave-boundary.test.ts tests/server-city-save.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Bumper spacing, interpolation and save-boundary regressions failed.' }
+            node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
+            if ($LASTEXITCODE -ne 0) { throw 'Required real bypass improvement preflight failed.' }
+            node --experimental-strip-types scripts/traffic-game-stress.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000
+            if ($LASTEXITCODE -ne 0) { throw 'Required bounded traffic throughput failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'rail') {
+            node --experimental-strip-types --test --test-concurrency=2 tests/rail-activation.test.ts tests/rail-network-session.test.ts tests/rail-passenger.test.ts tests/rail-taxi-parcels.test.ts tests/rail-durable-city.test.ts tests/rail-digest.test.ts tests/rail-management.test.ts tests/rail-track-geometry.test.ts tests/server-city-save.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Rail runtime, reservation and server save contracts failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'commercial') {
+            node --experimental-strip-types --test --test-concurrency=2 tests/commercial-screenshot-readback.test.mjs tests/commercial-accounting.test.ts tests/commercial-market-envelope.test.ts tests/commercial-progression.test.ts tests/commercial-migration.test.ts tests/commercial-visuals.test.ts tests/commercial-display-data.test.ts tests/commercial-panels.test.ts tests/market-client.test.ts tests/market-safety.test.ts tests/market-writer.test.ts tests/city-history.test.ts tests/history-validators.test.ts tests/agriculture-validation.test.ts tests/goods.test.ts tests/owner-profit.test.ts tests/growth.test.ts tests/city-goals.test.ts tests/city-stats.test.ts tests/city-series.test.ts tests/overview-data.test.ts tests/building-card-data.test.ts tests/workforce-summary.test.ts tests/city-network.test.ts tests/audio.test.ts tests/education-session.test.ts tests/business-capacity.test.ts tests/save-quota-lossless.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/server-city-save.test.ts tests/owner-decision.test.ts tests/owner-decision-session.test.ts tests/owner-decision-client.test.ts tests/owner-decision-e2e.test.ts tests/owner-decision-monthly.test.ts tests/entity-explanation-data.test.ts tests/entity-explanation-client.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Unified commercial economic, migration and save regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'history') {
+            node --experimental-strip-types --test tests/save-storage.test.ts tests/save-safety.test.ts tests/save-quota-lossless.test.ts tests/city-history.test.ts tests/history-validators.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/server-city-save.test.ts tests/month-end-review-scope.test.ts tests/agriculture-validation.test.ts tests/goods.test.ts tests/owner-profit.test.ts tests/city-series.test.ts tests/city-goals.test.ts tests/overview-data.test.ts tests/building-card-data.test.ts tests/city-network.test.ts tests/audio.test.ts tests/farm-levels.test.ts tests/farm-choice.test.ts tests/retail-shops.test.ts tests/factory-takeover-input.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'History/economic/ACK-only save contract failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'classic-toolbar') {
+            node --experimental-strip-types --test tests/build-toolbar.test.ts tests/grouped-tool-menu.test.ts tests/select-menu.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Classic toolbar regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'server-save') {
+            node --experimental-strip-types --test tests/fresh-server-city.test.ts tests/save-management-dialog.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/city-migration-inventory.test.ts tests/server-city-save.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Server save/auth/migration contract failed.' }
           } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
             node --experimental-strip-types --test tests/save-safety.test.ts tests/save-storage.test.ts tests/save-quota-hotfix.test.ts tests/save-promotion.test.ts tests/save-equivalence.test.ts tests/save-startup-diagnosis.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/entry-gate.test.ts tests/market-client.test.ts tests/market-writer.test.ts tests/market-safety.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Save boundary regressions failed.' }
           } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Simulation tests failed.' } }
 
       - name: Verify preserved advisor contract offline
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         run: npm run test:advisor
 
       - name: Verify admitted asset integrity
@@ -82,8 +107,29 @@ jobs:
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
         run: npm run build
 
+      # Always runs (every scope, including [save-hotfix-89]): never publish a build that cannot save.
+      - name: Save smoke on built bundle (deploy gate)
+        env:
+          CITYMANAGER_TRAFFIC_CHECKS: ${{ steps.scope.outputs.kind == 'traffic-gap' && 'bumper-gap' || '' }}
+          CITYMANAGER_RAIL_CHECKS: ${{ steps.scope.outputs.kind == 'rail' && 'activation' || '' }}
+          CITYMANAGER_TOOLBAR_CHECKS: ${{ steps.scope.outputs.kind == 'classic-toolbar' && 'classic' || '' }}
+        run: |
+          node tests/server-save-browser-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Server save smoke failed; not publishing.' }
+
+      - name: Preserve authenticated save and toolbar browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: server-save-browser-evidence
+          path: |
+            .test-output/server-save-smoke/*.png
+            .test-output/server-save-smoke/result.json
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Upload Pages market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-pages-market-verification-dist
@@ -92,7 +138,7 @@ jobs:
           retention-days: 3
 
       - name: Build loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         env:
           VITE_MARKET_URL: 'http://127.0.0.1:4317'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
@@ -100,7 +146,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/market-sandbox-dist
 
       - name: Upload loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-market-sandbox-dist
@@ -109,7 +155,7 @@ jobs:
           retention-days: 3
 
       - name: Build same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         env:
           VITE_MARKET_URL: '/citymanager-api'
           VITE_BASE_PATH: '/citymanager/'
@@ -118,7 +164,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/citymanager-public-test-dist
 
       - name: Upload same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-public-test-dist
@@ -138,17 +184,31 @@ jobs:
         if: steps.scope.outputs.kind == 'vehicle'
         run: node node_modules/vite/bin/vite.js build --config vite.vehicle.config.ts
 
+      - name: Build isolated actual-engine apartment fixture
+        if: steps.scope.outputs.kind == 'visual-final'
+        run: node node_modules/vite/bin/vite.js build --config vite.apartment.config.ts
+
+      - name: Build isolated actual-engine commercial fixture
+        if: steps.scope.outputs.kind == 'commercial'
+        run: node node_modules/vite/bin/vite.js build --config vite.commercial.config.ts
+
       - name: Verify the built game in installed Edge
+        if: steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
+          if ('${{ steps.scope.outputs.kind }}' -notin @('tower','factory','vehicle','visual-final','commercial') -and (Test-Path 'src/server-city-entry.ts')) {
+            throw 'Legacy browser entrypoints require server-fixture migration; see docs/server-save-ci-migration.md. Not claiming legacy acceptance.'
+          }
           $previewArgs = @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort')
           if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') { $previewArgs += @('--config', 'vite.luxury-tower.config.ts') }
           if ('${{ steps.scope.outputs.kind }}' -eq 'factory') { $previewArgs += @('--config', 'vite.factory.config.ts') }
           if ('${{ steps.scope.outputs.kind }}' -eq 'vehicle') { $previewArgs += @('--config', 'vite.vehicle.config.ts') }
+          if ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') { $previewArgs += @('--config', 'vite.apartment.config.ts') }
+          if ('${{ steps.scope.outputs.kind }}' -eq 'commercial') { $previewArgs += @('--config', 'vite.commercial.config.ts') }
           $previewProcess = Start-Process -FilePath (Get-Command node).Source -ArgumentList $previewArgs -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/preview.log -RedirectStandardError .test-output/preview-error.log
           $productionPreview = $null
           try {
-            if ('${{ steps.scope.outputs.kind }}' -in @('tower', 'factory', 'vehicle')) {
+            if ('${{ steps.scope.outputs.kind }}' -in @('tower', 'factory', 'vehicle', 'visual-final')) {
               $env:CITYMANAGER_PRODUCTION_URL = 'http://127.0.0.1:4174/CityManager/'
               $productionPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4174', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/production-preview.log -RedirectStandardError .test-output/production-preview-error.log
               $productionReady = $false
@@ -163,6 +223,8 @@ jobs:
             if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') { $previewUrl += 'tests/luxury-tower-preview.html' }
             if ('${{ steps.scope.outputs.kind }}' -eq 'factory') { $previewUrl += 'tests/factory-preview.html' }
             if ('${{ steps.scope.outputs.kind }}' -eq 'vehicle') { $previewUrl += 'tests/vehicle-preview.html' }
+            if ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') { $previewUrl += 'tests/apartment-preview.html' }
+            if ('${{ steps.scope.outputs.kind }}' -eq 'commercial') { $previewUrl += 'tests/commercial-preview.html' }
             for ($attempt = 0; $attempt -lt 40; $attempt++) {
               try {
                 $response = Invoke-WebRequest -Uri $previewUrl -TimeoutSec 2
@@ -180,6 +242,12 @@ jobs:
             } elseif ('${{ steps.scope.outputs.kind }}' -eq 'vehicle') {
               node --experimental-strip-types tests/vehicle-smoke.mjs
               if ($LASTEXITCODE -ne 0) { throw 'Vehicle browser evidence failed.' }
+            } elseif ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') {
+              node --experimental-strip-types tests/visual-final-smoke.mjs
+              if ($LASTEXITCODE -ne 0) { throw 'Apartment and toolbar browser evidence failed.' }
+            } elseif ('${{ steps.scope.outputs.kind }}' -eq 'commercial') {
+              node tests/commercial-smoke.mjs
+              if ($LASTEXITCODE -ne 0) { throw 'Commercial actual-render evidence failed.' }
             } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
               npm run test:browser
               if ($LASTEXITCODE -ne 0) { throw 'Save startup browser smoke failed.' }
@@ -247,6 +315,18 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Preserve commercial browser evidence
+        if: always() && steps.scope.outputs.kind == 'commercial'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: commercial-browser-evidence
+          retention-days: 3
+          path: |
+            .test-output/commercial/*.png
+            .test-output/commercial/report.json
+            .test-output/commercial/failure.json
+          if-no-files-found: error
+
       - name: Preserve factory browser evidence
         if: always() && steps.scope.outputs.kind == 'factory'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -269,8 +349,19 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Preserve apartment and toolbar browser evidence
+        if: always() && steps.scope.outputs.kind == 'visual-final'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-final-browser-evidence
+          path: |
+            .test-output/visual-final/*.png
+            .test-output/visual-final/report.json
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Preserve building progression browser evidence
-        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: building-progression-browser-evidence
@@ -293,7 +384,7 @@ jobs:
           retention-days: 3
 
       - name: Verify preserved signal GUI without provider calls
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'traffic-gap'
         run: |
           $env:VITE_CITY_SIGNALS = 'false'
           $env:VITE_CITY_ADVISOR_ONLINE = 'false'
@@ -344,3 +435,26 @@ jobs:
       - name: Deploy tested artifact to existing Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  live-save-smoke:
+    name: Live save boundary (read-only; authenticated save not tested)
+    if: github.ref == 'refs/heads/main'
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Public assets and unauthenticated save boundary
+        env:
+          CITYMANAGER_URL: https://nustanakritwithai.github.io/CityManager/
+        run: |
+          sleep 30
+          node tests/server-save-live-readonly.mjs || { echo "::error title=LIVE SAVE BOUNDARY FAILED::Public asset or unauthenticated boundary failed after ${GITHUB_SHA}. Authenticated saving was not tested."; exit 1; }

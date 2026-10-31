@@ -9,7 +9,7 @@ import {saveLocalCitySession} from '../src/local-city-save.ts';
 import {SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP} from '../src/save-storage.ts';
 import {decodeSaveCopy} from '../src/save-copy-codec.ts';
 
-test('native autosave persists advancing citizen runtime even when traffic fixture economic City is unchanged',async()=>{
+test('legacy storage utility preserves runtime-only autosave with primary-first durable copies',async()=>{
  const dense=populationFixture(334,true);step(dense);
  const raw=serializeParkSession(dense,createParkRuntime(dense));
  const writes:string[]=[],map=new Map([[SAVE_KEY,raw]]);
@@ -28,7 +28,8 @@ test('native autosave persists advancing citizen runtime even when traffic fixtu
  assert.deepEqual(Object.keys(JSON.parse(raw)).filter(key=>JSON.stringify(JSON.parse(raw)[key])!==JSON.stringify(JSON.parse(advanced)[key])),['parkRuntime']);
  timer();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(auto.last?.ok,true);assert.equal(storage.getItem(SAVE_KEY),advanced);
- assert.deepEqual(writes,[PRE_AUTOSAVE_BACKUP,AUTOSAVE_CHECKPOINT_KEY,SAVE_KEY]);
+ // Current guard publishes the validated primary first; both lossless copies remain required.
+ assert.deepEqual(writes,[SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP]);
  assert.equal(decodeSaveCopy(storage.getItem(PRE_AUTOSAVE_BACKUP)),raw);
  assert.equal(decodeSaveCopy(storage.getItem(AUTOSAVE_CHECKPOINT_KEY)),advanced);
  const reopened=deserializeParkSession(storage.getItem(SAVE_KEY)!);

@@ -88,7 +88,7 @@ const formatGrowthCash = (amount: number) => (amount / 100).toLocaleString('th-T
 /** Latest recorded basket, not a guessed commodity from a household timestamp. */
 export function householdConsumption(city: City, id: number): { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null {
   const household = city.households.find(value => value.id === id); if (!household) return null;
-  let latest: { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null = null;
+  let latest: { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null = city.history?.latestBasket[household.wallet]??null;
   for (const entry of city.goodsLedger) if (entry.to === household.wallet && entry.reason === 'Household final consumption' && (!latest || entry.tick > latest.tick)) latest = { commodity: 'goods', tick: entry.tick, quantity: entry.quantity };
   for (const entry of city.cropLedger) if (entry.to === household.wallet && entry.kind === 'consumption' && (!latest || entry.tick > latest.tick)) latest = { commodity: 'crops', tick: entry.tick, quantity: entry.quantity };
   return latest;

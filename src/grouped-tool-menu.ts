@@ -36,8 +36,9 @@ function installGroupedToolMenu(id: string, name: string, tools: readonly (reado
     const selected = options.find(option => option.tool === tool);
     anchor.classList.toggle('active', !!selected); anchor.dataset.activeTool = selected?.tool ?? '';
     label.textContent = selected?.label ?? name;
-    anchor.title = selected ? `${name} · ${selected.label}กำลังทำงาน · แตะเพื่อเลือกเครื่องมือ` : `${name} · ${names}`;
+    anchor.title = selected ? `${name} · ${selected.label}กำลังทำงาน · ${selected.button.title} · แตะเพื่อเลือกเครื่องมือ` : `${name} · ${names}`;
     anchor.setAttribute('aria-label', anchor.title);
+    anchor.setAttribute('aria-pressed', String(!!selected));
     const glyph = selected?.button.querySelector<HTMLElement>('.tool-icon, .zone-icon');
     if (glyph) { icon.innerHTML = glyph.innerHTML; icon.className = glyph.className.replace('zone-icon', 'tool-icon'); }
     else { icon.innerHTML = defaultIcon; icon.className = 'tool-icon svg-glyph'; }

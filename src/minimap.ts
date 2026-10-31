@@ -4,7 +4,8 @@
  * camera (minimap) or opens the place (map). Read-only over City.
  */
 import './minimap.css';
-import { SIZE, GATEWAY, isMarket, type City } from './sim.ts';
+import { SIZE, GATEWAY, type City } from './sim.ts';
+import { commercialPresentation } from './commercial-visuals.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { busCellNote, paintBusOverlay } from './bus/map-paint.ts';
 import { busMapRevision } from './bus/map-state.ts';
@@ -25,8 +26,8 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     if (!c.zone) continue;
     ctx.fillStyle = FILL[c.zone]; ctx.fillRect(x + .5, y + .5, cell - 1, cell - 1);
     if (c.building !== null) {
-      const firm = city.firms.find(f => f.building === c.building);
-      ctx.fillStyle = c.zone === 'C' && firm && isMarket(firm) ? BUILT.market : BUILT[c.zone];
+      const building = city.buildings.find(b => b.id === c.building);
+      ctx.fillStyle = c.zone === 'C' && building && building.level <= 3 ? BUILT.market : BUILT[c.zone];
       const pad = Math.max(1, cell * .18); ctx.fillRect(x + pad, y + pad, cell - pad * 2, cell - pad * 2);
     }
   }
@@ -58,7 +59,7 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     };
     for (const f of city.firms) {
       const b = city.buildings.find(v => v.id === f.building); if (!b) continue;
-      label(`${f.zone === 'C' ? (isMarket(f) ? NAMES.market : NAMES.shop) : NAMES[f.zone as 'I' | 'F']} #${b.id}`, b.cell);
+      label(`${f.zone === 'C' ? commercialPresentation(b.level).title : NAMES[f.zone as 'I' | 'F']} #${b.id}`, b.cell);
     }
     label('ประตูเมือง', GATEWAY);
   }

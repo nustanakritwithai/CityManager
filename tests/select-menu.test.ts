@@ -29,7 +29,7 @@ class Element {
   contains(element: Element): boolean { return this === element || this.children.some(child => child.contains(element)); }
   closest(selector: string): Element | null { return (selector.startsWith('#') ? this.id === selector.slice(1) : this.className.split(' ').includes(selector.slice(1))) ? this : this.parent?.closest(selector) ?? null; }
   querySelectorAll(selector: string): Element[] { return this.children.flatMap(child => [...(child.tag === selector ? [child] : []), ...child.querySelectorAll(selector)]); }
-  querySelector(selector: string) { assert.equal(selector, 'span:last-child'); return this.children.at(-1); }
+  querySelector(selector: string) { if (selector === 'span:last-child') return this.children.at(-1); return this.children.find(child => child.className.split(' ').includes(selector.slice(1))); }
   addEventListener(name: string, listener: (e: any) => void) { this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]); }
   dispatch(name: string, properties: Record<string, unknown> = {}) {
     const event = { target: this, detail: 1, prevented: false, stopped: false, ...properties,
@@ -120,7 +120,8 @@ test('integration retains shortcuts and command dispatch; demolition has no stan
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert.equal(html.includes('data-tool="bulldoze"'), false); assert.equal((html.match(/data-tool="select"/g) ?? []).length, 1);
-  assert.match(main, /b: 'bulldoze'/); assert.match(main, /v: 'select'/); assert.match(main, /p: 'select'/);
+  const shortcuts = readFileSync(new URL('../src/build-toolbar.ts', import.meta.url), 'utf8');
+  assert.match(shortcuts, /b: 'bulldoze'/); assert.match(shortcuts, /v: 'select'/); assert.match(shortcuts, /p: 'select'/);
   assert.match(main, /tool === 'bulldoze'/);
   assert.match(main, /bulldozeGuarded\(city, index, busEnabled\(\)/);
   assert.match(main, /resultSound\(bulldoze\(city, cell\), 'ui-bulldoze'\)/);

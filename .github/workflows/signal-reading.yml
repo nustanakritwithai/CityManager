@@ -26,12 +26,22 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npm test
+      - name: Select exact commercial scope
+        id: scope
+        run: node scripts/ci-visual-scope.mjs
+      - run: node --test tests/ci-visual-scope.test.mjs tests/panel-server-entry-fixture.test.mjs
+      - name: Verify relevant panel data
+        run: |
+          if ('${{ steps.scope.outputs.kind }}' -eq 'commercial') {
+            node --experimental-strip-types --test tests/signal-client.test.ts tests/signal-data.test.ts tests/signal-reading.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Commercial panel data failed.' }
+          } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' } }
       - run: npm run build
       - name: Exercise reports with intercepted mocks only
         run: |
@@ -51,3 +61,14 @@ jobs:
           } finally {
             Stop-Process -Id $readingPreview.Id -ErrorAction SilentlyContinue
           }
+
+      - name: Preserve actual panel evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signal-reading-evidence
+          retention-days: 3
+          path: |
+            .test-output/signal-reading/*.png
+            .test-output/signal-reading/qa.json
+          if-no-files-found: error

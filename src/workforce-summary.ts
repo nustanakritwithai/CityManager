@@ -2,7 +2,7 @@
 import type { City } from './sim.ts';
 import type { WorkerSkill, WorkerSkills } from './labor.ts';
 
-export const WORKFORCE_OCCUPATIONS = ['agriculture', 'manufacturing', 'retail', 'market-trading', 'park-maintenance', 'teacher', 'professor'] as const;
+export const WORKFORCE_OCCUPATIONS = ['agriculture', 'manufacturing', 'retail', 'park-maintenance', 'teacher', 'professor'] as const;
 export type WorkforceOccupation = typeof WORKFORCE_OCCUPATIONS[number];
 export type StudyRole = 'school-student' | 'university-student';
 export type WorkplaceKey = `firm:${number}` | `park:${number}` | `campus:${number}`;
@@ -126,18 +126,18 @@ export function deriveWorkforceSummary(city: City): WorkforceSummary {
   const firmRole = (id: number, householdId: number): WorkforceOccupation | null => {
     const firm = firms.get(id);
     if (!firm) { issue('missing-workplace', `firm:${id}`, householdId); return null; }
-    return firm.zone === 'F' ? 'agriculture' : firm.zone === 'I' ? 'manufacturing' : firm.commercialKind === 'market' ? 'market-trading' : 'retail';
+    return firm.zone === 'F' ? 'agriculture' : firm.zone === 'I' ? 'manufacturing' : 'retail';
   };
   for (const allocation of city.employment) {
     const role = firmRole(allocation.firmId, allocation.householdId);
     if (role === null) continue;
-    if (allocation.occupation !== (role === 'agriculture' || role === 'manufacturing' ? 'manufacturing' : 'retail') || role === 'market-trading') issue('role-mismatch', `firm:${allocation.firmId}.employment`, allocation.householdId);
+    if (allocation.occupation !== (role === 'agriculture' || role === 'manufacturing' ? 'manufacturing' : 'retail')) issue('role-mismatch', `firm:${allocation.firmId}.employment`, allocation.householdId);
     add({ householdId: allocation.householdId, workplace: `firm:${allocation.firmId}`, count: allocation.workers, role, relationship: 'employee', skill: allocation.skill });
   }
   for (const allocation of city.ownerLabor) {
     const role = firmRole(allocation.firmId, allocation.householdId);
     if (role === null) continue;
-    if ((role !== 'retail' && role !== 'market-trading') || firms.get(allocation.firmId)?.owner?.householdId !== allocation.householdId || allocation.workers !== 1) issue('role-mismatch', `firm:${allocation.firmId}.ownerLabor`, allocation.householdId);
+    if (role !== 'retail' || firms.get(allocation.firmId)?.owner?.householdId !== allocation.householdId || allocation.workers !== 1) issue('role-mismatch', `firm:${allocation.firmId}.ownerLabor`, allocation.householdId);
     add({ householdId: allocation.householdId, workplace: `firm:${allocation.firmId}`, count: allocation.workers, role, relationship: 'owner-worker', skill: allocation.skill });
   }
   for (const park of city.parks) for (const allocation of park.staffing?.allocations ?? []) {

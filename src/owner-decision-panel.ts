@@ -3,7 +3,7 @@ import { OWNER_FACT_LABELS, OWNER_REASON_TEXT, captureOwnerSnapshot, ownerPropos
 import { replayOwnerJournal, type createOwnerDecisionSession } from './owner-decision-session.ts';
 import { ownerDecisionConnectionReady, requestOwnerDecision, type OwnerDecisionConnection } from './owner-decision-client.ts';
 import { createOwnerMonthlyBatch, type OwnerMonthlyStepResult } from './owner-decision-monthly.ts';
-import { MONTH, isMarket, type City } from './sim.ts';
+import { MONTH, isCommercial, type City } from './sim.ts';
 import type { OwnerSnapshot } from './owner-decision.ts';
 
 type Session = ReturnType<typeof createOwnerDecisionSession>;
@@ -22,18 +22,18 @@ function button(id: string, label: string, action: () => void) {
 export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Options) {
   host.id = 'owner-decisions';
   const summary = element('summary'); summary.id = 'owner-decisions-toggle';
-  summary.append(element('span', 'เจ้าของตลาด'), element('span', 'กฎในเครื่อง · Typhoon เมื่อกด', 'owner-summary-note'));
+  summary.append(element('span', 'เจ้าของกิจการพาณิชย์'), element('span', 'กฎในเครื่อง · Typhoon เมื่อกด', 'owner-summary-note'));
   const body = element('section', undefined, 'owner-body');
-  body.append(element('h3', 'ข้อเสนอเจ้าของตลาดทั้งเมือง'));
+  body.append(element('h3', 'ข้อเสนอเจ้าของกิจการพาณิชย์ทั้งเมือง'));
   body.append(element('p', 'ข้อเสนอพื้นฐานมาจากกฎในเกม การขอ Typhoon เป็นการกดแยกแต่ละครั้ง และต้องตรวจพร้อมยืนยันก่อนย้ายเงินจริง', 'owner-note'));
-  const modes = element('div', undefined, 'owner-modes'); modes.setAttribute('aria-label', 'โหมดเจ้าของตลาดทั้งเมือง');
+  const modes = element('div', undefined, 'owner-modes'); modes.setAttribute('aria-label', 'โหมดเจ้าของกิจการพาณิชย์ทั้งเมือง');
   const processed = new Set<string>();
   let lastCity = options.getCity(), lastStatus = 'ready', resultText = '', busy = false, signature = '', revision = 0;
   let activeRequest: { controller: AbortController; city: City; snapshot: OwnerSnapshot; stateHash: string; generation: number; automatic: boolean } | null = null;
   let activeAutoBatch = false, batchRevision = 0, lastBatchStatus = 'idle';
   const monthlyBatch = createOwnerMonthlyBatch({
     getContext: () => ({ city: options.getCity(), mode: options.getSession().mode }),
-    getFirmIds: city => [...city.firms].filter(isMarket).map(firm => firm.id),
+    getFirmIds: city => [...city.firms].filter(f => isCommercial(f) && f.owner !== null).map(firm => firm.id),
     processFirm: async (city, firmId, controller) => {
       const [proposal] = options.getSession().evaluateTyphoonAutoMonthly(city, firmId);
       return proposal ? requestTyphoon(proposal, true, batchRevision, controller) : 'skipped';
@@ -60,7 +60,7 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
       if (activeAutoBatch && mode !== 'typhoon-auto') stopTyphoonAuto();
       options.getSession().setMode(mode as keyof typeof modeLabels);
       lastStatus = 'mode-changed';
-      resultText = mode === 'auto' ? 'กฎในเกมทำรายการเดือนละครั้งในเมืองนี้ โหลดหรือเริ่มใหม่จะกลับโหมดเสนอ' : mode === 'typhoon-auto' ? 'Typhoon จะเลือกเดือนละครั้ง ใช้เฉพาะคำสั่งเจ้าของตลาดที่ผ่านการตรวจ และกลับไปใช้กฎในเกมเมื่อเรียกไม่ได้' : mode === 'off' ? 'ปิดการประเมินเจ้าของตลาดแล้ว' : 'แสดงข้อเสนอให้เลือกทำเอง กฎและ Typhoon ยังไม่ย้ายเงินจนกดใช้';
+      resultText = mode === 'auto' ? 'กฎในเกมทำรายการเดือนละครั้งในเมืองนี้ โหลดหรือเริ่มใหม่จะกลับโหมดเสนอ' : mode === 'typhoon-auto' ? 'Typhoon จะเลือกเดือนละครั้ง ใช้เฉพาะคำสั่งเจ้าของกิจการพาณิชย์ที่ผ่านการตรวจ และกลับไปใช้กฎในเกมเมื่อเรียกไม่ได้' : mode === 'off' ? 'ปิดการประเมินเจ้าของกิจการพาณิชย์แล้ว' : 'แสดงข้อเสนอให้เลือกทำเอง กฎและ Typhoon ยังไม่ย้ายเงินจนกดใช้';
       signature = ''; sync(); options.onChange();
       const pausedBatch = monthlyBatch.getState();
       if (mode !== 'typhoon-auto' && pausedBatch.status === 'paused') {
@@ -292,7 +292,7 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
       return;
     }
     for (const outcome of outcomes) if (outcome.ok && outcome.proposalId) processed.add(outcome.proposalId);
-    lastStatus = 'monthly-evaluated'; resultText = 'จบรอบกฎเจ้าของตลาดแล้ว ผลแต่ละรายการอยู่ในประวัติ'; signature = '';
+    lastStatus = 'monthly-evaluated'; resultText = 'จบรอบกฎเจ้าของกิจการพาณิชย์แล้ว ผลแต่ละรายการอยู่ในประวัติ'; signature = '';
   }
   sync(); return { sync, reset, noteOutcomes, isAutoPending: () => activeAutoBatch };
 }

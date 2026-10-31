@@ -3,7 +3,7 @@
  * canonical state and its ledgers; nothing here is saved, so a loaded city shows its real stage.
  */
 import { CROPS, PRODUCTS, RECIPES } from './goods.ts';
-import { MONTH, farmCrop, isRetail, summary, type City } from './sim.ts';
+import { MONTH, farmCrop, isCommercial, summary, type City } from './sim.ts';
 
 export type GoalCheck = { label: string; done: boolean; value?: string };
 export type GoalStage = { level: number; id: string; name: string; hint: string; checks: GoalCheck[]; done: boolean };
@@ -22,6 +22,7 @@ export function treasuryAtMonthEnds(c: City, months: number): number[] | null {
   const last = c.tick - c.tick % MONTH;
   if (last < months * MONTH) return null;
   const ends = Array.from({ length: months + 1 }, (_, i) => last - (months - i) * MONTH), out = ends.map(() => 0);
+  if(c.history){for(let i=0;i<ends.length;i++){const end=ends[i];if(end<c.history.throughTick){const point=c.history.treasuryMonthEnds.find(p=>p.tick===end);if(!point)return null;out[i]=point.balance;}else out[i]=c.history.accounts.treasury??0;}}
   for (const e of c.ledger) {
     const delta = e.to === 'treasury' ? e.amount : e.from === 'treasury' ? -e.amount : 0;
     if (delta) ends.forEach((end, i) => { if (e.tick <= end) out[i] += delta; });
@@ -32,7 +33,7 @@ export function treasuryAtMonthEnds(c: City, months: number): number[] | null {
 export function cityGoals(c: City, s = summary(c)): CityGoals {
   const since = c.tick - MONTH;
   const recentCrops = c.cropLedger.filter(e => e.tick > since);
-  const shops = new Set(c.firms.filter(isRetail).map(f => f.wallet));
+  const shops = new Set(c.firms.filter(isCommercial).map(f => f.wallet));
   let wholesale = 0, sold = 0, imported = 0;
   for (let i = c.goodsLedger.length - 1; i >= 0 && c.goodsLedger[i].tick > since; i--) {
     const e = c.goodsLedger[i];
@@ -123,7 +124,7 @@ export function cityRecord(c: City) {
   return {
     day: c.tick, population: s.population, households: s.households,
     produced: c.goods.produced, soldLocally: c.goods.consumed,
-    taxes: c.ledger.reduce((n, e) => n + (e.to === 'treasury' && /tax/i.test(e.reason) ? e.amount : 0), 0),
+    taxes: (c.history?.taxTotal??0)+c.ledger.reduce((n, e) => n + (e.to === 'treasury' && /tax/i.test(e.reason) ? e.amount : 0), 0),
     treasury: s.treasury,
   };
 }
