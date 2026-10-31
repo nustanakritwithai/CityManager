@@ -1,5 +1,7 @@
 // Focused, local-only renderer evidence. No city simulation, saves, traffic or economy.
 import { spawn } from 'node:child_process';
+import {writeFileSync} from 'node:fs';
+import {commercialScreenshotReadback} from './commercial-screenshot-readback.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
@@ -18,10 +20,12 @@ const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/M
 let ws, sequence = 0; const pending = new Map(), errors = [], external = [], captures = [];
 child.on('error', error => errors.push(error.message));
 const sleep = ms => new Promise(r => setTimeout(r,ms));
-const watchdog = setTimeout(() => { child.kill(); console.error('Commercial-only review timed out'); process.exit(1); },90_000);
+const diagnostics={phase:'browser-start',state:null,lastCommand:null,captures:[]};
+const failReport=error=>writeFileSync(resolve(output,'failure.json'),JSON.stringify({error:String(error),diagnostics,captures,errors,external},null,2));
+const watchdog = setTimeout(() => { failReport(Error('Commercial-only review timed out (90s total budget)'));child.kill(); console.error('Commercial-only review timed out',JSON.stringify(diagnostics));process.exit(1); },90_000);
 function send(method, params = {}) {
-  const id = ++sequence; const result = new Promise((yes,no) => {
-    const timer = setTimeout(() => { pending.delete(id); no(Error(`CDP timeout: ${method}`)); },15_000);
+  diagnostics.lastCommand=method;const id = ++sequence; const result = new Promise((yes,no) => {
+    const timer = setTimeout(() => { pending.delete(id); no(Object.assign(Error(`CDP timeout: ${method}`),{cdpTimeoutMethod:method})); },15_000);
     pending.set(id,{ yes: value => { clearTimeout(timer); yes(value); }, no: error => { clearTimeout(timer); no(error); } });
   }); ws.send(JSON.stringify({ id,method,params })); return result;
 }
@@ -42,7 +46,15 @@ function pngEvidence(png){
  assert.ok(nonblank,'Uniform blank screenshot is not visual proof');assert.ok(sceneColors.size>16,'Rendered scene below header must contain varied pixel colors');return {width,height,nonblank,sceneColors:sceneColors.size};
 }
 
-async function capture(name) { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); const health=await evaluate('window.commercialReview.health()');assert.equal(health.contextLost,false);assert.ok(health.width>0&&health.height>0);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});const png=Buffer.from(r.data,'base64'),pixels=pngEvidence(png);await writeFile(resolve(output,`${name}.png`),png);captures.push({name,health,...pixels}); }
+let captureMode='surface';
+async function capture(name) {
+ diagnostics.phase='capture-frame';await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+ const record={name,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Commercial capture start',name,captureMode);
+ const probe=async()=>{assert.deepEqual(errors,[],'No runtime errors before screenshot');const health=await evaluate('({...window.commercialReview.health(),ready:window.commercialReview.ready,visibility:document.visibilityState,viewportWidth:innerWidth,viewportHeight:innerHeight})');assert.equal(health.ready,true);assert.equal(health.contextLost,false);assert.ok(health.width>0&&health.height>0);assert.equal(health.viewportWidth,1440);assert.equal(health.viewportHeight,1000);return health;};
+ try{diagnostics.phase='capture-readback';const r=await commercialScreenshotReadback(send,probe,record,captureMode);const png=Buffer.from(r.data,'base64'),pixels=pngEvidence(png);assert.equal(pixels.width,1440);assert.equal(pixels.height,1000);await writeFile(resolve(output,`${name}.png`),png);captureMode=record.mode;record.status='saved';captures.push({name,health:record.health,...pixels});}
+ catch(error){record.status='failed';record.error=String(error);throw error;}
+ finally{record.finished=new Date().toISOString();console.log('Commercial capture result',JSON.stringify(record));}
+}
 try {
   let pages; for(let n=0;n<100;n++) { try { pages=await(await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
   assert.ok(pages?.length, `Browser unavailable: ${errors.join('; ')}`);
@@ -63,9 +75,10 @@ try {
     ['unpowered-night',true,true,false,false,'retail'],['disconnected-night',true,true,true,true,'retail'],
     ['reconnected-night',true,true,true,false,'market']
   ]) {
+    diagnostics.state=name;diagnostics.phase='state-render';console.log('Commercial state',name);
     await evaluate(`window.commercialReview.show(${night},${occupied},${powered},${disconnected},${JSON.stringify(tag)})`);
     await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-    const rows=await evaluate('window.commercialReview.inspect()');assert.equal(rows.length,9);
+    diagnostics.phase='semantic-assertions';const rows=await evaluate('window.commercialReview.inspect()');assert.equal(rows.length,9);
     for(const row of rows){
       assert.equal(row.tier,row.level<=3?'market':row.level<=6?'building':'mall');
       assert.equal(row.name,`Commercial ${row.tier}`);assert.ok(row.parts.length>=10&&row.parts.length<=32);
@@ -83,6 +96,6 @@ try {
     results.push({name,rows,controls});await capture(name);
   }
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  await writeFile(resolve(output,'report.json'),JSON.stringify({passed:true,scope:'Actual CityView.render on synthetic visual-only parcels; not economic progression or save acceptance',results,captures,errors,external},null,2));
+  await writeFile(resolve(output,'report.json'),JSON.stringify({passed:true,scope:'Actual CityView.render on synthetic visual-only parcels; not economic progression or save acceptance',results,captures,diagnostics,errors,external},null,2));
   console.log(`Commercial-only browser checks passed; ${captures.length} actual WebGL screenshots.`);
-} catch(error){await writeFile(resolve(output,'failure.json'),JSON.stringify({error:String(error),captures,errors,external},null,2));throw error;} finally { clearTimeout(watchdog);ws?.close();child.kill(); }
+} catch(error){failReport(error);throw error;} finally { clearTimeout(watchdog);ws?.close();child.kill(); }
