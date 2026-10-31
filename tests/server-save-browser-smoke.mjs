@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { inflateSync, deflateSync } from 'node:zlib';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
+let trafficGapEvidence={status:'not-run',reason:'Bumper-gap acceptance is opt-in for the exact traffic transition.'};
 let railEvidence={status:'not-run',reason:'Rail UI acceptance is opt-in for the exact rail transition.'};
 let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
 const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],server:null};
@@ -153,7 +154,7 @@ async function run(){
  let child,ws,profile,acceptanceError;const pending=new Map();let id=0,expectReloadDialog=false,unexpectedDialog=null;
  try{
   await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
-  const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/';
+  const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/'+(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'?'?bus=1':'');
   profile=await mkdtemp(resolve(tmpdir(),'city-server-save-smoke-'));
   const browser=process.env.CITYMANAGER_BROWSER||(process.platform==='win32'?'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe':'google-chrome');
   child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
@@ -175,6 +176,7 @@ async function run(){
   const until=async(fn,label,ms=90_000)=>{diagnostics.phase=label;console.log('Acceptance phase:',label);const start=Date.now();while(Date.now()-start<ms){if(await fn())return;await sleep(100);}throw Error(`Timeout: ${label}`);};
   await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Inspector.enable');diagnostics.browserVersion=await send('Browser.getVersion');
   await send('Network.setCookie',{name:'cm_session',value:COOKIE,url:origin,httpOnly:true,sameSite:'Strict'});await send('Network.setCookie',{name:'cm_csrf',value:CSRF,url:origin,sameSite:'Strict'});
+  if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){const {trafficGapBootstrap}=await import('./traffic-gap-browser-checks.mjs');await send('Page.addScriptToEvaluateOnNewDocument',{source:trafficGapBootstrap()});}
   const serverSeed=await readFile(new URL('./fixtures/save-smoke/bus-optional-day60.json',import.meta.url),'utf8');
   const seed=JSON.stringify({obsoleteBrowserOnly:true,tick:99999});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{if(location.origin!==${JSON.stringify(origin)})return;
@@ -216,6 +218,15 @@ async function run(){
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
   const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,25,'actual built game saves commercial checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-20');await clean();await capture('server-save-acknowledged');
+  if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){
+   diagnostics.phase='actual bumper-gap traffic UI';trafficGapEvidence={status:'running'};
+   const {trafficGapBrowserChecks}=await import('./traffic-gap-browser-checks.mjs');
+   trafficGapEvidence=await trafficGapBrowserChecks({send,evaluate,capture,phase:label=>{diagnostics.phase=`traffic: ${label}`;console.log('Traffic acceptance phase:',label);},
+    loadFixture:async raw=>{const before=f.state.active;const result=await f.service.mutate(OWNER,randomUUID(),{action:'save',cityId:before.cityId,expectedRevision:before.revision,raw,metadata:{name:'synthetic traffic fixture',population:0,tick:JSON.parse(raw).tick}});assert.equal(result.raw,raw,'Only the isolated mock service installs the validated synthetic fixture');},
+    acknowledge:async()=>{const revision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>revision,'traffic durable server ACK');await settled();await clean();return JSON.parse(f.state.active.raw);},
+    reload:async()=>{diagnostics.phase='explicit traffic reload';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;await clean();}});
+   console.log('PASS actual bumper-gap traffic, fault fallback and server reload',JSON.stringify(trafficGapEvidence));
+  }
   if(process.env.CITYMANAGER_RAIL_CHECKS==='activation'){
    diagnostics.phase='actual rail UI';railEvidence={status:'running'};
    const {railBrowserChecks}=await import('./rail-browser-checks.mjs');
@@ -296,8 +307,8 @@ const selfTestOnly=process.argv.includes('--self-test'),started=new Date().toISO
 const output=resolve('.test-output/server-save-smoke');await mkdir(output,{recursive:true});
 try {
  if(selfTestOnly)await selfTest();else await run();
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,railEvidence,diagnostics},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics},null,2));
 } catch(error) {
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,diagnostics,error:String(error?.stack??error)},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics,error:String(error?.stack??error)},null,2));
  throw error;
 }

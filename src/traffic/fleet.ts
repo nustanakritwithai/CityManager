@@ -1,6 +1,6 @@
 import { linkKey, type Link, type LinkNetwork } from './network.ts';
 import { roadNeighbors } from '../road-topology.ts';
-import { LANE_START, LANE_END, SLOT_PITCH, laneOffset } from '../citizen-road-queue.ts';
+import { CAR_LENGTH, SLOT_PITCH, laneOffset } from '../citizen-road-queue.ts';
 import type { CitizenVehiclePose } from '../citizen-vehicle-poses.ts';
 import { linkTimes, shortestPath, type OdDemand, type RouteState } from './routing.ts';
 /**
@@ -20,10 +20,11 @@ export const GLOBAL_VEHICLE_CAP = 240;
 /** Base visual speed at free flow, tiles per real second; slowed by link congestion. */
 export const VISUAL_TILES_PER_SECOND = 1.2;
 export const FADE_SECONDS = .4;
-/** Centre s at which a car's box touches the node square (stop line) / has fully left it. */
-const STOP = LANE_END, CLEAR = LANE_START, SQUARE = (1 - STOP) + CLEAR;
+/** Junction square uses a 0.25-tile keep-out so a turning body cannot meet cross traffic.
+ * Straight-road queues still use the tighter shared pitch. */
+const STOP = 1 - 0.25 - CAR_LENGTH / 2, CLEAR = 0.25 + CAR_LENGTH / 2, SQUARE = (1 - STOP) + CLEAR;
 
-export type FleetCar = { id: string; path: number[]; pathKey: string; i: number; s: number; lane: number; paint: number; phase: 'in' | 'drive' | 'out'; fade: number };
+export type FleetCar = { id: string; path: number[]; pathKey: string; i: number; s: number; lane: number; paint: number; phase: 'in' | 'drive' | 'out'; fade: number; v: number };
 export type FleetState = { nextId: number; cars: FleetCar[]; targets: Map<string, { path: number[]; target: number }>; held: Map<number, string>; slow: Map<string, number> };
 export const createFleet = (): FleetState => ({ nextId: 1, cars: [], targets: new Map(), held: new Map(), slow: new Map() });
 const paint = (id: string) => { let n = 0; for (const c of id) n = (Math.imul(n, 31) + c.charCodeAt(0)) | 0; return (n >>> 0) % 6; };
@@ -116,8 +117,9 @@ export function stepFleet(fleet: FleetState, net: LinkNetwork, dt: number): void
         }
       }
     }
-    const speed = VISUAL_TILES_PER_SECOND * (fleet.slow.get(link) ?? 1);
-    const ns = Math.max(c.s, Math.min(c.s + speed * dt, max));
+    const cruise = VISUAL_TILES_PER_SECOND * (fleet.slow.get(link) ?? 1);
+    c.v = Number.isFinite(max) ? Math.min(cruise, Math.max(0, max - c.s) / Math.max(dt, 1e-4)) : cruise;
+    const ns = Math.max(c.s, Math.min(c.s + c.v * dt, max));
     if (!last && c.s <= STOP && ns > STOP && needsSquare(net, c.path[c.i], c.path[c.i + 1], c.path[c.i + 2])) fleet.held.set(c.path[c.i + 1], c.id);
     c.s = ns;
     if (c.s >= 1) { c.i++; c.s -= 1; }
@@ -136,7 +138,7 @@ export function stepFleet(fleet: FleetState, net: LinkNetwork, dt: number): void
     const lane = Math.min(fleet.nextId % 2, net.links.get(first)!.lanes - 1);
     if ((occ.get(`${first}|${lane}`) ?? []).some(o => o.s < CLEAR + SLOT_PITCH)) continue;
     const id = `fleet-${fleet.nextId++}`;
-    const car: FleetCar = { id, path: t.path, pathKey: k, i: 0, s: CLEAR, lane, paint: paint(id), phase: 'in', fade: 0 };
+    const car: FleetCar = { id, path: t.path, pathKey: k, i: 0, s: CLEAR, lane, paint: paint(id), phase: 'in', fade: 0, v: 0 };
     fleet.cars.push(car); occ = lanes();
   }
 }

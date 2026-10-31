@@ -72,7 +72,7 @@ jobs:
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail'
         run: node --test tests/traffic-workflow-partition.test.mjs
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail'
-        run: node --experimental-strip-types --test tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
+        run: node --experimental-strip-types --test tests/traffic-gap-browser-checks.test.mjs tests/traffic-presentation.test.ts tests/traffic-spacing.test.ts tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail'
         run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-peak-fixture.test.ts tests/traffic-game-peak-metrics.test.ts tests/traffic-game-fallback-metrics.test.ts tests/traffic-game-modal.test.ts tests/traffic-game-cases.test.ts
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail'
@@ -105,7 +105,7 @@ jobs:
   fault:
     name: Allocation game / default and worker fault
     needs: checks
-    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial' && needs.checks.outputs.kind != 'rail'
+    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial' && needs.checks.outputs.kind != 'rail' && needs.checks.outputs.kind != 'traffic-gap'
     runs-on: windows-latest
     timeout-minutes: 10
     defaults:
@@ -155,7 +155,7 @@ jobs:
   browser:
     name: Allocation game browser / ${{ matrix.case }}
     needs: checks
-    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial' && needs.checks.outputs.kind != 'rail'
+    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial' && needs.checks.outputs.kind != 'rail' && needs.checks.outputs.kind != 'traffic-gap'
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -231,8 +231,9 @@ jobs:
     steps:
       - name: Require all traffic acceptance jobs
         run: |
-          if ('${{ needs.checks.outputs.kind }}' -in @('vehicle','visual-final','server-save','classic-toolbar','history','commercial','rail')) {
+          if ('${{ needs.checks.outputs.kind }}' -in @('vehicle','visual-final','server-save','classic-toolbar','history','commercial','rail','traffic-gap')) {
             if ('${{ needs.checks.result }}' -ne 'success') { throw 'Exact scope classifier checks failed.' }
+            if ('${{ needs.checks.outputs.kind }}' -eq 'traffic-gap') { Write-Output 'Bumper-gap unit, worker, bypass preflight and bounded stress passed; actual server-authenticated traffic acceptance required in CityManager. Legacy local-save browser matrix not run.'; exit 0 }
             Write-Output 'Exact scoped change (relevant acceptance in CityManager): render/resource/browser checks are required by CityManager; dedicated traffic simulation/browser suite not run for this exact reviewed scope.'
             exit 0
           }

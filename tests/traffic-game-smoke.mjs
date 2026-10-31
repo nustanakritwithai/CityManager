@@ -47,14 +47,16 @@ const bypassCity=deserialize(serialize(bypassSeed)),bypassRaw=serializeParkSessi
 for(const [a,b] of [[296,320],[320,323],[323,275]])assert.equal(buildParallelRoad(bypassExpected,a,b).ok,true);
 assert.deepEqual(deserialize(serialize(bypassExpected)),bypassExpected);
 const pureGame=(c,n)=>{const game=new TrafficGame(captureTrafficGameSample(c));for(let i=0;i<n;i++)game.step();return game.frame;};
-const baselineTen=pureGame(bypassCity,10),bypassTen=pureGame(bypassExpected,10);assert.ok(bypassTen.completed>baselineTen.completed,'Validated player-built bypass must improve the independent game');
+// Both paths get the same bounded 20-step warmup: acceleration and safe corner traversal
+// consume the first ten steps. Demand and strict improvement remain unchanged.
+const baselineTwenty=pureGame(bypassCity,20),bypassTwenty=pureGame(bypassExpected,20);assert.ok(bypassTwenty.completed>baselineTwenty.completed,'Validated player-built bypass must improve the independent game');
 const blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1',software=process.env.CITYMANAGER_SOFTWARE_WEBGL==='1',expectDefault=process.env.TRAFFIC_GAME_EXPECT_DEFAULT==='1';
 const testPlan=trafficGameCase(process.env.TRAFFIC_GAME_CASE||'full',blocked);
 const denyRecoveryStorage=testPlan.name==='full'||testPlan.name==='core';
 const recoveryStorageMode=denyRecoveryStorage?'synthetic-recovery-idb-denied':'native-observed';
 const evidenceCase=denyRecoveryStorage?`${testPlan.output}-idb-denied`:testPlan.output;
 const fallbackAutosaveSchedule=blocked&&testPlan.extended?'dense OFF/ON only: capture single native60000ms callback; invoke after strict isolation sample; lifecycle native':'native';
-if(process.argv.includes('--preflight')){console.log(JSON.stringify({testPlan,evidenceCase,recoveryStorageMode,fallbackAutosaveSchedule,fixture:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length,roads:dense.cells.filter(c=>c.road).length},roadBytes:roadRaw.length,expectedRoads:roadExpected.cells.filter(c=>c.road).length,bypass:{before:baselineTen.completed,after:bypassTen.completed}}));process.exit(0);}
+if(process.argv.includes('--preflight')){console.log(JSON.stringify({testPlan,evidenceCase,recoveryStorageMode,fallbackAutosaveSchedule,fixture:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length,roads:dense.cells.filter(c=>c.road).length},roadBytes:roadRaw.length,expectedRoads:roadExpected.cells.filter(c=>c.road).length,bypass:{before:baselineTwenty.completed,after:bypassTwenty.completed}}));process.exit(0);}
 const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4195/CityManager/',origin=new URL(url).origin;assert.equal(new URL(url).hostname,'127.0.0.1');
 const output=resolve('.test-output/traffic-game',evidenceCase),port=9366;await mkdir(output,{recursive:true});const profile=await mkdtemp(resolve(output,'profile-'));
 let occupied=false;try{occupied=(await fetch(`http://127.0.0.1:${port}/json/version`,{signal:AbortSignal.timeout(500)})).ok;}catch{}assert.equal(occupied,false,'Dedicated CDP port already in use');
@@ -136,10 +138,10 @@ async function citizenSpeed(){await button('#toggle-inspector');await until('doc
 async function gameMenu(){await closeInspector();await button('#toggle-game-menu');await until('document.querySelector("#inspector").dataset.page==="game"');}
 async function waitModel(){await until("window.cityManager.traffic()?.mode==='allocation-game' && window.cityManager.traffic()?.worker?.applied>0 && !window.cityManager.traffic()?.failure");}
 async function waitPausedModel(){await until("window.cityManager.parks().paused && window.cityManager.traffic()?.paused && !window.cityManager.traffic()?.worker?.inflight && !window.cityManager.traffic()?.worker?.pending");}
-async function gameTenSteps(){
+async function gameTwentySteps(){
  await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await button('#park-recreation button[data-speed]');await closeInspector();
- await evaluate(`window.__trafficTen=false;window.__trafficBypassTrace={stage:${JSON.stringify(stage)},startWallMs:null,elapsedMs:0,frames:0,minIntervalMs:null,maxIntervalMs:0,over100ms:0,finalVisibleStep:null};(()=>{let start=null,previous=null;const watch=now=>{const t=window.cityManager.traffic(),paused=t?.paused??true,trace=window.__trafficBypassTrace;if(!paused&&start===null){start=now;trace.startWallMs=Date.now()}if(start!==null){trace.frames++;trace.elapsedMs=now-start;trace.finalVisibleStep=t?.step??null;if(previous!==null){const interval=now-previous;trace.minIntervalMs=trace.minIntervalMs===null?interval:Math.min(trace.minIntervalMs,interval);trace.maxIntervalMs=Math.max(trace.maxIntervalMs,interval);if(interval>100)trace.over100ms++}previous=now}if(t&&t.step>=10){if(!window.cityManager.parks().paused)document.querySelector('#pause').click();window.__trafficTen=true;}else requestAnimationFrame(watch)};requestAnimationFrame(watch)})()`);
- lastBypassTrace=null;await button('#pause');await until('({done:window.__trafficTen&&window.cityManager.parks().paused,trace:window.__trafficBypassTrace})',35000,result=>{lastBypassTrace=result.trace});await waitPausedModel();bypassTraces.push(lastBypassTrace);const t=(await diag()).traffic;assert.equal(t.step,10,'exactly ten real-time game steps');return t;
+ await evaluate(`window.__trafficTwenty=false;window.__trafficBypassTrace={stage:${JSON.stringify(stage)},startWallMs:null,elapsedMs:0,frames:0,minIntervalMs:null,maxIntervalMs:0,over100ms:0,finalVisibleStep:null};(()=>{let start=null,previous=null;const watch=now=>{const t=window.cityManager.traffic(),paused=t?.paused??true,trace=window.__trafficBypassTrace;if(!paused&&start===null){start=now;trace.startWallMs=Date.now()}if(start!==null){trace.frames++;trace.elapsedMs=now-start;trace.finalVisibleStep=t?.step??null;if(previous!==null){const interval=now-previous;trace.minIntervalMs=trace.minIntervalMs===null?interval:Math.min(trace.minIntervalMs,interval);trace.maxIntervalMs=Math.max(trace.maxIntervalMs,interval);if(interval>100)trace.over100ms++}previous=now}if(t&&t.step>=20){if(!window.cityManager.parks().paused)document.querySelector('#pause').click();window.__trafficTwenty=true;}else requestAnimationFrame(watch)};requestAnimationFrame(watch)})()`);
+ lastBypassTrace=null;await button('#pause');await until('({done:window.__trafficTwenty&&window.cityManager.parks().paused,trace:window.__trafficBypassTrace})',35000,result=>{lastBypassTrace=result.trace});await waitPausedModel();bypassTraces.push(lastBypassTrace);const t=(await diag()).traffic;assert.equal(t.step,20,'exactly twenty real-time game steps');return t;
 }
 async function runThreeDays(query){
  setStage(`three-day economy replay ${query}`);await navigate(economyRaw,query);const start=JSON.parse(economyCityRaw).tick;
@@ -184,10 +186,10 @@ try{
  if(testPlan.extended){
  // Real player input builds a connected bypass. One game minute/second keeps
  // the economic city day unchanged while each road game runs ten real seconds.
- setStage('bypass baseline ten steps');await navigate(bypassRaw,'?traffic=1');await waitModel();const beforeBypass=await gameTenSteps();assert.equal(beforeBypass.completed,baselineTen.completed);
+ setStage('bypass baseline ten steps');await navigate(bypassRaw,'?traffic=1');await waitModel();const beforeBypass=await gameTwentySteps();assert.equal(beforeBypass.completed,baselineTwenty.completed);
  setStage('construct bypass and ten steps');await navigate(bypassRaw,'?traffic=1');await waitModel();await button('[data-tool="road"]');for(const [a,b] of [[296,320],[320,323],[323,275]]){await tapCell(a);await tapCell(b);}await until(`window.cityManager.traffic()?.roads===${bypassExpected.cells.filter(c=>c.road).length}`);await waitPausedModel();
  assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(bypassExpected),'Real bypass construction matches validated economic commands');
- const afterBypass=await gameTenSteps();assert.equal(afterBypass.completed,bypassTen.completed);assert.ok(afterBypass.completed>beforeBypass.completed);checks.push('Real player-built connected bypass increases modeled throughput at the same ten-step workload');
+ const afterBypass=await gameTwentySteps();assert.equal(afterBypass.completed,bypassTwenty.completed);assert.ok(afterBypass.completed>beforeBypass.completed);checks.push('Real player-built connected bypass increases modeled throughput at the same twenty-step workload');
  // A valid, reconciled synthetic population fixture checks density and mobile
  // rendering. It is not claimed to be a natural-growth or real-device benchmark.
  // Paired runs start from the same validated city and use citizen-view speed,

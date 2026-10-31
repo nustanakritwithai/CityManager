@@ -128,3 +128,10 @@ test('rail scope requires exact reviewed runtime diff and rejects unrelated allo
  assert.equal(railPathsOnly(paths),true);assert.equal(railOnly(paths),false);assert.equal(railOnly(paths,{railSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/traffic/game.ts','src/pages-auth.ts','src/city-save-auth.ts','server/city-saves/service.mjs','index.html','src/commercial-visuals.ts','package.json'].map(p=>[...paths,p])]){assert.equal(railPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {trafficGapPathsOnly,trafficGapOnly} from '../scripts/ci-visual-scope.mjs';
+test('bumper-gap route requires exact reviewed physics and rejects mixed save or transport edits',()=>{
+ const paths=['src/traffic/spacing.ts','src/traffic/game.ts','src/traffic/game-poses.ts','tests/traffic-spacing.test.ts','tests/traffic-gap-browser-checks.mjs'];
+ assert.equal(trafficGapPathsOnly(paths),true);assert.equal(trafficGapOnly(paths),false);assert.equal(trafficGapOnly(paths,{trafficGapSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/main.ts','src/sim.ts','src/pages-auth.ts','src/bus/engine.ts','src/rail/network-runtime.ts','src/save-storage.ts','src/server-city-save.ts','server/city-saves/service.mjs','package.json'].map(p=>[...paths,p])]){assert.equal(trafficGapPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});

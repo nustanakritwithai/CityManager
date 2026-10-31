@@ -1,6 +1,7 @@
-import {LANE_SLOTS,laneOffset,laneSlotCentres} from '../citizen-road-queue.ts';
+import {LANE_SLOTS,LANE_START,laneOffset,laneSlotCentres} from '../citizen-road-queue.ts';
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
 import type {GameCar,GameRenderGroup} from './game.ts';
+import {TRAFFIC_SPACING} from './spacing.ts';
 
 /** Rendering is cosmetic: the game model still tracks at most 128 cars. */
 export const GAME_VISUAL_CAR_CAP=64;
@@ -34,14 +35,24 @@ export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGrou
  const result:Candidate[]=[];
  for(const [key,unsorted] of [...byLink].sort(([a],[b])=>a.localeCompare(b))){
   const g=groupByKey.get(key);if(!g||g.closed)continue;
-  const lanes=Math.max(1,Math.min(2,Math.round(g.storage/4))),selected=[...unsorted].sort((a,b)=>a.id-b.id).slice(0,lanes*LANE_SLOTS);
+  const lanes=Math.max(1,Math.min(2,Math.round(g.storage/TRAFFIC_SPACING.maxPerLanePerTile))),cap=lanes*Math.max(LANE_SLOTS,TRAFFIC_SPACING.maxPerLanePerTile);
+  const selected=[...unsorted].sort((a,b)=>a.id-b.id).slice(0,cap);
   const ax=((g.from%size)-(size-1)/2)*unit,az=(Math.floor(g.from/size)-(size-1)/2)*unit;
   const bx=((g.to%size)-(size-1)/2)*unit,bz=(Math.floor(g.to/size)-(size-1)/2)*unit;
   const hx=Math.sign(bx-ax),hz=Math.sign(bz-az);
-  for(let lane=0;lane<lanes;lane++){
+  const placed=selected.some(c=>typeof c.progress==='number');
+  if(placed){
+   const perLane:GameCar[][]=Array.from({length:lanes},()=>[]);
+   for(const c of selected)perLane[Math.min(lanes-1,Math.max(0,c.lane??0))].push(c);
+   for(let lane=0;lane<lanes;lane++){
+    const people=perLane[lane].sort((a,b)=>(a.progress??0)-(b.progress??0)).slice(-TRAFFIC_SPACING.maxPerLanePerTile);
+    for(const c of people){const s=Math.min(1,Math.max(0,c.progress??0)),offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane})*unit;
+     result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
+   }
+  }else for(let lane=0;lane<lanes;lane++){
    const people=selected.slice(lane*LANE_SLOTS,(lane+1)*LANE_SLOTS), slots=laneSlotCentres(people.length,people.some(c=>c.blocked)?1:.5);
    for(let i=0;i<people.length;i++){const c=people[i],s=slots[i],offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane})*unit;
-    result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6}});}
+    result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
   }
  }
  return spatialSample(result,size,limit);
