@@ -306,6 +306,8 @@ function detailCache(app: AppBase): DetailCache {
  */
 export function addVehicleDetail(parent: Entity, view: Pick<CityView, 'app'>, kind: VehicleKind,
   paint: string, cargo: string, widthScale = 1, lengthScale = 1): void {
+  // No graphics device (headless unit tests): keep the plain vehicle body.
+  if (!(view.app as { graphicsDevice?: unknown }).graphicsDevice) return;
   const cache = detailCache(view.app), key = `${kind}:${paint}:${kind === 'truck' ? cargo : ''}`;
   let pair = cache.meshes.get(key);
   if (!pair) {
