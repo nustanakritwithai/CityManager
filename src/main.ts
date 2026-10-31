@@ -800,7 +800,7 @@ async function boot() {
       const applyStored=(restored:ReturnType<typeof deserializeParkSession>)=>{
         assertSource();
         if (!restored.city.education) adoptSavedEducation(restored.city);
-        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;activeLocal=false;activeRevision=null;recoveryOnly=managed;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(managed);autosave.reset();
+        city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;activeLocal=false;activeRevision=null;recoveryOnly=managed;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(managed);autosave.adoptLoaded();
       };
       if(managed){assertSource();await loadRecoveryCityReadOnly(saved.raw,marketPanel?.client,saveGuard,applyStored);}
       else await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,applyStored,assertSource);

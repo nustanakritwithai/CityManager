@@ -20,19 +20,21 @@ export interface AutosaveOptions {
 
 export function createAutosave(opts: AutosaveOptions) {
   const now = opts.now ?? Date.now;
-  let savedRevision:string|number|null=null, savedTick: number | null = null, running = false, last: AutosaveResult | null = null;
+  let savedRevision:string|number|null=null, savedTick: number | null = null, running = false, last: AutosaveResult | null = null, adopted = false;
   const finish = (r: AutosaveResult) => { last = r; opts.onResult(r); return r; };
   async function run(force = false): Promise<AutosaveResult | null> {
     if (running || (opts.canSave && !opts.canSave())) return null;
     const tick = opts.tick();
     let revision:string|number;try{revision=opts.revision?.()??tick;}catch(error){return finish({ok:false,at:now(),quota:isQuotaError(error),message:error instanceof Error?error.message:String(error)});}
-    if (!force && savedRevision === revision && last?.ok) return null;
+    if (!force && savedRevision === revision && (last?.ok || adopted)) return null;
     running = true;
-    try { await opts.save(); savedTick = tick; savedRevision=revision; return finish({ ok: true, at: now() }); }
+    try { await opts.save(); savedTick = tick; savedRevision=revision; adopted=false; return finish({ ok: true, at: now() }); }
     catch (error) { return finish({ ok: false, at: now(), quota: isQuotaError(error), message: error instanceof Error ? error.message : String(error) }); }
     finally { running = false; }
   }
-  return { run, flush() { void run(true); }, reset(){savedTick=null;savedRevision=null;last=null;}, markSaved(tick: number) { savedTick = tick;savedRevision=opts.revision?.()??tick; last = { ok: true, at: now() }; }, get last() { return last; } };
+  return { run, flush() { void run(true); }, reset(){savedTick=null;savedRevision=null;last=null;adopted=false;},
+    /** After a Load: the slot already holds these bytes, so skip autosave until the city changes. Does not claim a save happened. */
+    adoptLoaded(){savedTick=opts.tick();savedRevision=opts.revision?.()??savedTick;last=null;adopted=true;}, markSaved(tick: number) { savedTick = tick;savedRevision=opts.revision?.()??tick; last = { ok: true, at: now() }; }, get last() { return last; } };
 }
 
 type Listen = { addEventListener(type: string, fn: () => void): void };
