@@ -12,12 +12,28 @@ import { resolve, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
-import { toolbarChecks } from './visual-final-toolbar.mjs';
-let toolbarEvidence=null;
+const toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
 const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const failureAfterCleanup=(primary,errors)=>primary??(errors.length?new AggregateError(errors,'Browser fixture cleanup failed'):null);
+async function stopBrowser(child,ws){
+ if(!child)return;
+ const alive=()=>child.exitCode===null&&child.signalCode===null;
+ // Ask the owned browser to shut down its children before removing its profile.
+ try{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({id:2147483647,method:'Browser.close'}));}catch{/* The bounded owned-process fallback below still runs. */}
+ for(let i=0;i<30&&alive();i++)await sleep(100);
+ if(alive()&&child.pid){
+  if(process.platform==='win32'){
+   // Never target image names or unrelated browser processes.
+   await new Promise((ok,bad)=>{const killer=spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore'});const timer=setTimeout(()=>{killer.kill();bad(Error('Owned browser tree termination timed out'));},5000);killer.once('error',e=>{clearTimeout(timer);bad(e);});killer.once('close',code=>{clearTimeout(timer);code===0||!alive()?ok():bad(Error(`Owned browser taskkill exited ${code}`));});});
+  }else child.kill('SIGTERM');
+  for(let i=0;i<30&&alive();i++)await sleep(100);
+  if(alive())throw Error('Owned browser did not exit');
+ }
+}
+
 function fixtureService(){
  let state={active:null,requests:new Map(),archives:new Map()},tail=Promise.resolve();
  const store={read:async()=>structuredClone(state.active),listArchives:async()=>[...state.archives.values()].map(({raw,...info})=>structuredClone(info)),readArchive:async(_,id)=>structuredClone(state.archives.get(id)??null),
@@ -26,6 +42,11 @@ function fixtureService(){
  return {service,get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0};
 }
 async function selfTest(){
+ const primary=Error('original acceptance failure'),cleanup=Error('profile busy');
+ assert.equal(failureAfterCleanup(primary,[cleanup]),primary,'Cleanup cannot mask acceptance failure');
+ assert.ok(failureAfterCleanup(null,[cleanup]) instanceof AggregateError,'Cleanup-only failure must fail acceptance');
+ assert.equal(failureAfterCleanup(null,[]),null);
+
  assert.equal(expectedReloadDialog('beforeunload',true),true);
  for(const [type,scope] of [['beforeunload',false],['confirm',true],['alert',true],['prompt',true]])assert.equal(expectedReloadDialog(type,scope),false);
  const f=fixtureService(),id=randomUUID(),cityId=randomUUID(),body={action:'create',cityId,raw:'{"version":23,"tick":1}',metadata:{name:'fixture',population:0,tick:1}};
@@ -62,7 +83,7 @@ async function run(){
   const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.wasm':'application/wasm','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2'};
   const bytes=await readFile(file);res.writeHead(200,{'Content-Type':mime[extname(file)]??'application/octet-stream','Cache-Control':'no-store'});res.end(bytes);
  }catch(e){if(!res.headersSent)res.writeHead(e.status??500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});
- let child,ws,profile;const pending=new Map();let id=0,expectReloadDialog=false,unexpectedDialog=null;
+ let child,ws,profile,acceptanceError;const pending=new Map();let id=0,expectReloadDialog=false,unexpectedDialog=null;
  try{
   await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
   const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/';
@@ -104,10 +125,10 @@ async function run(){
   assert.equal(await evaluate('!!window.cityManager'),false,'no offline city entry after server load failure');assert.equal(f.state.active,null);await clean();f.mode='ok';await enter();
   assert.equal(f.state.active.metadata.tick,JSON.parse(seed).tick);assert.equal(f.state.archives.size,1);assert.equal([...f.state.archives.values()][0].sources.length,2);await clean();
   const capture=async name=>{assert.match(name,/^[a-z0-9_-]+$/i);const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve(output,`${name}.png`),Buffer.from(shot.data,'base64'));};
-  diagnostics.phase='actual toolbar interactions';toolbarEvidence=await toolbarChecks({send,evaluate,capture});await clean();console.log('PASS real-DOM toolbar checks',JSON.stringify(toolbarEvidence));
+  assert.equal(await evaluate("!!document.querySelector('#save:not(:disabled)')"),true,'real Save control available after authenticated entry');
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
-  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();await clean();
+  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();await clean();await capture('server-save-acknowledged');
   f.delay=1000;const before=f.acknowledged,postsBefore=f.posts.length;await click('#save');await until(async()=>f.posts.length>postsBefore,'manual request');assert.equal(f.acknowledged,before);assert.match(await evaluate("document.querySelector('#autosave-status').textContent"),/กำลังบันทึก/);await until(async()=>f.acknowledged>before,'manual ACK');await settled();f.delay=0;await clean();
   await evaluate('window.__quota=true');let rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'quota independent server commit');await settled();await clean();
   rev=f.state.active.revision;await click('[data-speed="10"]');if(await evaluate('window.cityManager.parks().paused'))await click('#pause');await until(async()=>f.state.active.revision>rev,'autosave commit');await settled();if(!await evaluate('window.cityManager.parks().paused'))await click('#pause');
@@ -118,10 +139,22 @@ async function run(){
   f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure');assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
   const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'retry acknowledgement');await settled();assert.deepEqual(f.posts[start+1],pendingCommand);
   // A 409 never overwrites another revision and no automatic retry silently wins.
-  f.mode='conflict';rev=f.state.active.revision;await click('#save');await until(failed,'conflict failure');assert.equal(f.state.active.revision,rev);await clean();
+  f.mode='conflict';rev=f.state.active.revision;await click('#save');await until(failed,'conflict failure');assert.equal(f.state.active.revision,rev);await clean();await capture('server-save-conflict');
   assert.equal(await evaluate("!!document.querySelector('.market-launch')"),false,'trading stays disabled');
   console.log('PASS built server-save browser acceptance: load failure+retry/migration/manual ACK/autosave/reload/quota/network retry/conflict/no browser city writes');
- }finally{diagnostics.server={acknowledged:f.acknowledged,posts:f.posts.length,revision:f.state.active?.revision??null,mode:f.mode};for(const p of pending.values())p.reject(Error('smoke cleanup'));ws?.close();if(child){child.kill();await sleep(200);}if(server.listening)await new Promise(r=>server.close(r));if(profile)await rm(profile,{recursive:true,force:true});}
+ }catch(error){acceptanceError=error;diagnostics.acceptanceError=String(error?.stack??error);}
+ finally{
+  diagnostics.server={acknowledged:f.acknowledged,posts:f.posts.length,revision:f.state.active?.revision??null,mode:f.mode};
+  const cleanupErrors=[];const cleanup=async action=>{try{await action();}catch(error){cleanupErrors.push(error);}};
+  for(const p of pending.values())p.reject(Error('smoke cleanup'));pending.clear();
+  await cleanup(()=>stopBrowser(child,ws));
+  await cleanup(()=>ws?.close());
+  await cleanup(async()=>{if(server.listening){server.closeAllConnections();await new Promise((ok,bad)=>server.close(error=>error?bad(error):ok()));}});
+  await cleanup(async()=>{if(profile)await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:200});});
+  diagnostics.cleanupErrors=cleanupErrors.map(error=>String(error?.stack??error));
+  acceptanceError=failureAfterCleanup(acceptanceError,cleanupErrors);
+ }
+ if(acceptanceError)throw acceptanceError;
 }
 const selfTestOnly=process.argv.includes('--self-test'),started=new Date().toISOString();
 const output=resolve('.test-output/server-save-smoke');await mkdir(output,{recursive:true});
