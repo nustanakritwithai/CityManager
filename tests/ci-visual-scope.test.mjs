@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -107,4 +107,10 @@ test('history economic/save route requires reviewed source diff and rejects unre
  const paths=['src/city-history.ts','src/city-history-validation.ts','src/sim.ts','src/server-city-entry.ts','src/city-save-auth.ts','tests/city-history.test.ts','tests/history-validators.test.ts','tests/server-save-browser-smoke.mjs'];
  assert.equal(historyPathsOnly(paths),true);assert.equal(historyPathsOnly([...paths,'src/save-storage.ts','tests/save-quota-lossless.test.ts']),true);assert.equal(historyOnly(paths),false);assert.equal(historyOnly(paths,{historySourceDiff:'unreviewed source changes'}),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/main.ts','index.html','src/renderer.ts','src/build-toolbar.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(historyPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+
+test('approved lifetime scope requires reviewed client source and excludes reconnect or backend changes',()=>{
+ const paths=['src/pages-auth.ts','tests/pages-auth.test.ts'];assert.equal(sessionLifetimePathsOnly(paths),true);assert.equal(sessionLifetimePathsOnly([...paths,'tests/server-save-browser-smoke.mjs']),true);assert.equal(sessionLifetimeOnly(paths),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/city-save-auth.ts','src/main.ts','index.html','server/city-saves/service.mjs','.github/workflows/citymanager.yml'].map(p=>[...paths,p])]){assert.equal(sessionLifetimePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });

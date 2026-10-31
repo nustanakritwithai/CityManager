@@ -93,7 +93,12 @@ export const historySources=["src/save-storage.ts", "src/agriculture-runtime.ts"
 const historyAllowed=new Set(["src/save-storage.ts", "tests/save-quota-lossless.test.ts", "docs/city-history-retention.md", "src/agriculture-runtime.ts", "src/agriculture-validation.ts", "src/audio-cues.ts", "src/building-issues.ts", "src/chart-modal.ts", "src/city-goals.ts", "src/city-history-types.ts", "src/city-history-validation.ts", "src/city-history.ts", "src/city-network.ts", "src/city-save-auth.ts", "src/city-series.ts", "src/context-data.ts", "src/goods-validation.ts", "src/market-client.ts", "src/owner-profit.ts", "src/park-runtime.ts", "src/server-city-entry.ts", "src/server-city-save.ts", "src/server-save-size.ts", "src/sim.ts", "src/submenus.ts", "tests/agriculture-validation.test.ts", "tests/city-history.test.ts", "tests/city-series.test.ts", "tests/factory-takeover-input.test.ts", "tests/farm-levels.test.ts", "tests/goods.test.ts", "tests/history-fixture.ts", "tests/history-validators.test.ts", "tests/month-end-review-scope.test.ts", "tests/owner-profit.test.ts", "tests/retail-shops.test.ts", "tests/server-city-entry-flow.test.ts", "tests/server-city-entry.test.ts", "tests/server-save-browser-smoke.mjs", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", ".github/workflows/citymanager.yml", ".github/workflows/entity-explanation.yml", ".github/workflows/owner-decisions.yml", ".github/workflows/player-feedback.yml", ".github/workflows/traffic-enabled.yml"]);
 export function historyPathsOnly(paths){return ['src/city-history.ts','src/city-history-validation.ts','src/sim.ts','src/server-city-entry.ts','src/city-save-auth.ts','tests/city-history.test.ts','tests/history-validators.test.ts','tests/server-save-browser-smoke.mjs'].every(p=>paths.includes(p))&&paths.every(p=>historyAllowed.has(p));}
 export function historyOnly(paths,evidence={}){return historyPathsOnly(paths)&&matchesReviewedSources(evidence,{historySourceDiff:"326578432215a15f27f08da7833feb888ffeb8be260dc37080a67b87347def5c"});}
+// Explicitly approved lifetime cap only; exact reviewed client source, no retry-auth/backend edits.
+const sessionLifetimeAllowed=new Set(['src/pages-auth.ts','tests/pages-auth.test.ts','tests/server-save-browser-smoke.mjs','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs']);
+export function sessionLifetimePathsOnly(paths){return ['src/pages-auth.ts','tests/pages-auth.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>sessionLifetimeAllowed.has(p));}
+export function sessionLifetimeOnly(paths,evidence={}){return sessionLifetimePathsOnly(paths)&&matchesReviewedSources(evidence,{"pagesBefore": "0c95f6f29b1ba57fde0e9cb9a72ae85f588d5e9fdb271fca37ed14be2a569008", "pagesAfter": "314dfae189a4c5a0de74bd4f585dca4c5fdbf2bc184680ea67edd8fab58d7c0e"});}
 export function visualKind(paths, evidence = {}) {
+  if(sessionLifetimeOnly(paths,evidence))return 'server-save';
   if(historyOnly(paths,evidence))return 'history';
   if(classicToolbarOnly(paths,evidence))return 'classic-toolbar';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -131,6 +136,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const git = args => execFileSync('git', args, { encoding: 'utf8' });
     const paths = changedPaths(process.env.GITHUB_EVENT_NAME, event, git);
     const evidence = {};
+    if(sessionLifetimePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.pagesBefore=git(['show',`${base}:src/pages-auth.ts`]);evidence.pagesAfter=git(['show',`${head}:src/pages-auth.ts`]);}
     if(historyPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.historySourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...historySources]);}
     if (paths.includes('src/main.ts')) {
       const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);

@@ -114,3 +114,28 @@ test('Pages auth obtains the existing Guest from a v23 city and never binds a di
   send(host, state); await assert.rejects(pending, /identity-mismatch/);
   assert.equal(requests, 1); assert.equal(store.get(SAVE_KEY), raw); assert.equal(client.guestId, null); assert.equal(client.pagesAuthenticated, false);
 }));
+
+
+test('900-second and 24-hour server sessions expire exactly at their memory-only deadline', async () => {
+ for (const seconds of [900, 86400]) await harness(async (host, store) => {
+  const session = new PagesSession(), oldNow = Date.now; let time = 1_800_000_000_000;
+  Date.now = () => time;
+  try {
+   await session.prepare();
+   globalThis.fetch = async () => new Response(JSON.stringify({ access_token: token, token_type: 'Bearer', expires_in: seconds, guest_id: guest }), { status: 200 });
+   const pending = session.connect(guest); send(host, new URL(host.url).searchParams.get('state')!); assert.equal(await pending, guest);
+   session.activate(guest); assert.equal(session.verifiedGuest, guest);
+   time += seconds * 1000 - 1; assert.equal(session.bearer(), token); assert.equal(session.verifiedGuest, guest);
+   time++; assert.equal(session.bearer(), null); assert.equal(session.guestId, null); assert.equal(session.verifiedGuest, null);
+   assert.equal(store.size, 0, 'access token and PKCE material never reach browser storage');
+  } finally { Date.now = oldNow; }
+ });
+});
+test('session lifetime rejects values outside the bounded integer contract', async () => {
+ for (const seconds of [86401, 0, -1, 1.5, NaN, Infinity, '86400', null]) await harness(async (host, store) => {
+  const session = new PagesSession(); await session.prepare();
+  globalThis.fetch = async () => new Response(JSON.stringify({ access_token: token, token_type: 'Bearer', expires_in: seconds, guest_id: guest }), { status: 200 });
+  const pending = session.connect(guest); send(host, new URL(host.url).searchParams.get('state')!);
+  await assert.rejects(pending, /pages-exchange-invalid/); assert.equal(session.bearer(), null); assert.equal(session.verifiedGuest, null); assert.equal(store.size, 0);
+ });
+});

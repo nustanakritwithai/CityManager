@@ -4,6 +4,8 @@ export const MARKET_ORIGIN = 'https://citymanager.157-85-96-139.sslip.io';
 export const PAGES_MARKET_BASE = `${MARKET_ORIGIN}/citymanager-api`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
+// Accept the approved 24-hour server policy; older 15-minute sessions still work.
+const MAX_ACCESS_SECONDS = 24 * 60 * 60;
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 type Prepared = { state: string; verifier: string; challenge: string };
 
@@ -54,7 +56,7 @@ export class PagesSession {
             const response = await fetch(`${PAGES_MARKET_BASE}/v1/pages/exchange`, { method: 'POST', credentials: 'omit', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: data.code, verifier: prepared.verifier }) });
             if (!response.ok) throw new Error('pages-exchange-failed'); const body: unknown = await response.json();
             if (!body || typeof body !== 'object') throw new Error('pages-exchange-invalid'); const value = body as Record<string, unknown>;
-            if (value.token_type !== 'Bearer' || typeof value.access_token !== 'string' || !TOKEN.test(value.access_token) || typeof value.guest_id !== 'string' || !UUID.test(value.guest_id) || !Number.isSafeInteger(value.expires_in) || Number(value.expires_in) < 1 || Number(value.expires_in) > 900) throw new Error('pages-exchange-invalid');
+            if (value.token_type !== 'Bearer' || typeof value.access_token !== 'string' || !TOKEN.test(value.access_token) || typeof value.guest_id !== 'string' || !UUID.test(value.guest_id) || !Number.isSafeInteger(value.expires_in) || Number(value.expires_in) < 1 || Number(value.expires_in) > MAX_ACCESS_SECONDS) throw new Error('pages-exchange-invalid');
             if (expectedGuest && value.guest_id !== expectedGuest) throw new Error('market-guest-identity-mismatch');
             this.accessToken = value.access_token; this.expiresAt = Date.now() + Number(value.expires_in) * 1000; this.account = value.guest_id; this.validated = false; resolve(value.guest_id);
           } catch (error) { this.clear(); reject(error); } finally { this.connecting = false; }

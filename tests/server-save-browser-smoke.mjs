@@ -189,7 +189,7 @@ async function run(){
   const enter=async({afterReload=false}={})=>{await until(afterReload?reloadEntryPredicate:entryPredicate,'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');};
   const clean=async()=>assert.deepEqual(await evaluate('window.__cityWrites'),[],'browser city writes prohibited');
   const failed=()=>evaluate("!!document.querySelector('#save-failure-banner:not([hidden])')");
-  const settled=()=>until(()=>evaluate("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')"),'acknowledged save UI');
+  const settled=(label='acknowledged save UI')=>until(()=>evaluate("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')"),label);
   f.mode='load-error';await send('Page.navigate',{url});
   await until(()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')"),'entry before unavailable load');await click('.guest-entry-card button');
   await until(()=>evaluate("document.querySelector('.guest-entry-card [role=status]')?.textContent.includes('fixture-load-unavailable')"),'load failure stays gated');
@@ -217,7 +217,13 @@ async function run(){
   const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,24,'actual built game saves checkpointed server city');await clean();await capture('server-save-acknowledged');
   f.delay=1000;const before=f.acknowledged,postsBefore=f.posts.length;await click('#save');await until(async()=>f.posts.length>postsBefore,'manual request');assert.equal(f.acknowledged,before);assert.match(await evaluate("document.querySelector('#autosave-status').textContent"),/กำลังบันทึก/);await until(async()=>f.acknowledged>before,'manual ACK');await settled();f.delay=0;await clean();
   await evaluate('window.__quota=true');let rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'quota independent server commit');await settled();await clean();
-  rev=f.state.active.revision;await click('[data-speed="10"]');if(await evaluate('window.cityManager.parks().paused'))await click('#pause');await until(async()=>f.state.active.revision>rev,'autosave commit');await settled();if(!await evaluate('window.cityManager.parks().paused'))await click('#pause');
+  rev=f.state.active.revision;const autosaveTick=f.state.active.metadata.tick,autosavePosts=f.posts.length;
+  await click('[data-speed="1"]');if(await evaluate('window.cityManager.parks().paused'))await click('#pause');
+  await until(async()=>f.state.active.revision>rev&&f.state.active.metadata.tick>autosaveTick,'normal-speed autosave durable commit');
+  assert.ok(f.posts.slice(autosavePosts).some(p=>p.data?.action==='save'&&JSON.parse(p.data.raw).tick>autosaveTick),'Automatic POST contains actual progressed runtime, not a manual save');
+  diagnostics.autosave={beforeRevision:rev,beforeTick:autosaveTick,acknowledgedRevision:f.state.active.revision,acknowledgedTick:f.state.active.metadata.tick};
+  diagnostics.phase='pause after durable autosave';if(!await evaluate('window.cityManager.parks().paused'))await click('#pause');
+  assert.equal(await evaluate('window.cityManager.parks().paused'),true);await settled('durable autosave UI after pause');await clean();
   rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'save before reload');await settled();const saved=JSON.parse(f.state.active.raw);await clean();
   // A real beforeunload guard may protect changes after the ACK. Explicit reload is the tested user choice.
   diagnostics.phase='explicit reload after acknowledged save';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;const loaded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.equal(loaded.tick,saved.tick);assert.deepEqual(loaded.accounts,saved.accounts);assert.deepEqual(loaded.bus,saved.bus);await clean();
