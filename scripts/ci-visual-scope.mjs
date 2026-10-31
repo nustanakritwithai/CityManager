@@ -20,14 +20,7 @@ const factoryAllowed = new Set([
   '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml',
   'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs',
 ]);
-const farmAllowed = new Set([
-  'src/farm-visuals.ts', 'src/renderer.ts', 'tests/farm-visuals.test.ts',
-  'tests/farm-preview.ts', 'tests/farm-preview.html', 'tests/farm-smoke.mjs', 'vite.farm.config.ts',
-  '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml',
-  'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs',
-]);
 export function visualKind(paths) {
-  if (paths.includes('src/farm-visuals.ts') && paths.every(p => farmAllowed.has(p))) return 'farm';
   if (paths.includes('src/factory-visuals.ts') && paths.every(p => factoryAllowed.has(p))) return 'factory';
   return towerOnly(paths) ? 'tower' : 'full';
 }
