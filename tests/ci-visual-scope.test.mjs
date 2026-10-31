@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -92,4 +92,12 @@ test('conflict feedback scope admits only required UI/client contracts, never ba
  for(const invalid of [[],paths.slice(1),...['index.html','src/server-city-entry.ts','src/city-save-auth.ts','server/city-saves/service.mjs','.github/workflows/citymanager.yml','src/sim.ts'].map(p=>[...paths,p])])assert.equal(conflictFeedbackPathsOnly(invalid),false);
  assert.equal(serverSaveConflictFeedbackOnly({}),false);
  assert.equal(visualKind(paths),'full','reviewed main and unchanged index evidence is mandatory');
+});
+
+
+test('classic toolbar cosmetics require real toolbar changes and reject saving/simulation/entry paths',()=>{
+ const paths=['src/main.ts','src/build-toolbar.ts','src/build-toolbar.css','tests/build-toolbar.test.ts','tests/visual-final-toolbar.mjs'];
+ assert.equal(classicToolbarPathsOnly(paths),true);
+ assert.equal(classicToolbarOnly(paths),false);assert.equal(visualKind(paths),'full','reviewed main label change and unchanged index evidence required');
+ for(const invalid of [[],paths.slice(1),...['index.html','src/server-city-save.ts','src/server-city-entry.ts','server/city-saves/service.mjs','src/sim.ts','src/apartment-visuals.ts'].map(p=>[...paths,p])]){assert.equal(classicToolbarPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });

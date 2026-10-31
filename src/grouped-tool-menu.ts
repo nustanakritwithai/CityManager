@@ -1,4 +1,4 @@
-import { BUILD_ICONS, iconElement } from './ui-icons.ts';
+import { iconElement } from './ui-icons.ts';
 import { installToolMenu } from './tool-menu.ts';
 
 const services = [
@@ -19,7 +19,6 @@ function installGroupedToolMenu(id: string, name: string, tools: readonly (reado
   const anchor = document.createElement('button'); anchor.id = `${id}-tool`; anchor.type = 'button';
   anchor.className = 'tool grouped-tool-anchor';
   const icon = iconElement(id === 'construction' ? 'R' : 'overview', 'tool-icon svg-glyph'), label = document.createElement('span');
-  if (id === 'construction') icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${BUILD_ICONS.R}</svg>`;
   const defaultIcon = icon.innerHTML;
   anchor.append(icon, label); options[0].button.before(anchor);
   const menu = document.createElement('div'); menu.id = `${id}-submenu`; menu.className = 'grouped-tool-submenu';

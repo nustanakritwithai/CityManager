@@ -11,9 +11,10 @@ import { readFile, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { inflateSync, deflateSync } from 'node:zlib';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
-const toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
-const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],server:null};
+let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
+const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -22,6 +23,32 @@ async function reloadEntryRead(read,onRetry=()=>{}){
  try{return await read();}catch(error){
   if(error?.cdpError?.code!==-32000||!['Inspected target navigated or closed','Execution context was destroyed.','Cannot find context with specified id'].includes(error.cdpError.message))throw error;
   onRetry(error.cdpError);return false;
+ }
+}
+function pngEvidence(png){
+ assert.ok(png.length>24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Actual PNG evidence required');
+ const width=png.readUInt32BE(16),height=png.readUInt32BE(20),channels=png[25]===2?3:png[25]===6?4:0;
+ assert.ok(width>0&&height>0&&width*height<=16_000_000&&png[24]===8&&channels&&png[28]===0,'Supported bounded RGB/RGBA PNG required');
+ const chunks=[];for(let i=8;i+12<=png.length;){const n=png.readUInt32BE(i);assert.ok(i+12+n<=png.length);if(png.toString('ascii',i+4,i+8)==='IDAT')chunks.push(png.subarray(i+8,i+8+n));i+=n+12;}
+ const stride=width*channels,raw=inflateSync(Buffer.concat(chunks),{maxOutputLength:(stride+1)*height});assert.equal(raw.length,(stride+1)*height);
+ let previous=Buffer.alloc(stride),first,nonblank=false;
+ for(let y=0;y<height;y++){
+  const filter=raw[y*(stride+1)],row=Buffer.from(raw.subarray(y*(stride+1)+1,(y+1)*(stride+1)));assert.ok(filter<=4);
+  for(let x=0;x<stride;x++){const a=x>=channels?row[x-channels]:0,b=previous[x],c=x>=channels?previous[x-channels]:0,p=a+b-c;const predictor=filter===0?0:filter===1?a:filter===2?b:filter===3?Math.floor((a+b)/2):Math.abs(p-a)<=Math.abs(p-b)&&Math.abs(p-a)<=Math.abs(p-c)?a:Math.abs(p-b)<=Math.abs(p-c)?b:c;row[x]=(row[x]+predictor)&255;}
+  for(let x=0;x<stride;x+=channels){const rgb=row.subarray(x,x+3);if(!first)first=Buffer.from(rgb);else if(!rgb.equals(first))nonblank=true;}previous=row;
+ }
+ assert.ok(nonblank,'Uniform blank screenshot is not visual proof');return {width,height,nonblank};
+}
+// Surface capture can stall with headless software WebGL. Keep evidence mandatory:
+// one alternate view readback is permitted only after a capture timeout and live health probe.
+async function screenshotReadback(send,probe,record,mode='surface'){
+ record.mode=mode;record.health=await probe();
+ try{return await send('Page.captureScreenshot',{format:'png',fromSurface:mode==='surface',captureBeyondViewport:false,optimizeForSpeed:true});}
+ catch(error){
+  record.primaryError=String(error);
+  if(mode!=='surface'||error?.cdpTimeoutMethod!=='Page.captureScreenshot')throw error;
+  record.healthAfterTimeout=await probe();record.mode='view';
+  return await send('Page.captureScreenshot',{format:'png',fromSurface:false,captureBeyondViewport:false,optimizeForSpeed:true});
  }
 }
 const failureAfterCleanup=(primary,errors)=>primary??(errors.length?new AggregateError(errors,'Browser fixture cleanup failed'):null);
@@ -50,6 +77,16 @@ function fixtureService(){
  return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0};
 }
 async function selfTest(){
+ const samplePng=bytes=>{const chunk=(type,data)=>{const out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length);out.write(type,4);data.copy(out,8);return out;};const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(2);ihdr.writeUInt32BE(1,4);ihdr[8]=8;ihdr[9]=2;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',deflateSync(Buffer.from([0,...bytes]))),chunk('IEND',Buffer.alloc(0))]);};
+ assert.deepEqual(pngEvidence(samplePng([0,0,0,255,255,255])),{width:2,height:1,nonblank:true});assert.throws(()=>pngEvidence(samplePng([255,255,255,255,255,255])),/blank/);assert.throws(()=>pngEvidence(Buffer.from('not PNG')));
+
+ const captureTimeout=Object.assign(Error('capture timeout'),{cdpTimeoutMethod:'Page.captureScreenshot'});let calls=[],probes=0;const record={};
+ const shot=await screenshotReadback(async(method,params)=>{calls.push(params);if(calls.length===1)throw captureTimeout;return {data:'real-result'};},async()=>{probes++;return {live:true};},record);
+ assert.equal(shot.data,'real-result');assert.equal(probes,2);assert.deepEqual(calls.map(p=>p.fromSurface),[true,false]);assert.equal(record.mode,'view');
+ const other=Error('actual failure');await assert.rejects(screenshotReadback(async()=>{throw other;},async()=>true,{}),error=>error===other);
+ await assert.rejects(screenshotReadback(async()=>{throw captureTimeout;},async()=>true,{},'view'),error=>error===captureTimeout);
+ let fallbackCalled=false;await assert.rejects(screenshotReadback(async()=>{if(fallbackCalled)assert.fail('must not retry after unhealthy probe');fallbackCalled=true;throw captureTimeout;},async()=>{if(fallbackCalled)throw other;return true;},{}),error=>error===other);
+
  let retryCount=0;
  for(const message of ['Inspected target navigated or closed','Execution context was destroyed.','Cannot find context with specified id']){
   assert.equal(await reloadEntryRead(async()=>{throw Object.assign(Error(message),{cdpError:{code:-32000,message}});},()=>retryCount++),false);
@@ -124,6 +161,7 @@ async function run(){
   assert.ok(debugPort,'Browser unavailable; acceptance NOT passed');
   const pages=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();ws=new WebSocket(pages.find(p=>p.type==='page').webSocketDebuggerUrl);
   ws.onmessage=e=>{const m=JSON.parse(e.data);
+   if(m.method==='Runtime.exceptionThrown'||m.method==='Inspector.targetCrashed')diagnostics.runtimeErrors.push({method:m.method,details:m.params});
    if(m.method==='Page.javascriptDialogOpening'){
     const dialog={type:m.params.type,message:m.params.message,phase:diagnostics.phase,expected:expectedReloadDialog(m.params.type,expectReloadDialog)};diagnostics.dialogs.push(dialog);console.log('Browser dialog',JSON.stringify(dialog));
     if(dialog.expected){expectReloadDialog=false;void send('Page.handleJavaScriptDialog',{accept:true}).catch(error=>{unexpectedDialog=error;});}
@@ -131,14 +169,15 @@ async function run(){
    }
    if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(Object.assign(Error(JSON.stringify(m.error)),{cdpError:m.error})):p?.resolve(m.result);}};
   await new Promise((ok,bad)=>{ws.onopen=ok;ws.onerror=bad;});
-  const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Error(`CDP timeout: ${method}; phase=${diagnostics.phase}; expression=${diagnostics.lastExpression}`));},30_000);pending.set(n,{resolve:v=>{clearTimeout(t);resolve(v);},reject:e=>{clearTimeout(t);reject(e);}});ws.send(JSON.stringify({id:n,method,params}));});
+  const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Object.assign(Error(`CDP timeout: ${method}; phase=${diagnostics.phase}; expression=${diagnostics.lastExpression}`),{cdpTimeoutMethod:method}));},30_000);pending.set(n,{resolve:v=>{clearTimeout(t);resolve(v);},reject:e=>{clearTimeout(t);reject(e);}});ws.send(JSON.stringify({id:n,method,params}));});
   const evaluate=async expression=>{if(unexpectedDialog)throw unexpectedDialog;diagnostics.lastExpression=expression.slice(0,240);const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   const until=async(fn,label,ms=90_000)=>{diagnostics.phase=label;console.log('Acceptance phase:',label);const start=Date.now();while(Date.now()-start<ms){if(await fn())return;await sleep(100);}throw Error(`Timeout: ${label}`);};
-  await send('Runtime.enable');await send('Page.enable');await send('Network.enable');
+  await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Inspector.enable');diagnostics.browserVersion=await send('Browser.getVersion');
   await send('Network.setCookie',{name:'cm_session',value:COOKIE,url:origin,httpOnly:true,sameSite:'Strict'});await send('Network.setCookie',{name:'cm_csrf',value:CSRF,url:origin,sameSite:'Strict'});
   const seed=await readFile(new URL('./fixtures/save-smoke/bus-optional-day60.json',import.meta.url),'utf8');
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{if(location.origin!==${JSON.stringify(origin)})return;
    if(!localStorage.getItem('__fixture_seeded')){localStorage.setItem('citymanager.save.v7',${JSON.stringify(seed)});localStorage.setItem('citymanager.checkpoint.latest',${JSON.stringify(seed)});localStorage.setItem('__fixture_seeded','1');}
+   window.__contextLosses=0;document.addEventListener('webglcontextlost',()=>window.__contextLosses++,true);
    window.__cityWrites=[];window.__quota=false;const city=/^citymanager\\.(save\\.|backup\\.|checkpoint\\.|resume-choice|market\\.)/;
    for(const method of ['setItem','removeItem','clear']){const original=Storage.prototype[method];Storage.prototype[method]=function(...args){if(method==='clear'||city.test(String(args[0])))window.__cityWrites.push(method+':'+args[0]);if(window.__quota&&method==='setItem')throw new DOMException('fixture quota','QuotaExceededError');return original.apply(this,args);};}
    const transaction=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(stores,mode,...rest){if(mode==='readwrite'&&/citymanager/.test(this.name))window.__cityWrites.push('IDB:'+this.name);return transaction.call(this,stores,mode,...rest);};
@@ -155,8 +194,21 @@ async function run(){
   await until(()=>evaluate("document.querySelector('.guest-entry-card [role=status]')?.textContent.includes('fixture-load-unavailable')"),'load failure stays gated');
   assert.equal(await evaluate('!!window.cityManager'),false,'no offline city entry after server load failure');assert.equal(f.state.active,null);await clean();f.mode='ok';await enter();
   assert.equal(f.state.active.metadata.tick,JSON.parse(seed).tick);assert.equal(f.state.archives.size,1);assert.equal([...f.state.archives.values()][0].sources.length,2);await clean();
-  const capture=async name=>{assert.match(name,/^[a-z0-9_-]+$/i);const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve(output,`${name}.png`),Buffer.from(shot.data,'base64'));};
+  let captureMode='surface';
+  const capture=async name=>{
+   assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,captureMode);
+   const probe=async()=>{assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser error or renderer crash');const health=await evaluate("({ready:window.cityManager?.visuals().ready,contextLosses:window.__contextLosses,visibility:document.visibilityState,width:innerWidth,height:innerHeight})");assert.equal(health.ready,true);assert.equal(health.contextLosses,0,'WebGL context must remain live');return health;};
+   try{const shot=await screenshotReadback(send,probe,record,captureMode);const png=Buffer.from(shot.data,'base64');Object.assign(record,pngEvidence(png));await writeFile(resolve(output,`${name}.png`),png);captureMode=record.mode;record.status='saved';}
+   catch(error){record.status='failed';record.error=String(error);throw error;}
+   finally{record.finished=new Date().toISOString();console.log('Capture result',JSON.stringify(record));}
+  };
   assert.equal(await evaluate("!!document.querySelector('#save:not(:disabled)')"),true,'real Save control available after authenticated entry');
+  if(process.env.CITYMANAGER_TOOLBAR_CHECKS==='classic'){
+   diagnostics.phase='classic toolbar interactions';toolbarEvidence={status:'running',checks:[]};
+   const {toolbarChecks}=await import('./visual-final-toolbar.mjs');
+   toolbarEvidence=await toolbarChecks({send,evaluate,capture});await clean();
+   console.log('PASS classic toolbar actual DOM checks',JSON.stringify(toolbarEvidence));
+  }
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
   const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();await clean();await capture('server-save-acknowledged');
@@ -206,6 +258,7 @@ async function run(){
   // A 409 never overwrites another revision and no automatic retry silently wins.
   f.mode='conflict';rev=f.state.active.revision;await click('#save');await until(failed,'conflict failure');assert.equal(f.state.active.revision,rev);await clean();await capture('server-save-conflict');
   assert.equal(await evaluate("!!document.querySelector('.market-launch')"),false,'trading stays disabled');
+  assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser exception or renderer crash');
   console.log('PASS built server-save browser acceptance: load failure+retry/migration/manual ACK/autosave/reload/quota/network retry/management cancel-delete-fresh/tombstone reload/conflict/no browser city writes');
  }catch(error){acceptanceError=error;diagnostics.acceptanceError=String(error?.stack??error);}
  finally{

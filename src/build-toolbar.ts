@@ -2,7 +2,6 @@ import { ROAD_COST } from './sim.ts';
 import { PLANTS } from './utilities.ts';
 import { PARK } from './parks.ts';
 import { EDUCATION_COST } from './education.ts';
-import { BUILD_ICONS } from './ui-icons.ts';
 
 /** Match the established keyboard layout, not the visual order of grouped controls. */
 export const BUILD_SHORTCUTS: Readonly<Record<string, string>> = Object.freeze({
@@ -30,24 +29,12 @@ export function blocksGameShortcuts(event: KeyboardEvent): boolean {
     !!(event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable], [role="textbox"]'));
 }
 
-/** Decorate the real controls after HUD setup; never clone commands or move feature-gated tools. */
+/** Keep accessible costs/shortcuts without replacing the classic HUD artwork or layout. */
 export function installBuildToolbar() {
-  const dock = document.querySelector<HTMLElement>('.tool-dock');
-  dock?.classList.add('build-toolbar');
   for (const button of document.querySelectorAll<HTMLButtonElement>('.tool[data-tool]')) {
     const tool = button.dataset.tool!, detail = BUILD_DETAILS[tool];
-    if (!detail || button.querySelector('.build-price')) continue;
+    if (!detail) continue;
     button.dataset.buildTool = tool;
-    const glyph = button.querySelector<HTMLElement>('.tool-icon, .zone-icon');
-    if (glyph && BUILD_ICONS[tool]) {
-      glyph.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${BUILD_ICONS[tool]}</svg>`;
-      glyph.classList.add('svg-glyph');
-      // The previous road painter uses a CSS mask; remove it before displaying multitone SVG.
-      glyph.classList.remove('road-asset-icon'); glyph.style.maskImage = 'none'; glyph.style.width = ''; glyph.style.height = '';
-    }
-    // Keep the label as the last span: select/group menus deliberately update it in sync().
-    const price = document.createElement('small'); price.className = 'build-price'; price.textContent = detail.price;
-    price.setAttribute('aria-hidden', 'true'); button.append(price);
     const description = `${detail.label} · ${detail.price}${detail.key ? ` (${detail.key})` : ''}`;
     button.title = description; button.setAttribute('aria-label', description);
     if (detail.key) button.setAttribute('aria-keyshortcuts', detail.key);

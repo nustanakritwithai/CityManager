@@ -1,4 +1,4 @@
-import { BUILD_ICONS, iconElement } from './ui-icons.ts';
+import { iconElement } from './ui-icons.ts';
 import { installToolMenu } from './tool-menu.ts';
 
 /** The arrow always selects/pans first. Only the explicit demolition option arms demolition. */
@@ -16,10 +16,6 @@ export function installSelectMenu(anchor: HTMLButtonElement, choose: (tool: stri
     const active = tool === 'bulldoze';
     anchor.dataset.demolitionActive = String(active);
     anchorLabel.textContent = active ? 'รื้ออยู่' : 'เลือก';
-    const glyph = anchor.querySelector<HTMLElement>('.tool-icon');
-    if (glyph) glyph.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${BUILD_ICONS[active ? 'bulldoze' : 'select']}</svg>`;
-    const price = anchor.querySelector<HTMLElement>('.build-price');
-    if (price) price.textContent = active ? '0–20 เครดิต/ช่อง' : 'ไม่เสียค่าใช้จ่าย';
     anchor.title = active ? 'โหมดรื้อถอนกำลังทำงาน · 0–20 เครดิต/ช่อง · แตะเพื่อกลับไปเลือก/เลื่อน (V)' : 'เลือก/เลื่อน · ไม่เสียค่าใช้จ่าย · เปิดเมนูรื้อถอน (V)';
     anchor.setAttribute('aria-label', anchor.title);
     demolition.classList.toggle('active', active); demolition.setAttribute('aria-pressed', String(active));

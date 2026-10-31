@@ -50,17 +50,18 @@ export async function toolbarChecks({ send, evaluate, capture }) {
   if(await evaluate('!!document.querySelector(".guest-entry-card")')) await tap('.guest-entry-card button:nth-of-type(2)');
   if(await evaluate('document.querySelector(".guide-skip")?.getClientRects().length>0')) await tap('.guide-skip');
   await key('Escape');await key('v');
-  assert.equal(await evaluate('document.querySelectorAll(".tool-dock.build-toolbar").length'),1);
-  const details = await evaluate(`[...document.querySelectorAll('.tool[data-build-tool]')].map(b=>({tool:b.dataset.tool,title:b.title,label:b.getAttribute('aria-label'),price:b.querySelector('.build-price')?.textContent,key:b.getAttribute('aria-keyshortcuts'),glyph:!!b.querySelector('svg[aria-hidden="true"]'),mask:b.dataset.tool==='road'?getComputedStyle(b.querySelector('.tool-icon')).maskImage:null}))`);
+  assert.equal(await evaluate('document.querySelectorAll(".tool-dock").length'),1);
+  assert.equal(await evaluate('document.querySelectorAll(".tool-dock.build-toolbar, .build-price").length'),0);
+  const details = await evaluate(`[...document.querySelectorAll('.tool[data-build-tool]')].map(b=>({tool:b.dataset.tool,title:b.title,label:b.getAttribute('aria-label'),key:b.getAttribute('aria-keyshortcuts'),glyph:!!b.querySelector('svg[aria-hidden="true"]'),mask:b.dataset.tool==='road'?getComputedStyle(b.querySelector('.tool-icon')).maskImage:null}))`);
   const expectedKeys={select:'V',road:'R',R:'1',C:'2',I:'3',F:'4',power:'5',water:'6',park:'7',bulldoze:'B'};
   for(const [tool,k] of Object.entries(expectedKeys)) {
     const row=details.find(r=>r.tool===tool);assert.ok(row,tool);assert.equal(row.key,k);
-    assert.ok(row.label&&row.price&&row.title.includes(row.price),`Label and cost: ${tool}`);
-    if(['select','road','R','C','I','F','park','bulldoze'].includes(tool))assert.ok(row.glyph,`Inline multitone artwork: ${tool}`);
+    assert.ok(row.label&&row.title&&(row.title.includes('เครดิต')||row.title.includes('ฟรี')||row.title.includes('ไม่เสียค่าใช้จ่าย')),`Accessible label and cost: ${tool}`);
+    if(['select','R','C','I','F','park','bulldoze'].includes(tool))assert.ok(row.glyph,`Original HUD artwork: ${tool}`);
   }
-  assert.equal(details.find(r=>r.tool==='road').mask,'none');
-  assert.deepEqual(details.filter(r=>['R','C','I','F'].includes(r.tool)).map(r=>r.price),Array(4).fill('วางโซนฟรี'));
-  checks.push('One real dock; eight multitone icons; visible price text and accessible true V/R/1–7/B shortcuts; road mask removed');
+  assert.ok(details.find(r=>r.tool==='road').mask.includes('tabler-roads/road.svg'),'Original road asset mask restored');
+  assert.ok(details.filter(r=>['R','C','I','F'].includes(r.tool)).every(r=>r.title.includes('วางโซนฟรี')));
+  checks.push('One classic dock; original HUD icons and road asset; no modern price rows; accessible costs and true V/R/1–7/B shortcuts');
 
   const inspectLayout = async (name,id) => {
     const result=await evaluate(`(()=>{const m=document.querySelector('#${id}-submenu'),a=document.querySelector('[aria-controls="${id}-submenu"]'),rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,right:r.right,bottom:r.bottom,w:r.width,h:r.height}};return{name:${JSON.stringify(name)},id:${JSON.stringify(id)},ratio:Math.min(1,screen.width/innerWidth),width:innerWidth,height:innerHeight,anchor:rect(a),menu:rect(m),overflow:getComputedStyle(m).overflowY,client:m.clientHeight,scroll:m.scrollHeight,buttons:[...m.querySelectorAll('button')].filter(b=>!b.hidden).map(b=>({tool:b.dataset.tool||b.dataset.roadMode,...rect(b),pressed:b.getAttribute('aria-pressed'),label:b.getAttribute('aria-label')||b.title,price:b.querySelector('.build-price')?getComputedStyle(b.querySelector('.build-price')).display:null})),pageOverflow:document.documentElement.scrollWidth-innerWidth}})()`);
@@ -86,7 +87,7 @@ export async function toolbarChecks({ send, evaluate, capture }) {
     await tap('#construction-tool');await tap('#cancel-tool');assert.equal(await open('construction'),false);assert.equal(await selected('select'),true);
     await capture(`toolbar-${name}-dock`);
   }
-  checks.push('Four mobile layouts: native touch opens existing groups, selects R/park/road/demolition, cancels safely; popup bounds, >=44px physical targets and visible prices verified');
+  checks.push('Four mobile layouts: native touch opens existing groups, selects R/park/road/demolition, cancels safely; popup bounds, >=44px physical targets and accessible labels verified');
   await viewport(1440,1000,false);
   for(const [keyName,tool] of Object.entries({'1':'R','2':'C','3':'I','4':'F','5':'power','6':'water','7':'park',b:'bulldoze',r:'road',v:'select'})) {await key(keyName);assert.equal(await selected(tool),true);}
   await tap('#construction-tool');

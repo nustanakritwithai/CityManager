@@ -81,7 +81,15 @@ export function serverSaveConflictFeedbackOnly(evidence={}){
  const hashes={"mainBefore": "eb537a7892772e8805fc0c3bba5e2e47af1713cb9564b857d23ed5cb43441e04", "mainAfter": "da3e8ec81343cdf3a66e60748ee2686122c70b8b16700b6382f144c9b2265f49", "indexBefore": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5", "indexAfter": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5"};
  return matchesReviewedSources(evidence,hashes);
 }
+// Cosmetic rollback plus exactly reviewed main save-label text; no save logic/backend/entry edits admitted.
+const classicToolbarHashes={"mainBefore": "da3e8ec81343cdf3a66e60748ee2686122c70b8b16700b6382f144c9b2265f49", "mainAfter": "13405cff0e4f0d576ba0c6eae7eebe674098877c744df780c4aa09593e6f9e7a", "indexBefore": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5", "indexAfter": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5"};
+const classicToolbarAllowed=new Set(['src/main.ts','src/build-toolbar.ts','src/build-toolbar.css','src/select-menu.ts','src/grouped-tool-menu.ts','tests/build-toolbar.test.ts','tests/select-menu.test.ts','tests/grouped-tool-menu.test.ts','tests/visual-final-toolbar.mjs','tests/server-save-browser-smoke.mjs','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml']);
+export function classicToolbarPathsOnly(paths){
+ return ['src/main.ts','src/build-toolbar.ts','src/build-toolbar.css','tests/build-toolbar.test.ts','tests/visual-final-toolbar.mjs'].every(p=>paths.includes(p))&&paths.every(p=>classicToolbarAllowed.has(p));
+}
+export function classicToolbarOnly(paths,evidence={}){return classicToolbarPathsOnly(paths)&&matchesReviewedSources(evidence,classicToolbarHashes);}
 export function visualKind(paths, evidence = {}) {
+  if(classicToolbarOnly(paths,evidence))return 'classic-toolbar';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
   if(managementPathsOnly(paths)&&serverSaveManagementOnly(evidence))return 'server-save';
   if (['src/server-city-save.ts','src/server-city-entry.ts','src/city-save-auth.ts','src/main.ts','index.html'].every(p=>paths.includes(p)) && paths.every(p=>serverSaveAllowed.has(p)) && serverSaveEntryOnly(evidence)) return 'server-save';
