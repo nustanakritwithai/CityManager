@@ -56,13 +56,16 @@ jobs:
           if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') {
             node --experimental-strip-types --test tests/building-visuals.test.ts tests/asset-models-runtime.test.ts tests/atmosphere.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Tower visual regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'factory') {
+            node --experimental-strip-types --test tests/factory-visuals.test.ts tests/atmosphere.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Factory visual regressions failed.' }
           } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
             node --experimental-strip-types --test tests/save-safety.test.ts tests/save-storage.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/entry-gate.test.ts tests/market-client.test.ts tests/market-writer.test.ts tests/market-safety.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Save boundary regressions failed.' }
           } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Simulation tests failed.' } }
 
       - name: Verify preserved advisor contract offline
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.tower_only != 'true'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         run: npm run test:advisor
 
       - name: Verify admitted asset integrity
@@ -77,7 +80,7 @@ jobs:
         run: npm run build
 
       - name: Upload Pages market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.tower_only != 'true'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-pages-market-verification-dist
@@ -86,7 +89,7 @@ jobs:
           retention-days: 3
 
       - name: Build loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.tower_only != 'true'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         env:
           VITE_MARKET_URL: 'http://127.0.0.1:4317'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
@@ -94,7 +97,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/market-sandbox-dist
 
       - name: Upload loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.tower_only != 'true'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-market-sandbox-dist
@@ -103,7 +106,7 @@ jobs:
           retention-days: 3
 
       - name: Build same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.tower_only != 'true'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         env:
           VITE_MARKET_URL: '/citymanager-api'
           VITE_BASE_PATH: '/citymanager/'
@@ -112,7 +115,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/citymanager-public-test-dist
 
       - name: Upload same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.tower_only != 'true'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-public-test-dist
@@ -124,15 +127,20 @@ jobs:
         if: steps.scope.outputs.tower_only == 'true'
         run: node node_modules/vite/bin/vite.js build --config vite.luxury-tower.config.ts
 
+      - name: Build isolated actual-engine factory fixture
+        if: steps.scope.outputs.kind == 'factory'
+        run: node node_modules/vite/bin/vite.js build --config vite.factory.config.ts
+
       - name: Verify the built game in installed Edge
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           $previewArgs = @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort')
           if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') { $previewArgs += @('--config', 'vite.luxury-tower.config.ts') }
+          if ('${{ steps.scope.outputs.kind }}' -eq 'factory') { $previewArgs += @('--config', 'vite.factory.config.ts') }
           $previewProcess = Start-Process -FilePath (Get-Command node).Source -ArgumentList $previewArgs -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/preview.log -RedirectStandardError .test-output/preview-error.log
           $productionPreview = $null
           try {
-            if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') {
+            if ('${{ steps.scope.outputs.kind }}' -in @('tower', 'factory')) {
               $env:CITYMANAGER_PRODUCTION_URL = 'http://127.0.0.1:4174/CityManager/'
               $productionPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4174', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/production-preview.log -RedirectStandardError .test-output/production-preview-error.log
               $productionReady = $false
@@ -145,6 +153,7 @@ jobs:
             $previewReady = $false
             $previewUrl = 'http://127.0.0.1:4173/CityManager/'
             if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') { $previewUrl += 'tests/luxury-tower-preview.html' }
+            if ('${{ steps.scope.outputs.kind }}' -eq 'factory') { $previewUrl += 'tests/factory-preview.html' }
             for ($attempt = 0; $attempt -lt 40; $attempt++) {
               try {
                 $response = Invoke-WebRequest -Uri $previewUrl -TimeoutSec 2
@@ -156,6 +165,9 @@ jobs:
             if ('${{ steps.scope.outputs.tower_only }}' -eq 'true') {
               node --experimental-strip-types tests/luxury-tower-smoke.mjs
               if ($LASTEXITCODE -ne 0) { throw 'Tower browser evidence failed.' }
+            } elseif ('${{ steps.scope.outputs.kind }}' -eq 'factory') {
+              node --experimental-strip-types tests/factory-smoke.mjs
+              if ($LASTEXITCODE -ne 0) { throw 'Factory browser evidence failed.' }
             } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
               npm run test:browser
               if ($LASTEXITCODE -ne 0) { throw 'Save startup browser smoke failed.' }
@@ -223,8 +235,19 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Preserve factory browser evidence
+        if: always() && steps.scope.outputs.kind == 'factory'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: factory-browser-evidence
+          path: |
+            .test-output/factory/*.png
+            .test-output/factory/report.json
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Preserve building progression browser evidence
-        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.tower_only != 'true'
+        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: building-progression-browser-evidence
@@ -247,7 +270,7 @@ jobs:
           retention-days: 3
 
       - name: Verify preserved signal GUI without provider calls
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.tower_only != 'true'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory'
         run: |
           $env:VITE_CITY_SIGNALS = 'false'
           $env:VITE_CITY_ADVISOR_ONLINE = 'false'

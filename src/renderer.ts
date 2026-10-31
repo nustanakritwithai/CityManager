@@ -6,6 +6,7 @@ import {
 } from 'playcanvas';
 import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
 import { factoryLevel } from './factory-levels.ts';
+import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, type UtilityKind } from './utilities.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
@@ -42,6 +43,7 @@ export class CityView {
   assets: CityAssets | null = null;
   ground!: CityGround;
   atmosphere!: SceneAtmosphere;
+  private factories!: FactoryVisuals;
   world!: CityWorld;
   traffic!: SceneTraffic;
   private windowLit!: StandardMaterial;
@@ -137,26 +139,6 @@ export class CityView {
     parent.addChild(entity);
     return entity;
   }
-  /**
-   * Factory levels 4–9 each add one visible structure inside the parcel: a second stack (4), a
-   * brick annex (5), a second input tank (6), an annex upper floor (7), a goods silo (8) and a lit
-   * beacon band on the silo (9). Low quality keeps the silhouettes as unshadowed boxes only.
-   */
-  private factoryTiers(tile: Entity, level: number, lit: boolean) {
-    const low = this.quality === 'low', shadow = !low;
-    if (level >= 4) {
-      const stack = low ? null : this.assets?.detail('chimney', .24);
-      if (stack) { stack.setLocalPosition(.36, .1, -.74); tile.addChild(stack); } else this.box(tile, .36, .55, -.74, .14, .9, .14, '#7b6e63', shadow);
-    }
-    if (level >= 5) this.box(tile, -.62, .32, -.52, .5, .44, .5, '#a5654a', shadow);
-    if (level >= 6) {
-      const tank = low ? null : this.assets?.detail('tank', .42);
-      if (tank) { tank.setLocalPosition(-.18, .1, .72); tile.addChild(tank); } else this.box(tile, -.18, .3, .72, .34, .4, .34, '#b9c3c7', shadow);
-    }
-    if (level >= 7) { this.box(tile, -.62, .72, -.52, .44, .36, .44, '#b87457', shadow); this.box(tile, -.62, .93, -.52, .48, .06, .48, '#6d4b3a', false); }
-    if (level >= 8) this.box(tile, .72, .75, .36, .26, 1.3, .26, '#c9c2b0', shadow);
-    if (level >= 9) this.box(tile, .72, 1.3, .36, .3, .1, .3, lit ? this.windowLit : '#f1c267', false);
-  }
   private farm(tile: Entity, fertility: number, level: number) {
     const plot = new Entity('Original farm plot'); tile.addChild(plot);
     this.box(plot, 0, .09, 0, 1.68, .035, 1.68, this.ground.soilMaterial);
@@ -208,6 +190,7 @@ export class CityView {
     this.app.root.addChild(this.camera);
     // Sun/moon, sky dome, fog and post effects follow the visual-only time of day.
     this.atmosphere = new SceneAtmosphere(this.app, this.camera);
+    this.factories = new FactoryVisuals(this.app, (m, strength, blink) => this.atmosphere.registerGlow(m, strength, blink));
     this.windowLit = this.material('#f9df9a').clone() as StandardMaterial;
     this.windowLit.emissive = new Color(1, .82, .52); this.windowLit.update();
     this.atmosphere.registerGlow(this.windowLit, 1.6);
@@ -431,7 +414,7 @@ export class CityView {
     this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
-    const connected = connectedRoads(city), online = utilityService(city, connected).online;
+    const connected = connectedRoads(city), services = utilityService(city, connected), online = services.online;
     const fadeLater: Entity[] = [];
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
@@ -441,10 +424,13 @@ export class CityView {
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
       // Buildings without connected frontage are suspended in the sim, so they render faded.
       const reach = !!b && access(city, i);
+      const factory = b?.zone === 'I' ? city.firms.find(f => f.building === b.id) : undefined;
+      const factoryPowered = !!factory && reach && services.ok(factory.building);
+      const factoryActive = !!factory && factoryWorking(firmWorkerCount(city, factory.id), reach, factoryPowered, factory.recipe, factory.crops);
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
       const campus = city.education?.campuses.find(item => item.cell === i);
       const stand = this.taxiDepots.find(d => d.cell === i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -516,6 +502,10 @@ export class CityView {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level); continue; }
           if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
+          if (b.zone === 'I' && b.level >= 4) {
+            tile.addChild(this.factories.build(this.assets, b.level, i, factoryActive, factoryPowered && lit, this.quality === 'low', this.reducedMotion.matches));
+            continue;
+          }
           // Detailed assets for apartments/condos; retain code-native fallback if loading fails.
           if (b.zone === 'R' && b.level > 3) {
             const residence = this.assets?.building('R', b.level, i, lit);
@@ -537,7 +527,6 @@ export class CityView {
             if (b.zone === 'I' && b.level >= 2) { const chimney = this.assets?.detail('chimney', .32); if (chimney) { chimney.setLocalPosition(.68, .1, -.62); tile.addChild(chimney); } }
             if (b.zone === 'I' && b.level >= 3) { const tank = this.assets?.detail('tank', .6); if (tank) { tank.setLocalPosition(-.6, .1, .66); tile.addChild(tank); } }
             // One inset marker per level above three, contained within the same parcel.
-            if (b.zone === 'I' && b.level >= 4) this.factoryTiers(tile, b.level, lit);
             if (b.zone === 'I') for (let n = 0; n < factoryLevel(b.level).markers; n++) this.box(tile, -.7 + n * .23, .12, .82, .13, .06, .09, '#f1c267', false);
             if (b.zone === 'R' && b.level < 3 && hashCell(i) % 3 === 0) { const planter = this.assets?.detail('planter', .42); if (planter) { planter.setLocalPosition(.66, .1, .7); tile.addChild(planter); } }
             // A lived-in house gets a front-yard bench; some also a second bush (decoration only).
@@ -553,7 +542,6 @@ export class CityView {
             for (const wx of [-0.44, 0.2]) this.box(tile, wx, 0.52 + level * 0.55, 0.608, 0.25, 0.27, 0.035, lit ? this.windowLit : '#f9df9a', false);
           }
           if (b.zone === 'I') this.box(tile, 0.52, h * 0.65, -0.38, 0.2, h * 1.1, 0.22, '#786b60');
-          if (b.zone === 'I' && b.level >= 4) this.factoryTiers(tile, b.level, lit);
         }
       }
     }

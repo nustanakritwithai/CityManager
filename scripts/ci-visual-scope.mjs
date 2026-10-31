@@ -14,6 +14,16 @@ const allowed = new Set([...visualSources,
 export function towerOnly(paths) {
   return paths.length > 0 && paths.some(p => visualSources.includes(p)) && paths.every(p => allowed.has(p));
 }
+const factoryAllowed = new Set([
+  'src/factory-visuals.ts', 'src/renderer.ts', 'tests/factory-visuals.test.ts',
+  'tests/factory-preview.ts', 'tests/factory-preview.html', 'tests/factory-smoke.mjs', 'vite.factory.config.ts',
+  '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml',
+  'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs',
+]);
+export function visualKind(paths) {
+  if (paths.includes('src/factory-visuals.ts') && paths.every(p => factoryAllowed.has(p))) return 'factory';
+  return towerOnly(paths) ? 'tower' : 'full';
+}
 export function changedPaths(eventName, event, git) {
   const sha = /^[0-9a-f]{40}$/;
   let base, head;
@@ -31,13 +41,13 @@ export function changedPaths(eventName, event, git) {
   return git(['diff', '--name-only', '--no-renames', '-z', base, head]).split('\0').filter(Boolean);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  let selected = false;
+  let selected = 'full';
   try {
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
     const paths = changedPaths(process.env.GITHUB_EVENT_NAME, event, args => execFileSync('git', args, { encoding: 'utf8' }));
-    selected = towerOnly(paths);
+    selected = visualKind(paths);
     console.log(`Changed paths: ${JSON.stringify(paths)}`);
   } catch (error) { console.log(`Full-suite fallback: ${error.message}`); }
-  console.log(`Tower-only checks: ${selected}`);
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `tower_only=${selected}\n`);
+  console.log(`Visual check route: ${selected}`);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `kind=${selected}\ntower_only=${selected === 'tower'}\n`);
 }
