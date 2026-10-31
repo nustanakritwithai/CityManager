@@ -3,6 +3,7 @@ import {
   FOG_LINEAR, TONEMAP_ACES, SSAOTYPE_LIGHTING, SSAOTYPE_NONE, SHADOW_PCF3_32F, CULLFACE_FRONT, BLEND_ADDITIVE,
   PIXELFORMAT_SRGBA8, FILTER_LINEAR, ADDRESS_CLAMP_TO_EDGE, type AppBase
 } from 'playcanvas';
+import { updateVehicleGlow } from './vehicle-lighting.ts';
 import { aviationBeaconPulse } from './building-visuals.ts';
 import type { Atmosphere, Quality, Rgb } from './atmosphere.ts';
 
@@ -155,6 +156,7 @@ export class SceneAtmosphere {
     }
     this.skyMesh.setColors32(colors); this.skyMesh.update();
 
+    updateVehicleGlow(this.app, a.night);
     for (const [material, strength] of this.glow) { material.emissiveIntensity = strength * (this.blinking.has(material) ? aviationBeaconPulse(this.beaconSeconds, a.night) : a.night); material.update(); }
     if (this.frame) {
       const frame = this.frame;

@@ -44,6 +44,8 @@ env:
 # final job keeps the original check name and fails unless every case passes.
 jobs:
   checks:
+    outputs:
+      kind: ${{ steps.scope.outputs.kind }}
     name: Allocation game / unit and bounded stress
     runs-on: windows-latest
     timeout-minutes: 10
@@ -55,18 +57,32 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: node --test tests/traffic-workflow-partition.test.mjs
-      - run: node --experimental-strip-types --test tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
-      - run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-peak-fixture.test.ts tests/traffic-game-peak-metrics.test.ts tests/traffic-game-fallback-metrics.test.ts tests/traffic-game-modal.test.ts tests/traffic-game-cases.test.ts
-      - run: node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
-      - run: node --experimental-strip-types --test tests/traffic-decorative-initialization.test.ts
-      - run: node --experimental-strip-types tests/traffic-default-fault-smoke.mjs --preflight
+      - name: Select checks from the exact changed paths
+        id: scope
+        run: node scripts/ci-visual-scope.mjs
+      - name: Verify the scoped routing contract
+        run: node --test tests/ci-visual-scope.test.mjs tests/traffic-workflow-partition.test.mjs
+      - if: steps.scope.outputs.kind != 'vehicle'
+        run: npm ci --no-audit --no-fund
+      - if: steps.scope.outputs.kind != 'vehicle'
+        run: node --test tests/traffic-workflow-partition.test.mjs
+      - if: steps.scope.outputs.kind != 'vehicle'
+        run: node --experimental-strip-types --test tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
+      - if: steps.scope.outputs.kind != 'vehicle'
+        run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-peak-fixture.test.ts tests/traffic-game-peak-metrics.test.ts tests/traffic-game-fallback-metrics.test.ts tests/traffic-game-modal.test.ts tests/traffic-game-cases.test.ts
+      - if: steps.scope.outputs.kind != 'vehicle'
+        run: node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
+      - if: steps.scope.outputs.kind != 'vehicle'
+        run: node --experimental-strip-types --test tests/traffic-decorative-initialization.test.ts
+      - if: steps.scope.outputs.kind != 'vehicle'
+        run: node --experimental-strip-types tests/traffic-default-fault-smoke.mjs --preflight
       - name: Bounded synthetic game throughput and worker isolation
+        if: steps.scope.outputs.kind != 'vehicle'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           node --experimental-strip-types scripts/traffic-game-stress.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000 > .test-output/traffic-game-stress.json
@@ -76,7 +92,7 @@ jobs:
           node --experimental-strip-types scripts/traffic-game-worker-benchmark.mjs > .test-output/traffic-game-worker.json
           if ($LASTEXITCODE -ne 0) { throw 'Allocation-game worker benchmark failed.' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: always() && steps.scope.outputs.kind != 'vehicle'
         with:
           name: traffic-game-bounded-evidence
           path: |
@@ -89,6 +105,7 @@ jobs:
   fault:
     name: Allocation game / default and worker fault
     needs: checks
+    if: needs.checks.outputs.kind != 'vehicle'
     runs-on: windows-latest
     timeout-minutes: 10
     defaults:
@@ -138,6 +155,7 @@ jobs:
   browser:
     name: Allocation game browser / ${{ matrix.case }}
     needs: checks
+    if: needs.checks.outputs.kind != 'vehicle'
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -213,6 +231,11 @@ jobs:
     steps:
       - name: Require all traffic acceptance jobs
         run: |
+          if ('${{ needs.checks.outputs.kind }}' -eq 'vehicle') {
+            if ('${{ needs.checks.result }}' -ne 'success') { throw 'Vehicle scope classifier checks failed.' }
+            Write-Output 'Exact vehicle-only change: render/resource/browser checks are required by CityManager; traffic simulation unchanged.'
+            exit 0
+          }
           if ('${{ needs.checks.result }}' -ne 'success' -or '${{ needs.fault.result }}' -ne 'success' -or '${{ needs.browser.result }}' -ne 'success') {
             throw 'One or more required traffic acceptance jobs did not pass.'
           }

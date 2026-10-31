@@ -28,3 +28,10 @@ test('factory route requires its source marker and rejects mixed scopes or unrel
   for (const invalid of [[], ['tests/factory-visuals.test.ts'], ['.github/workflows/citymanager.yml'], [...paths, 'src/main.ts'], [...paths, 'src/auto-cleanup.ts'], [...paths, 'src/factory-visuals.ts.old'], [...paths, 'src/asset-models.ts'], [...paths, 'tests/luxury-tower-smoke.mjs']]) assert.equal(visualKind(invalid), 'full');
   assert.equal(visualKind(['src/renderer.ts', 'tests/factory-smoke.mjs']), 'full', 'shared renderer alone does not select factory route');
 });
+
+test('vehicle route needs its geometry marker and excludes bus, driving, saves and other visual scopes', () => {
+  const paths = ['src/vehicle-geometry.ts', 'src/vehicle-lighting.ts', 'src/scene-citizen-vehicles.ts', 'src/scene-traffic.ts', 'src/scene-atmosphere.ts', 'src/taxi/scene-vehicles.ts', 'tests/vehicle-visuals.test.ts', 'tests/vehicle-preview.ts', 'tests/vehicle-preview.html', 'tests/vehicle-smoke.mjs', 'tests/vehicle-baseline.ts', 'vite.vehicle.config.ts', '.github/workflows/traffic-enabled.yml', '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml', 'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs'];
+  assert.equal(visualKind(paths), 'vehicle');
+  for (const extra of ['src/main.ts', 'src/bus/presentation.ts', 'src/traffic/layer.ts', 'src/traffic/game-poses.ts', 'src/taxi/vehicle-poses.ts', 'src/auto-cleanup.ts', 'src/factory-visuals.ts', 'src/vehicle-geometry.ts.old']) assert.equal(visualKind([...paths, extra]), 'full');
+  assert.equal(visualKind(['src/scene-citizen-vehicles.ts', 'tests/vehicle-smoke.mjs']), 'full');
+});

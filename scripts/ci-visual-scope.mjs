@@ -20,7 +20,16 @@ const factoryAllowed = new Set([
   '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml',
   'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs',
 ]);
+const vehicleAllowed = new Set([
+  'src/vehicle-geometry.ts', 'src/vehicle-lighting.ts', 'src/scene-citizen-vehicles.ts',
+  'src/scene-traffic.ts', 'src/scene-atmosphere.ts', 'src/taxi/scene-vehicles.ts',
+  'tests/vehicle-visuals.test.ts', 'tests/vehicle-preview.ts', 'tests/vehicle-preview.html',
+  'tests/vehicle-smoke.mjs', 'tests/vehicle-baseline.ts', 'vite.vehicle.config.ts',
+  '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml', '.github/workflows/traffic-enabled.yml',
+  'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs',
+]);
 export function visualKind(paths) {
+  if (paths.includes('src/vehicle-geometry.ts') && paths.every(p => vehicleAllowed.has(p))) return 'vehicle';
   if (paths.includes('src/factory-visuals.ts') && paths.every(p => factoryAllowed.has(p))) return 'factory';
   return towerOnly(paths) ? 'tower' : 'full';
 }
