@@ -13,7 +13,7 @@ import { screenCull, storeTrafficModel } from './traffic/flag.ts';
 import { busEnabled } from './bus/types.ts';
 import { BusPresentation } from './bus/presentation.ts';
 import { deleteOldSaves } from './delete-old-saves.ts';
-import { autoCleanupOnce, dropOldCopies } from './auto-cleanup.ts';
+import { autoCleanupOnce } from './auto-cleanup.ts';
 import { installStartupRecoveryChooser } from './startup-recovery-chooser.ts';
 import { startupSaveFailureMessage } from './startup-save-feedback.ts';
 import { recoverySummary, loadFailureMessage } from './save-recovery-info.ts';
@@ -45,7 +45,7 @@ import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpe
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
-import { readStoredCity, saveStoredCity, AUTOSAVE_CHECKPOINT_KEY, type SaveSource } from './save-storage.ts';
+import { readStoredCity, saveStoredCity, type SaveSource } from './save-storage.ts';
 import { decodeSaveCopy } from './save-copy-codec.ts';
 import { primaryFence, promoteRecoverySave } from './save-promotion.ts';
 import { RESUME_CHOICE_KEY, resolveResumePreference, suppressRememberedChoice, rememberResumeChoice, rememberedResumeChoice, sameResumeInventory, type ResumeChoice } from './save-choice.ts';
@@ -792,9 +792,7 @@ async function boot() {
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
   marketPanel = installMarketPanel(() => city, () => render(), () => { const market = marketPanel?.client.enabled ? marketPanel.client.exportSave() : undefined; saveGuard.write(serializeParkSession(city, parkRuntime, market), importedLegacyRaw); if (market) city.market = structuredClone(market); }, () => serializeParkSession(city, parkRuntime));
   installHudRow();
-  const writeLocalSave = async () => {const generation=saveGuard.generation,legacy=importedLegacyRaw;await saveLocalCitySession(city,parkRuntime,marketPanel?.client,raw=>{try{saveGuard.write(raw,legacy,generation);}catch(error){if(!isQuotaError(error))throw error;
-    // [save-hotfix-89] Primary slot is full: drop old CityManager backup copies (never the primary/checkpoint, never other apps' keys) and retry once.
-    if(dropOldCopies(localStorage,[AUTOSAVE_CHECKPOINT_KEY]).length===0)throw error;saveGuard.write(raw,legacy,generation);}});};
+  const writeLocalSave = async () => {const generation=saveGuard.generation,legacy=importedLegacyRaw;await saveLocalCitySession(city,parkRuntime,marketPanel?.client,raw=>saveGuard.write(raw,legacy,generation));};
   // Autosave: every minute, plus on tab hide / close. Failures (e.g. localStorage quota) are shown, never swallowed.
   const saveBadge = document.createElement('span'); saveBadge.id = 'autosave-status'; saveBadge.setAttribute('role', 'status'); saveBadge.style.cssText = 'font-size:11px;opacity:.85;margin-inline:6px;white-space:normal;overflow-wrap:anywhere;max-width:100%'; saveBadge.textContent = 'ยังไม่ได้บันทึกอัตโนมัติ'; $('#save').insertAdjacentElement('afterend', saveBadge);
   const saveFeedback = installSaveFeedback(saveBadge, () => document.querySelector<HTMLButtonElement>('#export-city-save')?.click(),()=>activeLocal?'บันทึกในเบราว์เซอร์นี้แล้ว · พักตลาดออนไลน์':undefined);
