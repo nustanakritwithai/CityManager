@@ -1,3 +1,5 @@
+import { installSaveManagement } from './save-management-dialog.ts';
+import { freshServerCityRaw } from './fresh-server-city.ts';
 import { installBuildToolbar, BUILD_SHORTCUTS, blocksGameShortcuts } from './build-toolbar.ts';
 import { requireServerCityEntry, citySaveMetadata } from './server-city-entry.ts';
 import { buildingIssueRevision, issuePlaceRoute } from './building-issues.ts';
@@ -592,7 +594,7 @@ async function boot() {
   city=restored.city;parkRuntime=restored.runtime;taxiSession.bind(city);
   if(!city.education)adoptSavedEducation(city);
   syncEducationTools();paused=true;
-  let cityGeneration=0,saveBusy=false,resolvingConflict=false;
+  let cityGeneration=0,saveBusy=false,resolvingConflict=false,managingSave=false;
   const previewOnly=false,recoveryOnly=false;
   ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
@@ -791,11 +793,12 @@ async function boot() {
     const authenticated=explicit?serverEntry.auth.connect():Promise.resolve();
     void authenticated.catch(()=>{});
     return enqueueSave(async()=>{
+      if(managingSave)throw Error('กำลังจัดการเซฟ หยุดการบันทึกอัตโนมัติไว้');
       if(captured!==city||generation!==cityGeneration)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');
       const attempt=saveFeedback.begin();saveBusy=true;
       try{
         await authenticated;
-        if(serverSave.pending)await serverSave.retry();
+        if(serverSave.pending){const retried=await serverSave.retry();if('deleted' in retried)throw Error('เมืองถูกลบแล้ว กรุณาโหลดหน้าใหม่');}
         const raw=serializeParkSession(captured,parkRuntime,captured.market);
         await serverSave.save(raw,citySaveMetadata(raw));
         if(captured!==city||generation!==cityGeneration){saveFeedback.cancel(attempt);throw Error('เมืองเปลี่ยนระหว่างบันทึก');}
@@ -804,12 +807,12 @@ async function boot() {
       finally{saveBusy=false;}
     });
   };
-  const autosave=createAutosave({canSave:()=>!resolvingConflict&&!serverSave.conflict,save:()=>trackedSave(),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
+  const autosave=createAutosave({canSave:()=>!managingSave&&!resolvingConflict&&!serverSave.conflict&&!serverSave.deleted,save:()=>trackedSave(),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
   autosave.adoptLoaded();installAutosave(document,window,autosave,()=>document.hidden);
   if(serverEntry.migrationIssues.length){const warning=document.createElement('p');warning.id='city-migration-warning';warning.setAttribute('role','status');warning.textContent=`เปิดเมืองหลักจากเซิร์ฟเวอร์แล้ว แต่ยังย้ายเซฟเก่าไม่ครบ: ${serverEntry.migrationIssues.join(', ')} · ข้อมูลเก่ายังอยู่ ไม่ถูกลบ`;$('#save').insertAdjacentElement('afterend',warning);}
   window.addEventListener('beforeunload',event=>{if(saveBusy||serverSave.pending||serializeParkSession(city,parkRuntime,city.market)!==serverSave.confirmed?.raw){event.preventDefault();event.returnValue='';}});
   $('#save').addEventListener('click',async()=>{
-    if(saveBusy)return;
+    if(saveBusy||managingSave)return;
     try{
       if(serverSave.conflict||resolvingConflict){
         paused=true;
@@ -821,7 +824,7 @@ async function boot() {
             const raw=serializeParkSession(city,parkRuntime,city.market);
             await serverSave.archive({source:'conflict-session',raw});
             resolvingConflict=true;if(serverSave.conflict)serverSave.discardConflictedAttempt();
-            const active=await serverSave.load();if(!active)throw Error('ไม่พบเมืองหลักบนเซิร์ฟเวอร์');
+            const active=await serverSave.load();if(!active||'deleted' in active)throw Error('เมืองหลักถูกลบแล้ว กรุณาโหลดหน้าใหม่เพื่อเริ่มเมืองใหม่');
             const loaded=deserializeParkSession(active.raw);cityGeneration++;city=loaded.city;parkRuntime=loaded.runtime;
             taxiSession.bind(city);publishTaxi(true);cueLimiter.reset();syncEducationTools();ownerDecisionSession.reset(city);ownerDecisionPanel?.reset();
             resolvingConflict=false;selected=roadStart=null;inspector(false);setTool('select');autosave.adoptLoaded();saveFeedback.recovered();render();
@@ -845,7 +848,60 @@ async function boot() {
   };
   $('#toggle-campus').addEventListener('click', () => campusAction(toggleCampus));
   $('#upgrade-campus').addEventListener('click', () => campusAction(upgradeCampus));
-  $('#new-city').addEventListener('click',()=>{status('เมืองหลักเก็บบนเซิร์ฟเวอร์แล้ว การเริ่มเมืองใหม่ยังปิดไว้เพื่อรักษาเซฟเดิม');});
+  let managementSelection:{cityId:string;revision:number;raw:string;wasPaused:boolean}|null=null;
+  let deletedAcknowledgement:{cityId:string;revision:number}|null=null;
+  let freshRaw:string|null=null,createdAcknowledgement:{cityId:string;revision:number;rawHash:string}|null=null;
+  installSaveManagement($('#new-city'),{
+    canOpen:()=>!saveBusy&&!managingSave&&!resolvingConflict&&!serverSave.pending&&!serverSave.conflict&&!!serverSave.confirmed,
+    begin:()=>{
+      const confirmed=serverSave.confirmed!;managingSave=true;
+      managementSelection={cityId:confirmed.cityId,revision:confirmed.revision,raw:serializeParkSession(city,parkRuntime,city.market),wasPaused:paused};
+      deletedAcknowledgement=null;freshRaw=null;createdAcknowledgement=null;paused=true;render();
+      return {cityId:confirmed.cityId,tick:city.tick};
+    },
+    uncertain:()=>!!deletedAcknowledgement||serverSave.pending&&!serverSave.conflict||!!serverSave.deleted,
+    canReload:()=>!!deletedAcknowledgement&&!serverSave.pending,
+    reload:()=>location.reload(),
+    remove:()=>{
+      const authentication=serverEntry.auth.connect();void authentication.catch(()=>{});
+      return enqueueSave(async()=>{
+        saveBusy=true;try{
+          await authentication;const selection=managementSelection;if(!selection)throw Error('ไม่มีเมืองที่เลือก');
+          if(!deletedAcknowledgement){
+            if(serverSave.deleted)deletedAcknowledgement=serverSave.deleted;
+            else{
+              if(!serverSave.pending){const current=serverSave.confirmed;if(!current||current.cityId!==selection.cityId||current.revision!==selection.revision)throw Error('เมืองบนเซิร์ฟเวอร์เปลี่ยนแล้ว กรุณาตรวจเซฟก่อน');await serverSave.archive({source:`pre-delete-session:${selection.cityId}:${selection.revision}`,raw:selection.raw});}
+              const removed=serverSave.pending?await serverSave.retry():await serverSave.delete();
+              if(!('deleted' in removed))throw Error('คำตอบไม่ใช่การยืนยันลบเมือง');deletedAcknowledgement=removed;
+            }
+          }
+          const checked=await serverSave.load();
+          if(!checked||!('deleted' in checked)||checked.cityId!==deletedAcknowledgement.cityId||checked.revision!==deletedAcknowledgement.revision)throw Error('สถานะเมืองเปลี่ยนระหว่างตรวจการลบ กรุณาโหลดหน้าใหม่');
+          saveFeedback.recovered();status('ลบเมืองที่ใช้งานแล้ว · เก็บสำเนาสำรองบนเซิร์ฟเวอร์');
+        }finally{saveBusy=false;}
+      });
+    },
+    createFresh:()=>{
+      const authentication=serverEntry.auth.connect();void authentication.catch(()=>{});
+      return enqueueSave(async()=>{
+        saveBusy=true;try{
+          await authentication;if(!deletedAcknowledgement)throw Error('ยังยืนยันการลบเมืองไม่ได้');
+          if(!createdAcknowledgement){
+            freshRaw??=freshServerCityRaw(serverSave.owner);
+            const created=serverSave.pending?await serverSave.retry():await serverSave.create(freshRaw,citySaveMetadata(freshRaw));
+            if('deleted' in created||created.cityId===deletedAcknowledgement.cityId)throw Error('ยังยืนยันรหัสเมืองใหม่ไม่ได้');createdAcknowledgement=created;
+          }
+          const checked=await serverSave.load();
+          if(!checked||'deleted' in checked||checked.cityId!==createdAcknowledgement.cityId||checked.revision!==createdAcknowledgement.revision||checked.rawHash!==createdAcknowledgement.rawHash)throw Error('เมืองหลักเปลี่ยนระหว่างตรวจเมืองใหม่ กรุณาโหลดหน้าใหม่');
+          const loaded=deserializeParkSession(checked.raw);cityGeneration++;city=loaded.city;parkRuntime=loaded.runtime;
+          taxiSession.bind(city);publishTaxi(true);cueLimiter.reset();syncEducationTools();ownerDecisionSession.reset(city);ownerDecisionPanel?.reset();
+          selected=roadStart=null;inspector(false);setTool('select');paused=true;autosave.adoptLoaded();saveFeedback.recovered();render();
+        }finally{saveBusy=false;}
+      });
+    },
+    cancel:()=>{if(deletedAcknowledgement)return;managingSave=false;if(managementSelection&&!serverSave.pending&&!serverSave.conflict)paused=managementSelection.wasPaused;managementSelection=null;render();},
+    complete:()=>{managingSave=false;managementSelection=null;status('สร้างเมืองใหม่บนเซิร์ฟเวอร์แล้ว · บัญชีและเครดิตเดิมไม่ถูกลบ');},status
+  });
 
   document.addEventListener('keydown', e => {
     if (blocksGameShortcuts(e) || document.querySelector('dialog[open]')) return;

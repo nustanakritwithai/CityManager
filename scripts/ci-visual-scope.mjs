@@ -63,7 +63,17 @@ export function serverSaveEntryOnly(evidence = {}) {
   const hashes = {'mainBefore': '0ca81c4354234b06539e0c42df80ffa692e0770938b0a8b40d72f84ad6a80123', 'mainAfter': 'bac1b8b3f976597e7ab5c014c13fb917d0e8e0329658c967c0bbfdc113f1f20a', 'indexBefore': '272e1d25d1578187de2d14514de2fadaeb7227edd871da858226e19aa247ae57', 'indexAfter': 'ab8849cf8e4804dfe2063b3cf56f6f64f1c794805d53b82ad0a674e62ac48209'};
   return matchesReviewedSources(evidence,hashes);
 }
+// Separate reviewed management transition; deployment installer files are intentionally excluded.
+const managementAllowed=new Set(['src/fresh-server-city.ts','src/save-management-dialog.ts','src/main.ts','index.html','src/server-city-entry.ts','src/server-city-save.ts','server/city-saves/service.mjs','tests/fresh-server-city.test.ts','tests/save-management-dialog.test.ts','tests/server-city-entry-flow.test.ts','tests/server-city-save.test.ts','tests/server-save-browser-smoke.mjs','docs/server-only-city-entry.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','.github/workflows/citymanager.yml','docs/server-save-ci-migration.md']);
+export function managementPathsOnly(paths){
+ return ['src/fresh-server-city.ts','src/save-management-dialog.ts','src/main.ts','index.html','src/server-city-save.ts','src/server-city-entry.ts','server/city-saves/service.mjs'].every(p=>paths.includes(p))&&paths.every(p=>managementAllowed.has(p));
+}
+export function serverSaveManagementOnly(evidence={}){
+ const hashes={"mainBefore": "bac1b8b3f976597e7ab5c014c13fb917d0e8e0329658c967c0bbfdc113f1f20a", "mainAfter": "eb537a7892772e8805fc0c3bba5e2e47af1713cb9564b857d23ed5cb43441e04", "indexBefore": "ab8849cf8e4804dfe2063b3cf56f6f64f1c794805d53b82ad0a674e62ac48209", "indexAfter": "c1ab9b7591a0a793c791369eae4c724d4d6386547abf41f1a9cde0822d7d80e5"};
+ return matchesReviewedSources(evidence,hashes);
+}
 export function visualKind(paths, evidence = {}) {
+  if(managementPathsOnly(paths)&&serverSaveManagementOnly(evidence))return 'server-save';
   if (['src/server-city-save.ts','src/server-city-entry.ts','src/city-save-auth.ts','src/main.ts','index.html'].every(p=>paths.includes(p)) && paths.every(p=>serverSaveAllowed.has(p)) && serverSaveEntryOnly(evidence)) return 'server-save';
   if (['src/apartment-visuals.ts','src/build-toolbar.ts','src/main.ts'].every(p=>paths.includes(p)) && paths.every(p=>finalAllowed.has(p)) && toolbarMainOnly(evidence.mainBefore,evidence.mainAfter)) return 'visual-final';
   if (paths.includes('src/vehicle-geometry.ts') && paths.every(p => vehicleAllowed.has(p))) return 'vehicle';

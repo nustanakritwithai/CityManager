@@ -1,3 +1,4 @@
+import { freshServerCityRaw } from './fresh-server-city.ts';
 import { createCitySaveAuth, legacySaveOwner } from './city-save-auth.ts';
 import { ServerCitySaveClient } from './server-city-save.ts';
 import { inventoryLegacyCities, type MigrationCandidate } from './city-migration-inventory.ts';
@@ -23,6 +24,7 @@ export async function requireServerCityEntry(fresh:()=>string,configured?:string
  card.append(title,note,choices,button,status);overlay.append(card);document.body.append(overlay);
  let busy=false,client:ServerCitySaveClient|null=null,candidates:MigrationCandidate[]=[];
  let expectedOwner:string|null=null,migrationIssues:string[]=[],pendingCreateRaw:string|null=null;
+ let offeredDeleted:{cityId:string;revision:number}|null=null;
  try{expectedOwner=legacySaveOwner(storage);}catch{status.textContent='ยังอ่านบัญชี Guest เดิมไม่ได้ ข้อมูลเดิมยังอยู่ กรุณาตรวจบัญชีก่อน';return new Promise<never>(()=>{});}
  await auth.prepare().then(()=>{button.disabled=false;},()=>{status.textContent='ยังเตรียมการเชื่อมต่อไม่ได้ โปรดโหลดหน้าใหม่';});
  return new Promise<{client:ServerCitySaveClient;auth:ReturnType<typeof createCitySaveAuth>;raw:string;migrationIssues:string[]}>(resolve=>{
@@ -39,11 +41,20 @@ export async function requireServerCityEntry(fresh:()=>string,configured?:string
      client.discardConflictedAttempt();
     }
     // Retry an uncertain create verbatim before any reload or competing operation.
-    if(client.pending){finish((await client.retry()).raw);return;}
+    if(client.pending){const retried=await client.retry();if(!('deleted' in retried)){finish(retried.raw);return;}}
     const active=await client.load();
     const inventory=await inventoryReader(storage);migrationIssues=inventory.issues;
     try{const journal=storage.getItem('citymanager.market.v10');if(journal!==null){const value=JSON.parse(journal);if(!value||typeof value!=='object'||Array.isArray(value))throw Error('invalid-market-journal');await client.archive({source:'localStorage:citymanager.market.v10:nonplayable',raw:journal});}}catch(error){if(error instanceof SyntaxError)migrationIssues.push('standalone-market-journal-unreadable');else throw error;}
     for(const candidate of inventory.candidates)for(const source of candidate.sources)await client.archive({source,raw:candidate.raw});
+    if(active&&'deleted' in active){
+     // A durable deletion is authoritative over every retained browser copy.
+     choices.hidden=true;choices.replaceChildren();
+     if(!offeredDeleted||offeredDeleted.cityId!==active.cityId||offeredDeleted.revision!==active.revision){
+      offeredDeleted={cityId:active.cityId,revision:active.revision};button.textContent='เริ่มเมืองใหม่';
+      status.textContent='เมืองเดิมถูกลบจากเมืองที่ใช้งานแล้ว เก็บสำเนาสำรองบนเซิร์ฟเวอร์ กดเริ่มเมืองใหม่เพื่อสร้างรหัสเมืองใหม่ ไม่เปิดเซฟเก่าอัตโนมัติ';return;
+     }
+     pendingCreateRaw=freshServerCityRaw(owner);finish((await client.create(pendingCreateRaw,citySaveMetadata(pendingCreateRaw))).raw);return;
+    }
     if(active){finish(active.raw);return;}
     // Unknown old storage is not evidence of an empty city. Preserve originals and retry.
     if(inventory.issues.length)throw Error(`ยังตรวจเซฟเดิมไม่ครบ (${inventory.issues.join(', ')}) · ข้อมูลเดิมยังอยู่`);
