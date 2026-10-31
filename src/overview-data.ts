@@ -3,7 +3,7 @@
  * the money, goods and crop journals the simulator already records; nothing is mutated.
  */
 import { RECIPE, RECIPES, type CropId, type ProductId, type RecipeId } from './goods.ts';
-import { MONTH, farmCrop, isMarket, type City } from './sim.ts';
+import { MONTH, farmCrop, type City } from './sim.ts';
 
 export type TreasuryPoint = { tick: number; balance: number };
 /** End-of-day treasury balances for the last `days` days, rebuilt backwards from today. */
@@ -66,13 +66,13 @@ export const CHAIN_ROUTES: readonly Omit<ChainFlow, 'quantity'>[] = Object.freez
 /** Crop and goods movements between kinds of establishments over the last 30 days. */
 export function supplyChain(city: City, days = MONTH): SupplyChain {
   const fromTick = Math.max(0, city.tick - days + 1), inWindow = (tick: number) => tick >= fromTick && tick <= city.tick;
-  // A shop converted from a market was still a market for the crops it traded up to that day.
-  const kindOf = (wallet: string, tick = city.tick): ChainNode | null => {
+  // Two commodity lanes of the same C businesses, never historical role tags.
+  const kindOf = (wallet: string, commodity: 'crops' | 'goods'): ChainNode | null => {
     if (wallet === 'outside') return 'outside';
     if (wallet.startsWith('household:')) return 'household';
     const firm = city.firms.find(f => f.wallet === wallet);
     if (!firm) return null;
-    return firm.zone === 'F' ? 'farm' : firm.zone === 'I' ? 'factory' : isMarket(firm) || firm.convertedAt !== undefined && tick <= firm.convertedAt ? 'market' : 'shop';
+    return firm.zone === 'F' ? 'farm' : firm.zone === 'I' ? 'factory' : commodity === 'crops' ? 'market' : 'shop';
   };
   const totals = new Map<string, number>(), bump = (from: ChainNode | null, to: ChainNode | null, commodity: ChainFlow['commodity'], quantity: number) => {
     if (!from || !to) return; const key = `${from}>${to}>${commodity}`; totals.set(key, (totals.get(key) ?? 0) + quantity);
@@ -82,11 +82,11 @@ export function supplyChain(city: City, days = MONTH): SupplyChain {
     if (!inWindow(e.tick)) continue;
     if (e.kind === 'harvest') harvested += e.quantity;
     else if (e.kind === 'process') { processed += e.quantity; produced += e.outputQuantity; }
-    else if (e.kind === 'trade' || e.kind === 'consumption') bump(kindOf(e.from, e.tick), kindOf(e.to, e.tick), 'crops', e.quantity);
+    else if (e.kind === 'trade' || e.kind === 'consumption') bump(kindOf(e.from, 'crops'), kindOf(e.to, 'crops'), 'crops', e.quantity);
   }
   for (const e of city.goodsLedger) {
     if (!inWindow(e.tick)) continue;
-    if (e.reason === 'Wholesale stock delivery' || e.reason === 'Imported shop stock' || e.reason === 'Household final consumption' || e.reason === 'Exported goods') bump(kindOf(e.from), kindOf(e.to), 'goods', e.quantity);
+    if (e.reason === 'Wholesale stock delivery' || e.reason === 'Imported shop stock' || e.reason === 'Household final consumption' || e.reason === 'Exported goods') bump(kindOf(e.from, 'goods'), kindOf(e.to, 'goods'), 'goods', e.quantity);
   }
   return { flows: CHAIN_ROUTES.map(route => ({ ...route, quantity: totals.get(`${route.from}>${route.to}>${route.commodity}`) ?? 0 })), harvested, processed, produced, window: { fromTick, toTick: city.tick } };
 }

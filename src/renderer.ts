@@ -5,6 +5,7 @@ import {
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
+import { commercialVisualPlan } from './commercial-visuals.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, type UtilityKind } from './utilities.ts';
@@ -156,32 +157,21 @@ export class CityView {
     this.box(plot, .55, .29, -.208, .14, .27, .025, '#536754');
     this.box(plot, -.03, .28, .8, 1.5, .065, .045, '#b9ae87');
   }
-  private cropMarket(tile: Entity, cell: number, lit: boolean) {
-    const stall = new Entity('Crop market'); tile.addChild(stall);
-    this.box(stall, 0, .09, 0, 1.65, .025, 1.65, '#b6b9a3');
-    // Level-one market: an open stall under an awning with parasols, not a shop building.
-    this.box(stall, 0, .34, -.25, 1.1, .45, .5, '#d4ddd1');
-    this.box(stall, 0, .27, .2, 1.16, .27, .25, lit ? this.windowLit : '#8f7957');
-    const awning = this.assets?.detail('awning', 1.3, hashCell(cell) % 3);
-    if (awning) { awning.setLocalPosition(0, .1, -.05); awning.name = 'Crop market model'; stall.addChild(awning); }
-    else {
-      this.box(stall, 0, .7, -.1, 1.34, .14, .98, '#e07a45');
-      for (const x of [-.53, .53]) this.box(stall, x, .35, .34, .065, .5, .065, '#6f7862');
-    }
-    for (const [name, x, z] of [['parasol-a', -.55, .62], ['parasol-b', .6, .55]] as const) {
-      const parasol = this.assets?.detail(name, .55, hashCell(cell) % 3);
-      if (parasol) { parasol.setLocalPosition(x, .1, z); stall.addChild(parasol); }
-    }
-    // Empty wooden market furniture; stock quantities are shown by the inspector.
-    for (const x of [-.45, .04]) {
-      this.box(stall, x, .18, .63, .36, .17, .27, '#967954');
-      this.box(stall, x, .275, .63, .39, .035, .3, '#b49b6a');
+  private commercial(tile: Entity, level: number, lit: boolean) {
+    const plan = commercialVisualPlan(level);
+    const model = new Entity(`Commercial ${plan.tier}`);
+    tile.addChild(model);
+    for (const part of plan.parts) {
+      const entity = this.box(model, part.x, part.y, part.z, part.width, part.height, part.depth,
+        part.window && lit ? this.windowLit : part.color);
+      entity.name = part.name;
     }
   }
   agricultureDiagnostics() {
     const tiles = [...this.tiles.values()];
     return { farmPlots: tiles.filter(tile => tile.entity.findByName('Original farm plot')).length,
-      marketStalls: tiles.filter(tile => tile.entity.findByName('Crop market')).length,
+      marketStalls: tiles.filter(tile => tile.entity.findByName('Commercial market')).length,
+      commercialTiers: Object.fromEntries(['market', 'building', 'mall'].map(tier => [tier, tiles.filter(tile => tile.entity.findByName(`Commercial ${tier}`)).length])),
       buildGrid: this.ground.diagnostics.buildGrid };
   }
   setup() {
@@ -424,13 +414,15 @@ export class CityView {
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
       // Buildings without connected frontage are suspended in the sim, so they render faded.
       const reach = !!b && access(city, i);
+      const commercial = b?.zone === 'C' ? city.firms.find(f => f.building === b.id) : undefined;
+      const commercialLit = !!commercial && lit && reach && services.ok(commercial.building);
       const factory = b?.zone === 'I' ? city.firms.find(f => f.building === b.id) : undefined;
       const factoryPowered = !!factory && reach && services.ok(factory.building);
       const factoryActive = !!factory && factoryWorking(firmWorkerCount(city, factory.id), reach, factoryPowered, factory.recipe, factory.crops);
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
       const campus = city.education?.campuses.find(item => item.cell === i);
       const stand = this.taxiDepots.find(d => d.cell === i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -500,7 +492,7 @@ export class CityView {
         for (const dx of [-.86, .86]) this.box(tile, dx, .075, 0, .08, .03, 1.8, color, false);
         if (b) {
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level); continue; }
-          if (b.zone === 'C' && b.level === 1) { this.cropMarket(tile, i, lit); continue; }
+          if (b.zone === 'C') { this.commercial(tile, b.level, commercialLit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');
           if (b.zone === 'I' && b.level >= 4) {
             tile.addChild(this.factories.build(this.assets, b.level, i, factoryActive, factoryPowered && lit, this.quality === 'low', this.reducedMotion.matches));
@@ -518,8 +510,7 @@ export class CityView {
               for (const x of [-.36, .12]) this.box(tile, x, .48 + floor * .58, .635, .25, .25, .025, lit ? this.windowLit : '#718a97', false);
             continue;
           }
-          // Retained shops move up one commercial tier; their geometry stays unchanged.
-          const visualLevel = b.zone === 'C' ? Math.max(1, b.level - 1) : b.level;
+          const visualLevel = b.level;
           const model = this.assets?.building(b.zone, b.zone === 'I' ? factoryLevel(b.level).model : visualLevel, i, lit);
           if (model) {
             model.setLocalPosition(0, .1, 0); tile.addChild(model);

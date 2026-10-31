@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -113,4 +113,11 @@ test('history economic/save route requires reviewed source diff and rejects unre
 test('approved lifetime scope requires reviewed client source and excludes reconnect or backend changes',()=>{
  const paths=['src/pages-auth.ts','tests/pages-auth.test.ts'];assert.equal(sessionLifetimePathsOnly(paths),true);assert.equal(sessionLifetimePathsOnly([...paths,'tests/server-save-browser-smoke.mjs']),true);assert.equal(sessionLifetimeOnly(paths),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/city-save-auth.ts','src/main.ts','index.html','server/city-saves/service.mjs','.github/workflows/citymanager.yml'].map(p=>[...paths,p])]){assert.equal(sessionLifetimePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+
+test('unified commercial route requires exact reviewed economic source and fails closed for mixed changes',()=>{
+ const paths=['src/sim.ts','src/agriculture-validation.ts','src/main.ts','src/commercial-visuals.ts','tests/commercial-accounting.test.ts','tests/server-save-browser-smoke.mjs'];
+ assert.equal(commercialPathsOnly(paths),true);assert.equal(commercialOnly(paths),false);assert.equal(commercialOnly(paths,{commercialSourceDiff:'unreviewed economics'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/city-save-auth.ts','src/pages-auth.ts','index.html','src/build-toolbar.ts','server/city-saves/service.mjs','package.json','src/unknown.ts'].map(p=>[...paths,p])]){assert.equal(commercialPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });

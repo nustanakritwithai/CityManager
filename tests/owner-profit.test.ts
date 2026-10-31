@@ -17,8 +17,13 @@ function conserved(c: City) {
 // Small accounting fixtures use the same recorded operating/investment reasons as
 // the runtime. They isolate finance math; full-world replay is covered separately.
 function fixture() {
-  const c = seeded(62), f = c.firms.find(f => f.id === 16)!;
-  c.tick = 35; delete c.history; c.ledger = []; c.cropLedger = [];
+  // This is an isolated finance calculation, not a valid migration snapshot.
+  // Start with a real owned C firm; clear both historical streams and their
+  // transition offsets together rather than retaining references to deleted history.
+  const c = seeded(35), f = c.firms.find(f => f.zone === 'C' && f.owner)!;
+  assert.ok(f?.owner);
+  delete c.history; c.ledger = []; c.cropLedger = []; c.goodsLedger = [];
+  c.commercialUnifiedStartTick = 0; c.commercialUnifiedBaseline = { moneyEntries: 0, cropEntries: 0, goodsEntries: 0 };
   f.profit = 0; f.lastMonthProfit = 0; f.monthlyRevenue = 0; f.monthlyExpense = 0; f.workDays = {};
   Object.assign(f.owner!, { withdrawn: 0, taxPaid: 0, capitalContributed: 60_000, capitalReturned: 0 });
   c.accounts[f.wallet] = 60_000;
@@ -30,20 +35,25 @@ function entry(c: City, f: Firm, tick: number, amount: number, reason: string, i
   c.ledger.push({ tick, from: incoming ? counterparty : f.wallet, to: incoming ? f.wallet : counterparty, amount, reason });
 }
 
-test('seed 42 day 62 firm 16 accrues the 1400 unpaid wages in profit and tax exactly once', () => {
-  const c = seeded(62), f = c.firms.find(f => f.id === 16)!;
-  assert.equal(f.monthlyRevenue, 15_200); assert.equal(f.monthlyExpense, 8_400); assert.equal(wages(f), 1_400);
+test('seed 42 day 91 owned C firm accrues 1400 unpaid wages in profit and tax exactly once', () => {
+  const c = seeded(91), f = c.firms.find(f => f.id === 8 && f.owner)!;
+  assert.ok(f);
+  assert.equal(f.monthlyRevenue, 13_000); assert.equal(f.monthlyExpense, 7_150); assert.equal(wages(f), 1_400);
   const facts = ownerFinance(c, f.id)!;
-  assert.equal(facts.realizedProfit, f.profit + 5_400);
-  assert.equal(facts.taxReserve, 1_080);
-  assert.ok(facts.withdrawAvailable <= 15_100);
+  assert.equal(facts.realizedProfit, f.profit + 4_450);
+  assert.equal(facts.taxReserve, 890);
+  assert.equal(facts.withdrawAvailable, 2_670);
   const before = serialize(c);
-  assert.equal(withdrawOwnerProfit(c, f.id, 16_220).ok, false);
+  assert.equal(withdrawOwnerProfit(c, f.id, 2_671).ok, false);
   assert.equal(serialize(c), before);
+  const allowed = structuredClone(c);
+  assert.equal(withdrawOwnerProfit(allowed, f.id, 2_670).ok, true);
+  assert.equal(allowed.accounts[f.wallet], c.accounts[f.wallet] - 2_670);
 });
 
-test('seed 42 day 210 firm 12 cannot manually withdraw the automatic development retention', () => {
-  const c = seeded(210), f = c.firms.find(f => f.id === 12)!;
+test('seed 42 day 210 owned C firm cannot manually withdraw automatic development retention', () => {
+  const c = seeded(210), f = c.firms.find(f => f.id === 8 && f.owner)!;
+  assert.ok(f);
   const tax = sum(c.ledger.filter(e => e.tick === 210 && e.from === f.wallet && e.reason === 'Monthly firm profit tax').map(e => e.amount));
   const retained = Math.ceil(Math.max(0, f.lastMonthProfit - tax) / 4), facts = ownerFinance(c, f.id)!;
   assert.ok(facts.developmentReserve >= retained);

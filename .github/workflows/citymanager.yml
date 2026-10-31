@@ -65,6 +65,9 @@ jobs:
           } elseif ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') {
             node --experimental-strip-types --test tests/apartment-visuals.test.ts tests/asset-models-runtime.test.ts tests/building-visuals.test.ts tests/atmosphere.test.ts tests/build-toolbar.test.ts tests/grouped-tool-menu.test.ts tests/select-menu.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Apartment and toolbar regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'commercial') {
+            node --experimental-strip-types --test --test-concurrency=2 tests/commercial-screenshot-readback.test.mjs tests/commercial-accounting.test.ts tests/commercial-market-envelope.test.ts tests/commercial-progression.test.ts tests/commercial-migration.test.ts tests/commercial-visuals.test.ts tests/commercial-display-data.test.ts tests/commercial-panels.test.ts tests/market-client.test.ts tests/market-safety.test.ts tests/market-writer.test.ts tests/city-history.test.ts tests/history-validators.test.ts tests/agriculture-validation.test.ts tests/goods.test.ts tests/owner-profit.test.ts tests/growth.test.ts tests/city-goals.test.ts tests/city-stats.test.ts tests/city-series.test.ts tests/overview-data.test.ts tests/building-card-data.test.ts tests/workforce-summary.test.ts tests/city-network.test.ts tests/audio.test.ts tests/education-session.test.ts tests/business-capacity.test.ts tests/save-quota-lossless.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/server-city-save.test.ts tests/owner-decision.test.ts tests/owner-decision-session.test.ts tests/owner-decision-client.test.ts tests/owner-decision-e2e.test.ts tests/owner-decision-monthly.test.ts tests/entity-explanation-data.test.ts tests/entity-explanation-client.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Unified commercial economic, migration and save regressions failed.' }
           } elseif ('${{ steps.scope.outputs.kind }}' -eq 'history') {
             node --experimental-strip-types --test tests/save-storage.test.ts tests/save-safety.test.ts tests/save-quota-lossless.test.ts tests/city-history.test.ts tests/history-validators.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/server-city-save.test.ts tests/month-end-review-scope.test.ts tests/agriculture-validation.test.ts tests/goods.test.ts tests/owner-profit.test.ts tests/city-series.test.ts tests/city-goals.test.ts tests/overview-data.test.ts tests/building-card-data.test.ts tests/city-network.test.ts tests/audio.test.ts tests/farm-levels.test.ts tests/farm-choice.test.ts tests/retail-shops.test.ts tests/factory-takeover-input.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
             if ($LASTEXITCODE -ne 0) { throw 'History/economic/ACK-only save contract failed.' }
@@ -80,7 +83,7 @@ jobs:
           } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Simulation tests failed.' } }
 
       - name: Verify preserved advisor contract offline
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         run: npm run test:advisor
 
       - name: Verify admitted asset integrity
@@ -114,7 +117,7 @@ jobs:
           retention-days: 3
 
       - name: Upload Pages market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-pages-market-verification-dist
@@ -123,7 +126,7 @@ jobs:
           retention-days: 3
 
       - name: Build loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         env:
           VITE_MARKET_URL: 'http://127.0.0.1:4317'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
@@ -131,7 +134,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/market-sandbox-dist
 
       - name: Upload loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-market-sandbox-dist
@@ -140,7 +143,7 @@ jobs:
           retention-days: 3
 
       - name: Build same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         env:
           VITE_MARKET_URL: '/citymanager-api'
           VITE_BASE_PATH: '/citymanager/'
@@ -149,7 +152,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/citymanager-public-test-dist
 
       - name: Upload same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-public-test-dist
@@ -173,11 +176,15 @@ jobs:
         if: steps.scope.outputs.kind == 'visual-final'
         run: node node_modules/vite/bin/vite.js build --config vite.apartment.config.ts
 
+      - name: Build isolated actual-engine commercial fixture
+        if: steps.scope.outputs.kind == 'commercial'
+        run: node node_modules/vite/bin/vite.js build --config vite.commercial.config.ts
+
       - name: Verify the built game in installed Edge
         if: steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
-          if ('${{ steps.scope.outputs.kind }}' -notin @('tower','factory','vehicle','visual-final') -and (Test-Path 'src/server-city-entry.ts')) {
+          if ('${{ steps.scope.outputs.kind }}' -notin @('tower','factory','vehicle','visual-final','commercial') -and (Test-Path 'src/server-city-entry.ts')) {
             throw 'Legacy browser entrypoints require server-fixture migration; see docs/server-save-ci-migration.md. Not claiming legacy acceptance.'
           }
           $previewArgs = @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort')
@@ -185,6 +192,7 @@ jobs:
           if ('${{ steps.scope.outputs.kind }}' -eq 'factory') { $previewArgs += @('--config', 'vite.factory.config.ts') }
           if ('${{ steps.scope.outputs.kind }}' -eq 'vehicle') { $previewArgs += @('--config', 'vite.vehicle.config.ts') }
           if ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') { $previewArgs += @('--config', 'vite.apartment.config.ts') }
+          if ('${{ steps.scope.outputs.kind }}' -eq 'commercial') { $previewArgs += @('--config', 'vite.commercial.config.ts') }
           $previewProcess = Start-Process -FilePath (Get-Command node).Source -ArgumentList $previewArgs -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/preview.log -RedirectStandardError .test-output/preview-error.log
           $productionPreview = $null
           try {
@@ -204,6 +212,7 @@ jobs:
             if ('${{ steps.scope.outputs.kind }}' -eq 'factory') { $previewUrl += 'tests/factory-preview.html' }
             if ('${{ steps.scope.outputs.kind }}' -eq 'vehicle') { $previewUrl += 'tests/vehicle-preview.html' }
             if ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') { $previewUrl += 'tests/apartment-preview.html' }
+            if ('${{ steps.scope.outputs.kind }}' -eq 'commercial') { $previewUrl += 'tests/commercial-preview.html' }
             for ($attempt = 0; $attempt -lt 40; $attempt++) {
               try {
                 $response = Invoke-WebRequest -Uri $previewUrl -TimeoutSec 2
@@ -224,6 +233,9 @@ jobs:
             } elseif ('${{ steps.scope.outputs.kind }}' -eq 'visual-final') {
               node --experimental-strip-types tests/visual-final-smoke.mjs
               if ($LASTEXITCODE -ne 0) { throw 'Apartment and toolbar browser evidence failed.' }
+            } elseif ('${{ steps.scope.outputs.kind }}' -eq 'commercial') {
+              node tests/commercial-smoke.mjs
+              if ($LASTEXITCODE -ne 0) { throw 'Commercial actual-render evidence failed.' }
             } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
               npm run test:browser
               if ($LASTEXITCODE -ne 0) { throw 'Save startup browser smoke failed.' }
@@ -291,6 +303,18 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Preserve commercial browser evidence
+        if: always() && steps.scope.outputs.kind == 'commercial'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: commercial-browser-evidence
+          retention-days: 3
+          path: |
+            .test-output/commercial/*.png
+            .test-output/commercial/report.json
+            .test-output/commercial/failure.json
+          if-no-files-found: error
+
       - name: Preserve factory browser evidence
         if: always() && steps.scope.outputs.kind == 'factory'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -325,7 +349,7 @@ jobs:
           retention-days: 3
 
       - name: Preserve building progression browser evidence
-        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: building-progression-browser-evidence
@@ -348,7 +372,7 @@ jobs:
           retention-days: 3
 
       - name: Verify preserved signal GUI without provider calls
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial'
         run: |
           $env:VITE_CITY_SIGNALS = 'false'
           $env:VITE_CITY_ADVISOR_ONLINE = 'false'

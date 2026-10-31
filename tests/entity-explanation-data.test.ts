@@ -38,7 +38,11 @@ test('a funded v6 factory keeps entity wire scope and classifies actual capital 
 });
 
 test('all six card kinds retain exact selected identity and bounded copied evidence without a full save', () => {
-  const c = city(), before = serialize(c), kinds = new Set<string>();
+  const c = city();
+  // Presentation-only level fixture: legacy tags no longer determine market/building card kind.
+  const commercial = c.buildings.filter(b => b.zone === 'C'); assert(commercial.length >= 2);
+  commercial[0].level = 1; commercial[1].level = 4;
+  const before = serialize(c), kinds = new Set<string>();
   for (const building of c.buildings) {
     const s = capture(c, building.id); kinds.add(s.entity.kind);
     assert.equal(s.entity.id, building.id); assert.equal(s.entity.buildingId, building.id); assert.equal(s.entity.cell, building.cell); assert.equal(s.tick, c.tick);
@@ -79,7 +83,7 @@ test('missing firm, unknown price and unsafe values stay missing instead of zero
 });
 
 test('observed unit prices retain explicit commodity denominators while cash stocks remain satang', () => {
-  const c = city(), shop = c.firms.find(f => buildingCardData(c, f.building)?.kind === 'shop')!, farm = c.firms.find(f => buildingCardData(c, f.building)?.kind === 'farm')!;
+  const c = city(), shop = c.firms.find(f => f.zone === 'C' && buildingCardData(c, f.building)?.prices.goodsSell.status === 'observed')!, farm = c.firms.find(f => buildingCardData(c, f.building)?.kind === 'farm')!;
   const goods = capture(c, shop.building), crops = capture(c, farm.building);
   assert.equal(fact(goods, 'price.goodsSell')!.unit, 'satang/goods');
   assert.equal(fact(crops, 'price.cropsSell')!.unit, 'satang/crops');

@@ -3,11 +3,11 @@
  * retained money, goods and crop journals plus bounded daily checkpoints, household arrival
  * entries (population) and building ages (buildings standing today). Read-only.
  */
-import { isMarket, type City } from './sim.ts';
+import { type City } from './sim.ts';
 
 export type BuildingKind = 'shop' | 'I' | 'R' | 'F' | 'market';
 /** Fixed entity order; chart colours follow this order so each kind keeps its colour everywhere. */
-export const BUILDING_ORDER: readonly BuildingKind[] = Object.freeze(['shop', 'I', 'R', 'F', 'market']);
+export const BUILDING_ORDER: readonly BuildingKind[] = Object.freeze(['shop', 'I', 'R', 'F']);
 export type CityMarker = { tick: number; kind: 'building' | 'road' | 'arrival' | 'closure'; icon: string; text: string };
 export type DailySeries = {
   ticks: number[];
@@ -23,7 +23,7 @@ export type DailySeries = {
   markers: CityMarker[];
 };
 
-const KIND_NAME: Record<BuildingKind, string> = { shop: 'ร้านค้า', I: 'โรงงาน', R: 'บ้าน', F: 'ฟาร์ม', market: 'ตลาด' };
+const KIND_NAME: Record<BuildingKind, string> = { shop: 'พาณิชย์ทุกระดับ', I: 'โรงงาน', R: 'บ้าน', F: 'ฟาร์ม', market: 'ตลาด' };
 const KIND_ICON: Record<BuildingKind, string> = { shop: 'shop', I: 'I', R: 'R', F: 'F', market: 'market' };
 
 /** Last requested days ending today; compacted cities expose at most 90 real daily bins. */
@@ -83,7 +83,9 @@ export function dailySeries(city: City, days = 30): DailySeries {
   s.population = people; s.households = homes;
   // Buildings: built on the day `age` days ago; demolished buildings are no longer in the save.
   for (const b of city.buildings) {
-    const firm = city.firms.find(f => f.building === b.id), kind: BuildingKind = b.zone === 'C' ? (firm && !isMarket(firm) ? 'shop' : 'market') : b.zone as BuildingKind;
+    // Ages establish original construction dates, not historical level transitions.
+    // Count each commercial business once instead of inventing past tier changes.
+    const kind: BuildingKind = b.zone === 'C' ? 'shop' : b.zone as BuildingKind;
     const built = to - b.age, start = Math.max(0, built - from);
     if (built > to) continue;
     for (let i = start; i < n; i++) s.buildings[kind][i]++;

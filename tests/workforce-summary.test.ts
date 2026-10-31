@@ -58,7 +58,7 @@ test('all real roles reconcile across household and workplace indexes without co
   const city = fixture(), summary = deriveWorkforceSummary(city); reconcile(summary);
   assert.deepEqual(summary.counts, { population: 15, workforce: 11, dependents: 4, economicWorkers: 7, studying: 2,
     unassignedWorkforce: 2, occupiedWorkforce: 9, employeeWorkers: 6, ownerWorkers: 1, schoolStudents: 1, universityStudents: 1 });
-  assert.deepEqual(summary.occupations, { agriculture: 1, manufacturing: 1, retail: 1, 'market-trading': 1, 'park-maintenance': 1, teacher: 1, professor: 1 });
+  assert.deepEqual(summary.occupations, { agriculture: 1, manufacturing: 1, retail: 2, 'park-maintenance': 1, teacher: 1, professor: 1 });
   assert.equal(summary.unassignedShare, 2 / 9, 'excludes studying and dependents from the denominator');
   assert.equal(summary.byWorkplace.get('campus:30')!.localWorkers, 1);
   assert.equal(summary.byWorkplace.get('campus:30')!.learners, 1);
@@ -197,4 +197,11 @@ test('natural education city and save round trip remain byte-identical and deter
   const resumed = deserialize(saved); deriveWorkforceSummary(resumed);
   for (let n = 0; n < 3; n++) { step(resumed); step(control); }
   assert.equal(serialize(resumed), serialize(control));
+});
+
+
+test('commercial occupation ignores old market/retail tags while retaining owner versus employee relationships', () => {
+  const city = fixture(), before = deriveWorkforceSummary(city);
+  for (const firm of city.firms) if (firm.zone === 'C') firm.commercialKind = firm.commercialKind === 'market' ? 'retail' : 'market';
+  const after = deriveWorkforceSummary(city);assert.deepEqual(after,before);
 });
