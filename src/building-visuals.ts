@@ -47,7 +47,7 @@ export function towerGlassGeometry(positions: readonly number[], normals: readon
 
 /** Retail's renderer tier is its actual level minus one. */
 export function luxuryTower(zone: 'R' | 'C' | 'I', visualLevel: number): boolean {
-  return zone === 'R' ? visualLevel >= 4 : zone === 'C' && visualLevel >= 3;
+  return zone === 'R' ? visualLevel >= 7 : zone === 'C' && visualLevel >= 3;
 }
 /** The envelope retains its original height/footprint; fittings sit on a supported flat crown. */
 export function luxuryTowerLayout(height: number) {

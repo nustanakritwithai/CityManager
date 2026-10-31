@@ -1,3 +1,4 @@
+import { installBuildToolbar, BUILD_SHORTCUTS, blocksGameShortcuts } from './build-toolbar.ts';
 import { buildingIssueRevision, issuePlaceRoute } from './building-issues.ts';
 import { marketBaseUrl } from './market-flag.ts';
 import { renderBuildingIssues } from './building-issue-panel.ts';
@@ -111,6 +112,7 @@ import { installPanelTimeControls } from './panel-time-controls.ts';
 import { installSaveFeedback } from './save-feedback-panel.ts';
 import { createSaveAttemptQueue } from './save-feedback.ts';
 import './player-feedback.css';
+import './build-toolbar.css';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const money = (n: number) => '฿' + (n / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -784,7 +786,7 @@ async function boot() {
   const mapEntry = document.createElement('button'); mapEntry.type = 'button'; mapEntry.className = 'st-network st-map'; mapEntry.setAttribute('aria-label', 'แผนที่เมือง'); mapEntry.append(iconElement('map'), document.createTextNode('แผนที่'));
   mapEntry.addEventListener('click', () => { cityStatsPanel!.toggle(false); minimap?.toggleMap(true); });
   document.querySelector('#city-stats .st-titlebar .st-close')?.before(mapEntry);
-  installHudIcons(); installKeycaps(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); });
+  installHudIcons(); installKeycaps(); installBuildToolbar(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); });
   educationPanel = installEducationPanel($('#campus-actions'));
   panelTime = installPanelTimeControls($('#inspector .inspector-heading'), $('#pause'));
   if (!STARTER && !startup.restored && !startup.error) { guide.offer(); view.focus(GATEWAY + 5); }
@@ -1063,12 +1065,12 @@ async function boot() {
     dialog.append(title, text, back, empty, sample); document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
   });
   document.addEventListener('keydown', e => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || document.querySelector('dialog[open]')) return;
+    if (blocksGameShortcuts(e) || document.querySelector('dialog[open]')) return;
     if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
     if (e.key.toLowerCase() === 'u' && !(e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]'))) { audio.change({ muted: !audio.settings.muted }); audioPanel?.sync(); status(audio.settings.muted ? 'ปิดเสียงแล้ว (U)' : 'เปิดเสียงแล้ว (U)'); return; }
     if (route) return;
     if (e.key === ' ' && !(e.target instanceof Element && e.target.closest('button, summary, a, select, input, textarea, [contenteditable]'))) { e.preventDefault(); paused = !paused; render(); }
-    const shortcuts: Record<string, string> = { v: 'select', r: 'road', '1': 'R', '2': 'C', '3': 'I', '4': 'F', '5': 'power', '6': 'water', '7': 'park', b: 'bulldoze', p: 'select' };
+    const shortcuts = BUILD_SHORTCUTS;
     if (shortcuts[e.key.toLowerCase()]) { sound('ui-select'); setTool(shortcuts[e.key.toLowerCase()]); }
     if (e.key.toLowerCase() === 't') cityStatsPanel?.toggle();
     if (e.key.toLowerCase() === 'm') minimap?.toggleMap();

@@ -40,12 +40,12 @@ jobs:
         id: scope
         run: node scripts/ci-visual-scope.mjs
       - run: npm ci --no-audit --no-fund
-        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
       - name: Verify save feedback and actual education progress data
-        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
         run: node --experimental-strip-types --test tests/player-feedback.test.ts
       - name: Build local-only UX test artifact
-        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
         env:
           VITE_MARKET_URL: ''
           VITE_CITY_ADVISOR_ONLINE: 'false'
@@ -53,7 +53,7 @@ jobs:
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
         run: npm run build
       - name: Run full mobile and desktop UX smoke
-        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
         run: |
           New-Item -ItemType Directory -Force .test-output/player-feedback | Out-Null
           $uxProfile = Join-Path $env:RUNNER_TEMP ('citymanager-ux-' + [guid]::NewGuid())
@@ -89,7 +89,7 @@ jobs:
             Stop-Process -Id $uxEdge.Id -ErrorAction SilentlyContinue
           }
       - name: Preserve bounded UX evidence even on failure
-        if: always() && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle'
+        if: always() && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: player-feedback-ux-evidence

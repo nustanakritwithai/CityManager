@@ -1,4 +1,4 @@
-import { iconElement } from './ui-icons.ts';
+import { BUILD_ICONS, iconElement } from './ui-icons.ts';
 import { installToolMenu } from './tool-menu.ts';
 
 const services = [
@@ -19,6 +19,7 @@ function installGroupedToolMenu(id: string, name: string, tools: readonly (reado
   const anchor = document.createElement('button'); anchor.id = `${id}-tool`; anchor.type = 'button';
   anchor.className = 'tool grouped-tool-anchor';
   const icon = iconElement(id === 'construction' ? 'R' : 'overview', 'tool-icon svg-glyph'), label = document.createElement('span');
+  if (id === 'construction') icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${BUILD_ICONS.R}</svg>`;
   const defaultIcon = icon.innerHTML;
   anchor.append(icon, label); options[0].button.before(anchor);
   const menu = document.createElement('div'); menu.id = `${id}-submenu`; menu.className = 'grouped-tool-submenu';
@@ -36,8 +37,9 @@ function installGroupedToolMenu(id: string, name: string, tools: readonly (reado
     const selected = options.find(option => option.tool === tool);
     anchor.classList.toggle('active', !!selected); anchor.dataset.activeTool = selected?.tool ?? '';
     label.textContent = selected?.label ?? name;
-    anchor.title = selected ? `${name} · ${selected.label}กำลังทำงาน · แตะเพื่อเลือกเครื่องมือ` : `${name} · ${names}`;
+    anchor.title = selected ? `${name} · ${selected.label}กำลังทำงาน · ${selected.button.title} · แตะเพื่อเลือกเครื่องมือ` : `${name} · ${names}`;
     anchor.setAttribute('aria-label', anchor.title);
+    anchor.setAttribute('aria-pressed', String(!!selected));
     const glyph = selected?.button.querySelector<HTMLElement>('.tool-icon, .zone-icon');
     if (glyph) { icon.innerHTML = glyph.innerHTML; icon.className = glyph.className.replace('zone-icon', 'tool-icon'); }
     else { icon.innerHTML = defaultIcon; icon.className = 'tool-icon svg-glyph'; }

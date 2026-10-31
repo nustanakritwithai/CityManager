@@ -64,3 +64,15 @@ export function iconElement(name: string, className = 'ui-icon'): HTMLElement {
   const span = document.createElement('span'); span.className = className; span.setAttribute('aria-hidden', 'true');
   span.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${ICONS[name] ?? ''}</svg>`; return span;
 }
+
+/** Fixed, local multitone artwork for the build dock; no IDs, URL references or remote assets. */
+export const BUILD_ICONS: Readonly<Record<string, string>> = Object.freeze({
+  select: '<path d="m5 3 14 8-6 1.5 3 6-3 1.5-3-6-5 4z" fill="#67e8f9" stroke="#164e63" stroke-width="1.2"/><path d="m7 6 7 4-4 1z" fill="#cffafe"/>',
+  road: '<path d="M7 2h10l4 20H3z" fill="#475569" stroke="#94a3b8"/><path d="M12 3v4m0 3v4m0 3v4" stroke="#fde047" stroke-width="1.8"/><path d="M8 3 5 21M16 3l3 18" stroke="#cbd5e1"/>',
+  R: '<path d="M4 10h16v11H4z" fill="#4ade80"/><path d="m2 11 10-9 10 9-2 2-8-7-8 7z" fill="#166534"/><path d="M10 14h4v7h-4z" fill="#14532d"/><path d="M6 13h3v3H6zm9 0h3v3h-3z" fill="#dcfce7"/>',
+  C: '<path d="M4 7h16v14H4z" fill="#60a5fa"/><path d="M3 3h18v5H3z" fill="#1d4ed8"/><path d="M6 10h5v4H6zm7 0h5v4h-5z" fill="#dbeafe"/><path d="M9 16h6v5H9z" fill="#1e3a8a"/>',
+  I: '<path d="M3 21V10l6-4v5l6-4v14z" fill="#fbbf24"/><path d="M16 3h4l1 18h-6z" fill="#b45309"/><path d="M5 15h3v3H5zm5 0h3v3h-3z" fill="#fffbeb"/><path d="M16 5h4" stroke="#fde68a" stroke-width="2"/>',
+  F: '<path d="M2 17h20v5H2z" fill="#166534"/><path d="m4 21 4-4m2 4 4-4m2 4 4-4" stroke="#86efac"/><path d="M12 18V4" stroke="#fbbf24" stroke-width="2"/><path d="M12 9C7 9 6 5 6 5c5-1 6 4 6 4m0 5c-5 0-6-4-6-4 5-1 6 4 6 4m0-5c5 0 6-4 6-4-5-1-6 4-6 4m0 5c5 0 6-4 6-4-5-1-6 4-6 4" fill="#fcd34d"/>',
+  park: '<path d="M6 12h3v9H6z" fill="#a16207"/><circle cx="7.5" cy="8" r="6" fill="#22c55e"/><circle cx="6" cy="6" r="3" fill="#86efac"/><path d="M13 13h9v3h-9z" fill="#fbbf24"/><path d="M14 16v5m6-5v5M2 22h21" stroke="#4ade80" stroke-width="2"/>',
+  bulldoze: '<path d="M3 14h12v5H3z" fill="#ef4444"/><path d="M5 14V7h6l4 7z" fill="#fca5a5"/><path d="M7 9h3l2 4H7z" fill="#7f1d1d"/><path d="m16 12 3-1 3 10h-5z" fill="#f87171"/><rect x="2" y="18" width="14" height="4" rx="2" fill="#475569"/><path d="M5 20h8" stroke="#cbd5e1"/>',
+});
