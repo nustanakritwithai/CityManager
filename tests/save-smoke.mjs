@@ -17,9 +17,9 @@ const GROWTH_LIMIT=1.10,ABSOLUTE_CAP=4_700_000;
 // (primary rewrite in place + compressed checkpoint/backup ~20k each) fits; an extra uncompressed copy
 // of the city (e.g. a migration backup key) does not, and must not make saving fail.
 const HEADROOM=150_000;
-// Any CityManager key other than the primary slot must stay compressed/small: at most half the
-// primary save's size (compressed copies are ~10x smaller). Catches new uncompressed backup keys.
-const EXTRA_KEY_RATIO=0.5;
+// Any CityManager key other than the primary slot (and explicit v1-v6 import backups) must be small or
+// LZ-compressed. Catches new uncompressed backup/extra copies such as #153's raw before-taxi key.
+const EXTRA_KEY_RAW_LIMIT=64_000;
 // Keys a sibling app (Strategy-Game) keeps on the same github.io origin. Must stay byte-identical.
 const STRATEGY={'strategy-game.save':JSON.stringify({turn:42,units:[1,2,3]}),'StrategyGame:settings':'{"music":false}','sg_profile':'player-1'};
 const SAVE_FAILED=/เซฟหลักบันทึกไม่สำเร็จ|บันทึกอัตโนมัติไม่สำเร็จ|เซฟหลักไม่สำเร็จ|บันทึกไม่ได้/;
@@ -61,8 +61,8 @@ async function session(name,{seed={},filler=false,headroom=HEADROOM}={}){
     await until(`window.__cmWrites.some(w=>w.k===${JSON.stringify(SAVE_KEY)}||/active|checkpoint/.test(w.k))&&/บันทึก/.test(document.querySelector('#autosave-status')?.textContent??'')`,30000,`${label} save write`);await sleep(400);
     await assertNoSaveFailure(label);await click('#toggle-game-menu').catch(()=>{});};
   const strategyIntact=async label=>{for(const [k,v] of Object.entries(STRATEGY))assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(k)})`),v,`${name}/${label}: Strategy-Game key ${k} changed`);};
-  const keyBudget=async label=>{const keys=await evaluate('Object.keys(localStorage).filter(k=>k.startsWith("citymanager.")).map(k=>[k,localStorage.getItem(k).length])');const primary=(keys.find(([k])=>k===SAVE_KEY)?.[1])??0;
-    for(const [k,n] of keys)if(k!==SAVE_KEY)assert.ok(n<=Math.max(30_000,primary*EXTRA_KEY_RATIO),`${name}/${label}: localStorage key ${k} is ${n} chars (> ${EXTRA_KEY_RATIO*100}% of the ${primary}-char save): new uncompressed backup/extra key over size budget`);return keys;};
+  const keyBudget=async label=>{const keys=await evaluate('Object.keys(localStorage).filter(k=>k.startsWith("citymanager.")).map(k=>{const v=localStorage.getItem(k);return [k,v.length,v.startsWith("cm-copy-lz1:")]})');
+    for(const [k,n,packed] of keys)if(k!==SAVE_KEY&&!/^citymanager\.backup\.v[0-9]/.test(k)&&n>=EXTRA_KEY_RAW_LIMIT&&!packed)assert.fail(`${name}/${label}: localStorage key ${k} holds ${n} uncompressed chars (limit ${EXTRA_KEY_RAW_LIMIT}): new uncompressed backup/extra copy over size budget`);return keys;};
   const shot=async label=>{try{const r=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve(output,`${name}-${label}.png`),Buffer.from(r.data,'base64'));}catch{}};
   const clickXY=async(x,y)=>{for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,x,y,button:'left',clickCount:1});};
   const close=async()=>{try{ws.close();}catch{}child.kill();await sleep(300);await rm(profile,{recursive:true,force:true}).catch(()=>{});};
@@ -110,7 +110,7 @@ await scenario('taxi-running',{seed:{[SAVE_KEY]:raw}},async s=>{
   assert.ok(placed,'taxi-running: could not place a taxi depot');
   await s.evaluate('window.__cmWrites.length=0');await s.click('[data-speed="10"]');if(await s.evaluate('window.cityManager.parks().paused'))await s.click('#pause');
   await s.until('window.cityManager.traffic().step>=12',60000,'traffic game running 12 steps with taxis');await s.until(`new Set(window.__cmWrites.filter(w=>w.tick!==null).map(w=>w.tick)).size>=3`,90000,'3 autosaves with taxis running');await s.assertNoSaveFailure('taxi autosave');if(process.env.SAVE_SMOKE_DEBUG)console.log('RUNNING',JSON.stringify(await s.evaluate('({t:window.cityManager.traffic(),p:window.cityManager.parks()})')).slice(0,2500));
-  await s.manualSave('save while running');await new Promise(r=>setTimeout(r,2000));await s.assertNoSaveFailure('after running save');
+  await s.manualSave('save while running');await s.keyBudget('taxi save');await new Promise(r=>setTimeout(r,2000));await s.assertNoSaveFailure('after running save');
   if(!(await s.evaluate('window.cityManager.parks().paused')))await s.click('#pause');await s.manualSave('save after taxi play');
   const before=await s.state();await s.reload();const after=await s.state();assert.deepEqual({...after,size:0},{...before,size:0},'taxi-running: reload restores same day/money/buildings');await s.assertNoSaveFailure('taxi reload');
   await s.strategyIntact('taxi-running');if(process.env.SAVE_SMOKE_DEBUG)console.log(JSON.stringify(await s.evaluate('window.cityManager.traffic()')).slice(0,1500));const depots=await s.evaluate('JSON.parse(window.cityManager.snapshot()).taxi?.depots?.length??0');if(process.env.SAVE_SMOKE_EXPECT_TAXI_SAVE)assert.ok(depots>0,'taxi depot survives reload');checks.push(`Taxi depots after reload: ${depots}`);const fares=await s.evaluate(`JSON.parse(window.cityManager.snapshot()).ledger.filter(l=>/axi/.test(JSON.stringify(l))).length`);checks.push(`Taxi depot + traffic running at 10x: autosaves, save while running and reload OK (day ${after.tick}, taxi fare ledger rows ${fares})`);
