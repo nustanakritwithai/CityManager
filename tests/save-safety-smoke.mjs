@@ -53,7 +53,7 @@ try{
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),raw);
  assert.equal(decodeSaveCopy(await evaluate('localStorage.getItem("citymanager.checkpoint.latest")')),edited);
  await send('Page.captureScreenshot',{format:'png'}).then(r=>writeFile(resolve(output,guestMode?'guest-protected-startup.png':'protected-startup.png'),Buffer.from(r.data,'base64')));
- await evaluate("localStorage.setItem('citymanager.save.v7','{broken')");await button('#startup-recover-current');
+ await evaluate("localStorage.setItem('citymanager.save.v7','{broken')");await evaluate("document.querySelector('#startup-recovery-details').open=true");await button('#startup-recover-current');
  await until('document.querySelector("#startup-recovery-status").textContent.includes("โหลดไม่สำเร็จ")');
  assert.equal(await evaluate('!!document.querySelector("#startup-recovery-chooser[open]")'),true);
  assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'),'{broken');

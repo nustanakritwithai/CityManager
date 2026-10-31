@@ -7,7 +7,7 @@ export function createSaveFeedback(onChange: (state: SaveFeedbackState) => void,
   const emit = () => onChange({ pending: pending.size, lastSuccess, failure });
   return {
     // Recovery authorizes the loaded city, but is not a successful storage write.
-    recovered() { failure = null; failureAttempt = ++sequence; emit(); },
+    recovered() { lastSuccess = null; failure = null; failureAttempt = ++sequence; emit(); },
     begin() { const attempt = ++sequence; pending.add(attempt); emit(); return attempt; },
     cancel(attempt: number) { pending.delete(attempt); emit(); },
     succeeded(attempt: number) {

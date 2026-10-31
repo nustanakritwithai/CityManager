@@ -21,6 +21,7 @@ test('invalid/missing/denied candidates remain isolated and never expose raw con
 test('load failures are allowlisted and do not disclose identity or server details',()=>{
  assert.match(loadFailureMessage(Error('Park recreation: sidecar clock mismatch')),/โหลดไม่สำเร็จ.*sidecar clock mismatch/);
  assert.match(loadFailureMessage(Error('market guest identity mismatch')),/Guest.*ไม่ตรงกัน/);
+ assert.match(loadFailureMessage(Error('ยังบันทึกการเลือกเมืองใหม่ไม่ได้ กรุณาเก็บเมืองเดิมไว้ก่อน')),/โหลดไม่สำเร็จ.*ยังบันทึกการเลือกเมืองใหม่ไม่ได้.*เก็บเมืองเดิมไว้ก่อน/);
  assert.match(loadFailureMessage(Object.assign(Error('private data'),{name:'SecurityError'})),/ไม่อนุญาต/);
  assert.match(loadFailureMessage(Object.assign(Error('private data'),{name:'QuotaExceededError'})),/ไม่เพียงพอ/);
  const unknown=loadFailureMessage(Error('private_guest_secret'));assert.match(unknown,/ยังอ่านหรือตรวจสอบชุดที่เลือกไม่ผ่าน/);assert.ok(!unknown.includes('private_guest_secret'));
