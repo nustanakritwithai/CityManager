@@ -16,6 +16,7 @@ export function createCitySaveAuth(configured?:string) {
  if(!pages&&(endpoint.origin!==location.origin||endpoint.pathname!=='/citymanager-api'||endpoint.username||endpoint.password||endpoint.search||endpoint.hash))throw Error('save-endpoint-not-allowed');
  const base=pages?PAGES_MARKET_BASE:'/citymanager-api';
  let owner:string|null=null;
+ let connecting=false;
  const request=async(path:string,init:RequestInit={}):Promise<any>=>{
   if(!path.startsWith('/v1/')||path.includes('://'))throw Error('invalid-save-path');
   const headers=new Headers(init.headers);headers.set('Accept','application/json');
@@ -29,10 +30,20 @@ export function createCitySaveAuth(configured?:string) {
  };
  const prepare=()=>pages?pagesSession.prepare():Promise.resolve();
  const connect=async(expected:string|null=owner)=>{
-  if(pages&&!pagesSession.bearer())await pagesSession.connect(expected);
-  const me=await request('/v1/me');
-  if(!UUID.test(String(me?.guest_id))||(expected&&me.guest_id!==expected)){if(pages){pagesSession.clear();void pagesSession.prepare().catch(()=>{});}throw Error('save-owner-mismatch');}
-  if(pages)pagesSession.activate(me.guest_id);owner=me.guest_id;void prepare();return owner!;
+  // A second gesture must not consume/re-prime material owned by an active login.
+  if(connecting)throw Error('pages-login-busy');
+  connecting=true;
+  try{
+   if(pages&&!pagesSession.bearer())await pagesSession.connect(expected);
+   const me=await request('/v1/me');
+   if(!UUID.test(String(me?.guest_id))||(expected&&me.guest_id!==expected)){if(pages)pagesSession.clear();throw Error('save-owner-mismatch');}
+   if(pages)pagesSession.activate(me.guest_id);owner=me.guest_id;return owner!;
+  }finally{
+   // Failed/blocked popups consume a one-use challenge too. Ready the next user
+   // gesture without opening a popup, persisting tokens, or replacing its error.
+   try{await prepare();}catch{}
+   connecting=false;
+  }
  };
  return {request,prepare,connect,get owner(){return owner;}};
 }

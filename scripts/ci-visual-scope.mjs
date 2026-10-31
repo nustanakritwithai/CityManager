@@ -93,7 +93,12 @@ export const historySources=["src/save-storage.ts", "src/agriculture-runtime.ts"
 const historyAllowed=new Set(["src/save-storage.ts", "tests/save-quota-lossless.test.ts", "docs/city-history-retention.md", "src/agriculture-runtime.ts", "src/agriculture-validation.ts", "src/audio-cues.ts", "src/building-issues.ts", "src/chart-modal.ts", "src/city-goals.ts", "src/city-history-types.ts", "src/city-history-validation.ts", "src/city-history.ts", "src/city-network.ts", "src/city-save-auth.ts", "src/city-series.ts", "src/context-data.ts", "src/goods-validation.ts", "src/market-client.ts", "src/owner-profit.ts", "src/park-runtime.ts", "src/server-city-entry.ts", "src/server-city-save.ts", "src/server-save-size.ts", "src/sim.ts", "src/submenus.ts", "tests/agriculture-validation.test.ts", "tests/city-history.test.ts", "tests/city-series.test.ts", "tests/factory-takeover-input.test.ts", "tests/farm-levels.test.ts", "tests/goods.test.ts", "tests/history-fixture.ts", "tests/history-validators.test.ts", "tests/month-end-review-scope.test.ts", "tests/owner-profit.test.ts", "tests/retail-shops.test.ts", "tests/server-city-entry-flow.test.ts", "tests/server-city-entry.test.ts", "tests/server-save-browser-smoke.mjs", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", ".github/workflows/citymanager.yml", ".github/workflows/entity-explanation.yml", ".github/workflows/owner-decisions.yml", ".github/workflows/player-feedback.yml", ".github/workflows/traffic-enabled.yml"]);
 export function historyPathsOnly(paths){return ['src/city-history.ts','src/city-history-validation.ts','src/sim.ts','src/server-city-entry.ts','src/city-save-auth.ts','tests/city-history.test.ts','tests/history-validators.test.ts','tests/server-save-browser-smoke.mjs'].every(p=>paths.includes(p))&&paths.every(p=>historyAllowed.has(p));}
 export function historyOnly(paths,evidence={}){return historyPathsOnly(paths)&&matchesReviewedSources(evidence,{historySourceDiff:"326578432215a15f27f08da7833feb888ffeb8be260dc37080a67b87347def5c"});}
+// Reviewed reconnect-only transition; auth changes cannot enter by pathname alone.
+const reauthAllowed=new Set(['src/city-save-auth.ts','tests/city-save-reauth.test.ts','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','.github/workflows/citymanager.yml']);
+export function reauthPathsOnly(paths){return ['src/city-save-auth.ts','tests/city-save-reauth.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>reauthAllowed.has(p));}
+export function reauthOnly(paths,evidence={}){return reauthPathsOnly(paths)&&matchesReviewedSources(evidence,{"authBefore": "9bfbdf2419f89070deff32127cd341dc969d3c81d3c26593c6b32ef47d3db4de", "authAfter": "1975de9b54c55f60587587d5e330ba0e04408047d118a32d4701c6eb2dd0852a"});}
 export function visualKind(paths, evidence = {}) {
+  if(reauthOnly(paths,evidence))return 'server-save';
   if(historyOnly(paths,evidence))return 'history';
   if(classicToolbarOnly(paths,evidence))return 'classic-toolbar';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -131,6 +136,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const git = args => execFileSync('git', args, { encoding: 'utf8' });
     const paths = changedPaths(process.env.GITHUB_EVENT_NAME, event, git);
     const evidence = {};
+    if(reauthPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.authBefore=git(['show',`${base}:src/city-save-auth.ts`]);evidence.authAfter=git(['show',`${head}:src/city-save-auth.ts`]);}
     if(historyPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.historySourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...historySources]);}
     if (paths.includes('src/main.ts')) {
       const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);

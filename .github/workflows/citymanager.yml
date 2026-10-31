@@ -72,7 +72,7 @@ jobs:
             node --experimental-strip-types --test tests/build-toolbar.test.ts tests/grouped-tool-menu.test.ts tests/select-menu.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Classic toolbar regressions failed.' }
           } elseif ('${{ steps.scope.outputs.kind }}' -eq 'server-save') {
-            node --experimental-strip-types --test tests/fresh-server-city.test.ts tests/save-management-dialog.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/city-migration-inventory.test.ts tests/server-city-save.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
+            node --experimental-strip-types --test tests/city-save-reauth.test.ts tests/fresh-server-city.test.ts tests/save-management-dialog.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/city-migration-inventory.test.ts tests/server-city-save.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
             if ($LASTEXITCODE -ne 0) { throw 'Server save/auth/migration contract failed.' }
           } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
             node --experimental-strip-types --test tests/save-safety.test.ts tests/save-storage.test.ts tests/save-quota-hotfix.test.ts tests/save-promotion.test.ts tests/save-equivalence.test.ts tests/save-startup-diagnosis.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/entry-gate.test.ts tests/market-client.test.ts tests/market-writer.test.ts tests/market-safety.test.ts
