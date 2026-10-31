@@ -105,7 +105,7 @@ jobs:
   fault:
     name: Allocation game / default and worker fault
     needs: checks
-    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history'
+    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial'
     runs-on: windows-latest
     timeout-minutes: 10
     defaults:
@@ -155,7 +155,7 @@ jobs:
   browser:
     name: Allocation game browser / ${{ matrix.case }}
     needs: checks
-    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history'
+    if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial'
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -231,9 +231,9 @@ jobs:
     steps:
       - name: Require all traffic acceptance jobs
         run: |
-          if ('${{ needs.checks.outputs.kind }}' -in @('vehicle','visual-final','server-save','classic-toolbar','history')) {
-            if ('${{ needs.checks.result }}' -ne 'success') { throw 'Vehicle scope classifier checks failed.' }
-            Write-Output 'Exact scoped change (relevant acceptance in CityManager): render/resource/browser checks are required by CityManager; traffic simulation unchanged.'
+          if ('${{ needs.checks.outputs.kind }}' -in @('vehicle','visual-final','server-save','classic-toolbar','history','commercial')) {
+            if ('${{ needs.checks.result }}' -ne 'success') { throw 'Exact scope classifier checks failed.' }
+            Write-Output 'Exact scoped change (relevant acceptance in CityManager): render/resource/browser checks are required by CityManager; dedicated traffic simulation/browser suite not run for this exact reviewed scope.'
             exit 0
           }
           if ('${{ needs.checks.result }}' -ne 'success' -or '${{ needs.fault.result }}' -ne 'success' -or '${{ needs.browser.result }}' -ne 'success') {
