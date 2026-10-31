@@ -1,4 +1,5 @@
 import { buildingIssueRevision, issuePlaceRoute } from './building-issues.ts';
+import { marketBaseUrl } from './market-flag.ts';
 import { renderBuildingIssues } from './building-issue-panel.ts';
 import './building-issues.css';
 import { restoreStartupCity } from './startup-save.ts';
@@ -599,7 +600,7 @@ function updateMapInfo(placement: Preview | null) {
 }
 
 async function boot() {
-  const entryClient = new MarketClient(() => city, (import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL ?? '');
+  const entryClient = new MarketClient(() => city, marketBaseUrl((import.meta as ImportMeta & {env: Record<string,string|undefined>}).env.VITE_MARKET_URL));
   if (entryClient.enabled) { await new Promise<void>((resolve, reject) => { void requireGuestEntry(entryClient, resolve).catch(reject); }); }
   // [save-hotfix-89] One-time FULL wipe of CityManager saves BEFORE reading slots (owner decision): fresh city, no chooser, primary slot has room.
   try{const r=location.hostname.endsWith('github.io')?await autoWipeOnce():{ran:false,removed:[],reason:'not-production-origin'};if(r.ran||r.reason!=='already-done')console.info('[save-hotfix-89] auto-cleanup',r);}catch(error){console.warn('[save-hotfix-89] auto-cleanup failed; data untouched',error);}

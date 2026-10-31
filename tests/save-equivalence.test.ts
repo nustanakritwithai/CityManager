@@ -32,9 +32,9 @@ test('equivalence never accepts invalid snapshots or different Guest identities'
  const nested=JSON.parse(primary);nested.extra={a:1,b:2};const nested2=structuredClone(nested);nested2.extra={b:2,a:1};assert.equal(equivalentStoredSessions(JSON.stringify(nested),JSON.stringify(nested2)),false);
  const arr=JSON.parse(primary);arr.extra=[1,2];const arr2=structuredClone(arr);arr2.extra=[2,1];assert.equal(equivalentStoredSessions(JSON.stringify(arr),JSON.stringify(arr2)),false);
 });
-test('archive failure after formatting-only resume leaves both exact originals intact',()=>{
+test('archive quota after formatting-only resume never blocks the primary save (primary first, copies best effort)',()=>{
  const primary=raw(),copy=JSON.stringify(JSON.parse(primary),null,2),s=store(primary,copy);
  const blocked={getItem:s.getItem,setItem:(k:string,v:string)=>{if(k.startsWith('citymanager.backup.save-conflict.'))throw Error('synthetic archive quota');s.setItem(k,v);}};
  const result=restoreStartupCity(blocked,fresh);assert.equal(result.restored,true);
- assert.throws(()=>result.guard.write(primary,null),/archive quota/);assert.equal(s.getItem(SAVE_KEY),primary);assert.equal(s.getItem(AUTOSAVE_CHECKPOINT_KEY),copy);
+ result.guard.write(primary,null);assert.equal(s.getItem(SAVE_KEY),primary);assert.equal(decodeSaveCopy(s.getItem(AUTOSAVE_CHECKPOINT_KEY)),primary);
 });

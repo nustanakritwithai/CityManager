@@ -63,7 +63,7 @@ jobs:
             node --experimental-strip-types --test tests/vehicle-visuals.test.ts tests/citizen-vehicle-poses.test.ts tests/taxi-vehicle-poses.test.ts tests/atmosphere.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Vehicle visual regressions failed.' }
           } elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {
-            node --experimental-strip-types --test tests/save-safety.test.ts tests/save-storage.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/entry-gate.test.ts tests/market-client.test.ts tests/market-writer.test.ts tests/market-safety.test.ts
+            node --experimental-strip-types --test tests/save-safety.test.ts tests/save-storage.test.ts tests/save-quota-hotfix.test.ts tests/save-promotion.test.ts tests/save-equivalence.test.ts tests/save-startup-diagnosis.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/entry-gate.test.ts tests/market-client.test.ts tests/market-writer.test.ts tests/market-safety.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Save boundary regressions failed.' }
           } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Simulation tests failed.' } }
 
