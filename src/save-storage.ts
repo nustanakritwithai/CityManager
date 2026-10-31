@@ -1,4 +1,4 @@
-import {decodeSaveCopy} from './save-copy-codec.ts';
+import {decodeSaveCopy,encodeSaveCopy} from './save-copy-codec.ts';
 export const SAVE_CONFLICT_LATEST_KEY='citymanager.backup.save-conflict.latest';
 export const AUTOSAVE_CHECKPOINT_KEY='citymanager.checkpoint.latest';
 export const PRE_AUTOSAVE_BACKUP='citymanager.backup.before-autosave';
@@ -129,7 +129,8 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
     let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
     // First save that carries taxi data: keep the last taxi-free save once, untouched.
     let currentTaxi = false; try { currentTaxi = JSON.parse(current)?.taxi !== undefined; } catch { currentTaxi = false; }
-    if (parsed?.taxi !== undefined && !currentTaxi) { const keys = taxiBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current); if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Taxi migration backups full; original save preserved'); storage.setItem(slot, current); } storage.setItem(LATEST_BACKUP_KEY, slot); }
+    // Lossless LZ copy (readStoredCity decodes it): a raw full copy here exceeded localStorage quota on large cities (#153).
+    if (parsed?.taxi !== undefined && !currentTaxi) { const keys = taxiBackupKeys(); let slot = keys.find(key => { const v = storage.getItem(key); try { return v !== null && decodeSaveCopy(v) === current; } catch { return false; } }); if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Taxi migration backups full; original save preserved'); storage.setItem(slot, encodeSaveCopy(current)); } storage.setItem(LATEST_BACKUP_KEY, slot); }
     // First save that carries bus data: keep the last bus-free save once, untouched.
     let currentBus = false; try { currentBus = JSON.parse(current)?.bus !== undefined; } catch { currentBus = false; }
     if (parsed?.bus !== undefined && !currentBus) { const keys = busBackupKeys(); let slot = keys.find(key => storage.getItem(key) === current); if (!slot) { slot = keys.find(key => storage.getItem(key) === null); if (!slot) throw new Error('Bus migration backups full; original save preserved'); storage.setItem(slot, current); } storage.setItem(LATEST_BACKUP_KEY, slot); }
