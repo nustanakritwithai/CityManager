@@ -22,6 +22,7 @@ export function treasuryAtMonthEnds(c: City, months: number): number[] | null {
   const last = c.tick - c.tick % MONTH;
   if (last < months * MONTH) return null;
   const ends = Array.from({ length: months + 1 }, (_, i) => last - (months - i) * MONTH), out = ends.map(() => 0);
+  if(c.history){for(let i=0;i<ends.length;i++){const end=ends[i];if(end<c.history.throughTick){const point=c.history.treasuryMonthEnds.find(p=>p.tick===end);if(!point)return null;out[i]=point.balance;}else out[i]=c.history.accounts.treasury??0;}}
   for (const e of c.ledger) {
     const delta = e.to === 'treasury' ? e.amount : e.from === 'treasury' ? -e.amount : 0;
     if (delta) ends.forEach((end, i) => { if (e.tick <= end) out[i] += delta; });
@@ -123,7 +124,7 @@ export function cityRecord(c: City) {
   return {
     day: c.tick, population: s.population, households: s.households,
     produced: c.goods.produced, soldLocally: c.goods.consumed,
-    taxes: c.ledger.reduce((n, e) => n + (e.to === 'treasury' && /tax/i.test(e.reason) ? e.amount : 0), 0),
+    taxes: (c.history?.taxTotal??0)+c.ledger.reduce((n, e) => n + (e.to === 'treasury' && /tax/i.test(e.reason) ? e.amount : 0), 0),
     treasury: s.treasury,
   };
 }

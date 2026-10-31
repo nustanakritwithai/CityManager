@@ -6,7 +6,7 @@ const owner='00000000-0000-4000-8000-000000000001';
 test('legacy auth identity is read-only and preserved independently of market enablement',()=>{
  assert.equal(legacySaveOwner({getItem:()=>JSON.stringify({guestId:owner})}),owner);
  assert.equal(legacySaveOwner({getItem:()=>null}),null);
- assert.equal(legacySaveOwner({getItem:key=>key==='citymanager.save.v7'?JSON.stringify({market:{guestId:owner}}):null}),owner);
+ assert.equal(legacySaveOwner({getItem:key=>key==='citymanager.save.v7'?JSON.stringify({market:{guestId:owner}}):null}),null);
  assert.throws(()=>legacySaveOwner({getItem:()=>'{'}));
  assert.throws(()=>legacySaveOwner({getItem:()=>JSON.stringify({guestId:'wrong'})}));
 });
@@ -19,7 +19,9 @@ test('production entry and save integration has no browser city writer or offlin
  const gate=readFileSync(new URL('../src/server-city-entry.ts',import.meta.url),'utf8');
  assert.ok(!gate.includes('เล่นออฟไลน์'));
  assert.ok(gate.indexOf('await client.load()')<gate.indexOf('await client.create('));
- assert.ok(gate.indexOf('await client.archive(')<gate.indexOf('if(active)'));
+ assert.ok(!gate.includes('client.archive('));
+ assert.ok(!gate.includes('inventoryLegacyCities'));
+ assert.ok(!readFileSync(new URL('../src/city-save-auth.ts',import.meta.url),'utf8').includes('citymanager.save.'));
  assert.ok(!readFileSync(new URL('../src/city-save-auth.ts',import.meta.url),'utf8').includes('/v1/auth/guest'));
 });
 test('cookie save auth preserves CSRF and server conflict status without enabling trading',async()=>{

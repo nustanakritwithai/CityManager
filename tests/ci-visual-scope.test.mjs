@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -100,4 +100,11 @@ test('classic toolbar cosmetics require real toolbar changes and reject saving/s
  assert.equal(classicToolbarPathsOnly(paths),true);
  assert.equal(classicToolbarOnly(paths),false);assert.equal(visualKind(paths),'full','reviewed main label change and unchanged index evidence required');
  for(const invalid of [[],paths.slice(1),...['index.html','src/server-city-save.ts','src/server-city-entry.ts','server/city-saves/service.mjs','src/sim.ts','src/apartment-visuals.ts'].map(p=>[...paths,p])]){assert.equal(classicToolbarPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+
+test('history economic/save route requires reviewed source diff and rejects unrelated visuals/backend',()=>{
+ const paths=['src/city-history.ts','src/city-history-validation.ts','src/sim.ts','src/server-city-entry.ts','src/city-save-auth.ts','tests/city-history.test.ts','tests/history-validators.test.ts','tests/server-save-browser-smoke.mjs'];
+ assert.equal(historyPathsOnly(paths),true);assert.equal(historyOnly(paths),false);assert.equal(historyOnly(paths,{historySourceDiff:'unreviewed source changes'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/main.ts','index.html','src/renderer.ts','src/build-toolbar.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(historyPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, deserialize, serialize, step, farmCrop, selectFarmCrop, firmCapacity, firmWorkerCount, bulldoze } from '../src/sim.ts';
@@ -38,11 +39,10 @@ test('upgraded farm keeps identity, selection and historical journal through par
   const migrated = JSON.parse(serialize(c)); delete migrated.education; migrated.version = 15; migrated.rulesVersion = 'chain-10';
   delete migrated.farmLevelStartTick; delete migrated.factoryProgressionStartTick;
   assert.throws(() => deserialize(JSON.stringify(migrated)), /corrupt/);
-  const old = createCity(61025); for (let i = 0; i < 60; i++) step(old);
-  const oldEnvelope = JSON.parse(serialize(old)); delete oldEnvelope.education; oldEnvelope.version = 15; oldEnvelope.rulesVersion = 'chain-10';
-  delete oldEnvelope.farmLevelStartTick; delete oldEnvelope.factoryProgressionStartTick;
-  const comparable = { ...old, factoryProgressionStartTick: old.tick, farmLevelStartTick: old.tick }; delete comparable.education;
-  assert.deepEqual(deserialize(JSON.stringify(oldEnvelope)), comparable);
+  const legacy = readFileSync(new URL('./fixtures/retail-v15.json', import.meta.url), 'utf8');
+  const legacyCity = deserialize(legacy);
+  assert.equal(legacyCity.farmLevelStartTick, JSON.parse(legacy).tick);
+  assert.deepEqual(deserialize(serialize(legacyCity)), legacyCity);
   const runtime = createParkRuntime(c), session = deserializeParkSession(serializeParkSession(c, runtime));
   assert.deepEqual(session.city, c); assert.deepEqual(session.runtime, runtime);
   assert.equal(selectFarmCrop(c, f.id, 'auto').ok, true);
@@ -65,17 +65,18 @@ test('farm expansion requires water and sufficient retained working cash', () =>
 
 test('profitable farms autonomously reach level six when water is available', () => {
   const c = createCity(61025); c.utilities.outside.water = 100;
-  for (let i = 0; i < 119; i++) step(c);
+  const observed = [...c.ledger];
+  for (let i = 0; i < 119; i++) { step(c); observed.push(...c.ledger.filter(e => e.tick === c.tick)); }
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   assert.equal(selectFarmCrop(c, f.id, 'vegetables').ok, true);
   const id = f.id, wallet = f.wallet, cell = b.cell;
   for (let level = 4; level <= 6; level++) {
-    for (let i = 0; i < (level === 4 ? 1 : 30); i++) { holdEducationReady(c); step(c); }
+    for (let i = 0; i < (level === 4 ? 1 : 30); i++) { holdEducationReady(c); step(c); observed.push(...c.ledger.filter(e => e.tick === c.tick)); }
     assert.equal(b.level, level); assert.equal(f.id, id); assert.equal(f.wallet, wallet); assert.equal(b.cell, cell);
     assert.equal(farmCrop(c, f), 'vegetables');
     assert.deepEqual(deserialize(serialize(c)), c);
   }
-  const investments = c.ledger.filter(e => e.from === wallet && e.reason === 'Profitable firm height investment');
+  const investments = observed.filter(e => e.from === wallet && e.reason === 'Profitable firm height investment');
   assert.equal(investments.length, 5); assert.ok(investments.every(e => e.amount === 20_000));
 });
 
@@ -125,10 +126,11 @@ test('replay rejects a six-worker harvest truncated to the three-worker store', 
 });
 
 test('v15 migration fixes the boundary and admits valid pre- and post-upgrade harvests', () => {
-  const original = createCity(61025); for (let i = 0; i < 119; i++) step(original);
-  const old = JSON.parse(serialize(original)); delete old.education; old.version = 15; old.rulesVersion = 'chain-10'; delete old.farmLevelStartTick; delete old.factoryProgressionStartTick;
-  const c = deserialize(JSON.stringify(old)); assert.equal(c.farmLevelStartTick, 119);
-  assert.deepEqual(c.cropLedger, original.cropLedger);
+  const old = readFileSync(new URL('./fixtures/retail-v15.json', import.meta.url), 'utf8');
+  const original = JSON.parse(old), c = deserialize(old);
+  assert.equal(c.farmLevelStartTick, original.tick);
+  assert.deepEqual(c.cropLedger, original.cropLedger.filter((e: { tick: number }) => e.tick > (c.history?.throughTick ?? -1)));
+  while (c.tick < 119) step(c);
   step(c);
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   assert.equal(b.level, 4); b.level = 6;

@@ -1,3 +1,4 @@
+import { cropJournalLength } from './city-history.ts';
 import { factoryCropCapacity } from './factory-levels.ts';
 /** Canonical crop operations. Proposals are checked before synchronous commits. */
 import { farmCrop, isMarket, isRetail, type City, type Firm, type Household, type CropEntry } from './sim.ts';
@@ -47,8 +48,8 @@ function cropAccount(c: City, f: Firm, hooks: AgricultureHooks): CropAccount | n
   return validCropAccount(account) ? account : null;
 }
 function nextEntry(c: City): number {
-  if (!isSafeCount(c.tick) || !Array.isArray(c.cropLedger) || (c.cropLedger.length > 0 && c.cropLedger.at(-1)?.id !== c.cropLedger.length)) throw new RangeError('Invalid crop journal');
-  return safeAdd(c.cropLedger.length, 1);
+  if (!isSafeCount(c.tick) || !Array.isArray(c.cropLedger) || (c.cropLedger.length > 0 && c.cropLedger.at(-1)?.id !== cropJournalLength(c))) throw new RangeError('Invalid crop journal');
+  return safeAdd(cropJournalLength(c), 1);
 }
 type EntryFields = Omit<CropEntry, 'id' | 'tick'>;
 function entry(c: City, fields: EntryFields): CropEntry {

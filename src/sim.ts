@@ -1,3 +1,6 @@
+import { compactCityHistory, cropJournalLength, auditMoney } from './city-history.ts';
+import { validateCityHistory } from './city-history-validation.ts';
+import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
@@ -48,6 +51,7 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
  */
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = {
+  history?: CityHistory;
   populationCapacityVersion?: 1;
   businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
@@ -468,7 +472,7 @@ export function selectFarmCrop(c: City, firmId: number, choice: CropId | 'auto')
   const f = c.firms.find(f => f.id === firmId && f.zone === 'F');
   if (!f || (choice !== 'auto' && !CROPS.includes(choice))) return { ok: false, message: 'ไม่พบฟาร์มหรือชนิดพืชไม่ถูกต้อง' };
   const crop = choice === 'auto' ? automaticFarmCrop(c, firmId) : choice;
-  if (farmCrop(c, f) !== crop) (f.cropChoices ??= []).push({ at: c.cropLedger.length, crop });
+  if (farmCrop(c, f) !== crop) (f.cropChoices ??= []).push({ at: cropJournalLength(c), crop });
   f.cropMode = choice === 'auto' ? 'auto' : 'manual';
   return { ok: true, message: choice === 'auto' ? 'เลือกพืชอัตโนมัติแล้ว' : 'เลือกพืชสำหรับการเก็บเกี่ยวครั้งถัดไปแล้ว' };
 }
@@ -494,7 +498,7 @@ export function selectFactoryRecipe(c: City, firmId: number, choice: RecipeId | 
   const f = c.firms.find(f => f.id === firmId && f.zone === 'I');
   if (!f || !f.recipe || (choice !== 'auto' && !RECIPES.includes(choice))) return { ok: false, message: 'ไม่พบโรงงานหรือสูตรไม่ถูกต้อง' };
   const recipe = choice === 'auto' ? chooseRecipe(c, c.firms.filter(other => other.zone === 'I' && other.id !== f.id && other.recipe)) : choice;
-  if (recipe !== f.recipe) { (f.recipeChoices ??= [{ at: 0, recipe: f.recipe }]).push({ at: c.cropLedger.length, recipe }); f.recipe = recipe; }
+  if (recipe !== f.recipe) { (f.recipeChoices ??= [{ at: 0, recipe: f.recipe }]).push({ at: cropJournalLength(c), recipe }); f.recipe = recipe; }
   f.recipeMode = choice === 'auto' ? 'auto' : 'manual';
   return { ok: true, message: choice === 'auto' ? 'เลือกสูตรอัตโนมัติแล้ว' : 'เลือกสูตรโรงงานแล้ว' };
 }
@@ -734,7 +738,7 @@ function takeOver(c: City) {
     const funded = old.fundedBy, retail = isRetail(old);
     closeFirm(c, old);
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: recipe! } : old.zone === 'F' ? { cropMode: farmCropMode(old), cropChoices: [{ at: c.cropLedger.length, crop: farmCrop(c, old) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
+    c.firms.push({ id: fid, building: b.id, zone: old.zone, ...(old.zone === 'I' ? { recipe: recipe! } : old.zone === 'F' ? { cropMode: farmCropMode(old), cropChoices: [{ at: cropJournalLength(c), crop: farmCrop(c, old) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(old.commercialKind ? { commercialKind: old.commercialKind } : {}), takenOverAt: c.tick,
       wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: OWNER_STARTUP_CAPITAL, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
@@ -862,7 +866,7 @@ function createBuilding(c: City, i: number, shop = false) {
     transfer(c, 'outside', 'construction', 40_000, 'Outside residential developer investment');
   } else {
     const fid = c.nextId++, wallet = `firm:${fid}`;
-    c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : zone === 'F' ? { cropMode: 'auto' as const, cropChoices: [{ at: c.cropLedger.length, crop: automaticFarmCrop(c) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
+    c.firms.push({ id: fid, building: id, zone, ...(zone === 'I' ? { recipe: chooseRecipe(c) } : zone === 'F' ? { cropMode: 'auto' as const, cropChoices: [{ at: cropJournalLength(c), crop: automaticFarmCrop(c) }] } : {}), crops: emptyCrops(), products: emptyProducts(), ...(zone === 'C' ? { commercialKind: retail ? 'retail' as const : 'market' as const } : {}), ...(sponsor ? { fundedBy: { firmId: sponsor.id, capital: INDUSTRY_STARTUP_CAPITAL } } : {}), wallet, workDays: {}, inventory: 0, cropInventory: 0, cropCost: 0, productionTick: c.tick,
       owner: owner ? { householdId: owner.id, capitalContributed: 60_000, capitalReturned: 0, withdrawn: 0, taxPaid: 0 } : null,
       profit: 0, lastMonthProfit: 0, monthlyRevenue: 0, monthlyExpense: 0 });
     if (c.firms.length > LEGACY_MAX_FIRMS) c.businessCapacityVersion = 1;
@@ -1073,7 +1077,7 @@ function settleMonth(c: City) {
 export function departureDay(c: City, householdId: number): number | null {
   const h = c.households.find(h => h.id === householdId);
   if (!h || h.origin !== 'arrival' || householdWorkerCount(c, h.id) > 0 || c.firms.some(f => f.owner?.householdId === h.id)) return null;
-  let last = 0;
+  let last = c.history?.lastIncome[h.wallet] ?? 0;
   for (let i = c.ledger.length - 1; i >= 0; i--) {
     const e = c.ledger[i];
     if (e.to === h.wallet && (isWage(e.reason) || e.reason === 'New household arrival savings')) { last = e.tick; break; }
@@ -1111,6 +1115,7 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
     if (isWage(e.reason)) paid.add(e.to);
     else if (e.reason === 'New household arrival savings') recent.add(e.to);
   }
+  for (const [wallet,tick] of Object.entries(c.history?.lastIncome??{})) if(tick>since) paid.add(wallet);
   const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
   const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet))
     .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
@@ -1313,6 +1318,7 @@ function grow(c: City) {
 }
 export function step(c: City): void {
   withRoadScope(c, () => stepWithRoads(c));
+  compactCityHistory(c);
 }
 /** Everything a day does before growth review; shared by step() and the month-end upgrade preview. */
 function advanceToReview(c: City): void {
@@ -1328,18 +1334,31 @@ function advanceToReview(c: City): void {
  * private copy advanced through tomorrow's trade and month settlement, so the upgrade panels judge
  * the profit, cash and age that will actually be closed; otherwise it is the live city.
  */
-const reviewCache = new WeakMap<City, { key: string; view: City; grown: Map<number, number> }>();
+type GrowthReview = { key: string; view: City; grown: Map<number, number> };
+const reviewCache = new WeakMap<City, GrowthReview>();
+const reviewScopes = new WeakMap<City, { entry?: GrowthReview }>();
+/** Reuse a reviewed snapshot within one synchronous, read-only explanation pass.
+ * Never wrap commands or async work. The scope ends even when a reader throws;
+ * the next pass still checks the full state, including edits within the same day.
+ */
+export function withGrowthReviewScope<T>(c: City, read: () => T): T {
+  if (reviewScopes.has(c)) return read();
+  reviewScopes.set(c, {});
+  try { return read(); } finally { reviewScopes.delete(c); }
+}
 // Panels and tests may edit any part of the city between renders, so the whole state is the key.
 const reviewKey = (c: City) => JSON.stringify(c);
 function review(c: City) {
+  const scope = reviewScopes.get(c);
+  if (scope?.entry) return scope.entry;
   const key = reviewKey(c), hit = reviewCache.get(c);
-  if (hit && hit.key === key) return hit;
+  if (hit && hit.key === key) { if (scope) scope.entry = hit; return hit; }
   const view = structuredClone(c);
   withRoadScope(view, () => advanceToReview(view));
   // Run the real review on a second copy so shared spare water and power is spent in grow()'s order.
   const after = structuredClone(view); withRoadScope(after, () => grow(after));
   const grown = new Map(after.buildings.map(b => [b.id, b.level]));
-  const entry = { key, view, grown }; reviewCache.set(c, entry); return entry;
+  const entry = { key, view, grown }; reviewCache.set(c, entry); if (scope) scope.entry = entry; return entry;
 }
 export function reviewView(c: City): City {
   return (c.tick + 1) % MONTH !== 0 ? c : review(c).view;
@@ -1412,8 +1431,9 @@ export function serialize(c: City, market?: City['market']): string {
   if (c.education) assertEducationInvariants(c.education, c.households);
   if (c.taxi !== undefined) validateTaxi(c.taxi, taxiValidationView(c));
   if (c.bus !== undefined) validateBus(c.bus, busValidationView(c));
-  const json = JSON.stringify({ ...c, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) });
-  if (json.length > 12_000_000) throw new Error('Save journal exceeds the prototype 12 MB limit. The previous local save is preserved.');
+  const envelope = { ...c, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) };
+  const json = JSON.stringify(c.history ? {...envelope, historyBaseVersion:envelope.version, version:24, rulesVersion:'chain-19'} : envelope);
+  if (json.length > 12_000_000) throw new Error('City save exceeds the processing limit. Server save is unconfirmed; keep this page open.');
   return json;
 }
 
@@ -1459,6 +1479,7 @@ const RULES = { 7: 'chain-2', 8: 'chain-3', 9: 'chain-4' } as const;
 /** Every rule of a chain-2 (v7) save; chain-3 (v8) also reconciles typed stock, chain-4 (v9) its plants. */
 function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaffing = false, withDensity = false, extendedFactories = false, retailMaxLevel = RETAIL_LEGACY_MAX_LEVEL, withFarmLevels = false, expandedPopulation = false, expandedBusinesses = false): City {
   const typed = version >= 8;
+  const historicalLedger = auditMoney(c);
   const fail = (): never => { throw new Error(`Unsupported or corrupt CityManager save (expected version ${version} / ${RULES[version]}).`); };
   const int = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min;
   if (!c || (c.version as number) !== version || (c.rulesVersion as string) !== RULES[version] || !int(c.growthStartTick) || c.growthStartTick > c.tick || !int(c.seed) || c.seed > 4294967295 || !int(c.rng) || c.rng > 4294967295 || !int(c.tick) || !int(c.nextId, 1) || c.nextId > Number.MAX_SAFE_INTEGER - 2 || typeof c.lastEvent !== 'string') fail();
@@ -1492,7 +1513,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     const premise = c.buildings.find(b => b.id === f.building)!;
     if (f.zone === 'C' ? !['market', 'retail'].includes(f.commercialKind!) || (isMarket(f) ? premise.level !== 1 : premise.level < 2) : f.commercialKind !== undefined) fail();
     if (f.takenOverAt !== undefined) {
-      const opened = c.ledger.filter(e => e.from === f.wallet && e.to === 'construction' && e.tick === f.takenOverAt && (/^Self-employed (?:shop|market) construction$/.test(e.reason) ? !!f.owner && e.amount === 10_000 : !f.owner && e.amount === TAKEOVER_REFIT && (e.reason === `Business takeover refit #${f.id}` || /^Funded industry takeover #[1-9]\d*$/.test(e.reason))));
+      const opened = historicalLedger.filter(e => e.from === f.wallet && e.to === 'construction' && e.tick === f.takenOverAt && (/^Self-employed (?:shop|market) construction$/.test(e.reason) ? !!f.owner && e.amount === 10_000 : !f.owner && e.amount === TAKEOVER_REFIT && (e.reason === `Business takeover refit #${f.id}` || /^Funded industry takeover #[1-9]\d*$/.test(e.reason))));
       if (version < 9 || !int(f.takenOverAt, 1) || f.takenOverAt > c.tick || f.takenOverAt < c.tick - premise.age || f.fundedBy !== undefined || f.convertedAt !== undefined || opened.length !== 1) fail();
     }
     if (f.convertedAt !== undefined && (!isRetail(f) || !f.owner || !int(f.convertedAt, 1) || f.convertedAt > c.tick || premise.level < 2)) fail();
@@ -1502,16 +1523,16 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   }
   for (const p of version === 9 ? c.plants : []) {
     if (!p || Object.keys(p).length !== 4 || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell) || !UTILITY_KINDS.includes(p.kind) || !int(p.tick) || p.tick > c.tick) fail();
-    const cell = c.cells[p.cell], built = c.ledger.filter(e => e.reason === `Build ${PLANT_NAMES[p.kind]} #${p.id}`);
+    const cell = c.cells[p.cell], built = historicalLedger.filter(e => e.reason === `Build ${PLANT_NAMES[p.kind]} #${p.id}`);
     if (cell.road || cell.zone !== null || cell.building !== null || c.plants.some(q => q !== p && q.cell === p.cell)) fail();
     if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PLANTS[p.kind].cost || built[0].tick !== p.tick) fail();
     ids.add(p.id);
   }
   for (const p of c.parks) {
     if (!p || Object.keys(p).length !== (withStaffing && p.staffing !== undefined ? 5 : 4) || (!withStaffing && p.staffing !== undefined) || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell) || p.level !== 1 || !int(p.tick) || p.tick > c.tick) fail();
-    const cell = c.cells[p.cell], built = c.ledger.filter(e => e.reason === `Build park #${p.id}`);
+    const cell = c.cells[p.cell], built = historicalLedger.filter(e => e.reason === `Build park #${p.id}`);
     if (cell.road || cell.zone !== null || cell.building !== null || c.plants.some(q => q.cell === p.cell) || c.parks.some(q => q !== p && q.cell === p.cell)) fail();
-    if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PARK.cost || built[0].tick !== p.tick || c.ledger.some(e => e.reason === `Demolish park #${p.id}`)) fail();
+    if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PARK.cost || built[0].tick !== p.tick || historicalLedger.some(e => e.reason === `Demolish park #${p.id}`)) fail();
     ids.add(p.id);
   }
   const parkBuilds = new Map<number, number>(), parkRemoved = new Set<number>(), parkBills = new Set<string>();
@@ -1530,7 +1551,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   if (c.parks.reduce((n, p) => n + parkPayroll(p), 0) > balance(c, 'treasury')) fail();
   const parkPaid = new Map<string, number>();
   const parkPayments = new Set<string>();
-  for (const e of c.ledger) {
+  for (const e of historicalLedger) {
     const wage = /^Monthly park wages #([1-9]\d*)$/.exec(e.reason);
     if (wage) {
       const id = Number(wage[1]), built = parkBuilds.get(id), key = `${id}:${Math.ceil(e.tick / MONTH)}`;
@@ -1538,7 +1559,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       // A claim is settled once per wallet. Mid-month settlements only occur on
       // demolition; accepting one on a live park would leave already-paid days owed.
       const payment = `${id}:${e.tick}:${e.to}`;
-      if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !c.ledger.some(row => row.tick === e.tick && row.reason === `Demolish park #${id}`)) fail();
+      if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !historicalLedger.some(row => row.tick === e.tick && row.reason === `Demolish park #${id}`)) fail();
       parkPayments.add(payment);
       const paid = (parkPaid.get(key) ?? 0) + e.amount;
       if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * PARK_STAFF.dailyWage) fail();
@@ -1586,10 +1607,10 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   }
   for (const f of c.firms) if (firmWorkerCount(c, f.id) > capacity(building(c, f.building)) || Object.values(f.workDays).reduce((n, days) => n + days, 0) > capacity(building(c, f.building)) * (c.tick % MONTH)) fail();
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();
-  if (!Array.isArray(c.ledger) || !Array.isArray(c.goodsLedger)) fail();
-  for (const e of c.ledger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || !Object.hasOwn(c.accounts, e.from) || !Object.hasOwn(c.accounts, e.to) || e.from === e.to) fail();
+  if (!Array.isArray(historicalLedger) || !Array.isArray(c.goodsLedger)) fail();
+  for (const e of historicalLedger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || !Object.hasOwn(c.accounts, e.from) || !Object.hasOwn(c.accounts, e.to) || e.from === e.to) fail();
   const expansionFunding = new Map<number, Entry>(), bootstrapFunding = new Map<number, Entry>(), outsideFunding = new Map<number, Entry>();
-  for (const e of c.ledger) {
+  for (const e of historicalLedger) {
     const expansion = /^Industry expansion capital #([1-9]\d*)$/.exec(e.reason), bootstrap = /^Outside industry bootstrap equity #([1-9]\d*)$/.exec(e.reason), outsideEquity = /^Outside industry equity #([1-9]\d*)$/.exec(e.reason);
     if (outsideEquity) {
       const id = Number(outsideEquity[1]);
@@ -1620,7 +1641,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     if (outsideFunding.has(f.id) && (f.zone !== 'I' || f.fundedBy)) fail();
   }
   const closureMarkers = new Map<number, number>();
-  c.ledger.forEach((e, index) => {
+  historicalLedger.forEach((e, index) => {
     const match = /^Funded industry (demolition|takeover) #([1-9]\d*)$/.exec(e.reason); if (!match) return;
     // A funded factory closes by demolition (the treasury pays) or by a takeover (the new firm pays its refit).
     const id = Number(match[2]), funding = expansionFunding.get(id), takeover = match[1] === 'takeover';
@@ -1629,36 +1650,37 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   });
   for (const [id, funding] of expansionFunding) {
     const parent = c.firms.find(f => f.wallet === funding.from);
-    const historicalIndustry = c.goodsLedger.some(e => e.from === 'production' && e.to === funding.from && e.tick <= funding.tick);
+    const historicalIndustry = (c.history?.firstProduction[funding.from]??Infinity)<=funding.tick || c.goodsLedger.some(e => e.from === 'production' && e.to === funding.from && e.tick <= funding.tick);
     if (parent ? parent.zone !== 'I' : !historicalIndustry) fail();
     if (!c.firms.some(f => f.id === id)) {
       const closedAt = closureMarkers.get(id); if (closedAt === undefined) fail();
-      const estateReceipts = c.ledger.slice(closedAt! + 1).filter(e => /^Industry expansion residual return #[1-9]\d*$/.test(e.reason) && e.to === funding.to).reduce((n, e) => n + e.amount, 0);
+      const estateReceipts = historicalLedger.slice(closedAt! + 1).filter(e => /^Industry expansion residual return #[1-9]\d*$/.test(e.reason) && e.to === funding.to).reduce((n, e) => n + e.amount, 0);
       if (balance(c, funding.to) !== estateReceipts) fail();
     }
   }
   const returned = new Set<number>();
-  for (const e of c.ledger) {
+  for (const e of historicalLedger) {
     const match = /^Industry expansion residual return #([1-9]\d*)$/.exec(e.reason); if (!match) continue;
     const id = Number(match[1]), funding = expansionFunding.get(id);
     if (!funding || e.from !== funding.to || e.to !== funding.from || e.tick < funding.tick || !closureMarkers.has(id) || returned.has(id) || c.firms.some(f => f.id === id)) fail();
     returned.add(id);
   }
   const arrivals = c.households.filter(h => h.origin === 'arrival'), legacyCount = c.households.filter(h => h.origin === 'legacy-v1').length;
-  const arrivalEntries = c.ledger.filter(e => e.reason === 'New household arrival savings');
+  const arrivalEntries = historicalLedger.filter(e => e.reason === 'New household arrival savings');
   // Departed arrivals keep their funding entry and a zero wallet; the departure count covers them.
   const departures = c.migration.departures ?? 0;
-  if (!int(departures) || departures > arrivalEntries.length - arrivals.length) fail();
-  if (c.migration.legacyHouseholds !== legacyCount || c.migration.arrivals !== Math.max(legacyCount, arrivalEntries.length - arrivals.length - departures) + arrivals.length + departures) fail();
-  for (const e of c.ledger) if (e.reason === 'Emigration savings' && (e.to !== 'outside' || c.households.some(h => h.wallet === e.from) || !/^household:\d+$/.test(e.from))) fail();
+  const arrivalTotal=(c.history?.arrivalCount??0)+c.ledger.filter(e=>e.reason==='New household arrival savings').length;
+  if (!int(departures) || departures > arrivalTotal - arrivals.length) fail();
+  if (c.migration.legacyHouseholds !== legacyCount || c.migration.arrivals !== Math.max(legacyCount, arrivalTotal - arrivals.length - departures) + arrivals.length + departures) fail();
+  for (const e of historicalLedger) if (e.reason === 'Emigration savings' && (e.to !== 'outside' || c.households.some(h => h.wallet === e.from) || !/^household:\d+$/.test(e.from))) fail();
   const arrivalDays = new Set<number>();
   for (const h of arrivals) {
     const funding = arrivalEntries.filter(e => e.to === h.wallet);
     if (funding.length !== 1 || funding[0].from !== 'outside' || funding[0].amount !== 150_000 || arrivalDays.has(funding[0].tick)) fail();
     arrivalDays.add(funding[0].tick);
   }
-  const goodsBalances: Record<string, number> = {};
-  let produced = 0, imported = 0, consumed = 0, exported = 0;
+  const goodsBalances: Record<string, number> = {...c.history?.goodsBalances};
+  let {produced,imported,consumed,exported}=c.history?.goodsTotals??{produced:0,imported:0,consumed:0,exported:0};
   for (const e of c.goodsLedger) {
     if (!e || !int(e.tick) || e.tick > c.tick || !int(e.quantity, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || e.from === e.to || !/^(production|outside|firm:\d+)$/.test(e.from) || !/^(outside|firm:\d+|household:\d+)$/.test(e.to) || (e.from !== 'production' && !(e.from in c.accounts)) || !(e.to in c.accounts)) fail();
     goodsBalances[e.from] = (goodsBalances[e.from] ?? 0) - e.quantity;
@@ -1669,7 +1691,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     if (e.to === 'outside') exported += e.quantity;
   }
   if (produced !== c.goods.produced || imported !== c.goods.imported || consumed !== c.goods.consumed || exported !== c.goods.exported || c.firms.some(f => (goodsBalances[f.wallet] ?? 0) !== f.inventory) || Object.entries(goodsBalances).some(([wallet, amount]) => wallet.startsWith('firm:') && !c.firms.some(f => f.wallet === wallet) && amount !== 0)) fail();
-  const reconciled: Record<string, number> = Object.fromEntries(Object.keys(c.accounts).map(k => [k, 0]));
+  const reconciled: Record<string, number> = Object.fromEntries(Object.keys(c.accounts).map(k => [k, c.history?.accounts[k]??0]));
   for (const e of c.ledger) { reconciled[e.from] -= e.amount; reconciled[e.to] += e.amount; }
   if (Object.entries(c.accounts).some(([key, value]) => reconciled[key] !== value)) fail();
   validateAgriculture(c, extendedFactories, withFarmLevels);
@@ -1684,6 +1706,14 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 24) {
+    const envelope=parsed as Record<string,unknown>;
+    if(envelope.rulesVersion!=='chain-19'||![19,20,21,22,23].includes(Number(envelope.historyBaseVersion)))throw Error('Invalid history save version');
+    validateCityHistory(envelope as unknown as City);
+    const {historyBaseVersion,...rest}=envelope;
+    const rules:Record<number,string>={19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18'};
+    return deserializeVersioned(JSON.stringify({...rest,version:historyBaseVersion,rulesVersion:rules[Number(historyBaseVersion)]}),expandedPopulation,expandedBusinesses);
+  }
   if (version === 23) {
     const envelope = parsed as Record<string, unknown>;
     if (envelope.rulesVersion !== 'chain-18' || envelope.businessCapacityVersion !== 1) throw new Error('Invalid business capacity save version');
@@ -1793,6 +1823,8 @@ export function busValidationView(c: City): BusValidationView {
   };
 }
 export function deserialize(json: string): City {
+  const header=JSON.parse(json);
+  if(header?.history&&header.version!==24)throw Error('Unsupported or corrupt history checkpoint: requires save v24');
   const city = deserializeVersioned(json);
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.
   if ('taxi' in city) validateTaxi(city.taxi, taxiValidationView(city));
@@ -1800,5 +1832,6 @@ export function deserialize(json: string): City {
   if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
   if (city.factoryProgressionStartTick === undefined) city.factoryProgressionStartTick = city.tick;
   if (city.farmLevelStartTick === undefined) city.farmLevelStartTick = city.tick;
+  compactCityHistory(city);
   return city;
 }

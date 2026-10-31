@@ -1,5 +1,5 @@
 /** Read-only, current-state explanations shared by the map and the existing place panel. */
-import { access, buildingEducationStatus, economicSignals, firmCapacity, firmWorkerCount, homeOccupancy, housingUpgradeStatus, isMarket, isRetail, marketConversionStatus, parkStaffingStatus, productionUpgradeStatus, retailGrowthStatus, reviewIsTomorrow, utilities, withRoadScope, type City } from './sim.ts';
+import { access, buildingEducationStatus, economicSignals, firmCapacity, firmWorkerCount, homeOccupancy, housingUpgradeStatus, isMarket, isRetail, marketConversionStatus, parkStaffingStatus, productionUpgradeStatus, retailGrowthStatus, reviewIsTomorrow, utilities, withRoadScope, withGrowthReviewScope, type City } from './sim.ts';
 import { contextRevision } from './context-data.ts';
 import { CROP_RECIPE, farmStockCapacity } from './agriculture.ts';
 import { CROP_LABELS, RECIPE } from './goods.ts';
@@ -26,7 +26,7 @@ export function buildingIssueRevision(city: City): string {
 export function buildingIssues(city: City): Issue[] {
   const revision = buildingIssueRevision(city), hit = cache.get(city);
   if (hit?.revision === revision) return hit.issues;
-  const issues = withRoadScope(city, () => collect(city));
+  const issues = withRoadScope(city, () => withGrowthReviewScope(city, () => collect(city)));
   cache.set(city, { revision, issues }); return issues;
 }
 function collect(city: City): Issue[] {

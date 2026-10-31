@@ -1,3 +1,4 @@
+import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
@@ -13,6 +14,16 @@ type Operating = { tick: number; revenue: number; expense: number; moneyIndex?: 
 
 /** No repair, allocation, time advance or writes occur here. Historical roads are not inferred. */
 export function validateAgriculture(c: City, extendedFactories = false, withFarmLevels = true): void {
+  replayAgriculture(c, extendedFactories, withFarmLevels);
+}
+type AgricultureSeed = Pick<CityHistory, 'cropHoldings'|'cropTotals'|'latestPurchase'|'roles'|'farmMinimumLevels'|'ownerFinance'>;
+export function captureAgricultureHistory(c: City, throughTick: number): AgricultureSeed {
+  validateAgriculture(c, true, true);
+  requireThat(isSafeCount(throughTick) && throughTick % 30 === 0 && throughTick >= (c.history?.throughTick ?? 0) && throughTick <= c.tick);
+  return replayAgriculture(c, true, true, throughTick)!;
+}
+function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: boolean, captureTick?: number): AgricultureSeed | undefined {
+  const history = c.history;
   requireThat(isCanonicalResourceMap(c.resources, c.seed));
   requireThat(isSafeCount(c.agricultureStartTick) && c.agricultureStartTick <= c.tick);
   requireThat(object(c.crops) && ['harvested', 'processed', 'consumed', 'writtenOff'].every(key => isSafeCount(c.crops[key as keyof City['crops']])));
@@ -57,7 +68,7 @@ export function validateAgriculture(c: City, extendedFactories = false, withFarm
   c.ledger.forEach((e, i) => { const rows = cashReasons.get(e.reason) ?? []; rows.push(i); cashReasons.set(e.reason, rows); });
   c.goodsLedger.forEach((e, i) => { const rows = goodsReasons.get(e.reason) ?? []; rows.push(i); goodsReasons.set(e.reason, rows); });
   const matchedCash = new Set<number>(), matchedGoods = new Set<number>();
-  const roles = new Map<string, Role>(), holdings = new Map<string, Holding>(), operating = new Map<string, Operating[]>();
+  const roles = new Map<string, Role>(Object.entries(history?.roles ?? {})), holdings = new Map<string, Holding>(Object.entries(history?.cropHoldings ?? {}).map(([w,h]) => [w, {...h}])), operating = new Map<string, Operating[]>();
   // A demolished firm's earlier market receipt has no embedded role. Recover
   // any provable role from its other journal entries before replaying stock.
   if (extendedFactories) {
@@ -118,7 +129,7 @@ export function validateAgriculture(c: City, extendedFactories = false, withFarm
     requireThat(!matchedCash.has(index) && payment.tick === e.tick && payment.from === from && payment.to === to && payment.amount === e.cash);
     matchedCash.add(index); return index;
   };
-  const baskets = new Map<string, number>(), latestPurchase = new Map<string, number>();
+  const baskets = new Map<string, number>(), latestPurchase = new Map<string, number>(Object.entries(history?.latestPurchase ?? {}));
   const basket = (tick: number, wallet: string, quantity: number) => {
     requireThat(isSafeCount(quantity, 1) && /^household:[1-9][0-9]*$/.test(wallet) && Object.hasOwn(c.accounts, wallet));
     const key = tick + ':' + wallet, count = (baskets.get(key) ?? 0) + quantity;
@@ -127,17 +138,18 @@ export function validateAgriculture(c: City, extendedFactories = false, withFarm
     requireThat(count <= limit); baskets.set(key, count);
     latestPurchase.set(wallet, Math.max(tick, latestPurchase.get(wallet) ?? -1));
   };
-  for (const e of c.goodsLedger) if (e.tick > c.agricultureStartTick && e.to.startsWith('household:')) basket(e.tick, e.to, e.quantity);
-  let previousTick = c.agricultureStartTick, day = -1;
+  for (const e of c.goodsLedger) if (e.tick > c.agricultureStartTick && (captureTick === undefined || e.tick <= captureTick) && e.to.startsWith('household:')) basket(e.tick, e.to, e.quantity);
+  let previousTick = history?.throughTick ?? c.agricultureStartTick, day = -1;
   let sellable = new Map<string, number>();
   const dailyProduction = new Set<string>();
   // Farms never lose levels; the smallest level compatible with the journal so far
   // must remain possible at every subsequent harvest for the same firm.
-  const farmMinimumLevels = new Map<string, number>();
-  const totals = { harvested: 0, processed: 0, consumed: 0, writtenOff: 0, exported: 0 };
+  const farmMinimumLevels = new Map<string, number>(Object.entries(history?.farmMinimumLevels ?? {}));
+  const totals = { ...(history?.cropTotals ?? { harvested: 0, processed: 0, consumed: 0, writtenOff: 0, exported: 0 }) };
   for (let i = 0; i < c.cropLedger.length; i++) {
     const e = c.cropLedger[i];
-    requireThat(object(e) && e.id === i + 1 && isSafeCount(e.tick) && e.tick > c.agricultureStartTick && e.tick >= previousTick && e.tick <= c.tick && typeof e.from === 'string' && typeof e.to === 'string' && e.from !== e.to && typeof e.reason === 'string');
+    if (captureTick !== undefined && e.tick > captureTick) break;
+    requireThat(object(e) && e.id === (history?.cropOffset ?? 0) + i + 1 && isSafeCount(e.tick) && e.tick > (history?.throughTick ?? c.agricultureStartTick) && e.tick >= previousTick && e.tick <= c.tick && typeof e.from === 'string' && typeof e.to === 'string' && e.from !== e.to && typeof e.reason === 'string');
     requireThat(['quantity', 'fromValue', 'toValue', 'cash', 'workers', 'batches', 'outputQuantity'].every(key => isSafeCount(e[key as keyof CropEntry], key === 'quantity' ? 1 : 0)));
     previousTick = e.tick;
     if (day !== e.tick) { day = e.tick; sellable = new Map([...holdings].map(([wallet, h]) => [wallet, h.quantity])); }
@@ -211,6 +223,33 @@ export function validateAgriculture(c: City, extendedFactories = false, withFarm
     }
     for (const wallet of [e.from, e.to]) { const f = firms.get(wallet); if (f) requireThat(f.productionTick >= e.tick); }
   }
+  if (captureTick !== undefined) {
+    const ownerFinance = structuredClone(history?.ownerFinance ?? {});
+    for (const f of c.firms.filter(f => f.owner)) {
+      const seed = ownerFinance[f.wallet] ?? { contributed: 0, withdrawn: 0, taxPaid: 0, cash: 0, profit: 0 };
+      for (const e of c.ledger) {
+        if (e.tick > captureTick || (e.from !== f.wallet && e.to !== f.wallet)) continue;
+        if (e.reason === 'Owner capital contribution') seed.contributed += e.amount;
+        if (e.reason === 'Owner profit distribution') seed.withdrawn += e.amount;
+        if (e.reason === 'Monthly firm profit tax') seed.taxPaid += e.amount;
+        if (e.to === f.wallet) seed.cash += e.amount;
+        if (e.from === f.wallet) seed.cash -= e.amount;
+        if (e.from === f.wallet && ['Monthly firm rent','Monthly water and power bill'].includes(e.reason)) seed.profit -= e.amount;
+      }
+      for (const e of operating.get(f.wallet) ?? []) seed.profit += e.revenue - e.expense;
+      requireThat(Object.values(seed).every(Number.isSafeInteger));
+      ownerFinance[f.wallet] = seed;
+    }
+    const needed = new Set([...c.firms.map(f => f.wallet), ...c.cropLedger.filter(e => e.tick > captureTick).flatMap(e => [e.from,e.to])]);
+    for (const [w,h] of holdings) if (!needed.has(w) && h.quantity === 0 && h.value === 0) holdings.delete(w);
+    for (const w of roles.keys()) if (!needed.has(w)) roles.delete(w);
+    for (const w of farmMinimumLevels.keys()) if (!needed.has(w)) farmMinimumLevels.delete(w);
+    const currentHouseholds = new Set(c.households.map(h => h.wallet));
+    for (const w of latestPurchase.keys()) if (!currentHouseholds.has(w)) latestPurchase.delete(w);
+    const currentOwners = new Set(c.firms.filter(f => f.owner).map(f => f.wallet));
+    for (const w of Object.keys(ownerFinance)) if (!currentOwners.has(w)) delete ownerFinance[w];
+    return { cropHoldings: Object.fromEntries(holdings), cropTotals: totals, latestPurchase: Object.fromEntries(latestPurchase), roles: Object.fromEntries(roles), farmMinimumLevels: Object.fromEntries(farmMinimumLevels), ownerFinance };
+  }
   for (const key of ['harvested', 'processed', 'consumed', 'writtenOff'] as const) requireThat(totals[key] === c.crops[key]);
   requireThat(totals.exported === (c.crops.exported ?? 0) && (c.crops.exported === undefined || isSafeCount(c.crops.exported)));
   for (const [wallet, h] of holdings) {
@@ -229,7 +268,8 @@ export function validateAgriculture(c: City, extendedFactories = false, withFarm
 /** A household-owned shop: its owner paid the opening capital and every owner movement is in the ledger. */
 function validateShopOwner(c: City, f: Firm): void {
   const owner = f.owner!, wallet = `household:${owner.householdId}`;
-  let contributed = 0n, withdrawn = 0n, taxPaid = 0n;
+  const seed = c.history?.ownerFinance[f.wallet];
+  let contributed = BigInt(seed?.contributed ?? 0), withdrawn = BigInt(seed?.withdrawn ?? 0), taxPaid = BigInt(seed?.taxPaid ?? 0);
   for (const e of c.ledger) {
     if (e.from !== f.wallet && e.to !== f.wallet) continue;
     requireThat(!e.reason.startsWith('Closing owner ') && e.reason !== 'Outside firm equity investment');
@@ -239,23 +279,24 @@ function validateShopOwner(c: City, f: Firm): void {
   }
   requireThat(contributed === BigInt(owner.capitalContributed) && withdrawn === BigInt(owner.withdrawn) && taxPaid === BigInt(owner.taxPaid));
   const built = f.convertedAt === undefined ? 'Self-employed shop construction' : 'Self-employed market construction';
-  const construction = c.ledger.filter(e => e.from === f.wallet && e.reason === built);
+  const construction = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.from === f.wallet && e.reason === built);
   requireThat(construction.length === 1 && construction[0].to === 'construction' && construction[0].amount === 10_000);
-  const refit = c.ledger.filter(e => e.from === f.wallet && e.reason === 'Market to shop conversion');
+  const refit = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.from === f.wallet && e.reason === 'Market to shop conversion');
   requireThat(f.convertedAt === undefined ? refit.length === 0 : refit.length === 1 && refit[0].to === 'construction' && refit[0].amount === 20_000 && refit[0].tick === f.convertedAt);
 }
 
 /** Capital/earnings movements are distinct from the stall's operating result. */
 function validateOwnerFinance(c: City, f: Firm, operating: Operating[]): void {
   const owner = f.owner!, wallet = `household:${owner.householdId}`;
-  let contributed = 0n, withdrawn = 0n, taxPaid = 0n, cash = 0n;
+  const seed = c.history?.ownerFinance[f.wallet];
+  let contributed = BigInt(seed?.contributed ?? 0), withdrawn = BigInt(seed?.withdrawn ?? 0), taxPaid = BigInt(seed?.taxPaid ?? 0), cash = BigInt(seed?.cash ?? 0);
   const rows = [...operating];
   c.ledger.forEach((e, i) => {
     if (e.from === f.wallet && e.reason === 'Monthly firm rent') { requireThat(e.to === 'landlord'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
     // Water and power bills (chain-4) are operating costs too.
     if (e.from === f.wallet && e.reason === 'Monthly water and power bill') { requireThat(e.to === 'treasury'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
   });
-  const earnings = (endTick: number, endIndex = Infinity, fromTick = -1) => rows.filter(e => e.tick > fromTick && e.tick <= endTick && (e.moneyIndex === undefined || e.moneyIndex < endIndex)).reduce((n, e) => n + BigInt(e.revenue) - BigInt(e.expense), 0n);
+  const earnings = (endTick: number, endIndex = Infinity, fromTick = -1) => (fromTick < (c.history?.throughTick ?? -1) ? BigInt(seed?.profit ?? 0) : 0n) + rows.filter(e => e.tick > fromTick && e.tick <= endTick && (e.moneyIndex === undefined || e.moneyIndex < endIndex)).reduce((n, e) => n + BigInt(e.revenue) - BigInt(e.expense), 0n);
   for (let i = 0; i < c.ledger.length; i++) {
     const e = c.ledger[i]; if (e.from !== f.wallet && e.to !== f.wallet) continue;
     if (e.to === f.wallet) requireThat(e.reason === 'Owner capital contribution' || /^(?:Crop exchange|Fresh crop purchase) #\d+$/.test(e.reason));
@@ -271,7 +312,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[]): void {
     if (e.from === f.wallet) cash -= BigInt(e.amount); if (e.to === f.wallet) cash += BigInt(e.amount); requireThat(cash >= 0n);
   }
   requireThat(contributed === BigInt(owner.capitalContributed) && withdrawn === BigInt(owner.withdrawn) && taxPaid === BigInt(owner.taxPaid));
-  const construction = c.ledger.filter(e => e.from === f.wallet && e.reason === 'Self-employed market construction');
+  const construction = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.from === f.wallet && e.reason === 'Self-employed market construction');
   requireThat(construction.length === 1 && construction[0].to === 'construction' && construction[0].amount === 10_000);
   const settled = c.tick - c.tick % 30;
   requireThat(BigInt(f.profit) === earnings(settled) && BigInt(f.lastMonthProfit) === earnings(settled, Infinity, settled - 30));
