@@ -28,3 +28,9 @@ test('factory route requires its source marker and rejects mixed scopes or unrel
   for (const invalid of [[], ['tests/factory-visuals.test.ts'], ['.github/workflows/citymanager.yml'], [...paths, 'src/main.ts'], [...paths, 'src/auto-cleanup.ts'], [...paths, 'src/factory-visuals.ts.old'], [...paths, 'src/asset-models.ts'], [...paths, 'tests/luxury-tower-smoke.mjs']]) assert.equal(visualKind(invalid), 'full');
   assert.equal(visualKind(['src/renderer.ts', 'tests/factory-smoke.mjs']), 'full', 'shared renderer alone does not select factory route');
 });
+
+test('farm route requires its source marker and never absorbs factory or unrelated changes', () => {
+  const paths = ['src/farm-visuals.ts', 'src/renderer.ts', 'tests/farm-visuals.test.ts', 'tests/farm-preview.ts', 'tests/farm-preview.html', 'tests/farm-smoke.mjs', 'vite.farm.config.ts', '.github/workflows/citymanager.yml', '.github/workflows/player-feedback.yml', 'scripts/ci-visual-scope.mjs', 'tests/ci-visual-scope.test.mjs'];
+  assert.equal(visualKind(paths), 'farm');
+  for (const invalid of [['tests/farm-visuals.test.ts'], ['src/renderer.ts', 'tests/farm-smoke.mjs'], [...paths, 'src/main.ts'], [...paths, 'src/factory-visuals.ts'], [...paths, 'tests/factory-smoke.mjs'], [...paths, 'src/asset-models.ts'], [...paths, 'src/farm-visuals.ts.old']]) assert.equal(visualKind(invalid), 'full');
+});
