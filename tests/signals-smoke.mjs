@@ -1,4 +1,5 @@
 // Installed Edge, isolated loopback port/profile; no provider or authentication calls.
+import { documentIdentityScript, navigateDocument } from './active-local-save-navigation.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
@@ -78,11 +79,28 @@ try {
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: documentIdentityScript });
   await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready');
   assert.equal(await evaluate('document.querySelector("#signal-entry").hidden'), true, 'Pilot hidden without feature flag');
   checks.push('Default feature gate hides panel and creates no report request');
 
-  await send('Page.navigate', { url: `${url}?signals=1&starter=1` }); await until('!!window.cityManager && window.cityManager.visuals().ready');
+  // #141: the same profile now holds a stored city, so this boot opens the protected
+  // #startup-recovery-chooser modal over the HUD. Confirm the NEW document, then enter
+  // the preselected city with the real hit-tested Enter button before using the HUD.
+  await navigateDocument({ send, evaluate, url: `${url}?signals=1&starter=1`, ready: "!!document.querySelector('#startup-recovery-chooser[open]') || (!!window.cityManager && window.cityManager.visuals().ready)" });
+  if (await evaluate("!!document.querySelector('#startup-recovery-chooser[open]')")) {
+    await until("[...(document.querySelector('#startup-city-choice')?.options??[])].some(o=>o.value)");
+    if (await evaluate("document.querySelector('#startup-enter-city').disabled")) {
+      // No preselection: choose the stored primary (else first real choice) with real keyboard input.
+      if (await evaluate("document.querySelector('#startup-city-choice').hidden")) await button('#startup-change-city');
+      await button('#startup-city-choice');
+      const index = await evaluate("(()=>{const o=[...document.querySelector('#startup-city-choice').options];const i=o.findIndex(x=>x.value==='stored:current');return i>=0?i:o.findIndex(x=>x.value)})()");
+      const key = async (k, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: code === 'Home' ? 36 : code === 'ArrowDown' ? 40 : 13 }); };
+      await key('Home', 'Home'); for (let i = 0; i < index; i++) await key('ArrowDown', 'ArrowDown'); await key('Enter', 'Enter');
+      await until("!document.querySelector('#startup-enter-city').disabled");
+    }
+    await button('#startup-enter-city'); await until("!document.querySelector('#startup-recovery-chooser[open]')"); checks.push('Second visit passes the protected startup chooser by explicit Enter'); }
+  await until('!!window.cityManager && window.cityManager.visuals().ready');
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fixture = createCity(61025); for (let n = 0; n < 65; n++) step(fixture);
   await button('#toggle-game-menu');

@@ -30,3 +30,16 @@ test('quota detection variants and status text', () => {
   assert.ok(isQuotaError({ name: 'NS_ERROR_DOM_QUOTA_REACHED' })); assert.ok(isQuotaError({ code: 22 })); assert.ok(!isQuotaError(new Error('x')));
   assert.match(describeAutosave({ ok: true, at: 0 }, () => '10:00'), /10:00/);
 });
+
+test('after Load, autosave adopts the loaded bytes and does not rewrite them until the city changes', async () => {
+  const store = new Mem(); const original = '{"version":1,"legacy":true}'; store.setItem(SAVE_KEY, original);
+  let revision = 'loaded-rev', tick = 7, writes = 0;
+  const auto = createAutosave({ save: () => { writes++; store.setItem(SAVE_KEY, JSON.stringify({ tick, revision })); }, tick: () => tick, revision: () => revision, onResult: () => {} });
+  auto.adoptLoaded(); assert.equal(auto.last, null, 'adopting does not claim a save happened');
+  for (let i = 0; i < 3; i++) await auto.run();
+  assert.equal(writes, 0); assert.equal(store.getItem(SAVE_KEY), original, 'Loading does not rewrite the original save bytes');
+  revision = 'edited'; tick = 8; await auto.run();
+  assert.equal(writes, 1); assert.equal(store.getItem(SAVE_KEY), '{"tick":8,"revision":"edited"}');
+  await auto.run(); assert.equal(writes, 1, 'unchanged after the write is skipped');
+  auto.adoptLoaded(); await auto.run(true); assert.equal(writes, 2, 'explicit flush still writes');
+});
