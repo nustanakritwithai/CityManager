@@ -1,3 +1,4 @@
+import {isRailReserved,RAIL_PARCEL_MESSAGE} from '../rail/reserved-parcels.ts';
 import { connectedRoads, SIZE, campusAt, parkAt, plantAt, type City, type Result } from '../sim.ts';
 import { taxiAt } from '../taxi/buildings.ts';
 import { busDepotAt, busStopAt, busStopReason, busStopSides, createBus, removeBusDepotFromState, removeStopsFromState } from './buildings.ts';
@@ -10,6 +11,7 @@ const OFF = 'ระบบรถเมล์ยังไม่เปิดใช�
 export function busDepotReason(c: City, i: number, enabled = busEnabled()): string | null {
   if (!enabled) return OFF;
   if (!Number.isInteger(i) || i < 0 || i >= SIZE * SIZE) return 'ตำแหน่งอยู่นอกแผนที่';
+  if(isRailReserved(c,i))return RAIL_PARCEL_MESSAGE;
   const cell = c.cells[i];
   if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return 'อู่รถเมล์ต้องใช้แปลงว่างที่ยังไม่ลงโซน';
   if (!neighbours(i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';

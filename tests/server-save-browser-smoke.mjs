@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { inflateSync, deflateSync } from 'node:zlib';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
+let railEvidence={status:'not-run',reason:'Rail UI acceptance is opt-in for the exact rail transition.'};
 let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
 const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
@@ -215,6 +216,14 @@ async function run(){
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
   const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,25,'actual built game saves commercial checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-20');await clean();await capture('server-save-acknowledged');
+  if(process.env.CITYMANAGER_RAIL_CHECKS==='activation'){
+   diagnostics.phase='actual rail UI';railEvidence={status:'running'};
+   const {railBrowserChecks}=await import('./rail-browser-checks.mjs');
+   railEvidence=await railBrowserChecks({send,evaluate,capture,
+    acknowledge:async()=>{const revision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>revision,'rail durable server ACK');await settled();await clean();return JSON.parse(f.state.active.raw);},
+    reload:async()=>{diagnostics.phase='explicit rail reload';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;await clean();}});
+   console.log('PASS actual rail placement, movement and server reload',JSON.stringify(railEvidence));
+  }
   f.delay=1000;const before=f.acknowledged,postsBefore=f.posts.length;await click('#save');await until(async()=>f.posts.length>postsBefore,'manual request');assert.equal(f.acknowledged,before);assert.match(await evaluate("document.querySelector('#autosave-status').textContent"),/กำลังบันทึก/);await until(async()=>f.acknowledged>before,'manual ACK');await settled();f.delay=0;await clean();
   await evaluate('window.__quota=true');let rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'quota independent server commit');await settled();await clean();
   rev=f.state.active.revision;const autosaveTick=f.state.active.metadata.tick,autosavePosts=f.posts.length;
@@ -287,8 +296,8 @@ const selfTestOnly=process.argv.includes('--self-test'),started=new Date().toISO
 const output=resolve('.test-output/server-save-smoke');await mkdir(output,{recursive:true});
 try {
  if(selfTestOnly)await selfTest();else await run();
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,diagnostics},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,railEvidence,diagnostics},null,2));
 } catch(error) {
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,diagnostics,error:String(error?.stack??error)},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,diagnostics,error:String(error?.stack??error)},null,2));
  throw error;
 }
