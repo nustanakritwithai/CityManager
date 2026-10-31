@@ -3,8 +3,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize } from '../src/sim.ts';
-import { SAVE_KEY } from '../src/save-storage.ts';
+import { createCity, step, serialize, deserialize } from '../src/sim.ts';
+import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
 import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
 
@@ -50,7 +50,8 @@ async function untilRequests(count) {
   assert.equal(apiRequests.length, count, 'Exactly one mock request per explicit action');
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => deserialize(await evaluate('window.cityManager.snapshot()'));
+const panelServer=createPanelServerFixture(url);
 const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 const visible = selector => evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e&&!e.hidden&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0})()`);
 async function button(selector) {
@@ -108,6 +109,7 @@ async function fulfill(item, mode = 'ai') {
   });
 }
 async function intercept(params) {
+  if(await panelServer.intercept(params,send))return;
   if (/opentyphoon/i.test(params.request.url)) {
     providerAttempts++; await send('Fetch.failRequest', { requestId: params.requestId, errorReason: 'BlockedByClient' }); return;
   }
@@ -146,18 +148,16 @@ try {
   ws.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id && pending.has(message.id)) { const handler = pending.get(message.id); pending.delete(message.id); message.error ? handler.reject(Error(JSON.stringify(message.error))) : handler.resolve(message.result); }
+    if(message.method==='Page.javascriptDialogOpening')void panelServer.dialog(message.params,send).catch(error=>interceptionErrors.push(error.message));
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
     if (message.method === 'Fetch.requestPaused') void intercept(message.params).catch(error => interceptionErrors.push(String(error)));
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
-  await send('Fetch.enable', { patterns: [{ urlPattern: '*://*/api/city-advisor/report*' }, { urlPattern: '*opentyphoon*' }] });
+  await panelServer.install(send);
+  await send('Fetch.enable', { patterns: [{urlPattern:'*/citymanager-api/*',requestStage:'Request'},{ urlPattern: '*://*/api/city-advisor/report*' }, { urlPattern: '*opentyphoon*' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: url + '?advanced=1&starter=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready'); // experimental features are off by default
-  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
-  const fixture = createCity(61025); for (let day = 0; day < 65; day++) step(fixture);
-  await button('#toggle-game-menu');
-  await evaluate(`localStorage.removeItem(${JSON.stringify(SAVE_KEY)});localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(serialize(fixture))})`);
-  await button('#load'); await button('#close-inspector');
+  const fixture=createCity(61025);for(let day=0;day<65;day++)step(fixture);
+  await panelServer.load(serialize(fixture),{send,evaluate,button,url:url+'?advanced=1&starter=1'});
   const before = await state(); assert.deepEqual(before, fixture);
 
   await openSignals(); await untilRequests(1);
@@ -260,7 +260,7 @@ try {
   await button('#close-inspector'); await releaseCancelled();
   assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'), 'false');
   assert.notEqual(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'pending');
-  await button('#toggle-game-menu'); await button('#load'); await button('#close-inspector');
+  await panelServer.load(serialize(fixture),{send,evaluate,button,url:url+'?advanced=1&starter=1'});
   behavior = 'ai'; await openSignals(); await untilRequests(9);
   await until('document.querySelector("#signal-mode").dataset.mode==="ai"');
   assert.equal(apiRequests.at(-1).priorTick, null, 'Loading a city clears ephemeral comparison history');
@@ -274,6 +274,7 @@ try {
   assert(fonts[1].readerUnit > 2, 'Desktop website layout on a narrow physical screen scales reading unit');
   await shot('s22-wide-summary.png');
   assert.equal(apiRequests.length, 9, 'Viewport and reading changes never trigger API calls');
+  await assertNoCityWrites(evaluate);
   assert.equal(providerAttempts, 0, 'No direct provider attempt from client');
   assert.equal(interceptionErrors.length, 0, `Interception errors: ${JSON.stringify(interceptionErrors)}`);
   assert.equal(errors.length, 0, `Browser errors: ${JSON.stringify(errors)}`);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, isMarket, serialize, step } from '../src/sim.ts';
+import { createCity, serialize, step } from '../src/sim.ts';
 import { captureOwnerSnapshot, ownerProposalForCandidate } from '../src/owner-decision.ts';
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 import { requestOwnerDecision } from '../src/owner-decision-client.ts';
@@ -18,7 +18,7 @@ test('a provider-selected half-safe transfer crosses the client and journal boun
   assert.deepEqual(session.advance(city), []);
   assert.equal(city.tick, 210);
 
-  const firm = city.firms.find(isMarket);
+  const firm = city.firms.find(f=>f.zone==='C'&&f.owner!==null);
   assert(firm);
   assert(session.evaluateTyphoonAutoMonthly(city, firm.id).length > 0);
   const snapshot = captureOwnerSnapshot(city, firm.id);

@@ -25,7 +25,7 @@ export function cityDemandInput(c: City, stableParcelZones = false): DemandInput
   }
   for (const f of c.firms) {
     const b = byId.get(f.building); if (!b) continue;
-    add(jobs, b.cell, firmCapacity(b));
+    add(jobs, b.cell, firmCapacity(b, f));
     add(freight, b.cell, (moved.get(f.wallet) ?? 0) / FREIGHT_WINDOW_DAYS);
   }
   for (const k of c.education?.campuses ?? []) if (k.kind === 'school' && k.open) add(seats, k.cell, k.report.operatingSeats);

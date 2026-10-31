@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { contributeOwnerCapital, createCity, deserialize, isMarket, serialize, step, type City } from '../src/sim.ts';
+import { contributeOwnerCapital, createCity, deserialize, serialize, step, type City } from '../src/sim.ts';
 import { createCity as createLegacy, serialize as serializeLegacy, step as stepLegacy } from '../src/legacy-v5.ts';
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 import { captureOwnerSnapshot, ownerProposalForCandidate } from '../src/owner-decision.ts';
@@ -8,7 +8,7 @@ import { stressOwnerCash } from './owner-decision-fixture.ts';
 
 function town(day = 215): City { const c = createCity(61025); for (let n = 0; n < day; n++) step(c); return c; }
 function stressedMonthEve() { const c = town(209); stressOwnerCash(c); return c; }
-function market(c: City) { const f = c.firms.find(isMarket); assert(f?.owner); return f; }
+function market(c: City) { const f = c.firms.find(f=>f.zone==='C'&&f.owner!==null); assert(f?.owner); return f; }
 function replay(c: City, session: ReturnType<typeof createOwnerDecisionSession>) {
   const exported = JSON.parse(JSON.stringify(session.exportJournal()));
   const result = replayOwnerJournal(exported);

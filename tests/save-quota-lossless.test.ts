@@ -43,8 +43,8 @@ test('export refuses stale empty market client after another tab changes persist
  }finally{for(const [key,desc] of d)if(desc)Object.defineProperty(globalThis,key,desc);else Reflect.deleteProperty(globalThis,key);}
 });
 
-test('v23 business-capacity save round trips losslessly without reducing ledger or market fields',async()=>{
- const {businessFixture}=await import('./business-capacity-fixture.ts');const c=businessFixture(65),j=market();c.market=j;const raw=snap(c),copy=encodeSaveCopy(raw);assert.equal(JSON.parse(raw).version,23);assert.equal(decodeSaveCopy(copy),raw);assert.deepEqual(deserializeParkSession(decodeSaveCopy(copy)!).city.market,j);assert.deepEqual(JSON.parse(decodeSaveCopy(copy)!).ledger,JSON.parse(raw).ledger);
+test('v25 business-capacity save round trips losslessly without reducing ledger or market fields',async()=>{
+ const {businessFixture}=await import('./business-capacity-fixture.ts');const c=businessFixture(65),j=market();c.market=j;const raw=snap(c),copy=encodeSaveCopy(raw);assert.equal(JSON.parse(raw).version,25);assert.equal(JSON.parse(raw).commercialBaseVersion,23);assert.equal(decodeSaveCopy(copy),raw);assert.deepEqual(deserializeParkSession(decodeSaveCopy(copy)!).city.market,j);assert.deepEqual(JSON.parse(decodeSaveCopy(copy)!).ledger,JSON.parse(raw).ledger);
 });
 
 test('nonzero sequence or unknown market fields are not pristine',async()=>{
@@ -86,9 +86,9 @@ test('overlapping failed and successful save attempts settle in order',async()=>
 });
 
 
-test('legacy storage utility validates v24 checkpoints before writes and preserves exact bytes on success or quota failure',()=>{
+test('legacy storage utility validates v25 history checkpoints before writes and preserves exact bytes on success or quota failure',()=>{
  const c=createCity(91,{starter:false});for(let i=0;i<65;i++)step(c);
- const raw=snap(c);assert.equal(JSON.parse(raw).version,24);
+ const raw=snap(c);assert.equal(JSON.parse(raw).version,25);assert.equal(JSON.parse(raw).commercialBaseVersion,24);
  const s=memory();saveStoredCity(s,raw,null);assert.equal(s.getItem(SAVE_KEY),raw);
  const before=[...s.data];let writes=0;
  for(const mutate of [

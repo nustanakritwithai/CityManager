@@ -4,13 +4,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, housingCapacity, bulldoze, summary, firmWorkerCount } from '../src/sim.ts';
+import { adoptSavedEducation, createCity, step, serialize, housingCapacity, bulldoze, summary, firmWorkerCount } from '../src/sim.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { deserialize } from '../src/sim.ts';
-import { SAVE_KEY } from '../src/save-storage.ts';
+import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
 import { buildLocalSignalReport } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
-import { assertAdoptedCity, assertOriginalSave } from './education-adoption.mjs';
+import { assertAdoptedCity } from './education-adoption.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const workspaceOutput = resolve(root, '.test-output');
@@ -51,7 +51,7 @@ async function until(expression) {
   throw Error(`Condition timeout ${expression}`);
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => deserialize(await evaluate('window.cityManager.snapshot()'));
 async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
@@ -73,15 +73,16 @@ async function openQuestions() {
   if (!await evaluate('document.querySelector("#city-fact-questions").open')) await button('#city-fact-questions>summary');
   await until('!!document.querySelector("#city-question-intent")');
 }
+const panelServer = createPanelServerFixture(url);
 async function loadCity(city) {
-  if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
-  await button('#toggle-game-menu');
-  const planted = serialize(city);
-  await evaluate(`localStorage.removeItem(${JSON.stringify(SAVE_KEY)});localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(planted)})`);
-  await button('#load'); await button('#close-inspector'); await openSignals(); await openQuestions();
-  assertAdoptedCity(await state(), city, 'Loading preserves the saved city and adds only an empty education record when the save had none');
-  await assertOriginalSave(evaluate, planted);
+  const planted=serialize(city);
+  await panelServer.load(planted,{send,evaluate,button,url:url+'?advanced=1&starter=1'});
+  await openSignals();await openQuestions();
+  assertAdoptedCity(await state(),city,'Server entry preserves the acknowledged city and only adopts absent education');
+  assert.equal(panelServer.active.raw,planted,'Opening facts never rewrites acknowledged bytes');
+  await assertNoCityWrites(evaluate);
 }
+
 async function ask(intent, entityId) {
   await choose('#city-question-intent', intent);
   if (entityId !== undefined) await choose('#city-question-entity', String(entityId));
@@ -116,6 +117,7 @@ async function measureViewport(item) {
   measures.push({ name: item.width === 980 ? 's22-wide-request' : 's22-normal', ...measurement });
 }
 async function intercept(params) {
+  if(await panelServer.intercept(params,send))return;
   const request = params.request;
   if (/opentyphoon/i.test(request.url)) { directProviderAttempts++; await send('Fetch.failRequest', { requestId: params.requestId, errorReason: 'Aborted' }); return; }
   assert.equal(new URL(request.url).pathname, '/api/city-advisor/report');
@@ -137,15 +139,15 @@ try {
   ws.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id && pending.has(message.id)) { const handler = pending.get(message.id); pending.delete(message.id); message.error ? handler.reject(Error(JSON.stringify(message.error))) : handler.resolve(message.result); }
+    if(message.method==='Page.javascriptDialogOpening')void panelServer.dialog(message.params,send).catch(error=>errors.push(error.message));
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
     if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') errors.push('console.error');
     if (message.method === 'Fetch.requestPaused') void intercept(message.params).catch(error => { errors.push(error.message); void send('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'Aborted' }).catch(() => {}); });
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
-  await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/city-advisor/report', requestStage: 'Request' }, { urlPattern: '*opentyphoon*', requestStage: 'Request' }] });
+  await panelServer.install(send);
+  await send('Fetch.enable', { patterns: [{urlPattern:'*/citymanager-api/*',requestStage:'Request'},{ urlPattern: '*/api/city-advisor/report', requestStage: 'Request' }, { urlPattern: '*opentyphoon*', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: url + '?advanced=1&starter=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready'); // experimental features are off by default
-  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
   const fresh = createCity(61025); await loadCity(fresh);
   assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'empty', 'Question section waits for explicit action');
   await choose('#city-question-intent', 'house.detail');
@@ -179,25 +181,18 @@ try {
   assert(await evaluate('!!document.querySelector("[data-missing-id=\\"missing.city.workforce.education\\"]")'), 'Missing education is explicit rather than inferred from worker pools');
   await ask('city.businesses'); await expectFact('city.businesses.total', mature.firms.length, 'แห่ง'); await expectFact('city.businesses.workers', employed, 'คน');
   for (const [zone, fact] of [['C', 'commercial'], ['I', 'industrial'], ['F', 'farms']]) await expectFact(`city.businesses.${fact}`, mature.firms.filter(item => item.zone === zone).length, 'แห่ง');
-  await expectFact('city.businesses.raw-markets', mature.firms.filter(isMarket).length, 'แห่ง');
+  let commercialTiers=0;for(const [id,min,max] of [['raw-markets',1,3],['commercial-buildings',4,6],['malls',7,9]]){const count=mature.firms.filter(f=>f.zone==='C'&&mature.buildings.some(b=>b.id===f.building&&b.level>=min&&b.level<=max)).length;commercialTiers+=count;await expectFact(`city.businesses.${id}`,count,'แห่ง');}assert.equal(commercialTiers,mature.firms.filter(f=>f.zone==='C').length,'Every C is counted in exactly one actual level tier');
   await ask('house.detail', house.id); await expectFact('house.occupied-people', mature.households.filter(item => item.home === house.id).reduce((n, item) => n + item.members, 0), 'คน');
-  assert(mature.firms.some(item => item.zone === 'F') && mature.firms.some(item => isMarket(item)), 'The actual fixture includes agricultural and owner-operated market facts');
+  assert(mature.firms.some(item => item.zone === 'F') && mature.firms.some(item => item.zone==='C'&&item.owner), 'The actual fixture includes agricultural and owned commercial facts');
   for (const business of mature.firms) {
     await ask('business.detail', business.id);
     await expectFact('business.building', business.building, 'รหัส');
     await expectFact('business.zone', { C: 'พาณิชย์ (C)', I: 'อุตสาหกรรม (I)', F: 'ฟาร์ม (F)' }[business.zone], '');
     await expectFact('business.workers', firmWorkerCount(mature, business.id), 'คน');
     await expectFact('business.inventory', business.inventory, 'หน่วยสินค้า');
-    if (isRetail(business)) {
-      // Finished-goods retailers never hold crops; their answer intentionally omits crop facts.
-      assert.equal(business.cropInventory, 0); assert.equal(business.cropCost, 0);
-      const selector = '[data-fact-id="business.crop-inventory"],[data-fact-id="business.crop-cost"]';
-      assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 0, 'Retail answer has no irrelevant or leaked crop facts');
-    } else {
-      await expectFact('business.crop-inventory', business.cropInventory, 'ล็อตพืชผล');
-      await expectFact('business.crop-cost', business.cropCost, 'สตางค์');
-    }
-    if (isMarket(business) && business.owner !== null) await expectFact('business.owner-workers', mature.ownerLabor.filter(item => item.firmId === business.id).reduce((n, item) => n + item.workers, 0), 'คน');
+    await expectFact('business.crop-inventory',business.cropInventory,'ล็อตพืชผล');
+    await expectFact('business.crop-cost',business.cropCost,'สตางค์');
+    if(business.zone==='C'&&business.owner)await expectFact('business.owner-workers',mature.ownerLabor.filter(item=>item.firmId===business.id).reduce((n,item)=>n+item.workers,0),'คน');
   }
   await ask('business.detail', firm.id);
   await button('[data-fact-id="business.id"] .city-question-evidence>summary');
@@ -254,6 +249,7 @@ try {
     assert.deepEqual(await state(), immutable, 'Mobile disclosures do not mutate city');
   }
   checks.push('S22 normal and wide-request emulation retain readable essential text,44px controls, no horizontal overflow and read-only disclosures');
+  await assertNoCityWrites(evaluate);
   assert.equal(directProviderAttempts, 0, 'Browser never attempts direct provider access');
   assert.equal(errors.length, 0, JSON.stringify(errors));
   const result = { candidateCommit, testedAt: new Date().toISOString(), url, browser: 'installed Microsoft Edge headless', saveVersion: displaced.version, checks, reportRequests, realApiRequests: 0, directProviderAttempts, browserErrors: errors.length, measures, screenshots, note: 'Local preview; all existing report requests intercepted by mock. Mobile viewport/physical-screen ratio emulation, not physical Galaxy S22 testing. No merge or deployment.' };

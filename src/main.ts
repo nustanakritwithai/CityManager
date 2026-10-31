@@ -1,3 +1,4 @@
+import { commercialPresentation } from './commercial-visuals.ts';
 import { installSaveManagement } from './save-management-dialog.ts';
 import { freshServerCityRaw } from './fresh-server-city.ts';
 import { installBuildToolbar, BUILD_SHORTCUTS, blocksGameShortcuts } from './build-toolbar.ts';
@@ -39,7 +40,7 @@ import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { createTaxiFareAccumulator } from './taxi/fares.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -162,7 +163,7 @@ const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
   R: 'โซนบ้านสร้างที่ว่างก่อน · ครัวเรือนย้ายเข้าเมื่อผ่านความจุ ถนน บริการ และงาน',
-  C: 'วางโซนพาณิชย์ · เริ่มเป็นตลาดระดับ 1 · ครัวเรือนลงเงินและแรงงานเอง ซื้อขายพืชผลจริง',
+  C: 'วางโซนพาณิชย์ · ตลาด 1–3 → อาคาร 4–6 → Big Mall 7–9 · ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว',
   I: 'วางโรงงานข้างถนนเชื่อมเมือง · โรงงานเพิ่มต้องมีทุนกิจการจริงและพืชผล · ดูเงื่อนไขในภาพรวมเมือง',
   F: 'วางฟาร์มข้างถนน · ปลูกได้ทุกแปลง ดินต่ำให้ผลผลิตเท่าดิน 50% · เลือกพืชหลังสร้าง · ต้องมีแรงงานและผู้ซื้อ',
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
@@ -388,8 +389,7 @@ function renderPlace() {
   const page = route?.page === 'city' || route?.page === 'help' || route?.page === 'game' || route?.page === 'signals' ? route.page : route ? 'entity' : 'none';
   $('#inspector').dataset.page = page; $('#inspector').dataset.back = String(route !== null);
   // Header tint follows what is selected (visual only).
-  const firmHere = building && city.firms.find(f => f.building === building.id);
-  $('#inspector').dataset.kind = route?.page === 'household' ? 'household' : page !== 'entity' ? page : !cell ? 'none' : cell.road ? 'road' : !cell.zone ? 'land' : cell.zone === 'C' && firmHere && isMarket(firmHere) ? 'market' : cell.zone;
+  $('#inspector').dataset.kind = route?.page === 'household' ? 'household' : page !== 'entity' ? page : !cell ? 'none' : cell.road ? 'road' : !cell.zone ? 'land' : cell.zone === 'C' && building && building.level <= 3 ? 'market' : cell.zone;
   $('#inspector').dataset.household = String(route?.page === 'household');
   $('#submenu-back').setAttribute('aria-label', route?.page === 'household' ? 'กลับอาคารต้นทาง' : 'ย้อนกลับ');
   for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = e.dataset.pageContent !== page;
@@ -407,9 +407,9 @@ function renderPlace() {
   } else if (cell && cellIndex !== null) {
     const firm = building && city.firms.find(f => f.building === building.id);
     const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex);
-    const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? firm && isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาด' : building ? 'พาณิชย์ · ร้านค้าสำเร็จรูป' : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
+    const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (cellIndex % SIZE + 1) + ',' + (Math.floor(cellIndex / SIZE) + 1);
-    $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, !!firm && isMarket(firm), !!park);
+    $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, cell.zone === 'C' && !!building && building.level <= 3, !!park);
     if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;

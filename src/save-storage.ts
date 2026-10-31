@@ -92,6 +92,11 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
   let parsed = JSON.parse(raw);
+  if (parsed?.version === 25) {
+    deserializeParkSession(raw);
+    const rules: Record<number,string> = {19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18',24:'chain-19'};
+    parsed = {...parsed, version:parsed.commercialBaseVersion, rulesVersion:rules[parsed.commercialBaseVersion]};
+  }
   if (parsed?.version === 24) {
     // This legacy utility is not an application save path. Validate the full
     // checkpoint/session before any write; only unwrap metadata for the existing

@@ -5,7 +5,7 @@ import { moneyJournalLength } from './city-history.ts';
  * opposite way). Day-to-day differences and ledger events say which links just carried a change,
  * so the view can light up the chain an action set off. Read-only; nothing here mutates the city.
  */
-import { MONTH, ROAD_COST, access, isMarket, summary, utilityStatus, type City } from './sim.ts';
+import { MONTH, ROAD_COST, access, summary, utilityStatus, type City } from './sim.ts';
 
 import { cityOverview } from './context-data.ts';
 /** 1 when every building on the network has both water and power. */
@@ -40,12 +40,12 @@ export const NODES: readonly NetNode[] = Object.freeze([
   { id: 'farms', label: 'ฟาร์ม', group: 'production', icon: 'F', unit: 'แห่ง', kind: 'count' },
   { id: 'harvest', label: 'เก็บเกี่ยว', group: 'production', icon: 'crop', unit: 'ล็อต', kind: 'flow' },
   { id: 'cropStock', label: 'พืชผลในคลัง', group: 'production', icon: 'box', unit: 'ล็อต', kind: 'stock' },
-  { id: 'markets', label: 'ตลาด', group: 'production', icon: 'market', unit: 'แห่ง', kind: 'count' },
+  { id: 'markets', label: 'C · พืชผล', group: 'production', icon: 'market', unit: 'แห่ง', kind: 'count' },
   { id: 'eaten', label: 'ครัวเรือนกินพืชผล', group: 'production', icon: 'consume', unit: 'ล็อต', kind: 'flow' },
   { id: 'factories', label: 'โรงงาน', group: 'production', icon: 'I', unit: 'แห่ง', kind: 'count' },
   { id: 'produced', label: 'ผลิตสินค้า', group: 'production', icon: 'gear', unit: 'หน่วย', kind: 'flow' },
   { id: 'exported', label: 'ส่งออก', group: 'production', icon: 'export', unit: 'หน่วย', kind: 'flow' },
-  { id: 'shops', label: 'ร้านค้า', group: 'production', icon: 'shop', unit: 'แห่ง', kind: 'count' },
+  { id: 'shops', label: 'C · สินค้า', group: 'production', icon: 'shop', unit: 'แห่ง', kind: 'count' },
   { id: 'consumed', label: 'ครัวเรือนซื้อของ', group: 'production', icon: 'retail', unit: 'หน่วย', kind: 'flow' },
   { id: 'householdCash', label: 'เงินครัวเรือน', group: 'money', icon: 'coin', unit: '฿', kind: 'money' },
   { id: 'firmCash', label: 'เงินกิจการ', group: 'money', icon: 'coin', unit: '฿', kind: 'money' },
@@ -84,7 +84,7 @@ export const EDGES: readonly NetEdge[] = Object.freeze([
   { from: 'workforce', to: 'employed', sign: 1, why: 'แรงงานได้งานตามตำแหน่งที่มี' },
   { from: 'jobs', to: 'employed', sign: 1, why: 'ตำแหน่งงานรับแรงงานเข้าทำงาน' },
   { from: 'firmCash', to: 'employed', sign: 1, why: 'กิจการจ้างได้เท่าที่สำรองค่าจ้างได้' },
-  { from: 'markets', to: 'employed', sign: 1, why: 'เจ้าของตลาดทำงานในตลาดของตัวเอง' },
+  { from: 'markets', to: 'employed', sign: 1, why: 'กิจการพาณิชย์ใช้แรงงานเจ้าของและลูกจ้างตามระดับ' },
   { from: 'workforce', to: 'unemployed', sign: 1, why: 'แรงงานที่ยังไม่มีงานคือคนว่างงาน' },
   { from: 'employed', to: 'unemployed', sign: -1, why: 'คนมีงานมากขึ้น คนว่างงานจึงลดลง' },
   { from: 'farms', to: 'jobs', sign: 1, why: 'ฟาร์มมีตำแหน่งงานตามขนาดอาคาร' },
@@ -92,7 +92,7 @@ export const EDGES: readonly NetEdge[] = Object.freeze([
   { from: 'shops', to: 'jobs', sign: 1, why: 'ร้านค้ามีตำแหน่งงานตามขนาดอาคาร' },
   { from: 'farms', to: 'harvest', sign: 1, why: 'ฟาร์มที่มีคนทำงานเก็บเกี่ยวพืชผล', stream: 'harvest' },
   { from: 'harvest', to: 'cropStock', sign: 1, why: 'ผลผลิตเข้าคลังพืชผล', stream: 'harvest' },
-  { from: 'farms', to: 'markets', sign: 1, why: 'ตลาดเปิดได้เมื่อเมืองมีฟาร์มจริง' },
+  { from: 'farms', to: 'markets', sign: 1, why: 'พืชผลจากฟาร์มเป็นสินค้าสำหรับกิจการพาณิชย์' },
   { from: 'cropStock', to: 'produced', sign: 1, why: 'โรงงานแปรรูปพืชผลเป็นสินค้า', stream: 'produced' },
   { from: 'cropStock', to: 'eaten', sign: 1, why: 'ตลาดขายพืชผลให้ครัวเรือน', stream: 'eaten' },
   { from: 'markets', to: 'eaten', sign: 1, why: 'ครัวเรือนซื้อพืชผลที่ตลาด', stream: 'eaten' },
@@ -132,9 +132,9 @@ export function networkValues(city: City): NetValues {
     utilities: utilitiesOk(city),
     demandR: s.demand.R, homes: city.buildings.filter(b => b.zone === 'R').length, capacity: Math.max(0, o.personVacancy),
     households: s.households, population: s.population, workforce: s.workforce, jobs: s.jobs, employed: s.employed, unemployed: s.unemployed,
-    farms: city.firms.filter(f => f.zone === 'F').length, harvest: o.cropHarvested, cropStock: o.cropInventory, markets: city.firms.filter(isMarket).length,
+    farms: city.firms.filter(f => f.zone === 'F').length, harvest: o.cropHarvested, cropStock: o.cropInventory, markets: city.firms.filter(f => f.zone === 'C').length,
     eaten: o.cropConsumed, factories: city.firms.filter(f => f.zone === 'I').length, produced: o.produced, exported: o.exported,
-    shops: city.firms.filter(f => f.zone === 'C' && !isMarket(f)).length, consumed: o.consumed,
+    shops: city.firms.filter(f => f.zone === 'C').length, consumed: o.consumed,
     householdCash, firmCash, taxes, upkeep, treasury: city.accounts.treasury ?? 0,
   };
 }
@@ -161,13 +161,13 @@ export type NetEvent = { node: string; icon: string; text: string; tick: number 
 export type NetSnapshot = { tick: number; ledger: number; buildings: Map<number, string>; utilities: number };
 const kindOf = (city: City, buildingId: number, zone: string) => {
   if (zone !== 'C') return zone;
-  const firm = city.firms.find(f => f.building === buildingId); return firm && !isMarket(firm) ? 'shop' : 'market';
+  return 'shop'; // One commercial business; commodity lanes do not split its identity.
 };
 export function networkSnapshot(city: City): NetSnapshot {
   return { tick: city.tick, ledger: moneyJournalLength(city), buildings: new Map(city.buildings.map(b => [b.id, kindOf(city, b.id, b.zone)])), utilities: utilitiesOk(city) };
 }
 const BUILT: Record<string, [node: string, icon: string, name: string]> = {
-  R: ['homes', 'R', 'บ้าน'], I: ['factories', 'I', 'โรงงาน'], F: ['farms', 'F', 'ฟาร์ม'], market: ['markets', 'market', 'ตลาด'], shop: ['shops', 'shop', 'ร้านค้า'],
+  R: ['homes', 'R', 'บ้าน'], I: ['factories', 'I', 'โรงงาน'], F: ['farms', 'F', 'ฟาร์ม'], market: ['markets', 'market', 'ตลาด'], shop: ['shops', 'shop', 'พาณิชย์'],
 };
 const baht = (satang: number) => `${Math.round(satang / 100).toLocaleString('th-TH')} ฿`;
 /** What happened since the snapshot, in the words a player would use, oldest first. */
@@ -182,7 +182,7 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
     else if ((e.reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(e.reason))) add(wages, e.tick, e.amount);
     else if (e.to === 'treasury' && /tax/i.test(e.reason)) add(taxes, e.tick, e.amount);
     else if (e.reason === 'Outside residential height investment') out.push({ node: 'capacity', icon: 'level', text: 'บ้านเพิ่มชั้น รับคนได้มากขึ้น', tick: e.tick });
-    else if (e.reason === 'Market to shop conversion') out.push({ node: 'shops', icon: 'shop', text: `ตลาดยกระดับเป็นร้านค้า · ${baht(e.amount)}`, tick: e.tick });
+    else if (e.reason === 'Market to shop conversion') out.push({ node: 'shops', icon: 'shop', text: `การปรับปรุงพาณิชย์ตามบันทึกเดิม · ${baht(e.amount)}`, tick: e.tick });
     else if (e.reason === 'Profitable firm height investment') out.push({ node: 'jobs', icon: 'level', text: 'กิจการขยายอาคาร ตำแหน่งงานเพิ่ม', tick: e.tick });
   }
   for (const [tick, amount] of wages) out.push({ node: 'employed', icon: 'worker', text: `จ่ายค่าจ้างสิ้นเดือน ${baht(amount)}`, tick });
