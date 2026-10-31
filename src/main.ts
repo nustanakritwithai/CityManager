@@ -43,7 +43,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { collectTaxiFares, GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -155,7 +155,6 @@ let importedLegacyRaw: string | null = null;
 let trafficOn = false;
 let taxiFeature = false;
 const taxiSession = sharedTaxiSession();
-let taxiFareCity: unknown = null, taxiFareSeen = { trips: 0, tiles: 0 };
 let taxiView: SceneTaxiVehicles | undefined;
 let taxiButton: HTMLButtonElement | undefined;
 type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
@@ -299,11 +298,10 @@ async function activate(index: number) {
   render();
 }
 function publishTaxi(resync = false) {
-  if (city) taxiSession.bind(city);
   setTaxiPlayTraffic(trafficOn);
   if (!taxiFeature) { bindTaxiSessionDepots(null); return; }
   bindTaxiSessionDepots(taxiSession.trafficSites(true, trafficOn));
-  if (view) view.setTaxiDepots(taxiSession.depots());
+  if (view) view.setTaxiDepots([...(city?.taxi?.depots ?? []).map(d => ({ cell: d.cell, level: d.level, open: d.open })), ...taxiSession.depots()]);
   if (resync) trafficLayer?.afterMapEdit(city, paused || document.hidden);
 }
 function taxiOccupies(cells: readonly number[]) {
@@ -572,8 +570,8 @@ function syncTaxiInspector() {
   box.hidden = !depot;
   if (!depot || cell === null) return;
   $('#selection-title').textContent = `อู่แท็กซี่ #${depot.id} · ${cell % SIZE + 1},${Math.floor(cell / SIZE) + 1}`;
-  $('#place-subtitle').textContent = `ระดับ ${depot.level} · ${depot.level === 1 ? 4 : 8} คัน · ${depot.open ? 'เปิดบริการ' : 'ปิดบริการ'}`;
-  view?.setTaxiDepots(taxiSession.depots());
+  $('#place-subtitle').textContent = `ระดับ ${depot.level} · ${depot.level === 1 ? 4 : 8} คัน · ${depot.open ? 'เปิดบริการ' : 'ปิดบริการ'} · อยู่ในความจำรอบนี้ ยังไม่ลงเซฟ`;
+  view?.setTaxiDepots([...(city.taxi?.depots ?? []).map(d => ({ cell: d.cell, level: d.level, open: d.open })), ...taxiSession.depots()]);
 }
 function updateMapInfo(placement: Preview | null) {
   syncTaxiInspector();
@@ -606,7 +604,7 @@ async function boot() {
   // Never silently resume an older primary when emergency branches exist.
   let recoveryFound=false,recoveryUnavailable=false;try{recoveryFound=(await listRecoveryCopies()).length>0;}catch{recoveryUnavailable=true;}
   if(recoveryFound||recoveryUnavailable)startup.guard.block();
-  city=startup.city;parkRuntime=startup.runtime;importedLegacyRaw=startup.legacyRaw;taxiSession.bind(city);
+  city=startup.city;parkRuntime=startup.runtime;importedLegacyRaw=startup.legacyRaw;
   if(!city.education)adoptSavedEducation(city);
   const saveGuard=startup.guard,startupSaveError=startup.error??(recoveryUnavailable?'idb-recovery-unavailable':recoveryFound?'idb-recovery-available':null);
   syncEducationTools();if(startup.restored||startupSaveError)paused=true;
@@ -942,7 +940,7 @@ async function boot() {
         assertSource();
         if (!restored.city.education) adoptSavedEducation(restored.city);
         city=restored.city;parkRuntime=restored.runtime;importedLegacyRaw=legacy?saved.raw:null;previewOnly=false;activeLocal=false;activeRevision=null;recoveryOnly=managed;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(managed);autosave.adoptLoaded();
-        taxiSession.bind(city); publishTaxi(true);
+        taxiSession.clear(); publishTaxi(true);
       };
       if(managed){assertSource();await loadRecoveryCityReadOnly(saved.raw,marketPanel?.client,saveGuard,applyStored);}
       else await loadLocalCitySession(saved.raw,marketPanel?.client,saveGuard,applyStored,assertSource);
@@ -1053,7 +1051,7 @@ async function boot() {
       try{saveGuard.preserveNew(serializeParkSession(city,parkRuntime,city.market));}catch(error){status(error instanceof Error?error.message:'เก็บสำเนาเมืองเดิมไม่สำเร็จ');return;}
       try { if (marketPanel?.client.enabled && (marketPanel.client.guestId||marketPanel.client.journal.operations.length)) await marketPanel.client.resetCity(); } catch { status('ยังเริ่มเมืองใหม่ไม่ได้ กรุณาตรวจสอบรายการตลาดก่อน'); return; }
       saveGuard.authorizeNew(serializeParkSession(city,parkRuntime,city.market));autosave.reset();
-      activeLocal=false;activeRevision=null;recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);city = createCity(61025, { starter }); parkRuntime = createParkRuntime(city); taxiSession.bind(city); publishTaxi(true); cueLimiter.reset(); syncEducationTools(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
+      activeLocal=false;activeRevision=null;recoveryOnly=false;recoveryToken=null;recoveryUncertain=false;marketPanel?.client.setRecoveryReadOnly(false);city = createCity(61025, { starter }); parkRuntime = createParkRuntime(city); taxiSession.clear(); publishTaxi(true); cueLimiter.reset(); syncEducationTools(); ownerDecisionSession.reset(city); ownerDecisionPanel?.reset(); importedLegacyRaw = null; selected = roadStart = null; inspector(false); paused = true; setTool('select');
       if (starter) guide?.hold(); else { guide?.start(); view.focus(GATEWAY + 5); }
       render(); status(starter ? 'เมืองตัวอย่างพร้อมแล้ว · กดเล่นต่อเพื่อเริ่มเวลา' : 'แผนที่ว่างพร้อมแล้ว · ทำตามผู้ช่วยสอนด้านล่าง'); dialog.close();
     };
@@ -1098,14 +1096,7 @@ async function boot() {
     visual.update(dt);
     view.traffic.update(dt, !paused && !document.hidden);
     trafficLayer?.setVisible(visual.settings.traffic);
-    taxiSession.bind(city);
     trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt);
-    if (trafficLayer && taxiFeature) {
-      const t = trafficLayer.taxiTrips();
-      if (taxiFareCity !== city || t.trips < taxiFareSeen.trips) { taxiFareCity = city; taxiFareSeen = t.trips < taxiFareSeen.trips ? { trips: 0, tiles: 0 } : t; }
-      if (t.trips > taxiFareSeen.trips && !paused && !previewOnly && !recoveryOnly) collectTaxiFares(city, t.trips - taxiFareSeen.trips, t.tiles - taxiFareSeen.tiles);
-      taxiFareSeen = t;
-    }
     if(trafficLayer){const d=trafficLayer.diagnostics;view.traffic.setCarsEnabled(Boolean(d.failure));const text=trafficGameStatus(d);if(text!==trafficText){trafficText=text;trafficInfo.textContent=text;}const hotspot=d.loadByCell.reduce<typeof d.loadByCell[number]|null>((best,row)=>row.queued>0&&(!best||row.queued>best.queued)?row:best,null);bottleneckCell=hotspot?.cell??null;trafficFocus.hidden=bottleneckCell===null;}
 
     // `trafficLayer.bus` stays null on integrate/transport until bus is re-wired onto the #126 worker game.

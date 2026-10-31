@@ -15,7 +15,7 @@ export type TrafficGameSample = {map:RoadMap;demand:GameDemand[];clippedRate?:nu
 export type TrafficGameInput = {map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[];bus?:GameBusInput};
 export type GameCar = {id:number;from:number;to:number;blocked:boolean};
 export type GameRenderGroup = {key:string;from:number;to:number;amount:number;queued:number;storage:number;closed:boolean};
-export type TrafficGameFrame = {modal?:GameModalStats|null;bus?:GameBusFrame;/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
+export type TrafficGameFrame = {modal?:GameModalStats|null;bus?:GameBusFrame;step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
 type OD = GameDemand & {waiting:number;path:number[]|null};
 type Actor = {id:number;destination:number;path:number[];index:number;blocked:boolean};
 const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<576;
@@ -109,7 +109,7 @@ export function normalizeTrafficGameSample(sample:TrafficGameSample):{sample:Tra
 export class TrafficGame {
   private map:RoadMap;private network:LinkNetwork;private signature:string;
   private ods:OD[]=[];private cars:Actor[]=[];private stepValue=0;private nextId=1;private demandSignature='';
-  private taxiTrips=0;private taxiTiles=0;private offered=0;private completed=0;private dropped=0;private cancelled=0;private clippedRate=0;
+  private offered=0;private completed=0;private dropped=0;private cancelled=0;private clippedRate=0;
   private junctions=new Set<number>();
   /** Bus (optional; null = unchanged game). Shares per OD, PCU load per link, cumulative totals/injections. */
   private bus:{input:GameBusInput;shares:Map<string,GameBusShare|null>}|null=null;private busTotals=new Map<string,GameBusTotal>();private busInjected:Record<string,number>={};private busDiverted=0;private busReturned=0;
@@ -131,13 +131,13 @@ export class TrafficGame {
   setSample(sample:TrafficGameSample):void {const s=cleanSample(sample),signature=this.key(s.map),changed=signature!==this.signature, demandChanged=JSON.stringify(s.rows)!==this.demandSignature;this.replaceRows(s.rows,s.clippedRate);if(changed){this.map=s.map;this.signature=signature;this.network=buildNetwork(this.map);this.prepareJunctions();this.reconcileActors();}if(changed||demandChanged)this.replan();}
   /** Reconcile topology without consuming time, including while paused. */
   private reconcileActors():void {const times=new Map([...this.network.links].map(([key])=>[key,1])),routes=new Map<string,number[]|null>();for(const c of this.cars){const from=c.path[c.index],head=c.path[c.index+1];if(!this.network.links.has(linkKey(from,head))){c.blocked=true;continue;}if(head===c.destination){c.blocked=false;continue;}const key=pair(head,c.destination);if(!routes.has(key))routes.set(key,shortestPath(this.network,times,head,c.destination));const tail=routes.get(key)!;if(!tail)c.blocked=true;else{c.path=[from,...tail];c.index=0;c.blocked=false;}}}
-  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(o=>{const row:TaxiDemand={from:o.from,to:o.to,rate:o.rate};const taxi=demandTaxiRate(o);if(taxi>0)row.taxiRate=taxi;return row;}),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;this.taxiTrips=this.taxiTiles=0;if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();}
+  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(o=>{const row:TaxiDemand={from:o.from,to:o.to,rate:o.rate};const taxi=demandTaxiRate(o);if(taxi>0)row.taxiRate=taxi;return row;}),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();}
   /** Detached in-memory transaction candidate; never a save representation. */
   clone():TrafficGame {const copy=Object.create(TrafficGame.prototype) as TrafficGame;
     // Network, map and junction set are immutable after construction; road edits
     // replace them wholesale. Mutable actors/queues are detached before a step.
     copy.map=this.map;copy.network=this.network;copy.junctions=this.junctions;copy.signature=this.signature;
-    copy.ods=structuredClone(this.ods);copy.cars=structuredClone(this.cars);copy.stepValue=this.stepValue;copy.nextId=this.nextId;copy.taxiTrips=this.taxiTrips;copy.taxiTiles=this.taxiTiles;copy.offered=this.offered;copy.completed=this.completed;copy.dropped=this.dropped;copy.cancelled=this.cancelled;copy.clippedRate=this.clippedRate;copy.demandSignature=this.demandSignature;copy.bus=this.bus;copy.busTotals=new Map([...this.busTotals].map(([k,v])=>[k,{...v}]));copy.busInjected={...this.busInjected};copy.busDiverted=this.busDiverted;copy.busReturned=this.busReturned;return copy;}
+    copy.ods=structuredClone(this.ods);copy.cars=structuredClone(this.cars);copy.stepValue=this.stepValue;copy.nextId=this.nextId;copy.offered=this.offered;copy.completed=this.completed;copy.dropped=this.dropped;copy.cancelled=this.cancelled;copy.clippedRate=this.clippedRate;copy.demandSignature=this.demandSignature;copy.bus=this.bus;copy.busTotals=new Map([...this.busTotals].map(([k,v])=>[k,{...v}]));copy.busInjected={...this.busInjected};copy.busDiverted=this.busDiverted;copy.busReturned=this.busReturned;return copy;}
   private replan():void {const occupancy=new Map<string,number>();for(const c of this.cars){const k=linkKey(c.path[c.index],c.path[c.index+1]);occupancy.set(k,(occupancy.get(k)??0)+1);}const times=new Map([...this.network.links].map(([k,l])=>[k,1+((occupancy.get(k)??0)+this.busLoad(k))/Math.max(1,l.lanes)*3]));for(const od of this.ods)od.path=shortestPath(this.network,times,od.from,od.to);}
   step(paused=false):TrafficGameFrame {
     if(paused)return this.frame;
@@ -161,7 +161,7 @@ export class TrafficGame {
       const end=head===c.destination,next=end?null:linkKey(head,c.path[c.index+2]);
       if(next&&!canEnter(next)){c.blocked=true;continue;}
       exited.set(current,(exited.get(current)??0)+1);takeNode(head);
-      if(end){completed.add(c.id);this.completed++;if((c as TaxiActor).taxi){this.taxiTrips++;this.taxiTiles+=Math.max(1,c.path.length-1);}}else{enter(next!);c.index++;}
+      if(end){completed.add(c.id);this.completed++;}else{enter(next!);c.index++;}
     }
     this.cars=this.cars.filter(c=>!completed.has(c.id));
     const shift=this.ods.length?this.stepValue%this.ods.length:0;
@@ -194,6 +194,6 @@ export class TrafficGame {
     for(const od of this.ods)if(od.waiting>0){let load=loads.get(od.from);if(!load){load={cell:od.from,load:0,queued:0};loads.set(od.from,load);}load.queued+=od.waiting;}
     const groups=[...grouped.values()].sort((a,b)=>a.key.localeCompare(b.key));
     const bus=this.bus?{bus:{totals:[...this.busTotals.values()].map(t=>({...t})).sort((a,b)=>a.from-b.from||a.to-b.to||a.lineId-b.lineId),injected:{...this.busInjected},diverted:this.busDiverted,returned:this.busReturned}}:{};
-    return {...bus,...(this.taxiTrips?{taxiTrips:{trips:this.taxiTrips,tiles:this.taxiTiles}}:{}),step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
+    return {...bus,step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
   }
 }
