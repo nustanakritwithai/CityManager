@@ -1,0 +1,84 @@
+/* Panel polish: compact panel header and clock, and game menu cards with switches. */
+#game-content .save-group.primary .save-controls { margin-top: calc(10 * var(--u)); }
+html body #game-content .save-group.primary #save { width: 100%; min-height: calc(46 * var(--u)); font-size: calc(15 * var(--u)); }
+#game-content .save-group.primary .inspector-status:not(:empty) { margin-top: calc(10 * var(--u)); }
+
+#game-content .traffic-control { display: grid; gap: calc(8 * var(--u)); }
+#game-content .traffic-control > small { color: var(--pnl-muted); font-size: calc(12 * var(--u)); }
+html #game-content .menu-switch {
+  display: flex; align-items: center; gap: calc(10 * var(--u)); width: 100%; min-height: calc(48 * var(--u));
+  padding: calc(6 * var(--u)) calc(12 * var(--u)); border: 1px solid var(--pnl-line); border-radius: var(--pnl-radius-sm);
+  background: var(--pnl-surface-2); color: var(--pnl-text, #eef2ff); font-weight: 650; text-align: left;
+}
+#game-content .menu-switch-label { flex: 1; }
+#game-content .menu-switch-state { color: var(--pnl-muted); font-size: calc(12.5 * var(--u)); font-weight: 600; }
+#game-content .menu-switch-track {
+  position: relative; flex: none; width: calc(44 * var(--u)); height: calc(26 * var(--u)); border-radius: 999px;
+  background: #ffffff26; box-shadow: inset 0 0 0 1px #ffffff1f; transition: background .15s;
+}
+#game-content .menu-switch-track::after {
+  content: ''; position: absolute; top: calc(3 * var(--u)); left: calc(3 * var(--u)); width: calc(20 * var(--u)); height: calc(20 * var(--u));
+  border-radius: 50%; background: #e9eefc; box-shadow: 0 1px 3px #0006; transition: transform .15s;
+}
+#game-content .menu-switch[aria-pressed=true] .menu-switch-track { background: var(--pnl-accent); }
+#game-content .menu-switch[aria-pressed=true] .menu-switch-track::after { transform: translateX(calc(18 * var(--u))); background: #fff8e6; }
+#game-content .menu-switch[aria-pressed=true] .menu-switch-state { color: var(--pnl-accent); }
+@media (prefers-reduced-motion: reduce) { #game-content .menu-switch-track, #game-content .menu-switch-track::after { transition: none; } }
+
+/* Panel header: one row of back · identity · clock · close. The clock state text stays for
+   screen readers; the visible control is a short pill beside the close button. */
+html #inspector .panel-time-controls { flex: 0 0 auto; order: 1; margin-left: auto; padding: 0; border: 0; }
+html #inspector .panel-time-controls span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+html #inspector #panel-pause { min-width: max(44px, calc(64 * var(--reader-unit, 1px))); padding: calc(6 * var(--reader-unit, 1px)) calc(12 * var(--reader-unit, 1px)); border-radius: 999px; font-size: calc(13 * var(--reader-unit, 1px)); font-weight: 650; }
+html #inspector #panel-pause[aria-pressed=true] { border-color: var(--pnl-accent, #f3c46b); color: var(--pnl-accent, #f3c46b); }
+html #inspector #close-inspector { order: 2; }
+/* Touch sheets: room above the subtitle for the drag handle so the two never overlap. */
+html[data-touch-ui=true] #inspector .inspector-heading { padding-top: calc(14px + 4 * var(--reader-unit, 1px)); }
+html body #inspector #panel-pause { min-width: max(44px, calc(64 * var(--reader-unit, 1px))); }
+
+/* Building cards: labels wrap to two lines instead of being cut off mid-word. */
+#inspector .flow-node small, #entity-content[data-card-kind] .cx-metric dt, #entity-content[data-card-kind] .cx-metric small {
+  white-space: normal; overflow: hidden; text-overflow: clip; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+#entity-content[data-card-kind] .cx-metric dt .ui-icon { flex: none; }
+/* The input → recipe → output stages stack on narrow panels, each as a labelled row of two figures. */
+@media (max-width: 700px) {
+  #entity-content[data-card-kind] .bc-chain { grid-template-columns: minmax(0, 1fr); }
+  #entity-content[data-card-kind] .bc-chain-step .cx-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+html[data-touch-ui=true] #entity-content[data-card-kind] .bc-chain { grid-template-columns: minmax(0, 1fr); }
+html[data-touch-ui=true] #entity-content[data-card-kind] .bc-chain-step .cx-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Crop and recipe choices: equal buttons on a two-column grid; the chosen one is gold. */
+#entity-content .farm-crop-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(8 * var(--reader-unit, 1px)); }
+#entity-content .farm-crop-choices button { width: 100%; min-width: 0; min-height: 44px; white-space: normal; line-height: 1.3; }
+/* Section heads: title and ⓘ share the first row; the count sits under the title. */
+html body #inspector .cx-section-head:has(> .info-toggle) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: calc(8 * var(--reader-unit, 1px)); }
+html body #inspector .cx-section-head:has(> .info-toggle) > .info-toggle { grid-column: 2; grid-row: 1; }
+html body #inspector .cx-section-head:has(> .info-toggle) > .cx-count { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+
+/* City stats on touch: open below the one-row HUD, and hide the status line behind it. */
+html[data-touch-ui=true] body .city-stats {
+  top: calc(var(--row-top, 6px) + var(--row-h, 44px) + 8px);
+  max-height: calc(100dvh - var(--row-top, 6px) - var(--row-h, 44px) - var(--dock-clear, 140px) - 16px);
+}
+body:has(#city-stats:not([hidden])) .status-chip { visibility: hidden; }
+
+/* Entry screen: the game's navy and gold, a city skyline mark and one gold primary button. */
+body .guest-entry-gate { background: radial-gradient(120% 90% at 50% 0%, #2b4166 0%, #17223a 55%, #0e1628 100%); }
+body .guest-entry-card {
+  position: relative; padding: 40px 26px 28px; border: 1px solid #f3c46b40; border-radius: 22px;
+  background: linear-gradient(180deg, #1d2a47f2, #141d33f7); box-shadow: 0 24px 70px #050b1aa6, inset 0 1px 0 #ffffff14;
+}
+body .guest-entry-card::before {
+  content: ''; display: block; width: 56px; height: 44px; margin: 0 auto 14px;
+  background: linear-gradient(#f3c46b, #f3c46b) 4px 18px / 12px 26px no-repeat, linear-gradient(#f3c46b, #f3c46b) 22px 4px / 12px 40px no-repeat, linear-gradient(#f3c46b, #f3c46b) 40px 24px / 12px 20px no-repeat;
+  opacity: .9;
+}
+body .guest-entry-card h1 { margin-bottom: 8px; letter-spacing: .04em; }
+body .guest-entry-card p { font-size: 15px; }
+body .guest-entry-card button { border-color: #f6d891; background: linear-gradient(#f5d385, #d9a447); color: #1d1405; font-weight: 700; box-shadow: 0 6px 18px #d9a44740; }
+body .guest-entry-card button:hover:not(:disabled) { background: linear-gradient(#ffe0a0, #e2ad52); }
+body .guest-entry-card .guest-entry-note { margin-top: 16px; font-size: 13px; }
+html #inspector .panel-time-controls { align-self: center; }
+html:not([data-touch-ui=true]) #inspector .inspector-heading { padding-top: 10px; padding-bottom: 6px; }
+html body #game-content .save-group.primary .save-controls { display: block; }

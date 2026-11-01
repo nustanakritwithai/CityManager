@@ -46,7 +46,7 @@ async function button(selector) {
   await sleep(100);
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);
   assert.ok(p.w && p.h && p.hit, `${selector} is visible and reachable`);
-  if (['#upgrade-campus', '#toggle-campus', '#panel-pause', '#save-failure-export'].includes(selector)) assert.ok(p.w >= 44 && p.h >= 44, `${selector} has a 44px touch target`);
+  if (['#upgrade-campus', '#toggle-campus', '#panel-pause', '#save-failure-retry'].includes(selector)) assert.ok(p.w >= 44 && p.h >= 44, `${selector} has a 44px touch target`);
   // Keep the clock check independent of touch-emulation acknowledgements;
   // its visibility and mobile hit target are still checked above.
   if (!mobile || selector === '#panel-pause') {
