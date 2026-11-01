@@ -241,3 +241,11 @@ test('bus scene presentation requires its reviewed source diff and rejects engin
  assert.equal(busSceneOnly(paths),false);assert.equal(busSceneOnly(paths,{busSceneSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!=='src/bus/overlay.ts'),paths.filter(p=>p!=='tests/bus-scene.test.ts'),...['index.html','src/main.ts','src/bus/engine.ts','src/bus/lines.ts','src/bus/panel.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(busScenePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {busMapSources,busMapPathsOnly,busMapOnly} from '../scripts/ci-visual-scope.mjs';
+test('bus map overlay requires its reviewed source diff and rejects engine, 3D, save and simulation paths',()=>{
+ const paths=[...busMapSources,'tests/bus-map.test.ts','docs/bus-map-ci-scope.md'];
+ assert.equal(busMapPathsOnly(paths),true);
+ assert.equal(busMapOnly(paths),false);assert.equal(busMapOnly(paths,{busMapSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/bus/map-paint.ts'),paths.filter(p=>p!=='tests/bus-map.test.ts'),...['index.html','src/main.ts','src/bus/engine.ts','src/bus/scene-buses.ts','src/rail/map-paint.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(busMapPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
