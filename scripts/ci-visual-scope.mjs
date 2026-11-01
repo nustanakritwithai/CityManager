@@ -185,6 +185,12 @@ export const browserStorageSources=['src/advanced.ts', 'src/atmosphere-controls.
 const browserStorageAllowed=new Set([...browserStorageSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/browser-storage-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/traffic-workflow-partition.test.mjs']);
 export function browserStoragePathsOnly(paths){return ['src/session-memory.ts','src/market-client.ts','src/server-city-entry.ts','src/city-save-auth.ts'].every(p=>paths.includes(p))&&paths.every(p=>browserStorageAllowed.has(p));}
 export function browserStorageOnly(paths,evidence={}){return browserStoragePathsOnly(paths)&&matchesReviewedSources(evidence,{browserStorageSourceDiff:'0e6a2af384b0ca3bcbd8411f1fee28212ce3d8b9574cdd9dd6e8b67242d2ba61'});}
+// Save smoke hardening: the lost-ACK retry press waits for a settled layout and confirms the click lands.
+// Test harness only; no game, save client, server or workflow behaviour beyond routing changes.
+export const smokeRetrySources=['tests/server-save-browser-smoke.mjs'];
+const smokeRetryAllowed=new Set([...smokeRetrySources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/smoke-retry-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/traffic-workflow-partition.test.mjs']);
+export function smokeRetryPathsOnly(paths){return smokeRetrySources.every(p=>paths.includes(p))&&paths.every(p=>smokeRetryAllowed.has(p));}
+export function smokeRetryOnly(paths,evidence={}){return smokeRetryPathsOnly(paths)&&matchesReviewedSources(evidence,{smokeRetrySourceDiff:'d6c198c3e42fc58ef239863b4543161a5ff5e3e3a557c83c814dae069bf2fd99'});}
 export const trafficPresenterSources=["src/traffic/presentation.ts"];
 const trafficPresenterAllowed=new Set(["docs/TRAFFIC-PRESENTER-PERFORMANCE.md", "tests/traffic-game-cases.test.ts", "src/traffic/presentation.ts", ".github/workflows/citymanager.yml", ".github/workflows/traffic-enabled.yml", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", "tests/traffic-workflow-partition.test.mjs", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-game-cases.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs", "docs/server-save-ci-migration.md"]);
 export function trafficPresenterPathsOnly(paths){return ["src/traffic/presentation.ts", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs"].every(p=>paths.includes(p))&&paths.every(p=>trafficPresenterAllowed.has(p));}
@@ -208,6 +214,7 @@ export function visualKind(paths, evidence = {}) {
   if(busMapOnly(paths,evidence))return 'bus-map';
   if(saveCleanupOnly(paths,evidence))return 'save-cleanup';
   if(browserStorageOnly(paths,evidence))return 'browser-storage';
+  if(smokeRetryOnly(paths,evidence))return 'smoke-retry';
   if(hudPolishOnly(paths,evidence))return 'hud-polish';
   if(panelPolishOnly(paths,evidence))return 'panel-polish';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -260,6 +267,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return git(['show',`${head}:${p}`]);
       });
     }
+    if(smokeRetryPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.smokeRetrySourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...smokeRetrySources]);}
     if(browserStoragePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.browserStorageSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...browserStorageSources]);}
     if(saveCleanupPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.saveCleanupSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...saveCleanupSources]);}
     if(busMapPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.busMapSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...busMapSources]);}
