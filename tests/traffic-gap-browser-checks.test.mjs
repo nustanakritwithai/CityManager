@@ -116,3 +116,14 @@ test('dense browser seed is canonical and witnesses more than four route conflic
 
 import {TRAFFIC_REVIEW_VIEWPORT} from './traffic-gap-browser-checks.mjs';
 test('traffic-only evidence uses a bounded real desktop raster without changing clocks',()=>{assert.deepEqual(TRAFFIC_REVIEW_VIEWPORT,{width:960,height:640,deviceScaleFactor:1,mobile:false});assert.ok(Object.isFrozen(TRAFFIC_REVIEW_VIEWPORT));});
+
+test('passive readiness requires same-ID motion retained inside the current render ring',()=>{
+ const w=setup(),rows=samples();let index=0;
+ rows[1].presentation.renderedPoses=[pose(0)];rows[2].presentation.renderedPoses=[{...pose(.2),vehicleId:'replacement'}];
+ w.cityManager={traffic:()=>({...rows[index],worker:{epoch:'city'},ready:true,failure:null}),busSnapshot:()=>rows[index].buses,bus:()=>rows[index].busDraw};
+ w.__trafficGapStartSampling();w.__runFrame();assert.equal(w.__trafficGapObserver.motion.carMoves,0,'First birth is not observed movement');
+ index=1;w.__runFrame();assert.equal(w.__trafficGapObserver.motion.carMoves,0,'Stationary repeated actor is not movement');
+ index=2;w.__runFrame();assert.equal(w.__trafficGapObserver.motion.carMoves,0,'Replacement ID is not same-actor movement');
+ index=3;rows[3].presentation.renderedPoses=[{...pose(.3),vehicleId:'replacement'}];w.__runFrame();assert.equal(w.__trafficGapObserver.motion.carMoves,1);
+ for(let i=0;i<361;i++)w.__runFrame();assert.equal(w.__trafficGapObserver.motion.carMoves,0,'Discarded motion cannot satisfy current-ring acceptance');
+});

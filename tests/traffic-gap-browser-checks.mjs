@@ -8,7 +8,7 @@ export {renderedVehicleBox};
 /** Install before app boot. Observe real Worker messages without changing normal delivery.
  * Only a subsequent explicit commitPrevious acknowledges a candidate into the model. */
 export function trafficGapBootstrap(){return `(()=>{
- const Native=window.Worker,observation={attempts:0,created:0,terminated:0,committed:[],rendered:[],errors:0,latest:null,gateHold:null,gateResume:null,gateEvidence:[]};window.__trafficGapObserver=observation;
+ const Native=window.Worker,observation={attempts:0,created:0,terminated:0,committed:[],rendered:[],errors:0,latest:null,gateHold:null,gateResume:null,gateEvidence:[],motion:{nonidle:0,carMoves:0,busMoves:0}};window.__trafficGapObserver=observation;
  window.__trafficGapSampling=false;
  window.__trafficGapStartSampling=()=>{if(window.__trafficGapSampling)return;window.__trafficGapSampling=true;const sample=()=>{
   if(!window.__trafficGapSampling)return;const d=window.cityManager?.traffic?.();
@@ -16,7 +16,13 @@ export function trafficGapBootstrap(){return `(()=>{
    const gateRow=r=>({blocked:r.blocked,congestedLinks:r.congestedLinks,epoch:r.epoch,busMinute:r.busMinute,busMovement:r.busMovement,buses:r.buses});
    if(!observation.gateResume&&hold&&row.epoch===hold.epoch&&row.busMovement?.committedDrive>hold.grants){const bus=row.buses.find(b=>b.id===hold.bus.id&&b.phase!=='home');if(bus&&(bus.cell!==hold.bus.cell||bus.next!==hold.bus.next||Math.abs(bus.progress-hold.bus.progress)>1e-7)){observation.gateResume=true;observation.gateEvidence=[...observation.gateEvidence.slice(0,2),gateRow(row)];}}
    if(!observation.gateResume&&!observation.gateHold&&previous?.epoch===row.epoch&&previous.busMovement?.committedDrive>0&&previous.blocked>0&&previous.congestedLinks>0&&row.blocked>0&&row.congestedLinks>0&&row.busMinute>previous.busMinute&&row.busMovement?.heldDrive>previous.busMovement?.heldDrive){for(const bus of row.buses.filter(b=>['toStart','running'].includes(b.phase))){const old=previous.buses.find(b=>b.id===bus.id&&['toStart','running'].includes(b.phase));if(old&&old.cell===bus.cell&&old.next===bus.next&&Math.abs(old.progress-bus.progress)<1e-7){observation.gateHold={epoch:row.epoch,bus:{...bus},grants:row.busMovement.committedDrive};observation.gateEvidence=[gateRow(previous),gateRow(row)];}}}
-   observation.rendered.push(row);if(observation.rendered.length>360)observation.rendered.shift();}
+   row.motion={nonidle:row.presentation?.renderedPoses?.length?1:0,carMoves:0,busMoves:0};
+   if(previous?.epoch===row.epoch){
+    for(const p of row.presentation?.renderedPoses??[]){const old=previous.presentation?.renderedPoses?.find(q=>q.vehicleId===p.vehicleId);if(old&&Math.hypot(p.x-old.x,p.z-old.z)>1e-6)row.motion.carMoves++;}
+    for(const b of row.buses){const old=previous.buses.find(q=>q.id===b.id);if(old&&old.cell===b.cell&&old.next===b.next&&['toStart','running'].includes(old.phase)&&['toStart','running'].includes(b.phase)&&Math.abs(old.progress-b.progress)>1e-7)row.motion.busMoves++;}
+   }
+   observation.rendered.push(row);if(observation.rendered.length>360)observation.rendered.shift();
+   observation.motion=observation.rendered.reduce((sum,r,i)=>({nonidle:sum.nonidle+r.motion.nonidle,carMoves:sum.carMoves+(i?r.motion.carMoves:0),busMoves:sum.busMoves+(i?r.motion.busMoves:0)}),{nonidle:0,carMoves:0,busMoves:0});}
   requestAnimationFrame(sample);
  };requestAnimationFrame(sample);};
  window.Worker=class extends Native{
@@ -90,7 +96,7 @@ export function inspectTrafficEvidence(records,rendered,stops,{requireBus=true,r
   if(!previous||JSON.stringify(previous.presentation.renderedIds)!==JSON.stringify(d.renderedIds))visibility.push({step:sample.step,ids:d.renderedIds,retiring:d.retiringIds,deferred:d.deferredIds});
   previous=sample;
  }
- assert.ok(nonidle>=2&&movement>0,'Actual displayed vehicles must move, not merely an idle boot');if(requireBus)assert.ok(busSamples>0,'Actual bus snapshots required for mixed-scene proof');
+ assert.ok(nonidle>=2&&movement>0,'Actual displayed vehicles must move, not merely an idle boot; evidence='+JSON.stringify({nonidle,movement,renderSamples:rendered.length,workerFrames:records.length,firstStep:rendered[0]?.step,lastStep:rendered.at(-1)?.step,firstIds:rendered[0]?.presentation?.renderedIds,lastIds:rendered.at(-1)?.presentation?.renderedIds,busPositionChanges}));if(requireBus)assert.ok(busSamples>0,'Actual bus snapshots required for mixed-scene proof');
  if(requireBus){assert.ok(maxGrantedDrive>0,'Actual engine movement was admitted by the gate');assert.ok(busPositionChanges>0,'Actual active buses moved rather than being hidden or frozen');}
  const holdResume=requireBus?(heldThenResumed(gateEvidence,stops)??heldThenResumed(rendered,stops)):null;if(requireHold)assert.ok(holdResume,'Same real held bus must later be granted and physically resume while global time advances');
  return{holdResume,maxHeldDrive,maxGrantedDrive,busPositionChanges,homeSamples,maxBusIntrusions,maxRenderedFrameDisplacement,frames:records.length,renderSamples:rendered.length,nonidleFrames:nonidle,busSamples,movementSamples:movement,visibility};
@@ -101,7 +107,7 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  const checks=[],pacing={},sleep=ms=>new Promise(r=>setTimeout(r,ms));
  const pacingSnapshot=()=>evaluate('(()=>{const t=window.cityManager?.traffic?.();return {wallMs:performance.now(),busMinute:t?.busMinute,renderFrames:t?.timing?.frames,workerStep:t?.step,viewport:{width:innerWidth,height:innerHeight,pixelRatio:devicePixelRatio,canvasWidth:document.querySelector("canvas")?.width,canvasHeight:document.querySelector("canvas")?.height}}})()');
  const until=async(fn,label,limit=20000)=>{phase(label);const start=Date.now();while(Date.now()-start<limit){if(await fn())return;await sleep(100);}
-  let evidence;try{evidence=await evaluate('(()=>{const d=window.cityManager?.traffic?.(),o=window.__trafficGapObserver;return {wallMs:performance.now(),renderTiming:d?.timing,viewport:{width:innerWidth,height:innerHeight,pixelRatio:devicePixelRatio,canvasWidth:document.querySelector("canvas")?.width,canvasHeight:document.querySelector("canvas")?.height},step:d?.step,cars:d?.cars,failure:d?.failure,busMinute:d?.busMinute,busMovement:d?.busMovement,busLedger:d?.busLedger,presentation:d?.presentation,buses:window.cityManager?.busSnapshot?.(),observedFrames:o?.committed.length,gateEvidence:o?.gateEvidence}})()');}catch(error){evidence={diagnosticError:String(error)};}
+  let evidence;try{evidence=await evaluate('(()=>{const d=window.cityManager?.traffic?.(),o=window.__trafficGapObserver;return {wallMs:performance.now(),renderTiming:d?.timing,viewport:{width:innerWidth,height:innerHeight,pixelRatio:devicePixelRatio,canvasWidth:document.querySelector("canvas")?.width,canvasHeight:document.querySelector("canvas")?.height},step:d?.step,cars:d?.cars,failure:d?.failure,busMinute:d?.busMinute,busMovement:d?.busMovement,busLedger:d?.busLedger,presentation:d?.presentation,buses:window.cityManager?.busSnapshot?.(),observedFrames:o?.committed.length,observedMotion:o?.motion,renderSamples:o?.rendered.length,gateEvidence:o?.gateEvidence}})()');}catch(error){evidence={diagnosticError:String(error)};}
   throw Error('Traffic gap browser timeout: '+label+'; bounded synthetic evidence='+JSON.stringify({pacing,...evidence}));};
  const tap=async selector=>{const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled||!e.getClientRects().length)throw Error('Traffic control unavailable');e.scrollIntoView({block:'center',inline:'nearest'});const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(!hit||!e.contains(hit))throw Error('Traffic control is obscured');return{x,y}})()`);for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...p,button:'left',clickCount:1});};
  const paused=()=>evaluate('window.cityManager.parks().paused');
@@ -112,7 +118,7 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  assert.ok(await observer(),'Preboot passive Worker observer is required');assert.ok(await traffic(),'Traffic is enabled by default without a traffic query override');await pause(true);await toggle(true);
  await until(async()=>!!(await traffic())?.ready,'initial real Worker frame');assert.equal((await observer()).attempts,1,'Exactly one initial city worker');
  await tap('[data-speed="1"]');await evaluate('window.__trafficGapStartSampling()');await pause(false);
- await until(()=>evaluate('(()=>{const o=window.__trafficGapObserver,t=window.cityManager.traffic();return o.committed.length>=4&&t.cars>0&&t.step>=4&&t.busMovement?.committedDrive>0})()'),'busy real Worker and rendered cars');
+ await until(()=>evaluate('(()=>{const o=window.__trafficGapObserver,t=window.cityManager.traffic();return o.committed.length>=4&&t.cars>0&&t.step>=4&&t.busMovement?.committedDrive>0&&o.rendered.length>=4&&o.motion.nonidle>=2&&o.motion.carMoves>0&&o.motion.busMoves>0})()'),'busy real Worker and rendered cars');
  await pause(true);await until(async()=>{const t=await traffic();return t?.paused&&!t.updating;},'pause fence');
  await evaluate('window.__trafficGapSampling=false');const stable=await traffic(),observed=await observer(),records=observed.committed,city=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));const proof=inspectTrafficEvidence(records,observed.rendered,city.bus?.stops??[]);assert.equal(await evaluate('window.cityManager.bus()?.drew'),true,'Actual bus renderer is active');
  await sleep(400);const still=await traffic();for(const key of ['step','moving','waiting','completed','dropped','cancelled','busMinute'])assert.equal(still[key],stable[key],'Paused '+key);
@@ -125,7 +131,7 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  pacing.busyStart=await pacingSnapshot();
  await evaluate('window.__trafficGapStartSampling()');await pause(false);
  // Bound the full natural approach/hold/release sequence at the unchanged bus clock.
- await until(()=>evaluate('(()=>{const t=window.cityManager.traffic(),o=window.__trafficGapObserver;return t.step>=6&&o.committed.some(({frame})=>frame.blocked>0&&frame.congestedLinks>0)&&o.committed.length>=4&&o.gateResume===true})()'),'real busy queue bus hold then later grant and physical resume',30000);
+ await until(()=>evaluate('(()=>{const t=window.cityManager.traffic(),o=window.__trafficGapObserver;return t.step>=6&&o.committed.some(({frame})=>frame.blocked>0&&frame.congestedLinks>0)&&o.committed.length>=4&&o.gateResume===true&&o.motion.nonidle>=2&&o.motion.carMoves>0&&o.motion.busMoves>0})()'),'real busy queue bus hold then later grant and physical resume',30000);
  pacing.busyEnd=await pacingSnapshot();
  await pause(true);await until(async()=>!(await traffic()).updating,'busy queue pause fence');await evaluate('window.__trafficGapSampling=false');
  const busyObserved=await observer(),busyState=await traffic();const busyCity=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));const busyProof=inspectTrafficEvidence(busyObserved.committed,busyObserved.rendered,busyCity.bus?.stops??[],{requireHold:true,gateEvidence:busyObserved.gateEvidence});
@@ -139,7 +145,7 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  assert.ok(denseWitness.encounteredConflictNodes>4,'Actual dense bus route crosses more than four conflict nodes');
  await loadFixture(denseRaw);await reload();await until(async()=>!!(await traffic())?.ready,'dense grid entered from real server ACK');
  await evaluate('window.__trafficGapStartSampling()');await pause(false);
- await until(()=>evaluate('(()=>{const t=window.cityManager.traffic(),o=window.__trafficGapObserver;return t.step>=4&&t.cars>0&&o.committed.length>=4&&t.busMovement?.committedDrive>0})()'),'dense real Worker cars and physically advancing bus');
+ await until(()=>evaluate('(()=>{const t=window.cityManager.traffic(),o=window.__trafficGapObserver;return t.step>=4&&t.cars>0&&o.committed.length>=4&&t.busMovement?.committedDrive>0&&o.rendered.length>=4&&o.motion.nonidle>=2&&o.motion.carMoves>0&&o.motion.busMoves>0})()'),'dense real Worker cars and physically advancing bus');
  await pause(true);await until(async()=>!(await traffic()).updating,'dense pause fence');await evaluate('window.__trafficGapSampling=false');
  const denseObserved=await observer(),denseCity=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));
  const denseProof=inspectTrafficEvidence(denseObserved.committed,denseObserved.rendered,denseCity.bus?.stops??[]);
