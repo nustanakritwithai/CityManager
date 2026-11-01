@@ -4,6 +4,7 @@ import type {City} from '../sim.ts';
 import type {TaxiDepotSite} from '../taxi/sites.ts';
 import {buildNetwork,linkKey,type LinkNetwork} from './network.ts';
 import {shortestPath} from './routing.ts';
+import {createRoadNavigator,emptyNavigationStats,type NavigationStats} from './rrt-navigation.ts';
 import {gameBusShare,validGameBusInput,type GameBusFrame,type GameBusInput,type GameBusShare,type GameBusTotal} from '../bus/game-bus.ts';
 import {LANE_START,SLOT_PITCH} from '../citizen-road-queue.ts';
 import {TRAFFIC_SPACING,updateVehicleFollowing,type LaneVehicle} from './spacing.ts';
@@ -18,7 +19,7 @@ export type TrafficGameSample = {map:RoadMap;demand:GameDemand[];clippedRate?:nu
 export type TrafficGameInput = {map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[];bus?:GameBusInput};
 export type GameCar = {id:number;from:number;to:number;blocked:boolean;progress?:number;lane?:number;speed?:number;destination?:number;nextCell?:number;nextLane?:number;junction?:boolean;nextVisit?:number};
 export type GameRenderGroup = {key:string;from:number;to:number;amount:number;queued:number;storage:number;closed:boolean};
-export type TrafficGameFrame = {modal?:GameModalStats|null;bus?:GameBusFrame;/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
+export type TrafficGameFrame = {navigation?:NavigationStats;modal?:GameModalStats|null;bus?:GameBusFrame;/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
 type OD = GameDemand & {waiting:number;path:number[]|null};
 type Actor = {visits?:number;id:number;destination:number;path:number[];index:number;blocked:boolean;progress:number;speed:number;lane:number};
 const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<576;
@@ -116,6 +117,7 @@ export class TrafficGame {
   private ods:OD[]=[];private cars:Actor[]=[];private stepValue=0;private nextId=1;private demandSignature='';
   private taxiTrips=0;private taxiTiles=0;private offered=0;private completed=0;private dropped=0;private cancelled=0;private clippedRate=0;
   private junctions=new Set<number>();private bends=new Set<number>();
+  private navigation=emptyNavigationStats();
   private junctionRequests=new Map<number,{node:number;since:number}>();private junctionClock=0;
   /** Bus (optional; null = unchanged game). Shares per OD, PCU load per link, cumulative totals/injections. */
   private bus:{input:GameBusInput;shares:Map<string,GameBusShare|null>}|null=null;private busTotals=new Map<string,GameBusTotal>();private busInjected:Record<string,number>={};private busDiverted=0;private busReturned=0;
@@ -142,10 +144,18 @@ export class TrafficGame {
   clone():TrafficGame {const copy=Object.create(TrafficGame.prototype) as TrafficGame;
     // Network, map and junction set are immutable after construction; road edits
     // replace them wholesale. Mutable actors/queues are detached before a step.
-    copy.junctionRequests=new Map([...this.junctionRequests].map(([id,r])=>[id,{...r}]));copy.junctionClock=this.junctionClock;
+    copy.navigation={...this.navigation};copy.junctionRequests=new Map([...this.junctionRequests].map(([id,r])=>[id,{...r}]));copy.junctionClock=this.junctionClock;
     copy.map=this.map;copy.network=this.network;copy.junctions=this.junctions;copy.bends=this.bends;copy.signature=this.signature;
     copy.ods=structuredClone(this.ods);copy.cars=structuredClone(this.cars);copy.stepValue=this.stepValue;copy.nextId=this.nextId;copy.taxiTrips=this.taxiTrips;copy.taxiTiles=this.taxiTiles;copy.offered=this.offered;copy.completed=this.completed;copy.dropped=this.dropped;copy.cancelled=this.cancelled;copy.clippedRate=this.clippedRate;copy.demandSignature=this.demandSignature;copy.bus=this.bus;copy.busTotals=new Map([...this.busTotals].map(([k,v])=>[k,{...v}]));copy.busInjected={...this.busInjected};copy.busDiverted=this.busDiverted;copy.busReturned=this.busReturned;return copy;}
-  private replan():void {const occupancy=new Map<string,number>();for(const c of this.cars){const k=linkKey(c.path[c.index],c.path[c.index+1]);occupancy.set(k,(occupancy.get(k)??0)+1);}const times=new Map([...this.network.links].map(([k,l])=>[k,1+((occupancy.get(k)??0)+this.busLoad(k))/Math.max(1,l.lanes)*3]));for(const od of this.ods)od.path=shortestPath(this.network,times,od.from,od.to);}
+  private replan():void {
+    const occupancy=new Map<string,number>();for(const c of this.cars){const k=linkKey(c.path[c.index],c.path[c.index+1]);occupancy.set(k,(occupancy.get(k)??0)+1);}
+    const times=new Map([...this.network.links].map(([k,l])=>[k,1+((occupancy.get(k)??0)+this.busLoad(k))/Math.max(1,l.lanes)*3]));
+    const epoch=Math.floor(this.stepValue/REROUTE_STEPS),navigator=createRoadNavigator(this.network,times,{epoch});
+    // Rotate bounded exploration opportunity; admitted actors retain their exact routes.
+    const offset=this.ods.length?epoch%this.ods.length:0;
+    for(let i=0;i<this.ods.length;i++){const od=this.ods[(i+offset)%this.ods.length];od.path=navigator.route(od.from,od.to).path;}
+    this.navigation=navigator.stats();
+  }
   private actorLink(c:Actor):string {return linkKey(c.path[c.index],c.path[c.index+1]);}
   private laneCount(key:string):number {return this.network.links.get(key)?.lanes??1;}
   /** Free lane index, or -1 when every lane of the link is at the per-lane cap or bus load fills it. */
@@ -304,6 +314,6 @@ export class TrafficGame {
     for(const od of this.ods)if(od.waiting>0){let load=loads.get(od.from);if(!load){load={cell:od.from,load:0,queued:0};loads.set(od.from,load);}load.queued+=od.waiting;}
     const groups=[...grouped.values()].sort((a,b)=>a.key.localeCompare(b.key));
     const bus=this.bus?{bus:{totals:[...this.busTotals.values()].map(t=>({...t})).sort((a,b)=>a.from-b.from||a.to-b.to||a.lineId-b.lineId),injected:{...this.busInjected},diverted:this.busDiverted,returned:this.busReturned}}:{};
-    return {...bus,...(this.taxiTrips?{taxiTrips:{trips:this.taxiTrips,tiles:this.taxiTiles}}:{}),step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
+    return {navigation:{...this.navigation},...bus,...(this.taxiTrips?{taxiTrips:{trips:this.taxiTrips,tiles:this.taxiTiles}}:{}),step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
   }
 }

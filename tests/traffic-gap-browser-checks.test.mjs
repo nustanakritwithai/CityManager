@@ -137,3 +137,11 @@ test('fault cleanup retains original acceptance failure and records secondary fa
  const original=new Error('original assertion');await assert.rejects(trafficWithCleanup(async()=>{throw original;},async()=>{}),error=>error===original);
  assert.equal(await trafficWithCleanup(async()=>42,async()=>{}),42);
 });
+
+import {inspectRrtEvidence} from './traffic-gap-browser-checks.mjs';
+test('actual Worker RRT evidence requires accepted routes and strict finite planning budgets',()=>{
+ const frame={navigation:{attempted:2,accepted:1,fallback:1,unreachable:0,expanded:48,iterations:100,cacheHits:0,budgetExhausted:0}},records=[{frame}];
+ assert.equal(inspectRrtEvidence(records).maxAccepted,1);
+ assert.throws(()=>inspectRrtEvidence([{frame:{}}]),/navigation diagnostics/);
+ for(const patch of [{accepted:0},{attempted:0,accepted:0},{accepted:3},{expanded:513},{iterations:2049},{cacheHits:NaN},{fallback:-1}])assert.throws(()=>inspectRrtEvidence([{frame:{navigation:{...frame.navigation,...patch}}}]));
+});

@@ -142,3 +142,10 @@ test('shared bus movement route requires exact reviewed source and rejects mixed
  assert.equal(rightOfWayPathsOnly(paths),true);assert.equal(rightOfWayOnly(paths),false);assert.equal(rightOfWayOnly(paths,{rightOfWaySourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/main.ts','src/sim.ts','src/rail/network-runtime.ts','src/pages-auth.ts','src/server-city-save.ts','server/city-saves/service.mjs','package.json'].map(p=>[...paths,p])]){assert.equal(rightOfWayPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {trafficRrtPathsOnly,trafficRrtOnly} from '../scripts/ci-visual-scope.mjs';
+test('goal RRT route requires exact reviewed two-source change and rejects empty, unknown and mixed scope',()=>{
+ const paths=['src/traffic/game.ts','src/traffic/rrt-navigation.ts','tests/traffic-rrt-navigation.test.ts'];
+ assert.equal(trafficRrtPathsOnly(paths),true);assert.equal(trafficRrtOnly(paths),false);assert.equal(trafficRrtOnly(paths,{trafficRrtSourceDiff:'changed unreviewed source'}),false);assert.equal(visualKind(paths),'full');
+ for(const bad of [[],paths.slice(1),...['src/traffic/presentation.ts','src/traffic/layer.ts','src/main.ts','src/server-city-save.ts','src/taxi/rrt-roam.ts','src/bus/engine.ts','src/rail/network-runtime.ts','package.json'].map(p=>[...paths,p])]){assert.equal(trafficRrtPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
+});
