@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
-import {observeWorkWorker,workAckEvidence} from './traffic-work-expiry-browser-checks.mjs';
+import {observeWorkWorker,workAckEvidence,movedPoseExpression} from './traffic-work-expiry-browser-checks.mjs';
 
 test('work browser observer leaves native Worker messages untouched and bounded',()=>{
  class WorkerFixture{constructor(url,options){this.url=url;this.options=options;this.listeners=[];}addEventListener(type,fn){if(type==='message')this.listeners.push(fn);}emit(data){for(const fn of this.listeners)fn({data});}postMessage(...args){this.sent=args;return 17;}}
@@ -13,6 +13,12 @@ test('work browser observer leaves native Worker messages untouched and bounded'
  const frame=Object.freeze({step:1,cars:Object.freeze([]),workTrips:Object.freeze([{id:7,day:2}]),expiredWorkTrips:Object.freeze([]),signals:Object.freeze({phases:Object.freeze([])})});
  for(let i=0;i<200;i++)worker.emit(Object.freeze({kind:'frame',frame}));
  assert.equal(window.__workFrames.length,160);assert.equal(window.__workFrames[0].workTrips[0].id,7);assert.equal(frame.step,1);
+});
+
+test('native pose movement expression handles negative map coordinates',()=>{
+ const expression=movedPoseExpression(7,{x:-10.5,z:-.24});const context={window:{cityManager:{traffic:()=>({presentation:{renderedPoses:[{vehicleId:'game:7',x:-10.5,z:-.24}]}})}}};
+ assert.equal(runInNewContext(expression,context),false);context.window.cityManager.traffic=()=>({presentation:{renderedPoses:[{vehicleId:'game:7',x:-10.4,z:-.24}]}});assert.equal(runInNewContext(expression,context),true);
+ assert.throws(()=>movedPoseExpression(7,{x:NaN,z:0}),/Invalid/);
 });
 
 test('work receipt requires a later acknowledged worker frame and a removed body',()=>{

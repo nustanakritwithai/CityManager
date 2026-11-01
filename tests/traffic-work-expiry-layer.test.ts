@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
-import {bulldoze,createCity,type City} from '../src/sim.ts';
+import {buildRoad,bulldoze,createCity,type City} from '../src/sim.ts';
 import {workExpiryBrowserFixture} from './traffic-work-expiry-browser-fixture.ts';
 import {createTrafficGameWorkerEngine} from '../src/traffic/game-worker-engine.ts';
 import {TrafficGame} from '../src/traffic/game.ts';
@@ -53,6 +53,21 @@ test('native fixture can exercise an entered reservation and its work-trip expir
  assert.equal(entered,true,'Actual presenter grants and enters this car corridor before expiration');
  assert.ok(worker.expirations.includes(target.id),'The actual worker acknowledges expiration');
  assert.ok(layer.diagnostics.presentation.cornerOwners.every(r=>r.owner!==`game:${target.id}`));assert.ok(!layer.diagnostics.presentation.selectedIds.includes(`game:${target.id}`));assert.deepEqual(faults,[]);layer.destroy();
+});
+
+test('native closure fixture retains the same generic follower through expiry and road repair',()=>{
+ const {city,runtime,closedRoad}=workExpiryBrowserFixture(),worker=new WorkerFixture(),faults:string[]=[];let now=0;
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,m=>faults.push(m),()=>worker as never,scene as never,false,()=>now);
+ const frame=()=>{now+=25;layer.frame(city,1018+Math.floor(now/1000),false,.025,runtime.activity.day);worker.flush();};
+ for(let i=0;i<122;i++)frame();const before=(layer as any).latest as TrafficGameFrame;assert.equal(before.step,3);
+ const workIds=new Set(before.workTrips?.map(t=>t.id)),target=before.cars.find(c=>workIds.has(c.id)&&c.destination===closedRoad+1),follower=before.cars.find(c=>!workIds.has(c.id)&&c.destination===target?.destination);assert.ok(target&&follower);
+ assert.ok(before.cars.every(c=>c.from!==closedRoad&&c.to!==closedRoad));assert.equal(bulldoze(city,closedRoad).ok,true);layer.afterMapEdit(city);frame();
+ for(let i=0;i<3000&&!worker.expirations.includes(target.id);i++)frame();assert.ok(worker.expirations.includes(target.id));
+ const workerBefore=((layer as any).latest as TrafficGameFrame).cars.find(c=>c.id===follower.id),poseBefore=layer.diagnostics.presentation.renderedPoses.find(p=>p.vehicleId===`game:${follower.id}`);assert.ok(workerBefore&&poseBefore,'Same unrelated follower remains in worker and physical scene');
+ assert.equal(buildRoad(city,closedRoad-1,closedRoad).ok,true);layer.afterMapEdit(city);frame();
+ let moved=false;for(let i=0;i<1200;i++){frame();const pose=layer.diagnostics.presentation.renderedPoses.find(p=>p.vehicleId===`game:${follower.id}`);if(pose&&Math.hypot(pose.x-poseBefore.x,pose.z-poseBefore.z)>.01){moved=true;break;}}
+ assert.equal(moved,true,'Same unrelated car physically moves after expiry and real road repair');assert.deepEqual(faults,[]);layer.destroy();
 });
 
 test('10x at 10 FPS crossing whole work windows still classifies new work traffic',()=>{

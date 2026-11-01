@@ -35,6 +35,11 @@ export function workAckEvidence(id,frames,requests,traffic){
  return {receipt,cancel,ack,ackFrame:{seq:frame.seq,expired:frame.expiredWorkTrips}};
 }
 
+export function movedPoseExpression(id,pose){
+ if(!Number.isSafeInteger(id)||id<1||!Number.isFinite(pose?.x)||!Number.isFinite(pose?.z))throw Error('Invalid observed traffic pose');
+ return `(()=>{const p=window.cityManager.traffic().presentation.renderedPoses.find(v=>v.vehicleId==='game:'+${id});return !!p&&Math.hypot(p.x-(${pose.x}),p.z-(${pose.z}))>.01})()`;
+}
+
 /** Runs only against the built app and synthetic, server-acknowledged cities.
  * Native Worker messages and presenter diagnostics supply identities; the
  * test never inserts actors or commands into either traffic state machine. */
@@ -45,7 +50,7 @@ export async function workExpiryBrowserChecks(h){
  setStage('work trip red light and pause');await navigate(signalRaw,'?traffic=1');await waitModel();await citizenSpeed();await button('#pause');
  await until(`(()=>{const t=window.cityManager.traffic(),p=window.cityManager.parks(),f=window.__workFrames.at(-1);if(!t||!f||t.step!==f.step)return false;const ids=new Set(f.workTrips.map(x=>x.id));const car=f.cars.find(c=>ids.has(c.id)&&c.blocked&&f.phases.some(s=>s.node===c.to&&(s.state!=='green'||s.approach!==c.from))&&t.presentation.renderedIds.includes('game:'+c.id));if(!car||!(p.day>f.workTrips.find(x=>x.id===car.id).day||p.minute>=1020))return false;const pose=t.presentation.renderedPoses.find(x=>x.vehicleId==='game:'+car.id);if(!pose)return false;window.__workRed={id:car.id,x:pose.x,z:pose.z,step:f.step,day:p.day,minute:p.minute};return true})()`,45000);
  const red=await evaluate('window.__workRed');await screenshot('work-red-wait.png');
- await until(`(()=>{const id=${red.id},t=window.cityManager.traffic(),p=t.presentation.renderedPoses.find(v=>v.vehicleId==='game:'+id);return !!p&&Math.hypot(p.x-${red.x},p.z-${red.z})>.01})()`,45000);
+ await until(movedPoseExpression(red.id,red),45000);
  assert.equal(await evaluate(`window.__workFrames.some(f=>f.expiredWorkTrips.some(x=>x.id===${red.id}))`),false,'Ordinary red-light work car did not expire before moving');
  evidence.red={...red,moved:await evaluate(`window.cityManager.traffic().presentation.renderedPoses.find(v=>v.vehicleId==='game:'+${red.id})`)};
  await button('#pause');await waitPausedModel();const paused=await evaluate('({parks:window.cityManager.parks(),traffic:window.cityManager.traffic()})');await sleep(1500);
@@ -82,7 +87,7 @@ export async function workExpiryBrowserChecks(h){
  const followerBefore=await evaluate(`window.__workFrames.findLast(f=>f.cars.some(c=>c.id===${before.follower.id}))?.cars.find(c=>c.id===${before.follower.id})`);assert.ok(followerBefore,'Unrelated follower remains in the worker before reopening');
  const followerPose=await evaluate(`window.cityManager.traffic().presentation.renderedPoses.find(p=>p.vehicleId==='game:'+${before.follower.id})`);assert.ok(followerPose,'Same unrelated follower remains physically visible');const beforeSeq=await evaluate('window.__workFrames.at(-1).seq');
  await button('#pause');await until(`window.__workFrames.some(f=>f.seq>${beforeSeq}&&f.cars.some(c=>c.id===${before.follower.id}&&(c.from!==${followerBefore.from}||c.to!==${followerBefore.to}||(c.progress??0)>${followerBefore.progress??0}+.001)))`,35000);
- await until(`(()=>{const p=window.cityManager.traffic().presentation.renderedPoses.find(v=>v.vehicleId==='game:'+${before.follower.id});return !!p&&Math.hypot(p.x-${followerPose.x},p.z-${followerPose.z})>.01})()`,35000);
+ await until(movedPoseExpression(before.follower.id,followerPose),35000);
  evidence.follower={id:before.follower.id,before:followerBefore,after:await evaluate(`window.__workFrames.findLast(f=>f.cars.some(c=>c.id===${before.follower.id}))?.cars.find(c=>c.id===${before.follower.id})`)};await button('#pause');await waitPausedModel();await screenshot('work-follower-resumed.png');checks.push('Sustained blocked overdue work car receives expiration ACK; same unrelated follower proceeds after road repair');
 
  setStage('work trip scaled clock crossing');await navigate(closureRaw,'?traffic=1');await waitModel();await button('[data-speed="10"]');

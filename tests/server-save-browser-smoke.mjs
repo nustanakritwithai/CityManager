@@ -16,10 +16,19 @@ import { createServerCityService, hash } from '../server/city-saves/service.mjs'
 let trafficGapEvidence={status:'not-run',reason:'Bumper-gap acceptance is opt-in for the exact traffic transition.'};
 let railEvidence={status:'not-run',reason:'Rail UI acceptance is opt-in for the exact rail transition.'};
 let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
-const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],server:null};
+const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],saveNetwork:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Synthetic browser fixture only. Record the visible retry click and the
+// forwarded Save click without capturing cookies, keys, or city bytes.
+function installSaveClickTrace(){
+ window.__saveClickTrace=[];document.addEventListener('click',event=>{
+  const button=event.target?.closest?.('#save-failure-retry,#save');if(!button)return;
+  window.__saveClickTrace.push({id:button.id,trusted:event.isTrusted,disabled:button.disabled,at:Date.now()});
+  if(window.__saveClickTrace.length>40)window.__saveClickTrace.shift();
+ },true);
+}
 // Only read-only entry predicates immediately following our explicit reload may retry.
 async function reloadEntryRead(read,onRetry=()=>{}){
  try{return await read();}catch(error){
@@ -95,9 +104,16 @@ function fixtureService(){
  const store={read:async()=>structuredClone(state.active),listArchives:async()=>[...state.archives.values()].map(({raw,...info})=>structuredClone(info)),readArchive:async(_,id)=>structuredClone(state.archives.get(id)??null),
   transaction:(_,work)=>{const job=tail.then(async()=>{const next=structuredClone(state);const result=await work({request:async id=>next.requests.get(id),requestCount:async()=>next.requests.size,current:async()=>next.active,deletionFence:async()=>next.fence,wasRetired:async cityId=>[...next.requests.values()].some(r=>r.response.deleted&&r.response.cityId===cityId),resetAllowed:async()=>resetAllowed,bytes:async()=>0,publish:async v=>{next.active=structuredClone(v);next.snapshots.push(structuredClone(v));next.snapshots=next.snapshots.slice(-2);},retire:async marker=>{for(const copy of next.snapshots){const archived=next.archives.get(copy.rawHash)??{hash:copy.rawHash,raw:copy.raw,sources:[]};assert.equal(archived.raw,copy.raw);const source=`deleted:${copy.cityId}:${marker.revision}:snapshot:${copy.revision}`;if(!archived.sources.includes(source))archived.sources.push(source);next.archives.set(copy.rawHash,archived);}next.snapshots=[];next.active=structuredClone(marker);next.fence=marker.revision;},record:async(id,payloadHash,response)=>{const {raw,...receipt}=response;next.requests.set(id,{payloadHash,response:structuredClone(receipt)});},hasArchive:async id=>next.archives.has(id),archive:async(id,raw,source)=>{const old=next.archives.get(id)??{hash:id,raw,sources:[]};if(!old.sources.includes(source))old.sources.push(source);next.archives.set(id,old);}});state=next;return result;});tail=job.catch(()=>{});return job;}};
  const service=createServerCityService(store);
- return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0};
+ return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0,traceSave:false,postAudit:[]};
 }
 async function selfTest(){
+ const listeners=[],syntheticWindow={},syntheticDocument={addEventListener:(type,fn,capture)=>listeners.push({type,fn,capture})};
+ Function('window','document','Date',`(${installSaveClickTrace.toString()})()`)(syntheticWindow,syntheticDocument,Date);
+ assert.equal(listeners[0].type,'click');assert.equal(listeners[0].capture,true);
+ listeners[0].fn({target:{closest:()=>({id:'save-failure-retry',disabled:false})},isTrusted:true});
+ listeners[0].fn({target:{closest:()=>({id:'save',disabled:false})},isTrusted:false});
+ assert.deepEqual(syntheticWindow.__saveClickTrace.map(({id,trusted,disabled})=>({id,trusted,disabled})),[{id:'save-failure-retry',trusted:true,disabled:false},{id:'save',trusted:false,disabled:false}]);
+ assert.equal(JSON.stringify(syntheticWindow.__saveClickTrace).includes('cookie'),false,'Retry diagnostics contain no request credentials');
  const samplePng=(width,height,pixel)=>{const chunk=(type,data)=>{const out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length);out.write(type,4);data.copy(out,8);return out;};const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(width);ihdr.writeUInt32BE(height,4);ihdr[8]=8;ihdr[9]=2;const raw=Buffer.alloc((width*3+1)*height);for(let y=0;y<height;y++)for(let x=0;x<width;x++)raw.set(pixel(x,y),y*(width*3+1)+1+x*3);return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);};
  const grayscale=pngEvidence(samplePng(16,16,x=>[x*17,x*17,x*17]));assert.equal(grayscale.nonblank,true);assert.equal(grayscale.quantizedColors,16,'Legitimate grayscale UI does not need game colors');
  assert.throws(()=>pngEvidence(samplePng(2,1,x=>x?[255,255,255]:[0,0,0])),/Blank/);
@@ -164,7 +180,7 @@ async function selfTest(){
 }
 async function run(){
  const dist=resolve('dist');await readFile(resolve(dist,'index.html'));const f=fixtureService();
- const server=createServer(async(req,res)=>{try{
+ const server=createServer(async(req,res)=>{let audit;try{
   const path=new URL(req.url,'http://127.0.0.1').pathname;
   if(path.startsWith('/citymanager-api/')){
    if(!req.headers.cookie?.split('; ').includes(`cm_session=${COOKIE}`)){res.writeHead(401,{'Content-Type':'application/json'});res.end('{"error":"fixture-login-required"}');return;}
@@ -173,11 +189,12 @@ async function run(){
    const route=path.slice('/citymanager-api'.length);let result;
    if(route==='/v1/me')result={guest_id:OWNER};
    else if(route==='/v1/city-save'&&req.method==='POST'){
+    if(f.traceSave){audit={index:f.posts.length,at:Date.now(),modeAtReceive:f.mode,action:data.action,expectedRevision:data.expectedRevision};f.postAudit.push(audit);res.once('finish',()=>{audit.finished=true;});res.once('close',()=>{audit.closed=true;});}
     f.posts.push({key:req.headers['idempotency-key'],data:structuredClone(data)});
-    if(f.mode==='disconnect'){req.socket.destroy();return;}
+    if(f.mode==='disconnect'){if(audit)audit.outcome='disconnect';req.socket.destroy();return;}
     if(f.mode==='conflict')throw Object.assign(Error('save-conflict'),{status:409});
     if(f.delay)await sleep(f.delay);
-    result=await f.service.mutate(OWNER,req.headers['idempotency-key'],data);if((f.mode==='drop-delete-ack'&&data.action==='delete')||(f.mode==='drop-save-ack'&&data.action==='save')){req.socket.destroy();return;}f.acknowledged++;
+    result=await f.service.mutate(OWNER,req.headers['idempotency-key'],data);if(audit){audit.modeAtDecision=f.mode;audit.revision=result.revision;}if((f.mode==='drop-delete-ack'&&data.action==='delete')||(f.mode==='drop-save-ack'&&data.action==='save')){if(audit)audit.outcome='drop-ack';req.socket.destroy();return;}if(audit)audit.outcome='http-200';f.acknowledged++;
    }else if(route==='/v1/city-save'){if(f.mode==='load-error')throw Object.assign(Error('fixture-load-unavailable'),{status:503});result=await f.service.read(OWNER);}
    else if(route==='/v1/city-save/archives'){if(req.method==='POST'&&f.mode==='archive-error')throw Object.assign(Error('fixture-archive-unavailable'),{status:503});result=req.method==='POST'?await f.service.archive(OWNER,data):await f.service.listArchives(OWNER);}
    else if(route.startsWith('/v1/city-save/archives/'))result=await f.service.readArchive(OWNER,route.split('/').at(-1));
@@ -188,7 +205,7 @@ async function run(){
   if(file!==dist&&!file.startsWith(dist+sep))throw Object.assign(Error('path'),{status:403});
   const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.wasm':'application/wasm','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2'};
   const bytes=await readFile(file);res.writeHead(200,{'Content-Type':mime[extname(file)]??'application/octet-stream','Cache-Control':'no-store'});res.end(bytes);
- }catch(e){if(!res.headersSent)res.writeHead(e.status??500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});
+ }catch(e){if(audit){audit.outcome='error';audit.status=e.status??500;audit.error=String(e.message);}if(!res.headersSent)res.writeHead(e.status??500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});
  let child,ws,profile,acceptanceError;const pending=new Map();let id=0,expectReloadDialog=false,expectedConfirm=null,unexpectedDialog=null;
  try{
   await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
@@ -200,7 +217,14 @@ async function run(){
   for(let i=0;i<100&&!debugPort;i++){if(launchError)throw launchError;if(child.exitCode!==null)throw Error(`Browser exited ${child.exitCode}; no acceptance result`);try{debugPort=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);}catch{}await sleep(100);}
   assert.ok(debugPort,'Browser unavailable; acceptance NOT passed');
   const pages=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();ws=new WebSocket(pages.find(p=>p.type==='page').webSocketDebuggerUrl);
+  const observedSaveRequests=new Set();
   ws.onmessage=e=>{const m=JSON.parse(e.data);
+   if(f.traceSave&&m.method==='Network.requestWillBeSent'&&m.params.request.method==='POST'&&m.params.request.url===origin+'/citymanager-api/v1/city-save'){
+    observedSaveRequests.add(m.params.requestId);diagnostics.saveNetwork.push({event:'request',id:m.params.requestId,at:Date.now()});
+   }else if(f.traceSave&&observedSaveRequests.has(m.params?.requestId)&&['Network.responseReceived','Network.loadingFinished','Network.loadingFailed'].includes(m.method)){
+    diagnostics.saveNetwork.push({event:m.method,id:m.params.requestId,status:m.params.response?.status,error:m.params.errorText,canceled:m.params.canceled,at:Date.now()});
+   }
+   if(diagnostics.saveNetwork.length>100)diagnostics.saveNetwork.shift();
    if(m.method==='Runtime.exceptionThrown'||m.method==='Inspector.targetCrashed')diagnostics.runtimeErrors.push({method:m.method,details:m.params});
    if(m.method==='Page.javascriptDialogOpening'){
     const dialog={type:m.params.type,message:m.params.message,phase:diagnostics.phase,expected:expectedReloadDialog(m.params.type,expectReloadDialog)||(m.params.type==='confirm'&&expectedConfirm!==null&&m.params.message.includes('เก็บเมืองที่กำลังเล่นเป็นสำเนาบนเซิร์ฟเวอร์'))};diagnostics.dialogs.push(dialog);console.log('Browser dialog',JSON.stringify(dialog));
@@ -316,14 +340,15 @@ async function run(){
   await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Emulation.clearDeviceMetricsOverride');
   // Commit succeeded but its ACK was lost. The banner must replay the original
   // key/body before trackedSave writes the current state as a new revision.
+  await evaluate(`(${installSaveClickTrace.toString()})()`);f.traceSave=true;f.postAudit=[];
   const lostHead=f.state.active,lostRequests=f.state.requests.size,lostStart=f.posts.length;f.mode='drop-save-ack';await click('#save');await until(failed,'committed save with lost ACK');
   assert.equal(f.state.active.revision,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+1);const lostCommand=f.posts[lostStart];
-  const lostAckSnapshot=async()=>{const posts=f.posts.slice(lostStart);diagnostics.lostAck={initialRevision:lostHead.revision,headRevision:f.state.active.revision,initialReceiptCount:lostRequests,receiptCount:f.state.requests.size,posts:posts.map(({key,data})=>({key,action:data.action,expectedRevision:data.expectedRevision,rawHash:typeof data.raw==='string'?hash(data.raw):null})),ui:await evaluate(`({bannerVisible:!!document.querySelector('#save-failure-banner:not([hidden])'),banner:document.querySelector('#save-failure-banner')?.textContent,badge:document.querySelector('#autosave-status')?.textContent})`)};return posts;};
+  const lostAckSnapshot=async()=>{const posts=f.posts.slice(lostStart);diagnostics.lostAck={initialRevision:lostHead.revision,headRevision:f.state.active.revision,initialReceiptCount:lostRequests,receiptCount:f.state.requests.size,posts:posts.map(({key,data})=>({sameOriginalKey:key===lostCommand.key,action:data.action,expectedRevision:data.expectedRevision,rawHash:typeof data.raw==='string'?hash(data.raw):null})),fixtureAudit:structuredClone(f.postAudit),network:structuredClone(diagnostics.saveNetwork),ui:await evaluate(`({bannerVisible:!!document.querySelector('#save-failure-banner:not([hidden])'),banner:document.querySelector('#save-failure-banner')?.textContent,badge:document.querySelector('#autosave-status')?.textContent,saveDisabled:document.querySelector('#save')?.disabled,clicks:window.__saveClickTrace})`)};return posts;};
   f.mode='ok';await pressRetry(false);await until(async()=>{const posts=await lostAckSnapshot(),next=posts.find(p=>p.key!==lostCommand.key);return !!next&&f.state.requests.has(next.key);},'lost ACK retry and subsequent current-state receipt');await settled();
   const observed=await lostAckSnapshot();
   const grouped=verifyLostAckPosts(observed,lostCommand,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+2,'retry creates no duplicate receipt');
   assert.equal(f.state.requests.get(lostCommand.key)?.response.revision,lostHead.revision+1,'one original receipt records its single commit');
-  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');await clean();
+  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');f.traceSave=false;await clean();
   // Management is an explicit two-step lifecycle; Cancel has no mutation.
   diagnostics.phase='management cancel';const beforeCancel=f.state.active,cancelPosts=f.posts.length;
   await click('#new-city');await until(()=>evaluate("!!document.querySelector('#save-management-dialog[open]')"),'management dialog');await click('#save-management-cancel');
