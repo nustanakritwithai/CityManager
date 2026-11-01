@@ -141,6 +141,11 @@ export const panelGateFiles=['.github/workflows/citymanager.yml','.github/workfl
 export function panelGateEvidence(read){return JSON.stringify(panelGateFiles.map(p=>{const value=read(p);return [p,typeof value==='string'?value.replace(/\r\n/g,'\n'):value];}));}
 const panelPolishHashes={panelPolishSourceDiff:'617bc876aa34341f455a8fd4a6e677b95db7e82bda9767fa5e317670f08f9070',panelGateEvidence:'984222a38b64d059a97a32805bfe45b756d37b07789e2c2a3e7cb68949e917fc'};
 export function panelPolishOnly(paths,evidence={}){return panelPolishPathsOnly(paths)&&matchesReviewedSources(evidence,panelPolishHashes);}
+// Rail R1: rail manager, confirmation and dock-menu presentation only. No rail runtime, simulation, save or auth change.
+export const railPolishSources=['src/main.ts','src/rail/management.css','src/rail/management.ts','src/tool-menu.ts','src/ui-icons.ts'];
+const railPolishAllowed=new Set([...railPolishSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/rail-polish-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/rail-management.test.ts','tests/traffic-workflow-partition.test.mjs']);
+export function railPolishPathsOnly(paths){return ['src/rail/management.ts','src/rail/management.css','tests/rail-management.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>railPolishAllowed.has(p));}
+export function railPolishOnly(paths,evidence={}){return railPolishPathsOnly(paths)&&matchesReviewedSources(evidence,{railPolishSourceDiff:'0770e688a56be402aded8a3b8b4fca803da1fc5b762be196f7fba1e7e4590b3b'});}
 export const trafficPresenterSources=["src/traffic/presentation.ts"];
 const trafficPresenterAllowed=new Set(["docs/TRAFFIC-PRESENTER-PERFORMANCE.md", "tests/traffic-game-cases.test.ts", "src/traffic/presentation.ts", ".github/workflows/citymanager.yml", ".github/workflows/traffic-enabled.yml", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", "tests/traffic-workflow-partition.test.mjs", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-game-cases.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs", "docs/server-save-ci-migration.md"]);
 export function trafficPresenterPathsOnly(paths){return ["src/traffic/presentation.ts", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs"].every(p=>paths.includes(p))&&paths.every(p=>trafficPresenterAllowed.has(p));}
@@ -156,6 +161,7 @@ export function visualKind(paths, evidence = {}) {
   if(sessionLifetimeOnly(paths,evidence))return 'server-save';
   if(historyOnly(paths,evidence))return 'history';
   if(classicToolbarOnly(paths,evidence))return 'classic-toolbar';
+  if(railPolishOnly(paths,evidence))return 'rail-polish';
   if(hudPolishOnly(paths,evidence))return 'hud-polish';
   if(panelPolishOnly(paths,evidence))return 'panel-polish';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -208,6 +214,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return git(['show',`${head}:${p}`]);
       });
     }
+    if(railPolishPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railPolishSources]);}
     if(hudPolishPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.hudPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...hudPolishSources]);}
     if(commercialPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.commercialSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...commercialSources]);}
     if(historyPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.historySourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...historySources]);}
