@@ -87,6 +87,9 @@ jobs:
           } elseif ('${{ steps.scope.outputs.kind }}' -eq 'hud-polish') {
             node --experimental-strip-types --test tests/build-toolbar.test.ts tests/grouped-tool-menu.test.ts tests/select-menu.test.ts tests/rail-management.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'HUD and build dock presentation regressions failed.' }
+          } elseif ('${{ steps.scope.outputs.kind }}' -eq 'rail-scene') {
+            node --experimental-strip-types --test tests/rail-track-geometry.test.ts tests/rail-management.test.ts tests/rail-activation.test.ts
+            if ($LASTEXITCODE -ne 0) { throw 'Rail scene geometry and manager regressions failed.' }
           } elseif ('${{ steps.scope.outputs.kind }}' -eq 'rail-polish') {
             node --experimental-strip-types --test tests/rail-management.test.ts tests/grouped-tool-menu.test.ts tests/build-toolbar.test.ts tests/select-menu.test.ts tests/rail-activation.test.ts tests/rail-track-geometry.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Rail manager, confirmation and dock menu regressions failed.' }
@@ -104,7 +107,7 @@ jobs:
           } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Simulation tests failed.' } }
 
       - name: Verify preserved advisor contract offline
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         run: npm run test:advisor
 
       - name: Verify admitted asset integrity
@@ -123,7 +126,7 @@ jobs:
         env:
           CITYMANAGER_PR182_CHECKS: ${{ steps.scope.outputs.kind == 'panel-polish' && '1' || '' }}
           CITYMANAGER_TRAFFIC_CHECKS: ${{ (steps.scope.outputs.kind == 'traffic-gap' || steps.scope.outputs.kind == 'traffic-presenter') && 'bumper-gap' || '' }}
-          CITYMANAGER_RAIL_CHECKS: ${{ steps.scope.outputs.kind == 'rail' && 'activation' || '' }}
+          CITYMANAGER_RAIL_CHECKS: ${{ (steps.scope.outputs.kind == 'rail' || steps.scope.outputs.kind == 'rail-scene') && 'activation' || '' }}
           CITYMANAGER_TOOLBAR_CHECKS: ${{ steps.scope.outputs.kind == 'classic-toolbar' && 'classic' || '' }}
         run: |
           node tests/server-save-browser-smoke.mjs
@@ -141,7 +144,7 @@ jobs:
           retention-days: 3
 
       - name: Upload Pages market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-pages-market-verification-dist
@@ -150,7 +153,7 @@ jobs:
           retention-days: 3
 
       - name: Build loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         env:
           VITE_MARKET_URL: 'http://127.0.0.1:4317'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
@@ -158,7 +161,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/market-sandbox-dist
 
       - name: Upload loopback market verification artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-market-sandbox-dist
@@ -167,7 +170,7 @@ jobs:
           retention-days: 3
 
       - name: Build same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         env:
           VITE_MARKET_URL: '/citymanager-api'
           VITE_BASE_PATH: '/citymanager/'
@@ -176,7 +179,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --outDir .test-output/citymanager-public-test-dist
 
       - name: Upload same-origin public market test artifact
-        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: citymanager-public-test-dist
@@ -205,7 +208,7 @@ jobs:
         run: node node_modules/vite/bin/vite.js build --config vite.commercial.config.ts
 
       - name: Verify the built game in installed Edge
-        if: steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           if ('${{ steps.scope.outputs.kind }}' -notin @('tower','factory','vehicle','visual-final','commercial') -and (Test-Path 'src/server-city-entry.ts')) {
@@ -373,7 +376,7 @@ jobs:
           retention-days: 3
 
       - name: Preserve building progression browser evidence
-        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: always() && github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: building-progression-browser-evidence
@@ -396,7 +399,7 @@ jobs:
           retention-days: 3
 
       - name: Verify preserved signal GUI without provider calls
-        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
+        if: env.CITYMANAGER_SAVE_HOTFIX != 'true' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter'
         run: |
           $env:VITE_CITY_SIGNALS = 'false'
           $env:VITE_CITY_ADVISOR_ONLINE = 'false'
