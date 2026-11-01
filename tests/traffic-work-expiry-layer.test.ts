@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
-import {createCity,type City} from '../src/sim.ts';
+import {bulldoze,createCity,type City} from '../src/sim.ts';
+import {workExpiryBrowserFixture} from './traffic-work-expiry-browser-fixture.ts';
 import {createTrafficGameWorkerEngine} from '../src/traffic/game-worker-engine.ts';
 import {TrafficGame} from '../src/traffic/game.ts';
 import {gamePoses} from '../src/traffic/game-poses.ts';
@@ -37,6 +38,21 @@ test('ordinary all-red waiting at 17:00 survives and the same work car later pro
  assert.notEqual(presenter.motionState('game:1'),'absent');
  let proceeds=false;for(let i=0;i<20;i++){const next=game.step().cars.find(c=>c.id===1);if(!next||next.from!==car.from||next.progress!>car.progress!+1e-5){proceeds=true;break;}}
  assert.ok(proceeds,'the same car proceeds when the signal clears');layer.destroy();
+});
+
+test('native fixture can exercise an entered reservation and its work-trip expiry without injecting actors',()=>{
+ const {city,runtime,closedRoad}=workExpiryBrowserFixture(),worker=new WorkerFixture(),faults:string[]=[];let now=0;
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,m=>faults.push(m),()=>worker as never,scene as never,false,()=>now);
+ const frame=(minute:number)=>{now+=25;layer.frame(city,minute,false,.025,runtime.activity.day);worker.flush();};
+ for(let i=0;i<41;i++)frame(1018);frame(1018);
+ const latest=(layer as any).latest as TrafficGameFrame;assert.equal(latest.step,1);
+ const target=latest.cars.find(c=>latest.workTrips?.some(t=>t.id===c.id)&&c.destination===closedRoad+1);assert.ok(target);
+ assert.ok(latest.cars.every(c=>c.from!==closedRoad&&c.to!==closedRoad));assert.equal(bulldoze(city,closedRoad).ok,true);layer.afterMapEdit(city);frame(1018);
+ let entered=false;for(let i=0;i<3000&&!worker.expirations.includes(target.id);i++){frame(1020);if(layer.diagnostics.presentation.cornerOwners.some(r=>r.owner===`game:${target.id}`&&r.active&&r.entered))entered=true;}
+ assert.equal(entered,true,'Actual presenter grants and enters this car corridor before expiration');
+ assert.ok(worker.expirations.includes(target.id),'The actual worker acknowledges expiration');
+ assert.ok(layer.diagnostics.presentation.cornerOwners.every(r=>r.owner!==`game:${target.id}`));assert.ok(!layer.diagnostics.presentation.selectedIds.includes(`game:${target.id}`));assert.deepEqual(faults,[]);layer.destroy();
 });
 
 test('10x at 10 FPS crossing whole work windows still classifies new work traffic',()=>{

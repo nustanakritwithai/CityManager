@@ -53,6 +53,18 @@ test('reload accepts only observed exact same-raw lifecycle ACK chains and the f
  await assert.rejects(g.enter({evaluate,button:async()=>{await g.intercept(request('GET'),async()=>{});await g.intercept(request('POST',{...payload,cityId:base.cityId}),async()=>{});}}),/Entered GET must match final/);
 });
 
+test('reload revision failures retain assertion and bounded non-sensitive lifecycle diagnostics',async()=>{
+ const f=createTrafficServerFixture(url),base=await f.seed(raw),send=async()=>{};
+ const post=request('POST',{action:'save',cityId:base.cityId,expectedRevision:1,raw,metadata:base.metadata});
+ await f.intercept(post,send);f.allowNavigation();
+ const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
+ await assert.rejects(f.enter({evaluate,button:async()=>{await f.intercept(post,send);await f.intercept(request('GET'),send);}}),error=>{
+  assert.match(error.message,/Lifecycle writes form an exact revision chain/);
+  assert.match(error.message,/"baselineRevision":2/);assert.match(error.message,/"repeatedKey":true/);
+  assert.equal(error.message.includes(raw),false);assert.equal(error.message.includes(post.request.headers['Idempotency-Key']),false);return true;
+ });
+});
+
 test('old page unload and in-flight service request settle before a new fixture seed',async()=>{
  const f=createTrafficServerFixture(url),before=await f.seed(raw);let release,blank=false;
  const wait=new Promise(r=>release=r);let mutation;

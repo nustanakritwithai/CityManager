@@ -13,6 +13,12 @@ test('disjoint CI partitions preserve every former full/core/extended assertion 
  assert.throws(()=>trafficGameCase('peak',true),/normal assets/);assert.throws(()=>trafficGameCase('typo',true),/Unknown/);
 });
 
+test('work-expiry native case is an additional normal-asset partition',()=>{
+ const work=trafficGameCase('work-expiry',false);assert.equal(work.workExpiry,true);assert.equal(work.expectedChecks,4);
+ assert.equal(work.output,'normal-work-expiry');assert.equal(work.lifecycle||work.economy||work.bypass||work.dense||work.peak,false);
+ assert.throws(()=>trafficGameCase('work-expiry',true),/normal assets/);
+});
+
 test('standalone mobile partitions load the actual viewport-meta page before asserting 390px',async()=>{
  const {readFileSync}=await import('node:fs');const source=readFileSync(new URL('traffic-game-smoke.mjs',import.meta.url),'utf8');
  assert.match(source,/viewport\(true,false\);d=await navigate\(denseRaw,'\?traffic=0',blocked\)/,'OFF boots at the same mobile metrics as ON');

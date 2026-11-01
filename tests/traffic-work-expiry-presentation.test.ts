@@ -14,6 +14,8 @@ test('explicit expiry releases an occupied junction and lets an unrelated follow
  assert.deepEqual(ids(p.frame(0,false)),['game:1','game:2']);
  const reservations=[...(p as any).corners.values()];
  assert.ok(reservations.some((r:any)=>r.owner==='game:1'&&r.active&&r.entered),'the expired car actually owns an entered junction');
+ assert.ok(p.diagnostics.cornerOwners.some(r=>r.owner==='game:1'&&r.active&&r.entered),'read-only diagnostics identify the actual owner and occupancy');
+ const snapshot=p.diagnostics.cornerOwners;snapshot[0].owner='diagnostic-only';assert.ok(p.diagnostics.cornerOwners.some(r=>r.owner==='game:1'),'mutating a diagnostic snapshot cannot change reservation ownership');
  p.update([owner,{...follower,x:2}]);
  for(let n=0;n<100;n++)p.frame(.025,false);
  const stopped=p.diagnostics.renderedPoses.find(v=>v.vehicleId==='game:2')!.x;
@@ -21,6 +23,7 @@ test('explicit expiry releases an occupied junction and lets an unrelated follow
  p.expire(['game:1','game:1']);
  assert.deepEqual(ids(p.frame(0,true)),['game:2'],'the expired body is absent even from a paused frame');
  assert.ok([...(p as any).corners.values()].every((r:any)=>r.owner!=='game:1'));
+ assert.ok(p.diagnostics.cornerOwners.every(r=>r.owner!=='game:1'),'expiry removes the owner from the public diagnostics');
  assert.equal(p.diagnostics.removed,1);assert.deepEqual(p.diagnostics.lastRemoved,['game:1']);
  for(let n=0;n<150;n++)p.frame(.025,false);
  assert.ok(p.diagnostics.renderedPoses.find(v=>v.vehicleId==='game:2')!.x>1.9,'the survivor can use the released road');
