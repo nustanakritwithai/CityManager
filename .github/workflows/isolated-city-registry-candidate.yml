@@ -1,0 +1,62 @@
+name: Isolated city registry candidate
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/isolated-city-registry-candidate.yml'
+      - 'server/city-registry/**'
+      - 'server/save-slots/**'
+      - 'server/city-saves/service.mjs'
+      - 'tests/isolated-postgres-harness.mjs'
+      - 'tests/fixtures/market-server/package.json'
+      - 'tests/fixtures/market-server/package-lock.json'
+permissions:
+  contents: read
+jobs:
+  postgres-fixture:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/storage-isolated-ci-proof')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Record isolated runner versions
+        run: |
+          printf 'Runner OS=%s ARCH=%s ImageOS=%s ImageVersion=%s\n' "$RUNNER_OS" "$RUNNER_ARCH" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+          node --version
+          npm --version
+      - name: Install locked CI fixture dependencies
+        run: npm ci --prefix tests/fixtures/market-server --ignore-scripts --no-audit --no-fund
+      - name: Start disposable loopback PostgreSQL container
+        id: pg
+        run: |
+          container_id=$(docker run -d -p 127.0.0.1::5432 \
+            -e POSTGRES_USER=city_registry_ci -e POSTGRES_DB=city_registry_disposable_test \
+            -e POSTGRES_HOST_AUTH_METHOD=trust postgres@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a \
+            -c listen_addresses='*' -c port=5432)
+          echo "container_id=$container_id" >> "$GITHUB_OUTPUT"
+          for i in $(seq 1 30); do docker exec "$container_id" pg_isready -h 127.0.0.1 -p 5432 -U city_registry_ci -d city_registry_disposable_test && break; [ "$i" = 30 ] && exit 1; sleep 1; done
+          docker inspect --format='{{.Image}}' "$container_id"
+          docker exec "$container_id" postgres --version
+          port=$(docker port "$container_id" 5432/tcp | sed -n 's/^127\.0\.0\.1://p')
+          [[ "$port" =~ ^[0-9]+$ ]] || exit 1
+          marker=$(cat /proc/sys/kernel/random/uuid)
+          docker exec "$container_id" psql -v ON_ERROR_STOP=1 -U city_registry_ci -d city_registry_disposable_test -c "CREATE TABLE public.ci_instance_marker (token uuid NOT NULL); INSERT INTO public.ci_instance_marker VALUES ('$marker');"
+          echo "port=$port" >> "$GITHUB_OUTPUT"
+          echo "marker=$marker" >> "$GITHUB_OUTPUT"
+      - name: Run isolated transaction harness
+        env:
+          CI_PORT: ${{ steps.pg.outputs.port }}
+          CI_MARKER: ${{ steps.pg.outputs.marker }}
+        run: node tests/isolated-postgres-harness.mjs "$CI_PORT" "$GITHUB_WORKSPACE/tests/fixtures/market-server/node_modules/pg/package.json" "$CI_MARKER"
+      - name: Remove disposable container
+        if: always() && steps.pg.outputs.container_id != ''
+        env:
+          CI_CONTAINER_ID: ${{ steps.pg.outputs.container_id }}
+        run: docker rm -f "$CI_CONTAINER_ID"
