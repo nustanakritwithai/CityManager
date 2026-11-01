@@ -1,0 +1,43 @@
+name: PR181 matched peak diagnostic
+on:
+  push:
+    branches: [codex/pr181-matched-peak-diagnostic]
+    paths:
+      - '.github/workflows/traffic-peak-matched-diagnostic.yml'
+      - 'scripts/traffic-peak-matched-diagnostic.mjs'
+      - 'tests/traffic-peak-matched-diagnostic.test.mjs'
+permissions:
+  contents: read
+jobs:
+  matched:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: diagnostic
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: e65eb66ea35522bc7fb92caea65f60a34127a050
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 88bf31ef293c829752d5765f39cf8797fed214f4
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Validate immutable diagnostic protocol
+        run: node --test diagnostic/tests/traffic-peak-matched-diagnostic.test.mjs
+      - name: Exactly base then candidate, three unchanged pairs each
+        run: node diagnostic/scripts/traffic-peak-matched-diagnostic.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr181-matched-peak-base-candidate
+          path: matched-peak-evidence
+          retention-days: 3
+          if-no-files-found: error
