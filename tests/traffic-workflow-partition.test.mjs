@@ -7,15 +7,15 @@ test('traffic acceptance partitions bounded cases and gates every result',()=>{
  const checks=job('checks'),fault=job('fault'),browser=job('browser'),gate=job('enabled');
  for(const part of [checks,fault,browser,gate])assert.match(part,/timeout-minutes: 10/);
  assert.match(checks,/traffic-game-cases\.test\.ts/);assert.match(checks,/traffic-game-stress\.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000/);
- assert.match(fault,/needs: checks/);assert.match(fault,/traffic-default-fault-smoke\.mjs/);assert.match(fault,/traffic-game-fault-evidence/);
- assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);assert.match(browser,/- case: full\s+blocked: '0'\s+software: '0'/);assert.match(browser,/- case: core\s+blocked: '1'\s+software: '1'/);assert.match(browser,/- case: extended\s+blocked: '1'\s+software: '1'/);
- assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.case \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
+ assert.match(fault,/needs: checks/);assert.match(fault,/traffic-default-fault-smoke\.mjs/);assert.match(fault,/traffic-game-fault-\$\{\{ matrix\.case \}\}-evidence/);assert.match(fault,/case: \[preferences, economy, construct, async\]/);assert.match(fault,/fail-fast: false/);assert.match(fault,/TRAFFIC_FAULT_CASE: \$\{\{ matrix\.case \}\}/);
+ assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);for(const [mode,cases] of [['normal',['lifecycle','economy','bypass','dense','peak']],['fallback',['lifecycle','economy','bypass','dense']]])for(const name of cases)assert.ok(browser.includes(`- name: ${mode}-${name}\n            case: ${name}\n            blocked: '${mode==='fallback'?'1':'0'}'\n            software: '${mode==='fallback'?'1':'0'}'`));assert.equal((browser.match(/- name: (normal|fallback)-/g)??[]).length,9);
+ assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.name \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
  assert.match(gate,/needs: \[checks, fault, browser\]/);assert.match(gate,/if: always\(\)/);for(const name of ['checks','fault','browser'])assert.match(gate,new RegExp(`needs\\.${name}\\.result.*'success'`));
  assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '1'/g)??[]).length,1);
 });
 
 test('exact scoped routing propagates to downstream traffic jobs and aggregate without accepting failed checks',()=>{
- const scoped=['vehicle','visual-final','server-save','classic-toolbar','history','commercial','rail','hud-polish'];
+ const scoped=['vehicle','visual-final','server-save','classic-toolbar','history','commercial','rail','hud-polish','panel-polish'];
  const checks=job('checks'),gate=job('enabled');
  const exclusions=part=>[...part.matchAll(/(?:steps\.scope|needs\.checks)\.outputs\.kind != '([^']+)'/g)].map(m=>m[1]);
  const checkRoutes=[...new Set(exclusions(checks))];assert.deepEqual(checkRoutes,scoped);
@@ -53,5 +53,13 @@ test('scoped RRT routing retains shared taxi planner regressions in both traffic
 });
 
 test('adaptive phases, coordination, peer protocol and actual signal display remain mandatory in both gates',()=>{
- for(const path of ['.github/workflows/traffic-enabled.yml','.github/workflows/citymanager.yml']){const yaml=readFileSync(path,'utf8');for(const name of ['traffic-worker-cycle.test.ts','traffic-worker-cycle-presentation.test.ts','traffic-adaptive-signals.test.ts','traffic-signal-coordination.test.ts','traffic-signal-peers.test.ts','traffic-signal-display.test.ts','traffic-signal-lifecycle.test.ts','traffic-signal-browser-checks.test.mjs','traffic-rrt-navigation.test.ts'])assert.ok(yaml.includes(`tests/${name}`),`${path} requires ${name}`);}
+ for(const path of ['.github/workflows/traffic-enabled.yml','.github/workflows/citymanager.yml']){const yaml=readFileSync(path,'utf8');for(const name of ['traffic-worker-cycle.test.ts','traffic-worker-cycle-presentation.test.ts','traffic-lane-order.test.ts','traffic-adaptive-signals.test.ts','traffic-signal-coordination.test.ts','traffic-signal-peers.test.ts','traffic-signal-display.test.ts','traffic-signal-lifecycle.test.ts','traffic-signal-browser-checks.test.mjs','traffic-rrt-navigation.test.ts'])assert.ok(yaml.includes(`tests/${name}`),`${path} requires ${name}`);}
+});
+
+test('presenter-only route still requires migrated fault and full browser matrix',()=>{
+ const yaml=readFileSync('.github/workflows/traffic-enabled.yml','utf8');
+ // This new scope must never join the legacy exact-scope job skip lists.
+ assert.equal(yaml.includes("'traffic-presenter'"),false);
+ for(const name of ['traffic-server-entry-fixture.test.mjs','traffic-default-fault-smoke.mjs','traffic-game-smoke.mjs','traffic-lane-order.test.ts'])assert.ok(yaml.includes(name));
+ const main=readFileSync('.github/workflows/citymanager.yml','utf8');assert.ok(main.includes("(steps.scope.outputs.kind == 'traffic-gap' || steps.scope.outputs.kind == 'traffic-presenter') && 'bumper-gap'"));
 });

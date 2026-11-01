@@ -1,5 +1,6 @@
 import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { railPathsOnly, railOnly, commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, hudPolishPathsOnly, hudPolishOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
@@ -161,4 +162,42 @@ test('HUD and dock presentation requires its reviewed source diff and rejects sa
  assert.equal(hudPolishPathsOnly(paths),true);
  assert.equal(hudPolishOnly(paths),false);assert.equal(hudPolishOnly(paths,{hudPolishSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.slice(1),...['index.html','src/server-city-save.ts','src/server-city-entry.ts','src/save-storage.ts','src/sim.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])])assert.equal(hudPolishPathsOnly(invalid),false);
+});
+
+import {trafficPresenterPathsOnly,trafficPresenterOnly} from '../scripts/ci-visual-scope.mjs';
+test('presenter lane-order route requires exact source and all server-entry migration contracts',()=>{
+ const paths=['src/traffic/presentation.ts','tests/traffic-lane-order.test.ts','tests/traffic-default-fault-smoke.mjs','tests/traffic-game-smoke.mjs','tests/traffic-server-entry-fixture.mjs','tests/traffic-server-entry-fixture.test.mjs'];
+ assert.equal(trafficPresenterPathsOnly(paths),true);assert.equal(trafficPresenterPathsOnly([...paths,'docs/TRAFFIC-PRESENTER-PERFORMANCE.md']),true);assert.equal(trafficPresenterPathsOnly([...paths,'docs/unreviewed-performance.md']),false);assert.equal(trafficPresenterOnly(paths),false);assert.equal(trafficPresenterOnly(paths,{trafficPresenterSourceDiff:'unreviewed'}),false);
+ for(const bad of [[],...paths.map(x=>paths.filter(p=>p!==x)),...['tests/touch-reach.mjs','tests/stored-load-completion.test.ts','src/traffic/game.ts','src/main.ts','src/pages-auth.ts','src/sim.ts','src/bus/engine.ts'].map(p=>[...paths,p])]){assert.equal(trafficPresenterPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
+});
+
+import {panelPolishSources,panelPolishPathsOnly,panelPolishOnly} from '../scripts/ci-visual-scope.mjs';
+test('panel and server-entry scope needs every reviewed source path and exact diff',()=>{
+ const paths=[...panelPolishSources,'tests/market-session.test.ts','tests/server-save-browser-smoke.mjs'];
+ assert.equal(panelPolishPathsOnly(paths),true);
+ assert.equal(panelPolishOnly(paths),false);
+ assert.equal(panelPolishOnly(paths,{panelPolishSourceDiff:'unreviewed'}),false);
+ assert.equal(visualKind(paths),'full');
+ for(const bad of [[],...panelPolishSources.map(x=>paths.filter(p=>p!==x)),...['src/server-city-save.ts','src/pages-auth.ts','server/city-saves/service.mjs','src/sim.ts','package.json'].map(p=>[...paths,p])]){assert.equal(panelPolishPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
+});
+
+test('panel scope retains mandatory authenticated save and changed UI browser gate',()=>{
+ const workflow=readFileSync(new URL('../.github/workflows/citymanager.yml',import.meta.url),'utf8');
+ assert.match(workflow,/CITYMANAGER_PR182_CHECKS:.*kind == 'panel-polish'.*'1'/);
+ assert.match(workflow,/node tests\/server-save-browser-smoke\.mjs/);
+ assert.match(workflow,/server-save-browser-evidence/);
+ assert.match(workflow,/tests\/market-session\.test\.ts/);
+});
+
+import { panelGateEvidence, panelGateFiles } from '../scripts/ci-visual-scope.mjs';
+test('panel gate binds every accepted test and workflow, including deleted entry test',()=>{
+ const read = p => p === 'tests/entry-gate.test.ts' ? null : `reviewed:${p}\n`;
+ const expected=panelGateEvidence(read);
+ const hashes={panelGateEvidence:createHash('sha256').update(expected).digest('hex')};
+ assert.equal(matchesReviewedSources({panelGateEvidence:expected},hashes),true);
+ for(const changed of panelGateFiles){
+  const altered=panelGateEvidence(p=>p===changed?'changed assertion or workflow\n':read(p));
+  assert.equal(matchesReviewedSources({panelGateEvidence:altered},hashes),false,`${changed} must not inherit the scope`);
+ }
+ assert.equal(panelGateEvidence(p=>read(p)?.replace(/\n/g,'\r\n')??null),expected,'line ending normalization is stable');
 });

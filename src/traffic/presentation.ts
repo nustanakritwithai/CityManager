@@ -89,6 +89,15 @@ function cornerBox(e:Entry):Box|null {
 }
 /** Preserve at most the occupied and next conflict node, including straight crossings. */
 type NodePlan={key:string;visit?:number;nodeX?:number;nodeZ?:number;exit?:{x:number;z:number;headingX:number;headingZ:number};gate?:{x:number;z:number;headingX:number;headingZ:number};box:Box;boxes:Box[]};
+function incomingPredecessor(owner:CitizenVehiclePose,other:CitizenVehiclePose,gate:NodePlan['gate']):boolean {
+ if(!gate)return false;
+ const along=(p:CitizenVehiclePose)=>(p.x-gate.x)*gate.headingX+(p.z-gate.z)*gate.headingZ;
+ const lateral=(p:CitizenVehiclePose)=>(p.x-gate.x)*gate.headingZ-(p.z-gate.z)*gate.headingX;
+ const position=along(owner);
+ return position< -EPS&&other.headingX*gate.headingX+other.headingZ*gate.headingZ>.99
+  &&Math.abs(lateral(other)-lateral(owner))<.3-EPS
+  &&along(other)>position+EPS&&along(other)<=EPS;
+}
 function nodePlans(e:Entry):NodePlan[]{
  const plans:{key:string;visit?:number;nodeX?:number;nodeZ?:number;exit?:{x:number;z:number;headingX:number;headingZ:number};gate?:{x:number;z:number;headingX:number;headingZ:number};box:Box;boxes:Box[]}[]=[],seen=new Set<string>();
  for(const p of [e.pose,...e.path,e.last]){
@@ -171,13 +180,19 @@ export class TrafficPresentation {
  reconcileBuses(ids:readonly string[]):void {const live=new Set(ids);for(const id of this.busPositions.keys())if(!live.has(id))this.busPositions.delete(id);for(const [id,r]of this.reservations)if(!live.has(r.owner))this.reservations.delete(id);if(this.selectedOwner&&!live.has(this.selectedOwner))this.selectedOwner=null;}
  clearBusReservations():void {this.reservations.clear();this.busPositions.clear();this.selectedOwner=null;this.selectedBusEpoch.clear();this.selectedPeerBodies=[];this.birthOpportunity=1;}
  private acquireCorners(obstacles:readonly Box[]){
-  for(const r of [...this.corners.values()].sort((a,b)=>a.order-b.order)){
+  // No poses or collection membership change during acquisition. Reuse these
+  // detached broad-phase bounds, but keep reading live grant flags in order.
+  const entries=[...this.entries].map(([id,e])=>({id,pose:e.pose,box:body(e.pose)}));
+  const corners=[...this.corners.values()],reservations=[...this.reservations.values()];
+  for(const r of [...corners].sort((a,b)=>a.order-b.order)){
    if(r.active)continue;
-   if([...this.corners.values()].some(c=>c.owner===r.owner&&c.order<r.order&&!c.active))continue;
-   if([...this.entries].some(([id,e])=>id!==r.owner&&r.boxes.some(b=>intersects(body(e.pose),b))))continue;
-   if(obstacles.some(b=>r.boxes.some(a=>intersects(b,a))))continue;
-   if([...this.corners.values()].some(c=>c.active&&c.owner!==r.owner&&c.boxes.some(a=>r.boxes.some(b=>intersects(a,b)))))continue;
-   if([...this.reservations.values()].some(b=>this.granted(b)&&b.boxes.some(box=>r.boxes.some(a=>intersects(box,a)))))continue;
+   const owner=this.entries.get(r.owner);
+   if(owner&&entries.some(e=>e.id!==r.owner&&incomingPredecessor(owner.pose,e.pose,r.gate)))continue;
+   if(corners.some(c=>c.owner===r.owner&&c.order<r.order&&!c.active))continue;
+   if(entries.some(e=>e.id!==r.owner&&intersects(e.box,r.box)&&r.boxes.some(b=>intersects(e.box,b))))continue;
+   if(obstacles.some(b=>intersects(b,r.box)&&r.boxes.some(a=>intersects(b,a))))continue;
+   if(corners.some(c=>c.active&&c.owner!==r.owner&&intersects(c.box,r.box)&&c.boxes.some(a=>r.boxes.some(b=>intersects(a,b)))))continue;
+   if(reservations.some(b=>this.granted(b)&&b.boxes.some(box=>intersects(box,r.box)&&r.boxes.some(a=>intersects(box,a)))))continue;
    r.active=true;
   }
  }
@@ -212,7 +227,7 @@ export class TrafficPresentation {
    for(const r of reservations)if(r.boxes.some(b=>intersects(box,b)))return false;
    for(const r of corners){
     if(r.owner===id){if(!r.active&&(r.gate?(p.x-r.gate.x)*r.gate.headingX+(p.z-r.gate.z)*r.gate.headingZ>EPS:intersects(box,r.box)))return false;}
-    else if(r.active&&r.boxes.some(b=>intersects(box,b)))return false;
+    else if(r.active&&intersects(box,r.box)&&r.boxes.some(b=>intersects(box,b)))return false;
    }
    for(const [other,b]of footprints)if(other!==id&&intersects(box,b))return false;return true;
   };
@@ -221,6 +236,9 @@ export class TrafficPresentation {
   for(const p of this.pending){if(this.entries.size>=this.limit||this.selectedOwner)break;
    const candidate:Entry={pose:{...p},last:{...p},path:[],speed:0,retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()};
    const birthPlans=nodePlans(candidate);
+   // Do not introduce a new leader ahead of an already committed corridor.
+   if(corners.some(c=>c.active&&this.entries.has(c.owner)&&incomingPredecessor(this.entries.get(c.owner)!.pose,p,c.gate)))continue;
+   if(birthPlans.some(n=>[...this.entries.values()].some(e=>incomingPredecessor(p,e.pose,n.gate))))continue;
    if(birthPlans.some(n=>[...footprints.values()].some(b=>n.boxes.some(a=>intersects(a,b)))||obstacles.some(b=>n.boxes.some(a=>intersects(a,b)))||corners.some(c=>c.active&&n.boxes.some(a=>c.boxes.some(b=>intersects(a,b))))||reservations.some(r=>r.boxes.some(b=>n.boxes.some(a=>intersects(a,b))))))continue;
    if(clear(p,p.vehicleId)){this.entries.set(p.vehicleId,{pose:{...p},last:{...p},path:[],speed:Math.max(0,Math.min(2,p.speed??0)),retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()});footprints.set(p.vehicleId,body(p));this.admitted++;
     for(const plan of birthPlans){const r:CornerReservation={owner:p.vehicleId,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:plan.boxes.some(b=>intersects(body(p),b)),active:true};this.corners.set(`${p.vehicleId}@${plan.key}`,r);corners.push(r);}

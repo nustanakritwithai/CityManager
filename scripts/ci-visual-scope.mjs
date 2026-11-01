@@ -132,7 +132,21 @@ const hudPolishAllowed=new Set([...hudPolishSources, ".github/workflows/citymana
 /** Top HUD and build-dock presentation only: no simulation, save, auth or index.html change. */
 export function hudPolishPathsOnly(paths){return ['src/main.ts','src/tool-menu.ts','src/grouped-tool-menu.ts','tests/grouped-tool-menu.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>hudPolishAllowed.has(p));}
 export function hudPolishOnly(paths,evidence={}){return hudPolishPathsOnly(paths)&&matchesReviewedSources(evidence,{hudPolishSourceDiff:"76c952c53b596155fcf522e9ba3c408dbc08cd3075aa94c87fc38e8a4ff007a2"});}
+// PR182: exact reviewed panel/entry transition. Source drift or unrelated paths fall back to full CI.
+export const panelPolishSources=['index.html','src/entry-gate.ts','src/main.ts','src/owner-decision-panel.ts','src/panel-polish.css','src/panel-time-controls.ts','src/panels.css','src/rail/management.css','src/save-feedback-panel.ts','src/server-city-entry.ts','src/startup-recovery-chooser.ts','src/style.css'];
+const panelPolishAllowed=new Set([...panelPolishSources,'README.md','tests/commercial-market-envelope.test.ts','tests/entry-gate.test.ts','tests/market-session.test.ts','tests/player-feedback-smoke.mjs','tests/owner-decision-smoke.mjs','tests/owner-no-export-contract.test.mjs','tests/server-save-browser-smoke.mjs','tests/pr182-visual-checks.mjs','tests/traffic-workflow-partition.test.mjs','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml']);
+export function panelPolishPathsOnly(paths){return panelPolishSources.every(p=>paths.includes(p))&&paths.every(p=>panelPolishAllowed.has(p));}
+// Bind the accepted tests and workflows too; changing an allowlisted assertion cannot silently inherit this exemption.
+export const panelGateFiles=['.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','tests/commercial-market-envelope.test.ts','tests/entry-gate.test.ts','tests/market-session.test.ts','tests/owner-decision-smoke.mjs','tests/owner-no-export-contract.test.mjs','tests/player-feedback-smoke.mjs','tests/pr182-visual-checks.mjs','tests/server-save-browser-smoke.mjs','tests/traffic-workflow-partition.test.mjs'];
+export function panelGateEvidence(read){return JSON.stringify(panelGateFiles.map(p=>{const value=read(p);return [p,typeof value==='string'?value.replace(/\r\n/g,'\n'):value];}));}
+const panelPolishHashes={panelPolishSourceDiff:'617bc876aa34341f455a8fd4a6e677b95db7e82bda9767fa5e317670f08f9070',panelGateEvidence:'1cba24708e8594fa775a2f26f342c502e252973aa0e5a2241b83b237005e17d3'};
+export function panelPolishOnly(paths,evidence={}){return panelPolishPathsOnly(paths)&&matchesReviewedSources(evidence,panelPolishHashes);}
+export const trafficPresenterSources=["src/traffic/presentation.ts"];
+const trafficPresenterAllowed=new Set(["docs/TRAFFIC-PRESENTER-PERFORMANCE.md", "tests/traffic-game-cases.test.ts", "src/traffic/presentation.ts", ".github/workflows/citymanager.yml", ".github/workflows/traffic-enabled.yml", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", "tests/traffic-workflow-partition.test.mjs", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-game-cases.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs", "docs/server-save-ci-migration.md"]);
+export function trafficPresenterPathsOnly(paths){return ["src/traffic/presentation.ts", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs"].every(p=>paths.includes(p))&&paths.every(p=>trafficPresenterAllowed.has(p));}
+export function trafficPresenterOnly(paths,evidence={}){return trafficPresenterPathsOnly(paths)&&matchesReviewedSources(evidence,{trafficPresenterSourceDiff:'8b74a11b65776e16e5fd8cbd0e6acdee349da26e1f75496c52a5e0adee0c89ee'});}
 export function visualKind(paths, evidence = {}) {
+  if(trafficPresenterOnly(paths,evidence))return 'traffic-presenter';
   if(adaptiveSignalOnly(paths,evidence))return 'traffic-gap';
   if(trafficRrtOnly(paths,evidence))return 'traffic-gap';
   if(rightOfWayOnly(paths,evidence))return 'traffic-gap';
@@ -143,6 +157,7 @@ export function visualKind(paths, evidence = {}) {
   if(historyOnly(paths,evidence))return 'history';
   if(classicToolbarOnly(paths,evidence))return 'classic-toolbar';
   if(hudPolishOnly(paths,evidence))return 'hud-polish';
+  if(panelPolishOnly(paths,evidence))return 'panel-polish';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
   if(managementPathsOnly(paths)&&serverSaveManagementOnly(evidence))return 'server-save';
   if (['src/server-city-save.ts','src/server-city-entry.ts','src/city-save-auth.ts','src/main.ts','index.html'].every(p=>paths.includes(p)) && paths.every(p=>serverSaveAllowed.has(p)) && serverSaveEntryOnly(evidence)) return 'server-save';
@@ -179,11 +194,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const paths = changedPaths(process.env.GITHUB_EVENT_NAME, event, git);
     const evidence = {};
     if(sessionLifetimePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.pagesBefore=git(['show',`${base}:src/pages-auth.ts`]);evidence.pagesAfter=git(['show',`${head}:src/pages-auth.ts`]);}
+    if(trafficPresenterPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.trafficPresenterSourceDiff=git(["diff","--no-ext-diff","--no-renames","--binary","--full-index","--no-color","--src-prefix=a/","--dst-prefix=b/","--diff-algorithm=myers","--no-indent-heuristic",base,head,"--",...trafficPresenterSources]);}
     if(adaptiveSignalPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.adaptiveSignalSourceDiff=git(["diff","--no-ext-diff","--no-renames","--binary","--full-index","--no-color","--src-prefix=a/","--dst-prefix=b/","--diff-algorithm=myers","--no-indent-heuristic",base,head,"--",...adaptiveSignalSources]);}
     if(trafficRrtPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.trafficRrtSourceDiff=git(["diff","--no-ext-diff","--no-renames","--binary","--full-index","--no-color","--src-prefix=a/","--dst-prefix=b/","--diff-algorithm=myers","--no-indent-heuristic",base,head,"--",...trafficRrtSources]);}
     if(rightOfWayPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.rightOfWaySourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...rightOfWaySources]);}
     if(trafficGapPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.trafficGapSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...trafficGapSources]);}
     if(railPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railSources]);}
+    if(panelPolishPathsOnly(paths)){
+      const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);
+      evidence.panelPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...panelPolishSources]);
+      evidence.panelGateEvidence=panelGateEvidence(p=>{
+        if(p==='tests/entry-gate.test.ts' && !git(['ls-tree','--name-only',head,'--',p]).trim()) return null;
+        return git(['show',`${head}:${p}`]);
+      });
+    }
     if(hudPolishPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.hudPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...hudPolishSources]);}
     if(commercialPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.commercialSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...commercialSources]);}
     if(historyPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.historySourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...historySources]);}

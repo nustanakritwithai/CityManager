@@ -257,23 +257,21 @@ try {
   assertConservation(roadActual); await openPanel();
   checks.push('A real paused drag-built road records cash and ledger exactly, keeps explicit auto mode and replay verification active, and saves atomically with matching park clocks');
 
-  stage('5 replay export and readable S22 normal/wide evidence');
-  await load(manualFixture); await button('#owner-evaluate'); const stable = await state(); await button('#owner-export');
-  const startedDownload = Date.now(); let downloadedFiles = [];
-  while (Date.now() - startedDownload < 10000) { downloadedFiles = (await readdir(output)).filter(name => /\.json$/i.test(name)); if (downloadedFiles.length) break; await sleep(80); }
-  assert.equal(downloadedFiles.length, 1, 'Exactly one actual sidecar JSON download completes');
-  assert(downloads.length <= 1, 'No duplicate export download event');
-  const downloadedPath = resolve(output, downloadedFiles[0]); assert(downloadedPath.startsWith(output + sep));
-  const exported = JSON.parse(await readFile(downloadedPath, 'utf8')); assert.equal(exported.schemaVersion, 1);
-  assert.deepEqual(await state(), stable, 'Export never changes the city');
+  stage('5 read-only replay and readable S22 normal/wide evidence');
+  await load(manualFixture); await button('#owner-evaluate'); const stable = await state();
+  assert.equal(await evaluate("!!document.querySelector('#owner-export')"), false, 'No checkpoint download control');
+  const downloadsBefore = downloads.length;
+  await button('#owner-verify'); await until("document.querySelector('#owner-decisions').dataset.lastStatus === 'verified'");
+  assert.equal(downloads.length, downloadsBefore, 'Read-only replay verification does not download a city checkpoint');
+  assert.deepEqual(await state(), stable, 'Replay verification never changes the city');
   await evaluate('document.querySelector("#owner-decisions").scrollIntoView({block:"start"})'); await paints(); await shot('owner-decisions-desktop.png');
   await layout({ width: 360, height: 780, screenWidth: 360, screenHeight: 780 }, 'owner-decisions-s22.png');
   await layout({ width: 980, height: 2120, screenWidth: 360, screenHeight: 780 }, 'owner-decisions-s22-wide.png');
   assert.deepEqual(await state(), stable, 'Viewport changes do not change canonical state');
-  checks.push('Replay sidecar exports locally; S22 normal and wide layouts retain readable Thai,44px controls and no horizontal overflow');
+  checks.push('Read-only replay verifies without checkpoint export; S22 normal and wide layouts retain readable Thai,44px controls and no horizontal overflow');
   assert.equal(apiAttempts.length, 0, 'No report or provider request from any rule-owner action');
   assert.equal(errors.length, 0); assert.equal(networkFailures.length, 0);
-  const qa = { ...evidence, testedAt: new Date().toISOString(), checks, monthly, layouts, screenshots, apiAttempts, browserErrors: errors, networkFailures, journalDownload: downloadedFiles[0], output, note: 'Synthetic local preview only. S22 viewport/touch emulation, not a physical handset test. No provider calls or LLM output.' };
+  const qa = { ...evidence, testedAt: new Date().toISOString(), checks, monthly, layouts, screenshots, apiAttempts, browserErrors: errors, networkFailures, journalDownload: null, output, note: 'Synthetic local preview only. S22 viewport/touch emulation, not a physical handset test. No provider calls or LLM output.' };
   await writeFile(resolve(output, 'qa.json'), JSON.stringify(qa, null, 2) + '\n');
   console.log(JSON.stringify({ passed: checks.length, apiRequests: 0, browserErrors: 0, screenshots, output }));
 } catch (error) {
