@@ -2,9 +2,9 @@ import { ICONS } from './ui-icons.ts';
 import { Vec3 } from 'playcanvas';
 import type { CityView } from './renderer.ts';
 import type { Overlay } from './map-overlay.ts';
-import { ISSUE_ICONS, ISSUE_PRIORITY, type Issue } from './building-issues.ts';
+import { ISSUE_ICONS, ISSUE_PRIORITY, issueVisibility, type Issue } from './building-issues.ts';
 import { bindIssueInput } from './building-issue-input.ts';
-import { visibleIssueCells } from './building-issue-layout.ts';
+import { MAP_ISSUE_BUDGET, mapIssueShown, visibleIssueCells } from './building-issue-layout.ts';
 import type { Preview } from './placement-preview.ts';
 
 /** Existing map information layer; only 44px issue targets in select mode intercept input. */
@@ -41,7 +41,7 @@ export class MapMarkers {
         item = { issue, node, dispose }; this.layer.append(node);
       }
       const { node } = item; item.issue = issue;
-      node.className = `map-issue ${issue.tone}`; node.dataset.kind = issue.kind; node.dataset.cell = String(issue.cell);
+      node.className = `map-issue ${issue.tone}`; node.dataset.kind = issue.kind; node.dataset.visibility = issueVisibility(issue); node.dataset.cell = String(issue.cell);
       node.dataset.remaining = String(issue.remaining); node.title = `${issue.text}${issue.remaining ? ` · อีก ${issue.remaining} เรื่อง` : ''}`;
       node.setAttribute('aria-label', `เปิดรายละเอียดสถานที่: ${issue.details.map(fact => fact.detail).join(' · ')}`);
       node.setAttribute('aria-controls', 'inspector');
@@ -78,12 +78,16 @@ export class MapMarkers {
   private place() {
     if (this.layer.hidden) return;
     this.layer.dataset.interactive = String(this.view.mode === 'select');
-    const points = this.issues.map(({ issue }) => { const p = this.screen(issue.cell, 3.6); return { cell: issue.cell, x: p.x, y: p.y, z: p.z }; });
+    // Far out, only problems to fix now; zoomed in, also quieter hints. Filter before the budget.
+    const radius = this.view.radius;
+    const points = this.issues.filter(({ node }) => mapIssueShown(node.dataset.visibility as ReturnType<typeof issueVisibility>, radius))
+      .map(({ issue }) => { const p = this.screen(issue.cell, 3.6); return { cell: issue.cell, x: p.x, y: p.y, z: p.z }; });
     // Cull BEFORE the visible budget, so offscreen buildings cannot starve visible warnings.
     const selectionPoints = this.selectionCells.map(cell => { const p = this.screen(cell, .1); return { cell, x: p.x, y: p.y, z: p.z }; });
-    const visible = visibleIssueCells(points, innerWidth, innerHeight, 64, selectionPoints);
+    const visible = visibleIssueCells(points, innerWidth, innerHeight, MAP_ISSUE_BUDGET, selectionPoints);
+    const at = new Map(points.map(p => [p.cell, p]));
     for (let i = 0; i < this.issues.length; i++) {
-      const { issue, node } = this.issues[i], p = points[i], shown = visible.has(issue.cell);
+      const { issue, node } = this.issues[i], p = at.get(issue.cell)!, shown = visible.has(issue.cell);
       node.hidden = !shown; node.tabIndex = shown && this.view.mode === 'select' ? 0 : -1;
       if (shown) node.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px)`;
     }

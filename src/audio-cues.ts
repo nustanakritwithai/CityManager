@@ -6,6 +6,7 @@ import { moneyJournalLength } from './city-history.ts';
  */
 import { MONTH, type City } from './sim.ts';
 import { buildingIssues } from './map-overlay.ts';
+import { alertIssues } from './building-issues.ts';
 import { cityGoals } from './city-goals.ts';
 
 export type CueName = 'ev-build-home' | 'ev-build-business' | 'ev-build-farm' | 'ev-arrival' | 'ev-month' | 'ev-shop' | 'ev-issue' | 'ev-broke' | 'jingle-level' | 'jingle-win';
@@ -15,7 +16,7 @@ const shopIds = (c: City) => new Set(c.firms.filter(f => f.zone === 'C').map(f =
 export function cueSnapshot(c: City): CueSnapshot {
   const goals = cityGoals(c);
   return { tick: c.tick, ledger: moneyJournalLength(c), buildings: new Set(c.buildings.map(b => b.id)), shops: shopIds(c),
-    issues: new Set(buildingIssues(c).map(i => `${i.cell}:${i.kind}`)), level: goals.level, won: goals.won };
+    issues: new Set(alertIssues(buildingIssues(c)).map(i => `${i.cell}:${i.kind}`)), level: goals.level, won: goals.won };
 }
 
 /** True when this frame can finish the economic day, including a leftover fraction of a minute. */

@@ -7,6 +7,7 @@ import './minimap.css';
 import { SIZE, GATEWAY, type City } from './sim.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { buildingIssues } from './map-overlay.ts';
+import { alertIssues } from './building-issues.ts';
 import { busCellNote, paintBusOverlay } from './bus/map-paint.ts';
 import { busMapRevision } from './bus/map-state.ts';
 import { paintRailOverlay } from './rail/map-paint.ts';
@@ -128,7 +129,7 @@ export class Minimap {
   }
   update(city: City, selected: number | null) {
     const key = `${city.tick}:${city.buildings.length}:${city.cells.filter(c => c.road).length}:${selected}`;
-    if (city !== this.city || key !== this.key) { this.issues = new Set(buildingIssues(city).map(i => i.cell)); }
+    if (city !== this.city || key !== this.key) { this.issues = new Set(alertIssues(buildingIssues(city)).map(i => i.cell)); }
     this.city = city; this.selected = selected; this.key = key; this.redraw(true);
     if (!this.map.hidden) this.toggleMap(true);
   }

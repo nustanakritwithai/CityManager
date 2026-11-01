@@ -18,6 +18,20 @@ export const ISSUE_TEXT: Readonly<Record<IssueKind, string>> = Object.freeze({
   'unsuitable-fertility': 'ดินไม่พอปลูก', 'empty-home': 'บ้านว่าง ยังไม่มีครัวเรือน', importing: 'มีการนำเข้าสินค้าล่าสุด',
   broke: 'เงินกิจการหมดและไม่มีคนงาน', paused: 'พักบริการ', education: 'เกณฑ์การศึกษาระดับถัดไป', upgrade: 'ยังไม่ผ่านเกณฑ์ระดับถัดไป', 'missing-data': 'ข้อมูลไม่ครบ',
 });
+/**
+ * How loudly an issue speaks on the map, by what the player can do about it now:
+ * - 'alert': something is broken (no road, power, water, workers, input, stock…) - always a badge, counted and chimed.
+ * - 'nearby': worth knowing but not urgent (an empty new home, next-level requirements) - a badge only when zoomed in.
+ * - 'panel': routine or chosen state (recent imports, a campus the player paused) - only in the place panel.
+ */
+export type IssueVisibility = 'alert' | 'nearby' | 'panel';
+export function issueVisibility(issue: Pick<IssueFact, 'kind' | 'tone'>): IssueVisibility {
+  if (issue.tone === 'bad') return 'alert';
+  if (issue.tone === 'inactive' || issue.kind === 'importing') return 'panel';
+  return 'nearby';
+}
+/** Issues the player should act on now: what the HUD counts, the minimap dots and the issue chime use. */
+export const alertIssues = (issues: readonly Issue[]) => issues.filter(issue => issueVisibility(issue) === 'alert');
 const cache = new WeakMap<City, { revision: string; issues: Issue[] }>();
 /** Covers same-tick commands too; camera frames never call the model. No saved-state field added. */
 export function buildingIssueRevision(city: City): string {

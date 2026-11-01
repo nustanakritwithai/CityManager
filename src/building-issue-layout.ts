@@ -12,3 +12,11 @@ export function visibleIssueCells(points: readonly IssuePoint[], width: number, 
   }
   return cells;
 }
+
+/** Camera radius at or below which 'nearby' badges (empty homes, next-level hints) join the always-on alerts. */
+export const NEARBY_ISSUE_RADIUS = 40;
+/** At most this many badges on screen; the list is priority-sorted, so the most urgent are kept. */
+export const MAP_ISSUE_BUDGET = 20;
+export function mapIssueShown(visibility: 'alert' | 'nearby' | 'panel', cameraRadius: number): boolean {
+  return visibility === 'alert' || (visibility === 'nearby' && cameraRadius <= NEARBY_ISSUE_RADIUS);
+}
