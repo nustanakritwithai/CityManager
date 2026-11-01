@@ -2,27 +2,38 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { stripTypeScriptTypes } from 'node:module';
 import assert from 'node:assert/strict';
+import {CanvasSelectionClickGuard} from '../src/canvas-selection-click.ts';
 
 // Exercise the installed canvas handlers without a browser or graphics device.
 // Browser touch emulation also covers the integrated path in browser-smoke.mjs.
 const source = readFileSync(new URL('../src/renderer.ts', import.meta.url), 'utf8');
 const body = source.slice(source.indexOf('  input() {') + '  input() {'.length, source.indexOf('  /** Swap every material'));
-const install = new Function(stripTypeScriptTypes(body.slice(0, body.lastIndexOf('  }'))));
+const install = new Function('CanvasSelectionClickGuard', 'document', stripTypeScriptTypes(body.slice(0, body.lastIndexOf('  }'))));
 function harness(mode = 'select') {
-  const listeners = new Map();
+  const listeners = new Map(), documentListeners = new Map();
   const canvas = { addEventListener(type, cb) { listeners.set(type, cb); }, setPointerCapture() {}, hasPointerCapture() { return false; }, releasePointerCapture() {} };
+  const document = { addEventListener(type, cb) { documentListeners.set(type, cb); } };
   const calls = { cell: [], road: [], pan: [], hover: [] };
   const view = { canvas, mode, cameraBlocked: false, pointers: new Map(), down: null, dragStart: null, radius: 65, yaw: 0,
     pick: (x, y) => Math.round(x + y), onCell: i => calls.cell.push(i), onRoad: (a,b) => calls.road.push([a,b]),
     onHover: i => calls.hover.push(i), pan: (x,y) => calls.pan.push([x,y]), updateCamera() {} };
-  install.call(view);
-  function event(type, x, y, opts = {}) { listeners.get(type)({ pointerId: 1, button: 0, altKey: false, clientX: x, clientY: y, preventDefault() {}, ...opts }); }
-  return { view, calls, event };
+  install.call(view, CanvasSelectionClickGuard, document);
+  function event(type, x, y, opts = {}) { const e={ pointerId: 1, button: 0, altKey: false, clientX: x, clientY: y, preventDefault() {}, ...opts };documentListeners.get(type)?.(e);listeners.get(type)(e); }
+  function click(target, opts = {}) { let blocked=false;const e={isTrusted:true,pointerId:1,timeStamp:110,target,preventDefault(){},stopImmediatePropagation(){blocked=true;},...opts};documentListeners.get('click')?.(e);return blocked; }
+  return { view, calls, event, click, canvas };
 }
 
 test('default short tap inspects; small jitter does not pan', () => {
   const h = harness(); h.event('pointerdown', 10, 10); h.event('pointermove', 13, 12); h.event('pointerup', 13, 12);
   assert.deepEqual(h.calls.cell, [25]); assert.deepEqual(h.calls.pan, []);
+});
+
+test('touch selection blocks its retargeted click but not a later deliberate gesture', () => {
+  const h=harness();h.event('pointerdown',10,10,{isTrusted:true,pointerType:'touch',timeStamp:90});
+  h.event('pointerup',10,10,{isTrusted:true,pointerType:'touch',timeStamp:100});assert.deepEqual(h.calls.cell,[20]);
+  assert.equal(h.click({id:'recipe'}),true,'compatibility click on newly opened overlay is blocked');
+  assert.equal(h.click({id:'recipe'},{pointerId:2,timeStamp:200}),false,'new touch can activate the control');
+  assert.equal(h.click({id:'close'},{pointerId:-1,timeStamp:210}),false,'keyboard click stays available');
 });
 test('default drag pans and never inspects, even if it returns to its start', () => {
   const h = harness(); h.event('pointerdown', 10, 10); h.event('pointermove', 30, 10); h.event('pointermove', 10, 10); h.event('pointerup', 10, 10);

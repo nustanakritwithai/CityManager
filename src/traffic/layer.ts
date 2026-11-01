@@ -40,7 +40,7 @@ export class TrafficLayer {
  private workCancel=new Set<number>();private workRetired=new Set<number>();
  private workStalls=new WorkStallTracker();
  private presenter=new TrafficPresentation();private drawn:CitizenVehiclePose[]=[];
- private timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
+ private timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
  private anchor:number|null=null;private paused=true;private visible=true;private dirty=false;private renderDirty=true;private failure:string|null=null;
  constructor(private readonly app:AppBase,_onScreen:(cell:number)=>boolean=()=>true,private readonly onFailure:(message:string)=>void=()=>{},
    private readonly makeWorker:()=>Worker=()=>new Worker(new URL('./game-worker-entry.ts',import.meta.url),{type:'module'}),
@@ -50,7 +50,7 @@ export class TrafficLayer {
   this.signalDisplay.clear();try{this.signalScene?.sync([]);}catch{/* lost graphics */}try{this.signalScene?.setEnabled(false);}catch{/* lost graphics */}try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
  }
  private reset(city:City):void {
-  this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
+  this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
   this.client?.dispose();this.client=null;this.city=city;this.latest=null;this.presenter=new TrafficPresentation();this.workStalls=new WorkStallTracker();this.crossedWorkDay=null;this.drawn=[];this.anchor=null;this.dirty=false;this.renderDirty=true;this.failure=null;this.workExpiryAck=0;this.workCancel.clear();this.workRetired.clear();this.cars.setEnabled(this.visible);this.cars.sync([]);
   this.signalDisplay.reset(city);this.signalScene?.sync([]);this.signalScene?.setEnabled(this.visible);
   this.bus=null;this.minute=7*60; // rebuilt in frame() on the fresh bus clock
@@ -68,8 +68,8 @@ export class TrafficLayer {
   } catch(error){this.fail(error);}
  }
  private submit(city:City,advance:boolean,paused:boolean):void {
-  const start=performance.now();const input=captureTrafficGameInput(city,{taxiEnabled:this.taxiOn,...(this.workClock?{workClock:{...this.workClock,ack:this.workExpiryAck,...(this.crossedWorkDay===null?{}:{crossedWorkDay:this.crossedWorkDay})}}:{})});if(input.work){input.work.cancelIds=[...this.workCancel];input.work.retiredIds=[...this.workRetired];}if(this.bus)input.bus=this.bus.input();this.client?.submit(input,{advance,paused});
-  const ms=performance.now()-start;this.timing.samples++;this.timing.lastCaptureSubmitMs=ms;this.timing.maxCaptureSubmitMs=Math.max(this.timing.maxCaptureSubmitMs,ms);
+  const start=performance.now();const input=captureTrafficGameInput(city,{taxiEnabled:this.taxiOn,...(this.workClock?{workClock:{...this.workClock,ack:this.workExpiryAck,...(this.crossedWorkDay===null?{}:{crossedWorkDay:this.crossedWorkDay})}}:{})});if(input.work){input.work.cancelIds=[...this.workCancel];input.work.retiredIds=[...this.workRetired];}if(this.bus)input.bus=this.bus.input();const prepared=performance.now();this.client?.submit(input,{advance,paused});
+  const end=performance.now(),ms=end-start,inputMs=prepared-start,postMs=end-prepared;this.timing.samples++;this.timing.lastCaptureSubmitMs=ms;this.timing.maxCaptureSubmitMs=Math.max(this.timing.maxCaptureSubmitMs,ms);this.timing.lastInputMs=inputMs;this.timing.maxInputMs=Math.max(this.timing.maxInputMs,inputMs);this.timing.lastPostMs=postMs;this.timing.maxPostMs=Math.max(this.timing.maxPostMs,postMs);
  }
  /** Every city replacement starts a fresh game epoch; nothing is read from or
   * written to the player's save. Map edits replace the current sample. */
