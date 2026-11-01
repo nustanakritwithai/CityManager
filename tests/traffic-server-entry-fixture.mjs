@@ -1,6 +1,13 @@
 // Loopback-only traffic acceptance adapter. Reuses the real server service and
 // synthetic existing-owner endpoint fixture; never injects an app session.
 import assert from 'node:assert/strict';
+import {reachTouch} from './touch-reach.mjs';
+// Server Save callers wait for exact service raw/revision and client ACK after
+// the visible, enabled, hit-tested native click; never use the legacy local-save waiter.
+export async function reachTrafficControl(evaluate,button,selector){
+ if(selector==='#save')return false;
+ return reachTouch(evaluate,button,selector);
+}
 import {deserializeParkSession} from '../src/park-runtime.ts';
 import {createPanelServerFixture,assertNoCityWrites as noPanelCityWrites} from './panel-server-entry-fixture.mjs';
 export function assertNavigationSaveChain(before,after,writes){

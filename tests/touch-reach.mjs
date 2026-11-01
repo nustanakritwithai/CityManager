@@ -12,11 +12,11 @@ export async function withStoredLoadCompletion(evaluate,activate,timeout=15000){
   }finally{await evaluate('window.__storedLoadObserver?.disconnect();delete window.__storedLoadObserver;delete window.__storedLoadResult');}
 }
 
-// Save may finish with a server ACK, legacy primary storage, an awaited error, or
+// Save may finish in primary storage, fail after an awaited emergency copy, or
 // stop for explicit confirmation. Opening the dialog is NEVER auto-confirmed.
 export async function withStoredSaveCompletion(evaluate,activate,timeout=15000){
   try{
-    await evaluate(`(()=>{window.__storedSaveObserver?.disconnect();window.__storedSaveResult=null;const status=document.querySelector('#status');if(!status)throw Error('Missing save status');window.__storedSaveObserver=new MutationObserver(()=>{const text=status.textContent??'';if(!text.includes('กำลังพยายามสร้างสำเนากู้คืน')&&(/Saved day/.test(text)||/^บันทึกในเบราว์เซอร์นี้แล้ว/.test(text)||/^บันทึกเมืองบนเซิร์ฟเวอร์แล้ว/.test(text)||/^ยังบันทึกไม่ได้:/.test(text)||/^บันทึกไม่ได้:/.test(text)))window.__storedSaveResult=text;});window.__storedSaveObserver.observe(status,{childList:true,subtree:true,characterData:true})})()`);
+    await evaluate(`(()=>{window.__storedSaveObserver?.disconnect();window.__storedSaveResult=null;const status=document.querySelector('#status');if(!status)throw Error('Missing save status');window.__storedSaveObserver=new MutationObserver(()=>{const text=status.textContent??'';if(!text.includes('กำลังพยายามสร้างสำเนากู้คืน')&&(/Saved day/.test(text)||/^บันทึกในเบราว์เซอร์นี้แล้ว/.test(text)||/^บันทึกไม่ได้:/.test(text)))window.__storedSaveResult=text;});window.__storedSaveObserver.observe(status,{childList:true,subtree:true,characterData:true})})()`);
     await activate();const started=Date.now();
     while(Date.now()-started<timeout){if(await evaluate("window.__storedSaveResult!==null&&window.__storedSaveResult!==undefined||!!document.querySelector('#save-promotion-confirm[open]')"))return;await new Promise(resolve=>setTimeout(resolve,50));}
     throw Error('Stored Save did not reach a terminal result or confirmation: '+await evaluate("document.querySelector('#status')?.textContent"));

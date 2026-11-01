@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
-import {createTrafficServerFixture,assertNavigationSaveChain} from './traffic-server-entry-fixture.mjs';
+import {createTrafficServerFixture,assertNavigationSaveChain,reachTrafficControl} from './traffic-server-entry-fixture.mjs';
 const url='http://127.0.0.1:4195/CityManager/';
 import {createCity,step} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
@@ -60,4 +60,22 @@ test('old page unload and in-flight service request settle before a new fixture 
   send:async()=>{mutation=f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:1,raw,metadata:before.metadata}),async()=>wait);blank=true;setTimeout(()=>release(),5);},
   until:async()=>assert.equal(blank,true)});
  await mutation;assert.equal(f.active.revision,2);const next=await f.seed(raw);assert.equal(next.revision,1);assert.equal(f.writes.length,0);assert.notEqual(next.cityId,before.cityId);await assert.rejects(f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:2,raw,metadata:before.metadata}),async()=>{}),/Unexpected rejected traffic save/);assert.equal(f.active.revision,1);assert.equal(f.active.cityId,next.cityId);
+});
+
+
+test('traffic native Save bypasses only the obsolete local-save waiter; other controls still use reachability',async()=>{
+ let evaluated=0,clicked=0;
+ assert.equal(await reachTrafficControl(async()=>{evaluated++;throw Error('Legacy Save waiter used');},async()=>{clicked++;},'#save'),false);
+ assert.equal(evaluated,0);assert.equal(clicked,0,'caller owns the one hit-tested native click and subsequent ACK wait');
+ await assert.rejects(reachTrafficControl(async()=>{evaluated++;throw Error('Reachability delegated');},async()=>{},'#pause'),/Reachability delegated/);assert.equal(evaluated,1);
+});
+
+test('actual traffic bootstrap scripts ignore about:blank before accessing secure-origin APIs',async()=>{
+ const {readFileSync}=await import('node:fs'),{runInNewContext}=await import('node:vm');
+ for(const name of ['traffic-game-smoke.mjs','traffic-default-fault-smoke.mjs']){
+  const text=readFileSync(new URL(name,import.meta.url),'utf8'),literal=text.match(/const source=(`[^]*?`);/)?.[1];assert.ok(literal,name);
+  const source=runInNewContext(literal,{origin:new URL(url).origin,base:new URL(url),token:'fixture',pref:null,denyGet:false,denySet:false,protectedKeys:{},fault:''});
+  const blank={window:{},location:{origin:'null'}};runInNewContext(source,blank);assert.deepEqual(blank.window,{},'blank navigation creates no boot marker or storage/fault hooks');
+  let called=0;assert.throws(()=>runInNewContext(source,{window:{},location:{origin:new URL(url).origin},crypto:{randomUUID(){called++;throw Error('trusted boot marker');}}}),/trusted boot marker/);assert.equal(called,1);
+ }
 });

@@ -31,7 +31,7 @@ and tests. Any unrelated source, unknown range or missing required file selects
 the full route. This is relevant traffic coverage, not a claim that the entire
 historical simulation suite passes.
 
-Both default/fault and all seven partitioned allocation-game profiles now seed the
+Both default/fault and all nine partitioned allocation-game profiles now seed the
 isolated real server service through an acknowledged create, enter through the
 visible existing-owner gate, and retain actual worker, preference, pause,
 road/bypass, economy, model-fallback and performance assertions. No city is seeded
@@ -42,7 +42,7 @@ traffic preferences remain browser preferences; zero browser city writes remains
 mandatory. No recovery-IDB-denial chooser is presented as current startup.
 
 The new scope does not skip the Traffic workflow's default/fault or any of
-the seven browser jobs covering the former full/core/extended workloads. Main additionally retains current strict
+the nine browser jobs covering the former full/core/extended workloads. Main additionally retains current strict
 gap/identity/bus/RRT/signal and real server-save browser acceptance. Existing
 server-save workflows remain mandatory. Per-process 240-second watchdogs, traffic demand, bypass
 thresholds and performance thresholds are unchanged; combined work is partitioned as described below.
@@ -65,7 +65,9 @@ before acceptance; earlier artifacts are not proof of this migrated harness.
 The first migrated run reached actual entry and Save. It exposed two remaining
 harness assumptions: the shared native Save waiter lacked the current Thai
 server terminal text; a reload can legitimately flush an unchanged session and
-advance server revision. The fixture now verifies every such increase against
+advance server revision. Traffic Save now uses its existing hit-tested native button followed by exact
+server raw/revision and client ACK checks, without changing the shared legacy
+Save waiter or its unrelated UX consumers. The fixture verifies every such increase against
 observed successful POST/ACK actions, exact raw/city identity and contiguous
 expected revisions, then requires the actual entry GET to match the final head.
 It does not accept unexplained revision growth. Old pages unload and intercepted
@@ -75,8 +77,25 @@ is recorded without dumping session bodies.
 
 The fallback extended run exhausted its unchanged 240-second watchdog after
 bypass and dense sampling accumulated. CI now partitions the same assertions
-into normal core/bypass/dense/peak and fallback core/bypass/dense jobs. Automated
+into normal lifecycle/economy/bypass/dense/peak and fallback
+lifecycle/economy/bypass/dense jobs. The former core also exceeded 240 seconds
+while combining startup/ACK/toggle with both economic replays; lifecycle (four
+checks) is therefore separate from paired economy/paused-road (two checks). Automated
 union tests require every original check exactly once (9 normal, 8 fallback).
 Dense OFF/ON stays paired in one job; all three normal peak pairs stay in one
 job. Existing demand, native inputs, screenshots, per-pair thresholds and the
 240-second per-profile watchdog are unchanged. No old failure is marked passed.
+
+The shared touch-reach helper and its stored-load tests remain byte-identical to
+base e65eb66. Only traffic callers bypass that helper's obsolete local-Save
+terminal waiter; all non-Save native control reachability still delegates to it.
+Shared-helper edits are excluded from the exact presenter scope and route full.
+No Player feedback workflow skip was introduced.
+
+Observed fallback critical-path estimate: lifecycle reached its fourth check at
+about115s; the two economic replays took about80s before the former combined
+240s limit, with paused-road validation still pending. Separate lifecycle and
+economy profiles each retain the 240s bound; their budget is no longer shared.
+Bypass baseline+construction previously consumed about126s, and dense paired
+sampling now has its own full profile. The three-pair peak remains one unchanged
+protocol, not split or resampled. These estimates are not browser-pass claims.
