@@ -162,3 +162,10 @@ test('HUD and dock presentation requires its reviewed source diff and rejects sa
  assert.equal(hudPolishOnly(paths),false);assert.equal(hudPolishOnly(paths,{hudPolishSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.slice(1),...['index.html','src/server-city-save.ts','src/server-city-entry.ts','src/save-storage.ts','src/sim.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])])assert.equal(hudPolishPathsOnly(invalid),false);
 });
+
+import {trafficPresenterPathsOnly,trafficPresenterOnly} from '../scripts/ci-visual-scope.mjs';
+test('presenter lane-order route requires exact source and all server-entry migration contracts',()=>{
+ const paths=['src/traffic/presentation.ts','tests/traffic-lane-order.test.ts','tests/traffic-default-fault-smoke.mjs','tests/traffic-game-smoke.mjs','tests/traffic-server-entry-fixture.mjs','tests/traffic-server-entry-fixture.test.mjs'];
+ assert.equal(trafficPresenterPathsOnly(paths),true);assert.equal(trafficPresenterPathsOnly([...paths,'docs/TRAFFIC-PRESENTER-PERFORMANCE.md']),true);assert.equal(trafficPresenterPathsOnly([...paths,'docs/unreviewed-performance.md']),false);assert.equal(trafficPresenterOnly(paths),false);assert.equal(trafficPresenterOnly(paths,{trafficPresenterSourceDiff:'unreviewed'}),false);
+ for(const bad of [[],...paths.map(x=>paths.filter(p=>p!==x)),...['tests/touch-reach.mjs','tests/stored-load-completion.test.ts','src/traffic/game.ts','src/main.ts','src/pages-auth.ts','src/sim.ts','src/bus/engine.ts'].map(p=>[...paths,p])]){assert.equal(trafficPresenterPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
+});

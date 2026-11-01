@@ -72,7 +72,7 @@ jobs:
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish'
         run: node --test tests/traffic-workflow-partition.test.mjs
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish'
-        run: node --experimental-strip-types --test tests/traffic-worker-cycle.test.ts tests/traffic-worker-cycle-presentation.test.ts tests/traffic-adaptive-signals.test.ts tests/traffic-signal-coordination.test.ts tests/traffic-signal-peers.test.ts tests/traffic-signal-display.test.ts tests/traffic-signal-lifecycle.test.ts tests/traffic-signal-browser-checks.test.mjs tests/traffic-rrt-navigation.test.ts tests/taxi-dispatch.test.ts tests/taxi-traffic-game.test.ts tests/bus-bridge.test.ts tests/bus-buildings.test.ts tests/bus-engine.test.ts tests/bus-game.test.ts tests/bus-integration.test.ts tests/bus-level.test.ts tests/bus-lines.test.ts tests/bus-mode-share.test.ts tests/bus-movement-gate.test.ts tests/bus-player.test.ts tests/bus-render.test.ts tests/traffic-junction-fairness.test.ts tests/traffic-gap-browser-checks.test.mjs tests/traffic-presentation.test.ts tests/traffic-spacing.test.ts tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
+        run: node --experimental-strip-types --test tests/traffic-server-entry-fixture.test.mjs tests/traffic-worker-cycle.test.ts tests/traffic-worker-cycle-presentation.test.ts tests/traffic-lane-order.test.ts tests/traffic-adaptive-signals.test.ts tests/traffic-signal-coordination.test.ts tests/traffic-signal-peers.test.ts tests/traffic-signal-display.test.ts tests/traffic-signal-lifecycle.test.ts tests/traffic-signal-browser-checks.test.mjs tests/traffic-rrt-navigation.test.ts tests/taxi-dispatch.test.ts tests/taxi-traffic-game.test.ts tests/bus-bridge.test.ts tests/bus-buildings.test.ts tests/bus-engine.test.ts tests/bus-game.test.ts tests/bus-integration.test.ts tests/bus-level.test.ts tests/bus-lines.test.ts tests/bus-mode-share.test.ts tests/bus-movement-gate.test.ts tests/bus-player.test.ts tests/bus-render.test.ts tests/traffic-junction-fairness.test.ts tests/traffic-gap-browser-checks.test.mjs tests/traffic-presentation.test.ts tests/traffic-spacing.test.ts tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish'
         run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-peak-fixture.test.ts tests/traffic-game-peak-metrics.test.ts tests/traffic-game-fallback-metrics.test.ts tests/traffic-game-modal.test.ts tests/traffic-game-cases.test.ts
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish'
@@ -103,11 +103,17 @@ jobs:
           retention-days: 3
 
   fault:
-    name: Allocation game / default and worker fault
+    name: Allocation game fault / ${{ matrix.case }}
     needs: checks
     if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial' && needs.checks.outputs.kind != 'rail' && needs.checks.outputs.kind != 'hud-polish' && needs.checks.outputs.kind != 'traffic-gap'
     runs-on: windows-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [preferences, economy, construct, async]
+    env:
+      TRAFFIC_FAULT_CASE: ${{ matrix.case }}
     defaults:
       run:
         shell: pwsh
@@ -144,7 +150,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: traffic-game-fault-evidence
+          name: traffic-game-fault-${{ matrix.case }}-evidence
           path: |
             .test-output/traffic-default-fault/*.png
             .test-output/traffic-default-fault/report.json
@@ -153,7 +159,7 @@ jobs:
           retention-days: 3
 
   browser:
-    name: Allocation game browser / ${{ matrix.case }}
+    name: Allocation game browser / ${{ matrix.name }}
     needs: checks
     if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial' && needs.checks.outputs.kind != 'rail' && needs.checks.outputs.kind != 'hud-polish' && needs.checks.outputs.kind != 'traffic-gap'
     runs-on: windows-latest
@@ -162,13 +168,40 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - case: full
+          - name: normal-lifecycle
+            case: lifecycle
             blocked: '0'
             software: '0'
-          - case: core
+          - name: normal-economy
+            case: economy
+            blocked: '0'
+            software: '0'
+          - name: normal-bypass
+            case: bypass
+            blocked: '0'
+            software: '0'
+          - name: normal-dense
+            case: dense
+            blocked: '0'
+            software: '0'
+          - name: normal-peak
+            case: peak
+            blocked: '0'
+            software: '0'
+          - name: fallback-lifecycle
+            case: lifecycle
             blocked: '1'
             software: '1'
-          - case: extended
+          - name: fallback-economy
+            case: economy
+            blocked: '1'
+            software: '1'
+          - name: fallback-bypass
+            case: bypass
+            blocked: '1'
+            software: '1'
+          - name: fallback-dense
+            case: dense
             blocked: '1'
             software: '1'
     defaults:
@@ -211,7 +244,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: traffic-game-${{ matrix.case }}-evidence
+          name: traffic-game-${{ matrix.name }}-evidence
           path: |
             .test-output/traffic-game/*/*.png
             .test-output/traffic-game/*/report.json

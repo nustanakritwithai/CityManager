@@ -1,11 +1,17 @@
-/** Test-only execution plan. Full asset-enabled traffic coverage remains mandatory;
- * its recovery IndexedDB is explicitly synthetic-denied by the browser harness
- * to isolate steady-state traffic from unrelated native-IDB startup stalls.
- * Core/full use explicitly denied recovery IDB; extended retains native IDB; real IDB persistence has separate save CI.
- * The slower blocked-model fallback may use two independent bounded profiles. */
+/** Deterministic coverage partitions; every pair stays in one profile/job.
+ * Full/extended remain supported for explicit runs; CI uses disjoint bounded
+ * lifecycle, economy, bypass, dense OFF/ON and (normal only) fixed three-pair peak cases. */
 export function trafficGameCase(name,blocked) {
- if(!['full','core','extended'].includes(name))throw Error(`Unknown traffic game case: ${name}`);
- if(!blocked&&name!=='full')throw Error('Only the blocked-model fallback may be split');
- return {name,core:name!=='extended',extended:name!=='core',expectedChecks:name==='full'?(blocked?8:9):name==='core'?6:2,
-  output:blocked?(name==='full'?'fallback':`fallback-${name}`):'normal'};
+ if(!['full','core','extended','bypass','dense','peak','lifecycle','economy'].includes(name))throw Error(`Unknown traffic game case: ${name}`);
+ if(blocked&&name==='peak')throw Error('Peak protocol requires normal assets');
+ const lifecycle=['full','core','lifecycle'].includes(name),economy=['full','core','economy'].includes(name),core=lifecycle||economy,bypass=['full','extended','bypass'].includes(name),dense=['full','extended','dense'].includes(name),peak=!blocked&&['full','extended','peak'].includes(name);
+ return {name,core,lifecycle,economy,bypass,dense,peak,extended:bypass||dense||peak,expectedChecks:(lifecycle?4:0)+(economy?2:0)+(bypass?1:0)+(dense?1:0)+(peak?1:0),
+  output:`${blocked?'fallback':'normal'}${name==='full'?'':`-${name}`}`};
+}
+
+/** Fault checks are independent scenarios; no paired comparison is split. */
+export function trafficFaultCase(name='full'){
+ if(!['full','preferences','economy','construct','async'].includes(name))throw Error(`Unknown traffic fault case: ${name}`);
+ const preferences=name==='full'||name==='preferences',economy=name==='full'||name==='economy',faults=['construct','async'].filter(f=>name==='full'||name===f);
+ return {name,preferences,economy,faults,expectedChecks:(preferences?4:0)+(economy?1:0)+faults.length};
 }
