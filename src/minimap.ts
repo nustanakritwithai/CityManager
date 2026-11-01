@@ -9,6 +9,8 @@ import { commercialPresentation } from './commercial-visuals.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { busCellNote, paintBusOverlay } from './bus/map-paint.ts';
 import { busMapRevision } from './bus/map-state.ts';
+import { paintRailOverlay } from './rail/map-paint.ts';
+import { railCellNote, railMapRevision } from './rail/map-state.ts';
 
 type View = { target: { x: number; z: number }; yaw: number; radius: number };
 const UNIT = 2;
@@ -64,6 +66,7 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     label('ประตูเมือง', GATEWAY);
   }
   paintBusOverlay(ctx, cell, !!opts.labels);
+  paintRailOverlay(ctx, cell, !!opts.labels);
 }
 
 function setupCanvas(canvas: HTMLCanvasElement, size: number) {
@@ -106,7 +109,7 @@ export class Minimap {
     close.addEventListener('click', () => this.toggleMap(false));
     bar.append(h, close);
     const legend = document.createElement('div'); legend.className = 'city-map-legend';
-    for (const [tone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม'], ['road', 'ถนน'], ['gate', 'ประตูเมือง'], ['issue', 'มีปัญหา']] as const) {
+    for (const [tone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม'], ['road', 'ถนน'], ['gate', 'ประตูเมือง'], ['rail', 'รถไฟ'], ['issue', 'มีปัญหา']] as const) {
       const item = document.createElement('span'); item.className = `city-map-key ${tone}`; item.textContent = label; legend.append(item);
     }
     this.mapCanvas.className = 'city-map-canvas';
@@ -133,7 +136,7 @@ export class Minimap {
   /** Called every frame: redraws only when the camera or the city changed. */
   redraw(force = false) {
     if (!this.city) return;
-    const camera = `${this.view.target.x.toFixed(1)}:${this.view.target.z.toFixed(1)}:${this.view.yaw.toFixed(2)}:${this.view.radius.toFixed(0)}:${busMapRevision()}`;
+    const camera = `${this.view.target.x.toFixed(1)}:${this.view.target.z.toFixed(1)}:${this.view.yaw.toFixed(2)}:${this.view.radius.toFixed(0)}:${busMapRevision()}:${railMapRevision()}`;
     if (!force && camera === this.camera) return; this.camera = camera;
     draw(this.ctx, this.city, 152, { view: this.view, selected: this.selected, issues: this.issues });
     if (!this.map.hidden) this.toggleMap(true);
@@ -142,7 +145,7 @@ export class Minimap {
     if (cell === null || !this.city) return;
     const c = this.city.cells[cell], col = cell % SIZE + 1, row = Math.floor(cell / SIZE) + 1, b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
     const kind = c.road ? (cell === GATEWAY ? 'ประตูเมือง' : 'ถนน') : !c.zone ? 'ที่ดินว่าง' : b ? `${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} #${b.id} · ระดับ ${b.level}` : `โซน${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} (ว่าง)`;
-    const bus = busCellNote(cell);
-    this.mapInfo.textContent = `${col},${row} · ${kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}${bus ? ` · ${bus}` : ''}`;
+    const bus = busCellNote(cell), rail = railCellNote(cell);
+    this.mapInfo.textContent = `${col},${row} · ${rail || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}${bus ? ` · ${bus}` : ''}`;
   }
 }
