@@ -101,6 +101,17 @@ export function inspectTrafficEvidence(records,rendered,stops,{requireBus=true,r
  const holdResume=requireBus?(heldThenResumed(gateEvidence,stops)??heldThenResumed(rendered,stops)):null;if(requireHold)assert.ok(holdResume,'Same real held bus must later be granted and physically resume while global time advances');
  return{holdResume,maxHeldDrive,maxGrantedDrive,busPositionChanges,homeSamples,maxBusIntrusions,maxRenderedFrameDisplacement,frames:records.length,renderSamples:rendered.length,nonidleFrames:nonidle,busSamples,movementSamples:movement,visibility};
 }
+export function inspectRrtEvidence(records){
+ let maxAttempted=0,maxAccepted=0,maxExpanded=0,maxIterations=0;
+ assert.ok(records.length>0,'Actual committed Worker frames required for RRT proof');
+ for(const {frame} of records){const n=frame.navigation;assert.ok(n,'Actual Worker navigation diagnostics required');
+  for(const key of ['attempted','accepted','fallback','unreachable','expanded','iterations','cacheHits','budgetExhausted'])assert.ok(Number.isSafeInteger(n[key])&&n[key]>=0,'Finite nonnegative RRT counter '+key);
+  assert.ok(n.accepted<=n.attempted,'Accepted RRT paths cannot exceed attempts');assert.ok(n.expanded<=512&&n.iterations<=2048,'Actual Worker planning respects fixed per-wave RRT budgets');
+  maxAttempted=Math.max(maxAttempted,n.attempted);maxAccepted=Math.max(maxAccepted,n.accepted);maxExpanded=Math.max(maxExpanded,n.expanded);maxIterations=Math.max(maxIterations,n.iterations);
+ }
+ assert.ok(maxAttempted>0&&maxAccepted>0,'Actual Worker must attempt and accept goal-directed RRT routes');
+ return{frames:records.length,maxAttempted,maxAccepted,maxExpanded,maxIterations,nodeBudget:512,attemptBudget:2048};
+}
 export async function trafficWithCleanup(action,cleanup){
  let primary,failed=false,result;
  try{result=await action();}catch(error){primary=error;failed=true;}
@@ -159,6 +170,7 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  await pause(true);await until(async()=>!(await traffic()).updating,'dense pause fence');await evaluate('window.__trafficGapSampling=false');
  const denseObserved=await observer(),denseCity=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));
  const denseProof=inspectTrafficEvidence(denseObserved.committed,denseObserved.rendered,denseCity.bus?.stops??[]);
+ partial.navigation=inspectRrtEvidence([...records,...busyObserved.committed,...denseObserved.committed]);
  partial.dense={...denseProof,witness:denseWitness};partial.completed.push('dense-render-motion');
  await capture('traffic-gap-dense-grid-paused');
  checks.push('Actual greater-than-four-node dense server seed renders live cars and bus with strict sampled clearance; complete L1/L2/L3 cycles remain mandatory real-engine/layer tests');
@@ -177,6 +189,6 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  }
  await reload();await until(async()=>!!(await traffic())?.ready,'healthy explicit reload after faults');await pause(true);
  checks.push('Explicit constructor and asynchronous Worker fault injections each make one attempt; normal operation returns only on explicit healthy reload');
- return {status:'passed',checks,pacing,light:proof,dense:{...denseProof,witness:denseWitness},busy:{...busyProof,blocked:busyState.blocked,congestedLinks:busyState.congestedLinks},faults,scope:'Browser covers actual rendered sedan/SUV poses and observed bus bodies. Active bus/car clearance and engine passenger conservation are strict. Only actual home-phase storage omits bus meshes; long boarding/dwell/service-end cycles are covered by focused real-engine tests, not claimed from this short browser sample. Truck extents and exhaustive turning/stopping/restart adversarial cases remain separate mandatory source tests; no live truck/speed telemetry is fabricated.'};
+ return {status:'passed',checks,pacing,navigation:partial.navigation,light:proof,dense:{...denseProof,witness:denseWitness},busy:{...busyProof,blocked:busyState.blocked,congestedLinks:busyState.congestedLinks},faults,scope:'Browser covers actual rendered sedan/SUV poses and observed bus bodies. Active bus/car clearance and engine passenger conservation are strict. Only actual home-phase storage omits bus meshes; long boarding/dwell/service-end cycles are covered by focused real-engine tests, not claimed from this short browser sample. Truck extents and exhaustive turning/stopping/restart adversarial cases remain separate mandatory source tests; no live truck/speed telemetry is fabricated.'};
  }catch(error){partial.status='failed';const detail='\nPartial traffic evidence (not complete acceptance): '+JSON.stringify(partial);if(error instanceof Error){error.stack+=detail;throw error;}throw new Error(String(error)+detail);}
 }
