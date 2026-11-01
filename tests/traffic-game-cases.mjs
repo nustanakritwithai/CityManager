@@ -1,11 +1,10 @@
-/** Full asset-enabled and blocked-model traffic cases remain mandatory.
- * Every case uses an isolated real server ACK and visible authenticated entry.
- * Browser city persistence is forbidden; server lifecycle failures retain their
- * separate mandatory Save smoke coverage. No storage-denial startup shortcut.
- * The slower blocked-model fallback keeps two independent bounded profiles. */
+/** Deterministic coverage partitions; every pair stays in one profile/job.
+ * Full/extended remain supported for explicit runs; CI uses disjoint bounded
+ * core, bypass, dense OFF/ON and (normal only) fixed three-pair peak cases. */
 export function trafficGameCase(name,blocked) {
- if(!['full','core','extended'].includes(name))throw Error(`Unknown traffic game case: ${name}`);
- if(!blocked&&name!=='full')throw Error('Only the blocked-model fallback may be split');
- return {name,core:name!=='extended',extended:name!=='core',expectedChecks:name==='full'?(blocked?8:9):name==='core'?6:2,
-  output:blocked?(name==='full'?'fallback':`fallback-${name}`):'normal'};
+ if(!['full','core','extended','bypass','dense','peak'].includes(name))throw Error(`Unknown traffic game case: ${name}`);
+ if(blocked&&name==='peak')throw Error('Peak protocol requires normal assets');
+ const core=name==='full'||name==='core',bypass=['full','extended','bypass'].includes(name),dense=['full','extended','dense'].includes(name),peak=!blocked&&['full','extended','peak'].includes(name);
+ return {name,core,bypass,dense,peak,extended:bypass||dense||peak,expectedChecks:(core?6:0)+(bypass?1:0)+(dense?1:0)+(peak?1:0),
+  output:`${blocked?'fallback':'normal'}${name==='full'?'':`-${name}`}`};
 }

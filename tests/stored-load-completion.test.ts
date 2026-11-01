@@ -50,3 +50,13 @@ test('shared native Save executes once and waits for a fresh successful write re
  const button=async(s:string)=>{if(await reachTouch(p.evaluate,button,s))return;clicks++;setTimeout(()=>{durable=true;p.setStatus('บันทึกเมืองในเบราว์เซอร์แล้ว · Saved day 8');},5);};
  await button('#save');assert.equal(clicks,1);assert.equal(durable,true);assert.equal(p.observers.size,0);
 });
+
+test('server Save terminal UI is awaited without treating pending or stale text as an ACK',async()=>{
+ for(const terminal of ['บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่','ยังบันทึกไม่ได้: HTTP 409']){
+  const p=page();let completed=false;
+  await withStoredSaveCompletion(p.evaluate,async()=>{p.setStatus('กำลังบันทึกบนเซิร์ฟเวอร์');setTimeout(()=>{completed=true;p.setStatus(terminal);},5);});
+  assert.equal(completed,true);assert.equal(p.observers.size,0);
+ }
+ const p=page();p.setStatus('บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่');await assert.rejects(withStoredSaveCompletion(p.evaluate,async()=>{},10),/did not reach/);
+ await assert.rejects(withStoredSaveCompletion(p.evaluate,async()=>p.setStatus('กำลังบันทึกบนเซิร์ฟเวอร์'),10),/did not reach/);
+});

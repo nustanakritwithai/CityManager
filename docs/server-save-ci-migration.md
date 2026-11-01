@@ -31,7 +31,7 @@ and tests. Any unrelated source, unknown range or missing required file selects
 the full route. This is relevant traffic coverage, not a claim that the entire
 historical simulation suite passes.
 
-Both default/fault and allocation-game core/full/extended profiles now seed the
+Both default/fault and all seven partitioned allocation-game profiles now seed the
 isolated real server service through an acknowledged create, enter through the
 visible existing-owner gate, and retain actual worker, preference, pause,
 road/bypass, economy, model-fallback and performance assertions. No city is seeded
@@ -41,11 +41,11 @@ actual autosave publication and authenticated reload durability. Standalone
 traffic preferences remain browser preferences; zero browser city writes remains
 mandatory. No recovery-IDB-denial chooser is presented as current startup.
 
-The new scope does not skip the Traffic workflow's default/fault or any
-core/full/extended browser job. Main additionally retains current strict
+The new scope does not skip the Traffic workflow's default/fault or any of
+the seven browser jobs covering the former full/core/extended workloads. Main additionally retains current strict
 gap/identity/bus/RRT/signal and real server-save browser acceptance. Existing
-server-save workflows remain mandatory. Watchdogs, traffic demand, bypass
-thresholds and performance thresholds are unchanged.
+server-save workflows remain mandatory. Per-process 240-second watchdogs, traffic demand, bypass
+thresholds and performance thresholds are unchanged; combined work is partitioned as described below.
 
 PR181's original full run reported 71 failures in 32 files outside the only
 changed production module's import closure. Selected failures reproduce on exact
@@ -59,3 +59,24 @@ cloud workspace. Local Chromium currently fails before DevTools with
 `process_singleton_posix.cc: socket() failed: Operation not permitted`; no sandbox
 bypass is used. New remote CI screenshots and manual image review are required
 before acceptance; earlier artifacts are not proof of this migrated harness.
+
+### Exact-head browser follow-up
+
+The first migrated run reached actual entry and Save. It exposed two remaining
+harness assumptions: the shared native Save waiter lacked the current Thai
+server terminal text; a reload can legitimately flush an unchanged session and
+advance server revision. The fixture now verifies every such increase against
+observed successful POST/ACK actions, exact raw/city identity and contiguous
+expected revisions, then requires the actual entry GET to match the final head.
+It does not accept unexplained revision growth. Old pages unload and intercepted
+requests settle before a new scenario is seeded; fresh scenario identities and
+rejected-save errors fence delayed outgoing requests. Compact request evidence
+is recorded without dumping session bodies.
+
+The fallback extended run exhausted its unchanged 240-second watchdog after
+bypass and dense sampling accumulated. CI now partitions the same assertions
+into normal core/bypass/dense/peak and fallback core/bypass/dense jobs. Automated
+union tests require every original check exactly once (9 normal, 8 fallback).
+Dense OFF/ON stays paired in one job; all three normal peak pairs stay in one
+job. Existing demand, native inputs, screenshots, per-pair thresholds and the
+240-second per-profile watchdog are unchanged. No old failure is marked passed.

@@ -8,8 +8,8 @@ test('traffic acceptance partitions bounded cases and gates every result',()=>{
  for(const part of [checks,fault,browser,gate])assert.match(part,/timeout-minutes: 10/);
  assert.match(checks,/traffic-game-cases\.test\.ts/);assert.match(checks,/traffic-game-stress\.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000/);
  assert.match(fault,/needs: checks/);assert.match(fault,/traffic-default-fault-smoke\.mjs/);assert.match(fault,/traffic-game-fault-evidence/);
- assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);assert.match(browser,/- case: full\s+blocked: '0'\s+software: '0'/);assert.match(browser,/- case: core\s+blocked: '1'\s+software: '1'/);assert.match(browser,/- case: extended\s+blocked: '1'\s+software: '1'/);
- assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.case \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
+ assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);for(const [mode,cases] of [['normal',['core','bypass','dense','peak']],['fallback',['core','bypass','dense']]])for(const name of cases)assert.ok(browser.includes(`- name: ${mode}-${name}\n            case: ${name}\n            blocked: '${mode==='fallback'?'1':'0'}'\n            software: '${mode==='fallback'?'1':'0'}'`));assert.equal((browser.match(/- name: (normal|fallback)-/g)??[]).length,7);
+ assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.name \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
  assert.match(gate,/needs: \[checks, fault, browser\]/);assert.match(gate,/if: always\(\)/);for(const name of ['checks','fault','browser'])assert.match(gate,new RegExp(`needs\\.${name}\\.result.*'success'`));
  assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '1'/g)??[]).length,1);
 });
@@ -60,6 +60,6 @@ test('presenter-only route still requires migrated fault and full browser matrix
  const yaml=readFileSync('.github/workflows/traffic-enabled.yml','utf8');
  // This new scope must never join the legacy exact-scope job skip lists.
  assert.equal(yaml.includes("'traffic-presenter'"),false);
- for(const name of ['traffic-server-entry-fixture.test.mjs','traffic-default-fault-smoke.mjs','traffic-game-smoke.mjs','traffic-lane-order.test.ts'])assert.ok(yaml.includes(name));
+ for(const name of ['stored-load-completion.test.ts','traffic-server-entry-fixture.test.mjs','traffic-default-fault-smoke.mjs','traffic-game-smoke.mjs','traffic-lane-order.test.ts'])assert.ok(yaml.includes(name));
  const main=readFileSync('.github/workflows/citymanager.yml','utf8');assert.ok(main.includes("(steps.scope.outputs.kind == 'traffic-gap' || steps.scope.outputs.kind == 'traffic-presenter') && 'bumper-gap'"));
 });
