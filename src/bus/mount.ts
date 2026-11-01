@@ -4,7 +4,9 @@
  */
 import type { City } from '../sim.ts';
 import { installBusMenu, type BusToolName } from './menu.ts';
-import { confirmBusRemoval, installBusPanel, paintBusComposer, type BusComposerState } from './panel.ts';
+import { busCellLabel, confirmBusRemoval, installBusPanel, paintBusComposer, type BusComposerState } from './panel.ts';
+import { busPanelModel } from './player.ts';
+import { iconElement } from '../ui-icons.ts';
 import {
   beginLineEdit, busPlaceCaption, busRemovalImpact, busToolPreview, changeLineBuses, chooseSide, clearDraft, commitDepotRemoval, commitDraft, commitStopRemoval, draftHint, emptyBusUi, placeBusDepot, placeBusStop, preferredDepot, removeLine, setDraftCount, setDraftDepot, tapLineStop, undoStop, upgradeLine, type BusPreview, type BusRemovalImpact, type BusUiState,
 } from './player.ts';
@@ -74,6 +76,7 @@ export function createBusController(options: {
     const chosen = state.draft.depotId ?? preferredDepot(city(), state.draft.busCount);
     return {
       mode, message: shownMessage(mode, draftHint(city(), state.draft)), side: state.side, stops: [...state.draft.stopIds], busCount: state.draft.busCount,
+      stopLabels: state.draft.stopIds.map(id => { const stop = city().bus?.stops.find(item => item.id === id); return stop ? busCellLabel(stop.cell) : `#${id}`; }),
       commitLabel: state.draft.editing != null ? `บันทึกสาย #${state.draft.editing}` : 'สร้างสาย',
       depots: (city().bus?.depots ?? []).map(depot => ({ id: depot.id, label: `อู่ #${depot.id}`, selected: depot.id === chosen })),
     };
@@ -92,7 +95,7 @@ export function createBusController(options: {
       onClear: () => { state = clearDraft(state); message = draftHint(city(), state.draft); refresh(); options.help.textContent = message; },
       onDepot: id => { state = setDraftDepot(state, id); message = draftHint(city(), state.draft); refresh(); options.help.textContent = message; },
       onCount: count => { state = setDraftCount(state, count); message = draftHint(city(), state.draft); refresh(); options.help.textContent = message; },
-      onCommit: () => { options.beforeChange(); const committed = commitDraft(city(), state, true); state = committed.state; report(committed.result.ok, committed.result.message, committed.result.ok); if (committed.result.ok) panel.open(); },
+      onCommit: () => { options.beforeChange(); const committed = commitDraft(city(), state, true); state = committed.state; report(committed.result.ok, committed.result.message, committed.result.ok); if (committed.result.ok) { options.setTool('select'); panel.open(); } },
     });
     }
     if (view.mode !== 'hidden') options.help.textContent = view.message;
@@ -119,6 +122,26 @@ export function createBusController(options: {
     handles: (tool: string) => options.enabled() && (tool === 'bus-depot' || tool === 'bus-stop' || tool === 'bus-line'),
     preview(tool: string, hover: number | null): BusPreview | null { return busToolPreview(city(), tool, hover, state, options.enabled()); },
     caption: (cell: number) => busPlaceCaption(city(), cell, options.enabled()),
+    /** What the place panel shows for a stop or depot: its role, riders, lines and a way to the line panel. */
+    placeCard(cell: number): { title: string; subtitle: string; card: HTMLElement } | null {
+      if (!options.enabled()) return null;
+      const model = busPanelModel(city(), true), stop = model.stops.find(item => item.cell === cell), depot = model.depots.find(item => item.cell === cell);
+      if (!stop && !depot) return null;
+      const card = document.createElement('div'); card.className = 'bus-place-card';
+      const facts = document.createElement('div'); facts.className = 'bus-place-facts';
+      const fact = (value: string, label: string) => { const item = document.createElement('div'); item.append(Object.assign(document.createElement('strong'), { textContent: value }), Object.assign(document.createElement('span'), { textContent: label })); facts.append(item); };
+      const lines = stop ? stop.lineIds : depot!.lineIds;
+      if (stop) { fact(stop.waiting === null ? '—' : String(stop.waiting), 'รอขึ้นรถ'); fact(String(lines.length), 'สายที่ผ่าน'); fact(stop.sideLabel, 'ฝั่ง'); }
+      else { fact(`${depot!.assigned}/${depot!.capacity}`, 'รถที่ใช้'); fact(String(lines.length), 'สายที่ออก'); fact(depot!.open ? 'เปิด' : 'ปิด', 'อู่'); }
+      if (lines.length) { const chips = document.createElement('p'); chips.className = 'bus-place-lines'; chips.textContent = lines.map(id => `สาย ${id}`).join(' · '); card.append(facts, chips); } else card.append(facts);
+      const open = document.createElement('button'); open.type = 'button'; open.className = 'bus-touch bus-primary'; open.dataset.busOpen = 'panel';
+      open.append(iconElement('bus', 'bus-icon'), Object.assign(document.createElement('span'), { textContent: 'จัดการสาย' }));
+      open.addEventListener('click', () => { options.setTool('select'); panel.open(); });
+      card.append(open);
+      return stop
+        ? { title: 'ป้ายรถเมล์', subtitle: `${stop.level === 2 ? 'ศาลารอรถ' : 'ป้าย'} · ฝั่ง${stop.sideLabel}${lines.length ? '' : ' · ยังไม่มีสายผ่าน'}`, card }
+        : { title: `อู่รถเมล์ ${depot!.depotId}`, subtitle: `ระดับ ${depot!.level} · ว่าง ${depot!.free} คัน`, card };
+    },
     confirm: ask,
     tap(tool: BusToolName, cell: number) {
       if (tool === 'bus-depot') { const result = placeBusDepot(city(), cell, true); report(result.ok, result.message, result.ok); return; }

@@ -230,6 +230,23 @@ try {
   const cardSnapshot = await evaluate('cityManager.snapshot()');
   assert.equal(fixtureServer.active.raw,cardRaw,'Server fixture loads the exact acknowledged card city');await fixtureServer.core.assertNoCityWrites(evaluate);
   assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Confirmed server entry preserves exactly the chosen city');
+  // Reproduce the touch whose compatibility click previously selected a factory
+  // recipe. Follow it with a real new tap and a real keyboard activation.
+  stage='Verify canvas touch, next tap and keyboard';
+  await send('Emulation.setDeviceMetricsOverride',{width:360,height:740,screenWidth:360,screenHeight:780,deviceScaleFactor:1,mobile:true});
+  await until('innerWidth===360&&innerHeight===740');
+  const factoryEntry=cardCases.find(entry=>entry.kind==='factory');assert.ok(factoryEntry);
+  if(await evaluate("document.querySelector('#inspector').dataset.open==='true'"))await button('#close-inspector');
+  const openFactory=async()=>{await cell(factoryEntry.cell);await until("document.querySelector('#entity-content').dataset.cardKind==='factory'");await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Canvas touch does not activate a newly opened factory control');};
+  await openFactory();await button('#close-inspector');await until("document.querySelector('#inspector').dataset.open!=='true'");
+  assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'The next deliberate touch remains functional');
+  await openFactory();await evaluate("document.querySelector('#close-inspector').focus()");
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+  await until("document.querySelector('#inspector').dataset.open!=='true'");assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Keyboard activation remains functional');
+  checks.push('canvas touch does not activate a new factory control; following touch and keyboard activation work');
+  await send('Emulation.setDeviceMetricsOverride',{width:844,height:390,screenWidth:844,screenHeight:390,deviceScaleFactor:1,mobile:true});
+  await until('innerWidth===844&&innerHeight===390');
   const matrixFailures = [];
   for (const warning of [false,true]) {
     if (warning) {

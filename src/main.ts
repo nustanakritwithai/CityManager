@@ -389,7 +389,7 @@ function factoryRecipeAction(firmId: number, recipe: 'rice-mill' | 'cannery' | '
 }
 function renderPlace() {
   const metrics: HTMLElement[] = [], tags: HTMLElement[] = [], reasons: string[] = [];
-  let checklist: HTMLElement | null = null, railCard: HTMLElement | null = null;
+  let checklist: HTMLElement | null = null, railCard: HTMLElement | null = null, busCard: HTMLElement | null = null;
   const cellIndex = route?.page === 'place' ? route.cell : null;
   const cell = cellIndex === null ? null : city.cells[cellIndex];
   const building = cell?.building == null ? null : city.buildings.find(b => b.id === cell.building);
@@ -425,6 +425,8 @@ function renderPlace() {
     const busCaption = busController?.caption(cellIndex); if (busCaption) $('#place-subtitle').textContent = busCaption;
     const rail = !cell.road && !cell.zone ? railUi?.placeCard(cellIndex) : null;
     if (rail) { $('#selection-title').textContent = `${rail.title} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = rail.subtitle; railCard = rail.card; }
+    const bus = rail ? null : busController?.placeCard(cellIndex);
+    if (bus) { $('#selection-title').textContent = `${bus.title} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = bus.subtitle; busCard = bus.card; }
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
@@ -437,11 +439,11 @@ function renderPlace() {
       const distance = gatewayRoadDistance(city, cellIndex);
       if (distance !== null) reasons.push(`ระยะจากประตูเมืองผ่านถนน ${distance} ช่อง รวมทางเข้าแปลง (ไม่ใช่เวลาเดินทาง)`);
     }
-    const parcel = railCard ? null : parcelChecklist(city, cellIndex);
+    const parcel = railCard || busCard ? null : parcelChecklist(city, cellIndex);
     if (parcel) checklist = parcelChecklistView(parcel);
     if (!park && !connected && !parcel) reasons.push('ต้องเชื่อมถนนข้างแปลงกับประตูภายนอกฝั่งตะวันตก');
     if (!park && !utilityAt(city, cellIndex) && !parcel) reasons.push('น้ำหรือไฟในเครือข่ายไม่พอ การผลิตและเติบโตหยุดชั่วคราว สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน');
-    if (cell.road) {
+    if (cell.road && !busCard) {
       const road = roadFacts(city, cellIndex)!;
       metrics.push(metric('สร้างต่อช่อง', money(5000), true), metric('บำรุงรักษาต่อวัน', money(10), true),
         metric('ระยะถึงประตูเมือง', road.gateway ? 'ประตูเมือง' : road.stepsToGateway === null ? 'ไม่ถึง' : `${road.stepsToGateway} ช่อง`, false, 'นับตามถนนที่ต่อกัน', road.stepsToGateway ?? -1),
@@ -489,14 +491,14 @@ function renderPlace() {
         }
       }
     }
-    else if (railCard) reasons.length = 0;
+    else if (railCard || busCard) reasons.length = 0;
     else if (!cell.zone) reasons.push('แปลงนี้ยังไม่มีโซน');
   } else { $('#selection-title').textContent = 'เลือกสถานที่บนแผนที่'; $('#place-subtitle').textContent = 'บ้าน · บริษัท · ครัวเรือน'; symbol(null, false); }
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
   const selectedCampus = cellIndex === null ? undefined : campusAt(city, cellIndex);
   $('#campus-actions').hidden = !selectedCampus;
   educationPanel?.update(city, selectedCampus);
-  $('#explanation').replaceChildren(...(railCard ? [railCard] : []), ...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist && !railCard;
+  $('#explanation').replaceChildren(...(railCard ? [railCard] : []), ...(busCard ? [busCard] : []), ...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist && !railCard && !busCard;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction, factoryRecipeAction);
   let issueHost = document.getElementById('building-issue-details');
