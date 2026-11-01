@@ -22,6 +22,9 @@ test('UX browser suite uses server entry, native retry and retains the full layo
  assert.match(source,/button\('#save-failure-retry'\)/);assert.match(source,/fixtureServer\.assertRetry\(/);assert.match(source,/fixtureServer\.core\.assertNoCityWrites\(evaluate\)/);
  assert.doesNotMatch(source,/localStorage\.setItem\(['"]citymanager\.save/);assert.doesNotMatch(source,/button\('#save-failure-export'\)/);
  assert.match(source,/for \(const warning of \[false,true\]\)/);assert.match(reading,/for \(const viewport of views\)/);assert.match(reading,/for \(const name of pages\)/);assert.match(reading,/#save-failure-retry/);
+ const css=readFileSync(new URL('../src/player-feedback.css',import.meta.url),'utf8');
+ assert.match(css,/factory.*\.cx-metric dt\s*\{[^}]*overflow:visible[^}]*-webkit-line-clamp:unset[^}]*line-clamp:unset/);
+ assert.match(reading,/primaryTotal,4/);assert.match(reading,/primaryFull,4/);assert.match(reading,/primaryGeometry\.every\(x=>x\.textFits\)/);assert.match(reading,/textGeometry:/);
  const workflow=readFileSync(new URL('../.github/workflows/player-feedback.yml',import.meta.url),'utf8');assert.match(workflow,/tests\/player-feedback-server-fixture\.test\.mjs/);
  for(const path of ['src/server-city-save.ts','src/city-save-auth.ts','server/city-saves/**','tests/traffic-server-entry-fixture.mjs','tests/panel-server-entry-fixture.mjs'])assert.ok(workflow.includes(`'${path}'`),`${path} triggers the UX check`);
 });

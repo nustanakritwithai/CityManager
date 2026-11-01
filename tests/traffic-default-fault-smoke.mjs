@@ -100,6 +100,9 @@ async function literalReload(){
  * asserting the economic City and all durable bytes remain untouched. */
 async function revealDecorativeCars(){
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
+ // Visual preferences are page-memory only; select noon through the real UI
+ // rather than relying on the obsolete localStorage seed.
+ await button('#atmosphere-toggle');await button('input[name="atmosphere-time"][value="noon"]');await button('#atmosphere-toggle');
  await until('window.cityManager.atmosphere().hour===12.5');
  await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await button('#park-recreation button[data-speed]');await button('#close-inspector');
  assert.equal(await evaluate('window.cityManager.parks().speed'),1/1440);await button('#pause');

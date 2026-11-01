@@ -51,6 +51,8 @@ html #inspector > #save-failure-banner { position:static; transform:none; width:
   html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step { padding:calc(2 * var(--bc-unit)); gap:calc(1 * var(--bc-unit)); }
   html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step .cx-metrics { grid-template-columns:minmax(0,1fr); gap:calc(1 * var(--bc-unit)); }
   html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step :is(dt,dd,.bc-chain-label) { overflow-wrap:anywhere; }
+  /* Narrow columns must not inherit the general card's two-line label clamp. */
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step .cx-metric dt { display:block; white-space:normal; overflow:visible; text-overflow:clip; -webkit-line-clamp:unset; line-clamp:unset; }
 }
 /* On tall/portrait phones the inline warning also consumes reading space.
    Keep actual values before editable production choices while it is present. */
