@@ -20,6 +20,9 @@ test('capture pairs only employed people to their actual home and firm, without 
   city.employment=[{householdId:1,firmId:3,skill:'general',workers:1,occupation:'manufacturing',rank:'entry'}];
   const before=serialize(city),capture=captureTrafficGameInput(city,{workClock:{day:4,minute:600,ack:0}});
   assert.deepEqual(capture.work?.candidates,[{citizenId:'h:1:m:0',home:49,work:52}]);
+  for(const minute of [0,389,1020,1439])assert.deepEqual(captureTrafficGameInput(city,{workClock:{day:4,minute,ack:7}}).work,{day:4,minute,ack:7,candidates:[]},'no unused work roster outside an uncrossed window');
+  for(const minute of [390,1019])assert.deepEqual(captureTrafficGameInput(city,{workClock:{day:4,minute,ack:0}}).work?.candidates,capture.work?.candidates,'boundary minutes retain work candidates');
+  for(const workClock of [{day:4,minute:1020,ack:0,crossedWorkDay:4},{day:5,minute:0,ack:0,crossedWorkDay:4}])assert.deepEqual(captureTrafficGameInput(city,{workClock}).work?.candidates,capture.work?.candidates,'a skipped work window keeps its candidates through rollover');
   assert.equal(serialize(city),before);
   city.employment=[];assert.deepEqual(captureTrafficGameInput(city,{workClock:{day:4,minute:600,ack:0}}).work?.candidates,[]);
 });
@@ -39,6 +42,12 @@ test('17:00 alone does not expire work cars; authorized overdue cancellation pre
   mass(g);assert.deepEqual(g.clone().frame.expiredWorkTrips,after.expiredWorkTrips);
   g.setWork(clock(2,1020,1));assert.equal(g.frame.expiredWorkTrips,undefined);
   for(let i=0;i<6;i++)g.step();assert.deepEqual(issued(g),[]);
+});
+
+test('an empty off-window roster still cancels and acknowledges an existing work trip',()=>{
+  const g=new TrafficGame(sample());g.setWork(clock(4,600));for(let i=0;i<4;i++)g.step();const [id]=issued(g);assert.ok(id);
+  g.setWork({...clock(4,1020,0,[]),cancelIds:[id]});const receipt=g.frame.expiredWorkTrips?.find(x=>x.id===id);assert.ok(receipt);assert.equal(g.frame.cars.some(c=>c.id===id),false);
+  g.setWork(clock(4,1020,receipt.sequence,[]));assert.equal(g.frame.expiredWorkTrips,undefined);mass(g);
 });
 
 test('outstanding trip blocks duplicate on a later day until confirmed terminal retirement',()=>{

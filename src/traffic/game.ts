@@ -70,6 +70,11 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;
   const extra=session.map(d=>{if(!d||!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
   const result:TrafficGameInput={map,homes:[...homes].map(([cell,amount])=>({cell,amount})),destinations:[...destinations].map(([cell,amount])=>({cell,amount})),taxis:options.taxiEnabled?[...saved,...extra]:[]};
   if(options.workClock){
+    // New work actors can only be claimed in the work window or when a
+    // skipped window is being replayed. Keep the clock/ACK even when no
+    // candidate roster is needed so outstanding cancellations still settle.
+    const {minute,crossedWorkDay}=options.workClock;
+    if((minute<WORK_TRIP_START_MINUTE||minute>=WORK_TRIP_END_MINUTE)&&crossedWorkDay===undefined){result.work={...options.workClock,candidates:[]};return result;}
     const buildings=new Map(city.buildings.map(b=>[b.id,b.cell]));
     const firms=new Map(city.firms.map(f=>[f.id,buildings.get(f.building)]));
     const parks=new Map(city.parks.map(p=>[p.id,p.cell]));

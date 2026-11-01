@@ -44,6 +44,15 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:max(44px,calc(44 * var(
 #save-failure-banner button { flex-shrink:0; min-height:max(44px,calc(44 * var(--reader-unit,1px))); min-width:max(44px,calc(44 * var(--reader-unit,1px))); padding:6px 10px; font-size:calc(14 * var(--reader-unit,1px)); color:#1b2438; background:#f3c46b; }
 #autosave-status[data-failed=true] { color:#ffd2a0; }
 html #inspector > #save-failure-banner { position:static; transform:none; width:auto; flex:0 0 auto; margin:4px 4px 0; box-shadow:none; }
+/* On a narrow touch screen, put input and output alongside one another and
+   the recipe beneath them. Every figure remains readable and in the DOM. */
+@media (max-width:700px) {
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step[data-stage="input"] { grid-column:1; grid-row:1; }
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step[data-stage="output"] { grid-column:2; grid-row:1; }
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step[data-stage="recipe"] { grid-column:1 / -1; grid-row:2; }
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step:is([data-stage="input"],[data-stage="output"]) .cx-metrics { grid-template-columns:minmax(0,1fr); }
+}
 /* On tall/portrait phones the inline warning also consumes reading space.
    Keep actual values before editable production choices while it is present. */
 @media (max-width:700px), (min-height:501px) {
