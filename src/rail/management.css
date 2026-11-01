@@ -1,6 +1,76 @@
-.rail-management{color:#eef2ff;background:linear-gradient(180deg,#1d2a47,#141d33);border:1px solid #ffffff24;border-radius:18px;box-shadow:0 24px 60px #050b1aa6,inset 0 1px 0 #ffffff14;font:inherit;width:min(420px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:18px;overflow:auto;overscroll-behavior:contain}
+/* Rail manager and its confirmation: the dark-gold panel theme, with the rail lilac as accent. */
+.rail-management{--rail-tone:#c3b8ff;--rail-gold:#f3c46b;color:#eef2ff;background:linear-gradient(180deg,#1d2a47,#141d33);border:1px solid #ffffff24;border-radius:18px;box-shadow:0 24px 60px #050b1aa6,inset 0 1px 0 #ffffff14;font:inherit;width:min(420px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:18px;overflow:auto;overscroll-behavior:contain}
 .rail-management::backdrop{background:#050b1a8c;backdrop-filter:blur(2px)}
-.rail-management h2{font-size:21px;margin:0;color:#f3c46b}.rail-management h3{font-size:15px;margin:0}.rail-management p{font-size:12px;line-height:1.65;margin:8px 0}.rail-management button{font:inherit;min-height:44px;white-space:normal;border:1px solid #ffffff2e;border-radius:9px;padding:8px 12px;background:#2a3a5e;color:inherit;cursor:pointer}.rail-management button:disabled{opacity:.55;cursor:default}.rail-management button:focus-visible{outline:3px solid #d69a31;outline-offset:2px}
-.rail-management-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.rail-management-heading button{flex:none;width:44px;padding:0;font-size:23px}.rail-management-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:12px 0}.rail-management-metric{border-radius:10px;padding:10px 8px;background:#ffffff0f;border:1px solid #ffffff14}.rail-management-metric strong{display:block;font-size:23px;line-height:1.2}.rail-management-metric span{font-size:11px}.rail-management-station{display:flex;gap:12px;align-items:center;justify-content:space-between;border-bottom:1px solid #ffffff1a;padding:12px 0}.rail-management-station p{margin:3px 0}.rail-management-station button{flex:none;max-width:115px}.rail-management-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.rail-management-actions button{flex:1 1 140px}.rail-management-note{color:#a9b6d3}.rail-management-feedback{min-height:1.6em;color:#f3c46b}.rail-management-confirm .rail-management-actions{justify-content:flex-end}.rail-management-confirm .rail-management-actions button{flex:0 1 140px}
-@media(max-height:500px){.rail-management{max-height:calc(100dvh - 16px);padding:12px}.rail-management-heading{margin-bottom:4px}.rail-management-metrics{margin:8px 0}.rail-management-station{padding:8px 0}}
-.rail-management-metric strong{color:#f3c46b}.rail-management-confirm .rail-management-actions button:last-child{border-color:#f6d891;background:linear-gradient(#f5d385,#d9a447);color:#1d1405;font-weight:700}
+.rail-management h2{font-size:20px;margin:0;color:var(--rail-gold);line-height:1.25}.rail-management h3{font-size:15px;margin:0}.rail-management p{font-size:12px;line-height:1.6;margin:8px 0}
+.rail-management button{font:inherit;min-height:44px;white-space:normal;border:1px solid #ffffff2e;border-radius:10px;padding:8px 12px;background:#2a3a5e;color:inherit;cursor:pointer}
+.rail-management button:disabled{opacity:.55;cursor:default}.rail-management button:focus-visible{outline:3px solid #d69a31;outline-offset:2px}
+.rail-management button.rail-primary,.rail-place-card button.rail-primary,.rail-management-confirm .rail-management-actions button:last-child{border-color:#f6d891;background:linear-gradient(#f5d385,#d9a447);color:#1d1405;font-weight:700}
+.rail-management button.rail-danger{border-color:#ff9c9c66;background:#4a2433;color:#ffd5d5}
+.rail-management-mark{flex:none;display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#c3b8ff24;color:var(--rail-tone)}.rail-management-mark svg{width:24px;height:24px}
+
+/* Heading: icon, name and the line's state as a small pill. */
+.rail-management-heading{display:flex;align-items:center;gap:12px;margin-bottom:14px}.rail-management-heading>div{flex:1;min-width:0}
+.rail-management-heading button{flex:none;width:44px;padding:0;font-size:23px}
+.rail-management .rail-management-state{display:inline-flex;align-items:center;gap:6px;margin:4px 0 0;padding:2px 10px;border-radius:999px;background:#ffffff12;color:#c9d3ea;font-size:12px}
+.rail-management .rail-management-state:before{content:'';width:7px;height:7px;border-radius:50%;background:#8a96b3}
+.rail-management[data-service=running] .rail-management-state{background:#3ddc8a1f;color:#9ff0c2}.rail-management[data-service=running] .rail-management-state:before{background:#3ddc8a}
+.rail-management[data-service=paused] .rail-management-state{background:#f3c46b1f;color:#f6d891}.rail-management[data-service=paused] .rail-management-state:before{background:#f3c46b}
+
+/* Line diagram. */
+.rail-line{display:grid;grid-template-columns:auto 1fr auto;align-items:start;gap:8px;padding:14px 12px;border-radius:14px;background:#0b1326;border:1px solid #ffffff14}
+.rail-line-end{display:grid;justify-items:center;gap:2px;min-width:64px;text-align:center}
+.rail-line-end i{width:18px;height:18px;border-radius:50%;border:3px solid var(--rail-tone);background:#141d33;box-shadow:0 0 0 4px #c3b8ff1f}
+.rail-line-end[data-placed=false] i{border-style:dashed;border-color:#8a96b3;box-shadow:none}
+.rail-line-end strong{font-size:12px}.rail-line-end small{font-size:11px;color:#a9b6d3}
+.rail-line-track{position:relative;height:18px;margin-top:0;border-radius:3px;background:repeating-linear-gradient(90deg,#8a96b355 0 6px,transparent 6px 12px)}
+.rail-line-track:before{content:'';position:absolute;left:0;right:0;top:7px;height:4px;border-radius:2px;background:transparent}
+.rail-line[data-track=partial] .rail-line-track:before{right:45%;background:var(--rail-tone);opacity:.7}
+.rail-line[data-track=joined] .rail-line-track:before{background:var(--rail-tone)}
+.rail-line-train{position:absolute;top:-6px;left:calc(var(--at,0) * (100% - 28px));display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:var(--rail-gold);color:#1d1405;box-shadow:0 4px 10px #050b1a80;transition:left .4s linear}
+.rail-line-train svg{width:18px;height:18px}.rail-line-train[hidden]{display:none!important}
+
+/* Build steps before the line opens. */
+.rail-steps{list-style:none;counter-reset:rail-step;display:grid;gap:6px;margin:12px 0;padding:0}
+.rail-steps li{counter-increment:rail-step;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;background:#ffffff0a;color:#a9b6d3;font-size:13px}
+.rail-steps li:before{content:counter(rail-step);flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:2px solid #8a96b3;font-size:12px;font-weight:700}
+.rail-steps li span{flex:1}.rail-steps li small{font-size:12px;color:#c9d3ea}
+.rail-steps li[data-current=true]{background:#c3b8ff1a;color:#eef2ff;box-shadow:inset 3px 0 0 var(--rail-tone)}.rail-steps li[data-current=true]:before{border-color:var(--rail-tone);color:var(--rail-tone)}
+.rail-steps li[data-done=true]{color:#c9d3ea}.rail-steps li[data-done=true]:before{content:'✓';border-color:#3ddc8a;background:#3ddc8a;color:#0b1326}
+
+/* Passenger numbers: three main tiles, the rest folded away. */
+.rail-management-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:12px 0}
+.rail-management-metric{border-radius:12px;padding:10px 8px;background:#ffffff0f;border:1px solid #ffffff14}
+.rail-management-metric strong{display:block;font-size:23px;line-height:1.2;color:var(--rail-gold)}.rail-management-metric span{font-size:11px;color:#c9d3ea}
+.rail-management-more{margin:-4px 0 8px}.rail-management-more summary{cursor:pointer;font-size:12px;color:#a9b6d3;padding:6px 0;min-height:32px}
+.rail-management-metrics-minor{margin:4px 0 0}.rail-management-metrics-minor .rail-management-metric{padding:8px}.rail-management-metrics-minor strong{font-size:17px;color:#eef2ff}
+.rail-management-metrics[hidden],.rail-management-more[hidden],.rail-steps[hidden]{display:none}
+
+/* Station rows. */
+.rail-management-station{display:flex;gap:12px;align-items:center;justify-content:space-between;border-bottom:1px solid #ffffff1a;padding:10px 0}
+.rail-management-station h3:before{content:'';display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:50%;border:2px solid var(--rail-tone);vertical-align:1px}
+.rail-management-station p{margin:3px 0;color:#c9d3ea}.rail-management-station button{flex:none;max-width:115px}
+.rail-management-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.rail-management-actions button{flex:1 1 140px}.rail-management-actions button[hidden]{display:none}
+.rail-management-note{color:#8f9cbb}.rail-management-feedback{min-height:1.6em;color:var(--rail-gold)}.rail-management-feedback:empty{display:none}
+
+/* Confirmation sits above the dock with a clear backdrop, so the framed cells stay visible on the map. */
+.rail-management.rail-management-confirm{margin:auto auto max(16px,var(--dock-clear,132px));width:min(400px,calc(100vw - 24px));padding:14px 16px;border-color:#c3b8ff55}
+.rail-management.rail-management-confirm::backdrop{background:transparent;backdrop-filter:none}
+.rail-confirm-head{display:flex;align-items:center;gap:10px}.rail-confirm-head h2{font-size:18px}
+.rail-management-confirm p{margin:8px 0 4px}.rail-management .rail-confirm-detail{display:inline-block;margin:2px 0 0;padding:3px 10px;border-radius:999px;background:#c3b8ff1f;color:#ded8ff;font-weight:600}.rail-confirm-detail[hidden]{display:none!important}
+.rail-management-confirm .rail-management-actions{justify-content:flex-end;margin-top:12px}.rail-management-confirm .rail-management-actions button{flex:0 1 140px}
+.rail-management-confirm[data-tone=danger]{border-color:#ff9c9c66}.rail-management-confirm[data-tone=danger] .rail-management-mark{background:#ff9c9c24;color:#ffb3b3}
+.rail-management-confirm[data-tone=danger] .rail-management-actions button:last-child{border-color:#ffb3b3;background:linear-gradient(#ff9b9b,#d95c5c);color:#2a0b0b}
+
+/* Rail menu: a row like the build and service menus. */
+.rail-submenu .tool-option .tool-icon{color:#c3b8ff}
+.rail-submenu .tool-option[data-rail-action=manage] .tool-icon{color:#f3c46b}
+.rail-submenu .tool-option:is([data-rail-action=remove-track],[data-rail-action=remove-station]) .tool-icon{color:#ffb3b3}
+.rail-submenu .tool-option:disabled{opacity:.42;filter:saturate(.3)}
+
+/* Station or track in the place panel. */
+.rail-place-card{display:grid;gap:10px;margin:0 0 10px;padding:12px;border-radius:12px;background:#c3b8ff14;border:1px solid #c3b8ff33}
+.rail-place-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px}
+.rail-place-facts div{padding:8px;border-radius:10px;background:#ffffff0d}.rail-place-facts strong{display:block;font-size:18px;color:#f3c46b}.rail-place-facts span{font-size:11px;color:#c9d3ea}
+.rail-place-card button{font:inherit;min-height:44px;border-radius:10px;border:1px solid #ffffff2e;cursor:pointer}
+
+@media(max-height:500px){.rail-management{max-height:calc(100dvh - 16px);padding:12px}.rail-management-heading{margin-bottom:6px}.rail-management-metrics{margin:8px 0}.rail-management-station{padding:6px 0}.rail-steps{margin:8px 0}}

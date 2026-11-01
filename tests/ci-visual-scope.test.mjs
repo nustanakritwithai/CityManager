@@ -201,3 +201,11 @@ test('panel gate binds every accepted test and workflow, including deleted entry
  }
  assert.equal(panelGateEvidence(p=>read(p)?.replace(/\n/g,'\r\n')??null),expected,'line ending normalization is stable');
 });
+
+import {railPolishSources,railPolishPathsOnly,railPolishOnly} from '../scripts/ci-visual-scope.mjs';
+test('rail manager presentation requires its reviewed source diff and rejects rail runtime, save and simulation paths',()=>{
+ const paths=[...railPolishSources,'tests/rail-management.test.ts','docs/rail-polish-ci-scope.md'];
+ assert.equal(railPolishPathsOnly(paths),true);
+ assert.equal(railPolishOnly(paths),false);assert.equal(railPolishOnly(paths,{railPolishSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/rail/management.css'),paths.filter(p=>p!=='tests/rail-management.test.ts'),...['index.html','src/rail/network-runtime.ts','src/rail/scene.ts','src/park-runtime.ts','src/sim.ts','src/server-city-save.ts','src/pages-auth.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(railPolishPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});

@@ -389,7 +389,7 @@ function factoryRecipeAction(firmId: number, recipe: 'rice-mill' | 'cannery' | '
 }
 function renderPlace() {
   const metrics: HTMLElement[] = [], tags: HTMLElement[] = [], reasons: string[] = [];
-  let checklist: HTMLElement | null = null;
+  let checklist: HTMLElement | null = null, railCard: HTMLElement | null = null;
   const cellIndex = route?.page === 'place' ? route.cell : null;
   const cell = cellIndex === null ? null : city.cells[cellIndex];
   const building = cell?.building == null ? null : city.buildings.find(b => b.id === cell.building);
@@ -423,6 +423,8 @@ function renderPlace() {
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
     const busCaption = busController?.caption(cellIndex); if (busCaption) $('#place-subtitle').textContent = busCaption;
+    const rail = !cell.road && !cell.zone ? railUi?.placeCard(cellIndex) : null;
+    if (rail) { $('#selection-title').textContent = `${rail.title} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = rail.subtitle; railCard = rail.card; }
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
@@ -435,7 +437,7 @@ function renderPlace() {
       const distance = gatewayRoadDistance(city, cellIndex);
       if (distance !== null) reasons.push(`ระยะจากประตูเมืองผ่านถนน ${distance} ช่อง รวมทางเข้าแปลง (ไม่ใช่เวลาเดินทาง)`);
     }
-    const parcel = parcelChecklist(city, cellIndex);
+    const parcel = railCard ? null : parcelChecklist(city, cellIndex);
     if (parcel) checklist = parcelChecklistView(parcel);
     if (!park && !connected && !parcel) reasons.push('ต้องเชื่อมถนนข้างแปลงกับประตูภายนอกฝั่งตะวันตก');
     if (!park && !utilityAt(city, cellIndex) && !parcel) reasons.push('น้ำหรือไฟในเครือข่ายไม่พอ การผลิตและเติบโตหยุดชั่วคราว สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน');
@@ -487,13 +489,14 @@ function renderPlace() {
         }
       }
     }
+    else if (railCard) reasons.length = 0;
     else if (!cell.zone) reasons.push('แปลงนี้ยังไม่มีโซน');
   } else { $('#selection-title').textContent = 'เลือกสถานที่บนแผนที่'; $('#place-subtitle').textContent = 'บ้าน · บริษัท · ครัวเรือน'; symbol(null, false); }
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
   const selectedCampus = cellIndex === null ? undefined : campusAt(city, cellIndex);
   $('#campus-actions').hidden = !selectedCampus;
   educationPanel?.update(city, selectedCampus);
-  $('#explanation').replaceChildren(...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist;
+  $('#explanation').replaceChildren(...(railCard ? [railCard] : []), ...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist && !railCard;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction, factoryRecipeAction);
   let issueHost = document.getElementById('building-issue-details');
@@ -556,8 +559,9 @@ function render() {
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   const busPreview = route ? null : busController?.preview(tool, hover) ?? null;
   const placement = busPreview ?? (route ? null : previewPlacement(city, tool, start, hover));
-  const frames = busPreview ? busPreview.cells.map(cell => cell.cell) : preview;
-  view.render(city, selected, frames, new Set(placement?.cells.filter(cell => !cell.ok).map(cell => cell.cell)));
+  const railPreview = route ? null : railUi?.preview(hover) ?? null;
+  const frames = railPreview ? railPreview.cells : busPreview ? busPreview.cells.map(cell => cell.cell) : preview;
+  view.render(city, selected, frames, new Set(railPreview ? railPreview.invalid : placement?.cells.filter(cell => !cell.ok).map(cell => cell.cell)));
   busController?.refresh();
   updateMapInfo(placement);
   cityHud?.update(city, paused, s);
@@ -669,7 +673,7 @@ async function boot() {
     ownerDecisionSession.syncExternal(city, 'player-drag-road'); trafficLayer?.afterMapEdit(city, paused || document.hidden); render();
   });
   parkScene = new SceneParkActivity(view);
-  railUi=installRailManagement({view,city:()=>city,runtime:()=>parkRuntime,selectTool:()=>{setTool('select');inspector(false);},changed:()=>render(),status,enabled:true});
+  railUi=installRailManagement({view,city:()=>city,runtime:()=>parkRuntime,selectTool:()=>{setTool('select');inspector(false);},changed:()=>render(),repaint:()=>render(),status,enabled:true});
   view.app.once('destroy',()=>railUi?.destroy());
   view.traffic.setWalkersEnabled(false);
   let trafficEnabled=trafficModelEnabled();
