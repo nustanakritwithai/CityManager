@@ -8,17 +8,18 @@ const services = [
 
 const construction = [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const;
 
-export const installServicesMenu = (choose: (tool: string) => void) => installGroupedToolMenu('services', 'บริการเมือง', services, choose);
-export const installConstructionMenu = (choose: (tool: string) => void) => installGroupedToolMenu('construction', 'สิ่งปลูกสร้าง', construction, choose);
+export const installServicesMenu = (choose: (tool: string) => void) => installGroupedToolMenu('services', 'บริการเมือง', 'บริการ', services, choose);
+export const installConstructionMenu = (choose: (tool: string) => void) => installGroupedToolMenu('construction', 'สิ่งปลูกสร้าง', 'สร้าง', construction, choose);
 
 /** Move the existing controls, not their commands, into a disclosure that never arms placement or demolition. */
-function installGroupedToolMenu(id: string, name: string, tools: readonly (readonly [string, string])[], choose: (tool: string) => void) {
+/** `caption` is the one-word dock label; `name` stays the accessible group name. */
+function installGroupedToolMenu(id: string, name: string, caption: string, tools: readonly (readonly [string, string])[], choose: (tool: string) => void) {
   const options = tools.map(([tool, label]) => ({
     tool, label, button: document.querySelector<HTMLButtonElement>(`.tool-buttons [data-tool="${tool}"]`)!,
   }));
   const anchor = document.createElement('button'); anchor.id = `${id}-tool`; anchor.type = 'button';
   anchor.className = 'tool grouped-tool-anchor';
-  const icon = iconElement(id === 'construction' ? 'R' : 'overview', 'tool-icon svg-glyph'), label = document.createElement('span');
+  const icon = iconElement(id === 'construction' ? 'build' : 'overview', 'tool-icon svg-glyph'), label = document.createElement('span');
   const defaultIcon = icon.innerHTML;
   anchor.append(icon, label); options[0].button.before(anchor);
   const menu = document.createElement('div'); menu.id = `${id}-submenu`; menu.className = 'grouped-tool-submenu';
@@ -29,13 +30,13 @@ function installGroupedToolMenu(id: string, name: string, tools: readonly (reado
     option.button.setAttribute('aria-label', option.button.title);
     menu.append(option.button);
   }
-  const popup = installToolMenu(anchor, menu, true);
+  const popup = installToolMenu(anchor, menu, true, 'row');
   let currentTool = 'select';
   const sync = (tool: string) => {
     currentTool = tool;
     const selected = options.find(option => option.tool === tool);
     anchor.classList.toggle('active', !!selected); anchor.dataset.activeTool = selected?.tool ?? '';
-    label.textContent = selected?.label ?? name;
+    label.textContent = selected?.label ?? caption;
     anchor.title = selected ? `${name} · ${selected.label}กำลังทำงาน · ${selected.button.title} · แตะเพื่อเลือกเครื่องมือ` : `${name} · ${names}`;
     anchor.setAttribute('aria-label', anchor.title);
     anchor.setAttribute('aria-pressed', String(!!selected));

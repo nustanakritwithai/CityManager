@@ -692,7 +692,7 @@ async function boot() {
     if (taxiFeature && !taxiButton) {
       taxiButton = document.createElement('button');
       taxiButton.type = 'button'; taxiButton.dataset.tool = 'taxi'; taxiButton.className = 'tool'; taxiButton.title = 'อู่แท็กซี่';
-      taxiButton.innerHTML = '<span class="tool-icon" aria-hidden="true">🚕</span><span>แท็กซี่</span>';
+      taxiButton.append(iconElement('taxi', 'tool-icon svg-glyph'), Object.assign(document.createElement('span'), { textContent: 'แท็กซี่' }));
       document.querySelector<HTMLElement>('[data-tool="university"]')?.after(taxiButton);
       taxiButton.addEventListener('click', () => { sound('ui-select'); setTool('taxi'); });
       const actions = document.createElement('div'); actions.id = 'taxi-actions'; actions.hidden = true; actions.className = 'save-controls';
@@ -928,7 +928,7 @@ async function boot() {
     if (e.key === 'q') view.control('rotate-left'); if (e.key === 'e') view.control('rotate-right');
   });
   inspector(false);
-  setTool('select'); status('รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง');
+  setTool('select'); status(city.tick === 0 ? 'รับทุนตั้งเมืองแล้ว · ต่อถนนจากประตูสีเหลืองเพื่อขยายเมือง' : `เปิดเมืองวันที่ ${city.tick} แล้ว · กดเล่นเพื่อเดินเวลาต่อ`);
   mapMarkers = new MapMarkers(view, cell => {
     // Open the existing place route directly: never activate a build tool or pick a citizen.
     const next = issuePlaceRoute(city, cell); if (next) {
@@ -942,6 +942,8 @@ async function boot() {
     openRoute({ page: 'city' });
     const issues = document.querySelector<HTMLDetailsElement>('#issue-section'); if (issues) { issues.open = true; issues.scrollIntoView({ block: 'start' }); }
   });
+  // The first render ran before the HUD existed; a paused city would otherwise show an empty summary.
+  cityHud.update(city, paused);
   atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / 1440, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   const visual = atmosphere;
   audioPanel = installAudioPanel(audio, $('#atmosphere-menu'));
