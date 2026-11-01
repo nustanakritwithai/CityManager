@@ -1,14 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {legacySaveOwner} from '../src/city-save-auth.ts';
 const owner='00000000-0000-4000-8000-000000000001';
-test('legacy auth identity is read-only and preserved independently of market enablement',()=>{
- assert.equal(legacySaveOwner({getItem:()=>JSON.stringify({guestId:owner})}),owner);
- assert.equal(legacySaveOwner({getItem:()=>null}),null);
- assert.equal(legacySaveOwner({getItem:key=>key==='citymanager.save.v7'?JSON.stringify({market:{guestId:owner}}):null}),null);
- assert.throws(()=>legacySaveOwner({getItem:()=>'{'}));
- assert.throws(()=>legacySaveOwner({getItem:()=>JSON.stringify({guestId:'wrong'})}));
+test('entry keeps no browser-held Guest pin: identity comes only from the server session',()=>{
+ const auth=readFileSync(new URL('../src/city-save-auth.ts',import.meta.url),'utf8'),entry=readFileSync(new URL('../src/server-city-entry.ts',import.meta.url),'utf8');
+ assert.doesNotMatch(auth,/legacySaveOwner|localStorage|getItem/);assert.doesNotMatch(entry,/legacySaveOwner|localStorage|getItem/);
 });
 test('production entry and save integration has no browser city writer or offline escape',()=>{
  const main=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');

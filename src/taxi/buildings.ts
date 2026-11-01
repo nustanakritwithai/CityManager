@@ -9,13 +9,14 @@ export const TAXI_STORAGE_KEY = 'citymanager.taxi';
 /** Feature flag with a dev override: `?taxi=1` (remembered) / `?taxi=0`. */
 export function taxiEnabled(search = globalThis.location?.search ?? '', storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): boolean {
   const q = new URLSearchParams(search).get('taxi');
-  try { storage ??= globalThis.localStorage; } catch { /* storage getter can be denied */ }
+  storage ??= sessionMemory;
   try { if (q === '1') storage?.setItem(TAXI_STORAGE_KEY, '1'); if (q === '0') storage?.setItem(TAXI_STORAGE_KEY, '0'); } catch { /* private mode */ }
   if (q === '1') return true; if (q === '0') return false;
   try { const saved = storage?.getItem(TAXI_STORAGE_KEY); if (saved === '1') return true; if (saved === '0') return false; } catch { /* ignore */ }
   return TAXI_ENABLED;
 }
 import { TAXI_DEPOT_UNITS, type TaxiDepot, type TaxiState } from './sites.ts';
+import { sessionMemory } from '../session-memory.ts';
 export type { TaxiDepot, TaxiState } from './sites.ts';
 export const TAXI_DEPOT = Object.freeze({ footprint: 1, units: TAXI_DEPOT_UNITS, cost: 250_000, upgrade: 200_000, upkeep: 6_000 });
 export const MAX_TAXI_DEPOTS = 4;

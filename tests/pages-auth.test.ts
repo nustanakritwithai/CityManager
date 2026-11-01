@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { MARKET_ORIGIN, PAGES_MARKET_BASE, PAGES_ORIGIN, PagesSession, pagesSession } from '../src/pages-auth.ts';
 import { MarketClient, MARKET_SAVE_KEY } from '../src/market-client.ts';
 import { createCity } from '../src/sim.ts';
+import { useMarketStorage } from '../src/market-client.ts';
 
 const guest = '00000000-0000-4000-8000-000000000003', other = '00000000-0000-4000-8000-000000000004', code = 'c'.repeat(43), token = 't'.repeat(43);
 class Host extends EventTarget {
@@ -12,7 +13,7 @@ class Host extends EventTarget {
 }
 async function harness(run: (host: Host, store: Map<string,string>) => Promise<void>) {
   const names = ['window', 'navigator', 'localStorage', 'document'] as const, previous = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name)), oldFetch = globalThis.fetch; const host = new Host(), store = new Map<string,string>();
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: host }); Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: async (_n: string, _o: unknown, f: (v: object) => Promise<unknown>) => f({}) } } }); Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: '' } }); Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k,v) } });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: host }); Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: async (_n: string, _o: unknown, f: (v: object) => Promise<unknown>) => f({}) } } }); Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: '' } }); useMarketStorage({ getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k,v) });
   try { await run(host, store); } finally { pagesSession.clear(); globalThis.fetch = oldFetch; names.forEach((name, i) => previous[i] ? Object.defineProperty(globalThis, name, previous[i]!) : Reflect.deleteProperty(globalThis, name)); }
 }
 const send = (host: Host, state: string, source: unknown = host.popup, origin = MARKET_ORIGIN) => host.message(origin, source, { type: 'citymanager-auth-code', state, code });
@@ -99,22 +100,6 @@ test('expired access requires reauthentication; exchange failure does not retry 
     host.popup.closed = false; await session.prepare(); let requests = 0; globalThis.fetch = async () => { requests++; throw new Error('network'); }; const failed = session.connect(guest); send(host, new URL(host.url).searchParams.get('state')!); await assert.rejects(failed, /network/); assert.equal(requests, 1); assert.equal(session.bearer(), null);
   } finally { Date.now = now; }
 }));
-
-test('Pages auth obtains the existing Guest from a v23 city and never binds a different identity', async () => harness(async (host, store) => {
-  const { businessFixture } = await import('./business-capacity-fixture.ts');
-  const { serialize } = await import('../src/sim.ts');
-  const { SAVE_KEY } = await import('../src/save-storage.ts');
-  const city = businessFixture(65), client = new MarketClient(() => city, PAGES_MARKET_BASE);
-  city.market = { ...client.journal, guestId: guest }; const raw = serialize(city); store.set(SAVE_KEY, raw);
-  let requests = 0;
-  globalThis.fetch = async () => { requests++; return new Response(JSON.stringify({ access_token: token, token_type: 'Bearer', expires_in: 900, guest_id: other }), { status: 200 }); };
-  await client.preparePagesLogin(); const pending = client.connectPages(), state = new URL(host.url).searchParams.get('state')!;
-  host.message(MARKET_ORIGIN, host.popup, { type: 'citymanager-auth-ready', state });
-  assert.deepEqual(host.messages.at(-1)?.data, { type: 'citymanager-auth-intent', state, expectedGuest: guest });
-  send(host, state); await assert.rejects(pending, /identity-mismatch/);
-  assert.equal(requests, 1); assert.equal(store.get(SAVE_KEY), raw); assert.equal(client.guestId, null); assert.equal(client.pagesAuthenticated, false);
-}));
-
 
 test('900-second and 24-hour server sessions expire exactly at their memory-only deadline', async () => {
  for (const seconds of [900, 86400]) await harness(async (host, store) => {

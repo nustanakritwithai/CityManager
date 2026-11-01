@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {deserialize,serialize} from '../src/sim.ts';
 import {embeddedMarketJournal,MarketClient,marketJournalForTest} from '../src/market-client.ts';
 import {SAVE_KEY} from '../src/save-storage.ts';
+import { useMarketStorage } from '../src/market-client.ts';
 const guest='00000000-0000-4000-8000-000000000003',other='00000000-0000-4000-8000-000000000006';
 function fixture(version:24|25){
   const c=deserialize(readFileSync(new URL('./fixtures/retail-v15.json',import.meta.url),'utf8'));
@@ -24,12 +25,3 @@ test('shared extractor validates v24/v25 and preserves pending journal without a
   assert.throws(()=>embeddedMarketJournal(JSON.stringify({version:11})),/recovery/);
 });
 
-test('Pages expected guest recognizes both wrappers and rejects standalone guest mismatch before connection',()=>{
-  const old=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
-  try{for(const version of[24,25]as const){const{raw}=fixture(version);let writes=0;
-    Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(k:string)=>k===SAVE_KEY?raw:null,setItem:()=>{writes++;}}});
-    const c=deserialize(raw),client=new MarketClient(()=>c);
-    const expected=()=>Reflect.get(client,'expectedPagesGuest').call(client);
-    assert.equal(expected(),guest);client.guestId=other;assert.throws(expected,/mismatch/);assert.equal(writes,0);
-  }}finally{if(old)Object.defineProperty(globalThis,'localStorage',old);else Reflect.deleteProperty(globalThis,'localStorage');}
-});

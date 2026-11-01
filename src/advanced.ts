@@ -1,3 +1,4 @@
+import { sessionMemory } from './session-memory.ts';
 /**
  * Experimental features (city signals and questions, AI explanations, Typhoon owner decisions) live
  * behind one per-browser switch in the game menu, off by default. `?advanced=1` turns them on for one
@@ -12,8 +13,8 @@ export function advancedFromUrl(): boolean {
 }
 export function advancedEnabled(): boolean {
   if (advancedFromUrl()) return true;
-  try { return localStorage.getItem(ADVANCED_KEY) === '1'; } catch { return false; }
+  try { return sessionMemory.getItem(ADVANCED_KEY) === '1'; } catch { return false; }
 }
 export function storeAdvanced(on: boolean): void {
-  try { if (on) localStorage.setItem(ADVANCED_KEY, '1'); else localStorage.removeItem(ADVANCED_KEY); } catch { /* the switch still works for this visit */ }
+  try { if (on) sessionMemory.setItem(ADVANCED_KEY, '1'); else sessionMemory.removeItem(ADVANCED_KEY); } catch { /* the switch still works for this visit */ }
 }
