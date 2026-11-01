@@ -225,3 +225,11 @@ test('rail map overlay requires its reviewed source diff and rejects runtime, 3D
  assert.equal(railMapOnly(paths),false);assert.equal(railMapOnly(paths,{railMapSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!=='src/rail/map-state.ts'),paths.filter(p=>p!=='tests/rail-map.test.ts'),...['index.html','src/main.ts','src/rail/scene.ts','src/rail/network-runtime.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(railMapPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {busPolishSources,busPolishPathsOnly,busPolishOnly} from '../scripts/ci-visual-scope.mjs';
+test('bus panel presentation requires its reviewed source diff and rejects engine, save and simulation paths',()=>{
+ const paths=[...busPolishSources,'docs/bus-polish-ci-scope.md'];
+ assert.equal(busPolishPathsOnly(paths),true);
+ assert.equal(busPolishOnly(paths),false);assert.equal(busPolishOnly(paths,{busPolishSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/bus/panel.ts'),paths.filter(p=>p!=='src/bus/player.css'),...['index.html','src/bus/engine.ts','src/bus/lines.ts','src/bus/player.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs','tests/bus-player.test.ts'].map(p=>[...paths,p])]){assert.equal(busPolishPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});

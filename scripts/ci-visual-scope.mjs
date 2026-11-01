@@ -156,6 +156,11 @@ export const railMapSources=['src/minimap.css','src/minimap.ts','src/rail/manage
 const railMapAllowed=new Set([...railMapSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/rail-map-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/rail-map.test.ts','tests/traffic-workflow-partition.test.mjs']);
 export function railMapPathsOnly(paths){return ['src/rail/map-paint.ts','src/rail/map-state.ts','tests/rail-map.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>railMapAllowed.has(p));}
 export function railMapOnly(paths,evidence={}){return railMapPathsOnly(paths)&&matchesReviewedSources(evidence,{railMapSourceDiff:'809a0d811e1b824d245adceecf80aa27f9d34c1be69c5eea2897ac759a4ee9d8'});}
+// Bus B1: bus dock menu, line panel, composer and place card presentation only. No bus engine, save or auth change.
+export const busPolishSources=['src/bus/menu.ts','src/bus/mount.ts','src/bus/panel.ts','src/bus/player.css','src/main.ts','src/ui-icons.ts'];
+const busPolishAllowed=new Set([...busPolishSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/bus-polish-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/traffic-workflow-partition.test.mjs']);
+export function busPolishPathsOnly(paths){return ['src/bus/menu.ts','src/bus/panel.ts','src/bus/player.css'].every(p=>paths.includes(p))&&paths.every(p=>busPolishAllowed.has(p));}
+export function busPolishOnly(paths,evidence={}){return busPolishPathsOnly(paths)&&matchesReviewedSources(evidence,{busPolishSourceDiff:'REVIEWED_HASH'});}
 export const trafficPresenterSources=["src/traffic/presentation.ts"];
 const trafficPresenterAllowed=new Set(["docs/TRAFFIC-PRESENTER-PERFORMANCE.md", "tests/traffic-game-cases.test.ts", "src/traffic/presentation.ts", ".github/workflows/citymanager.yml", ".github/workflows/traffic-enabled.yml", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", "tests/traffic-workflow-partition.test.mjs", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-game-cases.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs", "docs/server-save-ci-migration.md"]);
 export function trafficPresenterPathsOnly(paths){return ["src/traffic/presentation.ts", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs"].every(p=>paths.includes(p))&&paths.every(p=>trafficPresenterAllowed.has(p));}
@@ -174,6 +179,7 @@ export function visualKind(paths, evidence = {}) {
   if(railPolishOnly(paths,evidence))return 'rail-polish';
   if(railSceneOnly(paths,evidence))return 'rail-scene';
   if(railMapOnly(paths,evidence))return 'rail-map';
+  if(busPolishOnly(paths,evidence))return 'bus-polish';
   if(hudPolishOnly(paths,evidence))return 'hud-polish';
   if(panelPolishOnly(paths,evidence))return 'panel-polish';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -226,6 +232,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return git(['show',`${head}:${p}`]);
       });
     }
+    if(busPolishPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.busPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...busPolishSources]);}
     if(railMapPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railMapSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railMapSources]);}
     if(railScenePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railSceneSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railSceneSources]);}
     if(railPolishPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railPolishSources]);}
