@@ -9,6 +9,8 @@ on:
       - 'server/save-slots/**'
       - 'server/city-saves/service.mjs'
       - 'tests/isolated-postgres-harness.mjs'
+      - 'tests/postgres-intent-host-absence.test.mjs'
+      - 'tests/postgres-intent-host-compat.test.mjs'
       - 'tests/fixtures/market-server/package.json'
       - 'tests/fixtures/market-server/package-lock.json'
 permissions:
@@ -33,6 +35,8 @@ jobs:
           npm --version
       - name: Install locked CI fixture dependencies
         run: npm ci --prefix tests/fixtures/market-server --ignore-scripts --no-audit --no-fund
+      - name: Verify intent absence and pending fences
+        run: node --test tests/postgres-intent-host-absence.test.mjs tests/postgres-intent-host-compat.test.mjs
       - name: Start disposable loopback PostgreSQL container
         id: pg
         run: |
