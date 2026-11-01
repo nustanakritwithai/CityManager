@@ -55,3 +55,11 @@ test('scoped RRT routing retains shared taxi planner regressions in both traffic
 test('adaptive phases, coordination, peer protocol and actual signal display remain mandatory in both gates',()=>{
  for(const path of ['.github/workflows/traffic-enabled.yml','.github/workflows/citymanager.yml']){const yaml=readFileSync(path,'utf8');for(const name of ['traffic-worker-cycle.test.ts','traffic-worker-cycle-presentation.test.ts','traffic-lane-order.test.ts','traffic-adaptive-signals.test.ts','traffic-signal-coordination.test.ts','traffic-signal-peers.test.ts','traffic-signal-display.test.ts','traffic-signal-lifecycle.test.ts','traffic-signal-browser-checks.test.mjs','traffic-rrt-navigation.test.ts'])assert.ok(yaml.includes(`tests/${name}`),`${path} requires ${name}`);}
 });
+
+test('presenter-only route still requires migrated fault and full browser matrix',()=>{
+ const yaml=readFileSync('.github/workflows/traffic-enabled.yml','utf8');
+ // This new scope must never join the legacy exact-scope job skip lists.
+ assert.equal(yaml.includes("'traffic-presenter'"),false);
+ for(const name of ['traffic-server-entry-fixture.test.mjs','traffic-default-fault-smoke.mjs','traffic-game-smoke.mjs','traffic-lane-order.test.ts'])assert.ok(yaml.includes(name));
+ const main=readFileSync('.github/workflows/citymanager.yml','utf8');assert.ok(main.includes("(steps.scope.outputs.kind == 'traffic-gap' || steps.scope.outputs.kind == 'traffic-presenter') && 'bumper-gap'"));
+});

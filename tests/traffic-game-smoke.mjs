@@ -6,8 +6,6 @@ import {writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {decodeSaveCopy} from '../src/save-copy-codec.ts';
-import {SAVE_KEY,AUTOSAVE_CHECKPOINT_KEY,PRE_AUTOSAVE_BACKUP} from '../src/save-storage.ts';
 import {installTrafficSaveTrace} from './traffic-save-trace.mjs';
 import {createCity as legacyCity,step as legacyStep,serialize as legacySerialize} from '../src/legacy-v4.ts';
 import {createCity,buildRoad,buildParallelRoad,deserialize,serialize,adoptSavedEducation,step,GATEWAY,SIZE} from '../src/sim.ts';
@@ -17,7 +15,7 @@ import {populationFixture} from './population-capacity-fixture.ts';
 import {trafficGamePeakFixture} from './traffic-game-peak-fixture.ts';
 import {TrafficGame,captureTrafficGameSample} from '../src/traffic/game.ts';
 import {reachTouch} from './touch-reach.mjs';
-import {enterSeededCity,observeRecoveryIdb,denyRecoveryIdbForTraffic} from './traffic-seeded-city-entry.mjs';
+import {createTrafficServerFixture} from './traffic-server-entry-fixture.mjs';
 import {trafficGameCase} from './traffic-game-cases.mjs';
 import {fallbackMetrics} from './traffic-game-fallback-metrics.mjs';
 import {peakTriplicateMetrics} from './traffic-game-peak-metrics.mjs';
@@ -52,12 +50,12 @@ const pureGame=(c,n)=>{const game=new TrafficGame(captureTrafficGameSample(c));f
 const baselineTwenty=pureGame(bypassCity,20),bypassTwenty=pureGame(bypassExpected,20);assert.ok(bypassTwenty.completed>baselineTwenty.completed,'Validated player-built bypass must improve the independent game');
 const blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1',software=process.env.CITYMANAGER_SOFTWARE_WEBGL==='1',expectDefault=process.env.TRAFFIC_GAME_EXPECT_DEFAULT==='1';
 const testPlan=trafficGameCase(process.env.TRAFFIC_GAME_CASE||'full',blocked);
-const denyRecoveryStorage=testPlan.name==='full'||testPlan.name==='core';
-const recoveryStorageMode=denyRecoveryStorage?'synthetic-recovery-idb-denied':'native-observed';
-const evidenceCase=denyRecoveryStorage?`${testPlan.output}-idb-denied`:testPlan.output;
+const recoveryStorageMode='isolated-server-ack';
+const evidenceCase=testPlan.output;
 const fallbackAutosaveSchedule=blocked&&testPlan.extended?'dense OFF/ON only: capture single native60000ms callback; invoke after strict isolation sample; lifecycle native':'native';
-if(process.argv.includes('--preflight')){console.log(JSON.stringify({testPlan,evidenceCase,recoveryStorageMode,fallbackAutosaveSchedule,fixture:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length,roads:dense.cells.filter(c=>c.road).length},roadBytes:roadRaw.length,expectedRoads:roadExpected.cells.filter(c=>c.road).length,bypass:{before:baselineTwenty.completed,after:bypassTwenty.completed}}));process.exit(0);}
+if(process.argv.includes('--preflight')){const fixture=createTrafficServerFixture('http://127.0.0.1:4195/CityManager/');for(const raw of [economyRaw,denseRaw,roadRaw,bypassRaw]){const ack=await fixture.seed(raw);assert.equal(ack.raw,raw);assert.equal(fixture.active.revision,1);}console.log(JSON.stringify({testPlan,evidenceCase,recoveryStorageMode,fallbackAutosaveSchedule,fixture:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length,roads:dense.cells.filter(c=>c.road).length},roadBytes:roadRaw.length,expectedRoads:roadExpected.cells.filter(c=>c.road).length,bypass:{before:baselineTwenty.completed,after:bypassTwenty.completed}}));process.exit(0);}
 const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4195/CityManager/',origin=new URL(url).origin;assert.equal(new URL(url).hostname,'127.0.0.1');
+const serverFixture=createTrafficServerFixture(url);
 const output=resolve('.test-output/traffic-game',evidenceCase),port=9366;await mkdir(output,{recursive:true});const profile=await mkdtemp(resolve(output,'profile-'));
 let occupied=false;try{occupied=(await fetch(`http://127.0.0.1:${port}/json/version`,{signal:AbortSignal.timeout(500)})).ok;}catch{}assert.equal(occupied,false,'Dedicated CDP port already in use');
 const args=['--headless=new','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-component-update','--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${port}`,`--user-data-dir=${profile}`];
@@ -80,20 +78,21 @@ async function click(x,y){if(touchMode){await send('Input.dispatchTouchEvent',{t
 async function button(selector){if(await reachTouch(evaluate,button,selector))return;await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`);await paints();const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);assert.ok(p.w&&p.h&&!p.disabled,`Visible enabled ${selector}`);assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`),true,`Actual hit ${selector}`);await click(p.x,p.y);}
 async function viewport(mobile){touchMode=mobile;await send('Emulation.setDeviceMetricsOverride',{width:mobile?390:1440,height:mobile?844:1000,screenWidth:mobile?390:1440,screenHeight:mobile?844:1000,deviceScaleFactor:1,mobile});await send('Emulation.setTouchEmulationEnabled',{enabled:mobile,maxTouchPoints:2});await until(`innerWidth===${mobile?390:1440}`);await paints();}
 async function navigate(raw,query='',controlAutosave=false){
- const oldBoot=await evaluate('window.__trafficGameBoot ?? null');if(initScript)await send('Page.removeScriptToEvaluateOnNewDocument',{identifier:initScript});const token=`game-case-${++seedGeneration}`;
- const source=`${denyRecoveryStorage?denyRecoveryIdbForTraffic:''}${observeRecoveryIdb}window.__trafficGameBoot=crypto.randomUUID();if(location.origin===${JSON.stringify(origin)}){if(sessionStorage.getItem('traffic-game-seed')!==${JSON.stringify(token)}){sessionStorage.setItem('traffic-game-seed',${JSON.stringify(token)});const pref=localStorage.getItem('citymanager.traffic');localStorage.clear();if(pref!==null)localStorage.setItem('citymanager.traffic',pref);localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)});localStorage.setItem('citymanager.visual.v1',JSON.stringify({timeMode:'noon',quality:'low',rain:false,seasons:false,traffic:true,mapInfo:false}));}window.__trafficWrites=[];for(const method of ['setItem','removeItem']){const old=Storage.prototype[method];Storage.prototype[method]=function(key,...args){if(this===localStorage)window.__trafficWrites.push({method,key});return old.call(this,key,...args)}}}`;
- initScript=(await send('Page.addScriptToEvaluateOnNewDocument',{source:source+(blocked?`(${installTrafficSaveTrace.toString()})(${controlAutosave});`:'')})).identifier;await send('Page.navigate',{url:url+query});await until(`window.__trafficGameBoot!==${JSON.stringify(oldBoot)}&&!!window.cityManager&&window.cityManager.visuals().ready`);
- if(denyRecoveryStorage){
-  const storage=await evaluate('window.__trafficRecoveryStorage');
-  assert.equal(storage?.mode,recoveryStorageMode);assert.ok(storage.denials>=1,'Declared denied-storage fixture actually exercised recovery startup');
-  assert.equal(await evaluate("!!document.querySelector('#startup-recovery-chooser[open]')"),true,'Denied recovery storage keeps the real protection dialog');
-  console.log('Traffic storage fixture',JSON.stringify(storage));
- }
- await enterSeededCity({evaluate,button,send,until,raw});
+ if(await evaluate('!!window.cityManager'))await serverFixture.assertNoCityWrites(evaluate);
+ const oldBoot=await evaluate('window.__trafficGameBoot ?? null');if(initScript)await send('Page.removeScriptToEvaluateOnNewDocument',{identifier:initScript});++seedGeneration;
+ const source=`window.__trafficGameBoot=crypto.randomUUID();if(location.origin===${JSON.stringify(origin)}){localStorage.setItem('citymanager.visual.v1',JSON.stringify({timeMode:'noon',quality:'low',rain:false,seasons:false,traffic:true,mapInfo:false}));window.__trafficWrites=[];for(const method of ['setItem','removeItem','clear']){const old=Storage.prototype[method];Storage.prototype[method]=function(key,...args){if(this===localStorage)window.__trafficWrites.push({method,key});return old.call(this,key,...args)}}}`;
+ initScript=(await send('Page.addScriptToEvaluateOnNewDocument',{source:source+(blocked?`(${installTrafficSaveTrace.toString()})(${controlAutosave});`:'')})).identifier;
+ await serverFixture.seed(raw);serverFixture.allowNavigation();await send('Page.navigate',{url:url+query});await until(`window.__trafficGameBoot!==${JSON.stringify(oldBoot)}`);
+ await serverFixture.enter({send,evaluate,button,until});
  if(controlAutosave)assert.deepEqual(await evaluate('window.__trafficAutosaveSchedule'),{mode:'controlled-single-60000ms-after-fallback-sample',registrations:1,invocations:0});
- assert.equal(await evaluate('window.cityManager.parks().paused'),true);assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),raw,'Startup retains exact original bytes');
- assert.deepEqual(await evaluate("window.__trafficWrites.filter(x=>/^citymanager\\.(save|backup|checkpoint|market)/.test(x.key))"),[],'Startup performs no save writes');
+ assert.equal(await evaluate('window.cityManager.parks().paused'),true);assert.equal(serverFixture.active.raw,raw,'Startup retains exact acknowledged server bytes');
+ assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),null,'No browser city seed or fallback');
+ assert.deepEqual(await evaluate("window.__trafficWrites.filter(x=>x.method==='clear'||/^citymanager\\.(save|backup|checkpoint|market)/.test(x.key))"),[],'Startup performs no browser city writes');
  const assets=await evaluate('window.cityManager.visuals()');assert.equal(assets.failed.length,blocked?41:0);return diag();
+}
+async function waitServerRaw(raw,afterRevision=-1){
+ const start=Date.now();while(Date.now()-start<30000){const head=serverFixture.active;if(head?.raw===raw&&head.revision>afterRevision){await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')");return head;}await sleep(80);}
+ throw Error('Server did not acknowledge exact traffic session: '+JSON.stringify({revision:serverFixture.active?.revision,afterRevision}));
 }
 async function tapCell(i){await paints();const p=await evaluate(`window.cityManager.cellScreen(${i})`);assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`),'city-canvas');await click(p.x,p.y);}
 async function closeInspector(){if(await evaluate('document.querySelector("#inspector").dataset.open==="true"'))await button('#close-inspector');}
@@ -103,7 +102,7 @@ async function mobileRaf(){return evaluate(`new Promise(resolve=>{const a=[],lon
 async function fallbackRaf(){return evaluate(`new Promise(resolve=>{window.__trafficSaveMark?.('fallback-sample-start');const a=[],longTasks=[],start=performance.now();let previous,observer=null,done=false;try{if(globalThis.PerformanceObserver?.supportedEntryTypes?.includes('longtask')){observer=new PerformanceObserver(list=>{for(const e of list.getEntries())longTasks.push(e.duration)});observer.observe({entryTypes:['longtask']})}}catch{}const finish=()=>{done=true;window.__trafficSaveMark?.('fallback-sample-end');if(observer){for(const e of observer.takeRecords())longTasks.push(e.duration);observer.disconnect()}resolve({intervals:a,longTasks,longTaskSupported:!!observer,visibility:document.visibilityState,elapsedMs:performance.now()-start,trailingMs:previous===undefined?null:Math.max(0,performance.now()-previous)})};const sample=t=>{if(done)return;if(previous!==undefined)a.push(t-previous);previous=t;requestAnimationFrame(sample)};setTimeout(finish,12000);requestAnimationFrame(sample)})`);}
 function summarizeRaf(sample){const sorted=[...sample.intervals].sort((a,b)=>a-b);return {count:sorted.length,p50:sorted[Math.floor((sorted.length-1)*.5)],p95:sorted[Math.floor((sorted.length-1)*.95)],max:sorted.at(-1),over50ms:sorted.filter(v=>v>50).length,over100ms:sorted.filter(v=>v>100).length,longTaskSupported:sample.longTaskSupported,longTaskCount:sample.longTasks.length,longTaskMaxMs:Math.max(0,...sample.longTasks),visibility:sample.visibility};}
 async function assertProtectedSaveUnchanged(raw){
- const actual=await evaluate("localStorage.getItem('citymanager.save.v7')");
+ const actual=serverFixture.active?.raw;
  const trace=await evaluate('window.__trafficSaveTrace ?? []');
  if(actual!==raw||trace.some(e=>e.type==='protected-write')){
   const fingerprint=value=>value===null?null:{utf16Length:value.length,utf8Bytes:Buffer.byteLength(value),sha256:createHash('sha256').update(value).digest('hex')};
@@ -111,28 +110,28 @@ async function assertProtectedSaveUnchanged(raw){
   await writeFile(resolve(output,`save-write-trace-${seedGeneration}.json`),JSON.stringify(evidence,null,2));
   console.error('Protected save write trace',JSON.stringify(evidence));
  }
- assert.equal(actual,raw,'Fallback sample does not change primary save bytes');
+ assert.equal(actual,raw,'Fallback sample does not change acknowledged server bytes');
  assert.deepEqual(trace.filter(e=>e.type==='protected-write').map(({before,after,...event})=>event),[],'Fallback sample has no protected writes including clear');
  assert.deepEqual(await evaluate("window.__trafficWrites.filter(x=>/^citymanager\\.(save|backup|checkpoint|market)/.test(x.key))"),[],'Fallback sample does not write protected storage');
 }
 // Keep traffic isolation strict, then exercise the captured production autosave
 // callback separately. No lifecycle writers are suppressed. Full-session reload
-// below uses the production deserializer, not a claim of a browser restart.
+// below checks real service revision and production deserialization; native reload is separately exercised.
 async function verifyControlledAutosave(original,condition){
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
  await assertProtectedSaveUnchanged(original);
  const expected=await evaluate('window.cityManager.sessionSnapshot()');
  assert.notEqual(expected,original,'Citizen runtime advanced despite unchanged economic City');
  await evaluate('window.__trafficInvokeAutosave()');
- await until(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})===${JSON.stringify(expected)}`);
- const stored=await evaluate(`({primary:localStorage.getItem(${JSON.stringify(SAVE_KEY)}),checkpoint:localStorage.getItem(${JSON.stringify(AUTOSAVE_CHECKPOINT_KEY)}),backup:localStorage.getItem(${JSON.stringify(PRE_AUTOSAVE_BACKUP)}),schedule:window.__trafficAutosaveSchedule})`);
- assert.equal(stored.primary,expected);assert.equal(decodeSaveCopy(stored.checkpoint),expected);assert.equal(decodeSaveCopy(stored.backup),original);
+ await waitServerRaw(expected);
+ const stored={primary:serverFixture.active.raw,revision:serverFixture.active.revision,schedule:await evaluate('window.__trafficAutosaveSchedule')};
+ assert.equal(stored.primary,expected);assert.ok(stored.revision>1,'Autosave is a real later server revision');await serverFixture.assertNoCityWrites(evaluate);
  const restored=deserializeParkSession(stored.primary),baseline=deserializeParkSession(original);
  assert.equal(serialize(restored.city),serialize(baseline.city),'Autosave changes runtime, not economic City');
  assert.equal(serializeParkSession(restored.city,restored.runtime,restored.city.market),expected,'Production full-session deserialization round-trips saved runtime');
  assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(baseline.city));
  assert.deepEqual(stored.schedule,{mode:'controlled-single-60000ms-after-fallback-sample',registrations:1,invocations:1});
- controlledAutosaveChecks.push({condition,...stored.schedule,primarySha256:createHash('sha256').update(stored.primary).digest('hex'),originalSha256:createHash('sha256').update(original).digest('hex'),primaryCheckpointEqual:true,originalBackupRetained:true,productionSessionRoundTrip:true,lifecycleHandlers:'native'});
+ controlledAutosaveChecks.push({condition,...stored.schedule,primarySha256:createHash('sha256').update(stored.primary).digest('hex'),originalSha256:createHash('sha256').update(original).digest('hex'),serverRevision:stored.revision,serverAcknowledged:true,productionSessionRoundTrip:true,lifecycleHandlers:'native'});
 }
 async function citizenSpeed(){await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await button('#park-recreation button[data-speed]');await closeInspector();}
 async function gameMenu(){await closeInspector();await button('#toggle-game-menu');await until('document.querySelector("#inspector").dataset.page==="game"');}
@@ -156,10 +155,11 @@ try{
  ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}}
   else if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);
   else if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error'){const a=m.params.args;const expected=blocked&&a.length===2&&/^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value)&&a[1]?.value==='Network error';(expected?expectedErrors:errors).push(a);}
-  else if(m.method==='Fetch.requestPaused'){const request=m.params.request.url,local=!/^https?:/.test(request)||new URL(request).origin===origin,model=/\/assets\/kenney-city\/models\/[^/]+\.glb(?:\?|$)/.test(request);if(!local)externalRequests.push(request);void send(!local||blocked&&model?'Fetch.failRequest':'Fetch.continueRequest',!local||blocked&&model?{requestId:m.params.requestId,errorReason:'Failed'}:{requestId:m.params.requestId}).catch(error=>errors.push(String(error)));}
+  else if(m.method==='Fetch.requestPaused'){const request=m.params.request.url,local=!/^https?:/.test(request)||new URL(request).origin===origin,model=/\/assets\/kenney-city\/models\/[^/]+\.glb(?:\?|$)/.test(request);if(!local)externalRequests.push(request);void (async()=>{if(await serverFixture.intercept(m.params,send))return;await send(!local||blocked&&model?'Fetch.failRequest':'Fetch.continueRequest',!local||blocked&&model?{requestId:m.params.requestId,errorReason:'Failed'}:{requestId:m.params.requestId});})().catch(error=>errors.push(String(error)));}
+  else if(m.method==='Page.javascriptDialogOpening')void serverFixture.dialog(m.params,send).catch(error=>errors.push(String(error)));
   else if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(/^https?:/.test(u)&&new URL(u).origin!==origin)externalRequests.push(u);}
  };
- await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Network.setCacheDisabled',{cacheDisabled:true});await send('Fetch.enable',{patterns:[{urlPattern:'*',requestStage:'Request'}]});await viewport(false);
+ await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Network.setCacheDisabled',{cacheDisabled:true});await send('Fetch.enable',{patterns:[{urlPattern:'*',requestStage:'Request'}]});await serverFixture.install(send);await viewport(false);
  let d;
  if(testPlan.core){
  // Fresh profile has no explicit preference; this must be the *new* game model,
@@ -170,8 +170,8 @@ try{
  setStage('desktop activation and pause');await button('#pause');await until('window.cityManager.traffic()?.moving>0 && window.cityManager.traffic()?.cars>0 && window.cityManager.traffic()?.step>0',30000);d=await diag();assert.ok(d.traffic.demandRate>0);await screenshot('desktop-traffic-game.png');
  await button('#pause');await waitPausedModel();const paused=await diag(),pausedCity=await evaluate('window.cityManager.snapshot()');await sleep(600);const afterPause=await diag();for(const key of ['step','waiting','moving','completed','dropped','cancelled'])assert.equal(afterPause.traffic[key],paused.traffic[key],`Paused ${key} must not advance`);assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);checks.push('Game creates real rendered representative cars; pause freezes model and city');
  // Persist the ordinary city and park session only: game counters are ephemeral.
- setStage('save and load');const oldEpoch=paused.traffic.worker.epoch;await gameMenu();await button('#save');await until("window.__trafficWrites.some(x=>x.method==='setItem'&&x.key==='citymanager.save.v7')");const saved=await evaluate("localStorage.getItem('citymanager.save.v7')");const savedDoc=JSON.parse(saved);assert.equal(savedDoc.trafficRuntime,undefined);assert.equal(savedDoc.trafficGame,undefined);assert.deepEqual(deserializeParkSession(saved).city,deserialize(pausedCity));assert.deepEqual(JSON.parse(saved),JSON.parse(await evaluate('window.cityManager.sessionSnapshot()')));
- await button('#load');await until(`window.cityManager.parks().paused&&window.cityManager.traffic()?.worker?.epoch!==${JSON.stringify(oldEpoch)}`);await waitModel();assert.equal((await diag()).traffic.step,0,'Accepted load starts a fresh ephemeral game');assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);checks.push('Save/load preserves city and journals, stores no game sidecar, and resets the ephemeral epoch');
+ setStage('save and server reload');await gameMenu();await until("!document.querySelector('#save').disabled");const oldRevision=serverFixture.active.revision;const expectedSaved=await evaluate('window.cityManager.sessionSnapshot()');await button('#save');const acknowledged=await waitServerRaw(expectedSaved,oldRevision);const saved=acknowledged.raw;const savedDoc=JSON.parse(saved);assert.equal(savedDoc.trafficRuntime,undefined);assert.equal(savedDoc.trafficGame,undefined);assert.deepEqual(deserializeParkSession(saved).city,deserialize(pausedCity));assert.deepEqual(JSON.parse(saved),JSON.parse(await evaluate('window.cityManager.sessionSnapshot()')));
+ await serverFixture.assertNoCityWrites(evaluate);const oldBoot=await evaluate('window.__trafficGameBoot');serverFixture.allowNavigation();await send('Page.reload',{ignoreCache:true});await until(`window.__trafficGameBoot!==${JSON.stringify(oldBoot)}`);await serverFixture.enter({send,evaluate,button,until});await waitModel();assert.equal((await diag()).traffic.step,0,'Acknowledged reload starts a fresh ephemeral game');assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);assert.equal(serverFixture.active.raw,saved);assert.equal(serverFixture.active.revision,acknowledged.revision);await gameMenu();checks.push('Server ACK/reload preserves city and journals, stores no game sidecar, and resets the ephemeral worker');
  // Test the actual game-menu control as well as URL preferences.
  setStage('toggle and persistent preference');await button('#traffic-game-toggle');await until('window.cityManager.traffic()===null');assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),'0');assert.equal(await evaluate("document.querySelector('#traffic-game-toggle').getAttribute('aria-pressed')"),'false');
  await button('#traffic-game-toggle');await waitModel();assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),'1');checks.push('Game-menu toggle switches the model and records both explicit OFF and ON');
@@ -240,7 +240,8 @@ try{
  }
  }
  setStage('final evidence and assertions');assert.equal(checks.length,testPlan.expectedChecks,'All checks required for the selected case must run');assert.deepEqual(errors,[]);assert.deepEqual(externalRequests,[]);if(blocked)assert.ok(expectedErrors.length>=41);
- const report={fallbackAutosaveSchedule,controlledAutosaveChecks,browser:await send('Browser.getVersion'),blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,evidenceCase,recoveryStorageMode,expectDefault,fixtures:{economy:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length}},checks,stages,errors,externalRequests,screenshots,frameIntervals,peakComparison,bypassTraces,note:'Installed Edge desktop/mobile emulation; not physical Android, FPS certification or live-site acceptance. Core/full traffic fixtures use explicitly denied recovery IndexedDB; this does not fix or certify native-IDB startup performance. Extended retains native-observed IDB; save-safety/UX CI separately tests real IndexedDB.'};
+ await serverFixture.assertNoCityWrites(evaluate);
+ const report={fallbackAutosaveSchedule,controlledAutosaveChecks,browser:await send('Browser.getVersion'),blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,evidenceCase,recoveryStorageMode,expectDefault,fixtures:{economy:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length}},checks,stages,errors,externalRequests,screenshots,frameIntervals,peakComparison,bypassTraces,note:'Installed Edge desktop/mobile emulation; not physical Android, FPS certification or live-site acceptance. All scenarios enter a real isolated server-acknowledged city. Browser-city persistence is forbidden; separate save safety gates retain server failure/lifecycle coverage.'};
  await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }catch(error){const failure={error:String(error),fallbackAutosaveSchedule,lastSaveTrace,controlledAutosaveChecks,stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,testCase:testPlan.name,evidenceCase,recoveryStorageMode,stages,errors,externalRequests,frameIntervals,peakComparison,bypassTraces,lastBypassTrace};try{await writeFile(resolve(output,'failure.json'),JSON.stringify(failure,null,2));}catch{}try{await screenshot('failure.png');await writeFile(resolve(output,'failure.json'),JSON.stringify({...failure,state:await diag(),page:await evaluate('({url:location.href,text:document.body.innerText.slice(-3000),idb:window.__recoveryIdb})')},null,2));}catch{}throw error;}
 finally{clearTimeout(watchdog);if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();}
