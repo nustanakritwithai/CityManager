@@ -11,9 +11,15 @@ export function trackMeshData(graph:RailGraph):TrackMeshData[]{
  const seen=new Set<string>();
  for(const link of graph.links){const key=[Math.min(link.from,link.to),Math.max(link.from,link.to)].join(':');if(seen.has(key))continue;seen.add(key);
   const ax=(link.from%24-11.5)*2,az=(Math.floor(link.from/24)-11.5)*2,bx=(link.to%24-11.5)*2,bz=(Math.floor(link.to/24)-11.5)*2,horizontal=az===bz,x=(ax+bx)/2,z=(az+bz)/2;
-  box(x,.12,z,horizontal?2:.55,.08,horizontal?.55:2,'#8e8b7b');
-  for(const side of [-.18,.18])box(x+(horizontal?0:side),.19,z+(horizontal?side:0),horizontal?2:.045,.055,horizontal?.045:2,'#d1d7ce');
-  for(const offset of [-.75,-.25,.25,.75])box(x+(horizontal?offset:0),.16,z+(horizontal?0:offset),horizontal?.08:.65,.06,horizontal?.65:.08,'#665848');
+  // Grey ballast bed, dark sleepers across it and two bright steel rails on top.
+  box(x,.1,z,horizontal?2:.74,.06,horizontal?.74:2,'#a7a397');
+  for(const offset of [-.75,-.25,.25,.75])box(x+(horizontal?offset:0),.145,z+(horizontal?0:offset),horizontal?.1:.6,.04,horizontal?.6:.1,'#5a4a3b');
+  for(const side of [-.18,.18])box(x+(horizontal?0:side),.19,z+(horizontal?side:0),horizontal?2:.05,.05,horizontal?.05:2,'#d8dee3');
  }
  return [...batches.values()];
 }
+
+/** Track direction at a station from its links; a station with no track yet faces east-west. */
+export function stationAxis(cell:number,graph:RailGraph){const link=graph.links.find(l=>l.from===cell||l.to===cell);if(!link)return 'x';return Math.abs(link.to-link.from)===1?'x':'z';}
+/** Whether only one track leaves the station, so the line ends here and needs a buffer stop. */
+export function stationEnds(cell:number,graph:RailGraph){const out=new Set(graph.links.filter(l=>l.from===cell).map(l=>l.to));return out.size===1?[...out][0]:null;}

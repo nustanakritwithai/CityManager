@@ -10,3 +10,9 @@ test('whole allowed grid remains three batched track meshes without dropping seg
  const links=[];for(let c=0;c<576;c++)for(const to of [c%24<23?c+1:-1,c<552?c+24:-1])if(to>=0)links.push({from:c,to,minutes:1},{from:to,to:c,minutes:1});
  const rows=trackMeshData({revision:0,links});assert.equal(links.length,2208);assert.equal(rows.length,3);assert.equal(rows.reduce((n,r)=>n+r.boxes,0),1104*7);assert.equal(rows.reduce((n,r)=>n+r.positions.length/3,0),1104*7*24);
 });
+import {stationAxis,stationEnds} from '../src/rail/track-geometry.ts';
+test('station platform follows its track and a dead end gets one buffer stop',()=>{
+ const line={revision:1,links:[{from:315,to:339,minutes:1},{from:339,to:315,minutes:1},{from:339,to:338,minutes:1},{from:338,to:339,minutes:1}]};
+ assert.equal(stationAxis(315,line),'z','North-south track: platform runs north-south');assert.equal(stationAxis(338,line),'x');assert.equal(stationAxis(100,line),'x','No track yet: default east-west');
+ assert.equal(stationEnds(315,line),339,'Only one way out: buffer stop on the far side');assert.equal(stationEnds(339,line),null,'Through station: no buffer stop');assert.equal(stationEnds(100,line),null);
+});
