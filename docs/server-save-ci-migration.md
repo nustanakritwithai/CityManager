@@ -99,3 +99,5 @@ economy profiles each retain the 240s bound; their budget is no longer shared.
 Bypass baseline+construction previously consumed about126s, and dense paired
 sampling now has its own full profile. The three-pair peak remains one unchanged
 protocol, not split or resampled. These estimates are not browser-pass claims.
+
+PR181 fault acceptance is four disjoint required jobs: preferences (four checks), OFF economy (one), constructor failure (one), and asynchronous Worker failure (one). Their union retains all seven original checks, with each fault's exact three-day replay and durable Save ACK retained. The per-process 180-second watchdog is unchanged; stage and pending-command ages now distinguish cumulative work from a stalled UI command. The aggregate requires the entire fault matrix.

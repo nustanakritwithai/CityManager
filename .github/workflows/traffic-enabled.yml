@@ -103,11 +103,17 @@ jobs:
           retention-days: 3
 
   fault:
-    name: Allocation game / default and worker fault
+    name: Allocation game fault / ${{ matrix.case }}
     needs: checks
     if: needs.checks.outputs.kind != 'vehicle' && needs.checks.outputs.kind != 'visual-final' && needs.checks.outputs.kind != 'server-save' && needs.checks.outputs.kind != 'classic-toolbar' && needs.checks.outputs.kind != 'history' && needs.checks.outputs.kind != 'commercial' && needs.checks.outputs.kind != 'rail' && needs.checks.outputs.kind != 'hud-polish' && needs.checks.outputs.kind != 'traffic-gap'
     runs-on: windows-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [preferences, economy, construct, async]
+    env:
+      TRAFFIC_FAULT_CASE: ${{ matrix.case }}
     defaults:
       run:
         shell: pwsh
@@ -144,7 +150,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: traffic-game-fault-evidence
+          name: traffic-game-fault-${{ matrix.case }}-evidence
           path: |
             .test-output/traffic-default-fault/*.png
             .test-output/traffic-default-fault/report.json

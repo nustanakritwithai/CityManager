@@ -22,3 +22,9 @@ test('standalone mobile partitions load the actual viewport-meta page before ass
  assert.doesNotMatch(source,/if\(testPlan\.(dense|peak)\)\{\s*await viewport\(true\)/);
  assert.match(source,/innerWidth===\$\{mobile\?390:1440\}/,'actual mobile width assertion remains mandatory');
 });
+
+test('four disjoint fault jobs preserve all seven assertions exactly once with unchanged watchdog',async()=>{
+ const {trafficFaultCase}=await import('./traffic-game-cases.mjs'),{readFileSync}=await import('node:fs');const full=trafficFaultCase(),parts=['preferences','economy','construct','async'].map(trafficFaultCase);
+ assert.equal(full.expectedChecks,7);assert.equal(parts.reduce((n,p)=>n+p.expectedChecks,0),7);assert.equal(parts.filter(p=>p.preferences).length,1);assert.equal(parts.filter(p=>p.economy).length,1);assert.deepEqual(parts.flatMap(p=>p.faults),['construct','async']);assert.throws(()=>trafficFaultCase('typo'),/Unknown/);
+ const source=readFileSync(new URL('traffic-default-fault-smoke.mjs',import.meta.url),'utf8');assert.match(source,/180000/);assert.match(source,/for\(const fault of testPlan\.faults\)/);assert.match(source,/await threeDays\(\);const workers=await assertFaultWorkers/);assert.match(source,/checks.length,testPlan.expectedChecks/);assert.match(source,/if\(testPlan.preferences\)/);assert.match(source,/if\(testPlan.economy\)/);
+});

@@ -8,3 +8,10 @@ export function trafficGameCase(name,blocked) {
  return {name,core,lifecycle,economy,bypass,dense,peak,extended:bypass||dense||peak,expectedChecks:(lifecycle?4:0)+(economy?2:0)+(bypass?1:0)+(dense?1:0)+(peak?1:0),
   output:`${blocked?'fallback':'normal'}${name==='full'?'':`-${name}`}`};
 }
+
+/** Fault checks are independent scenarios; no paired comparison is split. */
+export function trafficFaultCase(name='full'){
+ if(!['full','preferences','economy','construct','async'].includes(name))throw Error(`Unknown traffic fault case: ${name}`);
+ const preferences=name==='full'||name==='preferences',economy=name==='full'||name==='economy',faults=['construct','async'].filter(f=>name==='full'||name===f);
+ return {name,preferences,economy,faults,expectedChecks:(preferences?4:0)+(economy?1:0)+faults.length};
+}
