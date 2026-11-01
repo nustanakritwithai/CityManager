@@ -56,10 +56,12 @@ test('reload accepts only observed exact same-raw lifecycle ACK chains and the f
 test('old page unload and in-flight service request settle before a new fixture seed',async()=>{
  const f=createTrafficServerFixture(url),before=await f.seed(raw);let release,blank=false;
  const wait=new Promise(r=>release=r);let mutation;
- await f.leave({evaluate:async e=>e==='!!window.cityManager'?true:e==='window.__panelCityWrites'?[]:null,
+ await f.leave({evaluate:async e=>e==='!!window.cityManager'||e==='window.cityManager.parks().paused'?true:e==='window.cityManager.sessionSnapshot()'?raw:e==='window.__panelCityWrites'?[]:null,
   send:async()=>{mutation=f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:1,raw,metadata:before.metadata}),async()=>wait);blank=true;setTimeout(()=>release(),5);},
   until:async()=>assert.equal(blank,true)});
- await mutation;assert.equal(f.active.revision,2);const next=await f.seed(raw);assert.equal(next.revision,1);assert.equal(f.writes.length,0);assert.notEqual(next.cityId,before.cityId);await assert.rejects(f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:2,raw,metadata:before.metadata}),async()=>{}),/Unexpected rejected traffic save/);assert.equal(f.active.revision,1);assert.equal(f.active.cityId,next.cityId);
+ await mutation;assert.equal(f.active.revision,2);const next=await f.seed(raw);assert.equal(next.revision,1);assert.equal(f.writes.length,0);assert.notEqual(next.cityId,before.cityId);await f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:2,raw,metadata:before.metadata}),async()=>{});assert.equal(f.evidence.retiredWrites[0].ackRevision,3);assert.equal(f.active.revision,1);assert.equal(f.active.cityId,next.cityId);assert.equal(f.writes.length,0,'Old ACK cannot contaminate current navigation chain');
+ await assert.rejects(f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:3,raw:'wrong',metadata:before.metadata}),async()=>{}),/exact observed outgoing session/);
+ await assert.rejects(f.intercept(request('POST',{action:'save',cityId:'22222222-2222-4222-8222-222222222222',expectedRevision:1,raw,metadata:before.metadata}),async()=>{}),/Unexpected rejected traffic save/);assert.equal(f.active.revision,1);
 });
 
 
@@ -78,4 +80,21 @@ test('actual traffic bootstrap scripts ignore about:blank before accessing secur
   const blank={window:{},location:{origin:'null'}};runInNewContext(source,blank);assert.deepEqual(blank.window,{},'blank navigation creates no boot marker or storage/fault hooks');
   let called=0;assert.throws(()=>runInNewContext(source,{window:{},location:{origin:new URL(url).origin},crypto:{randomUUID(){called++;throw Error('trusted boot marker');}}}),/trusted boot marker/);assert.equal(called,1);
  }
+});
+
+test('Fetch diagnostic preserves every original error and correlates bounded request/cancel metadata',async()=>{
+ const {createTrafficNetworkAudit}=await import('./traffic-server-entry-fixture.mjs');const audit=createTrafficNetworkAudit(()=>({stage:'reload'}));
+ const p={requestId:'fetch1',networkId:'network1',frameId:'frame1',resourceType:'Fetch',request:{url:'http://127.0.0.1:4195/citymanager-api/v1/city-save',method:'POST',postData:'must-not-record',headers:{Cookie:'must-not-record'}}};
+ audit.observe('Network.loadingFailed',{requestId:'network1',canceled:true,errorText:'net::ERR_ABORTED'});
+ const original=Error('Invalid InterceptionId.');await assert.rejects(audit.bind(p,async()=>{throw original;})('Fetch.fulfillRequest',{responseCode:200,body:'must-not-record'}),error=>error===original);
+ const evidence=audit.evidence;assert.equal(evidence.failures[0].command,'Fetch.fulfillRequest');assert.equal(evidence.failures[0].method,'POST');assert.equal(evidence.failures[0].networkId,'network1');assert.equal(evidence.failures[0].events[0].canceled,true);assert.equal(JSON.stringify(evidence).includes('must-not-record'),false);
+ for(let i=0;i<200;i++)audit.observe('Network.loadingFailed',{requestId:String(i)});assert.equal(audit.evidence.events.length,160);
+});
+
+test('late lifecycle ACK is bound to the exact captured dirty outgoing runtime, never the new city',async()=>{
+ const f=createTrafficServerFixture(url),old=await f.seed(raw),runtime=createParkRuntime(city);runtime.minuteRemainder=.25;const dirty=serializeParkSession(city,runtime);assert.notEqual(dirty,raw);
+ await f.leave({evaluate:async e=>e==='!!window.cityManager'||e==='window.cityManager.parks().paused'?true:e==='window.cityManager.sessionSnapshot()'?dirty:e==='window.__panelCityWrites'?[]:null,send:async()=>{},until:async()=>{}});
+ const current=await f.seed(raw);await f.intercept(request('POST',{action:'save',cityId:old.cityId,expectedRevision:1,raw:dirty,metadata:old.metadata}),async()=>{});
+ assert.equal(f.evidence.retiredWrites.at(-1).ackRevision,2);assert.deepEqual(f.active,current);assert.equal(f.writes.length,0);
+ await assert.rejects(f.intercept(request('POST',{action:'save',cityId:old.cityId,expectedRevision:2,raw:dirty+' ',metadata:old.metadata}),async()=>{}),/exact observed outgoing session/);assert.deepEqual(f.active,current);
 });

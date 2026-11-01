@@ -27,19 +27,24 @@ export function assertNavigationSaveChain(before,after,writes){
 }
 export function createTrafficServerFixture(pageUrl){
  const url=new URL(pageUrl);assert.equal(url.protocol,'http:','Traffic fixture requires loopback HTTP');
- const fixture=createPanelServerFixture(pageUrl);let navigationAllowed=false,navigation=null;
+ let fixture=createPanelServerFixture(pageUrl),navigationAllowed=false,navigation=null;
+ const generations=new Map(),outgoingSnapshots=new Map(),retiredWrites=[];
  const writes=[],reads=[],pending=new Set(),navigationEvidence=[];
  const intercept=(params,send)=>{
   const work=(async()=>{
    const post=new URL(params.request.url).pathname==='/citymanager-api/v1/city-save'&&params.request.method==='POST';
    const get=new URL(params.request.url).pathname==='/citymanager-api/v1/city-save'&&params.request.method==='GET';
    const event=post?{command:JSON.parse(params.request.postData)}:get?{}:null;
-   if(post)writes.push(event);else if(get)reads.push(event);
-   const handled=await fixture.intercept(params,async(method,payload)=>{
+   const target=post?(generations.get(event.command.cityId)??fixture):fixture,retired=target!==fixture;
+   const previous=retired?target.active:null;
+   if(retired){assert.equal(event.command.action,'save','Retired scenario permits only lifecycle Save');assert.ok(outgoingSnapshots.has(event.command.cityId),'Retired Save requires an observed outgoing session');assert.equal(event.command.raw,outgoingSnapshots.get(event.command.cityId),'Retired lifecycle Save matches exact observed outgoing session');retiredWrites.push(event);}
+   else if(post)writes.push(event);else if(get)reads.push(event);
+   const handled=await target.intercept(params,async(method,payload)=>{
     if(event&&method==='Fetch.fulfillRequest'){event.status=payload.responseCode;event.response=JSON.parse(Buffer.from(payload.body,'base64').toString());}
     return send(method,payload);
    });
-   if(post)assert.equal(event.status,200,'Unexpected rejected traffic save (including a stale outgoing scenario)');
+   if(post)assert.equal(event.status,200,'Unexpected rejected traffic save');
+   if(retired)assertNavigationSaveChain({...previous,raw:outgoingSnapshots.get(event.command.cityId)},target.active,[event]);
    return handled;
   })();pending.add(work);void work.finally(()=>pending.delete(work)).catch(()=>{});return work;
  };
@@ -47,7 +52,8 @@ export function createTrafficServerFixture(pageUrl){
  const seed=async raw=>{
   await settle();navigation=null;writes.length=0;reads.length=0;
   const restored=deserializeParkSession(raw); // Validate the actual full-session contract, not a version label.
-  const priorCityId=fixture.active?.cityId;const ack=await fixture.seed(raw);
+  const priorCityId=fixture.active?.cityId;const next=createPanelServerFixture(pageUrl),ack=await next.seed(raw);
+  assert.equal(generations.has(ack.cityId),false,'Scenario identity must be globally fresh');fixture=next;generations.set(ack.cityId,next);
   if(priorCityId)assert.notEqual(ack.cityId,priorCityId,'Each reseeded scenario has a fresh service city identity');
   assert.equal(ack.raw,raw);assert.equal(ack.metadata.tick,restored.city.tick);
   assert.equal(ack.metadata.population,restored.city.households.reduce((n,h)=>n+h.members,0));
@@ -88,10 +94,29 @@ export function createTrafficServerFixture(pageUrl){
  };
  const leave=async({send,evaluate,until})=>{
   if(!await evaluate('!!window.cityManager'))return;
-  await noPanelCityWrites(evaluate);permitBeforeUnload();await send('Page.navigate',{url:'about:blank'});
+  await noPanelCityWrites(evaluate);assert.equal(await evaluate('window.cityManager.parks().paused'),true,'Scenario must be paused before capturing outgoing bytes');const outgoing=await evaluate('window.cityManager.sessionSnapshot()');deserializeParkSession(outgoing);outgoingSnapshots.set(fixture.active.cityId,outgoing);permitBeforeUnload();await send('Page.navigate',{url:'about:blank'});
   await until("location.href==='about:blank'");await settle();navigation=null;navigationAllowed=false;
  };
- return {seed,intercept,leave,settle,writes,reads,navigationEvidence,install:fixture.install,requests:fixture.requests,
+ return {seed,intercept,leave,settle,writes,reads,navigationEvidence,install:fixture.install,get requests(){return [...generations.values()].flatMap(f=>f.requests);},
   permitBeforeUnload,allowNavigation:permitBeforeUnload,dialog,enter,assertDurable,navigationRetries,
-  assertNoCityWrites:noPanelCityWrites,get evidence(){return {activeRevision:fixture.active?.revision,navigationEvidence,writes:writes.map(e=>({action:e.command.action,cityId:e.command.cityId,expectedRevision:e.command.expectedRevision,rawBytes:Buffer.byteLength(e.command.raw??''),status:e.status,ackRevision:e.response?.revision})),reads:reads.map(e=>({status:e.status,revision:e.response?.revision,cityId:e.response?.cityId}))};},get active(){return fixture.active;}};
+  assertNoCityWrites:noPanelCityWrites,get evidence(){return {activeRevision:fixture.active?.revision,generations:generations.size,retiredWrites:retiredWrites.map(e=>({cityId:e.command.cityId,expectedRevision:e.command.expectedRevision,status:e.status,ackRevision:e.response?.revision})),navigationEvidence,writes:writes.map(e=>({action:e.command.action,cityId:e.command.cityId,expectedRevision:e.command.expectedRevision,rawBytes:Buffer.byteLength(e.command.raw??''),status:e.status,ackRevision:e.response?.revision})),reads:reads.map(e=>({status:e.status,revision:e.response?.revision,cityId:e.response?.cityId}))};},get active(){return fixture.active;}};
+}
+
+// Diagnostic only: every failed interception remains a failure. Keep no headers,
+// cookies, bodies or player bytes; bounded synthetic request lifecycle metadata.
+export function createTrafficNetworkAudit(context=()=>null){
+ const events=[],failures=[];let seq=0;
+ const record=event=>{const entry={seq:++seq,at:Date.now(),...event};events.push(entry);if(events.length>160)events.shift();for(const failure of failures)if(entry.id&&entry.id===failure.networkId){failure.events.push(entry);if(failure.events.length>40)failure.events.shift();}};
+ return {
+  observe(method,p){
+   if(method==='Network.requestWillBeSent')record({event:method,id:p.requestId,url:p.request.url,method:p.request.method,frameId:p.frameId,loaderId:p.loaderId});
+   else if(method==='Network.loadingFailed')record({event:method,id:p.requestId,canceled:p.canceled,errorText:p.errorText,type:p.type});
+   else if(method==='Page.frameNavigated')record({event:method,frameId:p.frame.id,url:p.frame.url,loaderId:p.frame.loaderId});
+  },
+  bind(p,send){
+   const request={requestId:p.requestId,networkId:p.networkId,url:p.request.url,method:p.request.method,resourceType:p.resourceType,frameId:p.frameId,context:context()};record({event:'Fetch.requestPaused',...request});
+   return async(method,params)=>{try{return await send(method,params);}catch(error){const failure={...request,command:method,responseCode:params.responseCode,error:String(error),events:events.slice(-40)};failures.push(failure);if(failures.length>32)failures.shift();error.message+='; interception='+JSON.stringify(failure);throw error;}};
+  },
+  get evidence(){return {events:structuredClone(events),failures:structuredClone(failures)};}
+ };
 }
