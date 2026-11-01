@@ -1,5 +1,5 @@
-/** Proposed retail balance. Level 1 is a market; shops occupy levels 2–7. */
-export const RETAIL_MAX_LEVEL = 7;
+/** Proposed retail balance. Commodity roles are independent of the shared 1–9 commercial visual tiers. */
+export const RETAIL_MAX_LEVEL = 9;
 export const RETAIL_LEGACY_MAX_LEVEL = 4;
 export type RetailCapacity = { workers: number; stock: number; householdCoverage: number; heightFactor: number };
 const TABLE: readonly Readonly<RetailCapacity>[] = Object.freeze([
@@ -9,10 +9,12 @@ const TABLE: readonly Readonly<RetailCapacity>[] = Object.freeze([
   Object.freeze({ workers: 4, stock: 48, householdCoverage: 16, heightFactor: 1.2 }),
   Object.freeze({ workers: 5, stock: 72, householdCoverage: 24, heightFactor: 1.4 }),
   Object.freeze({ workers: 6, stock: 96, householdCoverage: 32, heightFactor: 1.6 }),
+  Object.freeze({ workers: 7, stock: 120, householdCoverage: 40, heightFactor: 1.8 }),
+  Object.freeze({ workers: 8, stock: 144, householdCoverage: 48, heightFactor: 2 }),
 ]);
 export function retailCapacity(level: number): RetailCapacity {
-  if (!Number.isInteger(level) || level < 2 || level > RETAIL_MAX_LEVEL) throw new RangeError('Retail level must be 2–7');
-  return { ...TABLE[level - 2] };
+  if (!Number.isInteger(level) || level < 1 || level > RETAIL_MAX_LEVEL) throw new RangeError('Retail level must be 1–9');
+  return { ...TABLE[Math.max(0, level - 2)] };
 }
 /**
  * One worker keeps the base 24-unit shelf; each extra actual worker unlocks the shelf of the level

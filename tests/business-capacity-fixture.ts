@@ -17,6 +17,9 @@ export function businessFixture(firms = 64, households = 96): City {
     c.ledger.push({ tick: 0, from: 'outside', to: wallet, amount: 1_000_000, reason: 'Fixture historical business capital' });
   }
   if (firms > 64) c.businessCapacityVersion = 1;
+  // Synthetic historical funding predates the unified commercial rules.
+  c.commercialUnifiedStartTick=c.tick;
+  c.commercialUnifiedBaseline={moneyEntries:c.ledger.length,cropEntries:c.cropLedger.length,goodsEntries:c.goodsLedger.length};
   return c;
 }
 export const vacantSite = (c: City) => c.cells.findIndex((cell, i) => !cell.road && cell.zone === null && cell.building === null && access(c, i));

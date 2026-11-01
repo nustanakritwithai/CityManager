@@ -6,8 +6,10 @@
  */
 import type { BusEvent, BusSnapshot } from './types.ts';
 
-/** The four read APIs the line panel may touch. `drainEvents` is not one of them. */
+/** Read APIs for the line panel and removal guard. `drainEvents` is not one of them. */
 export type BusLiveRead = {
+  /** Atomic UI removal guard; no engine mutations. */
+  hasActiveDepot?(depotId:number):boolean;
   snapshot(minute?: number): readonly BusSnapshot[];
   busesDetail(): readonly { id: string; lineId: number; phase: string; returning: boolean; retired: boolean; until: number }[];
   waitingAt(stopId: number): number;

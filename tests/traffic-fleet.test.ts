@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildNetwork, rebuildRegion, linkKey, type LinkNetwork } from '../src/traffic/network.ts';
 import { createFleet, setFleetDemand, stepFleet, fleetPoses, apportion, activeCars, GLOBAL_VEHICLE_CAP, VISUAL_SCALE, VISUAL_TILES_PER_SECOND } from '../src/traffic/fleet.ts';
 import { assignPeriod, type OdDemand } from '../src/traffic/routing.ts';
-import { LANE_END } from '../src/citizen-road-queue.ts';
+import { CAR_LENGTH, LANE_END } from '../src/citizen-road-queue.ts';
 import { overlappingPairs } from '../src/citizen-road-queue.ts';
 import { configureRoadPath, forgetRoadTopology, type RoadMap } from '../src/road-topology.ts';
 import { createCity, step, serialize } from '../src/sim.ts';
@@ -178,7 +178,8 @@ test('removed committed turn exit fades in place and releases its held junction 
   setFleetDemand(f, net, od, a.assigned);
   for (let i = 0; i < 30 && !f.held.size; i++) stepFleet(f, net, .05);
   assert.equal(f.held.size, 1); const car = f.cars[0], before = fleetPoses(f, net)[0];
-  assert.ok(car.s > LANE_END); removeRoad(c, net, 50);
+  // The fleet junction square keeps the wider 0.25-tile margin; lane queues use the tighter stop.
+  assert.ok(car.s > 1 - 0.25 - CAR_LENGTH / 2); removeRoad(c, net, 50);
   stepFleet(f, net, 0); assert.equal(car.phase, 'out'); assert.deepEqual(fleetPoses(f, net)[0], before);
   run(f, net, 1); assert.equal(f.cars.length, 0); assert.equal(f.held.size, 0);
 });

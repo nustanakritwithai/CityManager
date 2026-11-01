@@ -112,7 +112,7 @@ export class CityNetworkView {
       for (const node of NODES.filter(n => n.group === group)) { const chip = el('button', 'net-chip', node.label); chip.type = 'button'; chip.addEventListener('click', () => this.select(node.id)); row.append(chip); }
       this.index.append(row);
     }
-    this.side.append(this.detail, this.feedBox, this.index, this.table());
+    this.side.append(el('p', 'net-group', 'C · พืชผล และ C · สินค้า คือกิจการพาณิชย์เดียวกัน แยกช่องเพื่ออธิบายสินค้า ห้ามบวกจำนวนสองช่องซ้ำ'), this.detail, this.feedBox, this.index, this.table());
     const main = el('div', 'net-main'); main.append(this.stage, this.side);
     this.root.append(bar, main, this.announcer); document.body.append(this.root);
     this.bindStage();

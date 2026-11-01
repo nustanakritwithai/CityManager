@@ -8,7 +8,7 @@ test('candidate summaries show older and newer days without selecting or writing
  for(const [primary,copy] of [[old,newer],[newer,old]]){
   const data=new Map([[SAVE_KEY,primary],[AUTOSAVE_CHECKPOINT_KEY,copy]]),before=[...data];
   const summary=recoverySummary({getItem:key=>data.get(key)??null});
-  assert.match(summary,/วันที่ 0/);assert.match(summary,/วันที่ 1/);assert.match(summary,/v22/);assert.match(summary,/ยังไม่เลือกแทนให้คุณ/);assert.deepEqual([...data],before);
+  assert.match(summary,/วันที่ 0/);assert.match(summary,/วันที่ 1/);assert.match(summary,/v25/);assert.match(summary,/ยังไม่เลือกแทนให้คุณ/);assert.deepEqual([...data],before);
  }
 });
 test('invalid/missing/denied candidates remain isolated and never expose raw contents',()=>{

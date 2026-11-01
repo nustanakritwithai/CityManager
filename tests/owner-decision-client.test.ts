@@ -11,7 +11,7 @@ const connection = () => ({ enabled: true, endpoint });
 const fixture = () => {
   const city = createCity(61025);
   for (let day = 0; day < 215; day++) step(city);
-  const firm = city.firms.find(f => f.commercialKind === 'market');
+  const firm = city.firms.find(f => f.zone === 'C' && f.owner !== null);
   assert(firm);
   const snapshot = captureOwnerSnapshot(city, firm.id);
   assert(snapshot);

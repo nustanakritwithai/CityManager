@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MarketClient, MARKET_SAVE_KEY } from '../src/market-client.ts';
-import { createCity, deserialize, isMarket, serialize, step } from '../src/sim.ts';
+import { createCity, deserialize, serialize, step } from '../src/sim.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 
 const guest = '00000000-0000-4000-8000-000000000003', receipt = '00000000-0000-4000-8000-000000000004', claim = '00000000-0000-4000-8000-000000000005';
@@ -73,7 +73,7 @@ test('ACK requires the matching durable city and receipt before network access',
 }));
 
 test('real city save reload recovers a lost ACK without applying the crop twice', async () => environment(async store => {
-  seeded(store); let city = createCity(61025, { starter: true }); for (let i = 0; i < 360 && !city.firms.some(isMarket); i++) step(city); const target = city.firms.find(isMarket); assert.ok(target, 'seeded engine city must contain a market');
+  seeded(store); let city = createCity(61025, { starter: true }); for (let i = 0; i < 360 && !city.firms.some(f=>f.zone==='C'&&f.owner!==null); i++) step(city); const target = city.firms.find(f=>f.zone==='C'&&f.owner!==null); assert.ok(target, 'seeded engine city must contain an owned commercial business');
   let client = new MarketClient(() => city, 'http://127.0.0.1:4317'), ackCalls = 0; const r = { receipt_id: receipt, item_code: 'crop:rice', quantity: 1 }; const before = target.crops.rice;
   globalThis.fetch = async url => { if (String(url).endsWith('/claim')) return new Response('{}', { status: 200 }); if (String(url).endsWith('/ack')) { ackCalls++; if (ackCalls === 1) throw new Error('ack response lost'); return new Response('{}', { status: 200 }); } throw new Error('unexpected request'); };
   const save = () => { const market = client.exportSave(); store.set(SAVE_KEY, serialize(city, market)); city.market = market; };

@@ -1,4 +1,4 @@
-import { housingCapacity, householdWorkerCount, firmWorkerCount, isMarket, isRetail, type City } from './sim.ts';
+import { housingCapacity, householdWorkerCount, firmWorkerCount, type City } from './sim.ts';
 
 /** Local read-only questions. This contract is not sent to the Typhoon report endpoint. */
 export const CITY_FACT_QUESTIONS = [
@@ -87,7 +87,10 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
     fact('city.businesses.commercial', 'สถานประกอบการพาณิชย์', city.firms.filter(item => item.zone === 'C').length, 'แห่ง', 'firms[zone=C].length');
     fact('city.businesses.industrial', 'สถานประกอบการอุตสาหกรรม', city.firms.filter(item => item.zone === 'I').length, 'แห่ง', 'firms[zone=I].length');
     fact('city.businesses.farms', 'ฟาร์ม', city.firms.filter(item => item.zone === 'F').length, 'แห่ง', 'firms[zone=F].length');
-    fact('city.businesses.raw-markets', 'ตลาด · พาณิชย์ระดับ 1', city.firms.filter(isMarket).length, 'แห่ง', 'firms[zone=C,commercialKind=market].length');
+    const commercialTierCount = (from:number,to:number) => city.firms.filter(f => f.zone === 'C' && city.buildings.some(b => b.id === f.building && b.level >= from && b.level <= to)).length;
+    fact('city.businesses.raw-markets', 'ตลาด · พาณิชย์ระดับ 1–3', commercialTierCount(1,3), 'แห่ง', 'firms[zone=C,building.level=1..3].length');
+    fact('city.businesses.commercial-buildings', 'อาคารพาณิชย์ · ระดับ 4–6', commercialTierCount(4,6), 'แห่ง', 'firms[zone=C,building.level=4..6].length');
+    fact('city.businesses.malls', 'Big Mall · ระดับ 7–9', commercialTierCount(7,9), 'แห่ง', 'firms[zone=C,building.level=7..9].length');
     fact('city.businesses.workers', 'แรงงานที่ได้รับจัดสรรงาน', countEmployed(), 'คน', 'sum(householdWorkerCount(city,households.id)) [employment + ownerLabor]');
     missing('missing.city.businesses.history', 'คำตอบนี้ไม่มีข้อมูลเปรียบเทียบก่อนหน้า จึงยังสรุปการเปิดเพิ่ม ปิดกิจการ หรือแนวโน้มไม่ได้');
   } else if (question.intent === 'house.detail') {
@@ -120,11 +123,9 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
     fact('business.zone', 'ประเภทสถานประกอบการ', businessKinds[firm.zone], '', 'firms.zone', refs);
     fact('business.workers', 'แรงงานที่ได้รับจัดสรรงาน', firmWorkerCount(city, firm.id), 'คน', 'firmWorkerCount(city,firm.id) [employment + ownerLabor]', refs);
     fact('business.inventory', 'สินค้าคงคลังปัจจุบัน', firm.inventory, 'หน่วยสินค้า', 'firms.inventory', refs);
-    if (!isRetail(firm)) {
       fact('business.crop-inventory', 'พืชผลคงคลัง', firm.cropInventory, 'ล็อตพืชผล', 'firms.cropInventory', refs);
       fact('business.crop-cost', 'ต้นทุนบัญชีพืชผลคงคลัง', firm.cropCost, 'สตางค์', 'firms.cropCost', refs);
-    }
-    if (isMarket(firm) && firm.owner !== null) {
+    if (firm.zone === 'C' && firm.owner) {
       fact('business.owner-workers', 'แรงงานเจ้าของที่ลงมือทำงาน', sum(city.ownerLabor.filter(item => item.firmId === firm.id), item => item.workers), 'คน', 'sum(ownerLabor[firmId=firm.id].workers)', refs);
     }
     if (building) {

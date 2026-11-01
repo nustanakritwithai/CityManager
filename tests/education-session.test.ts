@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {createCity,step} from '../src/sim.ts';
 import {createParkRuntime,advanceParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
 
-test('education v22 city with park clock saves and loads without losing education or people',()=>{
+test('education city in commercial v25 envelope with park clock saves and loads without losing education or people',()=>{
  const city=createCity(61025),runtime=createParkRuntime(city);
  advanceParkRuntime(city,runtime,1440+421.25,()=>step(city));
- const raw=serializeParkSession(city,runtime),envelope=JSON.parse(raw);assert.equal(envelope.version,22);assert.equal(envelope.rulesVersion,'chain-17');
+ const raw=serializeParkSession(city,runtime),envelope=JSON.parse(raw);assert.equal(envelope.version,25);assert.equal(envelope.rulesVersion,'chain-20');assert.equal(envelope.commercialBaseVersion,22);
  const restored=deserializeParkSession(raw);assert.deepEqual(restored.city,city);assert.deepEqual(restored.runtime,runtime);
  assert.equal(serializeParkSession(restored.city,restored.runtime),raw);
 });

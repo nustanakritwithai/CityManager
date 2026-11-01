@@ -1,3 +1,4 @@
+import {isRailReserved,RAIL_PARCEL_MESSAGE} from '../rail/reserved-parcels.ts';
 import { connectedRoads, SIZE, campusAt, parkAt, plantAt, type City, type Result } from '../sim.ts';
 import { busDepotAt } from '../bus/buildings.ts';
 import { createTaxi, taxiAt, taxiEnabled, MAX_TAXI_DEPOTS, type TaxiDepot } from './buildings.ts';
@@ -8,6 +9,7 @@ const canAllocateId = (c: City) => Number.isSafeInteger(c.nextId) && c.nextId >=
 export function taxiSiteReason(c: City, i: number, enabled = taxiEnabled()): string | null {
   if (!enabled) return 'ระบบแท็กซี่ยังไม่เปิดใช้';
   if (!Number.isInteger(i) || i < 0 || i >= SIZE * SIZE) return 'ตำแหน่งอยู่นอกแผนที่';
+  if(isRailReserved(c,i))return RAIL_PARCEL_MESSAGE;
   const cell = c.cells[i];
   if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return 'อู่แท็กซี่ต้องใช้แปลงว่างที่ยังไม่ลงโซน';
   if (!neighbours(i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';

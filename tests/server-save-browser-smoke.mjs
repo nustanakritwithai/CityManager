@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { inflateSync, deflateSync } from 'node:zlib';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
+let trafficGapEvidence={status:'not-run',reason:'Bumper-gap acceptance is opt-in for the exact traffic transition.'};
+let railEvidence={status:'not-run',reason:'Rail UI acceptance is opt-in for the exact rail transition.'};
 let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
 const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
@@ -31,24 +33,29 @@ function pngEvidence(png){
  assert.ok(width>0&&height>0&&width*height<=16_000_000&&png[24]===8&&channels&&png[28]===0,'Supported bounded RGB/RGBA PNG required');
  const chunks=[];for(let i=8;i+12<=png.length;){const n=png.readUInt32BE(i);assert.ok(i+12+n<=png.length);if(png.toString('ascii',i+4,i+8)==='IDAT')chunks.push(png.subarray(i+8,i+8+n));i+=n+12;}
  const stride=width*channels,raw=inflateSync(Buffer.concat(chunks),{maxOutputLength:(stride+1)*height});assert.equal(raw.length,(stride+1)*height);
- let previous=Buffer.alloc(stride),first,nonblank=false;
+ let previous=Buffer.alloc(stride),minLuma=255,maxLuma=0;const colors=new Set();
  for(let y=0;y<height;y++){
   const filter=raw[y*(stride+1)],row=Buffer.from(raw.subarray(y*(stride+1)+1,(y+1)*(stride+1)));assert.ok(filter<=4);
   for(let x=0;x<stride;x++){const a=x>=channels?row[x-channels]:0,b=previous[x],c=x>=channels?previous[x-channels]:0,p=a+b-c;const predictor=filter===0?0:filter===1?a:filter===2?b:filter===3?Math.floor((a+b)/2):Math.abs(p-a)<=Math.abs(p-b)&&Math.abs(p-a)<=Math.abs(p-c)?a:Math.abs(p-b)<=Math.abs(p-c)?b:c;row[x]=(row[x]+predictor)&255;}
-  for(let x=0;x<stride;x+=channels){const rgb=row.subarray(x,x+3);if(!first)first=Buffer.from(rgb);else if(!rgb.equals(first))nonblank=true;}previous=row;
+  for(let x=0;x<stride;x+=channels){const r=row[x],g=row[x+1],b=row[x+2],luma=(54*r+183*g+19*b)>>8;minLuma=Math.min(minLuma,luma);maxLuma=Math.max(maxLuma,luma);if(colors.size<64)colors.add(((r>>4)<<8)|((g>>4)<<4)|(b>>4));}previous=row;
  }
- assert.ok(nonblank,'Uniform blank screenshot is not visual proof');return {width,height,nonblank};
+ const evidence={width,height,quantizedColors:colors.size,luminanceRange:maxLuma-minLuma};
+ // Neutral compositor rectangles can contain two colors but no game or UI.
+ // Grayscale text/UI is valid: diversity and contrast, not color saturation, are required.
+ assert.ok(colors.size>=8&&evidence.luminanceRange>=32,'Blank or low-information screenshot is not visual proof: '+JSON.stringify(evidence));return {...evidence,nonblank:true};
 }
-// Surface capture can stall with headless software WebGL. Keep evidence mandatory:
-// one alternate view readback is permitted only after a capture timeout and live health probe.
-async function screenshotReadback(send,probe,record,mode='surface'){
- record.mode=mode;record.health=await probe();
- try{return await send('Page.captureScreenshot',{format:'png',fromSurface:mode==='surface',captureBeyondViewport:false,optimizeForSpeed:true});}
+// Edge view readback returned a blank compositor backing despite healthy DOM/WebGL.
+// Retry only a surface timeout, once, with an explicit live viewport clip.
+async function screenshotReadback(send,probe,record){
+ record.mode='surface';record.health=await probe();
+ try{return await send('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false,optimizeForSpeed:true});}
  catch(error){
-  record.primaryError=String(error);
-  if(mode!=='surface'||error?.cdpTimeoutMethod!=='Page.captureScreenshot')throw error;
-  record.healthAfterTimeout=await probe();record.mode='view';
-  return await send('Page.captureScreenshot',{format:'png',fromSurface:false,captureBeyondViewport:false,optimizeForSpeed:true});
+  record.primaryError=String(error);if(error?.cdpTimeoutMethod!=='Page.captureScreenshot')throw error;
+  let health;try{health=await probe();record.healthAfterTimeout=health;
+   assert.ok(Number.isSafeInteger(health.width)&&health.width>0&&Number.isSafeInteger(health.height)&&health.height>0&&health.width*health.height<=16_000_000,'Bounded live viewport required for surface retry');
+  }catch(probeError){record.healthProbeError=String(probeError);if(error instanceof Error)error.stack+='\nSecondary capture health failure: '+String(probeError?.stack??probeError);throw error;}
+  record.mode='surface-viewport';
+  return await send('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false,optimizeForSpeed:true,clip:{x:0,y:0,width:health.width,height:health.height,scale:1}});
  }
 }
 const failureAfterCleanup=(primary,errors)=>primary??(errors.length?new AggregateError(errors,'Browser fixture cleanup failed'):null);
@@ -77,15 +84,19 @@ function fixtureService(){
  return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0};
 }
 async function selfTest(){
- const samplePng=bytes=>{const chunk=(type,data)=>{const out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length);out.write(type,4);data.copy(out,8);return out;};const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(2);ihdr.writeUInt32BE(1,4);ihdr[8]=8;ihdr[9]=2;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',deflateSync(Buffer.from([0,...bytes]))),chunk('IEND',Buffer.alloc(0))]);};
- assert.deepEqual(pngEvidence(samplePng([0,0,0,255,255,255])),{width:2,height:1,nonblank:true});assert.throws(()=>pngEvidence(samplePng([255,255,255,255,255,255])),/blank/);assert.throws(()=>pngEvidence(Buffer.from('not PNG')));
-
+ const samplePng=(width,height,pixel)=>{const chunk=(type,data)=>{const out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length);out.write(type,4);data.copy(out,8);return out;};const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(width);ihdr.writeUInt32BE(height,4);ihdr[8]=8;ihdr[9]=2;const raw=Buffer.alloc((width*3+1)*height);for(let y=0;y<height;y++)for(let x=0;x<width;x++)raw.set(pixel(x,y),y*(width*3+1)+1+x*3);return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);};
+ const grayscale=pngEvidence(samplePng(16,16,x=>[x*17,x*17,x*17]));assert.equal(grayscale.nonblank,true);assert.equal(grayscale.quantizedColors,16,'Legitimate grayscale UI does not need game colors');
+ assert.throws(()=>pngEvidence(samplePng(2,1,x=>x?[255,255,255]:[0,0,0])),/Blank/);
+ assert.throws(()=>pngEvidence(samplePng(16,16,()=>[255,255,255])),/Blank/);
+ // Exact failed Edge backing geometry: 373920 pixels gray243 +240480 white255.
+ assert.throws(()=>pngEvidence(samplePng(960,640,(x,y)=>x<760&&y<492?[243,243,243]:[255,255,255])),/Blank/);
+ assert.throws(()=>pngEvidence(Buffer.from('not PNG')));
  const captureTimeout=Object.assign(Error('capture timeout'),{cdpTimeoutMethod:'Page.captureScreenshot'});let calls=[],probes=0;const record={};
- const shot=await screenshotReadback(async(method,params)=>{calls.push(params);if(calls.length===1)throw captureTimeout;return {data:'real-result'};},async()=>{probes++;return {live:true};},record);
- assert.equal(shot.data,'real-result');assert.equal(probes,2);assert.deepEqual(calls.map(p=>p.fromSurface),[true,false]);assert.equal(record.mode,'view');
- const other=Error('actual failure');await assert.rejects(screenshotReadback(async()=>{throw other;},async()=>true,{}),error=>error===other);
- await assert.rejects(screenshotReadback(async()=>{throw captureTimeout;},async()=>true,{},'view'),error=>error===captureTimeout);
- let fallbackCalled=false;await assert.rejects(screenshotReadback(async()=>{if(fallbackCalled)assert.fail('must not retry after unhealthy probe');fallbackCalled=true;throw captureTimeout;},async()=>{if(fallbackCalled)throw other;return true;},{}),error=>error===other);
+ const health={live:true,width:960,height:640};const shot=await screenshotReadback(async(method,params)=>{calls.push(params);if(calls.length===1)throw captureTimeout;return {data:'real-result'};},async()=>{probes++;return health;},record);
+ assert.equal(shot.data,'real-result');assert.equal(probes,2);assert.deepEqual(calls.map(p=>p.fromSurface),[true,true]);assert.deepEqual(calls[1].clip,{x:0,y:0,width:960,height:640,scale:1});assert.equal(record.mode,'surface-viewport');
+ const other=Error('actual failure');await assert.rejects(screenshotReadback(async()=>{throw other;},async()=>health,{}),error=>error===other);
+ let attempts=0;await assert.rejects(screenshotReadback(async()=>{attempts++;throw captureTimeout;},async()=>health,{}),error=>error===captureTimeout);assert.equal(attempts,2,'Exactly one bounded surface retry');
+ let fallbackCalled=false;await assert.rejects(screenshotReadback(async()=>{if(fallbackCalled)assert.fail('must not retry after unhealthy probe');fallbackCalled=true;throw captureTimeout;},async()=>{if(fallbackCalled)throw other;return health;},{}),error=>error===captureTimeout&&error.stack.includes('Secondary capture health failure'));
 
  let retryCount=0;
  for(const message of ['Inspected target navigated or closed','Execution context was destroyed.','Cannot find context with specified id']){
@@ -152,7 +163,7 @@ async function run(){
  let child,ws,profile,acceptanceError;const pending=new Map();let id=0,expectReloadDialog=false,unexpectedDialog=null;
  try{
   await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
-  const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/';
+  const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/'+(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'?'?bus=1':'');
   profile=await mkdtemp(resolve(tmpdir(),'city-server-save-smoke-'));
   const browser=process.env.CITYMANAGER_BROWSER||(process.platform==='win32'?'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe':'google-chrome');
   child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
@@ -174,6 +185,7 @@ async function run(){
   const until=async(fn,label,ms=90_000)=>{diagnostics.phase=label;console.log('Acceptance phase:',label);const start=Date.now();while(Date.now()-start<ms){if(await fn())return;await sleep(100);}throw Error(`Timeout: ${label}`);};
   await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Inspector.enable');diagnostics.browserVersion=await send('Browser.getVersion');
   await send('Network.setCookie',{name:'cm_session',value:COOKIE,url:origin,httpOnly:true,sameSite:'Strict'});await send('Network.setCookie',{name:'cm_csrf',value:CSRF,url:origin,sameSite:'Strict'});
+  if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){const {trafficGapBootstrap}=await import('./traffic-gap-browser-checks.mjs');await send('Page.addScriptToEvaluateOnNewDocument',{source:trafficGapBootstrap()});}
   const serverSeed=await readFile(new URL('./fixtures/save-smoke/bus-optional-day60.json',import.meta.url),'utf8');
   const seed=JSON.stringify({obsoleteBrowserOnly:true,tick:99999});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{if(location.origin!==${JSON.stringify(origin)})return;
@@ -197,12 +209,11 @@ async function run(){
   const acknowledged=await f.service.mutate(OWNER,randomUUID(),{action:'create',cityId:randomUUID(),raw:serverSeed,metadata:{name:'acknowledged fixture',population:0,tick:JSON.parse(serverSeed).tick}});
   assert.equal(acknowledged.raw,serverSeed);f.mode='ok';await enter();
   assert.equal(f.state.active.metadata.tick,JSON.parse(serverSeed).tick);assert.equal(f.state.archives.size,0,'obsolete browser copies are neither imported nor archived');assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),seed);await clean();
-  let captureMode='surface';
   const capture=async name=>{
-   assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,captureMode);
+   assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,'surface');let png;
    const probe=async()=>{assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser error or renderer crash');const health=await evaluate("({ready:window.cityManager?.visuals().ready,contextLosses:window.__contextLosses,visibility:document.visibilityState,width:innerWidth,height:innerHeight})");assert.equal(health.ready,true);assert.equal(health.contextLosses,0,'WebGL context must remain live');return health;};
-   try{const shot=await screenshotReadback(send,probe,record,captureMode);const png=Buffer.from(shot.data,'base64');Object.assign(record,pngEvidence(png));await writeFile(resolve(output,`${name}.png`),png);captureMode=record.mode;record.status='saved';}
-   catch(error){record.status='failed';record.error=String(error);throw error;}
+   try{const shot=await screenshotReadback(send,probe,record);png=Buffer.from(shot.data,'base64');Object.assign(record,pngEvidence(png));await writeFile(resolve(output,`${name}.png`),png);record.status='saved';return {png,width:record.width,height:record.height};}
+   catch(error){record.status='failed';record.error=String(error);if(png){try{await writeFile(resolve(output,`${name}-rejected.png`),png);record.rejectedEvidence=`${name}-rejected.png`;}catch(preserveError){record.preserveError=String(preserveError);}}throw error;}
    finally{record.finished=new Date().toISOString();console.log('Capture result',JSON.stringify(record));}
   };
   assert.equal(await evaluate("!!document.querySelector('#save:not(:disabled)')"),true,'real Save control available after authenticated entry');
@@ -214,7 +225,24 @@ async function run(){
   }
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
-  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,24,'actual built game saves checkpointed server city');await clean();await capture('server-save-acknowledged');
+  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,25,'actual built game saves commercial checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-20');await clean();await capture('server-save-acknowledged');
+  if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){
+   diagnostics.phase='actual bumper-gap traffic UI';trafficGapEvidence={status:'running'};
+   const {trafficGapBrowserChecks}=await import('./traffic-gap-browser-checks.mjs');
+   trafficGapEvidence=await trafficGapBrowserChecks({send,evaluate,capture,phase:label=>{diagnostics.phase=`traffic: ${label}`;console.log('Traffic acceptance phase:',label);},
+    loadFixture:async raw=>{const before=f.state.active;const result=await f.service.mutate(OWNER,randomUUID(),{action:'save',cityId:before.cityId,expectedRevision:before.revision,raw,metadata:{name:'synthetic traffic fixture',population:0,tick:JSON.parse(raw).tick}});assert.equal(result.raw,raw,'Only the isolated mock service installs the validated synthetic fixture');},
+    acknowledge:async()=>{const revision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>revision,'traffic durable server ACK');await settled();await clean();return JSON.parse(f.state.active.raw);},
+    reload:async()=>{diagnostics.phase='explicit traffic reload';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;await clean();}});
+   console.log('PASS actual bumper-gap traffic, fault fallback and server reload',JSON.stringify(trafficGapEvidence));
+  }
+  if(process.env.CITYMANAGER_RAIL_CHECKS==='activation'){
+   diagnostics.phase='actual rail UI';railEvidence={status:'running'};
+   const {railBrowserChecks}=await import('./rail-browser-checks.mjs');
+   railEvidence=await railBrowserChecks({send,evaluate,capture,
+    acknowledge:async()=>{const revision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>revision,'rail durable server ACK');await settled();await clean();return JSON.parse(f.state.active.raw);},
+    reload:async()=>{diagnostics.phase='explicit rail reload';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;await clean();}});
+   console.log('PASS actual rail placement, movement and server reload',JSON.stringify(railEvidence));
+  }
   f.delay=1000;const before=f.acknowledged,postsBefore=f.posts.length;await click('#save');await until(async()=>f.posts.length>postsBefore,'manual request');assert.equal(f.acknowledged,before);assert.match(await evaluate("document.querySelector('#autosave-status').textContent"),/กำลังบันทึก/);await until(async()=>f.acknowledged>before,'manual ACK');await settled();f.delay=0;await clean();
   await evaluate('window.__quota=true');let rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'quota independent server commit');await settled();await clean();
   rev=f.state.active.revision;const autosaveTick=f.state.active.metadata.tick,autosavePosts=f.posts.length;
@@ -287,8 +315,8 @@ const selfTestOnly=process.argv.includes('--self-test'),started=new Date().toISO
 const output=resolve('.test-output/server-save-smoke');await mkdir(output,{recursive:true});
 try {
  if(selfTestOnly)await selfTest();else await run();
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,diagnostics},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics},null,2));
 } catch(error) {
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,diagnostics,error:String(error?.stack??error)},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics,error:String(error?.stack??error)},null,2));
  throw error;
 }

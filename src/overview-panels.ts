@@ -28,7 +28,7 @@ const NAV: readonly [string, string][] = [
   ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
   ['growth-anchor', 'ความต้องการ'], ['issue-section', 'ปัญหา'], ['event-log-section', 'เหตุการณ์'], ['money-section', 'บัญชี'],
 ];
-const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'ตลาด', factory: 'โรงงาน', shop: 'ร้านค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
+const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'C · พืชผล', factory: 'โรงงาน', shop: 'C · สินค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
 const NODE_POS: Record<ChainNode, [number, number]> = { farm: [14, 18], market: [174, 18], household: [334, 104], factory: [14, 190], shop: [174, 190], outside: [334, 190] };
 const NODE_W = 92, NODE_H = 48;
 
@@ -113,7 +113,7 @@ export class OverviewDashboard {
   private renderChain(city: City, series: DailySeries) {
     const chain = supplyChain(city), max = Math.max(1, ...chain.flows.map(f => f.quantity));
     const count = (kind: ChainNode) => kind === 'household' ? city.households.length : kind === 'outside' ? 0
-      : city.firms.filter(f => kind === 'farm' ? f.zone === 'F' : kind === 'factory' ? f.zone === 'I' : f.zone === 'C' && (kind === 'market') === (f.commercialKind === 'market')).length;
+      : city.firms.filter(f => kind === 'farm' ? f.zone === 'F' : kind === 'factory' ? f.zone === 'I' : f.zone === 'C').length;
     const diagram = svg('svg', { viewBox: '0 0 440 270', class: 'dash-chain-svg', role: 'img', 'aria-label': 'แผนภาพการไหลของพืชผลและสินค้า 30 วัน รายละเอียดอยู่ในรายการด้านล่าง' });
     const defs = svg('defs');
     for (const tone of ['crops', 'goods', 'idle']) {
@@ -165,7 +165,7 @@ export class OverviewDashboard {
         el('strong', '', active ? `ฟาร์ม ${line.farms} · ${RECIPE_LABELS[line.recipe]} ${line.factories} · เก็บ ${line.harvested} · ผลิต ${line.produced} · ขาย ${line.sold + line.freshSold}${line.imported ? ` · นำเข้า ${line.imported}` : ''}${line.exportedCrops ? ` · ส่งออกพืช ${line.exportedCrops}` : ''}` : `ยังไม่มี · เลือกปลูก${CROP_LABELS[line.crop]}ที่ฟาร์ม`));
       lines.append(item);
     }
-    this.chain.replaceChildren(this.head('ห่วงโซ่สินค้า 30 วัน', 'จากบันทึกพืชผลและสินค้าจริง'), diagram, legend, summary, lines, list, this.chart('crops', series), this.chart('goods', series));
+    this.chain.replaceChildren(this.head('ห่วงโซ่สินค้า 30 วัน', 'พาณิชย์ทั้งสองช่องคือกิจการเดียวกัน แยกแสดงตามสินค้า ไม่ใช่จำนวนกิจการที่ต้องบวกกัน'), diagram, legend, summary, lines, list, this.chart('crops', series), this.chart('goods', series));
   }
 
   private renderGrowth(city: City, series: DailySeries) {

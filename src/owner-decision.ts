@@ -1,5 +1,5 @@
 /** Local rule proposals only. These are game actors, not authenticated website users. */
-import { access, utilityAt, contributeOwnerCapital, firmRent, firmWage, isMarket, MONTH, ownerFinance, serialize, withdrawOwnerProfit, type City } from './sim.ts';
+import { access, utilityAt, contributeOwnerCapital, firmRent, firmWage, isCommercial, MONTH, ownerFinance, serialize, withdrawOwnerProfit, type City } from './sim.ts';
 import { ownerDecisionCandidates, validateOwnerDecisionSelection, type OwnerCandidateId } from '../server/city-advisor/src/owner-contract.mjs';
 
 export const OWNER_POLICY_VERSION = 'owner-rule-1' as const;
@@ -70,13 +70,13 @@ const snapshotHash = (snapshot: Omit<OwnerSnapshot, 'snapshotHash'>) => 'owner-s
 const proposalHash = (proposal: Omit<OwnerProposal, 'proposalId'>) => 'owner-proposal-1-' + fingerprint(canonical(proposal));
 const emptyFacts = (): OwnerFacts => Object.fromEntries(FACT_KEYS.map(k => [k, null])) as OwnerFacts;
 
-/** Copies only a real household-owned market and computes reserves from current prototype rules. */
+/** Copies only a real household-owned commercial business and computes reserves from current prototype rules. */
 export function captureOwnerSnapshot(city: City, firmId: number): OwnerSnapshot | null {
   try {
     const firm = city.firms.find(f => f.id === firmId);
     const household = firm?.owner && city.households.find(h => h.id === firm.owner!.householdId);
     const building = firm && city.buildings.find(b => b.id === firm.building);
-    if (!firm || !isMarket(firm) || !firm.owner || !household || !building || building.zone !== 'C' || building.level !== 1 || firm.fundedBy !== undefined || !id(firm.id) || !id(household.id) || !id(building.id) || firm.wallet !== 'firm:' + firm.id || household.wallet !== 'household:' + household.id || !money(city.tick)) return null;
+    if (!firm || !isCommercial(firm) || !firm.owner || !household || !building || building.zone !== 'C' || (building.level < 1 || building.level > 9) || firm.fundedBy !== undefined || !id(firm.id) || !id(household.id) || !id(building.id) || firm.wallet !== 'firm:' + firm.id || household.wallet !== 'household:' + household.id || !money(city.tick)) return null;
     const facts = emptyFacts(), missing: OwnerMissing[] = [];
     const mark = (code: OwnerMissing) => { if (!missing.includes(code)) missing.push(code); };
     const home = household.home === null ? undefined : city.buildings.find(b => b.id === household.home && b.zone === 'R');

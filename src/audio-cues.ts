@@ -4,14 +4,14 @@ import { moneyJournalLength } from './city-history.ts';
  * the network feed: a snapshot before, the city after, and the cues in between. A limiter keeps
  * 10× speed from turning into a drum roll.
  */
-import { MONTH, isMarket, isRetail, type City } from './sim.ts';
+import { MONTH, type City } from './sim.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { cityGoals } from './city-goals.ts';
 
 export type CueName = 'ev-build-home' | 'ev-build-business' | 'ev-build-farm' | 'ev-arrival' | 'ev-month' | 'ev-shop' | 'ev-issue' | 'ev-broke' | 'jingle-level' | 'jingle-win';
 export type CueSnapshot = { tick: number; ledger: number; buildings: ReadonlySet<number>; shops: ReadonlySet<number>; issues: ReadonlySet<string>; level: number; won: boolean };
 
-const shopIds = (c: City) => new Set(c.firms.filter(isRetail).map(f => f.id));
+const shopIds = (c: City) => new Set(c.firms.filter(f => f.zone === 'C').map(f => f.id));
 export function cueSnapshot(c: City): CueSnapshot {
   const goals = cityGoals(c);
   return { tick: c.tick, ledger: moneyJournalLength(c), buildings: new Set(c.buildings.map(b => b.id)), shops: shopIds(c),
@@ -31,8 +31,7 @@ export function cityCues(before: CueSnapshot, c: City, after = cueSnapshot(c)): 
   else if (after.level > before.level) out.push('jingle-level');
   for (const b of c.buildings) {
     if (before.buildings.has(b.id)) continue;
-    const f = c.firms.find(f => f.building === b.id);
-    out.push(b.zone === 'R' ? 'ev-build-home' : b.zone === 'F' ? 'ev-build-farm' : f && isMarket(f) ? 'ev-build-home' : 'ev-build-business');
+    out.push(b.zone === 'R' ? 'ev-build-home' : b.zone === 'F' ? 'ev-build-farm' : 'ev-build-business');
   }
   if ([...after.shops].some(id => !before.shops.has(id))) out.push('ev-shop');
   for (let i = Math.max(0,before.ledger-(c.history?.moneyCount??0)); i < c.ledger.length; i++) if (c.ledger[i].reason === 'New household arrival savings') { out.push('ev-arrival'); break; }

@@ -4,8 +4,13 @@
  * cell centre. A square of half-size JUNCTION_HALF around every cell centre is never occupied,
  * so cars cannot overlap across crossing links and never enter a junction.
  */
+import { TRAFFIC_SPACING } from './traffic/spacing.ts';
 export type LanePosition = { cell: number; incoming: number; lane: number };
-export const CAR_LENGTH = .22, CAR_WIDTH = .15, LANE_OFFSET = .12, JUNCTION_HALF = .25, QUEUE_GAP = .04;
+/** Sedan body in tiles. QUEUE_GAP is the standstill bumper gap, also in tiles. */
+export const CAR_LENGTH = TRAFFIC_SPACING.lengths.sedan / TRAFFIC_SPACING.worldPerTile;
+export const CAR_WIDTH = .15, LANE_OFFSET = .12;
+export const JUNCTION_HALF = TRAFFIC_SPACING.junctionHalfTiles;
+export const QUEUE_GAP = TRAFFIC_SPACING.standstillGap / TRAFFIC_SPACING.worldPerTile;
 /** Usable span of a lane between the two junction squares, for car centres. */
 export const LANE_START = JUNCTION_HALF + CAR_LENGTH / 2, LANE_END = 1 - JUNCTION_HALF - CAR_LENGTH / 2;
 export const SLOT_PITCH = CAR_LENGTH + QUEUE_GAP;

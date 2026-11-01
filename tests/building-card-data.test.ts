@@ -13,7 +13,7 @@ function freeze(value: unknown): void {
 }
 const walletsFor = (c: City, id: number) => c.households.filter(h => h.home === id).map(h => h.wallet);
 
-test('all six card kinds use actual selected identities, stocks and linked household records', () => {
+test('all present architectural card kinds use actual selected identities, stocks and linked household records', () => {
   const c = city(), kinds = new Set<string>();
   for (const b of c.buildings) {
     const card = buildingCardData(c, b.id)!; kinds.add(card.kind); assert.equal(card.identity.buildingId, b.id); assert.equal(card.identity.cell, b.cell);
@@ -26,7 +26,8 @@ test('all six card kinds use actual selected identities, stocks and linked house
     }
   }
   const h = householdCardData(c, c.households[0].id)!; kinds.add(h.kind); assert.equal(h.identity.householdId, c.households[0].id);
-  assert.deepEqual([...kinds].sort(), ['factory', 'farm', 'house', 'household', 'market', 'shop']);
+  const expectedKinds = new Set(c.buildings.map(b => b.zone === 'R' ? 'house' : b.zone === 'F' ? 'farm' : b.zone === 'I' ? 'factory' : b.level <= 3 ? 'market' : 'shop'));
+  expectedKinds.add('household'); assert.deepEqual([...kinds].sort(), [...expectedKinds].sort());
   assert.deepEqual(h.stocks, { goods: null, crops: null, cropCostSatang: null }, 'Household held inventory is not modeled');
 });
 
@@ -69,8 +70,8 @@ test('house combined wallet boundary excludes internal family transfers while ea
 
 test('owner capital is real cash flow rather than operating profit or property value', () => {
   const c = createCity(61025);
-  while (!c.firms.some(f => isMarket(f)) && c.tick < 180) step(c);
-  const f = c.firms.find(f => isMarket(f))!, card = buildingCardData(c, f.building)!;
+  while (!c.firms.some(f => f.zone === 'C' && f.owner !== null) && c.tick < 180) step(c);
+  const f = c.firms.find(f => f.zone === 'C' && f.owner !== null)!, card = buildingCardData(c, f.building)!;
   assert.equal(card.kind, 'market'); assert.equal(card.cash.basis, 'wallet-boundary');
   assert.equal(card.cash.inflow, 60000); assert.equal(card.cash.outflow, 10000); assert.equal(card.cash.current, 50000);
   assert.equal(f.profit, 0); assert.equal(f.monthlyRevenue, 0); assert.equal(f.monthlyExpense, 0);
@@ -92,7 +93,7 @@ test('today output comes from actual physical journals, while stock and workforc
 });
 
 test('prices require actual unambiguous paired cash and goods/crop journals, not constants or guessed history', () => {
-  const c = city(), shop = c.firms.find(isRetail)!, farm = c.firms.find(f => f.zone === 'F')!, trader = c.firms.find(f => isMarket(f))!;
+  const c = city(), shop = c.firms.find(isRetail)!, farm = c.firms.find(f => f.zone === 'F')!, trader = c.firms.find(f => f.zone === 'C' && f.owner !== null)!;
   assert.equal(buildingCardData(c, shop.building)!.prices.goodsSell.unitSatang, 800);
   assert.equal(buildingCardData(c, farm.building)!.prices.cropsSell.unitSatang, 150);
   assert.equal(buildingCardData(c, trader.building)!.prices.cropsBuy.unitSatang, 150);

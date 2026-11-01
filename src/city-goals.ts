@@ -3,7 +3,7 @@
  * canonical state and its ledgers; nothing here is saved, so a loaded city shows its real stage.
  */
 import { CROPS, PRODUCTS, RECIPES } from './goods.ts';
-import { MONTH, farmCrop, isRetail, summary, type City } from './sim.ts';
+import { MONTH, farmCrop, isCommercial, summary, type City } from './sim.ts';
 
 export type GoalCheck = { label: string; done: boolean; value?: string };
 export type GoalStage = { level: number; id: string; name: string; hint: string; checks: GoalCheck[]; done: boolean };
@@ -33,7 +33,7 @@ export function treasuryAtMonthEnds(c: City, months: number): number[] | null {
 export function cityGoals(c: City, s = summary(c)): CityGoals {
   const since = c.tick - MONTH;
   const recentCrops = c.cropLedger.filter(e => e.tick > since);
-  const shops = new Set(c.firms.filter(isRetail).map(f => f.wallet));
+  const shops = new Set(c.firms.filter(isCommercial).map(f => f.wallet));
   let wholesale = 0, sold = 0, imported = 0;
   for (let i = c.goodsLedger.length - 1; i >= 0 && c.goodsLedger[i].tick > since; i--) {
     const e = c.goodsLedger[i];

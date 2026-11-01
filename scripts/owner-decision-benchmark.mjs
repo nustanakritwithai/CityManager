@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { createCity, step, summary, serialize, deserialize, isMarket, isRetail, firmWage, MONTH } from '../src/sim.ts';
+import { createCity, step, summary, serialize, deserialize, firmWage, MONTH } from '../src/sim.ts';
 import { ownerStateHash } from '../src/owner-decision.ts';
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 
@@ -31,7 +31,7 @@ function reconcile(city) {
     assert(Number.isSafeInteger(firm.cropCost) && firm.cropCost >= 0);
     const earned = Object.values(firm.workDays).reduce((n, days) => n + days * firmWage(firm) / MONTH, 0);
     assert(Number.isSafeInteger(earned) && earned >= 0 && city.accounts[firm.wallet] >= earned, 'Earned wage claims remain fully reserved');
-    assert(isMarket(firm) || isRetail(firm) || firm.owner === null, 'Only markets and shops are household-owned');
+    assert(firm.zone === 'C' || firm.owner === null, 'Only commercial businesses are household-owned');
   }
   assert.equal(city.households.reduce((n, h) => n + h.workforce + h.dependents, 0),
     city.households.reduce((n, h) => n + h.members, 0), 'Canonical individual households retain actual member counts');
@@ -50,7 +50,7 @@ function metrics(city) {
     householdCashSatang: cashRange(city.households.map(h => city.accounts[h.wallet])),
     firmCashSatang: cashRange(city.firms.map(f => city.accounts[f.wallet])),
     cumulativeOperatingProfitSatang: city.firms.reduce((n, f) => n + f.profit + f.monthlyRevenue - f.monthlyExpense, 0),
-    markets: city.firms.filter(isMarket).length, fundedFactories: city.firms.filter(f => f.fundedBy).length,
+    markets: city.firms.filter(f=>f.zone==='C').length, fundedFactories: city.firms.filter(f => f.fundedBy).length,
     earnedWageWorkerDays: city.firms.reduce((n, f) => n + Object.values(f.workDays).reduce((v, days) => v + days, 0), 0),
     earnedWagesReservedSatang: city.firms.reduce((n, f) => n + Object.values(f.workDays).reduce((v, days) => v + days * firmWage(f) / MONTH, 0), 0),
     finishedGoods: city.firms.reduce((n, f) => n + f.inventory, 0),
@@ -102,7 +102,7 @@ export function runOwnerDecisionBenchmark({ days = OWNER_BENCHMARK_DAYS, seeds =
         if (outcome.status === 'applied') applied++;
         if (outcome.status === 'held') held++;
         const market = execution.firms.find(f => f.id === outcome.firmId);
-        assert(market && isMarket(market) && market.owner?.householdId === outcome.actorId);
+        assert(market && market.zone === 'C' && market.owner?.householdId === outcome.actorId);
       }
       if (day % 30 === 0 || day === days) {
         assert.equal(serialize(proposal), serialize(baseline), 'Proposal-only decisions must have zero effect on canonical simulation');

@@ -107,3 +107,8 @@ test('1.x saves load typed: v6 and chain-2 v7 cities keep every fact and keep ru
   for (const city of [fromV6, loaded]) { for (let d = 0; d < 90; d++) step(city); assert.deepEqual(deserialize(serialize(city)), city); }
   assert.equal(chooseRecipe(createCity(1, { starter: false })), 'rice-mill', 'an empty map starts with a rice mill');
 });
+
+test('legacy v7 fixture projection refuses post-unification gameplay instead of stripping its boundary',()=>{
+  const current=createCity(61025);step(current);
+  assert.throws(()=>untyped(serialize(current)),/Only untouched pre-unification history/);
+});

@@ -5,6 +5,7 @@ import { createCity as legacyCity, step as legacyStep, serialize as legacySerial
 import { createCity as agricultureCity, step as agricultureStep, serialize as agricultureSerialize } from '../src/legacy-v4.ts';
 import { untyped } from './untyped.ts';
 import { SAVE_KEY, COMMERCIAL_SAVE_KEY, COMMERCIAL_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
+import {auditMoney} from '../src/city-history.ts';
 import { keepSupplied } from './plants.ts';
 import { holdEducationReady } from './education-ready.ts';
 
@@ -13,7 +14,13 @@ const legacy388 = oldCity(388), legacy251 = oldCity(251);
 const oldRaw = legacySerialize(legacy388);
 const clone = (c: City) => deserialize(serialize(c));
 const current = (day = 388) => deserialize(legacySerialize(day === 388 ? legacy388 : day === 251 ? legacy251 : oldCity(day)));
-function sameOldState(c: City, raw: string) { const projected = untyped(serialize(c)); delete projected.growthStartTick; projected.version = 5; projected.rulesVersion = 'commercial-1'; assert.deepEqual(projected, JSON.parse(raw)); }
+function sameOldState(c: City, raw: string) {
+  const projected=untyped(serialize(c)),expected=JSON.parse(raw),through=c.history?.throughTick??-1;
+  for(const key of ['growthStartTick','commercialUnifiedStartTick','commercialUnifiedBaseline','commercialBaseVersion','historyBaseVersion','history'])delete projected[key];
+  projected.version=5;projected.rulesVersion='commercial-1';
+  for(const key of ['ledger','cropLedger','goodsLedger'])expected[key]=expected[key].filter((e:{tick:number})=>e.tick>through);
+  assert.deepEqual(projected,expected);
+}
 function conservation(c: City) {
   assert.equal(Object.values(c.accounts).reduce((n, v) => n + v, 0), 0);
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((n, f) => n + f.inventory, 0));
@@ -40,7 +47,7 @@ test('genuine v5 day388 plateau migrates without changing state, then existing c
   for (let n = 0; n < 15; n++) { step(c); conservation(c); }
   assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8);
   const child = c.firms.find(f => f.fundedBy)!; assert.ok(child); assert.ok(firmWorkerCount(c, child.id) > 0);
-  const capital = c.ledger.filter(e => e.reason === `Industry expansion capital #${child.id}`);
+  const capital = auditMoney(c).filter(e => e.reason === `Industry expansion capital #${child.id}`);
   assert.equal(capital.length, 1); assert.equal(capital[0].from, `firm:${child.fundedBy!.firmId}`); assert.equal(capital[0].amount, 300_000);
   assert.equal(c.ledger.some(e => e.from === 'outside' && e.to === child.wallet && e.tick === capital[0].tick), false);
 });
@@ -51,9 +58,12 @@ test('midmonth expansion preserves all earned wages, tax/rent/working reserves a
   const child = c.firms.find(f => f.fundedBy)!; assert.ok(child); assert.equal(c.tick, 252);
   const sponsor = c.firms.find(f => f.id === child.fundedBy!.firmId)!, prior = old.firms.find(f => f.id === sponsor.id)!;
   assert.equal(c.accounts[sponsor.wallet], old.accounts[prior.wallet] - 300_000);
-  // Farms now sell surplus crops to outside; that is the only outside flow the old rules lack.
+  // Unified commercial firms also buy local finished goods that previously went to outside export. Account for both deliberate flow changes.
   const cropExports = c.ledger.filter(e => e.tick === c.tick && /^Crop export #/.test(e.reason)).reduce((n, e) => n + e.amount, 0);
-  assert.equal(c.accounts[child.wallet], 260_000); assert.equal(c.accounts.construction, old.accounts.construction + 40_000); assert.equal(c.accounts.outside + cropExports, old.accounts.outside);
+  assert.equal(c.accounts[child.wallet], 260_000); assert.equal(c.accounts.construction, old.accounts.construction + 40_000); const exports=(x:City|ReturnType<typeof oldCity>)=>x.ledger.filter(e=>e.tick===x.tick&&e.reason==='Outside market goods export').reduce((n,e)=>n+e.amount,0);
+  const wholesale=(x:City|ReturnType<typeof oldCity>)=>x.ledger.filter(e=>e.tick===x.tick&&e.reason==='Local wholesale goods').reduce((n,e)=>n+e.amount,0);
+  assert.equal(exports(old)-exports(c),wholesale(c)-wholesale(old),'lost exports became recorded local purchases at the same wholesale price');
+  assert.equal(c.accounts.outside+cropExports-(wholesale(c)-wholesale(old)),old.accounts.outside);
   for (const key of ['workDays', 'profit', 'lastMonthProfit', 'monthlyRevenue', 'monthlyExpense'] as const) assert.deepEqual(sponsor[key], prior[key]);
   const earned = Object.values(sponsor.workDays).reduce((n, days) => n + days * firmWage(sponsor) / 30, 0);
   const tax = Math.floor(Math.max(0, sponsor.monthlyRevenue - sponsor.monthlyExpense - earned) / 5);
@@ -65,18 +75,19 @@ test('fresh deterministic cities use real outside and local capital with adequat
     const c = createCity(seed), twin = createCity(seed); let firstExpansion = 0, addedParcel: number | null = null;
     for (let day = 1; day <= 388; day++) {
       holdEducationReady(c); holdEducationReady(twin); step(c); step(twin); keepSupplied(c); keepSupplied(twin);
-      if (addedParcel === null) { addedParcel = zoneFundedParcel(c); assert.equal(zoneFundedParcel(twin), addedParcel); }
+      if (!firstExpansion) { const parcel = zoneFundedParcel(c); assert.equal(zoneFundedParcel(twin), parcel); if (parcel !== null) addedParcel = parcel; }
       if (!firstExpansion && c.firms.some(f => f.fundedBy)) firstExpansion = day;
       if (day % 30 === 0) conservation(c);
     }
     // The new factory tiers bring the existing outside-investor trigger forward.
     // An outside-funded factory can occupy the original last industrial parcel;
-    // the controlled extra parcel allows a genuinely funded local expansion too.
-    const outside = c.ledger.find(e => /^Outside industry equity #/.test(e.reason));
+    // controlled additional parcels keep land available until the local expansion occurs.
+    // Unified shops can fund extra outside factories before the local sponsor is ready.
+    const outside = auditMoney(c).find(e => /^Outside industry equity #/.test(e.reason));
     assert.ok(outside); assert.equal(outside.from, 'outside'); assert.equal(outside.amount, 300_000); assert.notEqual(addedParcel, null);
     assert.ok(firstExpansion > 120 && firstExpansion < 390, String(firstExpansion)); assert.ok(summary(c).population > 10); assert.ok(summary(c).jobs > 8); assert.deepEqual(c, twin);
-    for (const f of c.firms.filter(f => f.fundedBy)) { const capital = c.ledger.find(e => e.reason === `Industry expansion capital #${f.id}`)!; assert.equal(c.ledger.some(e => e.to === f.wallet && e.from === 'outside' && e.tick === capital.tick), false); }
-    for (const h of c.households.filter(h => h.origin === 'arrival')) assert.equal(c.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1);
+    for (const f of c.firms.filter(f => f.fundedBy)) { const capital = auditMoney(c).find(e => e.reason === `Industry expansion capital #${f.id}`); assert.ok(capital); assert.equal(auditMoney(c).some(e => e.to === f.wallet && e.from === 'outside' && e.tick === capital.tick), false); }
+    for (const h of c.households.filter(h => h.origin === 'arrival')) assert.equal(auditMoney(c).filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1);
     conservation(c);
   }
 });
@@ -88,7 +99,7 @@ test('real cash, housing, road, utility and crop shortages remain blockers rathe
   const road = current(); for (const [i, p] of road.cells.entries()) if (p.zone === 'I' && p.building === null) assert.equal(zoneCell(road, i, null).ok, true);
   assert.equal(industryGrowthStatus(road).code, 'growth.no-industrial-parcel');
   const utilities = current(); utilities.utilities.outside.water = 0; assert.equal(industryGrowthStatus(utilities).code, 'growth.utilities-unavailable');
-  const crop = current(); for (const f of [...crop.firms].filter(f => f.zone === 'F' || f.commercialKind === 'market')) assert.equal(bulldoze(crop, crop.buildings.find(b => b.id === f.building)!.cell).ok, true);
+  const crop = current(); for (const f of [...crop.firms].filter(f => f.zone === 'F' || f.zone === 'C')) assert.equal(bulldoze(crop, crop.buildings.find(b => b.id === f.building)!.cell).ok, true);
   assert.equal(industryGrowthStatus(crop).ready, false); assert.ok(['growth.no-crop-buffer', 'growth.vacancies-remain'].includes(industryGrowthStatus(crop).code));
   const before = crop.firms.length; for (let n = 0; n < 9; n++) step(crop); assert.equal(crop.firms.some(f => f.fundedBy), false); assert.ok(crop.firms.length >= before); conservation(crop);
 });
@@ -114,9 +125,9 @@ test('a locally funded factory cannot create a new parcel or free capital after 
   const status = industryGrowthStatus(city);
   assert.equal(status.code, 'growth.no-industrial-parcel'); assert.equal(status.sponsorFirmId, funded.id); assert.ok(status.availableCapital >= 300_000);
   assert.deepEqual(city.cells.map(cell => cell.zone), zones, 'no industrial zoning is invented');
-  assert.ok(city.ledger.some(e => /^Outside industry equity #/.test(e.reason) && e.from === 'outside' && e.amount === 300_000));
+  assert.ok(auditMoney(city).some(e => /^Outside industry equity #/.test(e.reason) && e.from === 'outside' && e.amount === 300_000));
   assert.equal(city.firms.some(f => f.fundedBy?.firmId === funded.id), false);
-  const capital = city.ledger.filter(e => e.reason === `Industry expansion capital #${funded.id}`);
+  const capital = auditMoney(city).filter(e => e.reason === `Industry expansion capital #${funded.id}`);
   assert.equal(capital.length, 1); assert.equal(capital[0].from, parent.wallet); assert.equal(capital[0].amount, 300_000);
   conservation(city);
 });
@@ -130,10 +141,10 @@ test('two-generation funded sponsors retain later estate receipts in either same
     if (addedParcel === null) addedParcel = zoneFundedParcel(c, b.id);
     child = c.firms.find(f => f.fundedBy?.firmId === b.id);
   }
-  assert.ok(c.ledger.some(e => /^Outside industry equity #/.test(e.reason) && e.from === 'outside' && e.amount === 300_000));
+  assert.ok(auditMoney(c).some(e => /^Outside industry equity #/.test(e.reason) && e.from === 'outside' && e.amount === 300_000));
   assert.notEqual(addedParcel, null);
   assert.ok(child, 'Actual profitable funded B can later sponsor C from accumulated operating cash'); conservation(c);
-  const funding = c.ledger.filter(e => e.reason === `Industry expansion capital #${child.id}`);
+  const funding = auditMoney(c).filter(e => e.reason === `Industry expansion capital #${child.id}`);
   assert.equal(funding.length, 1); assert.equal(funding[0].from, b.wallet); assert.equal(funding[0].amount, 300_000);
   assert.equal(c.ledger.some(e => e.to === child!.wallet && e.from === 'outside' && e.tick === funding[0].tick), false);
   for (const parentFirst of [true, false]) {
@@ -151,7 +162,7 @@ test('funding metadata cannot be forged, omitted, assigned to a market or inject
     const bad = JSON.parse(serialize(c)); change(bad.firms.find((f: typeof child) => f.id === child.id)); assert.throws(() => deserialize(JSON.stringify(bad)));
   }
   const legacy = JSON.parse(oldRaw); legacy.firms[0].fundedBy = { firmId: 1, capital: 300_000 }; assert.throws(() => deserialize(JSON.stringify(legacy)), /Legacy saves/);
-  const fake = JSON.parse(serialize(c)); fake.firms.find((f: typeof child) => f.commercialKind === 'market').fundedBy = child.fundedBy; assert.throws(() => deserialize(JSON.stringify(fake)));
+  const fake = JSON.parse(serialize(c)); fake.firms.find((f: typeof child) => f.zone === 'C' && f.owner !== null).fundedBy = child.fundedBy; assert.throws(() => deserialize(JSON.stringify(fake)));
 });
 
 test('v5 bytes remain immutable through v6 repeated loading/saving and quota failure; v4 still migrates', () => {

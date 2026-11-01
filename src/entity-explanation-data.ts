@@ -37,7 +37,7 @@ export function captureEntityExplanation(city: City, selection: EntitySelection 
     if (firm) {
       for (const key of ['employeeWorkers', 'ownerWorkers', 'employed'] as const) add('workforce.' + key, card.workforce[key]);
       const building = city.buildings.find(item => item.id === card!.identity.buildingId);
-      add('workforce.capacity', building ? firmCapacity(building) : null);
+      add('workforce.capacity', building ? firmCapacity(building, city.firms.find(f => f.building === building.id)) : null);
       for (const key of ['goods', 'crops', 'cropCostSatang'] as const) add('stocks.' + key, card.stocks[key]);
       for (const key of ['cropHarvested', 'cropProcessed', 'goodsProduced'] as const) add('today.' + key, card.today[key]);
     } else {

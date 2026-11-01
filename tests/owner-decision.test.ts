@@ -7,8 +7,8 @@ import { ownerDecisionCandidates, validateOwnerDecisionSelection } from '../serv
 function fixture(day = 210) {
   const city = createCity(61025);
   for (let n = 0; n < day; n++) step(city);
-  const firm = city.firms.find(f => f.commercialKind === 'market')!;
-  assert(firm?.owner, 'Real seeded market has its actual household owner');
+  const firm = city.firms.find(f => f.zone === 'C' && f.owner !== null)!;
+  assert(firm?.owner, 'Real seeded commercial business has its actual household owner');
   const household = city.households.find(h => h.id === firm.owner!.householdId)!;
   return { city, firm, household };
 }
@@ -33,7 +33,12 @@ test('owner capture/proposal is copied, deterministic and read-only for real mar
   const first = snapshot(city, firm.id), second = snapshot(city, firm.id);
   assert.deepEqual(first, second); assert.equal(first.actorId, household.id); assert.equal(first.homeId, household.home);
   assert.equal(first.moneyUnit, 'satang'); assert.equal(first.horizonDays, 30); assert.equal(first.budgetKnown, true);
-  assert.equal(first.facts.householdEssentialReserve, 34_000, 'One basket per household/day plus current monthly rent, not a per-person invented cost');
+  assert.equal(household.members, 3);
+  assert.equal(first.facts.householdFoodReserve, 30 * 800 * 3);
+  assert.equal(first.facts.householdRentReserve, 10_000);
+  assert.equal(first.facts.householdEssentialReserve, 82_000, 'Three members each consume one item per day plus monthly household rent');
+  assert.equal(first.facts.firmRentReserve, 10_000);
+  assert.equal(first.facts.firmWorkingReserve, 20_000);
   assert.equal(first.facts.firmTotalReserve, first.facts.earnedPayrollReserve! + first.facts.firmTaxReserve! + first.facts.firmRentReserve! + first.facts.firmWorkingReserve!);
   assert.deepEqual(proposeOwnerDecision(first), proposeOwnerDecision(second));
   first.facts.householdCash = 1;
@@ -61,7 +66,7 @@ test('realized profit withdrawal uses the existing command and retains firm rese
 
 test('a cash shortfall can use only actual household surplus, without creating outside capital', () => {
   const { city, firm, household } = fixture();
-  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - 18_000);
+  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - 25_000);
   const s = snapshot(city, firm.id), proposal = proposeOwnerDecision(s);
   assert.equal(proposal.command.type, 'contributeOwnerCapital'); assert.equal(proposal.command.amountSatang, 5_000);
   const outside = city.accounts.outside, beforeHousehold = city.accounts[household.wallet];
@@ -74,7 +79,7 @@ test('a cash shortfall can use only actual household surplus, without creating o
 
 test('Typhoon receives distinct quarter, half and full safe contribution amounts only', () => {
   const { city, firm } = fixture();
-  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - 18_000);
+  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - 25_000);
   const s = snapshot(city, firm.id), candidates = ownerDecisionCandidates(s);
   assert.equal(s.facts.safeContribute, 5_000);
   assert.deepEqual(candidates, [
@@ -104,12 +109,12 @@ test('fractional choices that round to zero are omitted without losing the legac
 
 test('household essentials and next rent cap a partial contribution instead of draining its wallet', () => {
   const { city, firm, household } = fixture();
-  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - 18_000);
-  recordedCashMove(city, household.wallet, 'landlord', city.accounts[household.wallet] - 34_500);
+  recordedCashMove(city, firm.wallet, 'landlord', city.accounts[firm.wallet] - 25_000);
+  recordedCashMove(city, household.wallet, 'landlord', city.accounts[household.wallet] - 82_500);
   const proposal = proposeOwnerDecision(snapshot(city, firm.id));
   assert.deepEqual(proposal.command, { type: 'contributeOwnerCapital', amountSatang: 500 });
   assert.equal(executeOwnerProposal(city, proposal).status, 'applied');
-  assert.equal(city.accounts[household.wallet], 34_000); conserved(city);
+  assert.equal(city.accounts[household.wallet], 82_000); conserved(city);
   const next = proposeOwnerDecision(snapshot(city, firm.id));
   assert.deepEqual(next.command, { type: 'hold', amountSatang: 0 });
 });

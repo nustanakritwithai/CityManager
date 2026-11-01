@@ -1,7 +1,7 @@
 import { cropJournalLength } from './city-history.ts';
 import { factoryCropCapacity } from './factory-levels.ts';
 /** Canonical crop operations. Proposals are checked before synchronous commits. */
-import { farmCrop, isMarket, isRetail, type City, type Firm, type Household, type CropEntry } from './sim.ts';
+import { farmCrop, isCommercial, type City, type Firm, type Household, type CropEntry } from './sim.ts';
 import { CROPS, RECIPE, emptyCrops, freshPreference, type CropId } from './goods.ts';
 import {
   CHAIN_CROP_PRICES as CROP_PRICES, CROP_STOCK_CAPS, farmStockCapacity, isSafeCount, isViableFarmland,
@@ -32,19 +32,19 @@ function workers(firm: Firm, hooks: AgricultureHooks): number | null {
 function operational(c: City, firm: Firm, hooks: AgricultureHooks): boolean {
   const building = c.buildings.find(b => b.id === firm.building && b.zone === firm.zone), count = workers(firm, hooks);
   if (!c.firms.includes(firm) || !building || !hooks.served(building.id) || !hooks.connected(building.cell) || count === null || count === 0) return false;
-  return !isMarket(firm) || !!firm.owner && c.ownerLabor.some(e => e.firmId === firm.id && e.householdId === firm.owner!.householdId && e.workers === 1);
+  return true;
 }
 function accessibleHousehold(c: City, h: Household, hooks: AgricultureHooks): boolean {
   const home = c.buildings.find(b => b.id === h.home && b.zone === 'R');
   return c.households.includes(h) && !!home && hooks.connected(home.cell);
 }
 function cropAccount(c: City, f: Firm, hooks: AgricultureHooks): CropAccount | null {
-  if (f.zone !== 'F' && !isMarket(f) && f.zone !== 'I') return null;
+  if (f.zone !== 'F' && !isCommercial(f) && f.zone !== 'I') return null;
   const cash = c.accounts[f.wallet], available = hooks.spendable(f);
   if (!isSafeCount(cash) || !isSafeCount(available) || available > cash) return null;
   const b = c.buildings.find(b => b.id === f.building);
   if (!b) return null;
-  const account: CropAccount = { ...(f.zone === 'I' ? { cropCapacity: factoryCropCapacity(b.level) } : f.zone === 'F' ? { capacity: farmStockCapacity(b.level) } : {}), wallet: f.wallet, zone: isMarket(f) ? 'T' : f.zone as 'F' | 'I', cropInventory: f.cropInventory, cropCost: f.cropCost, cash, reservedCash: cash - available };
+  const account: CropAccount = { ...(f.zone === 'I' ? { cropCapacity: factoryCropCapacity(b.level) } : f.zone === 'F' ? { capacity: farmStockCapacity(b.level) } : {}), wallet: f.wallet, zone: isCommercial(f) ? 'T' : f.zone as 'F' | 'I', cropInventory: f.cropInventory, cropCost: f.cropCost, cash, reservedCash: cash - available };
   return validCropAccount(account) ? account : null;
 }
 function nextEntry(c: City): number {
@@ -85,7 +85,7 @@ function exchange(c: City, seller: Firm, buyer: Firm, crop: CropId, quantity: nu
   if (!operational(c, seller, hooks) || !operational(c, buyer, hooks) || quantity > seller.crops[crop]) return false;
   const from = cropAccount(c, seller, hooks), to = cropAccount(c, buyer, hooks);
   if (!from || !to) return false;
-  const limit = isMarket(seller) ? quota.get(seller.id) ?? 0 : undefined;
+  const limit = isCommercial(seller) ? quota.get(seller.id) ?? 0 : undefined;
   const proposal = proposeCropPurchase(from, to, { quantity, prices: CROP_PRICES, ...(limit === undefined ? {} : { sellableLimit: limit }) });
   if (!proposal.ok) return false;
   let event: CropEntry, revenue: number, expense: number;
@@ -160,7 +160,7 @@ function openingSellable(c: City, traders: Firm[]): Map<number, number> {
 /** Harvest → factory purchases → market purchases → input-backed factory output. */
 export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, number> {
   const byId = (a: Firm, b: Firm) => a.id - b.id;
-  const farms = c.firms.filter(f => f.zone === 'F').sort(byId), traders = c.firms.filter(f => isMarket(f)).sort(byId), factories = c.firms.filter(f => f.zone === 'I').sort(byId);
+  const farms = c.firms.filter(f => f.zone === 'F').sort(byId), traders = c.firms.filter(f => isCommercial(f)).sort(byId), factories = c.firms.filter(f => f.zone === 'I').sort(byId);
   let sellable: Map<number, number>;
   try { sellable = openingSellable(c, traders); } catch { return new Map(traders.map(f => [f.id, 0])); }
   for (const farm of farms) harvest(c, farm, hooks);
@@ -174,7 +174,7 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
     const b = c.buildings.find(b => b.id === factory.building); if (!b) continue;
     let target: number; try { target = cappedProduct(workers(factory, hooks)!, 4, factoryCropCapacity(b.level)); } catch { continue; }
     while (source < sellers.length && factory.cropInventory < target) {
-      const { firm: seller, price } = sellers[source], available = Math.min(seller.crops[crop], isMarket(seller) ? Math.min(seller.cropInventory, sellable.get(seller.id) ?? 0) : seller.cropInventory);
+      const { firm: seller, price } = sellers[source], available = Math.min(seller.crops[crop], isCommercial(seller) ? Math.min(seller.cropInventory, sellable.get(seller.id) ?? 0) : seller.cropInventory);
       if (!isSafeCount(available, 1)) { source++; continue; }
       const budget = hooks.spendable(factory); if (!isSafeCount(budget) || budget < price) break;
       const qty = Math.min(available, target - factory.cropInventory, Math.floor(budget / price));
@@ -235,7 +235,7 @@ function exportSurplus(c: City, farm: Firm, hooks: AgricultureHooks): void {
 
 /** Fulfils the same ONE daily basket as generic retail, from canonical T stock. */
 export function consumeMarketCrop(c: City, h: Household, firm: Firm, sellable: Map<number, number>, hooks: AgricultureHooks, allowRepeat = false): boolean {
-  if (!isMarket(firm) || !operational(c, firm, hooks) || !accessibleHousehold(c, h, hooks)) return false;
+  if (!isCommercial(firm) || !operational(c, firm, hooks) || !accessibleHousehold(c, h, hooks)) return false;
   const trader = cropAccount(c, firm, hooks), limit = sellable.get(firm.id) ?? 0;
   const crop = freshPreference(h.id, c.tick).find(k => firm.crops[k] > 0);
   if (!trader || !crop) return false;
@@ -259,7 +259,7 @@ export function writeOffCrops(c: City, firm: Firm, _hooks: AgricultureHooks): bo
   if (!c.firms.includes(firm)) return false;
   const b = c.buildings.find(b => b.id === firm.building);
   if (!b) return false;
-  const cap = isRetail(firm) ? 0 : isMarket(firm) ? CROP_STOCK_CAPS.T : firm.zone === 'I' ? factoryCropCapacity(b.level) : farmStockCapacity(b.level);
+  const cap = isCommercial(firm) ? CROP_STOCK_CAPS.T : firm.zone === 'I' ? factoryCropCapacity(b.level) : farmStockCapacity(b.level);
   if (!validCropHolding(firm, cap)) return false;
   if (!firm.cropInventory) return true;
   let event: CropEntry, writtenOff: number, expense: number;
@@ -286,7 +286,7 @@ export function agricultureDiagnostic(c: City, f: Firm, hooks: AgricultureHooks)
     return result('agriculture.harvest-ready', Math.min(cap - f.cropInventory, harvestYield(fertility, workers(f, hooks)!)));
   }
   if (f.zone === 'I') return result(!f.recipe || f.crops[RECIPE[f.recipe].crop] < 2 ? 'agriculture.no-input' : 'agriculture.recipe-ready');
-  if (isMarket(f)) {
+  if (isCommercial(f)) {
     // Diagnostics are normally read after trade: a completed purchase must not
     // make its buyer disappear from today's market status.
     let soldToday = false;

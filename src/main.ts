@@ -1,3 +1,5 @@
+import {installRailManagement} from './rail/management.ts';
+import { commercialPresentation } from './commercial-visuals.ts';
 import { installSaveManagement } from './save-management-dialog.ts';
 import { freshServerCityRaw } from './fresh-server-city.ts';
 import { installBuildToolbar, BUILD_SHORTCUTS, blocksGameShortcuts } from './build-toolbar.ts';
@@ -39,7 +41,7 @@ import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { createTaxiFareAccumulator } from './taxi/fares.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, isMarket, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -119,6 +121,7 @@ let trafficLayer: TrafficLayer | null = null;
 /** Bus drawings (`?bus=1`). Still draws nothing until `trafficLayer.bus` exists (traffic on too). */
 let busView: BusPresentation | null = null;
 let parkScene: SceneParkActivity | undefined;
+let railUi:ReturnType<typeof installRailManagement>|undefined;
 let parkPanel: HTMLElement;
 let ownerDecisionSession: ReturnType<typeof createOwnerDecisionSession>;
 let ownerDecisionPanel: ReturnType<typeof createOwnerDecisionPanel> | undefined;
@@ -162,7 +165,7 @@ const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
   R: 'โซนบ้านสร้างที่ว่างก่อน · ครัวเรือนย้ายเข้าเมื่อผ่านความจุ ถนน บริการ และงาน',
-  C: 'วางโซนพาณิชย์ · เริ่มเป็นตลาดระดับ 1 · ครัวเรือนลงเงินและแรงงานเอง ซื้อขายพืชผลจริง',
+  C: 'วางโซนพาณิชย์ · ตลาด 1–3 → อาคาร 4–6 → Big Mall 7–9 · ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว',
   I: 'วางโรงงานข้างถนนเชื่อมเมือง · โรงงานเพิ่มต้องมีทุนกิจการจริงและพืชผล · ดูเงื่อนไขในภาพรวมเมือง',
   F: 'วางฟาร์มข้างถนน · ปลูกได้ทุกแปลง ดินต่ำให้ผลผลิตเท่าดิน 50% · เลือกพืชหลังสร้าง · ต้องมีแรงงานและผู้ซื้อ',
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
@@ -189,6 +192,7 @@ function farmHint(index: number | null): string {
   return `ฟาร์ม · ความอุดมสมบูรณ์ ${fertility}% · ${access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
 }
 function setTool(next: string) {
+  railUi?.close();
   roadMenu?.close();
   selectMenu?.close(); selectMenu?.sync(next);
   servicesMenu?.close(); servicesMenu?.sync(next);
@@ -234,6 +238,7 @@ function openRoute(next: Route) {
   if (next.page === 'signals') signalPanel?.refresh();
 }
 function cancel() {
+  if(railUi?.cancel())return;
   view?.abortGesture();
   if (selectMenu?.isOpen()) { selectMenu.close(true); return; }
   if (servicesMenu?.isOpen()) { servicesMenu.close(true); return; }
@@ -301,6 +306,8 @@ function taxiOccupies(cells: readonly number[]) {
 }
 /** Runs before activate so bus can keep the activate lines. Taxi is a no-op while traffic is off. */
 function taxiActivate(index: number) {
+  if(railUi?.activate(index))return;
+  if(tool!=='select'&&railUi?.isReserved(index)){status('ช่องนี้มีสถานีหรือรางรถไฟ กรุณาจัดการรถไฟก่อน');return;}
   if (taxiFeature && tool === 'taxi') {
     status(resultSound(taxiSession.place(city, index, true, trafficOn), 'ui-place').message);
     publishTaxi(true); render(); return;
@@ -388,8 +395,7 @@ function renderPlace() {
   const page = route?.page === 'city' || route?.page === 'help' || route?.page === 'game' || route?.page === 'signals' ? route.page : route ? 'entity' : 'none';
   $('#inspector').dataset.page = page; $('#inspector').dataset.back = String(route !== null);
   // Header tint follows what is selected (visual only).
-  const firmHere = building && city.firms.find(f => f.building === building.id);
-  $('#inspector').dataset.kind = route?.page === 'household' ? 'household' : page !== 'entity' ? page : !cell ? 'none' : cell.road ? 'road' : !cell.zone ? 'land' : cell.zone === 'C' && firmHere && isMarket(firmHere) ? 'market' : cell.zone;
+  $('#inspector').dataset.kind = route?.page === 'household' ? 'household' : page !== 'entity' ? page : !cell ? 'none' : cell.road ? 'road' : !cell.zone ? 'land' : cell.zone === 'C' && building && building.level <= 3 ? 'market' : cell.zone;
   $('#inspector').dataset.household = String(route?.page === 'household');
   $('#submenu-back').setAttribute('aria-label', route?.page === 'household' ? 'กลับอาคารต้นทาง' : 'ย้อนกลับ');
   for (const e of document.querySelectorAll<HTMLElement>('[data-page-content]')) e.hidden = e.dataset.pageContent !== page;
@@ -407,9 +413,9 @@ function renderPlace() {
   } else if (cell && cellIndex !== null) {
     const firm = building && city.firms.find(f => f.building === building.id);
     const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex);
-    const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? firm && isMarket(firm) ? 'พาณิชย์ระดับ 1 · ตลาด' : building ? 'พาณิชย์ · ร้านค้าสำเร็จรูป' : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
+    const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (cellIndex % SIZE + 1) + ',' + (Math.floor(cellIndex / SIZE) + 1);
-    $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, !!firm && isMarket(firm), !!park);
+    $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, cell.zone === 'C' && !!building && building.level <= 3, !!park);
     if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
@@ -526,6 +532,7 @@ function render() {
   parkScene?.setQuality(atmosphere?.diagnostics.quality ?? 'medium');
   parkScene?.sync(parkRuntime.activity);
   signalPanel?.sync();
+  railUi?.sync();
   validateRoute(); const s = summary(city);
   // Before the pause button is drawn: reaching stage 5 while running pauses for the win screen.
   const goals = cityGoals(city, s); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
@@ -659,12 +666,14 @@ async function boot() {
     ownerDecisionSession.syncExternal(city, 'player-drag-road'); trafficLayer?.afterMapEdit(city, paused || document.hidden); render();
   });
   parkScene = new SceneParkActivity(view);
+  railUi=installRailManagement({view,city:()=>city,runtime:()=>parkRuntime,selectTool:()=>{setTool('select');inspector(false);},changed:()=>render(),status,enabled:true});
+  view.app.once('destroy',()=>railUi?.destroy());
   view.traffic.setWalkersEnabled(false);
   let trafficEnabled=trafficModelEnabled();
   const trafficSection=document.createElement('section');trafficSection.id='traffic-game-status';trafficSection.className='growth-section';
   const trafficTitle=document.createElement('h3');trafficTitle.textContent='การจราจรจำลอง';
   const trafficInfo=document.createElement('p');trafficInfo.textContent='กำลังเตรียมแบบจำลอง';trafficInfo.setAttribute('role','status');
-  const trafficNote=document.createElement('small');trafficNote.textContent='รถและคิวเป็นตัวแทนเพื่อวางแผนถนน แสดงรถสูงสุด 64 คันจากแบบจำลองสูงสุด 128 คัน บางช่วงถนนอาจไม่แสดงรถแม้แบบจำลองมีรถอยู่ ไม่ใช่การเดินทางหรือการส่งสินค้าจริง และไม่เปลี่ยนเศรษฐกิจหรือเซฟ';
+  const trafficNote=document.createElement('small');trafficNote.textContent='ไฟลูกศรเขียวคือสิทธิ์เข้าคิวจากแบบจำลอง แถบแดงคือรอ ช่วงเคลียร์ทางเป็นแดงทุกด้าน รถยังต้องรอพื้นที่ว่าง และไฟไม่ได้สั่งสิทธิ์รถเมล์โดยตรง · รถและคิวเป็นตัวแทนเพื่อวางแผนถนน แสดงรถสูงสุด 64 คันจากแบบจำลองสูงสุด 128 คัน บางช่วงถนนอาจไม่แสดงรถแม้แบบจำลองมีรถอยู่ ไม่ใช่การเดินทางหรือการส่งสินค้าจริง และไม่เปลี่ยนเศรษฐกิจหรือเซฟ';
   const trafficFocus=document.createElement('button');trafficFocus.id='traffic-game-focus';trafficFocus.type='button';trafficFocus.textContent='ไปดูจุดรถติด';trafficFocus.hidden=true;
   let bottleneckCell:number|null=null;trafficFocus.addEventListener('click',()=>{if(bottleneckCell!==null){view.focus(bottleneckCell);inspector(false);render();}});
   trafficSection.append(trafficTitle,trafficInfo,trafficFocus,trafficNote);$('#growth-anchor').insertAdjacentElement('beforebegin',trafficSection);
@@ -979,13 +988,14 @@ async function boot() {
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
+    railUi?.sync();
     if (monthEnded(tickBefore, city.tick)) sound('ev-month');
     if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null } });
+  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });

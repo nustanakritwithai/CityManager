@@ -1,9 +1,10 @@
 import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
-import { isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
+import { MONTH, WAGES, isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
+import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 
 const invalid = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture state.'); };
 function requireThat(value: unknown): asserts value { if (!value) invalid(); }
@@ -11,6 +12,16 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 type Role = 'F' | 'T' | 'I';
 type Holding = { quantity: number; value: number };
 type Operating = { tick: number; revenue: number; expense: number; moneyIndex?: number };
+
+/** Prefix indices disambiguate commands performed on the very day of migration. */
+function unifiedEvent(c: City, tick: number, stream: 'moneyEntries'|'cropEntries'|'goodsEntries', globalIndex: number): boolean {
+  if (c.commercialUnifiedStartTick === undefined) return false;
+  const baseline = c.commercialUnifiedBaseline;
+  requireThat(object(baseline) && isSafeCount(baseline[stream]) && isSafeCount(globalIndex) && isSafeCount(tick));
+  const after = globalIndex >= baseline[stream];
+  requireThat(after ? tick >= c.commercialUnifiedStartTick : tick <= c.commercialUnifiedStartTick);
+  return after;
+}
 
 /** No repair, allocation, time advance or writes occur here. Historical roads are not inferred. */
 export function validateAgriculture(c: City, extendedFactories = false, withFarmLevels = true): void {
@@ -24,6 +35,9 @@ export function captureAgricultureHistory(c: City, throughTick: number): Agricul
 }
 function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: boolean, captureTick?: number): AgricultureSeed | undefined {
   const history = c.history;
+  // Missing boundary means this is an old snapshot and must use its old rules.
+  const unified = c.commercialUnifiedStartTick !== undefined;
+  if (unified) requireThat(isSafeCount(c.commercialUnifiedStartTick) && c.commercialUnifiedStartTick <= c.tick);
   requireThat(isCanonicalResourceMap(c.resources, c.seed));
   requireThat(isSafeCount(c.agricultureStartTick) && c.agricultureStartTick <= c.tick);
   requireThat(object(c.crops) && ['harvested', 'processed', 'consumed', 'writtenOff'].every(key => isSafeCount(c.crops[key as keyof City['crops']])));
@@ -32,12 +46,11 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   const households = new Map(c.households.map(h => [h.id, h]));
   const ownerIds = new Set<number>();
   for (const f of c.firms) {
-    const capacity = isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'F' && withFarmLevels ? farmStockCapacity(c.buildings.find(b => b.id === f.building)!.level) : f.zone === 'I' && extendedFactories ? factoryCropCapacity(c.buildings.find(b => b.id === f.building)!.level) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
+    const capacity = unified && f.zone === 'C' ? CROP_STOCK_CAPS.T : isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'F' && withFarmLevels ? farmStockCapacity(c.buildings.find(b => b.id === f.building)!.level) : f.zone === 'I' && extendedFactories ? factoryCropCapacity(c.buildings.find(b => b.id === f.building)!.level) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
     requireThat(isSafeCount(f.cropInventory) && f.cropInventory <= capacity && isSafeCount(f.cropCost) && (f.cropInventory > 0 || f.cropCost === 0));
     requireThat(isSafeCount(f.productionTick) && f.productionTick >= c.agricultureStartTick && f.productionTick <= c.tick);
-    if (isRetail(f)) requireThat(f.cropCost === 0);
-    // Farms have one worker per level; crop markets stay single-stall.
-    if (f.zone === 'F' || isMarket(f)) requireThat(f.inventory === 0 && (f.zone === 'F' || c.buildings.find(b => b.id === f.building)?.level === 1));
+    if (!unified && isRetail(f)) requireThat(f.cropCost === 0);
+    if (f.zone === 'F' || (!unified && isMarket(f))) requireThat(f.inventory === 0 && (f.zone === 'F' || c.buildings.find(b => b.id === f.building)?.level === 1));
     if (f.zone === 'F') {
       const b = c.buildings.find(b => b.id === f.building);
       requireThat(b && f.cropCost === 0);
@@ -48,7 +61,11 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     requireThat(['capitalContributed', 'capitalReturned', 'withdrawn', 'taxPaid'].every(key => isSafeCount(owner[key as keyof typeof owner])));
     requireThat(owner.capitalContributed >= 60_000 && owner.capitalReturned === 0);
     // A household-owned shop may hire beside its owner; a market stall is the owner's labour alone.
-    if (isMarket(f)) requireThat(Object.keys(f.workDays).length === 0 && !c.employment.some(e => e.firmId === f.id));
+    if (!unified && isMarket(f)) requireThat(Object.keys(f.workDays).length === 0 && !c.employment.some(e => e.firmId === f.id));
+    if (unified && isMarket(f)) {
+      requireThat(!c.goodsLedger.some((e,i) => !unifiedEvent(c,e.tick,'goodsEntries',(c.history?.goodsOffset ?? 0)+i) && (e.from === f.wallet || e.to === f.wallet)));
+      requireThat(!c.ledger.some((e,i) => !unifiedEvent(c,e.tick,'moneyEntries',(c.history?.moneyCount ?? 0)+i) && e.from === f.wallet && e.reason === 'Monthly wages'));
+    }
     ownerIds.add(owner.householdId);
   }
   const ownerFirms = new Set<number>();
@@ -68,6 +85,52 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   c.ledger.forEach((e, i) => { const rows = cashReasons.get(e.reason) ?? []; rows.push(i); cashReasons.set(e.reason, rows); });
   c.goodsLedger.forEach((e, i) => { const rows = goodsReasons.get(e.reason) ?? []; rows.push(i); goodsReasons.set(e.reason, rows); });
   const matchedCash = new Set<number>(), matchedGoods = new Set<number>();
+  // A commercial firm's post-transition finished-goods receipts must be backed
+  // by actual household goods transfers; otherwise arbitrary cash can be
+  // relabelled as sales while stock and owner income diverge.
+  if (unified) {
+    // Paid C posts accrue whole worker-days. payWages releases each reserved
+    // claim and requires full payment; neither partial satang nor fractional
+    // worker-days can be produced. Departed household wallets remain valid,
+    // and closure/emigration may settle wages before month end.
+    for (const [i,e] of c.ledger.entries()) if (e.reason === 'Monthly wages' && firms.get(e.from)?.zone === 'C' && unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i)) {
+      requireThat(isSafeCount(e.amount,1) && e.amount % (WAGES.C / MONTH) === 0 && /^household:[1-9]\d*$/.test(e.to) && Object.hasOwn(c.accounts,e.to));
+    }
+    const goodsSales = new Map<string, number>(), cashSales = new Map<string, number>();
+    const goodsPurchases = new Map<string, number>(), cashPurchases = new Map<string, number>();
+    const saleKey = (tick: number, from: string, to: string) => `${tick}:${from}:${to}`;
+    for (const [i,e] of c.goodsLedger.entries()) if (unifiedEvent(c,e.tick,'goodsEntries',(history?.goodsOffset ?? 0)+i) && firms.get(e.from)?.zone === 'C' && e.to.startsWith('household:')) {
+      requireThat(e.reason === 'Household final consumption');
+      const key = saleKey(e.tick,e.from,e.to);
+      goodsSales.set(key, safeAdd(goodsSales.get(key) ?? 0,e.quantity));
+    }
+    for (const [i,e] of c.goodsLedger.entries()) if (unifiedEvent(c,e.tick,'goodsEntries',(history?.goodsOffset ?? 0)+i) && firms.get(e.to)?.zone === 'C') {
+      if (e.reason === 'Wholesale stock delivery' || e.reason === 'Imported shop stock') {
+        requireThat(e.reason === 'Imported shop stock' ? e.from === 'outside' : /^firm:[1-9]\d*$/.test(e.from));
+        const key = saleKey(e.tick,e.to,e.from); goodsPurchases.set(key,safeAdd(goodsPurchases.get(key) ?? 0,e.quantity));
+      }
+    }
+    for (const [i,e] of c.ledger.entries()) if (unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i) && firms.get(e.from)?.zone === 'C' && (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import')) {
+      const unit = e.reason === 'Outside goods import' ? 450 : 350;
+      requireThat(e.amount % unit === 0 && (unit === 450 ? e.to === 'outside' : /^firm:[1-9]\d*$/.test(e.to)));
+      const key = saleKey(e.tick,e.from,e.to); cashPurchases.set(key,safeAdd(cashPurchases.get(key) ?? 0,e.amount / unit));
+    }
+    for (const [i,e] of c.ledger.entries()) if (unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i) && firms.get(e.to)?.zone === 'C') {
+      const m = /^Household #([1-9]\d*) purchase$/.exec(e.reason);
+      if (m) {
+        requireThat(e.from === `household:${m[1]}` && e.amount % 800 === 0);
+        const key = saleKey(e.tick,e.to,e.from);
+        cashSales.set(key,safeAdd(cashSales.get(key) ?? 0,e.amount / 800));
+      } else {
+        const f = firms.get(e.to)!;
+        if (e.reason === 'Owner capital contribution') requireThat(!!f.owner && e.from === `household:${f.owner.householdId}`);
+        else if (e.reason === 'Outside firm equity investment') requireThat(!f.owner && e.from === 'outside' && e.amount === 300_000 && e.tick === (f.takenOverAt ?? c.tick - c.buildings.find(b => b.id === f.building)!.age));
+        else requireThat(/^(?:Crop exchange|Fresh crop purchase) #[1-9]\d*$/.test(e.reason));
+      }
+    }
+    for (const key of new Set([...goodsSales.keys(),...cashSales.keys()])) requireThat(goodsSales.get(key) === cashSales.get(key));
+    for (const key of new Set([...goodsPurchases.keys(),...cashPurchases.keys()])) requireThat(goodsPurchases.get(key) === cashPurchases.get(key));
+  }
   const roles = new Map<string, Role>(Object.entries(history?.roles ?? {})), holdings = new Map<string, Holding>(Object.entries(history?.cropHoldings ?? {}).map(([w,h]) => [w, {...h}])), operating = new Map<string, Operating[]>();
   // A demolished firm's earlier market receipt has no embedded role. Recover
   // any provable role from its other journal entries before replaying stock.
@@ -96,7 +159,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     requireThat(/^firm:[1-9][0-9]*$/.test(wallet) && Object.hasOwn(c.accounts, wallet));
     const current = firms.get(wallet), known = roles.get(wallet);
     // A shop converted from a market traded crops as a market up to and including its conversion day.
-    const currentRole = current && (isMarket(current) ? 'T' : isRetail(current) ? (current.convertedAt !== undefined && day <= current.convertedAt ? 'T' : undefined) : current.zone);
+    const currentRole = current && (unified && postCrop && current.zone === 'C' ? 'T' : isMarket(current) ? 'T' : isRetail(current) ? (current.convertedAt !== undefined && day <= current.convertedAt ? 'T' : undefined) : current.zone);
     if (current) requireThat(currentRole !== undefined && (!expected || currentRole === expected));
     if (known && expected) requireThat(known === expected);
     const result = expected ?? known ?? (currentRole as Role | undefined);
@@ -105,7 +168,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   };
   const cropDestinationRole = (wallet: string, crop: string): Role => {
     const f = firms.get(wallet); requireThat(f);
-    if (isMarket(f)) return 'T';
+    if (isMarket(f) || (unified && postCrop && f.zone === 'C')) return 'T';
     if (f.zone === 'F') return 'F';
     requireThat(f.zone === 'I' && f.recipe !== undefined && (f.recipeChoices !== undefined || RECIPE[f.recipe].crop === crop));
     return 'I';
@@ -139,7 +202,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     latestPurchase.set(wallet, Math.max(tick, latestPurchase.get(wallet) ?? -1));
   };
   for (const e of c.goodsLedger) if (e.tick > c.agricultureStartTick && (captureTick === undefined || e.tick <= captureTick) && e.to.startsWith('household:')) basket(e.tick, e.to, e.quantity);
-  let previousTick = history?.throughTick ?? c.agricultureStartTick, day = -1;
+  let previousTick = history?.throughTick ?? c.agricultureStartTick, day = -1, postCrop = false;
   let sellable = new Map<string, number>();
   const dailyProduction = new Set<string>();
   // Farms never lose levels; the smallest level compatible with the journal so far
@@ -152,6 +215,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     requireThat(object(e) && e.id === (history?.cropOffset ?? 0) + i + 1 && isSafeCount(e.tick) && e.tick > (history?.throughTick ?? c.agricultureStartTick) && e.tick >= previousTick && e.tick <= c.tick && typeof e.from === 'string' && typeof e.to === 'string' && e.from !== e.to && typeof e.reason === 'string');
     requireThat(['quantity', 'fromValue', 'toValue', 'cash', 'workers', 'batches', 'outputQuantity'].every(key => isSafeCount(e[key as keyof CropEntry], key === 'quantity' ? 1 : 0)));
     previousTick = e.tick;
+    postCrop = unifiedEvent(c,e.tick,'cropEntries',e.id - 1);
     if (day !== e.tick) { day = e.tick; sellable = new Map([...holdings].map(([wallet, h]) => [wallet, h.quantity])); }
     if (e.kind === 'harvest') {
       requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? FARM_MAX_LEVEL : 3) && e.batches === 0 && e.outputQuantity === 0);
@@ -221,7 +285,9 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       role(e.from); requireThat(e.quantity === holding(e.from).quantity); release(e);
       totals.writtenOff = safeAdd(totals.writtenOff, e.quantity); op(e.from, { tick: e.tick, revenue: 0, expense: e.fromValue });
     }
-    for (const wallet of [e.from, e.to]) { const f = firms.get(wallet); if (f) requireThat(f.productionTick >= e.tick); }
+    // External receipts/refunds may arrive while the recipient is unserved or
+    // paused; they do not represent a simulation production attempt.
+    for (const wallet of [e.from, e.to]) { const f = firms.get(wallet); if (f && !(postCrop && (e.kind === 'market-receipt' || e.kind === 'market-refund'))) requireThat(f.productionTick >= e.tick); }
   }
   if (captureTick !== undefined) {
     const ownerFinance = structuredClone(history?.ownerFinance ?? {});
@@ -261,8 +327,18 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   c.goodsLedger.forEach((e, i) => { if ((e.tick > c.agricultureStartTick && e.from === 'production') || /^Crop recipe #/.test(e.reason)) requireThat(matchedGoods.has(i)); });
   for (const h of c.households) { const tick = latestPurchase.get(h.wallet); if (tick !== undefined || h.lastPurchaseTick > c.agricultureStartTick) requireThat(h.lastPurchaseTick === tick); }
 
-  for (const f of c.firms.filter(f => isMarket(f))) validateOwnerFinance(c, f, operating.get(f.wallet) ?? []);
-  for (const f of c.firms.filter(f => isRetail(f) && f.owner)) validateShopOwner(c, f);
+  if (!unified) {
+    for (const f of c.firms.filter(f => isMarket(f))) validateOwnerFinance(c, f, operating.get(f.wallet) ?? []);
+    for (const f of c.firms.filter(f => isRetail(f) && f.owner)) validateShopOwner(c, f);
+  } else {
+    for (const f of c.firms.filter(f => f.zone === 'C' && f.owner)) {
+      validateShopOwner(c, f);
+      validateOwnerFinance(c, f, operating.get(f.wallet) ?? [], true);
+      // The owner-profit checkpoint is the exact cumulative mixed-goods/crop
+      // accounting seed, including wages and retained development investments.
+      requireThat(ownerProfitHistory(c, f, 0n).reconciled);
+    }
+  }
 }
 
 /** A household-owned shop: its owner paid the opening capital and every owner movement is in the ledger. */
@@ -278,7 +354,7 @@ function validateShopOwner(c: City, f: Firm): void {
     if (e.reason === 'Monthly firm profit tax') { requireThat(e.from === f.wallet && e.to === 'treasury'); taxPaid += BigInt(e.amount); }
   }
   requireThat(contributed === BigInt(owner.capitalContributed) && withdrawn === BigInt(owner.withdrawn) && taxPaid === BigInt(owner.taxPaid));
-  const built = f.convertedAt === undefined ? 'Self-employed shop construction' : 'Self-employed market construction';
+  const built = isMarket(f) || f.convertedAt !== undefined ? 'Self-employed market construction' : 'Self-employed shop construction';
   const construction = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.from === f.wallet && e.reason === built);
   requireThat(construction.length === 1 && construction[0].to === 'construction' && construction[0].amount === 10_000);
   const refit = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.from === f.wallet && e.reason === 'Market to shop conversion');
@@ -286,33 +362,69 @@ function validateShopOwner(c: City, f: Firm): void {
 }
 
 /** Capital/earnings movements are distinct from the stall's operating result. */
-function validateOwnerFinance(c: City, f: Firm, operating: Operating[]): void {
+function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified = false): void {
   const owner = f.owner!, wallet = `household:${owner.householdId}`;
   const seed = c.history?.ownerFinance[f.wallet];
   let contributed = BigInt(seed?.contributed ?? 0), withdrawn = BigInt(seed?.withdrawn ?? 0), taxPaid = BigInt(seed?.taxPaid ?? 0), cash = BigInt(seed?.cash ?? 0);
   const rows = [...operating];
   c.ledger.forEach((e, i) => {
     if (e.from === f.wallet && e.reason === 'Monthly firm rent') { requireThat(e.to === 'landlord'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
+    // Unified firms account for finished goods and paid employee wages as well.
+    if (unified && (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import' || e.reason === 'Outside market goods export' || /^Household #\d+ purchase$/.test(e.reason) || e.reason === 'Monthly wages')) {
+      if (e.from === f.wallet) rows.push({ tick:e.tick, revenue:0, expense:e.amount, moneyIndex:i });
+      else if (e.to === f.wallet) rows.push({ tick:e.tick, revenue:e.amount, expense:0, moneyIndex:i });
+    }
     // Water and power bills (chain-4) are operating costs too.
     if (e.from === f.wallet && e.reason === 'Monthly water and power bill') { requireThat(e.to === 'treasury'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
   });
-  const earnings = (endTick: number, endIndex = Infinity, fromTick = -1) => (fromTick < (c.history?.throughTick ?? -1) ? BigInt(seed?.profit ?? 0) : 0n) + rows.filter(e => e.tick > fromTick && e.tick <= endTick && (e.moneyIndex === undefined || e.moneyIndex < endIndex)).reduce((n, e) => n + BigInt(e.revenue) - BigInt(e.expense), 0n);
+  const earnings = (endTick: number, endIndex = Infinity, fromTick = -1) => (fromTick < (c.history?.throughTick ?? -1) ? BigInt(unified ? (c.history?.ownerProfit[f.wallet]?.profit ?? seed?.profit ?? 0) : (seed?.profit ?? 0)) : 0n) + rows.filter(e => e.tick > fromTick && e.tick <= endTick && (e.moneyIndex === undefined || e.moneyIndex < endIndex)).reduce((n, e) => n + BigInt(e.revenue) - BigInt(e.expense), 0n);
+  // Reconstruct the W=0 upper bound at the precise ledger prefix. Actual
+  // unpaid wages W are non-negative; W + tax(P-W) + development(P-W) cannot
+  // be smaller than its zero-wage value. We do not invent historical workdays.
+  const minimumReserves = (tick: number, endIndex: number) => {
+    type Month = {profit: bigint; tax: bigint; invested: bigint};
+    const months = new Map<number, Month>();
+    const get = (t:number) => { const key=Math.ceil(t/30); let m=months.get(key); if(!m) months.set(key,m={profit:0n,tax:0n,invested:0n}); return m; };
+    for (const row of rows) if (row.tick <= tick && (row.moneyIndex === undefined || row.moneyIndex < endIndex)) get(row.tick).profit += BigInt(row.revenue)-BigInt(row.expense);
+    for (let i=0;i<endIndex;i++) {
+      const e=c.ledger[i]; if(e.tick>tick || e.from!==f.wallet) continue;
+      if(e.to==='treasury' && e.reason==='Monthly firm profit tax') get(e.tick).tax+=BigInt(e.amount);
+      if(e.to==='construction' && (e.reason==='Market to shop conversion'||e.reason==='Profitable firm height investment')) get(e.tick).invested+=BigInt(e.amount);
+    }
+    const seed=c.history?.ownerProfit[f.wallet];
+    let retained=BigInt(seed?.retained??0), invested=BigInt(seed?.invested??0), currentProfit=0n, currentInvestment=0n;
+    for(const [month,row] of [...months].sort(([a],[b])=>a-b)) {
+      invested+=row.invested;
+      if(month<=Math.floor(tick/30)) { retained+=developmentShare(row.profit-row.tax)-row.invested; if(retained<0n)retained=0n; }
+      else {currentProfit+=row.profit;currentInvestment+=row.invested;}
+    }
+    const tax=currentProfit>0n?currentProfit/5n:0n;
+    retained+=developmentShare(currentProfit-tax)-currentInvestment;
+    if(retained<0n)retained=0n;
+    return {tax,retained,invested};
+  };
   for (let i = 0; i < c.ledger.length; i++) {
     const e = c.ledger[i]; if (e.from !== f.wallet && e.to !== f.wallet) continue;
-    if (e.to === f.wallet) requireThat(e.reason === 'Owner capital contribution' || /^(?:Crop exchange|Fresh crop purchase) #\d+$/.test(e.reason));
+    const post = unified && unifiedEvent(c,e.tick,'moneyEntries',(c.history?.moneyCount ?? 0)+i);
+    if (e.to === f.wallet && (!unified || isMarket(f) && !post)) requireThat(e.reason === 'Owner capital contribution' || /^(?:Crop exchange|Fresh crop purchase) #\d+$/.test(e.reason));
     if (e.reason === 'Owner capital contribution') { requireThat(e.from === wallet && e.to === f.wallet); if (contributed === 0n) requireThat(e.amount === 60_000); contributed += BigInt(e.amount); }
     if (e.reason === 'Owner profit distribution') {
       requireThat(e.from === f.wallet && e.to === wallet);
       const current = earnings(e.tick, i, e.tick - e.tick % 30), reserve = current > 0n ? current / 5n : 0n;
-      requireThat(BigInt(e.amount) <= earnings(e.tick, i) - taxPaid - withdrawn - reserve && cash - BigInt(e.amount) >= 20_000n + reserve);
+      if (!unified || isMarket(f) && !post) requireThat(BigInt(e.amount) <= earnings(e.tick, i) - taxPaid - withdrawn - reserve && cash - BigInt(e.amount) >= 20_000n + reserve);
+      else if (post) {
+        const {tax,retained,invested} = minimumReserves(e.tick,i);
+        requireThat(BigInt(e.amount) <= earnings(e.tick,i) - taxPaid - withdrawn - tax - retained - invested && cash - BigInt(e.amount) >= 20_000n + tax + retained);
+      }
       withdrawn += BigInt(e.amount);
     }
     if (e.reason === 'Monthly firm profit tax') { requireThat(e.from === f.wallet && e.to === 'treasury'); taxPaid += BigInt(e.amount); }
-    requireThat(!e.reason.startsWith('Closing owner ') && e.reason !== 'Monthly wages');
+    requireThat(!e.reason.startsWith('Closing owner ') && (unified && (isRetail(f) || post) || e.reason !== 'Monthly wages'));
     if (e.from === f.wallet) cash -= BigInt(e.amount); if (e.to === f.wallet) cash += BigInt(e.amount); requireThat(cash >= 0n);
   }
   requireThat(contributed === BigInt(owner.capitalContributed) && withdrawn === BigInt(owner.withdrawn) && taxPaid === BigInt(owner.taxPaid));
-  const construction = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.from === f.wallet && e.reason === 'Self-employed market construction');
+  const constructionReason = isMarket(f) || f.convertedAt !== undefined ? 'Self-employed market construction' : 'Self-employed shop construction';
+  const construction = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.from === f.wallet && e.reason === constructionReason);
   requireThat(construction.length === 1 && construction[0].to === 'construction' && construction[0].amount === 10_000);
   const settled = c.tick - c.tick % 30;
   requireThat(BigInt(f.profit) === earnings(settled) && BigInt(f.lastMonthProfit) === earnings(settled, Infinity, settled - 30));

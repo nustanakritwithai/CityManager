@@ -148,7 +148,7 @@ test('upgrade button path writes bus level only and keeps fare display-only', ()
   const before = structuredClone(c.bus);
   const raised = upgradeLine(c, lineId, true);
   assert.equal(raised.ok, true);
-  if (raised.ok) assert.match(raised.message, /ระดับ 2/);
+  if (raised.ok) { assert.match(raised.message, /ระดับ 2/); assert.match(raised.message, /ขนาดรถใหม่จะใช้เมื่อรถกลับอู่/); }
   assert.equal(c.bus!.lines[0].busLevel, 2);
   assert.equal(c.bus!.lines[0].busCount, before!.lines[0].busCount);
   assert.deepEqual(c.bus!.depots, before!.depots);
@@ -295,3 +295,16 @@ function fakeDocument(): FakeDoc {
   return doc;
 }
 function walk(node: Fake, out: Fake[] = []) { out.push(node); for (const child of node.children) walk(child, out); return out; }
+
+test('active depot removal is rejected before grid/money writes and rechecked after confirmation',async()=>{
+ const c=city();assert.ok(buildBusDepot(c,depotCell(c),true).ok);const depot=c.bus!.depots[0],before=JSON.stringify(c);let active=true,runs=0,confirms=0;
+ setBusLiveReader(()=>({snapshot:()=>[],busesDetail:()=>[],waitingAt:()=>0,totals:{accepted:0,boarded:0,completed:0,released:0},hasActiveDepot:id=>id===depot.id&&active}));
+ try{
+  const direct=commitDepotRemoval(c,depot.id,true);assert.equal(direct.removed,false);assert.match(direct.message,/รอรถกลับอู่/);assert.equal(JSON.stringify(c),before);
+  const result=await bulldozeGuarded(c,depot.cell,true,async()=>{confirms++;return true;},()=>{runs++;return {ok:true,message:'unexpected'};});
+  assert.equal(result?.ok,false);assert.equal(runs,0);assert.equal(confirms,0);
+  active=false;const raced=await bulldozeGuarded(c,depot.cell,true,async()=>{active=true;return true;},()=>{runs++;return {ok:true,message:'unexpected'};});
+  assert.equal(raced?.ok,false);assert.equal(runs,0);assert.equal(JSON.stringify(c),before);
+  active=false;assert.equal(commitDepotRemoval(c,depot.id,true).removed,true);
+ }finally{setBusLiveReader(()=>null);}
+});

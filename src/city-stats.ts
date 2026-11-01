@@ -2,7 +2,7 @@
  * One read-only snapshot for the city stats overlay: services, buildings by level and kind,
  * population and labour by skill, and crop and goods stocks. Nothing here mutates the city.
  */
-import { MONTH, WAGES, access, connectedRoads, firmCapacity, firmWorkerCount, isMarket, summary, utilityStatus, type City, type Firm } from './sim.ts';
+import { MONTH, WAGES, access, connectedRoads, firmCapacity, firmWorkerCount, summary, utilityStatus, type City, type Firm } from './sim.ts';
 import { PARK_STAFF, parkWorkers } from './parks.ts';
 import { cityOverview } from './context-data.ts';
 
@@ -21,14 +21,14 @@ export type CityStats = {
   stocks: { crops: { farm: number; market: number; factory: number }; goods: { factory: number; shop: number }; harvested: number; processed: number; produced: number; consumed: number; imported: number; exported: number };
 };
 
-const kindOf = (firm: Firm | undefined, zone: string): BuildingKind => zone === 'C' ? (firm && !isMarket(firm) ? 'shop' : 'market') : zone as BuildingKind;
+const kindOf = (_firm: Firm | undefined, zone: string, level = 1): BuildingKind => zone === 'C' ? (level <= 3 ? 'market' : 'shop') : zone as BuildingKind;
 const zeroRow = (): Record<BuildingKind, number> => ({ R: 0, market: 0, shop: 0, I: 0, F: 0 });
 
 export function cityStats(city: City): CityStats {
   const s = summary(city), o = cityOverview(city, s), connected = connectedRoads(city), roads = city.cells.filter(c => c.road).length;
   const rows: Record<number, Record<BuildingKind, number>> = {}, totals = zeroRow();
   for (const b of city.buildings) {
-    const kind = kindOf(city.firms.find(f => f.building === b.id), b.zone);
+    const kind = kindOf(city.firms.find(f => f.building === b.id), b.zone, b.level);
     (rows[b.level] ??= zeroRow())[kind]++; totals[kind]++;
   }
   const labour = SKILLS.map(skill => {
@@ -38,18 +38,18 @@ export function cityStats(city: City): CityStats {
     return { skill, supply, employed, owners, idle: Math.max(0, supply - employed - owners) };
   });
   const jobs: CityStats['jobs'] = (['I', 'F', 'shop', 'market'] as const).map(kind => {
-    const firms = city.firms.filter(f => kindOf(f, f.zone) === kind);
+    const firms = city.firms.filter(f => kindOf(f, f.zone, city.buildings.find(b=>b.id===f.building)?.level) === kind);
     const buildings = firms.map(f => city.buildings.find(b => b.id === f.building)!).filter(Boolean);
     return {
-      kind, firms: firms.length, capacity: buildings.reduce((n, b) => n + firmCapacity(b), 0),
-      workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: kind === 'market' ? 0 : WAGES[kind === 'shop' ? 'C' : kind],
+      kind, firms: firms.length, capacity: buildings.reduce((n, b) => n + firmCapacity(b, firms.find(f => f.building === b.id)), 0),
+      workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: WAGES[kind === 'shop' || kind === 'market' ? 'C' : kind],
     };
   });
   if (city.parks.length) jobs.push({ kind: 'park', firms: city.parks.length, capacity: city.parks.length * PARK_STAFF.slots, workers: city.parks.reduce((n, p) => n + parkWorkers(p), 0), wage: PARK_STAFF.monthlyWage });
   const crop = { farm: 0, market: 0, factory: 0 }, goods = { factory: 0, shop: 0 };
   for (const f of city.firms) {
     if (f.zone === 'F') crop.farm += f.cropInventory; else if (f.zone === 'I') { crop.factory += f.cropInventory; goods.factory += f.inventory; }
-    else if (isMarket(f)) crop.market += f.cropInventory; else goods.shop += f.inventory;
+    else { crop.market += f.cropInventory; goods.shop += f.inventory; }
   }
   const u = utilityStatus(city);
   return {

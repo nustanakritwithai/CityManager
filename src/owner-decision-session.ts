@@ -1,5 +1,5 @@
 /** Local, replayable market-owner decisions. No provider, renderer, storage or save-v6 changes. */
-import { deserialize, isMarket, MONTH, serialize, step, type City } from './sim.ts';
+import { deserialize, isCommercial, MONTH, serialize, step, type City } from './sim.ts';
 import { captureOwnerSnapshot, executeOwnerProposal, OWNER_POLICY_VERSION, ownerStateHash, proposeOwnerDecision, validateOwnerProposal, type OwnerExecutionOutcome, type OwnerProposal } from './owner-decision.ts';
 
 export type OwnerDecisionMode = 'off' | 'proposal' | 'auto' | 'typhoon-auto';
@@ -56,7 +56,7 @@ function countOutcome(stats: OwnerDecisionStats, outcome: OwnerExecutionOutcome)
 function rejected(city: City, code: string, proposal: OwnerProposal | null = null, id: string | null = null): OwnerExecutionOutcome {
   let hash = 'unavailable';
   try { hash = ownerStateHash(city); } catch { /* Fail closed even when a checkpoint cannot be serialized. */ }
-  return { ok: false, status: 'rejected', code, message: code === 'duplicate-proposal' ? 'ข้อเสนอนี้ดำเนินการไปแล้ว' : code === 'mode-off' ? 'ปิดระบบข้อเสนอเจ้าของตลาดอยู่' : 'ไม่พบข้อเสนอในรอบปัจจุบัน',
+  return { ok: false, status: 'rejected', code, message: code === 'duplicate-proposal' ? 'ข้อเสนอนี้ดำเนินการไปแล้ว' : code === 'mode-off' ? 'ปิดระบบข้อเสนอเจ้าของกิจการพาณิชย์อยู่' : 'ไม่พบข้อเสนอในรอบปัจจุบัน',
     proposalId: proposal?.proposalId ?? id, actorId: proposal?.snapshot.actorId ?? null, firmId: proposal?.snapshot.firmId ?? null,
     command: proposal ? { ...proposal.command } : null, beforeHash: hash, afterHash: hash };
 }
@@ -221,7 +221,7 @@ export class OwnerDecisionSession {
       if (this.selectedMode === 'off') return [];
       if (this.selectedMode === 'typhoon-auto') return [];
       const outcomes: OwnerExecutionOutcome[] = [];
-      for (const firm of [...city.firms].filter(isMarket).sort((a, b) => a.id - b.id)) {
+      for (const firm of [...city.firms].filter(f => isCommercial(f) && f.owner !== null).sort((a, b) => a.id - b.id)) {
         const proposals = this.evaluateInternal(city, firm.id, 'monthly');
         if (this.selectedMode === 'auto' && proposals.length) outcomes.push(this.applyInternal(city, proposals[0].proposalId, 'monthly-auto'));
       }
@@ -256,7 +256,7 @@ export class OwnerDecisionSession {
   }
   evaluate(city: City, firmId?: number): OwnerProposal[] {
     if (!this.prepare(city) || this.selectedMode === 'off') return [];
-    const ids = firmId === undefined ? city.firms.filter(isMarket).map(f => f.id).sort((a, b) => a - b) : [firmId];
+    const ids = firmId === undefined ? city.firms.filter(f => isCommercial(f) && f.owner !== null).map(f => f.id).sort((a, b) => a - b) : [firmId];
     return ids.flatMap(id => this.evaluateInternal(city, id, 'manual'));
   }
   /** Evaluate one fresh firm snapshot within the monthly Typhoon-auto boundary. */

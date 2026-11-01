@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { railPathsOnly, railOnly, commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -113,4 +113,45 @@ test('history economic/save route requires reviewed source diff and rejects unre
 test('approved lifetime scope requires reviewed client source and excludes reconnect or backend changes',()=>{
  const paths=['src/pages-auth.ts','tests/pages-auth.test.ts'];assert.equal(sessionLifetimePathsOnly(paths),true);assert.equal(sessionLifetimePathsOnly([...paths,'tests/server-save-browser-smoke.mjs']),true);assert.equal(sessionLifetimeOnly(paths),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/city-save-auth.ts','src/main.ts','index.html','server/city-saves/service.mjs','.github/workflows/citymanager.yml'].map(p=>[...paths,p])]){assert.equal(sessionLifetimePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+
+test('unified commercial route requires exact reviewed economic source and fails closed for mixed changes',()=>{
+ const paths=['src/sim.ts','src/agriculture-validation.ts','src/main.ts','src/commercial-visuals.ts','tests/commercial-accounting.test.ts','tests/server-save-browser-smoke.mjs'];
+ assert.equal(commercialPathsOnly(paths),true);assert.equal(commercialOnly(paths),false);assert.equal(commercialOnly(paths,{commercialSourceDiff:'unreviewed economics'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/city-save-auth.ts','src/pages-auth.ts','index.html','src/build-toolbar.ts','server/city-saves/service.mjs','package.json','src/unknown.ts'].map(p=>[...paths,p])]){assert.equal(commercialPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+
+test('rail scope requires exact reviewed runtime diff and rejects unrelated allocation, auth and backend edits',()=>{
+ const paths=['src/sim.ts','src/park-runtime.ts','src/main.ts','src/rail/network-runtime.ts','tests/rail-activation.test.ts','tests/rail-browser-checks.mjs'];
+ assert.equal(railPathsOnly(paths),true);assert.equal(railOnly(paths),false);assert.equal(railOnly(paths,{railSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/traffic/game.ts','src/pages-auth.ts','src/city-save-auth.ts','server/city-saves/service.mjs','index.html','src/commercial-visuals.ts','package.json'].map(p=>[...paths,p])]){assert.equal(railPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+import {trafficGapPathsOnly,trafficGapOnly} from '../scripts/ci-visual-scope.mjs';
+test('bumper-gap route requires exact reviewed physics and rejects mixed save or transport edits',()=>{
+ const paths=['src/traffic/spacing.ts','src/traffic/game.ts','src/traffic/game-poses.ts','tests/traffic-spacing.test.ts','tests/traffic-gap-browser-checks.mjs'];
+ assert.equal(trafficGapPathsOnly(paths),true);assert.equal(trafficGapOnly(paths),false);assert.equal(trafficGapOnly(paths,{trafficGapSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/main.ts','src/sim.ts','src/pages-auth.ts','src/bus/engine.ts','src/rail/network-runtime.ts','src/save-storage.ts','src/server-city-save.ts','server/city-saves/service.mjs','package.json'].map(p=>[...paths,p])]){assert.equal(trafficGapPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+import {rightOfWayPathsOnly,rightOfWayOnly} from '../scripts/ci-visual-scope.mjs';
+test('shared bus movement route requires exact reviewed source and rejects mixed runtime/auth/save paths',()=>{
+ const paths=['src/bus/engine.ts','src/bus/game-bridge.ts','src/traffic/game.ts','src/traffic/presentation.ts','tests/bus-movement-gate.test.ts','tests/traffic-junction-fairness.test.ts','tests/traffic-gap-browser-checks.mjs'];
+ assert.equal(rightOfWayPathsOnly(paths),true);assert.equal(rightOfWayOnly(paths),false);assert.equal(rightOfWayOnly(paths,{rightOfWaySourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/main.ts','src/sim.ts','src/rail/network-runtime.ts','src/pages-auth.ts','src/server-city-save.ts','server/city-saves/service.mjs','package.json'].map(p=>[...paths,p])]){assert.equal(rightOfWayPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+import {trafficRrtPathsOnly,trafficRrtOnly} from '../scripts/ci-visual-scope.mjs';
+test('goal RRT route requires exact reviewed two-source change and rejects empty, unknown and mixed scope',()=>{
+ const paths=['src/traffic/game.ts','src/traffic/rrt-navigation.ts','tests/traffic-rrt-navigation.test.ts'];
+ assert.equal(trafficRrtPathsOnly(paths),true);assert.equal(trafficRrtOnly(paths),false);assert.equal(trafficRrtOnly(paths,{trafficRrtSourceDiff:'changed unreviewed source'}),false);assert.equal(visualKind(paths),'full');
+ for(const bad of [[],paths.slice(1),...['src/traffic/presentation.ts','src/traffic/layer.ts','src/main.ts','src/server-city-save.ts','src/taxi/rrt-roam.ts','src/bus/engine.ts','src/rail/network-runtime.ts','package.json'].map(p=>[...paths,p])]){assert.equal(trafficRrtPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
+});
+
+import {adaptiveSignalSources,adaptiveSignalPathsOnly,adaptiveSignalOnly} from '../scripts/ci-visual-scope.mjs';
+test('adaptive visible signals require the exact reviewed complete runtime diff and explicit browser evidence',()=>{
+ const paths=[...adaptiveSignalSources,'tests/traffic-adaptive-signals.test.ts','tests/traffic-signal-browser-checks.mjs','tests/traffic-worker-cycle.test.ts','tests/traffic-worker-cycle-presentation.test.ts'];assert.equal(adaptiveSignalPathsOnly(paths),true);assert.equal(adaptiveSignalOnly(paths),false);assert.equal(adaptiveSignalOnly(paths,{adaptiveSignalSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const bad of [[],paths.slice(1),paths.filter(p=>p!=='tests/traffic-worker-cycle.test.ts'),paths.filter(p=>p!=='tests/traffic-worker-cycle-presentation.test.ts'),...['src/bus/engine.ts','src/sim.ts','src/rail/network-runtime.ts','src/server-city-save.ts','src/pages-auth.ts','src/traffic/rrt-navigation.ts','package.json'].map(p=>[...paths,p])]){assert.equal(adaptiveSignalPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
 });
