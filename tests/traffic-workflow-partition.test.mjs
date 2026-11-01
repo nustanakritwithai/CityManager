@@ -40,3 +40,8 @@ test('bumper-gap retains traffic unit, bypass and bounded stress while using act
  const main=normalize(readFileSync(new URL('../.github/workflows/citymanager.yml',import.meta.url),'utf8'));
  assert.match(main,/CITYMANAGER_TRAFFIC_CHECKS:.*kind == 'traffic-gap'.*bumper-gap/);assert.match(main,/node.*tests\/server-save-browser-smoke\.mjs/);
 });
+
+test('reviewed bus movement keeps engine, boarding, fairness and renderer tests in traffic and deploy gates',()=>{
+ const main=readFileSync(new URL('../.github/workflows/citymanager.yml',import.meta.url),'utf8');
+ for(const required of ['bus-engine.test.ts','bus-movement-gate.test.ts','bus-game.test.ts','bus-player.test.ts','bus-render.test.ts','traffic-junction-fairness.test.ts']){assert.ok(job('checks').includes(required));assert.ok(main.includes(required));}
+});

@@ -11,7 +11,7 @@
  * Conservation (persons): diverted = submitted + carry; submitted = waiting + onboard + completed + released;
  * released = injected (by the game) + pendingReturn.
  */
-import { BusEngine, busRideMinutes } from './engine.ts';
+import { BusEngine, busRideMinutes, type BusMovementGate } from './engine.ts';
 import { busLineRoutes, busServiceOrder, type BusHost } from './lines.ts';
 import { createBusTrafficHook } from './traffic-hook.ts';
 import { createBusLoadSink } from '../traffic/bridge.ts';
@@ -24,20 +24,21 @@ export class BusGameBridge {
   private reqs = new Map<string, string>(); private returns: Record<string, number> = {}; private injected: Record<string, number> = {};
   private cfgKey = ''; private cfg: Pick<GameBusInput, 'stops' | 'lines'> = { stops: [], lines: [] };
   totals = { diverted: 0, submitted: 0, returned: 0 };
-  constructor(host: BusHost, minute: number) {
+  constructor(host: BusHost, minute: number, movementGate?: BusMovementGate, movementReset?: () => void) {
     this.host = host;
-    this.engine = new BusEngine(host, minute, { release: (id, persons) => { const k = this.reqs.get(id); if (k === undefined) throw Error(`Unknown bus request ${id}`); this.returns[k] = (this.returns[k] ?? 0) + persons / GAME_BUS_PERSONS_PER_RATE; this.totals.returned += persons; } });
+    this.engine = new BusEngine(host, minute, { movementGate, movementReset, release: (id, persons) => { const k = this.reqs.get(id); if (k === undefined) throw Error(`Unknown bus request ${id}`); this.returns[k] = (this.returns[k] ?? 0) + persons / GAME_BUS_PERSONS_PER_RATE; this.totals.returned += persons; } });
     this.hook.connect(createBusLoadSink(load => { this.load = load; }));
   }
   private config(): Pick<GameBusInput, 'stops' | 'lines'> {
-    const b = this.host.bus, key = JSON.stringify([b ?? null, this.host.cells.map(c => c.road ? 1 : 0).join(''), (this.host as { roadTopology?: unknown }).roadTopology ?? null]);
+    const b = this.host.bus, key = JSON.stringify([this.engine.activeLineIds.map(id=>[id,this.engine.activeBusCount(id),this.engine.activeBusCapacity(id)]), b ?? null, this.host.cells.map(c => c.road ? 1 : 0).join(''), (this.host as { roadTopology?: unknown }).roadTopology ?? null]);
     if (key === this.cfgKey) return this.cfg;
     const lines: GameBusLine[] = [];
     for (const r of b ? busLineRoutes(this.host) : []) {
-      const line = b!.lines.find(l => l.id === r.lineId); if (!line || r.status !== 'running' || r.headwayMinutes === null) continue;
+      const line = b!.lines.find(l => l.id === r.lineId); if (!line || !this.engine.activeLineIds.includes(r.lineId) || r.status !== 'running' || r.headwayMinutes === null) continue;
       const ride: Record<string, number> = {}, ids = [...new Set(busServiceOrder(line.stopIds))];
       for (const f of ids) for (const t of ids) if (f !== t) { const m = busRideMinutes(r, line.stopIds, f, t); if (m !== null) ride[`${f}:${t}`] = m; }
-      lines.push({ line: structuredClone(line), waitMinutes: r.headwayMinutes / 2, ride });
+      const active=this.engine.activeBusCount(r.lineId),capacity=this.engine.activeBusCapacity(r.lineId),busLevel=capacity>=80?3:capacity>=60?2:1;
+      lines.push({ line: {...structuredClone(line),busCount:active,busLevel}, waitMinutes: r.headwayMinutes * line.busCount / active / 2, ride });
     }
     this.cfgKey = key; this.cfg = { stops: structuredClone(b?.stops ?? []), lines }; return this.cfg;
   }

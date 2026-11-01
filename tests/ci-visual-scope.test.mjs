@@ -135,3 +135,10 @@ test('bumper-gap route requires exact reviewed physics and rejects mixed save or
  assert.equal(trafficGapPathsOnly(paths),true);assert.equal(trafficGapOnly(paths),false);assert.equal(trafficGapOnly(paths,{trafficGapSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
  for(const invalid of [[],paths.slice(1),...['src/main.ts','src/sim.ts','src/pages-auth.ts','src/bus/engine.ts','src/rail/network-runtime.ts','src/save-storage.ts','src/server-city-save.ts','server/city-saves/service.mjs','package.json'].map(p=>[...paths,p])]){assert.equal(trafficGapPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {rightOfWayPathsOnly,rightOfWayOnly} from '../scripts/ci-visual-scope.mjs';
+test('shared bus movement route requires exact reviewed source and rejects mixed runtime/auth/save paths',()=>{
+ const paths=['src/bus/engine.ts','src/bus/game-bridge.ts','src/traffic/game.ts','src/traffic/presentation.ts','tests/bus-movement-gate.test.ts','tests/traffic-junction-fairness.test.ts','tests/traffic-gap-browser-checks.mjs'];
+ assert.equal(rightOfWayPathsOnly(paths),true);assert.equal(rightOfWayOnly(paths),false);assert.equal(rightOfWayOnly(paths,{rightOfWaySourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const invalid of [[],paths.slice(1),...['src/main.ts','src/sim.ts','src/rail/network-runtime.ts','src/pages-auth.ts','src/server-city-save.ts','server/city-saves/service.mjs','package.json'].map(p=>[...paths,p])]){assert.equal(rightOfWayPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});

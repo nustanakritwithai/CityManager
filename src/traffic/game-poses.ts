@@ -5,6 +5,19 @@ import {TRAFFIC_SPACING} from './spacing.ts';
 
 /** Rendering is cosmetic: the game model still tracks at most 128 cars. */
 export const GAME_VISUAL_CAR_CAP=64;
+function turnHint(c:GameCar,g:GameRenderGroup,size:number,unit:number,bx:number,bz:number,hx:number,hz:number){
+ const incomingOffset=laneOffset({cell:g.to,incoming:g.to-g.from,lane:c.lane??0})*unit;
+ const entry={incomingHeadingX:hx,incomingHeadingZ:hz,entryX:bx+hz*incomingOffset,entryZ:bz-hx*incomingOffset,...(c.nextVisit===undefined?{}:{visit:c.nextVisit})};
+ if(c.nextCell===undefined){
+  if(!c.junction)return {};
+  const offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane:c.lane??0})*unit;
+  return {upcomingTurn:{x:bx+hz*offset,z:bz-hx*offset,headingX:hx,headingZ:hz,nodeX:bx,nodeZ:bz,...entry}};
+ }
+ const nx=((c.nextCell%size)-(size-1)/2)*unit,nz=(Math.floor(c.nextCell/size)-(size-1)/2)*unit,nhx=Math.sign(nx-bx),nhz=Math.sign(nz-bz);
+ if(Math.abs(nx-bx)+Math.abs(nz-bz)!==unit||(!c.junction&&hx*nhx+hz*nhz!==0))return {};
+ const offset=laneOffset({cell:c.nextCell,incoming:c.nextCell-g.to,lane:c.nextLane??c.lane??0})*unit;
+ return {upcomingTurn:{x:bx+nhz*offset+nhx*.355*unit,z:bz-nhx*offset+nhz*.355*unit,headingX:nhx,headingZ:nhz,nodeX:bx,nodeZ:bz,...entry}};
+}
 type Candidate={pose:CitizenVehiclePose;cell:number;link:string};
 /** Sample across the whole city, not just the current viewport. Equal-turn
  * selection across fixed spatial sectors, then links within each sector, keeps
@@ -47,12 +60,12 @@ export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGrou
    for(let lane=0;lane<lanes;lane++){
     const people=perLane[lane].sort((a,b)=>(a.progress??0)-(b.progress??0)).slice(-TRAFFIC_SPACING.maxPerLanePerTile);
     for(const c of people){const s=Math.min(1,Math.max(0,c.progress??0)),offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane})*unit;
-     result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
+     result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,...turnHint(c,g,size,unit,bx,bz,hx,hz),laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
    }
   }else for(let lane=0;lane<lanes;lane++){
    const people=selected.slice(lane*LANE_SLOTS,(lane+1)*LANE_SLOTS), slots=laneSlotCentres(people.length,people.some(c=>c.blocked)?1:.5);
    for(let i=0;i<people.length;i++){const c=people[i],s=slots[i],offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane})*unit;
-    result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
+    result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,...turnHint(c,g,size,unit,bx,bz,hx,hz),laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
   }
  }
  return spatialSample(result,size,limit);

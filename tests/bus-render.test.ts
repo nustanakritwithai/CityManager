@@ -87,9 +87,9 @@ test('fixture poses: interpolate, face next, levels 40/60/80, load, dwell kerb, 
   assert.equal(start.phase, 'toStart'); assert.equal(start.headingX, 1); assert.equal(start.progress, 0);
   const draw = busDrawList(bare(), fixtureBusSnapshots(), [], () => 0);
   const counts = busInstanceCounts(draw);
-  assert.equal(counts.buses, 6);
-  assert.deepEqual(counts.byLevel, { 1: 4, 2: 1, 3: 1 });
-  assert.equal(counts.loads, 3); assert.equal(counts.dwelling, 1); assert.equal(counts.total, 10);
+  assert.equal(counts.buses, 4);
+  assert.deepEqual(counts.byLevel, { 1: 2, 2: 1, 3: 1 });
+  assert.equal(counts.loads, 3); assert.equal(counts.dwelling, 1); assert.equal(counts.total, 8);
   const matrix = new Float32Array(16);
   writeBusMatrix(matrix, 0, l1);
   assert.ok(Math.abs(matrix[8]! / l1.length - 1) < 1e-6, 'local +Z points along the heading');
@@ -221,4 +221,11 @@ test('subscribeBusEvents is the UI hook and survives a throwing subscriber', () 
     assert.ok(frame.events.length > 0); assert.equal(seen, frame.events.length);
     assert.equal(engine.drainEvents().length, 0);
   } finally { unsub(); noisy(); }
+});
+
+
+test('only actual home buses stay inside depot; all active IDs and source snapshots remain intact',()=>{
+ const snapshots=fixtureBusSnapshots(),before=JSON.stringify(snapshots),draw=busDrawList(bare(),snapshots,[],()=>0);
+ assert.deepEqual(draw.buses.map(b=>b.id),snapshots.filter(b=>b.phase!=='home').map(b=>b.id));
+ assert.equal(snapshots.filter(b=>b.phase==='home').length,2);assert.equal(JSON.stringify(snapshots),before);
 });
