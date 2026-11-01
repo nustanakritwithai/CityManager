@@ -53,5 +53,5 @@ test('scoped RRT routing retains shared taxi planner regressions in both traffic
 });
 
 test('adaptive phases, coordination, peer protocol and actual signal display remain mandatory in both gates',()=>{
- for(const path of ['.github/workflows/traffic-enabled.yml','.github/workflows/citymanager.yml']){const yaml=readFileSync(path,'utf8');for(const name of ['traffic-adaptive-signals.test.ts','traffic-signal-coordination.test.ts','traffic-signal-peers.test.ts','traffic-signal-display.test.ts','traffic-signal-lifecycle.test.ts','traffic-signal-browser-checks.test.mjs','traffic-rrt-navigation.test.ts'])assert.ok(yaml.includes(`tests/${name}`),`${path} requires ${name}`);}
+ for(const path of ['.github/workflows/traffic-enabled.yml','.github/workflows/citymanager.yml']){const yaml=readFileSync(path,'utf8');for(const name of ['traffic-worker-cycle.test.ts','traffic-worker-cycle-presentation.test.ts','traffic-adaptive-signals.test.ts','traffic-signal-coordination.test.ts','traffic-signal-peers.test.ts','traffic-signal-display.test.ts','traffic-signal-lifecycle.test.ts','traffic-signal-browser-checks.test.mjs','traffic-rrt-navigation.test.ts'])assert.ok(yaml.includes(`tests/${name}`),`${path} requires ${name}`);}
 });

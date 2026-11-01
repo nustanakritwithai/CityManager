@@ -74,4 +74,9 @@ Initial matched 60-step all-road/64-OD/128-car host sample: live mean/p95 19.5/4
 
 Peer-route cache construction is separate one-time/topology-edit work (a separate host sample measured 34.7ms initial construction and 16.3ms for an edit), not a per-message RRT search.
 
-Residual added work remains material, around 39ms of the one-second worker cadence on this host, and below the existing 750/1000ms worker gate. This is not a speedup versus live or a real-device claim. Conservation error was zero in the dense sample. The earlier grouping pass also had exact full-frame/signal equality over two 240-step traces. No timing/policy thresholds were changed during optimization.
+Before the circular-admission guard described below, residual added work remained material, around 39ms of the one-second worker cadence on this host, and below the existing 750/1000ms worker gate. This is not a speedup versus live or a real-device claim. Conservation error was zero in the dense sample. The earlier grouping pass also had exact full-frame/signal equality over two 240-step traces. No timing/policy thresholds were changed during optimization.
+
+
+## Circular-admission guard integration
+
+The follow-on [worker cycle prevention](TRAFFIC-WORKER-CYCLE-PREVENTION.md) rejects prospective circular lane dependencies after signal/physical eligibility and before admission. It does not retune phases, neighbor scoring, clearance or bus geometry. Existing fixed-versus-adaptive and all five neighbor-comparison calibration results above were rerun on the integrated candidate and remained unchanged. The final bounded 60-step peak worker sample measured 48.96ms mean / 81.19ms p95; safety bookkeeping adds cost, and no overall speedup or mobile-FPS claim is made.
