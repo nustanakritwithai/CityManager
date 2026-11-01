@@ -21,7 +21,7 @@
 .city-map-legend { justify-self: stretch; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--c-muted, #cad6f0); }
 .city-map-key::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 6px; border-radius: 3px; vertical-align: -1px; }
 .city-map-key.R::before { background: #3f9c6b; } .city-map-key.C::before { background: #3c84b8; } .city-map-key.I::before { background: #c27a3a; } .city-map-key.F::before { background: #8aa543; }
-.city-map-key.road::before { background: #556078; } .city-map-key.rail::before { background: #c3b8ff; box-shadow: 0 0 0 2px #2b2450 inset; } .city-map-key.gate::before { background: #f3c46b; } .city-map-key.issue::before { background: #ff6b5b; border-radius: 50%; box-shadow: 0 0 0 2px #fff inset; }
+.city-map-key.road::before { background: #556078; } .city-map-key.bus::before { background: #f4f7fb; border-radius: 50%; box-shadow: 0 0 0 2px #2f8fd8 inset; } .city-map-key.rail::before { background: #c3b8ff; box-shadow: 0 0 0 2px #2b2450 inset; } .city-map-key.gate::before { background: #f3c46b; } .city-map-key.issue::before { background: #ff6b5b; border-radius: 50%; box-shadow: 0 0 0 2px #fff inset; }
 .city-map-canvas { display: block; border-radius: 10px; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); }
 .city-map-info { justify-self: stretch; margin: 0; min-height: 20px; font-size: 13.5px; color: var(--c-muted, #cad6f0); }
 @media (max-width: 600px) { .city-map { padding: 0 8px 10px; width: calc(100vw - 16px); box-sizing: border-box; } .city-map-legend { font-size: 12.5px; } }

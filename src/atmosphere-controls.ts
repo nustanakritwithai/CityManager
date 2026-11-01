@@ -6,6 +6,7 @@ import {
 import { WeatherOverlay } from './weather-overlay.ts';
 import type { CityView } from './renderer.ts';
 import type { City } from './sim.ts';
+import { sessionMemory } from './session-memory.ts';
 
 export type VisualSettings = { timeMode: TimeMode; quality: Quality | 'auto'; rain: boolean; seasons: boolean; traffic: boolean; mapInfo: boolean };
 const STORAGE_KEY = 'citymanager.visual.v1';
@@ -18,7 +19,7 @@ const NO_SEASON: SeasonWeights = { hot: 0, rainy: 0, cool: 0 };
 /** Per-viewer convenience only; an unreadable store falls back to defaults. */
 export function loadVisualSettings(): VisualSettings {
   try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    const raw = JSON.parse(sessionMemory.getItem(STORAGE_KEY) ?? '{}');
     return {
       timeMode: TIME_MODES.includes(raw.timeMode) ? raw.timeMode : DEFAULTS.timeMode,
       quality: raw.quality === 'auto' || QUALITIES.includes(raw.quality) ? raw.quality : DEFAULTS.quality,
@@ -30,7 +31,7 @@ export function loadVisualSettings(): VisualSettings {
   } catch { return { ...DEFAULTS }; }
 }
 function saveVisualSettings(settings: VisualSettings) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch { /* private mode: keep in memory */ }
+  try { sessionMemory.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch { /* private mode: keep in memory */ }
 }
 /** Software rasterisers (no GPU) start low; touch or small screens start medium. */
 export const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|basic render|warp|software/i;

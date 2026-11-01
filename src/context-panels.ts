@@ -641,7 +641,9 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
       const cards = takeCards(parts, [...keys]); if (stage === 'output') cards.push(cardStat('goods-produced-today', 'ผลิตจริงวันนี้', data.today.goodsProduced, 'หน่วย'));
       step.append(el('span', 'bc-chain-label', title), cardKpis(cards)); chain.append(step);
     }
-    production.append(chain); output.push(cardSection(production, 'production'));
+    // Put the read-only production values immediately after the identity in
+    // the actual document, so the visual and keyboard reading orders agree.
+    production.append(chain); output.splice(1, 0, cardSection(production, 'production'));
     if (parts.funding) output.push(cardSection(parts.funding, 'funding'));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
   } else {

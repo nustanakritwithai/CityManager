@@ -19,6 +19,7 @@ let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains i
 const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],saveNetwork:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
+const runLostAckNextSave=env=>env.CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE==='1';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // Synthetic browser fixture only. Record the visible retry click and the
 // forwarded Save click without capturing cookies, keys, or city bytes.
@@ -107,6 +108,7 @@ function fixtureService(){
  return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0,traceSave:false,postAudit:[]};
 }
 async function selfTest(){
+ assert.equal(runLostAckNextSave({}),false);assert.equal(runLostAckNextSave({CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE:'0'}),false);assert.equal(runLostAckNextSave({CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE:'1'}),true);
  const listeners=[],syntheticWindow={},syntheticDocument={addEventListener:(type,fn,capture)=>listeners.push({type,fn,capture})};
  Function('window','document','Date',`(${installSaveClickTrace.toString()})()`)(syntheticWindow,syntheticDocument,Date);
  const clickListener=listeners.find(x=>x.type==='click');assert.ok(clickListener);assert.equal(clickListener.capture,true);
@@ -341,6 +343,9 @@ async function run(){
   await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Emulation.clearDeviceMetricsOverride');
   // Commit succeeded but its ACK was lost. The banner must replay the original
   // key/body before trackedSave writes the current state as a new revision.
+  // Explicitly excluded from this release's acceptance by the owner; keep it
+  // opt-in for a later investigation rather than claiming it passed.
+  if(runLostAckNextSave(process.env)){
   await evaluate('window.__saveClickTrace=[]');f.postAudit=[];
   const lostHead=f.state.active,lostRequests=f.state.requests.size,lostStart=f.posts.length;f.mode='drop-save-ack';await click('#save');await until(failed,'committed save with lost ACK');
   assert.equal(f.state.active.revision,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+1);const lostCommand=f.posts[lostStart];
@@ -349,7 +354,9 @@ async function run(){
   const observed=await lostAckSnapshot();
   const grouped=verifyLostAckPosts(observed,lostCommand,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+2,'retry creates no duplicate receipt');
   assert.equal(f.state.requests.get(lostCommand.key)?.response.revision,lostHead.revision+1,'one original receipt records its single commit');
-  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');console.log('Lost ACK native retry',JSON.stringify({retryMouse:diagnostics.retryMouse,clicks:diagnostics.lostAck?.ui?.clicks}));f.traceSave=false;await clean();
+  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');console.log('Lost ACK native retry',JSON.stringify({retryMouse:diagnostics.retryMouse,clicks:diagnostics.lostAck?.ui?.clicks}));await clean();
+  }else{diagnostics.lostAck={status:'not-run',reason:'owner-excluded from release acceptance'};console.log('NOT RUN: lost ACK retry and subsequent current-state receipt (owner excluded)');}
+  f.traceSave=false;
   // Management is an explicit two-step lifecycle; Cancel has no mutation.
   diagnostics.phase='management cancel';const beforeCancel=f.state.active,cancelPosts=f.posts.length;
   await click('#new-city');await until(()=>evaluate("!!document.querySelector('#save-management-dialog[open]')"),'management dialog');await click('#save-management-cancel');
@@ -413,12 +420,12 @@ const selfTestOnly=process.argv.includes('--self-test'),started=new Date().toISO
 const output=resolve('.test-output/server-save-smoke');await mkdir(output,{recursive:true});
 try {
  if(selfTestOnly)await selfTest();else await run();
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':runLostAckNextSave(process.env)?'passed':'passed-with-exclusion',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics},null,2));
 } catch(error) {
  await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics,error:String(error?.stack??error)},null,2));
  // Emit only bounded synthetic request and click metadata so CI logs can
  // distinguish a missed click from a failed ACK when artifacts are unavailable.
- if(diagnostics.lostAck){const {initialRevision,headRevision,initialReceiptCount,receiptCount,posts,fixtureAudit,network,ui}=diagnostics.lostAck;console.error('Lost ACK diagnostic',JSON.stringify({initialRevision,headRevision,initialReceiptCount,receiptCount,posts:posts.map(({sameOriginalKey,action,expectedRevision})=>({sameOriginalKey,action,expectedRevision})),fixtureAudit,network,retryMouse:diagnostics.retryMouse,ui:{bannerVisible:ui?.bannerVisible,saveDisabled:ui?.saveDisabled,clicks:ui?.clicks}}));}
+ if(diagnostics.lostAck?.posts){const {initialRevision,headRevision,initialReceiptCount,receiptCount,posts,fixtureAudit,network,ui}=diagnostics.lostAck;console.error('Lost ACK diagnostic',JSON.stringify({initialRevision,headRevision,initialReceiptCount,receiptCount,posts:posts.map(({sameOriginalKey,action,expectedRevision})=>({sameOriginalKey,action,expectedRevision})),fixtureAudit,network,retryMouse:diagnostics.retryMouse,ui:{bannerVisible:ui?.bannerVisible,saveDisabled:ui?.saveDisabled,clicks:ui?.clicks}}));}
  else if(diagnostics.retryBanner)console.error('Banner retry diagnostic',JSON.stringify({retryMouse:diagnostics.retryMouse,...diagnostics.retryBanner}));
  throw error;
 }

@@ -2,14 +2,17 @@ import assert from 'node:assert/strict';
 
 // Shared mobile reading surfaces, using only native navigation and synthetic
 // server save failures. Collect the whole matrix before reporting any failure.
-export async function verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts, failServerWrites, restoreServerWrites, retrySave }) {
-  const views = [
+export async function verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts, failServerWrites, restoreServerWrites, retrySave, factoryOnly=false }) {
+  const views = factoryOnly ? [
+    { name:'phone', width:360, height:740, screenWidth:360, screenHeight:780 },
+    { name:'wide', width:390, height:844, screenWidth:390, screenHeight:844 },
+  ] : [
     { name:'phone', width:360, height:740, screenWidth:360, screenHeight:780 },
     { name:'short', width:360, height:420, screenWidth:360, screenHeight:780 },
     { name:'landscape', width:844, height:390, screenWidth:844, screenHeight:390 },
     { name:'wide', width:980, height:2120, screenWidth:390, screenHeight:844 },
   ];
-  const pages = ['ledger','city','help','game','house','factory','household'], failures = [];
+  const pages = factoryOnly ? ['factory'] : ['ledger','city','help','game','house','factory','household'], failures = [];
   const snapshot = await evaluate('cityManager.snapshot()');
   const expected = JSON.parse(snapshot);
   function differences(actual, before=expected, path='city', out=[]) {
@@ -62,10 +65,10 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
             const full=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right};
             const keys=({house:['households','persons','vacant-households','vacant-persons'],factory:['crop-stock','recipe-input','recipe-output','stock'],household:['members','workforce','dependents','employed','unemployed']})[${JSON.stringify(name)}]||[];
             const primary=keys.map(k=>document.querySelector('#entity-content .bc-kpis [data-context-metric="'+k+'"]')).filter(Boolean);
-            return{viewport:[innerWidth,innerHeight],ratio,panel:{top:p.top,bottom:p.bottom,left:p.left,right:p.right,height:p.height},body:{top:b.top,bottom:b.bottom,height:b.height,horizontalOverflow:body.scrollWidth>body.clientWidth+1},warningVisible:!banner.hidden,warningInline:banner.parentElement===panel,warningRect:{top:w.top,bottom:w.bottom},primaryTotal:primary.length,primaryFull:primary.filter(full).length,primaryGeometry:primary.map(e=>{const r=e.getBoundingClientRect();return{key:e.dataset.contextMetric,top:r.top,bottom:r.bottom,left:r.left,right:r.right,full:full(e)}}),ledgerFull:[...document.querySelectorAll('#ledger .sm-flow-card')].filter(full).length,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-retry']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width*ratio,height:r.height*ratio,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})};
+            return{viewport:[innerWidth,innerHeight],ratio,panel:{top:p.top,bottom:p.bottom,left:p.left,right:p.right,height:p.height},body:{top:b.top,bottom:b.bottom,height:b.height,horizontalOverflow:body.scrollWidth>body.clientWidth+1},warningVisible:!banner.hidden,warningInline:banner.parentElement===panel,warningRect:{top:w.top,bottom:w.bottom},primaryTotal:primary.length,primaryFull:primary.filter(full).length,primaryGeometry:primary.map(e=>{const r=e.getBoundingClientRect();return{key:e.dataset.contextMetric,top:r.top,bottom:r.bottom,left:r.left,right:r.right,full:full(e),textFits:[...e.querySelectorAll('dt,dd')].every(t=>t.scrollWidth<=t.clientWidth+1&&t.scrollHeight<=t.clientHeight+1)}}),chainOrder:[...document.querySelectorAll('#entity-content .bc-chain-step')].map(e=>{const r=e.getBoundingClientRect();return{stage:e.dataset.stage,left:r.left,top:r.top}}),factorySequence:[...document.querySelectorAll('#entity-content > [data-card-section]')].filter(e=>['production','recipe-choice'].includes(e.dataset.cardSection)).map(e=>({section:e.dataset.cardSection,top:e.getBoundingClientRect().top,order:getComputedStyle(e).order})),ledgerFull:[...document.querySelectorAll('#ledger .sm-flow-card')].filter(full).length,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-retry']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width*ratio,height:r.height*ratio,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})};
           })()`);
           Object.assign(measurement,{viewportName,page:name,warning}); layouts.push(measurement);
-          if (warning && (viewportName==='phone'||name==='ledger')) await shot('reading-'+label);
+          if (factoryOnly || (warning && (viewportName==='phone'||name==='ledger'))) await shot('reading-'+label);
           const p=measurement.panel;
           assert.ok(p.top>=0&&p.bottom<=viewport.height+1&&p.left>=0&&p.right<=viewport.width+1,'Viewport-contained panel: '+label);
           assert.ok(p.height>=viewport.height*.9,'Tall reading surface >=90% viewport: '+label);
@@ -79,6 +82,19 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
           if (viewportName==='phone'||viewportName==='wide') {
             if (measurement.primaryTotal) assert.equal(measurement.primaryFull,measurement.primaryTotal,'Complete type-specific primary values fit initially: '+label);
             if (name==='ledger') assert.ok(measurement.ledgerFull>0,'Actual complete ledger row visible: '+label);
+          }
+          if (factoryOnly) {
+            assert.equal(measurement.primaryTotal,4,'All four real factory values exist: '+label);
+            assert.equal(measurement.primaryFull,4,'All four values fit inside the visible scroll viewport: '+label);
+            assert.ok(measurement.primaryGeometry.every(x=>x.textFits),'Factory metric text does not overflow: '+label);
+            assert.deepEqual(measurement.chainOrder.map(x=>x.stage),['input','recipe','output'],'Factory DOM order is preserved: '+label);
+            assert.ok(measurement.chainOrder[0].left<measurement.chainOrder[1].left&&measurement.chainOrder[1].left<measurement.chainOrder[2].left,'Factory visual order follows DOM order: '+label);
+            assert.deepEqual(measurement.factorySequence.map(x=>x.section),['production','recipe-choice'],'Factory value and control document order: '+label);
+            assert.ok(measurement.factorySequence[0].top<measurement.factorySequence[1].top,'Factory value and control visual order: '+label);
+            const scroll=await evaluate("(()=>{const b=document.querySelector('#inspector-body');b.scrollTop=b.scrollHeight;return{range:b.scrollHeight-b.clientHeight,top:b.scrollTop}})()");
+            assert.ok(scroll.range>0&&scroll.top>0,'Factory detail controls remain scrollable: '+label);
+            const control=await evaluate("(()=>{const e=document.querySelector('#entity-content [data-recipe]:not(:disabled)');if(!e)return null;e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()");
+            assert.ok(control&&control.width>=43.5&&control.height>=43.5&&control.hit,'A real factory recipe control stays reachable: '+label);
           }
           const delta = differences(JSON.parse(await evaluate('cityManager.snapshot()')));
           if (delta.length) Object.assign(measurement,{stateDelta:delta,recentClicks:await evaluate('window.__uxReadingClicks')});

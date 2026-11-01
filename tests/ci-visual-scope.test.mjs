@@ -241,3 +241,43 @@ test('bus scene presentation requires its reviewed source diff and rejects engin
  assert.equal(busSceneOnly(paths),false);assert.equal(busSceneOnly(paths,{busSceneSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!=='src/bus/overlay.ts'),paths.filter(p=>p!=='tests/bus-scene.test.ts'),...['index.html','src/main.ts','src/bus/engine.ts','src/bus/lines.ts','src/bus/panel.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(busScenePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {workExpiryPaths,workExpiryPathsOnly,workExpiryOnly,workExpirySelectorMatches} from '../scripts/ci-visual-scope.mjs';
+test('work-expiry scope requires exact paths, base tree, source and gate evidence',()=>{
+ assert.equal(workExpiryPathsOnly(workExpiryPaths),true);
+ assert.equal(workExpiryOnly(workExpiryPaths),false);
+ for(const invalid of [[],workExpiryPaths.slice(1),[...workExpiryPaths,'src/server-city-save.ts'],[...workExpiryPaths,'src/rail/network-runtime.ts']])assert.equal(workExpiryPathsOnly(invalid),false);
+ assert.equal(visualKind(workExpiryPaths,{workExpiryBaseTree:'wrong',workExpirySourceDiff:'wrong',workExpiryGates:'wrong'}),'full');
+});
+
+test('work scope rejects any unreviewed selector mutation',()=>{
+ const selector=readFileSync('scripts/ci-visual-scope.mjs','utf8');
+ assert.equal(workExpirySelectorMatches(selector),true);
+ assert.equal(workExpirySelectorMatches(selector+'\n// unexpected change'),false);
+ assert.equal(workExpirySelectorMatches(selector.replace('return towerOnly(paths)', 'return true || towerOnly(paths)')),false);
+ assert.equal(workExpirySelectorMatches(selector.replace(/const workExpirySelectorHash='[0-9a-f]{64}';/,'')),false);
+});
+
+import {busMapSources,busMapPathsOnly,busMapOnly} from '../scripts/ci-visual-scope.mjs';
+test('bus map overlay requires its reviewed source diff and rejects engine, 3D, save and simulation paths',()=>{
+ const paths=[...busMapSources,'tests/bus-map.test.ts','docs/bus-map-ci-scope.md'];
+ assert.equal(busMapPathsOnly(paths),true);
+ assert.equal(busMapOnly(paths),false);assert.equal(busMapOnly(paths,{busMapSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/bus/map-paint.ts'),paths.filter(p=>p!=='tests/bus-map.test.ts'),...['index.html','src/main.ts','src/bus/engine.ts','src/bus/scene-buses.ts','src/rail/map-paint.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(busMapPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+import {saveCleanupDeletedSources,saveCleanupSources,saveCleanupPathsOnly,saveCleanupOnly} from '../scripts/ci-visual-scope.mjs';
+test('save cleanup needs every dead module deleted, its reviewed diff, and rejects any live source change',()=>{
+ const paths=[...saveCleanupSources,'tests/save-safety.test.ts','.github/workflows/save-safety.yml','docs/save-cleanup-ci-scope.md'];
+ assert.equal(saveCleanupPathsOnly(paths),true);
+ assert.equal(saveCleanupOnly(paths),false);assert.equal(saveCleanupOnly(paths,{saveCleanupSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!==saveCleanupDeletedSources[0]),...['index.html','src/main.ts','src/save-storage.ts','src/server-city-save.ts','src/market-client.ts','src/city-save-auth.ts','src/sim.ts','server/city-saves/service.mjs','tests/server-save-browser-smoke.mjs'].map(p=>[...paths,p])]){assert.equal(saveCleanupPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+import {browserStorageSources,browserStoragePathsOnly,browserStorageOnly} from '../scripts/ci-visual-scope.mjs';
+test('browser-storage removal needs its reviewed diff and rejects save format, server, simulation and UI paths',()=>{
+ const paths=[...browserStorageSources,'docs/browser-storage-ci-scope.md'];
+ assert.equal(browserStoragePathsOnly(paths),true);
+ assert.equal(browserStorageOnly(paths),false);assert.equal(browserStorageOnly(paths,{browserStorageSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/session-memory.ts'),...['index.html','src/main.ts','src/save-storage.ts','src/server-city-save.ts','src/park-runtime.ts','src/sim.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(browserStoragePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});

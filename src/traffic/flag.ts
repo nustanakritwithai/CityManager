@@ -1,8 +1,9 @@
+import { sessionMemory } from '../session-memory.ts';
 /** This independent game layer is enabled only after integration acceptance. */
 export const TRAFFIC_GAME_DEFAULT = true;
 export const TRAFFIC_STORAGE_KEY = 'citymanager.traffic';
 type TrafficStorage = Pick<Storage, 'getItem' | 'setItem'>;
-function defaultStorage():TrafficStorage|undefined { try { return globalThis.localStorage; } catch { return undefined; } }
+function defaultStorage():TrafficStorage|undefined { return sessionMemory; }
 /** Store both ON and OFF explicitly so opting out remains off across reloads. */
 export function storeTrafficModel(enabled:boolean,storage:TrafficStorage|undefined=defaultStorage()):boolean {
   try { if(!storage)return false;storage.setItem(TRAFFIC_STORAGE_KEY,enabled?'1':'0');return true; } catch {return false;}

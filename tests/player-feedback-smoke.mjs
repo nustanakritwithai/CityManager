@@ -13,6 +13,7 @@ import { verifyReadingPanels } from './player-feedback-reading.mjs';
 
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT);
 const runtimeOnly = process.env.CITYMANAGER_UX_RUNTIME_ONLY === '1';
+const workTouchOnly = process.env.CITYMANAGER_UX_WORK_TOUCH_ONLY === '1';
 if (!debugPort) throw Error('Set CITYMANAGER_DEBUG_PORT to your isolated test browser.');
 const root = resolve('dist'), output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/player-feedback'),origin='http://127.0.0.1:4176';
 await mkdir(output, { recursive: true });
@@ -247,6 +248,12 @@ try {
   try{await until("document.querySelector('#inspector').dataset.open!=='true'");}catch(error){console.error('Keyboard activation diagnostic',JSON.stringify(await evaluate('({active:document.activeElement?.id,events:window.__keyboardTrace})')));throw error;}
   assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Keyboard activation remains functional');
   checks.push('canvas touch does not activate a new factory control; following touch and keyboard activation work');
+  if (workTouchOnly) {
+    await shot('work-touch-keyboard');
+    await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts, failServerWrites, restoreServerWrites, retrySave, factoryOnly:true });
+    checks.push('factory reading: all four actual values on 360 and 390 phone viewports with and without save warning, DOM/visual order and scrolling');
+  }
+  if (!workTouchOnly) {
   await send('Emulation.setDeviceMetricsOverride',{width:844,height:390,screenWidth:844,screenHeight:390,deviceScaleFactor:1,mobile:true});
   await until('innerWidth===844&&innerHeight===390');
   const matrixFailures = [];
@@ -298,8 +305,9 @@ try {
   checks.push('all six cards at landscape 844x390, warning on/off: complete identity and at least two complete labelled numeric metrics, unchanged city data, no horizontal overflow, 44px reachable controls and real save retry');
   await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts, failServerWrites, restoreServerWrites, retrySave });
   checks.push('seven tall reading panels across phone, short, landscape and wide-request viewports, warning on/off: >=90% panel height, contained scroll content, inline persistent warning, physical 44px controls, full primary values at normal reading heights, unchanged city data');
+  } else { checks.push('Other cards and reading matrices excluded from this focused touch and factory check'); }
   await fixtureServer.core.assertNoCityWrites(evaluate);assert.deepEqual(httpErrors,[]);assert.deepEqual(externalRequests,[]);assert.equal(errors.length, 0, JSON.stringify(errors));
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, readingLayouts, checks, errors }, null, 2));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, workTouchOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, readingLayouts, checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   const failedStage = stage;

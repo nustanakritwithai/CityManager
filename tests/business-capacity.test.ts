@@ -5,9 +5,6 @@ import { MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, bulldoze, createCity, deserialize, 
 import { parcelChecklist } from '../src/place-checklist.ts';
 import { createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { SAVE_KEY, BUSINESS_CAPACITY_BACKUP_KEY, businessCapacityBackupKeys, AUTOSAVE_CHECKPOINT_KEY, LATEST_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
-import { createSaveGuard } from '../src/save-guard.ts';
-import { restoreStartupCity } from '../src/startup-save.ts';
-import { loadLocalCitySession, saveLocalCitySession } from '../src/local-city-save.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
 import * as v5 from '../src/legacy-v5.ts';
 import {decodeSaveCopy} from '../src/save-copy-codec.ts';
@@ -105,23 +102,8 @@ test('v23 handles education/population/roads combinations but rejects mismatched
 test('v1, v5 and v22 remain loadable without modifying original bytes or promoting a small city', () => {
   const legacy5 = v5.createCity(); for (let day = 0; day < 12; day++) v5.step(legacy5);
   const originals = [readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), v5.serialize(legacy5), historical(22)];
-  for (const raw of originals) { const store = memory(raw), before = [...store.data], loaded = restoreStartupCity(store, createCity); assert.equal(loaded.error, null); assert.deepEqual([...store.data], before); assert.equal(loaded.city.businessCapacityVersion, undefined); reconcile(loaded.city); }
+  for (const raw of originals) { const loaded = deserializeParkSession(raw); assert.equal(loaded.city.businessCapacityVersion, undefined); reconcile(loaded.city); }
   const canonical=session(deserializeParkSession(originals[2]).city); assert.equal(session(deserializeParkSession(canonical).city),canonical); assert.equal(JSON.parse(originals[2]).version,22);
-});
-
-test('v23 local session/startup/recovery retain Guest identity, journal and exact original migration bytes', async () => {
-  const old=historical(22), historicalNext=historical(23), journal=JSON.parse(old).market;
-  const store=memory(old),guard=createSaveGuard(store);guard.acceptLoaded(old);
-  // Exercise the actual dormant v22→v23 backup branch with exact original bytes.
-  guard.write(historicalNext,null);
-  assert.equal(decodeSaveCopy(store.getItem(BUSINESS_CAPACITY_BACKUP_KEY)!),old);assert.equal(readStoredCity(store,'backup')?.raw,old);assert.equal(readStoredCity(store,'checkpoint')?.raw,historicalNext);
-  const startup=restoreStartupCity(store,createCity);assert.equal(startup.error,null);assert.deepEqual(startup.city.market,journal);assert.equal(startup.city.firms.length,65);
-  let raw='';await saveLocalCitySession(startup.city,startup.runtime,undefined,value=>{raw=value;startup.guard.write(value,null);});
-  assert.equal(JSON.parse(raw).version,25);assert.equal(serializeParkSession(deserializeParkSession(raw).city,deserializeParkSession(raw).runtime),raw);
-  assert.throws(()=>startup.guard.write(old,null),/เวอร์ชันเก่า/);assert.equal(store.getItem(SAVE_KEY),raw);
-  const before = [...store.data]; let loaded: City | undefined;
-  await loadLocalCitySession(raw, undefined, startup.guard, restored => { loaded = restored.city; }); assert.deepEqual([...store.data], before); assert.deepEqual(loaded?.market, journal);
-  startup.guard.write(raw, null); assert.equal(decodeSaveCopy(store.getItem(BUSINESS_CAPACITY_BACKUP_KEY)!), old);
 });
 
 test('migration planner full or quota-failed capacity backup cannot publish new primary/checkpoint/recovery pointer', () => {

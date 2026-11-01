@@ -4,6 +4,7 @@
  * All numbers are PLACEHOLDERS pending owner balance. Round 1 is economy-neutral.
  */
 import type { TripPurpose } from '../traffic/types.ts';
+import { sessionMemory } from '../session-memory.ts';
 
 /** Feature flag — the single source of truth for bus. OFF: no bus demand is split, nothing changes. */
 export const BUS_ENABLED = true;
@@ -12,7 +13,7 @@ type FlagStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 /** Flag with a dev override: `?bus=1` (remembered) / `?bus=0` (forgotten). Never throws. */
 export function busEnabled(search = globalThis.location?.search ?? '', storage?: FlagStorage): boolean {
   let q: string | null = null; try { q = new URLSearchParams(search).get('bus'); } catch { q = null; }
-  try { storage ??= globalThis.localStorage; } catch { /* storage getter can be denied */ }
+  storage ??= sessionMemory;
   try { if (q === '1') storage?.setItem(BUS_STORAGE_KEY, '1'); if (q === '0') storage?.setItem(BUS_STORAGE_KEY, '0'); } catch { /* private mode */ }
   if (q === '1') return true; if (q === '0') return false;
   try { const saved = storage?.getItem(BUS_STORAGE_KEY); if (saved === '1') return true; if (saved === '0') return false; } catch { /* ignore */ }

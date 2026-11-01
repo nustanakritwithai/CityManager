@@ -7,9 +7,6 @@ import {RailNetworkRuntime} from '../src/rail/network-runtime.ts';
 import {isRailReserved,RAIL_PARCEL_MESSAGE} from '../src/rail/reserved-parcels.ts';
 import {buildTaxiDepot,taxiSiteReason} from '../src/taxi/placement.ts';
 import {taxiAt} from '../src/taxi/buildings.ts';
-import {createSaveGuard} from '../src/save-guard.ts';
-import {restoreStartupCity} from '../src/startup-save.ts';
-import {loadLocalCitySession} from '../src/local-city-save.ts';
 import {SAVE_KEY} from '../src/save-storage.ts';
 import {marketJournalForTest} from '../src/market-client.ts';
 
@@ -68,12 +65,11 @@ test('absent optional systems stay absent through combined-base save/reload',()=
 for(const [kind,cell] of [['station',245],['track',246]] as const){
   test(`overlapping ${kind} capture rejects before touching stored originals or existing reservations`,()=>{
     const {city,runtime,rail}=fixture();reserve(rail);assert.ok(buildTaxiDepot(city,243,true).ok);
-    const good=serializeParkSession(city,runtime),s=memory();s.setItem(SAVE_KEY,good);s.setItem('immutable-backup',good);
-    const guard=createSaveGuard(s);guard.acceptLoaded(good);const stored=[...s.data],network=rail.snapshot,reservations=claims(city);
+    const network=rail.snapshot,reservations=claims(city);
     city.taxi!.depots[0].cell=cell;const core=serialize(city);assert.doesNotThrow(()=>deserialize(core),'core taxi envelope remains valid');
     assert.throws(()=>rail.capture(city,core,0),occupied);
-    assert.throws(()=>guard.write(serializeParkSession(city,runtime),null),occupied);
-    assert.deepEqual([...s.data],stored);assert.deepEqual(rail.snapshot,network);assert.deepEqual(claims(city),reservations);
+    assert.throws(()=>serializeParkSession(city,runtime),occupied);
+    assert.deepEqual(rail.snapshot,network);assert.deepEqual(claims(city),reservations);
   });
   test(`valid-digest overlapping ${kind} restore preserves originals and never publishes candidate reservations`,async()=>{
     const {city,runtime,rail}=fixture();reserve(rail);assert.ok(buildTaxiDepot(city,243,true).ok);
@@ -87,10 +83,5 @@ for(const [kind,cell] of [['station',245],['track',246]] as const){
       assert.deepEqual(claims(target),reservations);assert.equal(serialize(target),coreBefore);
     }
     assert.throws(()=>deserializeParkSession(bad),occupied);
-    const s=memory();s.setItem(SAVE_KEY,bad);s.setItem('immutable-backup',good);const stored=[...s.data];
-    const loaded=restoreStartupCity(s,()=>createCity(9));assert.ok(loaded.error);assert.equal(loaded.guard.armed,false);assert.equal(loaded.runtime.rail,undefined);
-    assert.ok(claims(loaded.city).every(value=>!value));let applied=false;
-    await assert.rejects(loadLocalCitySession(bad,undefined,loaded.guard,()=>{applied=true;}));
-    assert.equal(applied,false);assert.deepEqual([...s.data],stored);
   });
 }

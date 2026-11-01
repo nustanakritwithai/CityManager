@@ -1,11 +1,8 @@
-import {decodeSaveCopy} from '../src/save-copy-codec.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {buildCampus,createCity,step,householdWorkerCount,adoptSavedEducation,serialize,deserialize} from '../src/sim.ts';
-import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
-import {restoreStartupCity} from '../src/startup-save.ts';
+import {createParkRuntime,deserializeParkSession,serializeParkSession} from '../src/park-runtime.ts';
 import {marketJournalForTest} from '../src/market-client.ts';
-import {SAVE_KEY,PRE_AUTOSAVE_BACKUP} from '../src/save-storage.ts';
 import {createEducation,educationGate,assertEducationInvariants,initialCampusReport,type EducationPeople,type EducationView} from '../src/education.ts';
 
 const vacant=(city:ReturnType<typeof createCity>)=>city.cells.findIndex((cell,i)=>!cell.road&&cell.zone===null&&cell.building===null&&!city.plants.some(p=>p.cell===i)&&!city.parks.some(p=>p.cell===i)&&!city.education?.campuses.some(p=>p.cell===i)&&[i-1,i+1,i-24,i+24].some(n=>city.cells[n]?.road));
@@ -28,14 +25,11 @@ test('previous v22 owner/student overlap loads without losing assets or rewritin
  adoptSavedEducation(city);assert.equal(buildCampus(city,vacant(city),'school').ok,true);
  city.education!.people=[{householdId:h.id,basic:0,higher:0,school:1,university:0,teacher:0,professor:0,campusId:city.education!.campuses[0].id,progress:12}];
  city.market=marketJournalForTest(null);city.market.guestId='00000000-0000-4000-8000-000000000003';
- const raw=serializeParkSession(city,createParkRuntime(city)),data=new Map([[SAVE_KEY,raw]]);
- const storage={getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>{data.set(key,value);}};
- const restored=restoreStartupCity(storage,()=>createCity(999));
- assert.equal(restored.restored,true);assert.equal(data.size,1);assert.equal(storage.getItem(SAVE_KEY),raw);
+ const raw=serializeParkSession(city,createParkRuntime(city));
+ const restored=deserializeParkSession(raw);
  assert.ok(householdWorkerCount(restored.city,h.id)<=h.workforce);
  for(const key of ['accounts','ledger','goods','goodsLedger','crops','cropLedger','households','firms','education','market','buildings','parks','plants'] as const)assert.deepEqual(restored.city[key],city[key],`${key} survives assignment repair`);
- const next=serializeParkSession(restored.city,restored.runtime);restored.guard.write(next,null);
- assert.equal(decodeSaveCopy(storage.getItem(PRE_AUTOSAVE_BACKUP)),raw);
+ const next=serializeParkSession(restored.city,restored.runtime);
  assert.deepEqual(deserialize(next).accounts,city.accounts);
 });
 

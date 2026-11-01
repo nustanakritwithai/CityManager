@@ -91,6 +91,9 @@ export function createTrafficServerFixture(pageUrl){
     // Preserve the original failing assertion and attach only synthetic request
     // metadata. In particular, never log raw city bytes or the request key.
     const detail={baselineRevision:head.revision,finalRevision:fixture.active?.revision,cursor:baseline.cursor,totalWrites:writes.length,writes:writes.slice(-40).map((event,offset)=>{const index=Math.max(0,writes.length-40)+offset;return {index,status:event.status,expectedRevision:event.command?.expectedRevision,ackRevision:event.response?.revision,repeatedKey:!!event.requestKey&&writes.slice(0,index).some(other=>other.requestKey===event.requestKey)};})};
+    // AssertionError caches its stack before message mutation; print the bounded
+    // metadata separately so CI logs retain the same non-sensitive evidence.
+    console.error('Traffic lifecycle metadata:',JSON.stringify(detail));
     error.message+=`; lifecycle=${JSON.stringify(detail)}`;throw error;
    }
    const loaded=reads.slice(readStart).at(-1);assert.equal(loaded?.status,200,'Entry must read a real acknowledged server head');assert.deepEqual(loaded.response,fixture.active,'Entered GET must match final durable revision, not an older racing head');

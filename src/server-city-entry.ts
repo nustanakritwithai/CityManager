@@ -1,13 +1,13 @@
 import { freshServerCityRaw } from './fresh-server-city.ts';
-import { createCitySaveAuth, legacySaveOwner } from './city-save-auth.ts';
+import { createCitySaveAuth } from './city-save-auth.ts';
 import { ServerCitySaveClient } from './server-city-save.ts';
 import { deserializeParkSession } from './park-runtime.ts';
 import { summary } from './sim.ts';
 export function citySaveMetadata(raw:string){const {city}=deserializeParkSession(raw);return {name:'CityManager',population:summary(city).population,tick:city.tick};}
-type EntryDependencies={auth:ReturnType<typeof createCitySaveAuth>;storage:Pick<Storage,'getItem'|'key'|'length'>;createClient:(request:ReturnType<typeof createCitySaveAuth>['request'],owner:string)=>ServerCitySaveClient};
+type EntryDependencies={auth:ReturnType<typeof createCitySaveAuth>;storage?:unknown;createClient:(request:ReturnType<typeof createCitySaveAuth>['request'],owner:string)=>ServerCitySaveClient};
 /** Only the authenticated server head is playable. Browser city copies are never read as candidates. */
 export async function requireServerCityEntry(_fresh:()=>string,configured?:string,dependencies:Partial<EntryDependencies>={}){
- const auth=dependencies.auth??createCitySaveAuth(configured),storage=dependencies.storage??localStorage;
+ const auth=dependencies.auth??createCitySaveAuth(configured);
  const createClient=dependencies.createClient??((request,owner)=>new ServerCitySaveClient(request,owner));
  const blocked=Array.from(document.body.children).filter((n):n is HTMLElement=>n instanceof HTMLElement).map(node=>({node,inert:node.inert}));blocked.forEach(({node})=>node.inert=true);
  const overlay=document.createElement('section');overlay.className='guest-entry-gate';
@@ -19,7 +19,7 @@ export async function requireServerCityEntry(_fresh:()=>string,configured?:strin
  const status=document.createElement('p');status.setAttribute('role','status');status.className='guest-entry-status';card.append(title,note,button,status,hint);overlay.append(card);document.body.append(overlay);
  let busy=false,client:ServerCitySaveClient|null=null,expectedOwner:string|null=null;
  let offeredEmpty:string|null=null;
- try{expectedOwner=legacySaveOwner(storage);}catch{status.textContent='ยังอ่านบัญชี Guest เดิมไม่ได้ ข้อมูลบัญชียังอยู่ กรุณาตรวจบัญชีก่อน';return new Promise<never>(()=>{});}
+ // No browser-held Guest pin: the server session (cookie or Pages login) is the only identity.
  await auth.prepare().then(()=>{button.disabled=false;},()=>{status.textContent='ยังเตรียมการเชื่อมต่อไม่ได้ โปรดโหลดหน้าใหม่';});
  return new Promise<{client:ServerCitySaveClient;auth:ReturnType<typeof createCitySaveAuth>;raw:string;migrationIssues:string[]}>(resolve=>{
   const finish=(raw:string)=>{deserializeParkSession(raw);overlay.remove();blocked.forEach(({node,inert})=>node.inert=inert);resolve({client:client!,auth,raw,migrationIssues:[]});};
