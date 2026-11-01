@@ -113,3 +113,6 @@ test('dense browser seed is canonical and witnesses more than four route conflic
   assert.equal(serializeParkSession(session.city,session.runtime,session.market),raw);
  }
 });
+
+import {TRAFFIC_REVIEW_VIEWPORT} from './traffic-gap-browser-checks.mjs';
+test('traffic-only evidence uses a bounded real desktop raster without changing clocks',()=>{assert.deepEqual(TRAFFIC_REVIEW_VIEWPORT,{width:960,height:640,deviceScaleFactor:1,mobile:false});assert.ok(Object.isFrozen(TRAFFIC_REVIEW_VIEWPORT));});
