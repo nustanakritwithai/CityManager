@@ -3,8 +3,7 @@ import test from 'node:test';
 import { buildCampus, createCity, deserialize, householdWorkerCount, serialize, step, toggleCampus, upgradeCampus, type City } from '../src/sim.ts';
 import { assertEducationInvariants, createEducation, EDUCATION_COST, educationOccupied, initialCampusReport, stepEducation, withdrawCampus, type CampusKind, type EducationPeople, type EducationView } from '../src/education.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
-import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
-import { restoreStartupCity } from '../src/startup-save.ts';
+import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 import { SAVE_KEY } from '../src/save-storage.ts';
 
 const person = (householdId: number, values: Partial<EducationPeople> = {}): EducationPeople => ({ householdId, basic: 0, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0, ...values });
@@ -203,10 +202,8 @@ test('an already expanded v22 school resumes saved progress without changing ori
   original.market.guestId = '00000000-0000-4000-8000-000000000003';
   const raw = serializeParkSession(original, createParkRuntime(original));
   assert.equal(JSON.parse(raw).version, 22);
-  const bytes = new Map([[SAVE_KEY, raw]]);
-  const storage = { getItem: (key: string) => bytes.get(key) ?? null, setItem: (key: string, value: string) => { bytes.set(key, value); } };
-  const restored = restoreStartupCity(storage, () => { throw Error('saved school was rejected'); });
-  assert.equal(restored.restored, true);
+  // The server load path: an expanded school save must deserialize as-is.
+  const restored = deserializeParkSession(raw);
   const city = restored.city;
   for (const key of ['accounts', 'ledger', 'households', 'firms', 'goods', 'goodsLedger', 'crops', 'cropLedger', 'buildings', 'education', 'market'] as const) assert.deepEqual(city[key], original[key], key);
   assert.equal(toggleCampus(city, campus.id).ok, true);

@@ -9,30 +9,14 @@ on:
       - 'tests/pages-auth.test.ts'
       - 'tests/pages-login-public-contract.test.mjs'
       - 'tests/fixtures/pages-login/*'
-      - 'src/city-migration-inventory.ts'
       - 'tests/server-city-*'
       - 'tests/server-save-*'
-      - 'tests/city-migration-inventory.test.ts'
       - 'server/city-saves/service.mjs'
       - 'src/autosave.ts'
       - 'src/save-*.ts'
-      - 'src/startup-save.ts'
-      - 'src/startup-save-feedback.ts'
       - 'src/startup-recovery-chooser.ts'
-      - 'src/local-city-save.ts'
-      - 'src/recovery-idb.ts'
-      - 'src/active-local-save.ts'
-      - 'tests/active-local-save-*'
-      - 'tests/recovery-idb-*'
-      - 'tests/recovery-unavailable-browser.mjs'
-      - 'tests/save-quota-lossless.test.ts'
       - 'src/market-client.ts'
       - 'src/entry-gate.ts'
-      - 'tests/save-safety*'
-      - 'tests/save-startup*'
-      - 'tests/save-recovery-info.test.ts'
-      - 'tests/save-equivalence.test.ts'
-      - 'tests/load-authority.test.ts'
       - '.github/workflows/save-safety.yml'
   workflow_dispatch:
 permissions:
@@ -61,15 +45,15 @@ jobs:
         run: node --test tests/ci-visual-scope.test.mjs
       - run: npm ci --no-audit --no-fund
         if: steps.scope.outputs.kind != 'visual-final'
-      - run: node --experimental-strip-types --test tests/save-safety.test.ts tests/save-startup-diagnosis.test.ts tests/save-startup-feedback.test.ts tests/save-recovery-info.test.ts tests/save-equivalence.test.ts tests/load-authority.test.ts tests/autosave.test.ts tests/education-session.test.ts tests/save-quota-lossless.test.ts tests/save-promotion.test.ts tests/active-local-save.test.ts
+      - run: node --experimental-strip-types --test tests/autosave.test.ts tests/education-session.test.ts
         if: steps.scope.outputs.kind != 'visual-final'
       - run: npm run build
         if: steps.scope.outputs.kind != 'visual-final'
         env:
           VITE_MARKET_URL: http://127.0.0.1:4317
-      - name: Verify server-only city contract and legacy read-only migration
+      - name: Verify server-only city contract
         if: steps.scope.outputs.kind != 'visual-final'
-        run: node --experimental-strip-types --test tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/city-migration-inventory.test.ts tests/server-city-save.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
+        run: node --experimental-strip-types --test tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts tests/server-city-save.test.ts tests/pages-auth.test.ts tests/pages-login-public-contract.test.mjs
       - name: Verify production bundle against isolated existing-login server fixture
         if: steps.scope.outputs.kind != 'visual-final'
         run: |
