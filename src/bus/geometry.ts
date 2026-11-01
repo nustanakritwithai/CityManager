@@ -36,7 +36,8 @@ export const BUS_BODY: Record<BusLevel, { length: number; width: number; height:
   3: { length: 1.32, width: 0.38, height: 0.36, paint: 2, color: '#e3941a' },
 };
 
-export const BUS_LINE_COLORS = ['#e23d4a', '#2f6feb', '#1aa36a', '#e3941a', '#8e5ea2', '#13a3b5', '#d96b2b', '#5c6b7a'] as const;
+// No yellow or orange: those read as road paint and the city gate.
+export const BUS_LINE_COLORS = ['#e23d4a', '#2f6feb', '#1aa36a', '#d65db1', '#8e5ea2', '#13a3b5', '#ff7aa8', '#5c6b7a'] as const;
 export const busLineColor = (lineId: number) => BUS_LINE_COLORS[((lineId % BUS_LINE_COLORS.length) + BUS_LINE_COLORS.length) % BUS_LINE_COLORS.length];
 
 /** Exact 40/60/80 map to levels 1/2/3. Any other capacity picks the nearest band so a bus still draws. */

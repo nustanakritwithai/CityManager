@@ -49,7 +49,7 @@ export function busOverlay(city: BusHost): BusOverlay {
   return {
     lines: routes.map((route, index) => lineVisual(route, index, routes.length)),
     stops: [...bus.stops].sort((a, b) => a.id - b.id).flatMap(stop => stopVisual(stop)),
-    depots: [...bus.depots].sort((a, b) => a.id - b.id).map(depot => depotVisual(depot)),
+    depots: [...bus.depots].sort((a, b) => a.id - b.id).map(depot => depotVisual(depot, city)),
   };
 }
 
@@ -65,7 +65,7 @@ function ribbons(route: BusLineRoute, index: number, count: number, paused: bool
   const hops: { from: number; to: number; spur: boolean }[] = [];
   for (const leg of route.legs) pushHops(hops, leg.path, false);
   pushHops(hops, route.fromDepot, true);
-  const offset = (index - (count - 1) / 2) * 0.18, y = 0.22 + index * 0.012, width = paused ? 0.12 : 0.16, color = busLineColor(route.lineId);
+  const offset = (index - (count - 1) / 2) * 0.18, y = 0.22 + index * 0.012, width = paused ? 0.06 : 0.08, color = busLineColor(route.lineId);
   const out: BusRibbon[] = [];
   for (const hop of hops) {
     const a = cellCenter(hop.from), b = cellCenter(hop.to), dx = b.x - a.x, dz = b.z - a.z, len = Math.hypot(dx, dz);
@@ -91,14 +91,27 @@ function spans(length: number, dashed: boolean): { t0: number; t1: number }[] {
 function stopVisual(stop: { id: number; cell: number; side: BusStopSide; level: 1 | 2 }): BusStopVisual[] {
   const kerb = BUS_SIDE[stop.side]; if (!kerb || !Number.isInteger(stop.cell)) return [];
   const centre = cellCenter(stop.cell), shelter = stop.level !== 1;
-  const sx = shelter ? 0.9 : 0.34, sy = shelter ? 0.64 : 0.78, sz = shelter ? 0.5 : 0.22;
+  const sx = shelter ? 0.9 : 0.42, sy = shelter ? 0.64 : 1.0, sz = shelter ? 0.5 : 0.22;
   return [{
     id: stop.id, cell: stop.cell, side: stop.side, level: stop.level, kind: shelter ? 'shelter' : 'pole',
     x: centre.x + kerb.x * BUS_KERB, z: centre.z + kerb.z * BUS_KERB, y: 0.16 + sy / 2,
     headingX: kerb.facingX, headingZ: kerb.facingZ, sx, sy, sz,
   }];
 }
-function depotVisual(depot: { id: number; cell: number; level: 1 | 2 | 3; open: boolean }): BusDepotVisual {
+function depotVisual(depot: { id: number; cell: number; level: 1 | 2 | 3; open: boolean }, city?: BusHost): BusDepotVisual {
   const centre = cellCenter(depot.cell), sy = (0.42 + (depot.level - 1) * 0.28) * (depot.open ? 1 : 0.72);
-  return { id: depot.id, cell: depot.cell, level: depot.level, open: depot.open, x: centre.x, z: centre.z, y: 0.12 + sy / 2, headingX: 1, headingZ: 0, sx: 1.45, sy, sz: 1.2 };
+  // The garage door faces the first neighbouring road, so buses drive straight out onto it.
+  const face = depotFacing(depot.cell, city);
+  return { id: depot.id, cell: depot.cell, level: depot.level, open: depot.open, x: centre.x, z: centre.z, y: 0.12 + sy / 2, headingX: face.x, headingZ: face.z, sx: 1.45, sy, sz: 1.2 };
+}
+const SIZE = 24;
+/** Unit grid direction from a depot cell to its first road neighbour (east when none). */
+export function depotFacing(cell: number, city?: { cells: { road: boolean }[] }): { x: number; z: number } {
+  const col = cell % SIZE;
+  for (const [dx, dz] of [[0, 1], [1, 0], [0, -1], [-1, 0]] as const) {
+    if ((dx === 1 && col === SIZE - 1) || (dx === -1 && col === 0)) continue;
+    const next = cell + dx + dz * SIZE;
+    if (city?.cells[next]?.road) return { x: dx, z: dz };
+  }
+  return { x: 1, z: 0 };
 }
