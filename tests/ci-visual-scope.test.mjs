@@ -149,3 +149,9 @@ test('goal RRT route requires exact reviewed two-source change and rejects empty
  assert.equal(trafficRrtPathsOnly(paths),true);assert.equal(trafficRrtOnly(paths),false);assert.equal(trafficRrtOnly(paths,{trafficRrtSourceDiff:'changed unreviewed source'}),false);assert.equal(visualKind(paths),'full');
  for(const bad of [[],paths.slice(1),...['src/traffic/presentation.ts','src/traffic/layer.ts','src/main.ts','src/server-city-save.ts','src/taxi/rrt-roam.ts','src/bus/engine.ts','src/rail/network-runtime.ts','package.json'].map(p=>[...paths,p])]){assert.equal(trafficRrtPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
 });
+
+import {adaptiveSignalSources,adaptiveSignalPathsOnly,adaptiveSignalOnly} from '../scripts/ci-visual-scope.mjs';
+test('adaptive visible signals require the exact reviewed complete runtime diff and explicit browser evidence',()=>{
+ const paths=[...adaptiveSignalSources,'tests/traffic-adaptive-signals.test.ts','tests/traffic-signal-browser-checks.mjs'];assert.equal(adaptiveSignalPathsOnly(paths),true);assert.equal(adaptiveSignalOnly(paths),false);assert.equal(adaptiveSignalOnly(paths,{adaptiveSignalSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
+ for(const bad of [[],paths.slice(1),...['src/bus/engine.ts','src/sim.ts','src/rail/network-runtime.ts','src/server-city-save.ts','src/pages-auth.ts','src/traffic/rrt-navigation.ts','package.json'].map(p=>[...paths,p])]){assert.equal(adaptiveSignalPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
+});

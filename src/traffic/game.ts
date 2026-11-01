@@ -1,5 +1,8 @@
+import {SignalPeers,type SignalPeerSnapshot} from './signal-peers.ts';
+import {buildSignalCorridors,neighborSignalBias,type SignalCorridor,type NeighborSignalState} from './signal-coordination.ts';
+import {chooseSignal,signalTopologyKey,type TrafficSignalFrame,type SignalPhase,type SignalDemand} from './adaptive-signals.ts';
 import type {GameModalStats} from './game-modal.ts';
-import {roadNeighbors,roadTopologyKey,validateRoadTopology,type RoadMap} from '../road-topology.ts';
+import {roadNeighbors,validateRoadTopology,type RoadMap} from '../road-topology.ts';
 import type {City} from '../sim.ts';
 import type {TaxiDepotSite} from '../taxi/sites.ts';
 import {buildNetwork,linkKey,type LinkNetwork} from './network.ts';
@@ -19,7 +22,7 @@ export type TrafficGameSample = {map:RoadMap;demand:GameDemand[];clippedRate?:nu
 export type TrafficGameInput = {map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[];bus?:GameBusInput};
 export type GameCar = {id:number;from:number;to:number;blocked:boolean;progress?:number;lane?:number;speed?:number;destination?:number;nextCell?:number;nextLane?:number;junction?:boolean;nextVisit?:number};
 export type GameRenderGroup = {key:string;from:number;to:number;amount:number;queued:number;storage:number;closed:boolean};
-export type TrafficGameFrame = {navigation?:NavigationStats;modal?:GameModalStats|null;bus?:GameBusFrame;/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
+export type TrafficGameFrame = {navigation?:NavigationStats;signals?:TrafficSignalFrame;modal?:GameModalStats|null;bus?:GameBusFrame;/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
 type OD = GameDemand & {waiting:number;path:number[]|null};
 type Actor = {visits?:number;id:number;destination:number;path:number[];index:number;blocked:boolean;progress:number;speed:number;lane:number};
 const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<576;
@@ -118,6 +121,8 @@ export class TrafficGame {
   private taxiTrips=0;private taxiTiles=0;private offered=0;private completed=0;private dropped=0;private cancelled=0;private clippedRate=0;
   private junctions=new Set<number>();private bends=new Set<number>();
   private navigation=emptyNavigationStats();
+  private signals=new Map<number,SignalPhase>();
+  private signalCorridors:ReadonlyMap<string,SignalCorridor>=new Map();private signalPeers?:SignalPeers;private signalSnapshots=new Map<number,SignalPeerSnapshot>();private signalSnapshotStep=0;
   private junctionRequests=new Map<number,{node:number;since:number}>();private junctionClock=0;
   /** Bus (optional; null = unchanged game). Shares per OD, PCU load per link, cumulative totals/injections. */
   private bus:{input:GameBusInput;shares:Map<string,GameBusShare|null>}|null=null;private busTotals=new Map<string,GameBusTotal>();private busInjected:Record<string,number>={};private busDiverted=0;private busReturned=0;
@@ -133,18 +138,25 @@ export class TrafficGame {
   private busLoad(k:string):number {return this.bus?.input.load[k]??0;}
   private busShareFor(od:OD):GameBusShare|null {if(!this.bus)return null;const k=pair(od.from,od.to);if(!this.bus.shares.has(k))this.bus.shares.set(k,gameBusShare(this.bus.input,od.from,od.to));return this.bus.shares.get(k)!;}
   constructor(sample:TrafficGameSample){const s=cleanSample(sample);this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.replaceRows(s.rows,s.clippedRate);this.prepareJunctions();this.replan();}
-  private key(map:RoadMap){return map.cells.map(c=>c.road?'1':'0').join('')+roadTopologyKey(map);}
-  private prepareJunctions(){this.junctionRequests.clear();const adj=new Map<number,Set<number>>();for(const l of this.network.links.values())for(const [a,b] of [[l.from,l.to],[l.to,l.from]])(adj.get(a)??adj.set(a,new Set()).get(a)!).add(b);this.bends=new Set([...adj].filter(([n,v])=>v.size===2&&[...v].reduce((sum,i)=>sum+i,0)!==2*n).map(([n])=>n));this.junctions=new Set([...adj].filter(([n,v])=>v.size>2||v.size===2&&[...v].reduce((sum,i)=>sum+i,0)!==2*n).map(([n])=>n));}
+  private key(map:RoadMap){return signalTopologyKey(map);}
+  private prepareJunctions(){this.signals.clear();this.junctionRequests.clear();const adj=new Map<number,Set<number>>();for(const l of this.network.links.values())for(const [a,b] of [[l.from,l.to],[l.to,l.from]])(adj.get(a)??adj.set(a,new Set()).get(a)!).add(b);this.bends=new Set([...adj].filter(([n,v])=>v.size===2&&[...v].reduce((sum,i)=>sum+i,0)!==2*n).map(([n])=>n));this.junctions=new Set([...adj].filter(([n,v])=>v.size>2||v.size===2&&[...v].reduce((sum,i)=>sum+i,0)!==2*n).map(([n])=>n));this.prepareSignalPeers();}
+  private prepareSignalPeers():void {
+    this.signalSnapshots.clear();this.signalSnapshotStep=this.junctionClock;this.signalCorridors=buildSignalCorridors(this.network,this.junctions,this.bends);
+    const graph={revision:this.signature,nodes:[...this.junctions].filter(n=>!this.bends.has(n)),corridors:[...this.signalCorridors.values()]};
+    this.signalPeers=this.signalPeers?.withGraph(graph)??new SignalPeers(graph);
+  }
   private replaceRows(rows:GameDemand[],clippedRate:number){const prior=new Map(this.ods.map(o=>[pair(o.from,o.to),o]));this.ods=rows.map(d=>{const old=prior.get(pair(d.from,d.to)) as TaxiOd|undefined;prior.delete(pair(d.from,d.to));const taxiRate=Math.min(d.rate,Math.max(0,demandTaxiRate(d)));const row:TaxiOd={...d,waiting:old?.waiting??0,path:old?.path??null};if(taxiRate>1e-12)row.taxiRate=taxiRate;else delete row.taxiRate;row.taxiCredit=taxiRate>0?old?.taxiCredit??0:0;row.taxiMarkedStep=old?.taxiMarkedStep??-1;return row;});for(const old of prior.values())this.cancelled+=old.waiting;this.clippedRate=clippedRate;this.demandSignature=JSON.stringify(rows);}
   setSample(sample:TrafficGameSample):void {const s=cleanSample(sample),signature=this.key(s.map),changed=signature!==this.signature, demandChanged=JSON.stringify(s.rows)!==this.demandSignature;this.replaceRows(s.rows,s.clippedRate);if(changed){this.map=s.map;this.signature=signature;this.network=buildNetwork(this.map);this.prepareJunctions();this.reconcileActors();}if(changed||demandChanged)this.replan();}
   /** Reconcile topology without consuming time, including while paused. */
   private reconcileActors():void {const times=new Map([...this.network.links].map(([key])=>[key,1])),routes=new Map<string,number[]|null>();for(const c of this.cars){const from=c.path[c.index],head=c.path[c.index+1];if(!this.network.links.has(linkKey(from,head))){c.blocked=true;c.speed=0;continue;}if(head===c.destination){c.blocked=false;continue;}const key=pair(head,c.destination);if(!routes.has(key))routes.set(key,shortestPath(this.network,times,head,c.destination));const tail=routes.get(key)!;if(!tail){c.blocked=true;c.speed=0;}else{c.path=[from,...tail];c.index=0;c.blocked=false;}}}
-  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(o=>{const row:TaxiDemand={from:o.from,to:o.to,rate:o.rate};const taxi=demandTaxiRate(o);if(taxi>0)row.taxiRate=taxi;return row;}),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.junctionRequests.clear();this.junctionClock=0;this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;this.taxiTrips=this.taxiTiles=0;if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();}
+  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(o=>{const row:TaxiDemand={from:o.from,to:o.to,rate:o.rate};const taxi=demandTaxiRate(o);if(taxi>0)row.taxiRate=taxi;return row;}),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.signals.clear();this.junctionRequests.clear();this.junctionClock=0;this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;this.taxiTrips=this.taxiTiles=0;if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();if(!s)this.prepareSignalPeers();}
   /** Detached in-memory transaction candidate; never a save representation. */
   clone():TrafficGame {const copy=Object.create(TrafficGame.prototype) as TrafficGame;
     // Network, map and junction set are immutable after construction; road edits
     // replace them wholesale. Mutable actors/queues are detached before a step.
-    copy.navigation={...this.navigation};copy.junctionRequests=new Map([...this.junctionRequests].map(([id,r])=>[id,{...r}]));copy.junctionClock=this.junctionClock;
+    copy.navigation={...this.navigation};copy.signalCorridors=this.signalCorridors;copy.signalPeers=this.signalPeers?.clone();copy.signalSnapshots=new Map(this.signalSnapshots);copy.signalSnapshotStep=this.signalSnapshotStep;
+    copy.signals=new Map([...this.signals].map(([node,phase])=>[node,{...phase}]));
+    copy.junctionRequests=new Map([...this.junctionRequests].map(([id,r])=>[id,{...r}]));copy.junctionClock=this.junctionClock;
     copy.map=this.map;copy.network=this.network;copy.junctions=this.junctions;copy.bends=this.bends;copy.signature=this.signature;
     copy.ods=structuredClone(this.ods);copy.cars=structuredClone(this.cars);copy.stepValue=this.stepValue;copy.nextId=this.nextId;copy.taxiTrips=this.taxiTrips;copy.taxiTiles=this.taxiTiles;copy.offered=this.offered;copy.completed=this.completed;copy.dropped=this.dropped;copy.cancelled=this.cancelled;copy.clippedRate=this.clippedRate;copy.demandSignature=this.demandSignature;copy.bus=this.bus;copy.busTotals=new Map([...this.busTotals].map(([k,v])=>[k,{...v}]));copy.busInjected={...this.busInjected};copy.busDiverted=this.busDiverted;copy.busReturned=this.busReturned;return copy;}
   private replan():void {
@@ -230,21 +242,64 @@ export class TrafficGame {
     return tail>=JUNCTION_CLEAR+(TRAFFIC_SPACING.lengths.sedan+TRAFFIC_SPACING.standstillGap)/TRAFFIC_SPACING.worldPerTile;
   }
   private substep(dt:number,grant:Map<number,number>):void {
-    // Oldest eligible request wins, but a body already inside owns the corridor
-    // until its rear clears. Keep the existing one-step signal duration at crossroads;
-    // only unsignalised two-arm bends can release within the worker step.
+    // Physical grants outlive phases and remain exclusive until the body clears.
     this.junctionClock++;
-    for(const [node,id]of grant)if(this.bends.has(node)&&!this.cars.some(c=>c.id===id&&(c.path[c.index]===node&&c.progress<JUNCTION_CLEAR||c.path[c.index+1]===node&&c.progress>JUNCTION_STOP)))grant.delete(node);
+    for(const [node,id]of grant)if(!this.cars.some(c=>c.id===id&&(c.path[c.index]===node&&c.progress<JUNCTION_CLEAR||c.path[c.index+1]===node&&c.progress>JUNCTION_STOP)))grant.delete(node);
     const candidates=this.cars.filter(c=>this.junctions.has(c.path[c.index+1])&&c.progress>=.45);
     const candidateIds=new Set(candidates.map(c=>c.id));
     for(const id of this.junctionRequests.keys())if(!candidateIds.has(id))this.junctionRequests.delete(id);
     for(const c of candidates){const node=c.path[c.index+1];if(this.junctionRequests.get(c.id)?.node!==node)this.junctionRequests.set(c.id,{node,since:this.junctionClock});}
     candidates.sort((a,b)=>this.junctionRequests.get(a.id)!.since-this.junctionRequests.get(b.id)!.since||a.id-b.id);
-    for(const c of candidates){
-      const node=c.path[c.index+1];if(grant.has(node))continue;
-      if(this.cars.some(other=>other!==c&&other.lane===c.lane&&this.actorLink(other)===this.actorLink(c)&&other.progress>c.progress))continue;
+    // Group once per substep: approach pressure is independent of the number
+    // of junctions in the map and does not repeatedly scan the bounded fleet.
+    const linkTotals=new Map<string,number>(),lanes=new Map<string,{count:number;head:number;tail:number}>(),allQueues=new Map<number,Map<number,number>>();
+    const laneKey=(c:Actor)=>`${this.actorLink(c)}:${c.lane}`;
+    for(const c of this.cars){const link=this.actorLink(c),key=`${link}:${c.lane}`,row=lanes.get(key);linkTotals.set(link,(linkTotals.get(link)??0)+1);if(row){row.count++;row.head=Math.max(row.head,c.progress);row.tail=Math.min(row.tail,c.progress);}else lanes.set(key,{count:1,head:c.progress,tail:c.progress});
+      const node=c.path[c.index+1],from=c.path[c.index],incoming=allQueues.get(node)??new Map<number,number>();incoming.set(from,(incoming.get(from)??0)+1);allQueues.set(node,incoming);
+    }
+    const eligible=new Set<Actor>(),demands=new Map<number,Map<number,SignalDemand>>();
+    for(const c of this.cars){
+      const node=c.path[c.index+1];if(!this.junctions.has(node)||lanes.get(laneKey(c))!.head>c.progress)continue;
       const next=c.path[c.index+2];
-      if(node!==c.destination&&(next===undefined||!this.junctionExitClear(linkKey(node,next),Math.min(c.lane,this.laneCount(linkKey(node,next))-1))))continue;
+      if(node!==c.destination){
+        if(next===undefined)continue;const key=linkKey(node,next),link=this.network.links.get(key),lane=Math.min(c.lane,this.laneCount(key)-1),row=lanes.get(`${key}:${lane}`);
+        // This read-only decision pass precedes every grant/move/spawn. Reuse
+        // its exact occupancy snapshot; live movement checks below stay fresh.
+        if(!link||lane<0||lane>=link.lanes||(linkTotals.get(key)??0)+this.busLoad(key)+1>link.lanes*STORAGE_PER_LANE||(row?.count??0)>=STORAGE_PER_LANE||!((row?.tail??Infinity)>=JUNCTION_CLEAR+(TRAFFIC_SPACING.lengths.sedan+TRAFFIC_SPACING.standstillGap)/TRAFFIC_SPACING.worldPerTile))continue;
+      }
+      eligible.add(c);if(this.bends.has(node))continue;
+      const approach=c.path[c.index],oldest=this.junctionRequests.get(c.id)?.since??this.junctionClock;
+      // Only followers behind this feasible head count; blocked adjacent lanes do not.
+      const queue=lanes.get(laneKey(c))!.count,approaches=demands.get(node)??new Map<number,SignalDemand>();demands.set(node,approaches);
+      const old=approaches.get(approach);if(old){old.oldest=Math.min(old.oldest,oldest);old.queue+=queue;}
+      else approaches.set(approach,{approach,oldest,queue});
+    }
+    // Receive only last substep's immutable observations. All decisions commit
+    // together, so neither node iteration order nor fresh peer writes feed back.
+    if(this.signalSnapshots.size)this.signalPeers?.exchange(this.signalSnapshots,this.signalSnapshotStep,[...demands.keys()]);
+    this.coordinateSignals(demands,eligible,lanes);
+    const nextSignals=new Map<number,SignalPhase>();
+    for(const node of this.junctions){
+      if(this.bends.has(node))continue;
+      nextSignals.set(node,chooseSignal(this.signals.get(node),[...(demands.get(node)?.values()??[])],this.junctionClock,grant.has(node)));
+    }
+    this.signals=nextSignals;
+    const snapshots=new Map<number,SignalPeerSnapshot>();
+    for(const [node,phase] of nextSignals){
+      // Telemetry includes physically blocked queues, unlike local admission
+      // demand. Report usable tail-space, not merely unused vehicle count.
+      const byApproach=Object.fromEntries(allQueues.get(node)??[]);let capacity=0,free=0;
+      for(const link of this.network.out.get(node)??[]){let linkFree=0;capacity+=link.lanes*STORAGE_PER_LANE;
+        for(let lane=0;lane<link.lanes;lane++){const row=lanes.get(`${linkKey(node,link.to)}:${lane}`);if(!row||row.tail>=JUNCTION_CLEAR+(TRAFFIC_SPACING.lengths.sedan+TRAFFIC_SPACING.standstillGap)/TRAFFIC_SPACING.worldPerTile)linkFree+=STORAGE_PER_LANE-(row?.count??0);}
+        free+=Math.max(0,linkFree-this.busLoad(linkKey(node,link.to)));
+      }
+      snapshots.set(node,{node,approach:phase.approach,state:phase.approach===null?'clearance':'green',since:phase.since,clearUntil:phase.clearUntil,byApproach,queue:Object.values(byApproach).reduce((a,b)=>a+b,0),space:capacity?Math.max(0,Math.min(1,free/capacity)):0});
+    }
+    this.signalSnapshots=snapshots;this.signalSnapshotStep=this.junctionClock;
+    for(const c of candidates){
+      if(!eligible.has(c))continue;
+      const node=c.path[c.index+1];if(grant.has(node))continue;
+      if(!this.bends.has(node)&&this.signals.get(node)?.approach!==c.path[c.index])continue;
       grant.set(node,c.id);
     }
     const ids=new Set(this.cars.map(c=>c.id)),done=new Set<number>(),finished:number[]=[];
@@ -255,6 +310,22 @@ export class TrafficGame {
     }
     if(finished.length){const gone=new Set(finished);for(const c of this.cars)if(gone.has(c.id)){this.completed++;if((c as TaxiActor).taxi){this.taxiTrips++;this.taxiTiles+=Math.max(1,c.path.length-1);}}this.cars=this.cars.filter(c=>!gone.has(c.id));}
     this.spawnWave(grant);
+  }
+  /** RRT chooses cached nearby dissemination paths; messages, not the search,
+   * carry state. Extra peers only add bounded pressure on their actual first hop. */
+  private coordinateSignals(demands:Map<number,Map<number,SignalDemand>>,eligible:ReadonlySet<Actor>,lanes:ReadonlyMap<string,{count:number;head:number}>):void {
+    const messages=new Map([...demands.keys()].map(node=>[node,this.signalPeers?.read(node,this.junctionClock)??[]]));
+    const sums=new Map<SignalDemand,{sum:number;heads:number}>();
+    for(const c of eligible){const node=c.path[c.index+1],next=c.path[c.index+2],demand=demands.get(node)?.get(c.path[c.index]);if(!demand)continue;
+      const row=sums.get(demand)??{sum:0,heads:0};row.heads++;sums.set(demand,row);
+      if(next===undefined)continue;const corridor=this.signalCorridors.get(linkKey(node,next));if(!corridor)continue;
+      const peers=messages.get(node)??[],direct=peers.find(p=>p.origin===corridor.to);if(!direct)continue;
+      const payload=direct.payload,state:NeighborSignalState={node:payload.node,phase:{approach:payload.approach,since:payload.since,clearUntil:payload.clearUntil},queue:payload.queue,space:payload.space,byApproach:payload.byApproach??{}};
+      const far=peers.filter(p=>p.origin!==corridor.to&&p.route.at(-2)===corridor.to).reduce((max,p)=>Math.max(max,(p.payload.space<=0?Math.min(1,p.payload.queue/3):0)/Math.max(1,p.route.length-1)),0);
+      const key=linkKey(node,next),lane=Math.min(c.lane,this.laneCount(key)-1),space=Math.max(0,1-(lanes.get(`${key}:${lane}`)?.count??0)/STORAGE_PER_LANE);
+      row.sum+=neighborSignalBias(state,corridor.approach,Math.ceil(corridor.distance/TRAFFIC_SPACING.maxSpeedTiles*SUBSTEPS),this.junctionClock,space,far);
+    }
+    for(const [demand,row] of sums)demand.coordination=row.sum/row.heads;
   }
   /** One departure per OD per substep, only into a bumper gap, so cars leave in a line instead of a burst. */
   private spawnWave(grant:ReadonlyMap<number,number>):void {
@@ -314,6 +385,7 @@ export class TrafficGame {
     for(const od of this.ods)if(od.waiting>0){let load=loads.get(od.from);if(!load){load={cell:od.from,load:0,queued:0};loads.set(od.from,load);}load.queued+=od.waiting;}
     const groups=[...grouped.values()].sort((a,b)=>a.key.localeCompare(b.key));
     const bus=this.bus?{bus:{totals:[...this.busTotals.values()].map(t=>({...t})).sort((a,b)=>a.from-b.from||a.to-b.to||a.lineId-b.lineId),injected:{...this.busInjected},diverted:this.busDiverted,returned:this.busReturned}}:{};
-    return {navigation:{...this.navigation},...bus,...(this.taxiTrips?{taxiTrips:{trips:this.taxiTrips,tiles:this.taxiTiles}}:{}),step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
+    const signals:TrafficSignalFrame={topology:this.signature,phases:[...this.junctions].filter(node=>!this.bends.has(node)).sort((a,b)=>a-b).map(node=>{const approach=this.signals.get(node)?.approach??null;return {node,approach,state:approach===null?'all-red':'green'};})};
+    return {navigation:{...this.navigation},signals,...bus,...(this.taxiTrips?{taxiTrips:{trips:this.taxiTrips,tiles:this.taxiTiles}}:{}),step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
   }
 }

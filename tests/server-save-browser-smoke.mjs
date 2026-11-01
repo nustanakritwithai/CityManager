@@ -204,7 +204,7 @@ async function run(){
   const capture=async name=>{
    assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,captureMode);
    const probe=async()=>{assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser error or renderer crash');const health=await evaluate("({ready:window.cityManager?.visuals().ready,contextLosses:window.__contextLosses,visibility:document.visibilityState,width:innerWidth,height:innerHeight})");assert.equal(health.ready,true);assert.equal(health.contextLosses,0,'WebGL context must remain live');return health;};
-   try{const shot=await screenshotReadback(send,probe,record,captureMode);const png=Buffer.from(shot.data,'base64');Object.assign(record,pngEvidence(png));await writeFile(resolve(output,`${name}.png`),png);captureMode=record.mode;record.status='saved';}
+   try{const shot=await screenshotReadback(send,probe,record,captureMode);const png=Buffer.from(shot.data,'base64');Object.assign(record,pngEvidence(png));await writeFile(resolve(output,`${name}.png`),png);captureMode=record.mode;record.status='saved';return {png,width:record.width,height:record.height};}
    catch(error){record.status='failed';record.error=String(error);throw error;}
    finally{record.finished=new Date().toISOString();console.log('Capture result',JSON.stringify(record));}
   };

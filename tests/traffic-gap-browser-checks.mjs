@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {inspectSignalEvidence,trafficSignalBrowserChecks} from './traffic-signal-browser-checks.mjs';
 import {trafficGapShortApproachFixture} from './traffic-gap-fixture.ts';
 import {trafficRightOfWayFixture,trafficRightOfWayWitness} from './traffic-right-of-way-fixture.ts';
 import {busPoses} from '../src/bus/poses.ts';
@@ -12,7 +13,7 @@ export function trafficGapBootstrap(){return `(()=>{
  window.__trafficGapSampling=false;
  window.__trafficGapStartSampling=()=>{if(window.__trafficGapSampling)return;window.__trafficGapSampling=true;const sample=()=>{
   if(!window.__trafficGapSampling)return;const d=window.cityManager?.traffic?.();
-  if(d?.ready&&!d.failure){const row={blocked:d.blocked,congestedLinks:d.congestedLinks,step:d.step,epoch:d.worker?.epoch,presentation:d.presentation,cars:d.cars,busDraw:window.cityManager?.bus?.(),busLedger:d.busLedger,busMinute:d.busMinute,busMovement:d.busMovement,buses:structuredClone(window.cityManager?.busSnapshot?.()??[]),liveIds:observation.latest?.step===d.step?observation.latest.liveIds:null},previous=observation.rendered.at(-1),hold=observation.gateHold;
+  if(d?.ready&&!d.failure){const row={signals:d.signals,signalRendering:d.signalRendering,blocked:d.blocked,congestedLinks:d.congestedLinks,step:d.step,epoch:d.worker?.epoch,presentation:d.presentation,cars:d.cars,busDraw:window.cityManager?.bus?.(),busLedger:d.busLedger,busMinute:d.busMinute,busMovement:d.busMovement,buses:structuredClone(window.cityManager?.busSnapshot?.()??[]),liveIds:observation.latest?.step===d.step?observation.latest.liveIds:null},previous=observation.rendered.at(-1),hold=observation.gateHold;
    const gateRow=r=>({blocked:r.blocked,congestedLinks:r.congestedLinks,epoch:r.epoch,busMinute:r.busMinute,busMovement:r.busMovement,buses:r.buses});
    if(!observation.gateResume&&hold&&row.epoch===hold.epoch&&row.busMovement?.committedDrive>hold.grants){const bus=row.buses.find(b=>b.id===hold.bus.id&&b.phase!=='home');if(bus&&(bus.cell!==hold.bus.cell||bus.next!==hold.bus.next||Math.abs(bus.progress-hold.bus.progress)>1e-7)){observation.gateResume=true;observation.gateEvidence=[...observation.gateEvidence.slice(0,2),gateRow(row)];}}
    if(!observation.gateResume&&!observation.gateHold&&previous?.epoch===row.epoch&&previous.busMovement?.committedDrive>0&&previous.blocked>0&&previous.congestedLinks>0&&row.blocked>0&&row.congestedLinks>0&&row.busMinute>previous.busMinute&&row.busMovement?.heldDrive>previous.busMovement?.heldDrive){for(const bus of row.buses.filter(b=>['toStart','running'].includes(b.phase))){const old=previous.buses.find(b=>b.id===bus.id&&['toStart','running'].includes(b.phase));if(old&&old.cell===bus.cell&&old.next===bus.next&&Math.abs(old.progress-bus.progress)<1e-7){observation.gateHold={epoch:row.epoch,bus:{...bus},grants:row.busMovement.committedDrive};observation.gateEvidence=[gateRow(previous),gateRow(row)];}}}
@@ -166,13 +167,15 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  assert.ok(denseWitness.encounteredConflictNodes>4,'Actual dense bus route crosses more than four conflict nodes');
  await loadFixture(denseRaw);await reload();await until(async()=>!!(await traffic())?.ready,'dense grid entered from real server ACK');
  await evaluate('window.__trafficGapStartSampling()');await pause(false);
- await until(()=>evaluate('(()=>{const t=window.cityManager.traffic(),o=window.__trafficGapObserver;return t.step>=4&&t.cars>0&&o.committed.length>=4&&t.busMovement?.committedDrive>0&&o.rendered.length>=4&&o.motion.nonidle>=2&&o.motion.carMoves>0&&o.motion.busMoves>0})()'),'dense real Worker cars and physically advancing bus');
+ await until(()=>evaluate('(()=>{const t=window.cityManager.traffic(),o=window.__trafficGapObserver;return t.step>=4&&t.cars>0&&o.committed.length>=4&&t.busMovement?.committedDrive>0&&o.rendered.length>=4&&o.motion.nonidle>=2&&o.motion.carMoves>0&&o.motion.busMoves>0&&t.signals?.heads.some(h=>h.state==="green")&&t.signals.heads.some(h=>h.state==="red")})()'),'dense real Worker cars and physically advancing bus');
  await pause(true);await until(async()=>!(await traffic()).updating,'dense pause fence');await evaluate('window.__trafficGapSampling=false');
  const denseObserved=await observer(),denseCity=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));
  const denseProof=inspectTrafficEvidence(denseObserved.committed,denseObserved.rendered,denseCity.bus?.stops??[]);
  partial.navigation=inspectRrtEvidence([...records,...busyObserved.committed,...denseObserved.committed]);
+ partial.signalFrames=inspectSignalEvidence(denseObserved.committed,denseObserved.rendered,denseCity);
  partial.dense={...denseProof,witness:denseWitness};partial.completed.push('dense-render-motion');
  await capture('traffic-gap-dense-grid-paused');
+ partial.signalVisual=await trafficSignalBrowserChecks({evaluate,capture,tap,toggle,until});
  checks.push('Actual greater-than-four-node dense server seed renders live cars and bus with strict sampled clearance; complete L1/L2/L3 cycles remain mandatory real-engine/layer tests');
  await loadFixture(JSON.stringify(lightSaved));await reload();await until(async()=>!!(await traffic())?.ready,'original light fixture restored through server');
  const faults=[];
@@ -189,6 +192,6 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  }
  await reload();await until(async()=>!!(await traffic())?.ready,'healthy explicit reload after faults');await pause(true);
  checks.push('Explicit constructor and asynchronous Worker fault injections each make one attempt; normal operation returns only on explicit healthy reload');
- return {status:'passed',checks,pacing,navigation:partial.navigation,light:proof,dense:{...denseProof,witness:denseWitness},busy:{...busyProof,blocked:busyState.blocked,congestedLinks:busyState.congestedLinks},faults,scope:'Browser covers actual rendered sedan/SUV poses and observed bus bodies. Active bus/car clearance and engine passenger conservation are strict. Only actual home-phase storage omits bus meshes; long boarding/dwell/service-end cycles are covered by focused real-engine tests, not claimed from this short browser sample. Truck extents and exhaustive turning/stopping/restart adversarial cases remain separate mandatory source tests; no live truck/speed telemetry is fabricated.'};
+ return {status:'passed',checks,pacing,navigation:partial.navigation,signals:{frames:partial.signalFrames,visual:partial.signalVisual},light:proof,dense:{...denseProof,witness:denseWitness},busy:{...busyProof,blocked:busyState.blocked,congestedLinks:busyState.congestedLinks},faults,scope:'Browser covers actual rendered sedan/SUV poses and observed bus bodies. Active bus/car clearance and engine passenger conservation are strict. Only actual home-phase storage omits bus meshes; long boarding/dwell/service-end cycles are covered by focused real-engine tests, not claimed from this short browser sample. Truck extents and exhaustive turning/stopping/restart adversarial cases remain separate mandatory source tests; no live truck/speed telemetry is fabricated.'};
  }catch(error){partial.status='failed';const detail='\nPartial traffic evidence (not complete acceptance): '+JSON.stringify(partial);if(error instanceof Error){error.stack+=detail;throw error;}throw new Error(String(error)+detail);}
 }
