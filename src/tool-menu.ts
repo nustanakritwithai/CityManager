@@ -27,7 +27,8 @@ export function installToolMenu(anchor: HTMLButtonElement, menu: HTMLElement, co
     if (layout === 'row') {
       // Centre the row on its anchor; a row wider than the screen scrolls sideways.
       // Slightly wider than the dock buttons so long names (มหาวิทยาลัย) stay whole.
-      const cell = r.width * 1.2, count = buttons().length, width = Math.min(count * cell + Math.max(0, count - 1) * 4, right - left - 16);
+      const cell = r.width * 1.2, count = allButtons().filter(button => !button.hidden).length, // Disabled options still take a cell.
+        width = Math.min(count * cell + Math.max(0, count - 1) * 4, right - left - 16);
       menu.style.left = `${Math.max(left + 8, Math.min(r.left + r.width / 2 - width / 2, right - width - 8))}px`;
       menu.style.width = `${width}px`; menu.style.maxHeight = '';
     } else {
