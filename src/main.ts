@@ -673,7 +673,7 @@ async function boot() {
   const trafficSection=document.createElement('section');trafficSection.id='traffic-game-status';trafficSection.className='growth-section';
   const trafficTitle=document.createElement('h3');trafficTitle.textContent='การจราจรจำลอง';
   const trafficInfo=document.createElement('p');trafficInfo.textContent='กำลังเตรียมแบบจำลอง';trafficInfo.setAttribute('role','status');
-  const trafficNote=document.createElement('small');trafficNote.textContent='รถและคิวเป็นตัวแทนเพื่อวางแผนถนน แสดงรถสูงสุด 64 คันจากแบบจำลองสูงสุด 128 คัน บางช่วงถนนอาจไม่แสดงรถแม้แบบจำลองมีรถอยู่ ไม่ใช่การเดินทางหรือการส่งสินค้าจริง และไม่เปลี่ยนเศรษฐกิจหรือเซฟ';
+  const trafficNote=document.createElement('small');trafficNote.textContent='ไฟลูกศรเขียวคือสิทธิ์เข้าคิวจากแบบจำลอง แถบแดงคือรอ ช่วงเคลียร์ทางเป็นแดงทุกด้าน รถยังต้องรอพื้นที่ว่าง และไฟไม่ได้สั่งสิทธิ์รถเมล์โดยตรง · รถและคิวเป็นตัวแทนเพื่อวางแผนถนน แสดงรถสูงสุด 64 คันจากแบบจำลองสูงสุด 128 คัน บางช่วงถนนอาจไม่แสดงรถแม้แบบจำลองมีรถอยู่ ไม่ใช่การเดินทางหรือการส่งสินค้าจริง และไม่เปลี่ยนเศรษฐกิจหรือเซฟ';
   const trafficFocus=document.createElement('button');trafficFocus.id='traffic-game-focus';trafficFocus.type='button';trafficFocus.textContent='ไปดูจุดรถติด';trafficFocus.hidden=true;
   let bottleneckCell:number|null=null;trafficFocus.addEventListener('click',()=>{if(bottleneckCell!==null){view.focus(bottleneckCell);inspector(false);render();}});
   trafficSection.append(trafficTitle,trafficInfo,trafficFocus,trafficNote);$('#growth-anchor').insertAdjacentElement('beforebegin',trafficSection);

@@ -1,5 +1,7 @@
 import type {AppBase} from 'playcanvas';
 import type {City} from '../sim.ts';
+import {SceneTrafficSignals} from '../scene-traffic-signals.ts';
+import {TrafficSignalDisplay} from './signal-display.ts';
 import {SceneCitizenVehicles} from '../scene-citizen-vehicles.ts';
 import {taxiEnabled} from '../taxi/buildings.ts';
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
@@ -25,6 +27,8 @@ export class TrafficLayer {
  /** Bus clock: like this game, real time (1 game second per real second), independent of economy ticks and
   * speed. Starts at 07:00 so service (05:00–23:00) runs; resets with the city epoch. */
  private readonly busOn=busEnabled();private minute=7*60;
+ private signalDisplay=new TrafficSignalDisplay();
+ private readonly signalScene:Pick<SceneTrafficSignals,'sync'|'setEnabled'|'destroy'|'diagnostics'>|null;
  private readonly cars:Pick<SceneCitizenVehicles,'sync'|'setEnabled'|'destroy'|'diagnostics'>;
  private client:ReturnType<typeof createTrafficGameClient<TrafficGameInput,TrafficGameFrame>>|null=null;
  private city:City|null=null;private latest:TrafficGameFrame|null=null;
@@ -33,19 +37,20 @@ export class TrafficLayer {
  private anchor:number|null=null;private paused=true;private visible=true;private dirty=false;private renderDirty=true;private failure:string|null=null;
  constructor(private readonly app:AppBase,_onScreen:(cell:number)=>boolean=()=>true,private readonly onFailure:(message:string)=>void=()=>{},
    private readonly makeWorker:()=>Worker=()=>new Worker(new URL('./game-worker-entry.ts',import.meta.url),{type:'module'}),
-   scene?:Pick<SceneCitizenVehicles,'sync'|'setEnabled'|'destroy'|'diagnostics'>,private readonly taxiOn=taxiEnabled(),private readonly now:()=>number=()=>performance.now()){this.cars=scene??new SceneCitizenVehicles(app);}
+   scene?:Pick<SceneCitizenVehicles,'sync'|'setEnabled'|'destroy'|'diagnostics'>,private readonly taxiOn=taxiEnabled(),private readonly now:()=>number=()=>performance.now(),signalScene?:Pick<SceneTrafficSignals,'sync'|'setEnabled'|'destroy'|'diagnostics'>){this.cars=scene??new SceneCitizenVehicles(app);this.signalScene=signalScene??(scene?null:new SceneTrafficSignals(app));}
  private fail(error:unknown):void {
   this.failure=error instanceof Error?error.message:String(error);try{this.client?.dispose();}catch{/* isolated visual feature */}
-  try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
+  this.signalDisplay.clear();try{this.signalScene?.sync([]);}catch{/* lost graphics */}try{this.signalScene?.setEnabled(false);}catch{/* lost graphics */}try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
  }
  private reset(city:City):void {
   this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
   this.client?.dispose();this.client=null;this.city=city;this.latest=null;this.presenter=new TrafficPresentation();this.drawn=[];this.anchor=null;this.dirty=false;this.renderDirty=true;this.failure=null;this.cars.setEnabled(this.visible);this.cars.sync([]);
+  this.signalDisplay.reset(city);this.signalScene?.sync([]);this.signalScene?.setEnabled(this.visible);
   this.bus=null;this.minute=7*60; // rebuilt in frame() on the fresh bus clock
   try {
    const worker=this.makeWorker(),epoch=crypto.randomUUID();
    this.client=createTrafficGameClient<TrafficGameInput,TrafficGameFrame>(worker,epoch,{onFrame:frame=>{
-    const start=performance.now();this.latest=frame;try{this.bus?.onFrame(frame.bus,this.minute);}catch(error){this.fail(error);}this.presenter.update(gamePoses(frame.cars,frame.groups,24,2,128),gamePoses(frame.cars,frame.groups),frame.cars.filter(c=>!gameCarIsTaxi(c)).map(c=>`game:${c.id}`));this.renderDirty=true;
+    const start=performance.now();this.latest=frame;const signalHeads=this.signalDisplay.accept(frame.signals);this.signalScene?.sync(signalHeads);try{this.bus?.onFrame(frame.bus,this.minute);}catch(error){this.fail(error);}this.presenter.update(gamePoses(frame.cars,frame.groups,24,2,128),gamePoses(frame.cars,frame.groups),frame.cars.filter(c=>!gameCarIsTaxi(c)).map(c=>`game:${c.id}`));this.renderDirty=true;
     const ms=performance.now()-start;this.timing.projections++;this.timing.lastProjectionMs=ms;this.timing.maxProjectionMs=Math.max(this.timing.maxProjectionMs,ms);
    },onFailure:message=>this.fail(message)});
    this.submit(city,false,this.paused);
@@ -58,9 +63,9 @@ export class TrafficLayer {
  /** Every city replacement starts a fresh game epoch; nothing is read from or
   * written to the player's save. Map edits replace the current sample. */
  afterMapEdit(city:City,paused=this.paused):void {
-  try{if(city!==this.city){this.paused=paused;this.reset(city);return;}this.dirty=true;}catch(error){this.fail(error);}
+  try{if(city!==this.city){this.paused=paused;this.reset(city);return;}this.signalDisplay.reset(city);this.signalScene?.sync([]);this.dirty=true;}catch(error){this.fail(error);}
  }
- setVisible(visible:boolean):void {if(this.visible===visible)return;this.visible=visible;this.renderDirty=true;try{this.cars.setEnabled(visible&&!this.failure);}catch(error){this.fail(error);}}
+ setVisible(visible:boolean):void {if(this.visible===visible)return;this.visible=visible;this.renderDirty=true;try{this.cars.setEnabled(visible&&!this.failure);this.signalScene?.setEnabled(visible&&!this.failure);}catch(error){this.fail(error);}}
  /** Visibility can change when the renderer is not receiving frames. Fence an
   * in-flight step immediately on hide and reset wall-time on both transitions. */
  pageVisibilityChanged(hidden:boolean):void {
@@ -100,9 +105,9 @@ export class TrafficLayer {
   return busPoses(this.bus.engine.snapshot(this.minute).filter(b=>b.phase!=='home'),{stops:this.city.bus?.stops??[]});
  }
 
- destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
- get diagnostics(){const f=this.latest,worker=this.client?.status??null,presenter=this.presenter,bus=this.bus;return {...this.cars.diagnostics,mode:'allocation-game' as const,get presentation(){return presenter.diagnostics;},paused:this.paused,
-  get busLedger(){return bus?.ledger()??null;},get busMovement(){return bus?.engine.movementStats??null;},busMinute:bus?.engine.now??null,busStranded:bus?.engine.strandedCount??0,ready:f!==null,updating:f===null||!!worker?.inflight||!!worker?.pending,step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
+ destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;this.signalDisplay.clear();try{this.signalScene?.destroy();}catch{/* best-effort owned graphics cleanup */}try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
+ get diagnostics(){const f=this.latest,worker=this.client?.status??null,presenter=this.presenter,bus=this.bus,signalDisplay=this.signalDisplay,signalScene=this.signalScene;return {...this.cars.diagnostics,mode:'allocation-game' as const,get presentation(){return presenter.diagnostics;},paused:this.paused,
+  get signals(){return signalDisplay.diagnostics;},get signalRendering(){return signalScene?.diagnostics??null;},get busLedger(){return bus?.ledger()??null;},get busMovement(){return bus?.engine.movementStats??null;},busMinute:bus?.engine.now??null,busStranded:bus?.engine.strandedCount??0,ready:f!==null,updating:f===null||!!worker?.inflight||!!worker?.pending,step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
   completed:f?.completed??0,dropped:f?.dropped??0,cancelled:f?.cancelled??0,clippedRate:f?.clippedRate??0,
   roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker,timing:{...this.timing}};}
  /** Cumulative completed taxi trips on the latest frame (resets with the game). */

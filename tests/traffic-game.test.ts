@@ -5,7 +5,16 @@ const sample=(paths:number[][],rate=3):TrafficGameSample=>{const roads=new Set(p
 const base=()=>sample([[25,26,27,28],[26,50]]);
 const run=(s:TrafficGameSample,n:number)=>{const g=new TrafficGame(s);for(let i=0;i<n;i++)g.step();return g.frame;};
 const mass=(f:ReturnType<TrafficGame['step']>)=>assert.ok(Math.abs(f.offered-f.completed-f.dropped-f.cancelled-f.waiting-f.moving)<1e-6,JSON.stringify(f));
-test('shared bottleneck limits capacity while a real bypass adds throughput',()=>{const a=run(base(),120),b=run(sample([[25,26,27,28],[25,49,50,26]]),120),c=run(sample([[25,26,27,28],[26,50],[25,49,73,74,75,76,52,28]]),120);for(const f of [a,b,c])mass(f);assert.ok(b.completed<=a.completed+4);assert.ok(c.completed>a.completed+30,JSON.stringify([a.completed,b.completed,c.completed]));assert.ok(c.dropped<a.dropped);assert.ok(c.groups.every(g=>g.closed||g.amount<=g.storage));});
+test('shared bottleneck limits capacity while a real bypass adds throughput',()=>{
+ // The former +30 margin encoded the removed artificial one-second grant hold.
+ // Check useful bypass benefit and preregistered live-baseline floors instead.
+ for(const [seconds,bottleneckFloor,bypassFloor] of [[120,60,91],[240,120,187],[600,300,475]]){
+  const a=run(base(),seconds),b=run(sample([[25,26,27,28],[25,49,50,26]]),seconds),c=run(sample([[25,26,27,28],[26,50],[25,49,73,74,75,76,52,28]]),seconds);
+  for(const f of [a,b,c]){mass(f);assert.ok(f.groups.every(g=>g.closed||g.amount<=g.storage));}
+  assert.ok(b.completed<=a.completed+4);assert.ok(c.completed>a.completed,JSON.stringify([seconds,a.completed,c.completed]));assert.ok(c.dropped<a.dropped);
+  assert.ok(a.completed>=bottleneckFloor);assert.ok(c.completed>=bypassFloor);
+ }
+});
 test('bounded queues and actors report clipped and dropped demand without inventing completions',()=>{const s=sample([[25,26,27,28]],4),g=new TrafficGame(s);for(let i=0;i<400;i++)g.step();const f=g.frame;mass(f);assert.ok(f.moving<=GAME_MAX_CARS);assert.ok(f.waiting<=GAME_MAX_ODS*GAME_MAX_QUEUE);assert.ok(f.dropped>0);assert.ok(f.completed<f.offered);assert.ok(f.groups.every(x=>x.closed||x.amount<=x.storage));});
 test('a severed occupied link strands cars; repair lets them finish and preserves accounting',()=>{const s=sample([[25,26,27,28]],1),g=new TrafficGame(s);g.step();g.step();const before=g.frame;assert.ok(before.moving);const cut=structuredClone(s);cut.map.cells[26].road=false;g.setSample(cut);g.step();const broken=g.frame;mass(broken);assert.ok(broken.blocked>0);assert.ok(broken.groups.some(x=>x.closed));g.setSample(s);for(let i=0;i<12;i++)g.step();const fixed=g.frame;mass(fixed);assert.ok(fixed.completed>before.completed);});
 test('pause, clone and reset are deterministic, isolated and retain the sample',()=>{const s=base(),g=new TrafficGame(s);for(let i=0;i<12;i++)g.step();const before=g.frame;assert.deepEqual(g.step(true),before);const copy=g.clone();assert.deepEqual(copy.frame,before);for(let i=0;i<5;i++){g.step();copy.step();assert.deepEqual(g.frame,copy.frame);}copy.step();assert.notDeepEqual(copy.frame,g.frame);g.reset();assert.equal(g.frame.step,0);assert.equal(g.frame.moving,0);assert.equal(g.frame.demandRate,3);});
