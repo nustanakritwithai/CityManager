@@ -4,8 +4,9 @@ import type {CityView} from '../renderer.ts';
 import {installToolMenu} from '../tool-menu.ts';
 import {iconElement} from '../ui-icons.ts';
 import {GAME_RAIL_POLICY,GAME_RAIL_TRACK_MINUTES,RailNetworkRuntime} from './network-runtime.ts';
-import {railStationRows} from './presentation.ts';
+import {railStationRows,railTrainPose} from './presentation.ts';
 import {SceneRail} from './scene.ts';
+import {publishRailMap,uniqueRuns} from './map-state.ts';
 import './management.css';
 
 export type RailManagementOptions={view:CityView;city:()=>City;runtime:()=>ParkRuntime;selectTool:()=>void;changed:()=>void;status:(message:string)=>void;enabled:boolean;
@@ -137,6 +138,8 @@ export function installRailManagement(options:RailManagementOptions){
     }
     const rows=service?railStationRows(service.config,service.snapshot):[];
     for(const site of state?.stations??[]){const ui=stationElements.get(site.id)!,row=rows.find(r=>r.id===site.id);ui.text.textContent=row?`${cellLabel(site.cell)} · รอ ${row.waiting}/${row.queueCapacity} · เดินมา ${row.access} · รอนอก ${row.outside}`:`${cellLabel(site.cell)} · แผนยังไม่เปิดบริการ`;ui.button.textContent=row?(row.open?'ปิดสถานี':'เปิดสถานี'):'ถอนแผน';ui.button.setAttribute('aria-pressed',String(!!row?.open));}
+    let train=null;if(service){try{const pose=railTrainPose(service.config,state!.graph,service.snapshot,runtime.minuteRemainder);train={x:pose.x,z:pose.z,moving:pose.moving};}catch{train=null;}}
+    publishRailMap(state?{links:uniqueRuns(state.graph.links),stations:sites.map((site,index)=>({cell:site.cell,index:index+1,waiting:rows.find(r=>r.id===site.id)?.waiting??0})),train,running:!!service?.snapshot.enabled}:null);
     scene.syncNetwork(state,runtime.minuteRemainder);
   }
   function activate(cell:number):boolean{

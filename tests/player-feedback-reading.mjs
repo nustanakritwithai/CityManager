@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 
 // Shared mobile reading surfaces, using only native navigation and synthetic
-// local save failures. Collect the whole matrix before reporting any failure.
-export async function verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts, failLocalWrites, restoreLocalWrites, retrySave }) {
+// server save failures. Collect the whole matrix before reporting any failure.
+export async function verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts, failServerWrites, restoreServerWrites, retrySave }) {
   const views = [
     { name:'phone', width:360, height:740, screenWidth:360, screenHeight:780 },
     { name:'short', width:360, height:420, screenWidth:360, screenHeight:780 },
@@ -47,7 +47,7 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
     for (const warning of [false,true]) {
       if (warning) {
         await game();
-        await failLocalWrites('Synthetic reading-panel quota');
+        await failServerWrites();
         await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
       }
       for (const name of pages) {
@@ -60,7 +60,7 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
             const full=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right};
             const keys=({house:['households','persons','vacant-households','vacant-persons'],factory:['crop-stock','recipe-input','recipe-output','stock'],household:['members','workforce','dependents','employed','unemployed']})[${JSON.stringify(name)}]||[];
             const primary=keys.map(k=>document.querySelector('#entity-content .bc-kpis [data-context-metric="'+k+'"]')).filter(Boolean);
-            return{viewport:[innerWidth,innerHeight],ratio,panel:{top:p.top,bottom:p.bottom,left:p.left,right:p.right,height:p.height},body:{top:b.top,bottom:b.bottom,height:b.height,horizontalOverflow:body.scrollWidth>body.clientWidth+1},warningVisible:!banner.hidden,warningInline:banner.parentElement===panel,warningRect:{top:w.top,bottom:w.bottom},primaryTotal:primary.length,primaryFull:primary.filter(full).length,ledgerFull:[...document.querySelectorAll('#ledger .sm-flow-card')].filter(full).length,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-export']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width*ratio,height:r.height*ratio,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})};
+            return{viewport:[innerWidth,innerHeight],ratio,panel:{top:p.top,bottom:p.bottom,left:p.left,right:p.right,height:p.height},body:{top:b.top,bottom:b.bottom,height:b.height,horizontalOverflow:body.scrollWidth>body.clientWidth+1},warningVisible:!banner.hidden,warningInline:banner.parentElement===panel,warningRect:{top:w.top,bottom:w.bottom},primaryTotal:primary.length,primaryFull:primary.filter(full).length,ledgerFull:[...document.querySelectorAll('#ledger .sm-flow-card')].filter(full).length,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-retry']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width*ratio,height:r.height*ratio,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})};
           })()`);
           Object.assign(measurement,{viewportName,page:name,warning}); layouts.push(measurement);
           if (warning && (viewportName==='phone'||name==='ledger')) await shot('reading-'+label);
@@ -87,7 +87,7 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
         }
       }
       if (warning) {
-        await restoreLocalWrites();
+        await restoreServerWrites();
         await retrySave();
       }
     }
