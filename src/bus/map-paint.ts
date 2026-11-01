@@ -15,18 +15,32 @@ export function paintBusOverlay(ctx: CanvasRenderingContext2D, cellPx: number, l
   for (const seg of draw.lines) strokeRibbon(ctx, seg, cellPx);
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
+  // Stops: white discs with a bus-blue ring, numbered on the city map; riders waiting under them.
+  const order = stopOrder(draw.stops);
   for (const stop of draw.stops) {
-    const p = worldToCanvas(stop.x, stop.z, cellPx);
-    const w = stop.kind === 'shelter' ? cellPx * 0.42 : cellPx * 0.16;
-    const h = stop.kind === 'shelter' ? cellPx * 0.28 : cellPx * 0.16;
-    ctx.fillStyle = stop.kind === 'shelter' ? '#f4f7fb' : '#d5dbe3';
-    ctx.fillRect(p.x - w / 2, p.y - h / 2, w, h);
-    ctx.strokeStyle = '#243044'; ctx.lineWidth = 1; ctx.strokeRect(p.x - w / 2, p.y - h / 2, w, h);
+    const p = worldToCanvas(stop.x, stop.z, cellPx), r = Math.max(2.5, cellPx * (stop.kind === 'shelter' ? 0.3 : 0.24));
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#f4f7fb'; ctx.fill(); ctx.lineWidth = Math.max(1.2, cellPx * 0.08); ctx.strokeStyle = '#2f8fd8'; ctx.stroke();
+    if (labels || cellPx >= 10) {
+      ctx.fillStyle = '#16314d'; ctx.font = `700 ${Math.max(6, r * 1.15)}px "IBM Plex Sans Thai", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(order.get(stop.id) ?? ''), p.x, p.y + 0.5);
+    }
+    if (labels && stop.waiting > 0) {
+      // Waiting riders as a gold count badge on the stop's shoulder (building names sit above and below).
+      const text = String(stop.waiting);
+      ctx.font = `700 ${Math.max(8, cellPx * 0.26)}px "IBM Plex Sans Thai", sans-serif`;
+      const bw = Math.max(r * 1.3, ctx.measureText(text).width + 6), bh = Math.max(10, cellPx * 0.34), bx = p.x + r * 0.55, by = p.y - r * 1.35;
+      ctx.beginPath(); ctx.roundRect(bx, by - bh / 2, bw, bh, bh / 2); ctx.fillStyle = '#f3c46b'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = '#0f192e'; ctx.stroke();
+      ctx.fillStyle = '#1d1405'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, bx + bw / 2, by + 0.5);
+    }
   }
+  // Depots: pale garage tiles with a blue edge (grey when closed).
   for (const depot of draw.depots) {
-    const p = worldToCanvas(depot.x, depot.z, cellPx), s = cellPx * 0.56;
-    ctx.fillStyle = depot.open ? '#f2c14e' : '#8d887c';
-    ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+    const p = worldToCanvas(depot.x, depot.z, cellPx), s = cellPx * 0.62;
+    ctx.beginPath(); ctx.roundRect(p.x - s / 2, p.y - s / 2, s, s, s * 0.2);
+    ctx.fillStyle = depot.open ? '#dfe6f0' : '#8d887c'; ctx.fill();
+    ctx.lineWidth = Math.max(1.2, cellPx * 0.08); ctx.strokeStyle = depot.open ? '#2f8fd8' : '#5d5a52'; ctx.stroke();
+    if (labels) { ctx.fillStyle = '#16314d'; ctx.font = `700 ${Math.max(8, s * 0.42)}px "IBM Plex Sans Thai", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('อู่', p.x, p.y + 0.5); }
   }
   for (const bus of draw.buses) {
     const p = worldToCanvas(bus.x, bus.z, cellPx);
@@ -56,10 +70,12 @@ export function paintBusOverlay(ctx: CanvasRenderingContext2D, cellPx: number, l
 function strokeRibbon(ctx: CanvasRenderingContext2D, seg: BusRibbon, cellPx: number) {
   const a = worldToCanvas(seg.x - seg.headingX * seg.length / 2, seg.z - seg.headingZ * seg.length / 2, cellPx);
   const b = worldToCanvas(seg.x + seg.headingX * seg.length / 2, seg.z + seg.headingZ * seg.length / 2, cellPx);
-  ctx.strokeStyle = seg.color;
-  ctx.globalAlpha = seg.paused ? 0.45 : 0.9;
-  ctx.lineWidth = Math.max(1.25, cellPx * (seg.paused ? 0.12 : 0.16));
+  const width = Math.max(1.6, cellPx * (seg.paused ? 0.14 : 0.22));
   ctx.setLineDash(seg.paused ? [Math.max(2, cellPx * 0.35), Math.max(2, cellPx * 0.28)] : []);
+  // A dark casing under the line colour keeps it readable over roads and zones.
+  ctx.globalAlpha = seg.paused ? 0.35 : 0.75; ctx.strokeStyle = '#0f192e'; ctx.lineWidth = width + Math.max(1.5, cellPx * 0.08);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  ctx.globalAlpha = seg.paused ? 0.5 : 1; ctx.strokeStyle = seg.color; ctx.lineWidth = width;
   ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
 }
 
@@ -68,11 +84,13 @@ export function busCellNote(cell: number): string | null {
   if (!busEnabled()) return null;
   const draw = publishedBusMap(); if (!draw) return null;
   const stop = draw.stops.find(item => item.cell === cell);
-  if (stop) {
-    const kind = stop.kind === 'shelter' ? 'ศาลา' : 'ป้ายเสา';
-    return stop.waiting > 0 ? `${kind} · รอ ${stop.waiting}` : kind;
-  }
+  if (stop) return `ป้ายรถเมล์ ${stopOrder(draw.stops).get(stop.id)} · ${stop.kind === 'shelter' ? 'ศาลา' : 'ป้ายเสา'} · รอ ${stop.waiting} คน`;
   const depot = draw.depots.find(item => item.cell === cell);
-  if (depot) return `อู่รถเมล์ ระดับ ${depot.level}${depot.open ? '' : ' · ปิด'}`;
+  if (depot) return `อู่รถเมล์ · ระดับ ${depot.level}${depot.open ? '' : ' · ปิด'}`;
   return null;
+}
+
+/** Stop numbers for the map: 1, 2, 3… by stop id, so a stop keeps its number as others are added. */
+export function stopOrder(stops: readonly { id: number }[]): Map<number, number> {
+  return new Map([...stops].map(stop => stop.id).sort((a, b) => a - b).map((id, index) => [id, index + 1]));
 }

@@ -109,7 +109,7 @@ export class Minimap {
     close.addEventListener('click', () => this.toggleMap(false));
     bar.append(h, close);
     const legend = document.createElement('div'); legend.className = 'city-map-legend';
-    for (const [tone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม'], ['road', 'ถนน'], ['gate', 'ประตูเมือง'], ['rail', 'รถไฟ'], ['issue', 'มีปัญหา']] as const) {
+    for (const [tone, label] of [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม'], ['road', 'ถนน'], ['gate', 'ประตูเมือง'], ['rail', 'รถไฟ'], ['bus', 'รถเมล์'], ['issue', 'มีปัญหา']] as const) {
       const item = document.createElement('span'); item.className = `city-map-key ${tone}`; item.textContent = label; legend.append(item);
     }
     this.mapCanvas.className = 'city-map-canvas';
@@ -146,6 +146,6 @@ export class Minimap {
     const c = this.city.cells[cell], col = cell % SIZE + 1, row = Math.floor(cell / SIZE) + 1, b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
     const kind = c.road ? (cell === GATEWAY ? 'ประตูเมือง' : 'ถนน') : !c.zone ? 'ที่ดินว่าง' : b ? `${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} #${b.id} · ระดับ ${b.level}` : `โซน${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} (ว่าง)`;
     const bus = busCellNote(cell), rail = railCellNote(cell);
-    this.mapInfo.textContent = `${col},${row} · ${rail || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}${bus ? ` · ${bus}` : ''}`;
+    this.mapInfo.textContent = `${col},${row} · ${rail || bus || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}`;
   }
 }
