@@ -75,6 +75,20 @@ async function stopBrowser(child,ws){
  }
 }
 
+// A browser/network stack can retransmit a POST before JavaScript observes its
+// failure. Group by idempotency key, never by assumed array positions.
+function verifyLostAckPosts(posts, original, expectedNextRevision){
+ assert.ok(posts.length>=3,'original, at least one replay and next save required');
+ assert.deepEqual(posts[0],original,'first observed command is the lost save');
+ const replays=posts.filter(p=>p.key===original.key),following=posts.filter(p=>p.key!==original.key);
+ assert.ok(replays.length>=2,'the exact lost command was retried');
+ for(const post of replays)assert.deepEqual(post,original,'every replay keeps the exact id and body');
+ assert.ok(following.length>=1,'a subsequent current-state save must occur');
+ const next=following[0];assert.ok(next.key&&next.key!==original.key,'subsequent save has a distinct key');
+ for(const post of following)assert.deepEqual(post,next,'only one distinct subsequent intent is permitted');
+ assert.equal(next.data.action,'save');assert.equal(next.data.expectedRevision,expectedNextRevision,'next save fences against the committed lost-ACK revision');
+ return {next,replays:replays.length,subsequentAttempts:following.length};
+}
 function fixtureService(){
  let resetAllowed=true;
  let state={active:null,fence:0,snapshots:[],requests:new Map(),archives:new Map()},tail=Promise.resolve();
@@ -112,12 +126,27 @@ async function selfTest(){
 
  assert.equal(expectedReloadDialog('beforeunload',true),true);
  for(const [type,scope] of [['beforeunload',false],['confirm',true],['alert',true],['prompt',true]])assert.equal(expectedReloadDialog(type,scope),false);
+ const old={key:'first',data:{action:'save',expectedRevision:3,raw:'exact'}},next={key:'next',data:{action:'save',expectedRevision:4,raw:'current'}};
+ const grouped=verifyLostAckPosts([old,structuredClone(old),structuredClone(old),next,structuredClone(next)],old,4);assert.equal(grouped.replays,3);assert.equal(grouped.subsequentAttempts,2);
+ assert.throws(()=>verifyLostAckPosts([old,{...old,data:{...old.data,raw:'changed'}},next],old,4));
+ assert.throws(()=>verifyLostAckPosts([old,next,next],old,4));
+ assert.throws(()=>verifyLostAckPosts([old,old,next,{...next,key:'third'}],old,4));
+ assert.throws(()=>verifyLostAckPosts([old,old,{...next,data:{...next.data,expectedRevision:3}}],old,4));
  const f=fixtureService(),id=randomUUID(),cityId=randomUUID(),body={action:'create',cityId,raw:'{"version":23,"tick":1}',metadata:{name:'fixture',population:0,tick:1}};
  const first=await f.service.mutate(OWNER,id,body);assert.equal(first.revision,1);assert.deepEqual(await f.service.mutate(OWNER,id,body),first);
  await assert.rejects(f.service.mutate(OWNER,randomUUID(),body),e=>e.status===409);
  await f.service.archive(OWNER,{raw:body.raw,source:'primary'});await f.service.archive(OWNER,{raw:body.raw,source:'checkpoint'});
  assert.deepEqual((await f.service.readArchive(OWNER,hash(body.raw))).sources,['primary','checkpoint']);
  assert.equal(f.state.active.revision,1);
+ // Deterministically deliver duplicate transport attempts to the same service
+ // transaction, then a distinct fenced save. Duplicates must not recommit.
+ const d=fixtureService(),did=randomUUID(),dCity=randomUUID(),dCreate={...body,cityId:dCity};await d.service.mutate(OWNER,randomUUID(),dCreate);
+ const lost={key:did,data:{action:'save',cityId:dCity,expectedRevision:1,raw:'{\"version\":23,\"tick\":2}',metadata:{name:'fixture',population:0,tick:2}}};
+ const nextSave={key:randomUUID(),data:{action:'save',cityId:dCity,expectedRevision:2,raw:'{\"version\":23,\"tick\":3}',metadata:{name:'fixture',population:0,tick:3}}};
+ for(const post of [lost,structuredClone(lost),structuredClone(lost),nextSave])await d.service.mutate(OWNER,post.key,post.data);
+ verifyLostAckPosts([lost,structuredClone(lost),structuredClone(lost),nextSave],lost,2);
+ assert.equal(d.state.active.revision,3);assert.equal(d.state.requests.size,3,'create plus two save receipts despite duplicate deliveries');
+ assert.equal(d.state.requests.get(did).response.revision,2);assert.equal(d.state.requests.get(nextSave.key).response.revision,3);
  const deleteId=randomUUID(),remove={action:'delete',cityId,expectedRevision:1};
  const tombstone=await f.service.mutate(OWNER,deleteId,remove);
  assert.deepEqual(tombstone,{owner:OWNER,cityId,revision:2,deleted:true,archiveHash:hash(body.raw)});
@@ -194,7 +223,7 @@ async function run(){
    window.__cityWrites=[];window.__quota=false;const city=/^citymanager\\.(save\\.|backup\\.|checkpoint\\.|resume-choice|market\\.)/;
    for(const method of ['setItem','removeItem','clear']){const original=Storage.prototype[method];Storage.prototype[method]=function(...args){if(method==='clear'||city.test(String(args[0])))window.__cityWrites.push(method+':'+args[0]);if(window.__quota&&method==='setItem')throw new DOMException('fixture quota','QuotaExceededError');return original.apply(this,args);};}
    const transaction=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(stores,mode,...rest){if(mode==='readwrite'&&/citymanager/.test(this.name))window.__cityWrites.push('IDB:'+this.name);return transaction.call(this,stores,mode,...rest);};
-   const si=window.setInterval;window.setInterval=function(fn,ms,...args){return si.call(this,fn,ms===60000?1500:ms,...args);};})();`});
+   const si=window.setInterval;window.setInterval=function(fn,ms,...args){return ms===60000?si.call(this,()=>{if(!window.__suspendAcceleratedAutosave)fn(...args);},1500):si.call(this,fn,ms,...args);};})();`});
   const click=selector=>{diagnostics.phase=`click ${selector}`;return evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
   const entryPredicate=()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
   const reloadEntryPredicate=()=>reloadEntryRead(entryPredicate,error=>{diagnostics.navigationRetries.push({phase:diagnostics.phase,...error});console.log('Post-reload entry context retry',JSON.stringify(error));});
@@ -271,6 +300,10 @@ async function run(){
   rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'save before reload');await settled();const saved=JSON.parse(f.state.active.raw);await clean();
   // A real beforeunload guard may protect changes after the ACK. Explicit reload is the tested user choice.
   diagnostics.phase='explicit reload after acknowledged save';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;const loaded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.equal(loaded.tick,saved.tick);assert.deepEqual(loaded.accounts,saved.accounts);assert.deepEqual(loaded.bus,saved.bus);await clean();
+  // The separate autosave test above already passed. Prevent only its artificially
+  // accelerated fixture timer from racing the controlled fault/retry matrix.
+  await send('Page.addScriptToEvaluateOnNewDocument',{source:'window.__suspendAcceleratedAutosave=true'});await evaluate('window.__suspendAcceleratedAutosave=true');const drainRevision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>drainRevision,'post-reload manual ACK before fault matrix');await settled();
+  await until(async()=>{const n=f.posts.length;await sleep(500);return f.posts.length===n;},'drain accelerated autosave requests',10000);
   // Actual visible banner control retries the exact uncertain command on both sizes.
   const pressRetry=async mobile=>{const box=await evaluate(`(()=>{const e=document.querySelector('#save-failure-retry'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(x,y))};})()`);assert.ok(box.hit&&box.width>0&&box.height>0,'retry must be visible and hit-testable');if(mobile){assert.ok(box.width>=44&&box.height>=44,'touch retry target at least 44px');await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:box.x,y:box.y}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}else{await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:box.x,y:box.y});await send('Input.dispatchMouseEvent',{type:'mousePressed',x:box.x,y:box.y,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:box.x,y:box.y,button:'left',clickCount:1});}};
   assert.equal(await evaluate(`!!document.querySelector('#save-failure-export,#export,#import,[download],input[type=file]')`),false,'no browser city export or import controls');
@@ -285,8 +318,12 @@ async function run(){
   // key/body before trackedSave writes the current state as a new revision.
   const lostHead=f.state.active,lostRequests=f.state.requests.size,lostStart=f.posts.length;f.mode='drop-save-ack';await click('#save');await until(failed,'committed save with lost ACK');
   assert.equal(f.state.active.revision,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+1);const lostCommand=f.posts[lostStart];
-  f.mode='ok';await pressRetry(false);await until(async()=>f.state.active.revision===lostHead.revision+2,'lost ACK retry and subsequent current-state save');await settled();
-  assert.deepEqual(f.posts[lostStart+1],lostCommand,'lost ACK retry preserves exact idempotency key and payload');assert.notEqual(f.posts[lostStart+2].key,lostCommand.key);assert.equal(f.posts[lostStart+2].data.expectedRevision,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+2,'retry creates no duplicate receipt');await clean();
+  const lostAckSnapshot=async()=>{const posts=f.posts.slice(lostStart);diagnostics.lostAck={initialRevision:lostHead.revision,headRevision:f.state.active.revision,initialReceiptCount:lostRequests,receiptCount:f.state.requests.size,posts:posts.map(({key,data})=>({key,action:data.action,expectedRevision:data.expectedRevision,rawHash:typeof data.raw==='string'?hash(data.raw):null})),ui:await evaluate(`({bannerVisible:!!document.querySelector('#save-failure-banner:not([hidden])'),banner:document.querySelector('#save-failure-banner')?.textContent,badge:document.querySelector('#autosave-status')?.textContent})`)};return posts;};
+  f.mode='ok';await pressRetry(false);await until(async()=>{const posts=await lostAckSnapshot(),next=posts.find(p=>p.key!==lostCommand.key);return !!next&&f.state.requests.has(next.key);},'lost ACK retry and subsequent current-state receipt');await settled();
+  const observed=await lostAckSnapshot();
+  const grouped=verifyLostAckPosts(observed,lostCommand,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+2,'retry creates no duplicate receipt');
+  assert.equal(f.state.requests.get(lostCommand.key)?.response.revision,lostHead.revision+1,'one original receipt records its single commit');
+  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');await clean();
   // Management is an explicit two-step lifecycle; Cancel has no mutation.
   diagnostics.phase='management cancel';const beforeCancel=f.state.active,cancelPosts=f.posts.length;
   await click('#new-city');await until(()=>evaluate("!!document.querySelector('#save-management-dialog[open]')"),'management dialog');await click('#save-management-cancel');
