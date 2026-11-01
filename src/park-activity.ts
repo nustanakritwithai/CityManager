@@ -30,7 +30,8 @@ const hash = (value: string): number => { let n = 2166136261; for (const char of
  * remaining slots, matching the workforce allocator's residual pools. A change can reassign a slot's
  * job, but never changes its constituent identity or creates another worker.
  */
-function activityRoster(city: City): { citizens: Citizen[]; daytimeUnavailable: Set<string> } {
+type EmployedVisitor = (citizenId:string, homeId:number|null, firmId:number|null, parkJobId:number|null) => void;
+function activityRoster(city: City, employedVisitor?: EmployedVisitor): { citizens: Citizen[]; daytimeUnavailable: Set<string> } {
   const people: Citizen[] = [];
   const daytimeUnavailable = new Set<string>();
   // Index once per snapshot. Iterating the original arrays preserves stable
@@ -54,7 +55,7 @@ function activityRoster(city: City): { citizens: Citizen[]; daytimeUnavailable: 
     value.wages.sort((a, b) => a.firmId - b.firmId);
   }
   const educationByHousehold = new Map<number, number>();
-  for (const e of city.education?.people ?? []) {
+  for (const e of employedVisitor ? [] : city.education?.people ?? []) {
     // educationOccupied uses find(), so the first duplicate is authoritative.
     if (!educationByHousehold.has(e.householdId)) educationByHousehold.set(e.householdId, e.school + e.university + e.teacher + e.professor);
   }
@@ -74,6 +75,10 @@ function activityRoster(city: City): { citizens: Citizen[]; daytimeUnavailable: 
     // Keeping this separate from employed preserves legacy activity save fields.
     let education = educationByHousehold.get(h.id) ?? 0;
     for (let slot = 0; slot < h.members; slot++) {
+      if (employedVisitor) {
+        const job = jobs[slot]; if (job) employedVisitor(identity(h.id, slot), h.home, job.firmId, job.parkJobId);
+        continue;
+      }
       const citizenId = identity(h.id, slot), employed = jobs[slot] != null;
       const studyingOrTeaching = !employed && slot < h.workforce && education > 0;
       if (studyingOrTeaching) education--;
@@ -84,6 +89,8 @@ function activityRoster(city: City): { citizens: Citizen[]; daytimeUnavailable: 
   return { citizens: people, daytimeUnavailable };
 }
 export function parkActivityCitizens(city: City): Citizen[] { return activityRoster(city).citizens; }
+/** Same identity and assignment ordering, without allocating a second citizen roster. */
+export function forEachParkActivityEmployedCitizen(city: City, visit: EmployedVisitor): void { activityRoster(city, visit); }
 
 /** Jobs and canonical education reservations share the existing 08:00–17:00
  * leisure window. This does not invent a campus timetable or alter daily roles. */

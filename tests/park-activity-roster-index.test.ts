@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {createCity,type City} from '../src/sim.ts';
 import {WORKER_SKILLS} from '../src/labor.ts';
 import {educationOccupied} from '../src/education.ts';
-import {parkActivityCitizens,parkActivityUnavailableCitizenIds,type Citizen} from '../src/park-activity.ts';
+import {parkActivityCitizens,forEachParkActivityEmployedCitizen,parkActivityUnavailableCitizenIds,type Citizen} from '../src/park-activity.ts';
+import {populationFixture} from './population-capacity-fixture.ts';
 
 // Reference of the pre-index assignment contract: owner then wages by firm ID,
 // then parks in park ID order; education occupies the first free worker slots.
@@ -49,7 +50,16 @@ test('indexed workforce and education match original roster order with overlappi
   c.education!.people.push({...c.education!.people[0],school:0});
   const before=structuredClone(c),expected=originalRoster(c);
   assert.deepEqual(parkActivityCitizens(c),expected.citizens);
+  const actual:unknown[]=[];forEachParkActivityEmployedCitizen(c,(citizenId,homeId,firmId,parkJobId)=>actual.push({citizenId,homeId,firmId,parkJobId}));
+  assert.deepEqual(actual,expected.citizens.filter(person=>person.employed).map(({citizenId,homeId,firmId,parkJobId})=>({citizenId,homeId,firmId,parkJobId})));
   assert.deepEqual(parkActivityUnavailableCitizenIds(c,600),expected.unavailable);
   assert.deepEqual(parkActivityUnavailableCitizenIds(c,1020),new Set());
   assert.deepEqual(c,before);
+});
+
+test('employee visitor matches the full roster for a dense city and an empty city',()=>{
+  for(const c of [createCity(1,{starter:false}),populationFixture(334,true)]){
+    const actual:unknown[]=[];forEachParkActivityEmployedCitizen(c,(citizenId,homeId,firmId,parkJobId)=>actual.push({citizenId,homeId,firmId,parkJobId}));
+    assert.deepEqual(actual,parkActivityCitizens(c).filter(person=>person.employed).map(({citizenId,homeId,firmId,parkJobId})=>({citizenId,homeId,firmId,parkJobId})));
+  }
 });

@@ -11,7 +11,7 @@ import {createRoadNavigator,emptyNavigationStats,type NavigationStats} from './r
 import {gameBusShare,validGameBusInput,type GameBusFrame,type GameBusInput,type GameBusShare,type GameBusTotal} from '../bus/game-bus.ts';
 import {LANE_START,SLOT_PITCH} from '../citizen-road-queue.ts';
 import {TRAFFIC_SPACING,updateVehicleFollowing,type LaneVehicle} from './spacing.ts';
-import {parkActivityCitizens,WORK_END_MINUTE} from '../park-activity.ts';
+import {forEachParkActivityEmployedCitizen,WORK_END_MINUTE} from '../park-activity.ts';
 
 /** Bounded, ephemeral road-game traffic. One step represents one real second,
  * not a city day or a literal citizen trip. Work labels are representative;
@@ -74,12 +74,15 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;
     const firms=new Map(city.firms.map(f=>[f.id,buildings.get(f.building)]));
     const parks=new Map(city.parks.map(p=>[p.id,p.cell]));
     const candidates:WorkTripInput['candidates']=[];
-    for(const person of parkActivityCitizens(city)){
-      if(!person.employed||person.homeId===null)continue;
-      const home=homeAccess.get(person.homeId),work=person.firmId!==null?firms.get(person.firmId):person.parkJobId!==null?parks.get(person.parkJobId):undefined;
-      if(home===undefined||work===undefined||!frontages(map,work).length)continue;
-      candidates.push({citizenId:person.citizenId,home,work});
-    }
+    const workAccess=new Map<number,boolean>();
+    forEachParkActivityEmployedCitizen(city,(citizenId,homeId,firmId,parkJobId)=>{
+      if(homeId===null)return;
+      const home=homeAccess.get(homeId),work=firmId!==null?firms.get(firmId):parkJobId!==null?parks.get(parkJobId):undefined;
+      if(home===undefined||work===undefined)return;
+      let accessible=workAccess.get(work);if(accessible===undefined){accessible=frontages(map,work).length>0;workAccess.set(work,accessible);}
+      if(!accessible)return;
+      candidates.push({citizenId,home,work});
+    });
     candidates.sort((a,b)=>a.citizenId.localeCompare(b.citizenId));
     result.work={...options.workClock,candidates:candidates.slice(0,MAX_WORK_CANDIDATES)};
   }

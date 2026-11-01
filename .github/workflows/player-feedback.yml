@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/main.ts'
       - 'src/renderer.ts'
+      - 'src/canvas-selection-click.ts'
       - 'src/scene-decor.ts'
       - 'src/education-panel*.ts'
       - 'src/panel-time-controls.ts'
@@ -14,6 +15,7 @@ on:
       - 'src/city-save-auth.ts'
       - 'server/city-saves/**'
       - 'tests/player-feedback*'
+      - 'tests/canvas-selection-click.test.ts'
       - 'tests/traffic-server-entry-fixture.mjs'
       - 'tests/panel-server-entry-fixture.mjs'
       - 'tests/touch-reach.mjs'
@@ -48,7 +50,7 @@ jobs:
         if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'traffic-gap'
       - name: Verify save feedback and actual education progress data
         if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'traffic-gap'
-        run: node --experimental-strip-types --test tests/player-feedback.test.ts tests/player-feedback-server-fixture.test.mjs
+        run: node --experimental-strip-types --test tests/player-feedback.test.ts tests/player-feedback-server-fixture.test.mjs tests/canvas-selection-click.test.ts
       - name: Build local-only UX test artifact
         if: steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'traffic-gap'
         env:

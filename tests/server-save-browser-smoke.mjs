@@ -23,9 +23,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // Synthetic browser fixture only. Record the visible retry click and the
 // forwarded Save click without capturing cookies, keys, or city bytes.
 function installSaveClickTrace(){
- window.__saveClickTrace=[];document.addEventListener('click',event=>{
-  const button=event.target?.closest?.('#save-failure-retry,#save');if(!button)return;
-  window.__saveClickTrace.push({id:button.id,trusted:event.isTrusted,disabled:button.disabled,at:Date.now()});
+ window.__saveClickTrace=[];for(const type of ['pointerdown','pointerup','mousedown','mouseup','click'])document.addEventListener(type,event=>{
+  const target=event.target,button=target?.closest?.('#save-failure-retry,#save');
+  window.__saveClickTrace.push({type,id:button?.id??target?.id??'',tag:target?.tagName??'',trusted:event.isTrusted,disabled:button?.disabled??false,pointerId:event.pointerId,pointerType:event.pointerType,x:event.clientX,y:event.clientY,at:Date.now()});
   if(window.__saveClickTrace.length>40)window.__saveClickTrace.shift();
  },true);
 }
@@ -109,9 +109,9 @@ function fixtureService(){
 async function selfTest(){
  const listeners=[],syntheticWindow={},syntheticDocument={addEventListener:(type,fn,capture)=>listeners.push({type,fn,capture})};
  Function('window','document','Date',`(${installSaveClickTrace.toString()})()`)(syntheticWindow,syntheticDocument,Date);
- assert.equal(listeners[0].type,'click');assert.equal(listeners[0].capture,true);
- listeners[0].fn({target:{closest:()=>({id:'save-failure-retry',disabled:false})},isTrusted:true});
- listeners[0].fn({target:{closest:()=>({id:'save',disabled:false})},isTrusted:false});
+ const clickListener=listeners.find(x=>x.type==='click');assert.ok(clickListener);assert.equal(clickListener.capture,true);
+ clickListener.fn({target:{closest:()=>({id:'save-failure-retry',disabled:false})},isTrusted:true});
+ clickListener.fn({target:{closest:()=>({id:'save',disabled:false})},isTrusted:false});
  assert.deepEqual(syntheticWindow.__saveClickTrace.map(({id,trusted,disabled})=>({id,trusted,disabled})),[{id:'save-failure-retry',trusted:true,disabled:false},{id:'save',trusted:false,disabled:false}]);
  assert.equal(JSON.stringify(syntheticWindow.__saveClickTrace).includes('cookie'),false,'Retry diagnostics contain no request credentials');
  const samplePng=(width,height,pixel)=>{const chunk=(type,data)=>{const out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length);out.write(type,4);data.copy(out,8);return out;};const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(width);ihdr.writeUInt32BE(height,4);ihdr[8]=8;ihdr[9]=2;const raw=Buffer.alloc((width*3+1)*height);for(let y=0;y<height;y++)for(let x=0;x<width;x++)raw.set(pixel(x,y),y*(width*3+1)+1+x*3);return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);};
@@ -329,18 +329,19 @@ async function run(){
   await send('Page.addScriptToEvaluateOnNewDocument',{source:'window.__suspendAcceleratedAutosave=true'});await evaluate('window.__suspendAcceleratedAutosave=true');const drainRevision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>drainRevision,'post-reload manual ACK before fault matrix');await settled();
   await until(async()=>{const n=f.posts.length;await sleep(500);return f.posts.length===n;},'drain accelerated autosave requests',10000);
   // Actual visible banner control retries the exact uncertain command on both sizes.
-  const pressRetry=async mobile=>{const box=await evaluate(`(()=>{const e=document.querySelector('#save-failure-retry'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(x,y))};})()`);assert.ok(box.hit&&box.width>0&&box.height>0,'retry must be visible and hit-testable');if(mobile){assert.ok(box.width>=44&&box.height>=44,'touch retry target at least 44px');await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:box.x,y:box.y}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}else{await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:box.x,y:box.y});await send('Input.dispatchMouseEvent',{type:'mousePressed',x:box.x,y:box.y,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:box.x,y:box.y,button:'left',clickCount:1});}};
+  await evaluate(`(${installSaveClickTrace.toString()})()`);f.traceSave=true;f.postAudit=[];
+  const pressRetry=async mobile=>{const box=await evaluate(`(()=>{const e=document.querySelector('#save-failure-retry'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(x,y))};})()`);assert.ok(box.hit&&box.width>0&&box.height>0,'retry must be visible and hit-testable');if(mobile){assert.ok(box.width>=44&&box.height>=44,'touch retry target at least 44px');await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:box.x,y:box.y}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}else{await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:box.x,y:box.y});const afterMove=await evaluate(`(()=>{const e=document.querySelector('#save-failure-retry'),r=e.getBoundingClientRect(),t=document.elementFromPoint(${box.x},${box.y});return {x:r.x,y:r.y,width:r.width,height:r.height,hit:e.contains(t),targetId:t?.id??'',targetTag:t?.tagName??''};})()`);diagnostics.retryMouse={before:box,afterMove};await send('Input.dispatchMouseEvent',{type:'mousePressed',x:box.x,y:box.y,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:box.x,y:box.y,button:'left',clickCount:1});}};
   assert.equal(await evaluate(`!!document.querySelector('#save-failure-export,#export,#import,[download],input[type=file]')`),false,'no browser city export or import controls');
   for(const [name,width,height,mobile] of [['desktop',1280,800,false],['mobile',390,844,true]]){
    await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});await send('Emulation.setTouchEmulationEnabled',{enabled:mobile});
    f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure '+name);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
    if(process.env.CITYMANAGER_PR182_CHECKS==='1')await capture('pr182-banner-'+name);
-   const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await pressRetry(mobile);await until(async()=>f.state.active.revision>rev,'banner retry acknowledgement '+name);await settled();assert.deepEqual(f.posts[start+1],pendingCommand,'exact uncertain command retry');await clean();
+   const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await pressRetry(mobile);await until(async()=>{diagnostics.retryBanner={name,initialRevision:rev,headRevision:f.state.active.revision,fixtureAudit:structuredClone(f.postAudit),clicks:await evaluate('window.__saveClickTrace')};return f.state.active.revision>rev;},'banner retry acknowledgement '+name);await settled();assert.deepEqual(f.posts[start+1],pendingCommand,'exact uncertain command retry');await clean();
   }
   await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Emulation.clearDeviceMetricsOverride');
   // Commit succeeded but its ACK was lost. The banner must replay the original
   // key/body before trackedSave writes the current state as a new revision.
-  await evaluate(`(${installSaveClickTrace.toString()})()`);f.traceSave=true;f.postAudit=[];
+  await evaluate('window.__saveClickTrace=[]');f.postAudit=[];
   const lostHead=f.state.active,lostRequests=f.state.requests.size,lostStart=f.posts.length;f.mode='drop-save-ack';await click('#save');await until(failed,'committed save with lost ACK');
   assert.equal(f.state.active.revision,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+1);const lostCommand=f.posts[lostStart];
   const lostAckSnapshot=async()=>{const posts=f.posts.slice(lostStart);diagnostics.lostAck={initialRevision:lostHead.revision,headRevision:f.state.active.revision,initialReceiptCount:lostRequests,receiptCount:f.state.requests.size,posts:posts.map(({key,data})=>({sameOriginalKey:key===lostCommand.key,action:data.action,expectedRevision:data.expectedRevision,rawHash:typeof data.raw==='string'?hash(data.raw):null})),fixtureAudit:structuredClone(f.postAudit),network:structuredClone(diagnostics.saveNetwork),ui:await evaluate(`({bannerVisible:!!document.querySelector('#save-failure-banner:not([hidden])'),banner:document.querySelector('#save-failure-banner')?.textContent,badge:document.querySelector('#autosave-status')?.textContent,saveDisabled:document.querySelector('#save')?.disabled,clicks:window.__saveClickTrace})`)};return posts;};
@@ -348,7 +349,7 @@ async function run(){
   const observed=await lostAckSnapshot();
   const grouped=verifyLostAckPosts(observed,lostCommand,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+2,'retry creates no duplicate receipt');
   assert.equal(f.state.requests.get(lostCommand.key)?.response.revision,lostHead.revision+1,'one original receipt records its single commit');
-  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');f.traceSave=false;await clean();
+  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');console.log('Lost ACK native retry',JSON.stringify({retryMouse:diagnostics.retryMouse,clicks:diagnostics.lostAck?.ui?.clicks}));f.traceSave=false;await clean();
   // Management is an explicit two-step lifecycle; Cancel has no mutation.
   diagnostics.phase='management cancel';const beforeCancel=f.state.active,cancelPosts=f.posts.length;
   await click('#new-city');await until(()=>evaluate("!!document.querySelector('#save-management-dialog[open]')"),'management dialog');await click('#save-management-cancel');
@@ -417,6 +418,7 @@ try {
  await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics,error:String(error?.stack??error)},null,2));
  // Emit only bounded synthetic request and click metadata so CI logs can
  // distinguish a missed click from a failed ACK when artifacts are unavailable.
- if(diagnostics.lostAck){const {initialRevision,headRevision,initialReceiptCount,receiptCount,posts,fixtureAudit,network,ui}=diagnostics.lostAck;console.error('Lost ACK diagnostic',JSON.stringify({initialRevision,headRevision,initialReceiptCount,receiptCount,posts:posts.map(({sameOriginalKey,action,expectedRevision})=>({sameOriginalKey,action,expectedRevision})),fixtureAudit,network,ui:{bannerVisible:ui?.bannerVisible,saveDisabled:ui?.saveDisabled,clicks:ui?.clicks}}));}
+ if(diagnostics.lostAck){const {initialRevision,headRevision,initialReceiptCount,receiptCount,posts,fixtureAudit,network,ui}=diagnostics.lostAck;console.error('Lost ACK diagnostic',JSON.stringify({initialRevision,headRevision,initialReceiptCount,receiptCount,posts:posts.map(({sameOriginalKey,action,expectedRevision})=>({sameOriginalKey,action,expectedRevision})),fixtureAudit,network,retryMouse:diagnostics.retryMouse,ui:{bannerVisible:ui?.bannerVisible,saveDisabled:ui?.saveDisabled,clicks:ui?.clicks}}));}
+ else if(diagnostics.retryBanner)console.error('Banner retry diagnostic',JSON.stringify({retryMouse:diagnostics.retryMouse,...diagnostics.retryBanner}));
  throw error;
 }
