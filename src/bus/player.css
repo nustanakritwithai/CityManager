@@ -1,55 +1,103 @@
+/* Bus dock tools, line panel and composer: the dark-gold panel theme with the bus sky-blue as accent. */
 #bus-tool { touch-action: manipulation; }
-#bus-panel, #bus-composer {
+#bus-panel, #bus-composer, .bus-confirm {
+  --bus-tone: #8fd3ff; --bus-gold: #f3c46b;
   touch-action: manipulation;
-  background: var(--panel, #243352);
-  color: #f4f7ff;
-  border: 1px solid var(--line, #899fc6);
-  border-radius: 12px;
-  box-shadow: var(--shadow, 0 8px 24px #0008);
+  color: #eef2ff;
+  background: linear-gradient(180deg, #1d2a47, #141d33);
+  border: 1px solid #ffffff24;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px #050b1aa6, inset 0 1px 0 #ffffff14;
 }
+/* Line panel: a side sheet on wide screens, a bottom sheet above the dock on phones. */
 #bus-panel {
-  position: fixed;
-  z-index: 28;
-  left: max(8px, env(safe-area-inset-left));
-  right: max(8px, env(safe-area-inset-right));
-  bottom: calc(150px + env(safe-area-inset-bottom));
-  max-height: min(46vh, 440px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 10px 12px 14px;
+  position: fixed; z-index: 28;
+  top: 96px; right: max(12px, env(safe-area-inset-right)); width: min(390px, calc(100vw - 24px));
+  max-height: calc(100dvh - 96px - var(--dock-clear, 150px) - 8px);
+  overflow: auto; overscroll-behavior: contain; padding: 14px 14px 16px;
 }
 #bus-panel[hidden], #bus-composer[hidden], .bus-confirm[hidden] { display: none; }
-#bus-composer { width: min(640px, 100%); margin-bottom: 6px; padding: 8px; max-height: 28vh; overflow: auto; }
-.bus-head, .bus-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.bus-head { justify-content: space-between; }
-.bus-head h3, #bus-panel h4 { margin: 8px 0 4px; }
-.bus-row, .bus-line { border-top: 1px solid #899fc655; padding: 6px 0; }
-.bus-line p, .bus-row p, .bus-message { margin: 2px 0; line-height: 1.4; overflow-wrap: anywhere; }
+#bus-composer { width: min(560px, 100%); margin-bottom: 6px; padding: 10px 12px; max-height: 30vh; overflow: auto; }
+.bus-icon { flex: none; display: inline-grid; place-items: center; color: var(--bus-tone, #8fd3ff); }
+.bus-icon svg { width: 22px; height: 22px; display: block; }
+
+.bus-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.bus-head > .bus-icon { width: 40px; height: 40px; border-radius: 12px; background: #8fd3ff24; }
+.bus-heading { flex: 1; min-width: 0; }
+.bus-head h3 { margin: 0; font-size: 19px; color: var(--bus-gold); }
+.bus-state { margin: 2px 0 0; font-size: 12px; color: #a9b6d3; }
+#bus-panel h4 { margin: 14px 0 6px; font-size: 13px; color: #c9d3ea; letter-spacing: .02em; }
+.bus-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.bus-tile { padding: 9px 8px; border-radius: 12px; background: #ffffff0f; border: 1px solid #ffffff14; }
+.bus-tile strong { display: block; font-size: 22px; line-height: 1.2; color: var(--bus-gold); }
+.bus-tile span { font-size: 11px; color: #c9d3ea; }
+.bus-note, .bus-meta, .bus-empty { margin: 4px 0; font-size: 12px; line-height: 1.5; color: #a9b6d3; }
+.bus-board-note { margin: 8px 0 0; padding: 6px 10px; border-radius: 10px; background: #8fd3ff1a; color: #d9f1ff; font-size: 12px; }
+
+/* One card per line: name, status pill, the stops in order, fleet controls. */
+.bus-line { margin: 0 0 8px; padding: 10px 12px; border-radius: 14px; background: #ffffff0a; border: 1px solid #ffffff14; }
+.bus-line-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.bus-line-head strong { font-size: 15px; }
+.bus-pill { padding: 2px 9px; border-radius: 999px; font-size: 11px; background: #3ddc8a1f; color: #9ff0c2; }
+.bus-pill[data-status=suspended] { background: #f3c46b1f; color: #f6d891; }
+.bus-route { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 8px 0 4px; padding: 0; list-style: none; }
+.bus-route li { position: relative; padding: 3px 9px; border-radius: 999px; background: #8fd3ff1f; color: #d9f1ff; font-size: 12px; white-space: nowrap; }
+.bus-route li + li { margin-left: 14px; }
+.bus-route li + li::before { content: ''; position: absolute; left: -14px; top: 50%; width: 14px; border-top: 2px dashed #8fd3ff88; }
+.bus-route .bus-route-empty { background: none; color: #a9b6d3; padding-left: 0; }
+.bus-live { margin: 4px 0; font-size: 12px; color: #d9f1ff; }
+.bus-line .bus-actions { margin-top: 8px; }
+
+/* Stops and depots: icon, one line, two small actions. */
+.bus-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #ffffff14; }
+.bus-row > p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.bus-row .bus-touch { padding: 6px 10px; }
+
+.bus-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bus-message { margin: 0 0 8px; line-height: 1.45; font-size: 13px; color: #d9e3f7; overflow-wrap: anywhere; }
+#bus-composer .bus-route { margin: 0 0 8px; }
 .bus-touch {
-  min-height: 44px;
-  min-width: 44px;
+  min-height: 44px; min-width: 44px;
   touch-action: manipulation;
   padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid #899fc6;
-  background: #344769;
-  color: #f4f7ff;
-  font: inherit;
+  border-radius: 10px;
+  border: 1px solid #ffffff2e;
+  background: #2a3a5e;
+  color: #eef2ff;
+  font: inherit; cursor: pointer;
 }
-.bus-touch.is-selected, .bus-touch[aria-pressed="true"] { border-color: #e7c36c; background: #526382; }
-.bus-touch:focus-visible { outline: 2px solid #f1d78d; outline-offset: 2px; }
-.bus-count { min-width: 44px; text-align: center; }
-.bus-confirm {
-  border: 0;
-  border-radius: 12px;
-  padding: 16px;
-  max-width: min(440px, calc(100vw - 24px));
-  background: #243352;
-  color: #f4f7ff;
-}
-.bus-confirm::backdrop { background: #0d1526cc; }
+.bus-touch:disabled { opacity: .5; cursor: default; }
+.bus-touch.is-selected, .bus-touch[aria-pressed="true"] { border-color: var(--bus-gold, #f3c46b); background: #3d4a6b; color: var(--bus-gold, #f3c46b); }
+.bus-touch:focus-visible { outline: 3px solid #d69a31; outline-offset: 2px; }
+.bus-touch.bus-primary { border-color: #f6d891; background: linear-gradient(#f5d385, #d9a447); color: #1d1405; font-weight: 700; }
+.bus-touch.bus-upgrade { flex: 1 1 100%; border-color: #f3c46b88; background: #f3c46b14; color: #f6d891; font-size: 12px; line-height: 1.45; text-align: left; }
+.bus-touch.bus-danger { border-color: #ff9c9c66; background: #4a2433; color: #ffd5d5; }
+.bus-touch.bus-close { width: 44px; padding: 0; font-size: 22px; }
+.bus-count { min-width: 52px; text-align: center; font-weight: 600; }
+#bus-composer .bus-actions .bus-primary { margin-left: auto; }
+
+.bus-confirm { padding: 16px; max-width: min(420px, calc(100vw - 24px)); }
+.bus-confirm h3 { margin: 0 0 6px; color: #ffb3b3; }
+.bus-confirm p { margin: 0 0 12px; line-height: 1.55; color: #d9e3f7; }
+.bus-confirm::backdrop { background: #050b1a8c; backdrop-filter: blur(2px); }
 .bus-confirm .bus-actions { flex-direction: column; }
 .bus-confirm .bus-touch { width: 100%; }
+
+/* Rail-like tones for the dock row. */
+#bus-submenu .tool-option .tool-icon { color: #8fd3ff; }
+#bus-submenu .tool-option[data-action=panel] .tool-icon { color: #f3c46b; }
+
+/* Stop or depot in the place panel. */
+.bus-place-card { display: grid; gap: 10px; margin: 0 0 10px; padding: 12px; border-radius: 12px; background: #8fd3ff14; border: 1px solid #8fd3ff33; }
+.bus-place-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 6px; }
+.bus-place-facts div { padding: 8px; border-radius: 10px; background: #ffffff0d; }
+.bus-place-facts strong { display: block; font-size: 18px; color: #f3c46b; }
+.bus-place-facts span { font-size: 11px; color: #c9d3ea; }
+.bus-place-lines { margin: 0; font-size: 12px; color: #d9f1ff; }
+.bus-place-card .bus-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.bus-place-card .bus-primary .bus-icon { color: #1d1405; }
+
 @media (max-width: 720px) {
-  #bus-panel { bottom: calc(128px + env(safe-area-inset-bottom)); max-height: 42vh; }
+  #bus-panel { top: auto; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); width: auto;
+    bottom: calc(var(--dock-clear, 128px) + 4px); max-height: 52dvh; border-radius: 16px; }
 }
