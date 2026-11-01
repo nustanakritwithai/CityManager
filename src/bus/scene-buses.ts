@@ -91,28 +91,49 @@ export class SceneBuses {
   private counts: BusInstanceCounts = busInstanceCounts({ buses: [], loads: [], dwelling: [], lines: [], stops: [], depots: [], crowds: [], captions: [] });
   constructor(private readonly app: AppBase) {
     app.root.addChild(this.root);
+    // Shades only (each batch takes its level or role colour): dark window band and windscreen,
+    // pale roof and destination sign, bright lamps, dark wheels. Local +z is the front.
     this.busMesh = unitMesh(app, [
-      { sx: 1, sy: 0.62, sz: 1, y: -0.05, shade: 255 },
-      { sx: 0.92, sy: 0.28, sz: 0.62, y: 0.32, z: 0.08, shade: 150 },
-      { sx: 0.72, sy: 0.16, sz: 0.08, y: 0.34, z: 0.42, shade: 70 },
+      { sx: 1, sy: 0.6, sz: 1, y: -0.06, shade: 255 },
+      { sx: 1.02, sy: 0.24, sz: 0.84, y: 0.06, z: -0.04, shade: 48 },
+      { sx: 0.96, sy: 0.1, sz: 0.96, y: 0.29, shade: 225 },
+      { sx: 0.86, sy: 0.3, sz: 0.03, y: 0.08, z: 0.5, shade: 36 },
+      { sx: 0.56, sy: 0.08, sz: 0.035, y: 0.26, z: 0.5, shade: 255 },
+      { sx: 0.16, sy: 0.07, sz: 0.03, x: -0.32, y: -0.22, z: 0.5, shade: 255 },
+      { sx: 0.16, sy: 0.07, sz: 0.03, x: 0.32, y: -0.22, z: 0.5, shade: 255 },
+      { sx: 1.04, sy: 0.16, sz: 0.2, y: -0.33, z: 0.3, shade: 28 },
+      { sx: 1.04, sy: 0.16, sz: 0.2, y: -0.33, z: -0.3, shade: 28 },
     ]);
     this.ribbon = unitMesh(app, [{ sx: 1, sy: 1, sz: 1, shade: 255 }]);
+    // Stop pole: a post with a bus-blue sign plate carrying a dark bus glyph.
     const pole = unitMesh(app, [
-      { sx: 0.16, sy: 0.9, sz: 0.16, shade: 210 },
-      { sx: 0.72, sy: 0.28, sz: 0.12, y: 0.28, z: 0.18, shade: 255 },
-      { sx: 0.72, sy: 0.08, sz: 0.14, y: 0.28, z: 0.18, shade: 40 },
+      { sx: 0.14, sy: 1, sz: 0.14, shade: 150 },
+      { sx: 0.18, sy: 0.06, sz: 0.18, y: -0.48, shade: 90 },
+      { sx: 0.9, sy: 0.36, sz: 0.12, y: 0.3, shade: 255 },
+      { sx: 0.5, sy: 0.2, sz: 0.14, y: 0.3, shade: 40 },
+      { sx: 0.3, sy: 0.06, sz: 0.15, y: 0.25, shade: 255 },
     ]);
+    // Shelter: kerb pad, roof with a sign strip, glass back wall, bench and a sign post at one end.
     const shelter = unitMesh(app, [
-      { sx: 1, sy: 0.08, sz: 1, y: -0.42, shade: 170 },
-      { sx: 1, sy: 0.08, sz: 0.9, y: 0.36, shade: 240 },
-      { sx: 1, sy: 0.55, sz: 0.08, y: 0.02, z: -0.36, shade: 200 },
-      { sx: 0.7, sy: 0.08, sz: 0.28, y: -0.12, shade: 110 },
+      { sx: 1, sy: 0.08, sz: 1, y: -0.46, shade: 170 },
+      { sx: 1.04, sy: 0.08, sz: 0.94, y: 0.4, shade: 245 },
+      { sx: 1.04, sy: 0.06, sz: 0.12, y: 0.36, z: 0.44, shade: 120 },
+      { sx: 0.96, sy: 0.7, sz: 0.06, y: 0, z: -0.38, shade: 120 },
+      { sx: 0.06, sy: 0.8, sz: 0.06, x: -0.47, y: 0, z: 0.36, shade: 150 },
+      { sx: 0.06, sy: 0.8, sz: 0.06, x: 0.47, y: 0, z: 0.36, shade: 150 },
+      { sx: 0.7, sy: 0.08, sz: 0.24, y: -0.16, z: -0.2, shade: 90 },
     ]);
+    // Depot: yard pad with white bay marks, a shed with a stepped roof and a wide dark door at the front.
     const depot = unitMesh(app, [
-      { sx: 1, sy: 0.08, sz: 1, y: -0.46, shade: 150 },
-      { sx: 0.82, sy: 0.7, sz: 0.68, shade: 230 },
-      { sx: 0.92, sy: 0.1, sz: 0.78, y: 0.38, shade: 70 },
-      { sx: 0.28, sy: 0.32, sz: 0.06, y: -0.12, z: 0.36, shade: 40 },
+      { sx: 1, sy: 0.06, sz: 1, y: -0.47, shade: 110 },
+      { sx: 0.04, sy: 0.02, sz: 0.3, x: -0.2, y: -0.43, z: 0.38, shade: 255 },
+      { sx: 0.04, sy: 0.02, sz: 0.3, x: 0.06, y: -0.43, z: 0.38, shade: 255 },
+      { sx: 0.04, sy: 0.02, sz: 0.3, x: 0.32, y: -0.43, z: 0.38, shade: 255 },
+      { sx: 0.86, sy: 0.62, sz: 0.62, z: -0.14, y: -0.12, shade: 235 },
+      { sx: 0.9, sy: 0.12, sz: 0.66, z: -0.14, y: 0.22, shade: 175 },
+      { sx: 0.74, sy: 0.1, sz: 0.5, z: -0.14, y: 0.33, shade: 150 },
+      { sx: 0.52, sy: 0.42, sz: 0.04, z: 0.18, y: -0.2, shade: 32 },
+      { sx: 0.4, sy: 0.1, sz: 0.04, z: 0.18, y: 0.08, shade: 255 },
     ]);
     const person = unitMesh(app, [
       { sx: 0.4, sy: 0.5, sz: 0.28, shade: 255 },
@@ -122,9 +143,9 @@ export class SceneBuses {
     this.buses = ['#1f6feb', '#148f62', '#e3941a'].map(color => new Instancer(app, this.busMesh, this.root, color, { vertex: true }));
     this.loads = new Instancer(app, box, this.root, '#ffe08a', { emissive: true });
     this.dwelling = new Instancer(app, box, this.root, '#f2c14e', { emissive: true, opacity: 0.8 });
-    this.poles = new Instancer(app, pole, this.root, '#e8eef5', { vertex: true });
-    this.shelters = new Instancer(app, shelter, this.root, '#f7f4ee', { vertex: true });
-    this.depots = ['#e6b325', '#f0c14e', '#ffd56a', '#8d887c'].map(color => new Instancer(app, depot, this.root, color, { vertex: true }));
+    this.poles = new Instancer(app, pole, this.root, '#7cc4f4', { vertex: true });
+    this.shelters = new Instancer(app, shelter, this.root, '#cfe9fb', { vertex: true });
+    this.depots = ['#dfe6f0', '#cfe6f7', '#bfe2fb', '#8d887c'].map(color => new Instancer(app, depot, this.root, color, { vertex: true }));
     this.crowds = new Instancer(app, person, this.root, '#e07a5f', { vertex: true });
   }
   /** Upload one instance per draw-list entry. An empty list hides the layer. */
@@ -148,7 +169,7 @@ export class SceneBuses {
       used.add(key);
       const paused = key.startsWith('1'), color = key.slice(2);
       let batch = this.lines.get(key);
-      if (!batch) { batch = new Instancer(this.app, this.ribbon, this.root, color, { emissive: true, opacity: paused ? 0.4 : 0.92 }); this.lines.set(key, batch); }
+      if (!batch) { batch = new Instancer(this.app, this.ribbon, this.root, color, { emissive: true, opacity: paused ? 0.35 : 0.72 }); this.lines.set(key, batch); }
       batch.sync(group.length, (m, i) => {
         const seg = group[i]!;
         writeBasisMatrix(m, i * 16, { x: seg.x, y: seg.y, z: seg.z, headingX: seg.headingX, headingZ: seg.headingZ, sx: seg.width, sy: 0.025, sz: seg.length });
