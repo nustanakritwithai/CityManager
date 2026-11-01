@@ -180,18 +180,19 @@ export class TrafficPresentation {
  reconcileBuses(ids:readonly string[]):void {const live=new Set(ids);for(const id of this.busPositions.keys())if(!live.has(id))this.busPositions.delete(id);for(const [id,r]of this.reservations)if(!live.has(r.owner))this.reservations.delete(id);if(this.selectedOwner&&!live.has(this.selectedOwner))this.selectedOwner=null;}
  clearBusReservations():void {this.reservations.clear();this.busPositions.clear();this.selectedOwner=null;this.selectedBusEpoch.clear();this.selectedPeerBodies=[];this.birthOpportunity=1;}
  private acquireCorners(obstacles:readonly Box[]){
-  for(const r of [...this.corners.values()].sort((a,b)=>a.order-b.order)){
+  // No poses or collection membership change during acquisition. Reuse these
+  // detached broad-phase bounds, but keep reading live grant flags in order.
+  const entries=[...this.entries].map(([id,e])=>({id,pose:e.pose,box:body(e.pose)}));
+  const corners=[...this.corners.values()],reservations=[...this.reservations.values()];
+  for(const r of [...corners].sort((a,b)=>a.order-b.order)){
    if(r.active)continue;
-   // A rear car cannot use this corridor until the car ahead on the same
-   // incoming lane has reached it. Reserving it first can block that leader's
-   // turn while the follower itself cannot pass the leader's body.
    const owner=this.entries.get(r.owner);
-   if(owner&&[...this.entries].some(([id,e])=>id!==r.owner&&incomingPredecessor(owner.pose,e.pose,r.gate)))continue;
-   if([...this.corners.values()].some(c=>c.owner===r.owner&&c.order<r.order&&!c.active))continue;
-   if([...this.entries].some(([id,e])=>id!==r.owner&&r.boxes.some(b=>intersects(body(e.pose),b))))continue;
-   if(obstacles.some(b=>r.boxes.some(a=>intersects(b,a))))continue;
-   if([...this.corners.values()].some(c=>c.active&&c.owner!==r.owner&&c.boxes.some(a=>r.boxes.some(b=>intersects(a,b)))))continue;
-   if([...this.reservations.values()].some(b=>this.granted(b)&&b.boxes.some(box=>r.boxes.some(a=>intersects(box,a)))))continue;
+   if(owner&&entries.some(e=>e.id!==r.owner&&incomingPredecessor(owner.pose,e.pose,r.gate)))continue;
+   if(corners.some(c=>c.owner===r.owner&&c.order<r.order&&!c.active))continue;
+   if(entries.some(e=>e.id!==r.owner&&intersects(e.box,r.box)&&r.boxes.some(b=>intersects(e.box,b))))continue;
+   if(obstacles.some(b=>intersects(b,r.box)&&r.boxes.some(a=>intersects(b,a))))continue;
+   if(corners.some(c=>c.active&&c.owner!==r.owner&&intersects(c.box,r.box)&&c.boxes.some(a=>r.boxes.some(b=>intersects(a,b)))))continue;
+   if(reservations.some(b=>this.granted(b)&&b.boxes.some(box=>intersects(box,r.box)&&r.boxes.some(a=>intersects(box,a)))))continue;
    r.active=true;
   }
  }
@@ -226,7 +227,7 @@ export class TrafficPresentation {
    for(const r of reservations)if(r.boxes.some(b=>intersects(box,b)))return false;
    for(const r of corners){
     if(r.owner===id){if(!r.active&&(r.gate?(p.x-r.gate.x)*r.gate.headingX+(p.z-r.gate.z)*r.gate.headingZ>EPS:intersects(box,r.box)))return false;}
-    else if(r.active&&r.boxes.some(b=>intersects(box,b)))return false;
+    else if(r.active&&intersects(box,r.box)&&r.boxes.some(b=>intersects(box,b)))return false;
    }
    for(const [other,b]of footprints)if(other!==id&&intersects(box,b))return false;return true;
   };

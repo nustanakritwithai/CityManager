@@ -120,3 +120,58 @@ export function createTrafficNetworkAudit(context=()=>null){
   get evidence(){return {events:structuredClone(events),failures:structuredClone(failures)};}
  };
 }
+
+// Native HTTP transport: page-exit keepalive requests outlive their CDP Fetch IDs.
+// Reuse exactly the same real-service adapter; never mock a successful ACK.
+export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,forward=fetch}){
+ const base=new URL(upstream);assert.equal(base.hostname,'127.0.0.1');assert.equal(base.protocol,'http:');
+ return async(req,res)=>{try{
+  assert.equal(req.headers.host,new URL(origin).host,'Only the exact isolated fixture host is served');
+  const target=new URL(req.url,origin);assert.equal(target.origin,origin);assert.ok(req.url.startsWith('/')&&!req.url.startsWith('//'));
+  if(target.pathname==='/__traffic_network_fence_page'){assert.equal(req.method,'GET');res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Isolated network fence</title>');return;}
+  if(target.pathname.startsWith('/citymanager-api/')){
+   let data='';for await(const chunk of req){data+=chunk;assert.ok(Buffer.byteLength(data)<=10*1024*1024,'Bounded fixture request');}
+   const record={method:req.method,path:target.pathname,finished:false,closed:false};deliveries.push(record);
+   res.once('finish',()=>{record.finished=true;});res.once('close',()=>{record.closed=true;});
+   assert.equal(await fixture.intercept({requestId:'http-'+deliveries.length,request:{url:target.href,method:req.method,headers:req.headers,postData:data}},async(method,payload)=>{
+    assert.equal(method,'Fetch.fulfillRequest');record.status=payload.responseCode;
+    res.writeHead(payload.responseCode,Object.fromEntries(payload.responseHeaders.map(h=>[h.name,h.value])));res.end(Buffer.from(payload.body,'base64'));
+   }),true);
+   return;
+  }
+  assert.ok(req.method==='GET'||req.method==='HEAD','Asset forwarding is read-only');
+  const asset=new URL(target.pathname+target.search,base);assert.equal(asset.origin,base.origin,'No external forwarding');
+  const response=await forward(asset,{method:req.method,redirect:'manual',signal:AbortSignal.timeout(30000)});
+  assert.ok(response.status<300||response.status>=400,'Fixture assets cannot redirect');
+  const headers={};for(const [key,value] of response.headers)if(!['content-encoding','content-length','transfer-encoding','connection'].includes(key))headers[key]=value;
+  res.writeHead(response.status,headers);res.end(req.method==='HEAD'?undefined:Buffer.from(await response.arrayBuffer()));
+ }catch(error){errors.push(String(error));if(!res.headersSent)res.writeHead(500,{'Content-Type':'text/plain'});res.end('Isolated fixture request failed');}};
+}
+export async function startTrafficHttpFixture(upstream){
+ const source=new URL(upstream);assert.equal(source.hostname,'127.0.0.1');assert.equal(source.protocol,'http:');assert.equal(source.username,'');assert.equal(source.password,'');
+ const {createServer}=await import('node:http');const errors=[],deliveries=[];let handler;
+ const server=createServer((req,res)=>handler(req,res));
+ await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
+ const origin=`http://127.0.0.1:${server.address().port}`,url=new URL(new URL(upstream).pathname,origin).href,fixture=createTrafficServerFixture(url);
+ handler=trafficHttpHandler({origin,upstream,fixture,errors,deliveries});
+ return {url,fixture,errors,deliveries,async close(){server.closeAllConnections();await new Promise((ok,bad)=>server.close(error=>error?bad(error):ok()));}};
+}
+export function trafficNetworkRules(origin,blockedModels=false){
+ const url=new URL(origin);assert.equal(url.hostname,'127.0.0.1');assert.equal(url.protocol,'http:');
+ return [ ...(blockedModels?[{urlPattern:origin+'/CityManager/assets/kenney-city/models/*.glb',block:true}]:[]),
+  {urlPattern:origin+'/*',block:false},{urlPattern:'http://*:*/*',block:true},{urlPattern:'https://*:*/*',block:true}];
+}
+export async function installTrafficNetworkFence({send,evaluate,protocol,origin,blockedModels=false,observeProbe}){
+ const command=protocol.domains.find(d=>d.domain==='Network')?.commands.find(c=>c.name==='setBlockedURLs');
+ assert.ok(command?.parameters.some(p=>p.name==='urlPatterns'),'Browser must support ordered fail-closed network rules');
+ await send('Network.setBlockedURLs',{urlPatterns:trafficNetworkRules(origin,blockedModels)});
+ await send('Page.navigate',{url:origin+'/__traffic_network_fence_page'});
+ const readyDeadline=Date.now()+5000;while(!await evaluate(`location.origin===${JSON.stringify(origin)}&&document.readyState==='complete'`)){assert.ok(Date.now()<readyDeadline,'Native fixture fence page must load');await new Promise(r=>setTimeout(r,20));}
+ // A different loopback origin proves blocking without contacting any external host.
+ const probe=origin.replace('127.0.0.1','localhost')+'/__traffic_network_fence_probe';
+ const evidence=observeProbe(probe);evidence.active=true;
+ const result=await evaluate(`fetch(${JSON.stringify(probe)}).then(()=>false,()=>true)`);assert.equal(result,true,'Other-origin request must be blocked');
+ const deadline=Date.now()+5000;while(!evidence.failed&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
+ assert.equal(evidence.failed?.blockedReason,'inspector','Must be CDP block, not DNS/CORS/connection failure');evidence.active=false;
+ return {rules:trafficNetworkRules(origin,blockedModels),probe:evidence};
+}
