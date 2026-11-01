@@ -415,5 +415,8 @@ try {
  await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':'passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics},null,2));
 } catch(error) {
  await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics,error:String(error?.stack??error)},null,2));
+ // Emit only bounded synthetic request and click metadata so CI logs can
+ // distinguish a missed click from a failed ACK when artifacts are unavailable.
+ if(diagnostics.lostAck){const {initialRevision,headRevision,initialReceiptCount,receiptCount,posts,fixtureAudit,network,ui}=diagnostics.lostAck;console.error('Lost ACK diagnostic',JSON.stringify({initialRevision,headRevision,initialReceiptCount,receiptCount,posts:posts.map(({sameOriginalKey,action,expectedRevision})=>({sameOriginalKey,action,expectedRevision})),fixtureAudit,network,ui:{bannerVisible:ui?.bannerVisible,saveDisabled:ui?.saveDisabled,clicks:ui?.clicks}}));}
  throw error;
 }

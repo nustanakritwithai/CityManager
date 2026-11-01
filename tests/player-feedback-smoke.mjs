@@ -88,10 +88,15 @@ const schoolCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'sch
 const universityCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'university') === null); assert.ok(buildCampus(city, universityCell, 'university').ok);
 for (let i = 0; i < 12; i++) step(city);
 const fixture = serializeParkSession(city, createParkRuntime(city));
-// The same real published-save replay used by building-cards-smoke includes a
-// retailer, whose taller financial card exposed the warning/landscape regression.
+// Start from the published-save replay used by building-cards-smoke. The current
+// UI displays commercial levels 1–3 as markets, so make the replay's retailer a
+// level-4 shop for this isolated visual fixture and verify it survives loading.
 const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
 const cardCity = deserialize(serializeV4(prior)); adoptSavedEducation(cardCity);
+const retailBuilding = cardCity.buildings.find(b => cardCity.firms.some(f => f.building === b.id && isRetail(f)));
+assert.ok(retailBuilding, 'Replay contains a retailer for the shop visual fixture');
+retailBuilding.level = 4;
+assert.equal(deserialize(serialize(cardCity)).buildings.find(b => b.id === retailBuilding.id)?.level, 4, 'Shop fixture survives validated save round trip');
 const cardCases = ['house','shop','market','factory','farm'].map(kind => {
   const b = cardCity.buildings.find(b => kind === 'house' ? b.zone === 'R' : cardCity.firms.some(f => f.building === b.id && (kind === 'shop' ? isRetail(f) : kind === 'market' ? isMarket(f) : f.zone === (kind === 'farm' ? 'F' : 'I'))));
   assert.ok(b, 'Real day29 replay contains ' + kind); return { kind, cell:b.cell };
