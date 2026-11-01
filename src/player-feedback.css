@@ -53,6 +53,8 @@ html #inspector > #save-failure-banner { position:static; transform:none; width:
   html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step :is(dt,dd,.bc-chain-label) { overflow-wrap:anywhere; }
   /* Narrow columns must not inherit the general card's two-line label clamp. */
   html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step .cx-metric dt { display:block; white-space:normal; overflow:visible; text-overflow:clip; -webkit-line-clamp:unset; line-clamp:unset; }
+  /* Thai glyphs need enough actual line-box height, not just visible overflow. */
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step .cx-metric :is(dt,dd) { line-height:1.7; }
 }
 /* On tall/portrait phones the inline warning also consumes reading space.
    Keep actual values before editable production choices while it is present. */

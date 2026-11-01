@@ -293,3 +293,11 @@ test('work-only scope skips unrelated fact and signal suites without changing fa
   assert.match(workflow,/else \{ npm test; if \(\$LASTEXITCODE -ne 0\)/,'Other routes retain original full fallback');
  }
 });
+
+import {smokeRetrySources,smokeRetryPathsOnly,smokeRetryOnly} from '../scripts/ci-visual-scope.mjs';
+test('save smoke hardening needs its reviewed diff and rejects any game, save client or server path',()=>{
+ const paths=[...smokeRetrySources,'docs/smoke-retry-ci-scope.md'];
+ assert.equal(smokeRetryPathsOnly(paths),true);
+ assert.equal(smokeRetryOnly(paths),false);assert.equal(smokeRetryOnly(paths,{smokeRetrySourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],...['index.html','src/main.ts','src/server-city-save.ts','src/save-feedback-panel.ts','server/city-saves/service.mjs','tests/server-city-save.test.ts'].map(p=>[...paths,p])]){assert.equal(smokeRetryPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
