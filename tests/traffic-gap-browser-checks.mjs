@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {trafficGapBusyFixture} from './traffic-gap-fixture.ts';
+import {trafficGapShortApproachFixture} from './traffic-gap-fixture.ts';
 import {trafficRightOfWayFixture,trafficRightOfWayWitness} from './traffic-right-of-way-fixture.ts';
 import {busPoses} from '../src/bus/poses.ts';
 import {vehicleBox as renderedVehicleBox,boxesOverlap,TRAFFIC_SPACING} from '../src/traffic/spacing.ts';
@@ -121,7 +121,7 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  await pause(false);await until(async()=>(await traffic()).step>stable.step,'resume advances real Worker');await pause(true);
  await toggle(false);assert.equal(await traffic(),null);await sleep(300);const off=(await observer()).attempts;await sleep(300);assert.equal((await observer()).attempts,off,'Disabled feature does not spawn workers');await toggle(true);await until(async()=>!!(await traffic())?.ready,'native re-enable');
  const lightSaved=await acknowledge();
- await loadFixture(trafficGapBusyFixture());await reload();await until(async()=>!!(await traffic())?.ready,'synthetic busy fixture entered from actual server ACK');
+ await loadFixture(trafficGapShortApproachFixture());await reload();await until(async()=>!!(await traffic())?.ready,'synthetic busy fixture entered from actual server ACK');
  pacing.busyStart=await pacingSnapshot();
  await evaluate('window.__trafficGapStartSampling()');await pause(false);
  // Bound the full natural approach/hold/release sequence at the unchanged bus clock.

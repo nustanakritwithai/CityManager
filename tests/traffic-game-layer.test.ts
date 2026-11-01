@@ -180,3 +180,33 @@ for(const level of [1,2,3] as const)test(`dense 12-junction mixed traffic comple
  const paused=layer.diagnostics.presentation.renderedPoses,busPaused=layer.bus!.engine.snapshot();layer.frame(city,0,true,.25);worker.flush();assert.deepEqual(layer.diagnostics.presentation.renderedPoses,paused);assert.deepEqual(layer.bus!.engine.snapshot(),busPaused);
  layer.setVisible(false);layer.frame(city,0,false,.025);assert.equal(layer.diagnostics.failure,null);layer.destroy();
 });
+
+
+test('short browser approach holds and resumes under measured low render cadence without changing clocks',async()=>{
+ const {trafficGapShortApproachFixture}=await import('./traffic-gap-fixture.ts');
+ const {deserializeParkSession}=await import('../src/park-runtime.ts');const {busPoses}=await import('../src/bus/poses.ts');
+ const {vehicleBox,boxesOverlap}=await import('../src/traffic/spacing.ts');
+ const city=deserializeParkSession(trafficGapShortApproachFixture()).city,before=serialize(city),worker=new FakeWorker();let now=0;
+ assert.equal(city.bus!.depots[0].cell,320);assert.deepEqual(city.bus!.stops.map(s=>s.cell),[274,295]);
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>worker as never,scene as never,undefined,()=>now);
+ let previous: {blocked:number;congested:number;held:number;bus:string}|undefined;
+ let hold: {wall:number;committed:number;bus:string}|undefined,resume:number|undefined;
+ let ids=new Set<string>();const seen=new Set<string>();
+ // Actual CI measured 70 frames / 30.4 wall seconds; PlayCanvas caps dt at .1.
+ // Wall scheduling and physical dt remain distinct, exactly as in production.
+ for(let i=0;i<69;i++){
+  now+=435;layer.frame(city,0,false,.1);worker.flush();const d=layer.diagnostics,m=d.busMovement!,snapshot=layer.bus!.engine.snapshot(),bus=JSON.stringify(snapshot);
+  assert.equal(d.failure,null);const road=snapshot[0]?.phase==='toStart'||snapshot[0]?.phase==='running';
+  if(!hold&&previous&&road&&m.committedDrive>0&&d.blocked>0&&d.congestedLinks>0&&previous.blocked>0&&previous.congested>0&&m.heldDrive>previous.held&&bus===previous.bus)hold={wall:now,committed:m.committedDrive,bus};
+  if(hold&&!resume&&road&&d.blocked>0&&d.congestedLinks>0&&m.committedDrive>hold.committed&&bus!==hold.bus)resume=now;
+  const cars=d.presentation.renderedPoses,buses=busPoses(snapshot.filter(b=>b.phase!=='home'),{stops:city.bus!.stops});
+  const nextIds=new Set(cars.map(c=>c.vehicleId));for(const id of ids)if(!nextIds.has(id))assert.ok(d.presentation.lastRemoved.includes(id));for(const id of nextIds){if(!ids.has(id))assert.ok(!seen.has(id));seen.add(id);}ids=nextIds;
+  for(let a=0;a<cars.length;a++)for(let b=a+1;b<cars.length;b++){const x=vehicleBox(cars[a],.42,.3),y=vehicleBox(cars[b],.42,.3);assert.equal(boxesOverlap({minX:x.minX-.09,maxX:x.maxX+.09,minZ:x.minZ-.09,maxZ:x.maxZ+.09},y,1e-7),false);}
+  for(const car of cars)for(const b of buses)assert.equal(boxesOverlap(vehicleBox(car,.42,.3),vehicleBox(b,b.length,b.width),1e-7),false);
+  assert.equal(d.busLedger!.engineError,0);assert.equal(d.presentation.busIntrusions,0);
+  previous={blocked:d.blocked,congested:d.congestedLinks,held:m.heldDrive,bus};
+ }
+ assert.ok(hold,'previously driven bus must genuinely hold on congested road');assert.ok(resume&&resume<30000,'actual congested hold must resume within unchanged browser wall budget');assert.ok(seen.size>0);assert.equal(serialize(city),before);
+ console.log(JSON.stringify({fixture:'short-browser-approach',heldWallMs:hold.wall,resumedWallMs:resume,physicalSeconds:(layer.bus!.engine.now-420)*60}));layer.destroy();
+});
