@@ -151,6 +151,11 @@ export const railSceneSources=['src/rail/scene.ts','src/rail/track-geometry.ts']
 const railSceneAllowed=new Set([...railSceneSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/rail-scene-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/rail-track-geometry.test.ts','tests/traffic-workflow-partition.test.mjs']);
 export function railScenePathsOnly(paths){return [...railSceneSources,'tests/rail-track-geometry.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>railSceneAllowed.has(p));}
 export function railSceneOnly(paths,evidence={}){return railScenePathsOnly(paths)&&matchesReviewedSources(evidence,{railSceneSourceDiff:'ecf0a95a4f84b16e26f7a5ee98a18be737fa96a84dcb3055b8b5dc7ffbf2aecf'});}
+// Rail R3: railway on the minimap and the city map (published by the rail manager). No runtime, save or 3D change.
+export const railMapSources=['src/minimap.css','src/minimap.ts','src/rail/management.ts','src/rail/map-paint.ts','src/rail/map-state.ts'];
+const railMapAllowed=new Set([...railMapSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/rail-map-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/rail-map.test.ts','tests/traffic-workflow-partition.test.mjs']);
+export function railMapPathsOnly(paths){return ['src/rail/map-paint.ts','src/rail/map-state.ts','tests/rail-map.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>railMapAllowed.has(p));}
+export function railMapOnly(paths,evidence={}){return railMapPathsOnly(paths)&&matchesReviewedSources(evidence,{railMapSourceDiff:'REVIEWED_HASH'});}
 export const trafficPresenterSources=["src/traffic/presentation.ts"];
 const trafficPresenterAllowed=new Set(["docs/TRAFFIC-PRESENTER-PERFORMANCE.md", "tests/traffic-game-cases.test.ts", "src/traffic/presentation.ts", ".github/workflows/citymanager.yml", ".github/workflows/traffic-enabled.yml", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", "tests/traffic-workflow-partition.test.mjs", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-game-cases.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs", "docs/server-save-ci-migration.md"]);
 export function trafficPresenterPathsOnly(paths){return ["src/traffic/presentation.ts", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs"].every(p=>paths.includes(p))&&paths.every(p=>trafficPresenterAllowed.has(p));}
@@ -168,6 +173,7 @@ export function visualKind(paths, evidence = {}) {
   if(classicToolbarOnly(paths,evidence))return 'classic-toolbar';
   if(railPolishOnly(paths,evidence))return 'rail-polish';
   if(railSceneOnly(paths,evidence))return 'rail-scene';
+  if(railMapOnly(paths,evidence))return 'rail-map';
   if(hudPolishOnly(paths,evidence))return 'hud-polish';
   if(panelPolishOnly(paths,evidence))return 'panel-polish';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -220,6 +226,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return git(['show',`${head}:${p}`]);
       });
     }
+    if(railMapPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railMapSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railMapSources]);}
     if(railScenePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railSceneSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railSceneSources]);}
     if(railPolishPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.railPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...railPolishSources]);}
     if(hudPolishPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.hudPolishSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...hudPolishSources]);}

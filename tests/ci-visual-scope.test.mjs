@@ -217,3 +217,11 @@ test('rail scene presentation requires its reviewed source diff and rejects runt
  assert.equal(railSceneOnly(paths),false);assert.equal(railSceneOnly(paths,{railSceneSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!=='src/rail/track-geometry.ts'),paths.filter(p=>p!=='tests/rail-track-geometry.test.ts'),...['index.html','src/main.ts','src/rail/management.ts','src/rail/network-runtime.ts','src/rail/presentation.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(railScenePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {railMapSources,railMapPathsOnly,railMapOnly} from '../scripts/ci-visual-scope.mjs';
+test('rail map overlay requires its reviewed source diff and rejects runtime, 3D, save and simulation paths',()=>{
+ const paths=[...railMapSources,'tests/rail-map.test.ts','docs/rail-map-ci-scope.md'];
+ assert.equal(railMapPathsOnly(paths),true);
+ assert.equal(railMapOnly(paths),false);assert.equal(railMapOnly(paths,{railMapSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/rail/map-state.ts'),paths.filter(p=>p!=='tests/rail-map.test.ts'),...['index.html','src/main.ts','src/rail/scene.ts','src/rail/network-runtime.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(railMapPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
