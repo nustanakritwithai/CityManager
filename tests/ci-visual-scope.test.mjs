@@ -281,3 +281,15 @@ test('browser-storage removal needs its reviewed diff and rejects save format, s
  assert.equal(browserStorageOnly(paths),false);assert.equal(browserStorageOnly(paths,{browserStorageSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!=='src/session-memory.ts'),...['index.html','src/main.ts','src/save-storage.ts','src/server-city-save.ts','src/park-runtime.ts','src/sim.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(browserStoragePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+test('work-only scope skips unrelated fact and signal suites without changing fallback',()=>{
+ for(const file of ['city-questions.yml','signal-reading.yml']){
+  const workflow=readFileSync(`.github/workflows/${file}`,'utf8');
+  assert.match(workflow,/name: Verify exact work-only scope\s+if: steps\.scope\.outputs\.kind == 'traffic-work-expiry'\s+run: node --test tests\/ci-visual-scope\.test\.mjs/);
+  assert.match(workflow,/name: Record work-only exclusions\s+if: steps\.scope\.outputs\.kind == 'traffic-work-expiry'/);
+  assert.match(workflow,/name: Verify relevant panel data\s+if: steps\.scope\.outputs\.kind != 'traffic-work-expiry'/);
+  assert.match(workflow,/if: steps\.scope\.outputs\.kind != 'traffic-work-expiry'\s+run: npm run build/);
+  assert.match(workflow,/name: Preserve actual panel evidence\s+if: always\(\) && steps\.scope\.outputs\.kind != 'traffic-work-expiry'/);
+  assert.match(workflow,/else \{ npm test; if \(\$LASTEXITCODE -ne 0\)/,'Other routes retain original full fallback');
+ }
+});
