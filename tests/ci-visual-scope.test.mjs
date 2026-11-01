@@ -2,7 +2,7 @@ import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { railPathsOnly, railOnly, commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
+import { railPathsOnly, railOnly, commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, hudPolishPathsOnly, hudPolishOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
 const base = 'a'.repeat(40), head = 'b'.repeat(40), ancestor = 'c'.repeat(40);
 test('only explicitly allowed paths with an actual visual source change select tower checks', () => {
   assert.equal(towerOnly([...visualSources, 'tests/building-visuals.test.ts']), true);
@@ -154,4 +154,11 @@ import {adaptiveSignalSources,adaptiveSignalPathsOnly,adaptiveSignalOnly} from '
 test('adaptive visible signals require the exact reviewed complete runtime diff and explicit browser evidence',()=>{
  const paths=[...adaptiveSignalSources,'tests/traffic-adaptive-signals.test.ts','tests/traffic-signal-browser-checks.mjs','tests/traffic-worker-cycle.test.ts','tests/traffic-worker-cycle-presentation.test.ts'];assert.equal(adaptiveSignalPathsOnly(paths),true);assert.equal(adaptiveSignalOnly(paths),false);assert.equal(adaptiveSignalOnly(paths,{adaptiveSignalSourceDiff:'unreviewed'}),false);assert.equal(visualKind(paths),'full');
  for(const bad of [[],paths.slice(1),paths.filter(p=>p!=='tests/traffic-worker-cycle.test.ts'),paths.filter(p=>p!=='tests/traffic-worker-cycle-presentation.test.ts'),...['src/bus/engine.ts','src/sim.ts','src/rail/network-runtime.ts','src/server-city-save.ts','src/pages-auth.ts','src/traffic/rrt-navigation.ts','package.json'].map(p=>[...paths,p])]){assert.equal(adaptiveSignalPathsOnly(bad),false);assert.equal(visualKind(bad),'full');}
+});
+
+test('HUD and dock presentation requires its reviewed source diff and rejects save, entry and simulation paths',()=>{
+ const paths=['src/main.ts','src/tool-menu.ts','src/grouped-tool-menu.ts','tests/grouped-tool-menu.test.ts','src/ui-icons.ts','src/hud-row.ts'];
+ assert.equal(hudPolishPathsOnly(paths),true);
+ assert.equal(hudPolishOnly(paths),false);assert.equal(hudPolishOnly(paths,{hudPolishSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.slice(1),...['index.html','src/server-city-save.ts','src/server-city-entry.ts','src/save-storage.ts','src/sim.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])])assert.equal(hudPolishPathsOnly(invalid),false);
 });
