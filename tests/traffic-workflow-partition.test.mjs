@@ -15,7 +15,7 @@ test('traffic acceptance partitions bounded cases and gates every result',()=>{
 });
 
 test('exact scoped routing propagates to downstream traffic jobs and aggregate without accepting failed checks',()=>{
- const scoped=['vehicle','visual-final','server-save','classic-toolbar','history','commercial','rail','hud-polish','panel-polish','rail-polish','rail-scene','rail-map','bus-polish','bus-scene','bus-map','save-cleanup','browser-storage'];
+ const scoped=['vehicle','visual-final','server-save','classic-toolbar','history','commercial','rail','hud-polish','panel-polish','rail-polish','rail-scene','rail-map','bus-polish','bus-scene','bus-map','save-cleanup','browser-storage','smoke-retry'];
  const checks=job('checks'),gate=job('enabled');
  const exclusions=part=>[...part.matchAll(/(?:steps\.scope|needs\.checks)\.outputs\.kind != '([^']+)'/g)].map(m=>m[1]);
  const checkRoutes=[...new Set(exclusions(checks))];assert.deepEqual(checkRoutes,scoped);
