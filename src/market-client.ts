@@ -3,7 +3,7 @@ import { factoryCropCapacity } from './factory-levels.ts';
 import { deserialize, isCommercial, type City } from './sim.ts';
 import { deserializeParkSession } from './park-runtime.ts';
 import { withMarketWriter, type MarketWriterLocks } from './market-writer.ts';
-import { SAVE_KEY } from './save-storage.ts';
+import { sessionMemory } from './session-memory.ts';
 import { PAGES_MARKET_BASE, PAGES_ORIGIN, pagesSession } from './pages-auth.ts';
 import { CROP_STOCK_CAPS, farmStockCapacity, releaseCropCost } from './agriculture.ts';
 import { CROPS, PRODUCTS, RECIPE, type CropId, type ProductId } from './goods.ts';
@@ -50,7 +50,11 @@ export function validateRecoveryMarketJournal(value:unknown):void {
  for(const r of Object.values(j.receipts))if(!allowed(r,['claimId','state','firmId','itemId','quantity']))throw Error('recovery-market-unknown');
  if(j.guestId===null&&(j.operations.length||j.escrow.length||Object.keys(j.receipts).length))throw Error('recovery-market-identity-missing');
 }
-const persist = (j: MarketJournal) => localStorage.setItem(MARKET_SAVE_KEY, JSON.stringify(j));
+/** Where the market journal lives: page memory only (the game keeps no browser storage). Tests may substitute a store. */
+type MarketStorage = Pick<Storage, 'getItem' | 'setItem'> & Partial<Pick<Storage, 'removeItem'>>;
+let marketStorage: MarketStorage = sessionMemory;
+export function useMarketStorage(storage: MarketStorage = sessionMemory) { marketStorage = storage; }
+const persist = (j: MarketJournal) => marketStorage.setItem(MARKET_SAVE_KEY, JSON.stringify(j));
 
 export class MarketClient {
   readonly baseUrl: string;
@@ -64,13 +68,13 @@ export class MarketClient {
   private readDurableCity: (cityId: string) => string | null;
   private readonly readCurrentSession?: () => string;
   private revision: string | null = null;
-  constructor(city: () => City, baseUrl = '', options: { recoveryEnabled?: boolean; readCurrentSession?: () => string; readDurableCity?: (cityId: string) => string | null } = {}) { this.city = city; this.readCurrentSession = options.readCurrentSession; this.readDurableCity = options.readDurableCity ?? (() => globalThis.localStorage.getItem(SAVE_KEY)); this.recoveryEnabled = options.recoveryEnabled === true; let safeBase = ''; if (/^\/citymanager-api\/?$/.test(baseUrl)) safeBase = '/citymanager-api'; else if (baseUrl.replace(/\/$/, '') === PAGES_MARKET_BASE && typeof window !== 'undefined' && window.location.origin === PAGES_ORIGIN) safeBase = PAGES_MARKET_BASE; else try { const u = new URL(baseUrl); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '4317' && !u.username && !u.password && !u.search && !u.hash) safeBase = u.origin; } catch { /* disabled by default */ } this.baseUrl = safeBase; if (!safeBase) { this.journal = safeJournal(null); return; } let raw: string | null = null; try { if (!globalThis.localStorage) throw new Error('storage unavailable'); raw = globalThis.localStorage.getItem(MARKET_SAVE_KEY); this.revision = raw; this.journal = safeJournal(raw); } catch { this.journalUnavailable = true; this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
+  constructor(city: () => City, baseUrl = '', options: { recoveryEnabled?: boolean; readCurrentSession?: () => string; readDurableCity?: (cityId: string) => string | null } = {}) { this.city = city; this.readCurrentSession = options.readCurrentSession; this.readDurableCity = options.readDurableCity ?? (() => null); this.recoveryEnabled = options.recoveryEnabled === true; let safeBase = ''; if (/^\/citymanager-api\/?$/.test(baseUrl)) safeBase = '/citymanager-api'; else if (baseUrl.replace(/\/$/, '') === PAGES_MARKET_BASE && typeof window !== 'undefined' && window.location.origin === PAGES_ORIGIN) safeBase = PAGES_MARKET_BASE; else try { const u = new URL(baseUrl); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '4317' && !u.username && !u.password && !u.search && !u.hash) safeBase = u.origin; } catch { /* disabled by default */ } this.baseUrl = safeBase; if (!safeBase) { this.journal = safeJournal(null); return; } let raw: string | null = null; try { raw = marketStorage.getItem(MARKET_SAVE_KEY); this.revision = raw; this.journal = safeJournal(raw); } catch { this.journalUnavailable = true; this.journal = safeJournal(null); } this.guestId = this.journal.guestId; }
   get enabled() { return Boolean(this.baseUrl); }
   get usesPagesAuth() { return this.baseUrl === PAGES_MARKET_BASE; }
   get pagesAuthenticated() { return this.usesPagesAuth && Boolean(pagesSession.verifiedGuest); }
   preparePagesLogin() { if (!this.usesPagesAuth || this.journalUnavailable) throw new Error('pages-auth-unavailable'); return pagesSession.prepare(); }
 
-  private expectedPagesGuest() { const saved = embeddedMarketJournal(globalThis.localStorage?.getItem(SAVE_KEY) ?? null); const hasState = (j: MarketJournal) => Boolean(j.operations.length || j.escrow.length || Object.keys(j.receipts).length); if ((!this.journal.guestId && hasState(this.journal)) || (saved && !saved.guestId && hasState(saved))) throw new Error('saved market identity requires recovery'); if (saved?.guestId && this.guestId && saved.guestId !== this.guestId) throw new Error('market guest identity mismatch'); return this.guestId ?? saved?.guestId ?? null; }
+  private expectedPagesGuest() { const hasState = (j: MarketJournal) => Boolean(j.operations.length || j.escrow.length || Object.keys(j.receipts).length); if (!this.journal.guestId && hasState(this.journal)) throw new Error('saved market identity requires recovery'); return this.guestId ?? null; }
   connectPages() { if (!this.usesPagesAuth || this.journalUnavailable) throw new Error('pages-auth-unavailable'); const expected = this.expectedPagesGuest(); const exchange = pagesSession.connect(expected); return exchange.then(async guest => { try { const me = await this.request('/v1/me'); if (me?.guest_id !== guest) throw new Error('market guest identity mismatch'); return me; } catch (error) { pagesSession.clear(); throw error; } }); }
   exportSave() { return structuredClone(this.journal); }
   validateSave(value: unknown) { safeJournal(JSON.stringify(value)); }
@@ -97,12 +101,12 @@ export class MarketClient {
     catch (error) {
       const written = this.revision;
       this.journal = old; this.guestId = oldGuest; this.revision = oldRevision;
-      if (persisted && globalThis.localStorage) {
+      if (persisted) {
         try {
           // Do not roll back over a newer writer that ignored the market lock.
-          if (localStorage.getItem(MARKET_SAVE_KEY) !== written) throw new Error('market-state-changed-reload');
-          if (oldRevision === null) localStorage.removeItem(MARKET_SAVE_KEY);
-          else localStorage.setItem(MARKET_SAVE_KEY, oldRevision);
+          if (marketStorage.getItem(MARKET_SAVE_KEY) !== written) throw new Error('market-state-changed-reload');
+          if (oldRevision === null) marketStorage.removeItem?.(MARKET_SAVE_KEY);
+          else marketStorage.setItem(MARKET_SAVE_KEY, oldRevision);
         } catch (rollbackError) {
           this.journalUnavailable = true;
           throw new Error('market-load-rollback-failed', { cause: rollbackError });
@@ -119,14 +123,14 @@ export class MarketClient {
     assertCurrent();apply();
   },true); }
   async importSave(value: unknown) { return this.bindLoadedCity(value, () => {}); }
-  private save() { if (globalThis.localStorage) { persist(this.journal); this.revision = JSON.stringify(this.journal); } }
+  private save() { persist(this.journal); this.revision = JSON.stringify(this.journal); }
   async saveLocalCity(write: (journal: MarketJournal) => void | Promise<void>) { return this.writer(async () => { const current = this.city().market; const hasState = Boolean(this.journal.operations.length || this.journal.escrow.length || Object.keys(this.journal.receipts).length); if (hasState && (!current || current.cityId !== this.journal.cityId || current.guestId !== this.guestId)) throw new Error('saved-city-recovery-required'); for (const [id, r] of Object.entries(this.journal.receipts)) if (r.state === 'applied' || r.state === 'delivered') { const saved = current?.receipts[id] as typeof r | undefined; if (!saved || !['applied', 'delivered'].includes(saved.state) || saved.claimId !== r.claimId || saved.firmId !== r.firmId || saved.itemId !== r.itemId || saved.quantity !== r.quantity) throw new Error('saved-city-recovery-required'); } await write(this.exportSave()); },true); }
   private async writer<T>(work: () => Promise<T>, allowRecoveryReadOnly=false): Promise<T> {
     if (this.journalUnavailable) throw new Error('market-journal-unavailable');
     const checked=async()=>{if(this.recoveryReadOnly&&!allowRecoveryReadOnly)throw Error('market-disabled-in-recovery');return work();};
     if (typeof window === 'undefined') return checked(); // Node-only integration harness; browsers must provide Web Locks.
     const locks = globalThis.navigator?.locks as MarketWriterLocks | undefined;
-    return withMarketWriter({ locks, expectedJournal: this.revision, readJournal: () => globalThis.localStorage.getItem(MARKET_SAVE_KEY), work:checked });
+    return withMarketWriter({ locks, expectedJournal: this.revision, readJournal: () => marketStorage.getItem(MARKET_SAVE_KEY), work:checked });
   }
   private async request(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers); headers.set('Accept', 'application/json');
@@ -186,8 +190,8 @@ export class MarketClient {
     throw new Error('market-session-reconciliation-required');
   }
   async createGuest() { return this.writer(async () => { const existing = await this.checkSession(); if (existing) return this.reconcileSessionUnlocked(existing); if (this.guestId || this.journal.operations.length || this.journal.escrow.length || Object.keys(this.journal.receipts).length) throw new Error('guest-session-recovery-required'); const me = await this.request('/v1/auth/guest', { method: 'POST', body: '{}' }); if (!UUID.test(String(me?.guest_id))) throw new Error('invalid guest session'); this.guestId = me.guest_id; this.journal.guestId = this.guestId; this.save(); return me; }); }
-  async quarantine() { return this.writer(async () => { const old = JSON.stringify(this.journal); if (globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.quarantine.${this.journal.cityId}.${Date.now()}`, old); const journal = this.journal, guest = this.guestId; this.journal = safeJournal(null); this.guestId = null; try { this.save(); } catch (e) { this.journal = journal; this.guestId = guest; throw e; } }); }
-  async resetCity() { return this.writer(async () => { if (this.guestId || this.journal.operations.length || this.journal.escrow.length || Object.keys(this.journal.receipts).length) throw new Error('market-city-reset-requires-reconciliation'); const old = JSON.stringify(this.journal); if (globalThis.localStorage) globalThis.localStorage.setItem(`${MARKET_SAVE_KEY}.city-${this.journal.cityId}`, old); const journal = this.journal; this.journal = safeJournal(null); try { this.save(); } catch (e) { this.journal = journal; throw e; } }); }
+  async quarantine() { return this.writer(async () => { const old = JSON.stringify(this.journal); marketStorage.setItem(`${MARKET_SAVE_KEY}.quarantine.${this.journal.cityId}.${Date.now()}`, old); const journal = this.journal, guest = this.guestId; this.journal = safeJournal(null); this.guestId = null; try { this.save(); } catch (e) { this.journal = journal; this.guestId = guest; throw e; } }); }
+  async resetCity() { return this.writer(async () => { if (this.guestId || this.journal.operations.length || this.journal.escrow.length || Object.keys(this.journal.receipts).length) throw new Error('market-city-reset-requires-reconciliation'); const old = JSON.stringify(this.journal); marketStorage.setItem(`${MARKET_SAVE_KEY}.city-${this.journal.cityId}`, old); const journal = this.journal; this.journal = safeJournal(null); try { this.save(); } catch (e) { this.journal = journal; throw e; } }); }
   private stock(firmId: number, itemId: MarketItem) { const product = itemId.startsWith('product:'), key = itemId.slice(itemId.indexOf(':') + 1); if (product ? !isProductId(key) : !isCropId(key)) throw new Error('invalid typed market item'); const f = this.city().firms.find(f => f.id === firmId && (product ? f.zone === 'I' && !!f.recipe && (RECIPE[f.recipe].product === key || !!f.recipeChoices) : f.zone === 'F')); if (!f) throw new Error('typed source firm required'); const bucket = (product ? f.products : f.crops) as Record<string, number>; return { f, bucket, key } as const; }
   async deposit(firmId: number, itemId: MarketItem, quantity: number, saveCity: () => void) { return this.writer(() => this.depositUnlocked(firmId, itemId, quantity, saveCity)); }
   private async depositUnlocked(firmId: number, itemId: MarketItem, quantity: number, saveCity: () => void) {

@@ -6,11 +6,12 @@
 import { guideState } from './guide-steps.ts';
 import type { City, Zone } from './sim.ts';
 import './guide.css';
+import { sessionMemory } from './session-memory.ts';
 
 export const GUIDE_KEY = 'citymanager.guide.v1';
 type Stored = 'active' | 'done' | 'skipped' | null;
-const read = (): Stored => { try { const v = localStorage.getItem(GUIDE_KEY); return v === 'active' || v === 'done' || v === 'skipped' ? v : null; } catch { return null; } };
-const write = (v: Exclude<Stored, null>) => { try { localStorage.setItem(GUIDE_KEY, v); } catch { /* the guide still runs for this visit */ } };
+const read = (): Stored => { try { const v = sessionMemory.getItem(GUIDE_KEY); return v === 'active' || v === 'done' || v === 'skipped' ? v : null; } catch { return null; } };
+const write = (v: Exclude<Stored, null>) => { try { sessionMemory.setItem(GUIDE_KEY, v); } catch { /* the guide still runs for this visit */ } };
 const TOOL_LABELS: Record<string, string> = { road: 'เลือกถนน', R: 'เลือกบ้าน', C: 'เลือกพาณิชย์', I: 'เลือกโรงงาน', F: 'เลือกฟาร์ม', power: 'เลือกโรงไฟฟ้า', water: 'เลือกโรงสูบน้ำ', play: 'กดเล่น' };
 
 export class Guide {

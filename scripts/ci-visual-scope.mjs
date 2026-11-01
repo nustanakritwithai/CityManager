@@ -179,6 +179,12 @@ const saveCleanupDeletedTests=['tests/active-local-save-browser.mjs', 'tests/act
 const saveCleanupAllowed=new Set([...saveCleanupSources,...saveCleanupDeletedTests,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/save-safety.yml','.github/workflows/traffic-enabled.yml','docs/save-cleanup-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/traffic-workflow-partition.test.mjs']);
 export function saveCleanupPathsOnly(paths){return saveCleanupDeletedSources.every(p=>paths.includes(p))&&paths.every(p=>saveCleanupAllowed.has(p));}
 export function saveCleanupOnly(paths,evidence={}){return saveCleanupPathsOnly(paths)&&matchesReviewedSources(evidence,{saveCleanupSourceDiff:'ce75e15c81704810c6636f17c76ff2e5f905236d0beb52c5cefcd72b939f5c3c'});}
+// D2: the game keeps nothing in the browser. No stored Guest pin at entry; market journal, settings and feature
+// switches live in page memory. Exactly these sources and their tests; no save format, server or simulation change.
+export const browserStorageSources=['src/advanced.ts', 'src/atmosphere-controls.ts', 'src/audio-settings.ts', 'src/bus/types.ts', 'src/city-save-auth.ts', 'src/guide.ts', 'src/market-client.ts', 'src/server-city-entry.ts', 'src/session-memory.ts', 'src/taxi/buildings.ts', 'src/traffic/flag.ts', 'tests/commercial-market-envelope.test.ts', 'tests/market-client.test.ts', 'tests/market-safety.test.ts', 'tests/pages-auth.test.ts', 'tests/server-city-entry-flow.test.ts', 'tests/server-city-entry.test.ts', 'tests/trade-rejections.client.test.ts'];
+const browserStorageAllowed=new Set([...browserStorageSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/browser-storage-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/traffic-workflow-partition.test.mjs']);
+export function browserStoragePathsOnly(paths){return ['src/session-memory.ts','src/market-client.ts','src/server-city-entry.ts','src/city-save-auth.ts'].every(p=>paths.includes(p))&&paths.every(p=>browserStorageAllowed.has(p));}
+export function browserStorageOnly(paths,evidence={}){return browserStoragePathsOnly(paths)&&matchesReviewedSources(evidence,{browserStorageSourceDiff:'0e6a2af384b0ca3bcbd8411f1fee28212ce3d8b9574cdd9dd6e8b67242d2ba61'});}
 export const trafficPresenterSources=["src/traffic/presentation.ts"];
 const trafficPresenterAllowed=new Set(["docs/TRAFFIC-PRESENTER-PERFORMANCE.md", "tests/traffic-game-cases.test.ts", "src/traffic/presentation.ts", ".github/workflows/citymanager.yml", ".github/workflows/traffic-enabled.yml", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", "tests/traffic-workflow-partition.test.mjs", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-game-cases.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs", "docs/server-save-ci-migration.md"]);
 export function trafficPresenterPathsOnly(paths){return ["src/traffic/presentation.ts", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs"].every(p=>paths.includes(p))&&paths.every(p=>trafficPresenterAllowed.has(p));}
@@ -201,6 +207,7 @@ export function visualKind(paths, evidence = {}) {
   if(busSceneOnly(paths,evidence))return 'bus-scene';
   if(busMapOnly(paths,evidence))return 'bus-map';
   if(saveCleanupOnly(paths,evidence))return 'save-cleanup';
+  if(browserStorageOnly(paths,evidence))return 'browser-storage';
   if(hudPolishOnly(paths,evidence))return 'hud-polish';
   if(panelPolishOnly(paths,evidence))return 'panel-polish';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -253,6 +260,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return git(['show',`${head}:${p}`]);
       });
     }
+    if(browserStoragePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.browserStorageSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...browserStorageSources]);}
     if(saveCleanupPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.saveCleanupSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...saveCleanupSources]);}
     if(busMapPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.busMapSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...busMapSources]);}
     if(busScenePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.busSceneSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...busSceneSources]);}

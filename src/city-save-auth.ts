@@ -1,15 +1,6 @@
 /** Save authentication is independent of the disabled trading feature. No city or token storage. */
 import { pagesSession, PAGES_ORIGIN, PAGES_MARKET_BASE } from './pages-auth.ts';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-/** Read legacy identity only; never create a replacement identity when it is unreadable. */
-export function legacySaveOwner(storage:Pick<Storage,'getItem'>):string|null {
- const readGuest=(raw:string):string|null=>{const data=JSON.parse(raw);if(!data||typeof data!=='object')throw Error('legacy-identity-unreadable');const guest=data.guestId;if(guest===null||guest===undefined)return null;if(typeof guest!=='string'||!UUID.test(guest))throw Error('legacy-identity-unreadable');return guest;};
- const journal=storage.getItem('citymanager.market.v10');
- if(journal!==null){const guest=readGuest(journal);if(guest)return guest;}
- // Browser-only city files are obsolete. Only the separate remembered Guest journal pins identity.
-
- return null;
-}
 export function createCitySaveAuth(configured?:string) {
  const pages=location.origin===PAGES_ORIGIN;
  const endpoint=new URL(configured??'/citymanager-api',location.origin);
