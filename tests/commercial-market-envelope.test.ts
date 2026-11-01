@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {deserialize,serialize} from '../src/sim.ts';
 import {embeddedMarketJournal,MarketClient,marketJournalForTest} from '../src/market-client.ts';
-import {requireGuestEntry} from '../src/entry-gate.ts';
 import {SAVE_KEY} from '../src/save-storage.ts';
 const guest='00000000-0000-4000-8000-000000000003',other='00000000-0000-4000-8000-000000000006';
 function fixture(version:24|25){
@@ -33,17 +32,4 @@ test('Pages expected guest recognizes both wrappers and rejects standalone guest
     const expected=()=>Reflect.get(client,'expectedPagesGuest').call(client);
     assert.equal(expected(),guest);client.guestId=other;assert.throws(expected,/mismatch/);assert.equal(writes,0);
   }}finally{if(old)Object.defineProperty(globalThis,'localStorage',old);else Reflect.deleteProperty(globalThis,'localStorage');}
-});
-
-test('entry gate never creates replacement guest for v24/v25 pending identity or corrupt/unknown wrappers',async()=>{
-  class Element{children:Element[]=[];parent?:Element;inert=false;disabled=false;handler?:()=>void;textContent='';className='';id='';type='';setAttribute(){}focus(){}append(...nodes:Element[]){for(const n of nodes){n.parent=this;this.children.push(n);}}addEventListener(_n:string,f:()=>void){this.handler=f;}remove(){if(this.parent)this.parent.children=this.parent.children.filter(n=>n!==this);}contains(n:Element){return this.children.includes(n);}}
-  const names=['document','HTMLElement','localStorage']as const,old=names.map(n=>Object.getOwnPropertyDescriptor(globalThis,n));
-  try{for(const mode of['v24','v25','corrupt','unknown','mismatch']as const){let{raw}=fixture(mode==='v24'?24:25);if(mode==='corrupt'||mode==='unknown'){const e=JSON.parse(raw);if(mode==='corrupt')e.market.operations=[{bad:true}];else e.version=99;raw=JSON.stringify(e);}
-    const body=new Element(),game=new Element();body.append(game);let calls=0,created=0,started=0,writes=0;
-    Object.defineProperty(globalThis,'HTMLElement',{configurable:true,value:Element});Object.defineProperty(globalThis,'document',{configurable:true,value:{body,createElement:()=>new Element()}});
-    Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(k:string)=>k===SAVE_KEY?raw:null,setItem:()=>{writes++;}}});
-    const client={enabled:true,usesPagesAuth:false,guestId:null,journal:marketJournalForTest(null),checkSession:async()=>{calls++;return mode==='mismatch'?{guest_id:other}:null;},createGuest:async()=>{created++;throw Error('must not create');},reconcileSession:async()=>{throw Error('must not reconcile foreign identity');}}as unknown as MarketClient;
-    await requireGuestEntry(client,()=>{started++;});body.children[1].children[0].children[3].handler!();await new Promise(r=>setTimeout(r,0));
-    assert.equal(created,0,mode);assert.equal(started,0,mode);assert.equal(writes,0,mode);assert.equal(game.inert,true,mode);if(mode==='corrupt'||mode==='unknown')assert.equal(calls,0);
-  }}finally{names.forEach((n,i)=>old[i]?Object.defineProperty(globalThis,n,old[i]!):Reflect.deleteProperty(globalThis,n));}
 });

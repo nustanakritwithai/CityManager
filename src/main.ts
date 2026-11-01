@@ -794,7 +794,7 @@ async function boot() {
   marketPanel.client.setRecoveryReadOnly(true);
   installHudRow();
   const saveBadge=document.createElement('span');saveBadge.id='autosave-status';saveBadge.setAttribute('role','status');$('#save').insertAdjacentElement('afterend',saveBadge);
-  const saveFeedback=installSaveFeedback(saveBadge,()=>document.querySelector<HTMLButtonElement>('#export-city-save')?.click(),()=> 'บันทึกบนเซิร์ฟเวอร์แล้ว');
+  const saveFeedback=installSaveFeedback(saveBadge,()=>$<HTMLButtonElement>('#save').click(),()=> 'บันทึกบนเซิร์ฟเวอร์แล้ว');
   const enqueueSave=createSaveAttemptQueue();
   const trackedSave=(explicit=false)=>{
     const captured=city,generation=cityGeneration;
@@ -844,12 +844,6 @@ async function boot() {
       await trackedSave(true);sound('ui-save');status('บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่');
     }catch(error){sound('ui-error');status(`ยังบันทึกไม่ได้: ${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · อย่าปิดหน้านี้`);}
   });
-  // Retire all browser load/recovery controls. Old copies are archived read-only at entry.
-  for(const id of ['load','load-legacy','load-v2','load-v3','load-v4','load-v5','load-v6','load-backup'])$('#'+id)?.remove();
-  document.querySelector('.save-group.legacy')?.remove();
-  const exportButton=document.createElement('button');exportButton.id='export-city-save';exportButton.textContent='ส่งออกเซฟเมืองเป็นไฟล์';
-  exportButton.onclick=()=>{const raw=serializeParkSession(city,parkRuntime,city.market),url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-day-${city.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งไฟล์ให้ดาวน์โหลดแล้ว · ไม่ใช่การบันทึกบนเซิร์ฟเวอร์');};
-  $('#save').insertAdjacentElement('afterend',exportButton);
   const campusAction = (action: typeof toggleCampus) => {
     const campus = route?.page === 'place' ? campusAt(city, route.cell) : undefined;
     if (!campus) return;

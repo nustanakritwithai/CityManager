@@ -1,18 +1,18 @@
 import { createSaveFeedback } from './save-feedback.ts';
 
-export function installSaveFeedback(badge: HTMLElement, exportSave: () => void, successLabel:()=>string|undefined=()=>undefined) {
+export function installSaveFeedback(badge: HTMLElement, retrySave: () => void, successLabel:()=>string|undefined=()=>undefined) {
   const banner = document.createElement('aside'); banner.id = 'save-failure-banner'; banner.hidden = true;
   banner.setAttribute('aria-label', 'สถานะการบันทึก');
   const message = document.createElement('div'); message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite'); message.setAttribute('aria-atomic', 'true');
   const title = document.createElement('strong'), detail = document.createElement('span'), last = document.createElement('small');
   title.textContent = 'ยังบันทึกไม่ได้'; message.append(title, detail, last);
-  const backup = document.createElement('button'); backup.id = 'save-failure-export'; backup.type = 'button'; backup.textContent = 'ส่งออกไฟล์'; backup.onclick = exportSave;
-  banner.append(message, backup); document.body.append(banner);
+  const retry = document.createElement('button'); retry.id = 'save-failure-retry'; retry.type = 'button'; retry.textContent = 'บันทึกอีกครั้ง'; retry.onclick = retrySave;
+  banner.append(message, retry); document.body.append(banner);
   const measure = () => document.documentElement.style.setProperty('--save-warning-height', banner.hidden ? '0px' : `${banner.offsetHeight + 8}px`);
   const inspector = document.getElementById('inspector')!, body = document.getElementById('inspector-body')!;
   const narrow = matchMedia('(max-width:700px)');
   // A full-height reading panel owns its warning row. Moving the existing node
-  // keeps the same failure, live status and Export action across every route.
+  // keeps the same failure, live status and retry action across every route.
   const place = () => {
     const inline = inspector.dataset.open === 'true' && (document.documentElement.dataset.touchUi === 'true' || narrow.matches);
     const parent = inline ? inspector : document.body;
