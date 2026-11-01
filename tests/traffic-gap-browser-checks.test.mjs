@@ -127,3 +127,13 @@ test('passive readiness requires same-ID motion retained inside the current rend
  index=3;rows[3].presentation.renderedPoses=[{...pose(.3),vehicleId:'replacement'}];w.__runFrame();assert.equal(w.__trafficGapObserver.motion.carMoves,1);
  for(let i=0;i<361;i++)w.__runFrame();assert.equal(w.__trafficGapObserver.motion.carMoves,0,'Discarded motion cannot satisfy current-ring acceptance');
 });
+
+import {trafficWithCleanup} from './traffic-gap-browser-checks.mjs';
+test('fault cleanup retains original acceptance failure and records secondary failure without passing',async()=>{
+ const primary=new Error('primary pause evaluation failure'),cleanup=new Error('cleanup CDP timeout');let cleaned=0;
+ await assert.rejects(trafficWithCleanup(async()=>{throw primary;},async()=>{cleaned++;throw cleanup;}),error=>error===primary&&error.stack.includes('primary pause evaluation failure')&&error.stack.includes('Secondary traffic cleanup failure:')&&error.stack.includes('cleanup CDP timeout'));
+ assert.equal(cleaned,1);
+ await assert.rejects(trafficWithCleanup(async()=>true,async()=>{throw cleanup;}),error=>error===cleanup);
+ const original=new Error('original assertion');await assert.rejects(trafficWithCleanup(async()=>{throw original;},async()=>{}),error=>error===original);
+ assert.equal(await trafficWithCleanup(async()=>42,async()=>{}),42);
+});
