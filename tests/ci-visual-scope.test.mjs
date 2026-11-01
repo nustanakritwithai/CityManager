@@ -257,3 +257,11 @@ test('save cleanup needs every dead module deleted, its reviewed diff, and rejec
  assert.equal(saveCleanupOnly(paths),false);assert.equal(saveCleanupOnly(paths,{saveCleanupSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!==saveCleanupDeletedSources[0]),...['index.html','src/main.ts','src/save-storage.ts','src/server-city-save.ts','src/market-client.ts','src/city-save-auth.ts','src/sim.ts','server/city-saves/service.mjs','tests/server-save-browser-smoke.mjs'].map(p=>[...paths,p])]){assert.equal(saveCleanupPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {browserStorageSources,browserStoragePathsOnly,browserStorageOnly} from '../scripts/ci-visual-scope.mjs';
+test('browser-storage removal needs its reviewed diff and rejects save format, server, simulation and UI paths',()=>{
+ const paths=[...browserStorageSources,'docs/browser-storage-ci-scope.md'];
+ assert.equal(browserStoragePathsOnly(paths),true);
+ assert.equal(browserStorageOnly(paths),false);assert.equal(browserStorageOnly(paths,{browserStorageSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/session-memory.ts'),...['index.html','src/main.ts','src/save-storage.ts','src/server-city-save.ts','src/park-runtime.ts','src/sim.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(browserStoragePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
