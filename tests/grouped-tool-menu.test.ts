@@ -52,7 +52,7 @@ function environment(run: (document: Element & { body: Element; activeElement?: 
   try { run(document, dock, originals); } finally { names.forEach((name, i) => old[i] ? Object.defineProperty(globalThis, name, old[i]!) : Reflect.deleteProperty(globalThis, name)); }
 }
 for (const [id, name, expected, install] of [
-  ['services', 'บริการเมือง', serviceTools, installServicesMenu], ['construction', 'สิ่งปลูกสร้าง', constructionTools, installConstructionMenu],
+  ['services', 'บริการ', serviceTools, installServicesMenu], ['construction', 'สร้าง', constructionTools, installConstructionMenu],
 ] as const) {
   test(`${id}: original ordered buttons, read-only disclosure and explicit selection`, () => environment((document, dock, originals) => {
     const chosen: string[] = [], controller = install(tool => { chosen.push(tool); controller.sync(tool); });
@@ -61,7 +61,8 @@ for (const [id, name, expected, install] of [
     for (const button of menu.children) { assert.equal(button, originals.find(original => original.dataset.tool === button.dataset.tool)); assert.equal(button.title, `Original ${button.dataset.tool}`); assert.equal(button.getAttribute('aria-label'), button.title); }
     assert.equal(anchor.children[1].textContent, name); assert.equal(anchor.getAttribute('aria-expanded'), 'false');
     anchor.dispatch('click'); assert.equal(controller.isOpen(), true); assert.deepEqual(chosen, []); assert.equal(anchor.getAttribute('aria-expanded'), 'true');
-    assert.ok(menu.children.every(button => button.style.width === '44px' && button.style.height === '44px'));
+    // Row popups widen each option by 20% so long names fit; height matches the dock button.
+    assert.ok(menu.children.every(button => parseFloat(button.style.width) === 44 * 1.2 && button.style.height === '44px'));
     anchor.dispatch('click'); assert.equal(controller.isOpen(), false); assert.deepEqual(chosen, []);
     for (const option of menu.children) {
       anchor.dispatch('click'); option.dispatch('click'); assert.equal(controller.isOpen(), false); assert.equal(chosen.at(-1), option.dataset.tool);

@@ -57,6 +57,10 @@ export const ICONS: Record<string, string> = {
   tax: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" fill="currentColor" opacity=".45"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.8"/>',
   rent: '<circle cx="8" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 12h9m-3 0v3m-3-3v2" stroke="currentColor" stroke-width="2.2"/>',
   price: '<path d="M3 12 12 3h8v8l-9 9z" fill="currentColor" opacity=".5"/><circle cx="16" cy="8" r="1.8" fill="currentColor"/>',
+  bus: '<rect x="4" y="3" width="16" height="15" rx="3" fill="currentColor"/><path d="M6.5 6h11v5h-11z" fill="#0e172c"/><circle cx="8" cy="14.5" r="1.3" fill="#0e172c"/><circle cx="16" cy="14.5" r="1.3" fill="#0e172c"/><path d="M7 18v3m10-3v3" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
+  taxi: '<path d="M9 3h6v3H9z" fill="currentColor" opacity=".7"/><path d="M5 11 7 6.5h10L19 11h1a1 1 0 0 1 1 1v5H3v-5a1 1 0 0 1 1-1z" fill="currentColor"/><path d="M8 8h3.5v3H7zM12.5 8H16l1 3h-4.5z" fill="#0e172c"/><circle cx="7.5" cy="17.5" r="2" fill="currentColor" stroke="#0e172c" stroke-width="1.4"/><circle cx="16.5" cy="17.5" r="2" fill="currentColor" stroke="#0e172c" stroke-width="1.4"/>',
+  train: '<rect x="5" y="2" width="14" height="15" rx="3.5" fill="currentColor"/><path d="M7.5 5h9v5h-9z" fill="#0e172c"/><circle cx="9" cy="13.5" r="1.3" fill="#0e172c"/><circle cx="15" cy="13.5" r="1.3" fill="#0e172c"/><path d="m8 17-3 5m11-5 3 5M6.5 20h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  build: '<path d="M3 21V10l6-4v4l6-4v15z" fill="currentColor" opacity=".55"/><path d="M15 21V3h6v18z" fill="currentColor"/><path d="M17 6h2m-2 3h2m-2 3h2" stroke="#0e172c" stroke-width="1.6"/>',
 };
 
 /** An inline SVG icon from the shared set, hidden from assistive technology. */

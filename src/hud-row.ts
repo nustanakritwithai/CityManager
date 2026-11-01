@@ -45,4 +45,10 @@ export function installHudRow() {
   cycle.addEventListener('click', () => speeds[(current() + 1) % speeds.length]?.click());
   const watch = new MutationObserver(syncSpeed); for (const b of document.querySelectorAll('[data-speed]')) watch.observe(b, { attributes: true, attributeFilter: ['aria-pressed'] });
   speeds.at(-1)?.after(cycle); syncSpeed();
+
+  // Keep the camera button just above the build dock and status line, whatever their height.
+  const dock = document.querySelector<HTMLElement>('.bottom-hud');
+  const clearDock = () => { const r = dock?.getBoundingClientRect(); if (r?.height) document.documentElement.style.setProperty('--dock-clear', `${Math.max(0, innerHeight - r.top + 8)}px`); }; // A hidden dock (open sheet) keeps the last value.
+  if (dock) new ResizeObserver(clearDock).observe(dock);
+  addEventListener('resize', clearDock); clearDock();
 }

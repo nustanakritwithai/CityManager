@@ -19,6 +19,8 @@ export function installHudIcons() {
   for (const [id, name] of [['toggle-camera-pan', 'move'], ['toggle-camera', 'crosshair']] as const) {
     const button = document.getElementById(id); if (button) { button.innerHTML = svg(name); button.classList.add('svg-glyph'); }
   }
+  const bus = document.querySelector<HTMLElement>('#bus-tool .tool-icon');
+  if (bus) { bus.innerHTML = svg('bus'); bus.classList.add('svg-glyph'); }
   for (const [id, name] of Object.entries(PAGES)) {
     const glyph = document.getElementById(id)?.querySelector<HTMLElement>('span[aria-hidden="true"]');
     if (glyph) { glyph.innerHTML = svg(name); glyph.classList.add('svg-glyph'); }

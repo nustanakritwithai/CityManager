@@ -2,6 +2,7 @@ import type {City} from '../sim.ts';
 import type {ParkRuntime} from '../park-runtime.ts';
 import type {CityView} from '../renderer.ts';
 import {installToolMenu} from '../tool-menu.ts';
+import {iconElement} from '../ui-icons.ts';
 import {GAME_RAIL_POLICY,GAME_RAIL_TRACK_MINUTES,RailNetworkRuntime} from './network-runtime.ts';
 import {railStationRows} from './presentation.ts';
 import {SceneRail} from './scene.ts';
@@ -16,7 +17,7 @@ const element=<K extends keyof HTMLElementTagNameMap>(tag:K,text='')=>{const nod
 export function installRailManagement(options:RailManagementOptions){
   const {view}=options,scene=new SceneRail(view);
   const anchor=element('button');anchor.id='rail-tool';anchor.type='button';anchor.className='tool';anchor.title='รถไฟโดยสาร';
-  const icon=element('span','🚆');icon.className='tool-icon';icon.setAttribute('aria-hidden','true');anchor.append(icon,element('span','รถไฟ'));
+  const icon=iconElement('train','tool-icon svg-glyph');icon.setAttribute('aria-hidden','true');anchor.append(icon,element('span','รถไฟ'));
   document.querySelector('.tool-buttons')?.append(anchor);
   const menu=element('div');menu.id='rail-management-submenu';menu.className='grouped-tool-submenu';const popup=installToolMenu(anchor,menu,true);
   const panel=element('dialog');panel.id='rail-management';panel.className='rail-management';panel.setAttribute('aria-labelledby','rail-management-title');
