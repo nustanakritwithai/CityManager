@@ -106,3 +106,77 @@ test('equal wall time yields equal game steps for finely and coarsely chunked ca
   while(now<3000){now+=chunk;layer.frame(city,0,false,.1);worker.flush();}const step=layer.diagnostics.step;layer.destroy();return step;};
  assert.equal(run(100),3);assert.equal(run(500),3);assert.equal(run(1000),3);
 });
+
+test('real bus bridge and visible-car presenter share movement permission without save writes',async()=>{
+ const {busPoses}=await import('../src/bus/poses.ts');
+ const city=deserialize(readFileSync(new URL('./fixtures/save-smoke/bus-optional-day60.json',import.meta.url),'utf8')),before=serialize(city),worker=new FakeWorker();let now=0,moved=false,visibleCars=0;
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>worker as never,scene as never,undefined,()=>now);
+ const box=(p:{x:number;z:number;headingX:number;headingZ:number},length:number,width:number)=>{const x=(Math.abs(p.headingX)*length+Math.abs(p.headingZ)*width)/2,z=(Math.abs(p.headingZ)*length+Math.abs(p.headingX)*width)/2;return {left:p.x-x,right:p.x+x,top:p.z-z,bottom:p.z+z};};
+ let firstBus:string|undefined;
+ for(let i=0;i<1600;i++){
+  now+=25;layer.frame(city,0,false,.025);worker.flush();assert.equal(layer.diagnostics.failure,null);
+  const cars=layer.diagnostics.presentation.renderedPoses,buses=busPoses(layer.bus!.engine.snapshot().filter(b=>b.phase!=='home'),{stops:city.bus!.stops});visibleCars=Math.max(visibleCars,cars.length);
+  const current=JSON.stringify(buses.map(b=>[b.x,b.z]));if(firstBus&&current!==firstBus&&buses.length)moved=true;if(buses.length&&!firstBus)firstBus=current;
+  for(const car of cars)for(const bus of buses){const a=box(car,.42,.3),b=box(bus,bus.length,bus.width);assert.ok(!(a.left<b.right-1e-7&&b.left<a.right-1e-7&&a.top<b.bottom-1e-7&&b.top<a.bottom-1e-7),'committed bus cannot intrude visible car');}
+ }
+ assert.ok(moved);assert.ok(visibleCars>0);assert.ok(layer.diagnostics.presentation.busGranted>0);assert.equal(layer.diagnostics.presentation.busIntrusions,0);assert.equal(layer.bus!.ledger().engineError,0);assert.equal(layer.diagnostics.busLedger?.engineError,0);assert.ok(layer.diagnostics.busMovement!.committedDrive>0);assert.equal(layer.diagnostics.busMinute,layer.bus!.engine.now);assert.equal(serialize(city),before);
+ const paused=layer.diagnostics.presentation.renderedPoses,busPaused=layer.bus!.engine.snapshot();layer.frame(city,0,true,.25);worker.flush();assert.deepEqual(layer.diagnostics.presentation.renderedPoses,paused);assert.deepEqual(layer.bus!.engine.snapshot(),busPaused);
+ layer.setVisible(false);layer.frame(city,0,false,.025);assert.equal(layer.diagnostics.failure,null);layer.destroy();
+});
+
+test('busy bus completes its first corner and reaches the stop after natural car hold and resume',async()=>{
+ const {busPoses}=await import('../src/bus/poses.ts');
+ const {trafficGapBusyFixture}=await import('./traffic-gap-fixture.ts');const {deserializeParkSession}=await import('../src/park-runtime.ts');
+ const city=deserializeParkSession(trafficGapBusyFixture()).city,before=serialize(city),worker=new FakeWorker();let now=0,moved=false,visibleCars=0;
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>worker as never,scene as never,undefined,()=>now);
+ const box=(p:{x:number;z:number;headingX:number;headingZ:number},length:number,width:number)=>{const x=(Math.abs(p.headingX)*length+Math.abs(p.headingZ)*width)/2,z=(Math.abs(p.headingZ)*length+Math.abs(p.headingX)*width)/2;return {left:p.x-x,right:p.x+x,top:p.z-z,bottom:p.z+z};};
+ let previousIds=new Set<string>();const seenIds=new Set<string>();
+ let firstBus:string|undefined,held=false,resumed=false,heldCommits=0,arrived=false,departed=false;
+ // Physical first approach, mandatory 60s dwell, then actual kerb departure: no fake clock shortcut.
+ for(let i=0;i<6400;i++){
+  now+=25;layer.frame(city,0,false,.025);worker.flush();assert.equal(layer.diagnostics.failure,null);
+  const stats=layer.diagnostics.busMovement!;if(!held&&stats.heldDrive+stats.heldTransition>0){held=true;heldCommits=stats.committedDrive;}if(held&&stats.committedDrive>heldCommits)resumed=true;if(layer.bus!.engine.snapshot().some(b=>b.phase==='dwelling'))arrived=true;if(arrived&&layer.bus!.engine.snapshot().some(b=>b.phase==='running'&&b.progress>0))departed=true;
+  const cars=layer.diagnostics.presentation.renderedPoses,buses=busPoses(layer.bus!.engine.snapshot().filter(b=>b.phase!=='home'),{stops:city.bus!.stops});visibleCars=Math.max(visibleCars,cars.length);
+  const currentIds=new Set(cars.map(c=>c.vehicleId));for(const id of previousIds)if(!currentIds.has(id))assert.ok(layer.diagnostics.presentation.lastRemoved.includes(id),'only real terminal retirement removes an admitted ID');for(const id of currentIds){if(!previousIds.has(id))assert.ok(!seenIds.has(id),'admitted ID never flashes out and reappears');seenIds.add(id);}previousIds=currentIds;
+  for(let a=0;a<cars.length;a++)for(let b=a+1;b<cars.length;b++){const x=box(cars[a],.42,.3),y=box(cars[b],.42,.3);assert.ok(!(x.left-.09<y.right-1e-7&&y.left-.09<x.right-1e-7&&x.top-.09<y.bottom-1e-7&&y.top-.09<x.bottom-1e-7),'car body and standstill gap remain clear');}
+  const current=JSON.stringify(buses.map(b=>[b.x,b.z]));if(firstBus&&current!==firstBus&&buses.length)moved=true;if(buses.length&&!firstBus)firstBus=current;
+  for(const car of cars)for(const bus of buses){const a=box(car,.42,.3),b=box(bus,bus.length,bus.width);assert.ok(!(a.left<b.right-1e-7&&b.left<a.right-1e-7&&a.top<b.bottom-1e-7&&b.top<a.bottom-1e-7),'committed bus cannot intrude visible car');}
+ }
+ assert.ok(held,'natural busy scenario must exercise a bus hold');assert.ok(resumed,'held bus must resume real driving');assert.ok(departed,'bus must physically depart after its real dwell, not remain permanently merge-blocked');assert.ok(arrived,'bus must clear the second turn and reach actual first stop, not freeze after one resumed frame');assert.ok(moved);assert.ok(visibleCars>0);assert.ok(layer.diagnostics.presentation.busGranted>0);assert.equal(layer.diagnostics.presentation.busIntrusions,0);assert.equal(layer.bus!.ledger().engineError,0);assert.equal(layer.diagnostics.busLedger?.engineError,0);assert.ok(layer.diagnostics.busMovement!.committedDrive>0);assert.equal(layer.diagnostics.busMinute,layer.bus!.engine.now);assert.equal(serialize(city),before);
+ const paused=layer.diagnostics.presentation.renderedPoses,busPaused=layer.bus!.engine.snapshot();layer.frame(city,0,true,.25);worker.flush();assert.deepEqual(layer.diagnostics.presentation.renderedPoses,paused);assert.deepEqual(layer.bus!.engine.snapshot(),busPaused);
+ layer.setVisible(false);layer.frame(city,0,false,.025);assert.equal(layer.diagnostics.failure,null);layer.destroy();
+});
+
+for(const level of [1,2,3] as const)test(`dense 12-junction mixed traffic completes outbound, dwell and return with bus L${level}`,async()=>{
+ const {busPoses}=await import('../src/bus/poses.ts');
+ const {trafficRightOfWayFixture,trafficRightOfWayWitness}=await import('./traffic-right-of-way-fixture.ts');const {deserializeParkSession}=await import('../src/park-runtime.ts');
+ const raw=trafficRightOfWayFixture(level);assert.ok(trafficRightOfWayWitness(raw).encounteredConflictNodes>4);
+ const city=deserializeParkSession(raw).city,before=serialize(city),worker=new FakeWorker();let now=0,moved=false,visibleCars=0;
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>worker as never,scene as never,undefined,()=>now);
+ const box=(p:{x:number;z:number;headingX:number;headingZ:number},length:number,width:number)=>{const x=(Math.abs(p.headingX)*length+Math.abs(p.headingZ)*width)/2,z=(Math.abs(p.headingZ)*length+Math.abs(p.headingX)*width)/2;return {left:p.x-x,right:p.x+x,top:p.z-z,bottom:p.z+z};};
+ let previousIds=new Set<string>();const seenIds=new Set<string>();
+ let firstBus:string|undefined,held=false,resumed=false,heldCommits=0,arrived=false,departed=false;
+ // Physical first approach, mandatory 60s dwell, then actual kerb departure: no fake clock shortcut.
+ let stops:number[]=[];let previousStop:number|undefined;let minVisible=Infinity,maxDeferred=0;
+ for(let i=0;i<36000;i++){
+  now+=25;layer.frame(city,0,false,.025);worker.flush();assert.equal(layer.diagnostics.failure,null);
+  const snapshot=layer.bus!.engine.snapshot()[0];if(snapshot?.phase==='dwelling'&&snapshot.cell!==previousStop){stops.push(snapshot.cell);previousStop=snapshot.cell;}if(snapshot?.phase!=='dwelling')previousStop=undefined;
+  if(i>400)minVisible=Math.min(minVisible,layer.diagnostics.presentation.renderedIds.length);maxDeferred=Math.max(maxDeferred,layer.diagnostics.presentation.birthDeferredFrames);
+  if(i===0){const [from,to]=city.bus!.stops;layer.bus!.engine.submit([{requestId:'dense-proof',purpose:'commute',from:from.cell,to:to.cell,persons:4,lineId:city.bus!.lines[0].id,fromStopId:from.id,toStopId:to.id,fareSatang:0}]);}
+  const stats=layer.diagnostics.busMovement!;if(!held&&stats.heldDrive+stats.heldTransition>0){held=true;heldCommits=stats.committedDrive;}if(held&&stats.committedDrive>heldCommits)resumed=true;if(layer.bus!.engine.snapshot().some(b=>b.phase==='dwelling'))arrived=true;if(arrived&&layer.bus!.engine.snapshot().some(b=>b.phase==='running'&&b.progress>0))departed=true;
+  const cars=layer.diagnostics.presentation.renderedPoses,buses=busPoses(layer.bus!.engine.snapshot().filter(b=>b.phase!=='home'),{stops:city.bus!.stops});visibleCars=Math.max(visibleCars,cars.length);for(const b of buses){assert.equal(b.level,level);assert.equal(b.capacity,[0,40,60,80][level]);assert.equal(b.length,[0,.78,1.02,1.32][level]);}
+  const currentIds=new Set(cars.map(c=>c.vehicleId));for(const id of previousIds)if(!currentIds.has(id))assert.ok(layer.diagnostics.presentation.lastRemoved.includes(id),'only real terminal retirement removes an admitted ID');for(const id of currentIds){if(!previousIds.has(id))assert.ok(!seenIds.has(id),'admitted ID never flashes out and reappears');seenIds.add(id);}previousIds=currentIds;
+  for(let a=0;a<cars.length;a++)for(let b=a+1;b<cars.length;b++){const x=box(cars[a],.42,.3),y=box(cars[b],.42,.3);assert.ok(!(x.left-.09<y.right-1e-7&&y.left-.09<x.right-1e-7&&x.top-.09<y.bottom-1e-7&&y.top-.09<x.bottom-1e-7),'car body and standstill gap remain clear');}
+  const current=JSON.stringify(buses.map(b=>[b.x,b.z]));if(firstBus&&current!==firstBus&&buses.length)moved=true;if(buses.length&&!firstBus)firstBus=current;
+  for(const car of cars)for(const bus of buses){const a=box(car,.42,.3),b=box(bus,bus.length,bus.width);assert.ok(!(a.left<b.right-1e-7&&b.left<a.right-1e-7&&a.top<b.bottom-1e-7&&b.top<a.bottom-1e-7),'committed bus cannot intrude visible car');}
+ }
+ assert.deepEqual(stops.slice(0,3),[255,341,255],'actual outward and return stop arrivals, with real dwell and no timeout relocation');
+ assert.ok(layer.bus!.engine.totals.completed>=4,'submitted passengers reach the second stop');
+ console.log(JSON.stringify({fixture:'dense-right-of-way',level,stops,minVisible,maxVisible:visibleCars,birthDeferredFrames:maxDeferred,maxDrainSeconds:layer.diagnostics.presentation.maxDrainSeconds,birthOpportunities:layer.diagnostics.presentation.birthOpportunities,ledger:layer.bus!.ledger(),movement:layer.diagnostics.busMovement}));
+ assert.ok(held,'natural busy scenario must exercise a bus hold');assert.ok(resumed,'held bus must resume real driving');assert.ok(departed,'bus must physically depart after its real dwell, not remain permanently merge-blocked');assert.ok(arrived,'bus must clear the second turn and reach actual first stop, not freeze after one resumed frame');assert.ok(moved);assert.ok(visibleCars>0);assert.ok(layer.diagnostics.presentation.busGranted>0);assert.equal(layer.diagnostics.presentation.busIntrusions,0);assert.equal(layer.bus!.ledger().engineError,0);assert.equal(layer.diagnostics.busLedger?.engineError,0);assert.ok(layer.diagnostics.busMovement!.committedDrive>0);assert.equal(layer.diagnostics.busMinute,layer.bus!.engine.now);assert.equal(serialize(city),before);
+ const paused=layer.diagnostics.presentation.renderedPoses,busPaused=layer.bus!.engine.snapshot();layer.frame(city,0,true,.25);worker.flush();assert.deepEqual(layer.diagnostics.presentation.renderedPoses,paused);assert.deepEqual(layer.bus!.engine.snapshot(),busPaused);
+ layer.setVisible(false);layer.frame(city,0,false,.025);assert.equal(layer.diagnostics.failure,null);layer.destroy();
+});

@@ -6,10 +6,11 @@ import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
 import {captureTrafficGameInput,gameCarIsTaxi,type TrafficGameInput,type TrafficGameFrame} from './game.ts';
 import {gamePoses} from './game-poses.ts';
 import {createTrafficGameClient} from './game-worker-client.ts';
+import type {BusMovementGate,BusTurnIntent} from '../bus/engine.ts';
 import {BusGameBridge} from '../bus/game-bridge.ts';
 import {busPoses} from '../bus/poses.ts';
 import {busEnabled} from '../bus/types.ts';
-import {TrafficPresentation} from './presentation.ts';
+import {TrafficPresentation,type PresentationObstacle} from './presentation.ts';
 export {trafficModelEnabled} from './flag.ts';
 
 /** Ephemeral traffic-allocation game, independent of economic time and saves.
@@ -79,21 +80,29 @@ export class TrafficLayer {
    else if(now-this.anchor>=1000){this.anchor=now;const worker=this.client.status;advance=!worker.inflight&&!worker.pending;}
 
   }
-  if(this.busOn&&!this.bus&&!this.failure)this.bus=new BusGameBridge(city,this.minute);
+  if(this.busOn&&!this.bus&&!this.failure)this.bus=new BusGameBridge(city,this.minute,this.busMovementGate,()=>this.presenter.clearBusReservations());
+  if(this.bus)this.presenter.reconcileBuses(this.bus.engine.snapshot().map(b=>b.id));
   if(this.bus&&!paused&&!this.failure){this.minute+=Math.min(.25,Math.max(0,dt))/60;this.bus.tick(this.minute);}
   if((advance||pauseChanged||this.dirty)&&this.client&&!this.failure){this.dirty=false;this.submit(city,advance,paused);}
   if(!this.failure&&(this.renderDirty||!paused)){this.drawn=this.presenter.frame(dt,paused,this.busObstacles());if(this.visible)this.cars.sync(this.drawn);this.renderDirty=false;}
   }catch(error){this.fail(error);}finally{const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);}
  }
- /** Independent bus bodies are read-only obstacles; the presenter never moves buses or hides admitted cars. */
+ /** Production geometry is used for both movement proposals and actual visible bodies.
+  * The engine commits time/arrival only after this gate grants the complete sweep. */
+ private busIntentGeometry=new WeakMap<BusTurnIntent,{id:string;samples:readonly PresentationObstacle[]}>();
+ private busMovementGate:BusMovementGate=(proposal,others)=>{
+  const peers=others.filter(b=>b.id!==proposal.busId&&b.phase!=='home'),options={stops:this.city?.bus?.stops??[]};
+  const project=(snapshot:typeof proposal.from)=>busPoses([snapshot],options)[0];
+  return this.presenter.allowBusMovement(proposal.busId,project(proposal.from),project(proposal.to),busPoses(peers,options),proposal.samples.map(project),proposal.turns?.map(turn=>{let geometry=this.busIntentGeometry.get(turn);if(!geometry){geometry={id:turn.id,samples:turn.samples.map(project)};this.busIntentGeometry.set(turn,geometry);}return geometry;}));
+ };
  private busObstacles(){
   if(!this.bus||!this.city)return [];
-  return busPoses(this.bus.engine.snapshot(this.minute),{stops:this.city.bus?.stops??[]});
+  return busPoses(this.bus.engine.snapshot(this.minute).filter(b=>b.phase!=='home'),{stops:this.city.bus?.stops??[]});
  }
 
  destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
- get diagnostics(){const f=this.latest,worker=this.client?.status??null,presenter=this.presenter;return {...this.cars.diagnostics,mode:'allocation-game' as const,get presentation(){return presenter.diagnostics;},paused:this.paused,
-  ready:f!==null,updating:f===null||!!worker?.inflight||!!worker?.pending,step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
+ get diagnostics(){const f=this.latest,worker=this.client?.status??null,presenter=this.presenter,bus=this.bus;return {...this.cars.diagnostics,mode:'allocation-game' as const,get presentation(){return presenter.diagnostics;},paused:this.paused,
+  get busLedger(){return bus?.ledger()??null;},get busMovement(){return bus?.engine.movementStats??null;},busMinute:bus?.engine.now??null,busStranded:bus?.engine.strandedCount??0,ready:f!==null,updating:f===null||!!worker?.inflight||!!worker?.pending,step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
   completed:f?.completed??0,dropped:f?.dropped??0,cancelled:f?.cancelled??0,clippedRate:f?.clippedRate??0,
   roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker,timing:{...this.timing}};}
  /** Cumulative completed taxi trips on the latest frame (resets with the game). */

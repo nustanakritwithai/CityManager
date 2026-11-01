@@ -1,3 +1,6 @@
+import assert from 'node:assert/strict';
+import {buildBusDepot,buildBusStop} from '../src/bus/placement.ts';
+import {createBusLine} from '../src/bus/lines.ts';
 import {populationFixture} from './population-capacity-fixture.ts';
 import {serializeParkSession,deserializeParkSession,createParkRuntime} from '../src/park-runtime.ts';
 /** Synthetic 32-family queue fixture: same fixed bottleneck as strict bypass preflight.
@@ -8,6 +11,9 @@ export function trafficGapBusyFixture():string {
  for(const i of [272,273,274,275,...Array.from({length:10},(_,i)=>288+i)])city.cells[i].road=true;
  for(const [i,b]of homes.entries()){b.cell=[271,248][i];city.cells[b.cell]={road:false,zone:b.zone,building:b.id};}
  for(const [i,b]of firms.entries()){b.cell=[251,276,400,401,402,403,404][i];city.cells[b.cell]={road:false,zone:b.zone,building:b.id};}
+ assert.equal(buildBusDepot(city,270,true).ok,true);
+ for(const cell of[274,295])assert.equal(buildBusStop(city,cell,undefined,true).ok,true);
+ assert.equal(createBusLine(city,{depotId:city.bus!.depots[0].id,stopIds:city.bus!.stops.map(s=>s.id),busCount:1,busLevel:1}).ok,true);
  // Canonicalize through the real migration/history boundary before the mock ACK.
  const restored=deserializeParkSession(serializeParkSession(city,createParkRuntime(city)));return serializeParkSession(restored.city,restored.runtime,restored.market);
 }

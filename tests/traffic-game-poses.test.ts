@@ -32,3 +32,21 @@ test('below the visual cap, output is unchanged by the sampling budget',()=>{
  const cars=[{id:2,from:25,to:26,blocked:false},{id:1,from:0,to:1,blocked:true},{id:3,from:300,to:301,blocked:false}],groups=cars.map(c=>({key:`${c.from}>${c.to}`,from:c.from,to:c.to,amount:1,queued:Number(c.blocked),storage:4,closed:false}));
  assert.deepEqual(gamePoses(cars,groups),gamePoses(cars,groups,24,2,128));
 });
+
+test('upcoming turn hint identifies actual next lane without advancing the rendered car',()=>{
+ const incoming={key:'25>26',from:25,to:26,amount:1,queued:0,storage:6,closed:false};
+ const outgoing={key:'26>50',from:26,to:50,amount:1,queued:0,storage:3,closed:false};
+ const [pose]=gamePoses([{id:1,from:25,to:26,blocked:false,progress:.3,lane:1,nextCell:50,nextLane:0}],[incoming]);
+ const [plain]=gamePoses([{id:1,from:25,to:26,blocked:false,progress:.3,lane:1}],[incoming]);
+ const [exit]=gamePoses([{id:1,from:26,to:50,blocked:false,progress:.355,lane:0}],[outgoing]);
+ assert.equal(pose.x,plain.x);assert.equal(pose.z,plain.z);assert.deepEqual(pose.upcomingTurn,{x:exit.x,z:exit.z,headingX:exit.headingX,headingZ:exit.headingZ,nodeX:-19,nodeZ:-21,incomingHeadingX:1,incomingHeadingZ:0,entryX:-19,entryZ:-20.76});
+ const [straight]=gamePoses([{id:1,from:25,to:26,blocked:false,progress:.3,nextCell:27}],[incoming]);assert.equal(straight.upcomingTurn,undefined);
+});
+
+test('straight and terminal conflict-node hints use actual node and do not invent a final outgoing trip',()=>{
+ const group={key:'25>26',from:25,to:26,amount:1,queued:0,storage:3,closed:false};
+ const [straight]=gamePoses([{id:1,from:25,to:26,blocked:false,progress:.2,nextCell:27,junction:true}],[group]);
+ assert.deepEqual(straight.upcomingTurn,{x:-18.29,z:-21.24,headingX:1,headingZ:0,nodeX:-19,nodeZ:-21,incomingHeadingX:1,incomingHeadingZ:0,entryX:-19,entryZ:-21.24});
+ const [terminal]=gamePoses([{id:1,from:25,to:26,blocked:false,progress:.2,destination:26,junction:true}],[group]);
+ assert.equal(terminal.upcomingTurn!.x,terminal.exitX);assert.equal(terminal.upcomingTurn!.z,terminal.exitZ);
+});

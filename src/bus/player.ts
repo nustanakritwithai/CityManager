@@ -105,7 +105,7 @@ export function upgradeLine(host: BusHost & { lastEvent?: string }, id: number, 
   if (!enabled) return { ok: false as const, message: OFF };
   if (!host.bus) return { ok: false as const, message: 'ไม่พบสายรถเมล์' };
   const result = upgradeBusLine(host.bus, id, enabled);
-  if (result.ok) host.lastEvent = result.message;
+  if (result.ok) { result.message += ' · ขนาดรถใหม่จะใช้เมื่อรถกลับอู่'; host.lastEvent = result.message; }
   return result;
 }
 
@@ -124,9 +124,15 @@ export function busRemovalImpact(host: BusHost, cell: number, via: BusRemovalVia
   const verb = via === 'bulldoze' ? `รื้ออู่รถเมล์ #${depot.id}` : `รื้ออู่รถเมล์ #${depot.id}`;
   return { kind: 'depot', id: depot.id, cell, lineIds, title: `รื้ออู่รถเมล์ #${depot.id}?`, body: `${verb} · สายที่กระทบ: ${ids(lineIds)}${move}` };
 }
+const ACTIVE_DEPOT = 'ยังรื้ออู่นี้ไม่ได้: มีรถที่ยังไม่กลับอู่ ให้หยุดบริการและรอรถกลับอู่ก่อน';
+const activeDepot = (id:number) => getBusLiveSource()?.hasActiveDepot?.(id) === true;
+
 export async function bulldozeGuarded(host: BusHost, cell: number, enabled: boolean, confirm: (impact: BusRemovalImpact) => Promise<boolean>, run: (cell: number) => Result): Promise<Result | null> {
+  const depot=busDepotAt(host,cell);
+  if(depot&&activeDepot(depot.id))return {ok:false,message:ACTIVE_DEPOT};
   const impact = enabled ? busRemovalImpact(host, cell, 'bulldoze') : null;
   if (impact && !await confirm(impact)) return null;
+  if(depot&&activeDepot(depot.id))return {ok:false,message:ACTIVE_DEPOT};
   return run(cell);
 }
 export function commitStopRemoval(city: City, id: number, confirmed: boolean): Result & { removed: boolean } {
@@ -138,6 +144,7 @@ export function commitStopRemoval(city: City, id: number, confirmed: boolean): R
 export function commitDepotRemoval(city: City, id: number, confirmed: boolean): Result & { removed: boolean } {
   const depot = city.bus?.depots.find(item => item.id === id);
   if (!depot) return { ok: false, message: 'ไม่พบอู่รถเมล์', removed: false };
+  if (activeDepot(id)) return {ok:false,message:ACTIVE_DEPOT,removed:false};
   if (!confirmed) return { ok: false, message: busRemovalImpact(city, depot.cell, 'direct')?.body ?? 'ยังไม่รื้อ', removed: false };
   const result = removeBusDepot(city, id); return { ...result, removed: result.ok };
 }
@@ -201,7 +208,7 @@ function upgradeLabel(line: Pick<BusLine, 'busLevel' | 'busCount'>): string | nu
   const to = nextBusLevel(line.busLevel); if (!to) return null;
   try {
     const quote = busLevelQuote(to), preview = busLevelDisplayLines({ busLevel: to, busCount: line.busCount });
-    return `ยกระดับเป็นระดับ ${quote.level} · ${preview[1]} · ${preview[2]}`;
+    return `ยกระดับเป็นระดับ ${quote.level} · ${preview[1]} · ${preview[2]} · ขนาดรถใหม่จะใช้เมื่อรถกลับอู่`;
   } catch { return null; }
 }
 function liveOf(read: BusLiveRead, lineId: number): BusLiveCard {
