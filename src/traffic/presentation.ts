@@ -89,6 +89,15 @@ function cornerBox(e:Entry):Box|null {
 }
 /** Preserve at most the occupied and next conflict node, including straight crossings. */
 type NodePlan={key:string;visit?:number;nodeX?:number;nodeZ?:number;exit?:{x:number;z:number;headingX:number;headingZ:number};gate?:{x:number;z:number;headingX:number;headingZ:number};box:Box;boxes:Box[]};
+function incomingPredecessor(owner:CitizenVehiclePose,other:CitizenVehiclePose,gate:NodePlan['gate']):boolean {
+ if(!gate)return false;
+ const along=(p:CitizenVehiclePose)=>(p.x-gate.x)*gate.headingX+(p.z-gate.z)*gate.headingZ;
+ const lateral=(p:CitizenVehiclePose)=>(p.x-gate.x)*gate.headingZ-(p.z-gate.z)*gate.headingX;
+ const position=along(owner);
+ return position< -EPS&&other.headingX*gate.headingX+other.headingZ*gate.headingZ>.99
+  &&Math.abs(lateral(other)-lateral(owner))<.3-EPS
+  &&along(other)>position+EPS&&along(other)<=EPS;
+}
 function nodePlans(e:Entry):NodePlan[]{
  const plans:{key:string;visit?:number;nodeX?:number;nodeZ?:number;exit?:{x:number;z:number;headingX:number;headingZ:number};gate?:{x:number;z:number;headingX:number;headingZ:number};box:Box;boxes:Box[]}[]=[],seen=new Set<string>();
  for(const p of [e.pose,...e.path,e.last]){
@@ -173,6 +182,11 @@ export class TrafficPresentation {
  private acquireCorners(obstacles:readonly Box[]){
   for(const r of [...this.corners.values()].sort((a,b)=>a.order-b.order)){
    if(r.active)continue;
+   // A rear car cannot use this corridor until the car ahead on the same
+   // incoming lane has reached it. Reserving it first can block that leader's
+   // turn while the follower itself cannot pass the leader's body.
+   const owner=this.entries.get(r.owner);
+   if(owner&&[...this.entries].some(([id,e])=>id!==r.owner&&incomingPredecessor(owner.pose,e.pose,r.gate)))continue;
    if([...this.corners.values()].some(c=>c.owner===r.owner&&c.order<r.order&&!c.active))continue;
    if([...this.entries].some(([id,e])=>id!==r.owner&&r.boxes.some(b=>intersects(body(e.pose),b))))continue;
    if(obstacles.some(b=>r.boxes.some(a=>intersects(b,a))))continue;
@@ -221,6 +235,9 @@ export class TrafficPresentation {
   for(const p of this.pending){if(this.entries.size>=this.limit||this.selectedOwner)break;
    const candidate:Entry={pose:{...p},last:{...p},path:[],speed:0,retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()};
    const birthPlans=nodePlans(candidate);
+   // Do not introduce a new leader ahead of an already committed corridor.
+   if(corners.some(c=>c.active&&this.entries.has(c.owner)&&incomingPredecessor(this.entries.get(c.owner)!.pose,p,c.gate)))continue;
+   if(birthPlans.some(n=>[...this.entries.values()].some(e=>incomingPredecessor(p,e.pose,n.gate))))continue;
    if(birthPlans.some(n=>[...footprints.values()].some(b=>n.boxes.some(a=>intersects(a,b)))||obstacles.some(b=>n.boxes.some(a=>intersects(a,b)))||corners.some(c=>c.active&&n.boxes.some(a=>c.boxes.some(b=>intersects(a,b))))||reservations.some(r=>r.boxes.some(b=>n.boxes.some(a=>intersects(a,b))))))continue;
    if(clear(p,p.vehicleId)){this.entries.set(p.vehicleId,{pose:{...p},last:{...p},path:[],speed:Math.max(0,Math.min(2,p.speed??0)),retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()});footprints.set(p.vehicleId,body(p));this.admitted++;
     for(const plan of birthPlans){const r:CornerReservation={owner:p.vehicleId,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:plan.boxes.some(b=>intersects(body(p),b)),active:true};this.corners.set(`${p.vehicleId}@${plan.key}`,r);corners.push(r);}
