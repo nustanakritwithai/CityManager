@@ -75,6 +75,7 @@ import { installSheetHandle } from './sheet-handle.ts';
 import './panels.css';
 import './hud.css';
 import './panel-theme.css';
+import './panel-polish.css';
 import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
 import { advancedEnabled, storeAdvanced } from './advanced.ts';
 import { AudioEngine, type EffectName } from './audio-engine.ts';
@@ -181,7 +182,9 @@ const help: Record<string, string> = {
 const WARN_TEXT = /ไม่พอ|ไม่ได้|ต้อง|ขวาง|ไม่ถูกต้อง|นอกแผนที่|ยังไม่เชื่อม|ไม่มีอยู่แล้ว|ไม่พบ/;
 function status(message: string) {
   const text = thaiMessage(message), chip = $('#status'), changed = chip.textContent !== text;
-  chip.textContent = text; $('#inspector-status').textContent = text;
+  chip.textContent = text;
+  // The game menu echoes results that happen while it is open (saving), not map hints.
+  if (route?.page === 'game' && !text.startsWith('เลือกสถานที่')) $('#inspector-status').textContent = text;
   // Tone and a short pop make each result read as a toast; the words stay the same.
   chip.dataset.tone = WARN_TEXT.test(text) ? 'warn' : /แล้ว|เรียบร้อย|Saved/.test(text) ? 'good' : 'info';
   if (changed && !matchMedia('(prefers-reduced-motion: reduce)').matches) chip.animate?.([{ opacity: .55 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
@@ -677,15 +680,18 @@ async function boot() {
   const trafficFocus=document.createElement('button');trafficFocus.id='traffic-game-focus';trafficFocus.type='button';trafficFocus.textContent='ไปดูจุดรถติด';trafficFocus.hidden=true;
   let bottleneckCell:number|null=null;trafficFocus.addEventListener('click',()=>{if(bottleneckCell!==null){view.focus(bottleneckCell);inspector(false);render();}});
   trafficSection.append(trafficTitle,trafficInfo,trafficFocus,trafficNote);$('#growth-anchor').insertAdjacentElement('beforebegin',trafficSection);
-  const trafficControl=document.createElement('section');trafficControl.className='save-group';
+  const trafficControl=document.createElement('section');trafficControl.className='save-group traffic-control';
   const trafficControlTitle=document.createElement('h4');trafficControlTitle.textContent='การจราจรจำลอง';
-  const trafficButton=document.createElement('button');trafficButton.id='traffic-game-toggle';trafficButton.type='button';
-  const trafficControlNote=document.createElement('small');trafficControlNote.textContent='ปิดหรือเปิดแบบจำลองได้ รถจำลองเริ่มใหม่เมื่อโหลดเมือง';
+  // A switch: the label stays, aria-pressed carries the state and draws the knob.
+  const trafficButton=document.createElement('button');trafficButton.id='traffic-game-toggle';trafficButton.type='button';trafficButton.className='menu-switch';
+  const trafficState=document.createElement('span');trafficState.className='menu-switch-state';
+  trafficButton.append(Object.assign(document.createElement('span'),{className:'menu-switch-label',textContent:'รถจำลองบนถนน'}),trafficState,Object.assign(document.createElement('span'),{className:'menu-switch-track'}));
+  const trafficControlNote=document.createElement('small');trafficControlNote.textContent='รถจำลองเริ่มใหม่เมื่อโหลดเมือง';
   trafficControl.append(trafficControlTitle,trafficButton,trafficControlNote);$('#game-content .game-menu').prepend(trafficControl);
   const setTrafficEnabled=(enabled:boolean,persist=false)=>{
     trafficEnabled=enabled;trafficOn=enabled;trafficLayer?.destroy();trafficLayer=null;view.traffic.setCarsEnabled(!enabled);
     if(enabled){try{const canvas=$('#city-canvas') as HTMLCanvasElement;trafficLayer=new TrafficLayer(view.app,screenCull(i=>view.project(i),()=>({width:canvas.clientWidth,height:canvas.clientHeight})),()=>{view.traffic.setCarsEnabled(true);status('แบบจำลองจราจรไม่พร้อม · กลับไปใช้รถตกแต่ง โดยไม่กระทบเซฟ');});}catch{view.traffic.setCarsEnabled(true);trafficInfo.textContent='แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน';}}
-    trafficButton.textContent=enabled?'ปิดการจราจรจำลอง':'เปิดการจราจรจำลอง';trafficButton.setAttribute('aria-pressed',String(enabled));
+    trafficState.textContent=enabled?'เปิด':'ปิด';trafficButton.setAttribute('aria-label',enabled?'ปิดการจราจรจำลอง':'เปิดการจราจรจำลอง');trafficButton.setAttribute('aria-pressed',String(enabled));
     trafficSection.hidden=!enabled;
     if(persist){const saved=storeTrafficModel(enabled);try{const u=new URL(location.href);u.searchParams.delete('traffic');history.replaceState(history.state,'',u);}catch{/* preference still applies */}
       status(saved?(enabled?'เปิดการจราจรจำลองแล้ว':'ปิดการจราจรจำลองแล้ว'):'เปลี่ยนเฉพาะรอบนี้: เบราว์เซอร์ไม่อนุญาตให้จำการตั้งค่า');}
@@ -787,14 +793,15 @@ async function boot() {
   watchPanels(document.querySelector<HTMLElement>('#inspector'), document.querySelector<HTMLElement>('#city-stats'));
   $('#toggle-inspector').addEventListener('click', () => { if (route?.page === 'city') { inspector(false); render(); } else openRoute({page:'city'}); });
   $('#toggle-help').addEventListener('click', () => { if (route?.page === 'help') { inspector(false); render(); } else openRoute({page:'help'}); });
-  $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else openRoute({page:'game'}); });
+  // The game menu shows save results only, not the map hint that was last on the status line.
+  $('#toggle-game-menu').addEventListener('click', () => { if (route?.page === 'game') { inspector(false); render(); } else { $('#inspector-status').textContent = ''; openRoute({page:'game'}); } });
   $('#close-inspector').addEventListener('click', () => { inspector(false); render(); });
   // Trading remains disabled. Its synchronous financial callback must never pretend to await a server save.
   marketPanel = installMarketPanel(() => city, () => render(), () => { throw Error('market-disabled-server-save-required'); }, () => serializeParkSession(city, parkRuntime,city.market));
   marketPanel.client.setRecoveryReadOnly(true);
   installHudRow();
   const saveBadge=document.createElement('span');saveBadge.id='autosave-status';saveBadge.setAttribute('role','status');$('#save').insertAdjacentElement('afterend',saveBadge);
-  const saveFeedback=installSaveFeedback(saveBadge,()=>document.querySelector<HTMLButtonElement>('#export-city-save')?.click(),()=> 'บันทึกบนเซิร์ฟเวอร์แล้ว');
+  const saveFeedback=installSaveFeedback(saveBadge,()=>$<HTMLButtonElement>('#save').click(),()=> 'บันทึกบนเซิร์ฟเวอร์แล้ว');
   const enqueueSave=createSaveAttemptQueue();
   const trackedSave=(explicit=false)=>{
     const captured=city,generation=cityGeneration;
@@ -844,12 +851,6 @@ async function boot() {
       await trackedSave(true);sound('ui-save');status('บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่');
     }catch(error){sound('ui-error');status(`ยังบันทึกไม่ได้: ${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · อย่าปิดหน้านี้`);}
   });
-  // Retire all browser load/recovery controls. Old copies are archived read-only at entry.
-  for(const id of ['load','load-legacy','load-v2','load-v3','load-v4','load-v5','load-v6','load-backup'])$('#'+id)?.remove();
-  document.querySelector('.save-group.legacy')?.remove();
-  const exportButton=document.createElement('button');exportButton.id='export-city-save';exportButton.textContent='ส่งออกเซฟเมืองเป็นไฟล์';
-  exportButton.onclick=()=>{const raw=serializeParkSession(city,parkRuntime,city.market),url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`citymanager-day-${city.tick}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('ส่งไฟล์ให้ดาวน์โหลดแล้ว · ไม่ใช่การบันทึกบนเซิร์ฟเวอร์');};
-  $('#save').insertAdjacentElement('afterend',exportButton);
   const campusAction = (action: typeof toggleCampus) => {
     const campus = route?.page === 'place' ? campusAt(city, route.cell) : undefined;
     if (!campus) return;

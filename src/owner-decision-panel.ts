@@ -101,25 +101,16 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
       try {
         const result = replayOwnerJournal(captured);
         lastStatus = result.ok ? 'verified' : 'verify-failed';
-        resultText = result.ok ? 'Replay ตรงกับรายการและสถานะที่บันทึก เมืองปัจจุบันไม่เปลี่ยน' : 'Replay ยังตรวจไม่ผ่าน เก็บไฟล์ประกอบเพื่อตรวจต่อ';
+        resultText = result.ok ? 'Replay ตรงกับรายการและสถานะที่บันทึก เมืองปัจจุบันไม่เปลี่ยน' : 'Replay ยังตรวจไม่ผ่าน เมืองปัจจุบันไม่เปลี่ยน';
       } catch { lastStatus = 'verify-failed'; resultText = 'ยังตรวจ replay ไม่ได้ เมืองปัจจุบันไม่เปลี่ยน'; }
       busy = false; signature = ''; sync();
     }, 0);
   });
-  const download = button('owner-export', 'ส่งออก replay', () => {
-    try {
-      const blob = new Blob([JSON.stringify(options.getSession().exportJournal(), null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob), link = element('a'); link.href = url; link.download = `citymanager-owner-replay-v1-day-${options.getCity().tick}.json`;
-      document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      lastStatus = 'exported'; resultText = 'ส่งออกไฟล์ประกอบพร้อม snapshot เมืองสำหรับ replay ในเครื่องแล้ว';
-    } catch { lastStatus = 'export-failed'; resultText = 'ยังส่งออกไม่ได้ ประวัติรอบนี้ยังอยู่ในหน้านี้'; }
-    sync();
-  });
-  controls.append(evaluate, cancelTyphoon, verify, download);
+  controls.append(evaluate, cancelTyphoon, verify);
   const status = element('p', '', 'owner-status'); status.id = 'owner-status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const list = element('div', undefined, 'owner-proposals'); list.id = 'owner-proposals';
   const journal = element('p', '', 'owner-journal-summary'); journal.id = 'owner-journal-summary';
-  const retention = element('p', 'ประวัตินี้อยู่เฉพาะรอบที่เปิดเมือง เก็บ checkpoint และหน้าต่างรายการล่าสุด ส่งออกเก็บก่อนโหลดหรือเริ่มใหม่ เซฟเมืองยังเป็น v6', 'owner-note');
+  const retention = element('p', 'ประวัติ replay อยู่เฉพาะรอบที่เปิดเมืองและใช้ตรวจในหน้านี้ เมื่อโหลดหรือเริ่มใหม่ประวัติรอบนี้จะหายไป เมืองบันทึกบนเซิร์ฟเวอร์', 'owner-note');
   body.append(modes, schedule, controls, status, list, journal, retention); host.append(summary, body);
   host.addEventListener('toggle', () => { signature = ''; sync(); });
 
@@ -268,7 +259,7 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
       const stopAutoAllowed = activeAutoBatch && node.dataset.ownerMode !== 'typhoon-auto';
       node.disabled = busy && !stopAutoAllowed || node.dataset.ownerMode === 'auto' && !stats.recording || node.dataset.ownerMode === 'typhoon-auto' && (!stats.recording || !ownerDecisionConnectionReady(options.connection));
     });
-    evaluate.disabled = session.mode !== 'proposal' || busy || !stats.recording; verify.disabled = download.disabled = busy;
+    evaluate.disabled = session.mode !== 'proposal' || busy || !stats.recording; verify.disabled = busy;
     cancelTyphoon.hidden = activeRequest === null && !activeAutoBatch; cancelTyphoon.disabled = activeRequest === null && !activeAutoBatch;
     cancelTyphoon.textContent = activeAutoBatch ? 'หยุด Typhoon ทำรายการเอง' : 'ยกเลิกคำขอ Typhoon';
     schedule.textContent = session.mode === 'off' ? 'ปิดอยู่ ไม่มีการประเมินหรือทำรายการจากกฎ' : `รอบเดือนถัดไปวันที่ ${(Math.floor(city.tick / MONTH) + 1) * MONTH} · ${session.mode === 'auto' ? 'กฎในเกมทำรายการอัตโนมัติ' : session.mode === 'typhoon-auto' ? 'Typhoon เลือกและทำรายการอัตโนมัติ' : 'เสนอให้เลือกทำเอง เงินยังไม่ย้าย'}`;

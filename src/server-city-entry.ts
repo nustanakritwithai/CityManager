@@ -13,9 +13,10 @@ export async function requireServerCityEntry(_fresh:()=>string,configured?:strin
  const overlay=document.createElement('section');overlay.className='guest-entry-gate';
  const card=document.createElement('div');card.className='guest-entry-card';
  const title=document.createElement('h1');title.textContent='CityManager';
- const note=document.createElement('p');note.textContent='เล่นต่อจากเซฟที่เซิร์ฟเวอร์ยืนยันเท่านั้น · ไม่เปิดเซฟในเบราว์เซอร์ · ตลาดยังปิดอยู่ · เข้าสู่ระบบด้วยบัญชีเดิมหรือกู้คืนบัญชี หากเล่นครั้งแรก ให้เลือกสร้าง Guest ใหม่แล้วกด Continue';
+ const note=document.createElement('p');note.textContent='เมืองของคุณเก็บไว้บนเซิร์ฟเวอร์ · เข้าเล่นด้วยบัญชีแขก (Guest)';
+ const hint=document.createElement('p');hint.className='guest-entry-note';hint.textContent='เล่นครั้งแรก: ในหน้าต่างเข้าสู่ระบบ ให้สร้าง Guest ใหม่ แล้วกดปุ่ม Continue';
  const button=document.createElement('button');button.textContent='เล่นต่อ';button.disabled=true;
- const status=document.createElement('p');status.setAttribute('role','status');card.append(title,note,button,status);overlay.append(card);document.body.append(overlay);
+ const status=document.createElement('p');status.setAttribute('role','status');status.className='guest-entry-status';card.append(title,note,button,status,hint);overlay.append(card);document.body.append(overlay);
  let busy=false,client:ServerCitySaveClient|null=null,expectedOwner:string|null=null;
  let offeredEmpty:string|null=null;
  try{expectedOwner=legacySaveOwner(storage);}catch{status.textContent='ยังอ่านบัญชี Guest เดิมไม่ได้ ข้อมูลบัญชียังอยู่ กรุณาตรวจบัญชีก่อน';return new Promise<never>(()=>{});}

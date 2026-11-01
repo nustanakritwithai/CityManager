@@ -8,7 +8,8 @@ export function installPanelTimeControls(header: HTMLElement, pause: HTMLButtonE
   return { update(paused: boolean, speed: number, disabled: boolean) {
     const rate = speed === 1 / 1440 ? '1 นาทีเกม/วินาที' : `${speed}×`;
     state.textContent = `${paused ? 'หยุดเวลาอยู่' : 'กำลังเดินเวลา'} · ${rate}`;
-    button.textContent = paused ? '▶ เล่นต่อ' : 'Ⅱ หยุดเวลา';
+    // Short label beside the close button; the full state is in #panel-time-state for screen readers.
+    button.textContent = paused ? '▶ เล่น' : 'Ⅱ หยุด'; button.setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา');
     button.setAttribute('aria-pressed', String(paused)); button.disabled = disabled;
   } };
 }

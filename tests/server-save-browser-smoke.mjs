@@ -75,6 +75,20 @@ async function stopBrowser(child,ws){
  }
 }
 
+// A browser/network stack can retransmit a POST before JavaScript observes its
+// failure. Group by idempotency key, never by assumed array positions.
+function verifyLostAckPosts(posts, original, expectedNextRevision){
+ assert.ok(posts.length>=3,'original, at least one replay and next save required');
+ assert.deepEqual(posts[0],original,'first observed command is the lost save');
+ const replays=posts.filter(p=>p.key===original.key),following=posts.filter(p=>p.key!==original.key);
+ assert.ok(replays.length>=2,'the exact lost command was retried');
+ for(const post of replays)assert.deepEqual(post,original,'every replay keeps the exact id and body');
+ assert.ok(following.length>=1,'a subsequent current-state save must occur');
+ const next=following[0];assert.ok(next.key&&next.key!==original.key,'subsequent save has a distinct key');
+ for(const post of following)assert.deepEqual(post,next,'only one distinct subsequent intent is permitted');
+ assert.equal(next.data.action,'save');assert.equal(next.data.expectedRevision,expectedNextRevision,'next save fences against the committed lost-ACK revision');
+ return {next,replays:replays.length,subsequentAttempts:following.length};
+}
 function fixtureService(){
  let resetAllowed=true;
  let state={active:null,fence:0,snapshots:[],requests:new Map(),archives:new Map()},tail=Promise.resolve();
@@ -112,12 +126,27 @@ async function selfTest(){
 
  assert.equal(expectedReloadDialog('beforeunload',true),true);
  for(const [type,scope] of [['beforeunload',false],['confirm',true],['alert',true],['prompt',true]])assert.equal(expectedReloadDialog(type,scope),false);
+ const old={key:'first',data:{action:'save',expectedRevision:3,raw:'exact'}},next={key:'next',data:{action:'save',expectedRevision:4,raw:'current'}};
+ const grouped=verifyLostAckPosts([old,structuredClone(old),structuredClone(old),next,structuredClone(next)],old,4);assert.equal(grouped.replays,3);assert.equal(grouped.subsequentAttempts,2);
+ assert.throws(()=>verifyLostAckPosts([old,{...old,data:{...old.data,raw:'changed'}},next],old,4));
+ assert.throws(()=>verifyLostAckPosts([old,next,next],old,4));
+ assert.throws(()=>verifyLostAckPosts([old,old,next,{...next,key:'third'}],old,4));
+ assert.throws(()=>verifyLostAckPosts([old,old,{...next,data:{...next.data,expectedRevision:3}}],old,4));
  const f=fixtureService(),id=randomUUID(),cityId=randomUUID(),body={action:'create',cityId,raw:'{"version":23,"tick":1}',metadata:{name:'fixture',population:0,tick:1}};
  const first=await f.service.mutate(OWNER,id,body);assert.equal(first.revision,1);assert.deepEqual(await f.service.mutate(OWNER,id,body),first);
  await assert.rejects(f.service.mutate(OWNER,randomUUID(),body),e=>e.status===409);
  await f.service.archive(OWNER,{raw:body.raw,source:'primary'});await f.service.archive(OWNER,{raw:body.raw,source:'checkpoint'});
  assert.deepEqual((await f.service.readArchive(OWNER,hash(body.raw))).sources,['primary','checkpoint']);
  assert.equal(f.state.active.revision,1);
+ // Deterministically deliver duplicate transport attempts to the same service
+ // transaction, then a distinct fenced save. Duplicates must not recommit.
+ const d=fixtureService(),did=randomUUID(),dCity=randomUUID(),dCreate={...body,cityId:dCity};await d.service.mutate(OWNER,randomUUID(),dCreate);
+ const lost={key:did,data:{action:'save',cityId:dCity,expectedRevision:1,raw:'{\"version\":23,\"tick\":2}',metadata:{name:'fixture',population:0,tick:2}}};
+ const nextSave={key:randomUUID(),data:{action:'save',cityId:dCity,expectedRevision:2,raw:'{\"version\":23,\"tick\":3}',metadata:{name:'fixture',population:0,tick:3}}};
+ for(const post of [lost,structuredClone(lost),structuredClone(lost),nextSave])await d.service.mutate(OWNER,post.key,post.data);
+ verifyLostAckPosts([lost,structuredClone(lost),structuredClone(lost),nextSave],lost,2);
+ assert.equal(d.state.active.revision,3);assert.equal(d.state.requests.size,3,'create plus two save receipts despite duplicate deliveries');
+ assert.equal(d.state.requests.get(did).response.revision,2);assert.equal(d.state.requests.get(nextSave.key).response.revision,3);
  const deleteId=randomUUID(),remove={action:'delete',cityId,expectedRevision:1};
  const tombstone=await f.service.mutate(OWNER,deleteId,remove);
  assert.deepEqual(tombstone,{owner:OWNER,cityId,revision:2,deleted:true,archiveHash:hash(body.raw)});
@@ -148,9 +177,9 @@ async function run(){
     if(f.mode==='disconnect'){req.socket.destroy();return;}
     if(f.mode==='conflict')throw Object.assign(Error('save-conflict'),{status:409});
     if(f.delay)await sleep(f.delay);
-    result=await f.service.mutate(OWNER,req.headers['idempotency-key'],data);if(f.mode==='drop-delete-ack'&&data.action==='delete'){req.socket.destroy();return;}f.acknowledged++;
+    result=await f.service.mutate(OWNER,req.headers['idempotency-key'],data);if((f.mode==='drop-delete-ack'&&data.action==='delete')||(f.mode==='drop-save-ack'&&data.action==='save')){req.socket.destroy();return;}f.acknowledged++;
    }else if(route==='/v1/city-save'){if(f.mode==='load-error')throw Object.assign(Error('fixture-load-unavailable'),{status:503});result=await f.service.read(OWNER);}
-   else if(route==='/v1/city-save/archives')result=req.method==='POST'?await f.service.archive(OWNER,data):await f.service.listArchives(OWNER);
+   else if(route==='/v1/city-save/archives'){if(req.method==='POST'&&f.mode==='archive-error')throw Object.assign(Error('fixture-archive-unavailable'),{status:503});result=req.method==='POST'?await f.service.archive(OWNER,data):await f.service.listArchives(OWNER);}
    else if(route.startsWith('/v1/city-save/archives/'))result=await f.service.readArchive(OWNER,route.split('/').at(-1));
    else throw Object.assign(Error('fixture-route-not-found'),{status:404});
    res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(result));return;
@@ -160,7 +189,7 @@ async function run(){
   const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.wasm':'application/wasm','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2'};
   const bytes=await readFile(file);res.writeHead(200,{'Content-Type':mime[extname(file)]??'application/octet-stream','Cache-Control':'no-store'});res.end(bytes);
  }catch(e){if(!res.headersSent)res.writeHead(e.status??500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});
- let child,ws,profile,acceptanceError;const pending=new Map();let id=0,expectReloadDialog=false,unexpectedDialog=null;
+ let child,ws,profile,acceptanceError;const pending=new Map();let id=0,expectReloadDialog=false,expectedConfirm=null,unexpectedDialog=null;
  try{
   await new Promise((ok,bad)=>{server.once('error',bad);server.listen(0,'127.0.0.1',ok);});
   const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/'+(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'?'?bus=1':'');
@@ -174,8 +203,8 @@ async function run(){
   ws.onmessage=e=>{const m=JSON.parse(e.data);
    if(m.method==='Runtime.exceptionThrown'||m.method==='Inspector.targetCrashed')diagnostics.runtimeErrors.push({method:m.method,details:m.params});
    if(m.method==='Page.javascriptDialogOpening'){
-    const dialog={type:m.params.type,message:m.params.message,phase:diagnostics.phase,expected:expectedReloadDialog(m.params.type,expectReloadDialog)};diagnostics.dialogs.push(dialog);console.log('Browser dialog',JSON.stringify(dialog));
-    if(dialog.expected){expectReloadDialog=false;void send('Page.handleJavaScriptDialog',{accept:true}).catch(error=>{unexpectedDialog=error;});}
+    const dialog={type:m.params.type,message:m.params.message,phase:diagnostics.phase,expected:expectedReloadDialog(m.params.type,expectReloadDialog)||(m.params.type==='confirm'&&expectedConfirm!==null&&m.params.message.includes('เก็บเมืองที่กำลังเล่นเป็นสำเนาบนเซิร์ฟเวอร์'))};diagnostics.dialogs.push(dialog);console.log('Browser dialog',JSON.stringify(dialog));
+    if(dialog.expected){const accept=m.params.type==='confirm'?expectedConfirm:true;expectedConfirm=null;expectReloadDialog=false;void send('Page.handleJavaScriptDialog',{accept}).catch(error=>{unexpectedDialog=error;});}
     else {unexpectedDialog=Error(`Unexpected browser dialog: ${JSON.stringify(dialog)}`);for(const p of pending.values())p.reject(unexpectedDialog);pending.clear();}
    }
    if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(Object.assign(Error(JSON.stringify(m.error)),{cdpError:m.error})):p?.resolve(m.result);}};
@@ -194,7 +223,7 @@ async function run(){
    window.__cityWrites=[];window.__quota=false;const city=/^citymanager\\.(save\\.|backup\\.|checkpoint\\.|resume-choice|market\\.)/;
    for(const method of ['setItem','removeItem','clear']){const original=Storage.prototype[method];Storage.prototype[method]=function(...args){if(method==='clear'||city.test(String(args[0])))window.__cityWrites.push(method+':'+args[0]);if(window.__quota&&method==='setItem')throw new DOMException('fixture quota','QuotaExceededError');return original.apply(this,args);};}
    const transaction=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(stores,mode,...rest){if(mode==='readwrite'&&/citymanager/.test(this.name))window.__cityWrites.push('IDB:'+this.name);return transaction.call(this,stores,mode,...rest);};
-   const si=window.setInterval;window.setInterval=function(fn,ms,...args){return si.call(this,fn,ms===60000?1500:ms,...args);};})();`});
+   const si=window.setInterval;window.setInterval=function(fn,ms,...args){return ms===60000?si.call(this,()=>{if(!window.__suspendAcceleratedAutosave)fn(...args);},1500):si.call(this,fn,ms,...args);};})();`});
   const click=selector=>{diagnostics.phase=`click ${selector}`;return evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
   const entryPredicate=()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
   const reloadEntryPredicate=()=>reloadEntryRead(entryPredicate,error=>{diagnostics.navigationRetries.push({phase:diagnostics.phase,...error});console.log('Post-reload entry context retry',JSON.stringify(error));});
@@ -202,21 +231,37 @@ async function run(){
   const clean=async()=>assert.deepEqual(await evaluate('window.__cityWrites'),[],'browser city writes prohibited');
   const failed=()=>evaluate("!!document.querySelector('#save-failure-banner:not([hidden])')");
   const settled=(label='acknowledged save UI')=>until(()=>evaluate("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')"),label);
+  const capture=async (name,{requireReady=true}={})=>{
+   assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,'surface');let png;
+   const probe=async()=>{assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser error or renderer crash');const health=await evaluate("({ready:window.cityManager?.visuals().ready,contextLosses:window.__contextLosses,visibility:document.visibilityState,width:innerWidth,height:innerHeight})");if(requireReady)assert.equal(health.ready,true);assert.equal(health.contextLosses,0,'WebGL context must remain live');return health;};
+   try{const shot=await screenshotReadback(send,probe,record);png=Buffer.from(shot.data,'base64');Object.assign(record,pngEvidence(png));await writeFile(resolve(output,`${name}.png`),png);record.status='saved';return {png,width:record.width,height:record.height};}
+   catch(error){record.status='failed';record.error=String(error);if(png){try{await writeFile(resolve(output,`${name}-rejected.png`),png);record.rejectedEvidence=`${name}-rejected.png`;}catch(preserveError){record.preserveError=String(preserveError);}}throw error;}
+   finally{record.finished=new Date().toISOString();console.log('Capture result',JSON.stringify(record));}
+  };
   f.mode='load-error';await send('Page.navigate',{url});
+  if(process.env.CITYMANAGER_PR182_CHECKS==='1'){for(const [name,width,height,mobile] of [['desktop',1280,800,false],['mobile',390,844,true]]){await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});await until(()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')"),'visible entry '+name);await capture('pr182-entry-'+name,{requireReady:false});}await send('Emulation.clearDeviceMetricsOverride');}
   await until(()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')"),'entry before unavailable load');await click('.guest-entry-card button');
   await until(()=>evaluate("document.querySelector('.guest-entry-card [role=status]')?.textContent.includes('fixture-load-unavailable')"),'load failure stays gated');
   assert.equal(await evaluate('!!window.cityManager'),false,'no offline city entry after server load failure');assert.equal(f.state.active,null);await clean();
   const acknowledged=await f.service.mutate(OWNER,randomUUID(),{action:'create',cityId:randomUUID(),raw:serverSeed,metadata:{name:'acknowledged fixture',population:0,tick:JSON.parse(serverSeed).tick}});
   assert.equal(acknowledged.raw,serverSeed);f.mode='ok';await enter();
   assert.equal(f.state.active.metadata.tick,JSON.parse(serverSeed).tick);assert.equal(f.state.archives.size,0,'obsolete browser copies are neither imported nor archived');assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),seed);await clean();
-  const capture=async name=>{
-   assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,'surface');let png;
-   const probe=async()=>{assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser error or renderer crash');const health=await evaluate("({ready:window.cityManager?.visuals().ready,contextLosses:window.__contextLosses,visibility:document.visibilityState,width:innerWidth,height:innerHeight})");assert.equal(health.ready,true);assert.equal(health.contextLosses,0,'WebGL context must remain live');return health;};
-   try{const shot=await screenshotReadback(send,probe,record);png=Buffer.from(shot.data,'base64');Object.assign(record,pngEvidence(png));await writeFile(resolve(output,`${name}.png`),png);record.status='saved';return {png,width:record.width,height:record.height};}
-   catch(error){record.status='failed';record.error=String(error);if(png){try{await writeFile(resolve(output,`${name}-rejected.png`),png);record.rejectedEvidence=`${name}-rejected.png`;}catch(preserveError){record.preserveError=String(preserveError);}}throw error;}
-   finally{record.finished=new Date().toISOString();console.log('Capture result',JSON.stringify(record));}
-  };
   assert.equal(await evaluate("!!document.querySelector('#save:not(:disabled)')"),true,'real Save control available after authenticated entry');
+  if(process.env.CITYMANAGER_PR182_CHECKS==='1'){const {pr182VisualChecks}=await import('./pr182-visual-checks.mjs');await pr182VisualChecks({send,evaluate,capture});await clean();}
+  if(process.env.CITYMANAGER_PR182_CHECKS==='1'){
+   // Instantiate the advanced owner panel: its former dynamically-created Blob
+   // download included a city checkpoint. Verification remains read-only.
+   const wasPaused=await evaluate('window.cityManager.parks().paused');if(!wasPaused)await click('#pause');
+   await click('#toggle-game-menu');const wasAdvanced=await evaluate("document.querySelector('#toggle-advanced').getAttribute('aria-pressed')==='true'");if(!wasAdvanced)await click('#toggle-advanced');
+   await click('#toggle-inspector');await evaluate("document.querySelector('#owner-decisions').open=true");
+   assert.equal(await evaluate("!!document.querySelector('#owner-export')"),false,'no owner checkpoint export control');
+   assert.equal(await evaluate("!!document.querySelector('#owner-verify:not(:disabled)')"),true,'read-only verification retained');
+   const snapshot=await evaluate('window.cityManager.sessionSnapshot()');
+   await evaluate(`window.__downloadAttempts=0;window.__originalCreateObjectURL=URL.createObjectURL;URL.createObjectURL=function(...a){window.__downloadAttempts++;return window.__originalCreateObjectURL.apply(this,a)};window.__downloadListener=e=>{if(e.target.closest('a[download]'))window.__downloadAttempts++};document.addEventListener('click',window.__downloadListener,true)`);
+   await click('#owner-verify');await until(()=>evaluate("!document.querySelector('#owner-verify').disabled"),'owner replay verification finishes');
+   assert.equal(await evaluate("document.querySelector('#owner-decisions').dataset.lastStatus"),'verified','read-only replay still verifies');assert.equal(await evaluate('window.__downloadAttempts'),0,'read-only replay action cannot create a download');assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),snapshot,'replay verification does not mutate city');
+   await evaluate(`URL.createObjectURL=window.__originalCreateObjectURL;document.removeEventListener('click',window.__downloadListener,true)`);await click('#close-inspector');if(!wasAdvanced){await click('#toggle-game-menu');await click('#toggle-advanced');await click('#close-inspector');}if(!wasPaused)await click('#pause');await clean();
+  }
   if(process.env.CITYMANAGER_TOOLBAR_CHECKS==='classic'){
    diagnostics.phase='classic toolbar interactions';toolbarEvidence={status:'running',checks:[]};
    const {toolbarChecks}=await import('./visual-final-toolbar.mjs');
@@ -255,9 +300,30 @@ async function run(){
   rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'save before reload');await settled();const saved=JSON.parse(f.state.active.raw);await clean();
   // A real beforeunload guard may protect changes after the ACK. Explicit reload is the tested user choice.
   diagnostics.phase='explicit reload after acknowledged save';expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;const loaded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.equal(loaded.tick,saved.tick);assert.deepEqual(loaded.accounts,saved.accounts);assert.deepEqual(loaded.bus,saved.bus);await clean();
-  // Failed network request stays pending in memory, never local fallback. Retry same key/body.
-  f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure');assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
-  const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>rev,'retry acknowledgement');await settled();assert.deepEqual(f.posts[start+1],pendingCommand);
+  // The separate autosave test above already passed. Prevent only its artificially
+  // accelerated fixture timer from racing the controlled fault/retry matrix.
+  await send('Page.addScriptToEvaluateOnNewDocument',{source:'window.__suspendAcceleratedAutosave=true'});await evaluate('window.__suspendAcceleratedAutosave=true');const drainRevision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>drainRevision,'post-reload manual ACK before fault matrix');await settled();
+  await until(async()=>{const n=f.posts.length;await sleep(500);return f.posts.length===n;},'drain accelerated autosave requests',10000);
+  // Actual visible banner control retries the exact uncertain command on both sizes.
+  const pressRetry=async mobile=>{const box=await evaluate(`(()=>{const e=document.querySelector('#save-failure-retry'),r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(x,y))};})()`);assert.ok(box.hit&&box.width>0&&box.height>0,'retry must be visible and hit-testable');if(mobile){assert.ok(box.width>=44&&box.height>=44,'touch retry target at least 44px');await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:box.x,y:box.y}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}else{await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:box.x,y:box.y});await send('Input.dispatchMouseEvent',{type:'mousePressed',x:box.x,y:box.y,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:box.x,y:box.y,button:'left',clickCount:1});}};
+  assert.equal(await evaluate(`!!document.querySelector('#save-failure-export,#export,#import,[download],input[type=file]')`),false,'no browser city export or import controls');
+  for(const [name,width,height,mobile] of [['desktop',1280,800,false],['mobile',390,844,true]]){
+   await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});await send('Emulation.setTouchEmulationEnabled',{enabled:mobile});
+   f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure '+name);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
+   if(process.env.CITYMANAGER_PR182_CHECKS==='1')await capture('pr182-banner-'+name);
+   const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await pressRetry(mobile);await until(async()=>f.state.active.revision>rev,'banner retry acknowledgement '+name);await settled();assert.deepEqual(f.posts[start+1],pendingCommand,'exact uncertain command retry');await clean();
+  }
+  await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Emulation.clearDeviceMetricsOverride');
+  // Commit succeeded but its ACK was lost. The banner must replay the original
+  // key/body before trackedSave writes the current state as a new revision.
+  const lostHead=f.state.active,lostRequests=f.state.requests.size,lostStart=f.posts.length;f.mode='drop-save-ack';await click('#save');await until(failed,'committed save with lost ACK');
+  assert.equal(f.state.active.revision,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+1);const lostCommand=f.posts[lostStart];
+  const lostAckSnapshot=async()=>{const posts=f.posts.slice(lostStart);diagnostics.lostAck={initialRevision:lostHead.revision,headRevision:f.state.active.revision,initialReceiptCount:lostRequests,receiptCount:f.state.requests.size,posts:posts.map(({key,data})=>({key,action:data.action,expectedRevision:data.expectedRevision,rawHash:typeof data.raw==='string'?hash(data.raw):null})),ui:await evaluate(`({bannerVisible:!!document.querySelector('#save-failure-banner:not([hidden])'),banner:document.querySelector('#save-failure-banner')?.textContent,badge:document.querySelector('#autosave-status')?.textContent})`)};return posts;};
+  f.mode='ok';await pressRetry(false);await until(async()=>{const posts=await lostAckSnapshot(),next=posts.find(p=>p.key!==lostCommand.key);return !!next&&f.state.requests.has(next.key);},'lost ACK retry and subsequent current-state receipt');await settled();
+  const observed=await lostAckSnapshot();
+  const grouped=verifyLostAckPosts(observed,lostCommand,lostHead.revision+1);assert.equal(f.state.requests.size,lostRequests+2,'retry creates no duplicate receipt');
+  assert.equal(f.state.requests.get(lostCommand.key)?.response.revision,lostHead.revision+1,'one original receipt records its single commit');
+  assert.equal(f.state.requests.get(grouped.next.key)?.response.revision,lostHead.revision+2,'one subsequent receipt records its single commit');await clean();
   // Management is an explicit two-step lifecycle; Cancel has no mutation.
   diagnostics.phase='management cancel';const beforeCancel=f.state.active,cancelPosts=f.posts.length;
   await click('#new-city');await until(()=>evaluate("!!document.querySelector('#save-management-dialog[open]')"),'management dialog');await click('#save-management-cancel');
@@ -292,8 +358,14 @@ async function run(){
   assert.equal(await evaluate('!!window.cityManager'),false);assert.deepEqual(f.state.active,remoteDeleted);assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),seed);await clean();
   await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'fresh entry after tombstone');
   assert.equal(f.state.active.owner,OWNER);assert.notEqual(f.state.active.cityId,fresh.cityId);assert.equal(f.state.active.metadata.tick,0);await clean();
-  // A 409 never overwrites another revision and no automatic retry silently wins.
-  f.mode='conflict';rev=f.state.active.revision;await click('#save');await until(failed,'conflict failure');assert.equal(f.state.active.revision,rev);await clean();await capture('server-save-conflict');
+  // Another device advances the head; conflict retry must explicitly preserve local raw first.
+  if(!await evaluate('window.cityManager.parks().paused'))await click('#pause');
+  assert.equal(await evaluate('window.cityManager.parks().paused'),true,'freeze runtime before byte-for-byte conflict test');
+  const beforeRemote=f.state.active;const remoteRaw=beforeRemote.raw+' ';const remote=await f.service.mutate(OWNER,randomUUID(),{action:'save',cityId:beforeRemote.cityId,expectedRevision:beforeRemote.revision,raw:remoteRaw,metadata:beforeRemote.metadata});
+  const conflictStart=f.posts.length;await click('#save');await until(failed,'conflict failure');assert.deepEqual(f.state.active,remote);const localRaw=f.posts[conflictStart].data.raw;await clean();await capture('server-save-conflict');
+  const archiveCount=f.state.archives.size;expectedConfirm=false;await pressRetry(false);await until(async()=>expectedConfirm===null,'conflict cancel confirmation');await sleep(250);assert.deepEqual(f.state.active,remote);assert.equal(f.state.archives.size,archiveCount,'cancel archives nothing');assert.equal(f.posts.length,conflictStart+1,'cancel does not retry or overwrite');
+  f.mode='archive-error';expectedConfirm=true;await pressRetry(false);await until(async()=>expectedConfirm===null,'archive failure confirmation');await until(()=>evaluate("document.querySelector('#status')?.textContent.includes('fixture-archive-unavailable')"),'archive failure surfaced');assert.deepEqual(f.state.active,remote);assert.equal(f.state.archives.size,archiveCount,'failed archive preserves both states');assert.equal(f.posts.length,conflictStart+1,'archive failure cannot overwrite');
+  f.mode='ok';expectedConfirm=true;await pressRetry(false);await until(async()=>expectedConfirm===null,'successful recovery confirmation');await until(()=>evaluate("document.querySelector('#status')?.textContent.includes('เก็บสำเนางานที่ขัดแย้งแล้ว')"),'confirmed conflict recovery');assert.deepEqual(f.state.active,remote,'recovery never overwrites remote head');assert.equal(f.state.archives.get(hash(localRaw))?.raw,localRaw,'exact conflicted bytes archived');assert.ok(f.state.archives.get(hash(localRaw))?.sources.includes('conflict-session'));await clean();
   assert.equal(await evaluate("!!document.querySelector('.market-launch')"),false,'trading stays disabled');
   assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser exception or renderer crash');
   console.log('PASS built server-save browser acceptance: load failure+retry/server-ACK-only entry/v24 checkpoint/manual ACK/autosave/reload/quota/network retry/management cancel-delete-fresh/tombstone reload/conflict/no browser city writes');

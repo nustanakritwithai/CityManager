@@ -242,7 +242,6 @@
 #game-content .save-group h4 small { font-size: calc(12.5 * var(--u)); font-weight: 500; color: var(--pnl-muted); }
 html #game-content .save-group .save-controls button { font-weight: 650; border-color: var(--pnl-line); background: var(--pnl-surface-2); }
 html #game-content .save-group.primary #save { background: var(--pnl-accent); border-color: var(--pnl-accent); color: #1a1408; }
-html #game-content .save-group.legacy .save-controls button { font-weight: 550; color: var(--pnl-muted); }
 #game-content .save-group.danger { border-color: #ff8a7a44; background: #ff8a7a0d; }
 html #game-content .save-group.danger #new-city { border-color: #ff8a7a88; color: var(--pnl-bad); background: transparent; }
 #game-content .inspector-status:not(:empty) { margin-top: calc(10 * var(--u)); padding: calc(8 * var(--u)) calc(12 * var(--u)); border-radius: var(--pnl-radius-sm); background: #f3c46b14; box-shadow: inset 3px 0 0 var(--pnl-accent); }
