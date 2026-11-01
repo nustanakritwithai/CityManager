@@ -4,7 +4,6 @@
  */
 import { SIZE, type City } from './sim.ts';
 import { WORKER_SKILLS } from './labor.ts';
-import { educationOccupied } from './education.ts';
 
 export const PARK_VISITOR_CAPACITY = 6, MAX_PARK_VISITORS = 64;
 export const MAX_PARK_ROUTE_SEARCHES = 256;
@@ -34,20 +33,38 @@ const hash = (value: string): number => { let n = 2166136261; for (const char of
 function activityRoster(city: City): { citizens: Citizen[]; daytimeUnavailable: Set<string> } {
   const people: Citizen[] = [];
   const daytimeUnavailable = new Set<string>();
+  // Index once per snapshot. Iterating the original arrays preserves stable
+  // ordering for equal firm IDs and repeated municipal allocation rows.
+  type FirmRow = { firmId: number; workers: number };
+  type ParkRow = { parkId: number; workers: number };
+  type Rows = { owners: FirmRow[]; wages: FirmRow[]; parks: ParkRow[] };
+  const rows = new Map<number, Map<string, Rows>>();
+  const forKey = (householdId: number, skill: string): Rows => {
+    let skills = rows.get(householdId); if (!skills) { skills = new Map(); rows.set(householdId, skills); }
+    let value = skills.get(skill); if (!value) { value = { owners: [], wages: [], parks: [] }; skills.set(skill, value); }
+    return value;
+  };
+  for (const e of city.ownerLabor) forKey(e.householdId, e.skill).owners.push(e);
+  for (const e of city.employment) forKey(e.householdId, e.skill).wages.push(e);
+  for (const park of [...city.parks as StaffedPark[]].sort((a, b) => a.id - b.id)) {
+    for (const a of park.staffing?.allocations ?? []) if (a.parkId === park.id) forKey(a.householdId, a.skill).parks.push(a);
+  }
+  for (const skills of rows.values()) for (const value of skills.values()) {
+    value.owners.sort((a, b) => a.firmId - b.firmId);
+    value.wages.sort((a, b) => a.firmId - b.firmId);
+  }
+  const educationByHousehold = new Map<number, number>();
+  for (const e of city.education?.people ?? []) {
+    // educationOccupied uses find(), so the first duplicate is authoritative.
+    if (!educationByHousehold.has(e.householdId)) educationByHousehold.set(e.householdId, e.school + e.university + e.teacher + e.professor);
+  }
   for (const h of [...city.households].sort((a, b) => a.id - b.id)) {
     const jobs: (Job | null)[] = [];
     for (const skill of WORKER_SKILLS) {
-      const allocations = [
-        ...city.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).sort((a, b) => a.firmId - b.firmId),
-        ...city.employment.filter(e => e.householdId === h.id && e.skill === skill).sort((a, b) => a.firmId - b.firmId)
-      ];
+      const value = rows.get(h.id)?.get(skill);
       const pool: (Job | null)[] = [];
-      for (const e of allocations) for (let i = 0; i < e.workers && pool.length < h.workerSkills[skill]; i++) pool.push({ firmId: e.firmId, parkJobId: null });
-      for (const park of [...city.parks as StaffedPark[]].sort((a, b) => a.id - b.id)) {
-        for (const a of park.staffing?.allocations ?? []) if (a.householdId === h.id && a.skill === skill && a.parkId === park.id) {
-          for (let i = 0; i < a.workers && pool.length < h.workerSkills[skill]; i++) pool.push({ firmId: null, parkJobId: park.id });
-        }
-      }
+      for (const e of [...value?.owners ?? [], ...value?.wages ?? []]) for (let i = 0; i < e.workers && pool.length < h.workerSkills[skill]; i++) pool.push({ firmId: e.firmId, parkJobId: null });
+      for (const a of value?.parks ?? []) for (let i = 0; i < a.workers && pool.length < h.workerSkills[skill]; i++) pool.push({ firmId: null, parkJobId: a.parkId });
       while (pool.length < h.workerSkills[skill]) pool.push(null);
       jobs.push(...pool);
     }
@@ -55,7 +72,7 @@ function activityRoster(city: City): { citizens: Citizen[]; daytimeUnavailable: 
     // Map its canonical reservations to remaining workforce slots in the same
     // stable skill/member order. Never overwrite a real job or reserve dependents.
     // Keeping this separate from employed preserves legacy activity save fields.
-    let education = educationOccupied(city.education, h.id);
+    let education = educationByHousehold.get(h.id) ?? 0;
     for (let slot = 0; slot < h.members; slot++) {
       const citizenId = identity(h.id, slot), employed = jobs[slot] != null;
       const studyingOrTeaching = !employed && slot < h.workforce && education > 0;

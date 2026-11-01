@@ -11,20 +11,28 @@ import {createRoadNavigator,emptyNavigationStats,type NavigationStats} from './r
 import {gameBusShare,validGameBusInput,type GameBusFrame,type GameBusInput,type GameBusShare,type GameBusTotal} from '../bus/game-bus.ts';
 import {LANE_START,SLOT_PITCH} from '../citizen-road-queue.ts';
 import {TRAFFIC_SPACING,updateVehicleFollowing,type LaneVehicle} from './spacing.ts';
+import {parkActivityCitizens,WORK_END_MINUTE} from '../park-activity.ts';
 
 /** Bounded, ephemeral road-game traffic. One step represents one real second,
- * not a city day or a citizen trip. The game never writes City or a save. */
+ * not a city day or a literal citizen trip. Work labels are representative;
+ * the game never writes City, payroll or a save. */
 export const GAME_MAX_ODS=64, GAME_MAX_CARS=128, GAME_MAX_QUEUE=32, GAME_MAX_RATE=4;
 const STORAGE_PER_LANE=TRAFFIC_SPACING.maxPerLanePerTile, REROUTE_STEPS=5, SUBSTEPS=5;
 const JUNCTION_STOP=1-.25-TRAFFIC_SPACING.lengths.sedan/TRAFFIC_SPACING.worldPerTile/2, JUNCTION_CLEAR=1-JUNCTION_STOP;
 export type GameDemand = {from:number;to:number;rate:number};
 export type TrafficGameSample = {map:RoadMap;demand:GameDemand[];clippedRate?:number};
-export type TrafficGameInput = {map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[];bus?:GameBusInput};
+/** The existing visual morning commute starts at 06:30; the 17:00 cutoff is
+ * the city-wide work reservation convention, not an individual job shift. */
+export const WORK_TRIP_START_MINUTE=6*60+30, WORK_TRIP_END_MINUTE=WORK_END_MINUTE;
+const MAX_WORK_CANDIDATES=8192, MAX_UNACKNOWLEDGED_WORK_EXPIRATIONS=8192;
+export type WorkTripClock={day:number;minute:number;ack:number;crossedWorkDay?:number};
+export type WorkTripInput=WorkTripClock & {candidates:{citizenId:string;home:number;work:number}[];cancelIds?:number[];retiredIds?:number[]};
+export type TrafficGameInput = {map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[];bus?:GameBusInput;work?:WorkTripInput};
 export type GameCar = {id:number;from:number;to:number;blocked:boolean;progress?:number;lane?:number;speed?:number;destination?:number;nextCell?:number;nextLane?:number;junction?:boolean;nextVisit?:number};
 export type GameRenderGroup = {key:string;from:number;to:number;amount:number;queued:number;storage:number;closed:boolean};
-export type TrafficGameFrame = {navigation?:NavigationStats;signals?:TrafficSignalFrame;modal?:GameModalStats|null;bus?:GameBusFrame;/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
+export type TrafficGameFrame = {navigation?:NavigationStats;signals?:TrafficSignalFrame;modal?:GameModalStats|null;bus?:GameBusFrame;workTrips?:{id:number;day:number}[];expiredWorkTrips?:{sequence:number;id:number}[];/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
 type OD = GameDemand & {waiting:number;path:number[]|null};
-type Actor = {visits?:number;id:number;destination:number;path:number[];index:number;blocked:boolean;progress:number;speed:number;lane:number};
+type Actor = {visits?:number;id:number;destination:number;path:number[];index:number;blocked:boolean;progress:number;speed:number;lane:number;workClaimPending?:boolean;workCitizen?:string};
 const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<576;
 const pair=(a:number,b:number)=>`${a}:${b}`;
 const frontages=(map:RoadMap,at:number):number[]=>map.cells[at]?.road?[at]:roadNeighbors(at).filter(i=>map.cells[i]?.road).sort((a,b)=>a-b);
@@ -41,9 +49,10 @@ export function bindTaxiSessionDepots(depots: readonly TaxiDepotSite[] | null): 
   boundTaxiDepots = (depots ?? []).map(d => ({ id: d.id, cell: d.cell, level: d.level, open: d.open }));
 }
 
-/** Read only building placement/density and road topology; no economy, journals,
- * actual travel, city clock, financial data or persistence participates. */
-export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;sessionDepots?:TaxiDepotSite[]}={}):TrafficGameInput {
+/** Read building placement/density and road topology for ambient demand. The
+ * optional work clock additionally reads existing assignments for work labels;
+ * it never mutates the economy, financial journals or persistence. */
+export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;sessionDepots?:TaxiDepotSite[];workClock?:WorkTripClock}={}):TrafficGameInput {
   if(options.taxiEnabled!==undefined&&typeof options.taxiEnabled!=='boolean')throw Error('Invalid taxi game preference');
   const map:RoadMap={cells:city.cells.map(c=>({road:c.road})),...(city.roadTopology?{roadTopology:structuredClone(city.roadTopology)}:{})};
   const homes=new Map<number,number>(),destinations=new Map<number,number>(),homeAccess=new Map<number,number>();
@@ -59,7 +68,22 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;
   const session=options.taxiEnabled?options.sessionDepots??boundTaxiDepots:[];
   if(!Array.isArray(session)||saved.length+session.length>4)throw Error('Invalid traffic game taxi depots');
   const extra=session.map(d=>{if(!d||!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
-  return {map,homes:[...homes].map(([cell,amount])=>({cell,amount})),destinations:[...destinations].map(([cell,amount])=>({cell,amount})),taxis:options.taxiEnabled?[...saved,...extra]:[]};
+  const result:TrafficGameInput={map,homes:[...homes].map(([cell,amount])=>({cell,amount})),destinations:[...destinations].map(([cell,amount])=>({cell,amount})),taxis:options.taxiEnabled?[...saved,...extra]:[]};
+  if(options.workClock){
+    const buildings=new Map(city.buildings.map(b=>[b.id,b.cell]));
+    const firms=new Map(city.firms.map(f=>[f.id,buildings.get(f.building)]));
+    const parks=new Map(city.parks.map(p=>[p.id,p.cell]));
+    const candidates:WorkTripInput['candidates']=[];
+    for(const person of parkActivityCitizens(city)){
+      if(!person.employed||person.homeId===null)continue;
+      const home=homeAccess.get(person.homeId),work=person.firmId!==null?firms.get(person.firmId):person.parkJobId!==null?parks.get(person.parkJobId):undefined;
+      if(home===undefined||work===undefined||!frontages(map,work).length)continue;
+      candidates.push({citizenId:person.citizenId,home,work});
+    }
+    candidates.sort((a,b)=>a.citizenId.localeCompare(b.citizenId));
+    result.work={...options.workClock,candidates:candidates.slice(0,MAX_WORK_CANDIDATES)};
+  }
+  return result;
 }
 /** Worker-side OD assembly: prefer road-reachable destinations over visually
  * close disconnected ones; when none are reachable retain an unreachable OD so
@@ -124,6 +148,57 @@ export class TrafficGame {
   private signals=new Map<number,SignalPhase>();
   private signalCorridors:ReadonlyMap<string,SignalCorridor>=new Map();private signalPeers?:SignalPeers;private signalSnapshots=new Map<number,SignalPeerSnapshot>();private signalSnapshotStep=0;
   private junctionRequests=new Map<number,{node:number;since:number}>();private junctionClock=0;
+  private workMinute=-1;private workDay=-1;private workCandidates=new Map<string,string[]>();private workUsed=new Set<string>();
+  private workUsedDay=-1;private workWindowDay=-1;private workLastWindow=-1;private workClaimDay=-1;
+  // Keep completed worker cars too: their presentation queue may still occupy a junction.
+  private workIssued=new Map<number,{day:number;citizenId:string}>();private workExpirationSequence=0;private workExpirationAck=0;
+  private workExpirations:{sequence:number;id:number}[]=[];
+  /** Advance only from the city's simulated clock; retain tombstones until the
+   * host acknowledges an accepted frame, including across coalesced candidates. */
+  setWork(input:WorkTripInput|undefined):void {
+    if(!input)return;
+    if(!Number.isSafeInteger(input.day)||input.day<0||!Number.isInteger(input.minute)||input.minute<0||input.minute>=1440||!Number.isSafeInteger(input.day*1440+input.minute)||!Number.isSafeInteger(input.ack)||input.ack<0||input.ack>this.workExpirationSequence||!Array.isArray(input.candidates)||input.candidates.length>MAX_WORK_CANDIDATES)throw Error('Invalid traffic work trip clock');
+    if(input.crossedWorkDay!==undefined&&(!Number.isSafeInteger(input.crossedWorkDay)||input.crossedWorkDay<0||input.crossedWorkDay>input.day||input.crossedWorkDay*1440+WORK_TRIP_START_MINUTE>input.day*1440+input.minute))throw Error('Invalid crossed work window');
+    const cancelIds=input.cancelIds??[],retiredIds=input.retiredIds??[];
+    if(!Array.isArray(cancelIds)||!Array.isArray(retiredIds)||cancelIds.length>MAX_WORK_CANDIDATES||retiredIds.length>MAX_WORK_CANDIDATES||[...cancelIds,...retiredIds].some(id=>!Number.isSafeInteger(id)||id<1))throw Error('Invalid traffic work trip identities');
+    const cancels=new Set(cancelIds),retirements=new Set(retiredIds);
+    if(cancels.size!==cancelIds.length||retirements.size!==retiredIds.length||cancelIds.some(id=>retirements.has(id)))throw Error('Invalid traffic work trip identities');
+    const ids=new Set<string>();
+    for(const c of input.candidates){if(!c||typeof c.citizenId!=='string'||!c.citizenId||c.citizenId.length>128||ids.has(c.citizenId)||!cell(c.home)||!cell(c.work))throw Error('Invalid traffic work trip candidate');ids.add(c.citizenId);}
+    this.workExpirationAck=Math.max(this.workExpirationAck,input.ack);
+    this.workExpirations=this.workExpirations.filter(e=>e.sequence>this.workExpirationAck);
+    const absolute=input.day*1440+input.minute;
+    if(absolute<this.workMinute)return; // stale clock cannot resurrect a prior day or trip
+    const expiring=cancelIds.filter(id=>{const trip=this.workIssued.get(id);return trip&&(trip.day<input.day||trip.day===input.day&&input.minute>=WORK_TRIP_END_MINUTE);}).sort((a,b)=>a-b);
+    if(this.workExpirations.length+expiring.length>MAX_UNACKNOWLEDGED_WORK_EXPIRATIONS)throw Error('Traffic work trip acknowledgements stalled');
+    const expired=new Set(expiring);
+    for(const id of expiring){this.workIssued.delete(id);this.junctionRequests.delete(id);this.workExpirations.push({sequence:++this.workExpirationSequence,id});}
+    if(expired.size){const before=this.cars.length;this.cars=this.cars.filter(c=>!expired.has(c.id));this.cancelled+=before-this.cars.length;}
+    // The host only reports terminal presentation retirement after an accepted
+    // frame lacks the actor. Never discard an issued token for a live model car.
+    const moving=new Set(this.cars.map(c=>c.id));
+    for(const id of retiredIds)if(!moving.has(id))this.workIssued.delete(id);
+    this.workDay=input.day;if(input.crossedWorkDay!==undefined)this.workWindowDay=Math.max(this.workWindowDay,input.crossedWorkDay);
+    this.workMinute=absolute;
+    const byPair=new Map<string,string[]>(),frontageCache=new Map<number,number[]>();
+    const access=(at:number)=>{let list=frontageCache.get(at);if(!list){list=frontages(this.map,at);frontageCache.set(at,list);}return list;};
+    for(const c of [...input.candidates].sort((a,b)=>a.citizenId.localeCompare(b.citizenId)))for(const from of access(c.home))for(const to of access(c.work)){
+      if(from===to)continue;const key=pair(from,to);(byPair.get(key)??byPair.set(key,[]).get(key)!).push(c.citizenId);
+    }
+    this.workCandidates=byPair;
+  }
+  private claimNewWorkTrips():void {
+    const claimDay=this.workClaimDay;
+    const outstanding=new Set([...this.workIssued.values()].map(t=>t.citizenId));
+    for(const car of this.cars){
+      if(!car.workClaimPending)continue;car.workClaimPending=false;
+      if(claimDay<0||(car as TaxiActor).taxi)continue;
+      if(this.workIssued.size>=MAX_WORK_CANDIDATES)continue;
+      const id=this.workCandidates.get(pair(car.path[0],car.destination))?.find(candidate=>!this.workUsed.has(candidate)&&!outstanding.has(candidate));
+      if(id===undefined)continue;
+      this.workUsed.add(id);outstanding.add(id);car.workCitizen=id;this.workIssued.set(car.id,{day:claimDay,citizenId:id});
+    }
+  }
   /** Bus (optional; null = unchanged game). Shares per OD, PCU load per link, cumulative totals/injections. */
   private bus:{input:GameBusInput;shares:Map<string,GameBusShare|null>}|null=null;private busTotals=new Map<string,GameBusTotal>();private busInjected:Record<string,number>={};private busDiverted=0;private busReturned=0;
   /** Set or clear bus input. Load replaces the previous load; returns are cumulative (delta injected once). */
@@ -149,7 +224,7 @@ export class TrafficGame {
   setSample(sample:TrafficGameSample):void {const s=cleanSample(sample),signature=this.key(s.map),changed=signature!==this.signature, demandChanged=JSON.stringify(s.rows)!==this.demandSignature;this.replaceRows(s.rows,s.clippedRate);if(changed){this.map=s.map;this.signature=signature;this.network=buildNetwork(this.map);this.prepareJunctions();this.reconcileActors();}if(changed||demandChanged)this.replan();}
   /** Reconcile topology without consuming time, including while paused. */
   private reconcileActors():void {const times=new Map([...this.network.links].map(([key])=>[key,1])),routes=new Map<string,number[]|null>();for(const c of this.cars){const from=c.path[c.index],head=c.path[c.index+1];if(!this.network.links.has(linkKey(from,head))){c.blocked=true;c.speed=0;continue;}if(head===c.destination){c.blocked=false;continue;}if(c.path.slice(c.index+1).every((node,i)=>i===0||this.network.links.has(linkKey(c.path[c.index+i],node)))){c.blocked=false;continue;}const key=pair(head,c.destination);if(!routes.has(key))routes.set(key,shortestPath(this.network,times,head,c.destination));const tail=routes.get(key)!;if(!tail){c.blocked=true;c.speed=0;}else{c.path=[from,...tail];c.index=0;c.blocked=false;}}}
-  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(o=>{const row:TaxiDemand={from:o.from,to:o.to,rate:o.rate};const taxi=demandTaxiRate(o);if(taxi>0)row.taxiRate=taxi;return row;}),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.signals.clear();this.junctionRequests.clear();this.junctionClock=0;this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;this.taxiTrips=this.taxiTiles=0;if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();if(!s)this.prepareSignalPeers();}
+  reset(sample?:TrafficGameSample):void {const s=sample?cleanSample(sample):null,rows=s?.rows??this.ods.map(o=>{const row:TaxiDemand={from:o.from,to:o.to,rate:o.rate};const taxi=demandTaxiRate(o);if(taxi>0)row.taxiRate=taxi;return row;}),clipped=s?.clippedRate??this.clippedRate;this.cars=[];this.ods=[];this.signals.clear();this.junctionRequests.clear();this.junctionClock=0;this.stepValue=0;this.nextId=1;this.offered=this.completed=this.dropped=this.cancelled=0;this.taxiTrips=this.taxiTiles=0;this.workMinute=-1;this.workDay=-1;this.workUsedDay=-1;this.workWindowDay=-1;this.workLastWindow=-1;this.workClaimDay=-1;this.workCandidates.clear();this.workUsed.clear();this.workIssued.clear();this.workExpirationSequence=0;this.workExpirationAck=0;this.workExpirations=[];if(s){this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.prepareJunctions();}this.replaceRows(rows,clipped);this.replan();if(!s)this.prepareSignalPeers();}
   /** Detached in-memory transaction candidate; never a save representation. */
   clone():TrafficGame {const copy=Object.create(TrafficGame.prototype) as TrafficGame;
     // Network, map and junction set are immutable after construction; road edits
@@ -158,6 +233,7 @@ export class TrafficGame {
     copy.signals=new Map([...this.signals].map(([node,phase])=>[node,{...phase}]));
     copy.junctionRequests=new Map([...this.junctionRequests].map(([id,r])=>[id,{...r}]));copy.junctionClock=this.junctionClock;
     copy.map=this.map;copy.network=this.network;copy.junctions=this.junctions;copy.bends=this.bends;copy.signature=this.signature;
+    copy.workMinute=this.workMinute;copy.workDay=this.workDay;copy.workUsedDay=this.workUsedDay;copy.workWindowDay=this.workWindowDay;copy.workLastWindow=this.workLastWindow;copy.workClaimDay=this.workClaimDay;copy.workCandidates=new Map([...this.workCandidates].map(([key,ids])=>[key,[...ids]]));copy.workUsed=new Set(this.workUsed);copy.workIssued=new Map([...this.workIssued].map(([id,trip])=>[id,{...trip}]));copy.workExpirationSequence=this.workExpirationSequence;copy.workExpirationAck=this.workExpirationAck;copy.workExpirations=this.workExpirations.map(e=>({...e}));
     copy.ods=structuredClone(this.ods);copy.cars=structuredClone(this.cars);copy.stepValue=this.stepValue;copy.nextId=this.nextId;copy.taxiTrips=this.taxiTrips;copy.taxiTiles=this.taxiTiles;copy.offered=this.offered;copy.completed=this.completed;copy.dropped=this.dropped;copy.cancelled=this.cancelled;copy.clippedRate=this.clippedRate;copy.demandSignature=this.demandSignature;copy.bus=this.bus;copy.busTotals=new Map([...this.busTotals].map(([k,v])=>[k,{...v}]));copy.busInjected={...this.busInjected};copy.busDiverted=this.busDiverted;copy.busReturned=this.busReturned;return copy;}
   private replan():void {
     const occupancy=new Map<string,number>();for(const c of this.cars){const k=linkKey(c.path[c.index],c.path[c.index+1]);occupancy.set(k,(occupancy.get(k)??0)+1);}
@@ -378,7 +454,7 @@ export class TrafficGame {
         path=alt;lane=this.pickLane(linkKey(path[0],path[1]));if(lane<0)continue;
       }
       const first=linkKey(path[0],path[1]);if(!this.tailClear(first,lane))continue;
-      const actor:Actor={id:this.nextId,destination:od.to,path:[...path],index:0,visits:0,blocked:false,progress:this.junctions.has(path[0])?JUNCTION_CLEAR:LANE_START,speed:0,lane};
+      const actor:Actor={id:this.nextId,destination:od.to,path:[...path],index:0,visits:0,blocked:false,progress:this.junctions.has(path[0])?JUNCTION_CLEAR:LANE_START,speed:0,lane,...(this.workMinute>=0?{workClaimPending:true}:{})};
       if(!this.admissionIsAcyclic(grant,actor))continue;
       od.waiting-=1;this.nextId++;this.cars.push(actor);
       occupancy.set(first,(occupancy.get(first)??0)+1);
@@ -387,6 +463,12 @@ export class TrafficGame {
   }
   step(paused=false):TrafficGameFrame {
     if(paused)return this.frame;
+    const minute=this.workMinute<0?-1:this.workMinute%1440;
+    let claimDay=minute>=WORK_TRIP_START_MINUTE&&minute<WORK_TRIP_END_MINUTE?this.workDay:this.workWindowDay>this.workLastWindow?this.workWindowDay:-1;
+    if(claimDay<this.workUsedDay)claimDay=-1;
+    if(claimDay>this.workUsedDay){this.workUsed.clear();this.workUsedDay=claimDay;}
+    if(claimDay>=0)this.workLastWindow=Math.max(this.workLastWindow,claimDay);
+    this.workClaimDay=claimDay;
     this.stepValue++;
     for(const od of this.ods){const b=this.busShareFor(od),busPart=b?od.rate*b.share:0;if(b&&busPart>0){const key=`${od.from}:${od.to}:${b.lineId}:${b.fromStopId}:${b.toStopId}`,t=this.busTotals.get(key)??{from:od.from,to:od.to,lineId:b.lineId,fromStopId:b.fromStopId,toStopId:b.toStopId,total:0};t.total+=busPart;this.busTotals.set(key,t);this.busDiverted+=busPart;}const road=od.rate-busPart;this.offered+=road;const value=od.waiting+road;od.waiting=Math.min(GAME_MAX_QUEUE,value);this.dropped+=Math.max(0,value-GAME_MAX_QUEUE);}
     if(this.stepValue%REROUTE_STEPS===0)this.replan();
@@ -405,12 +487,13 @@ export class TrafficGame {
       book.taxiMarkedStep = this.stepValue;
       const taxiIn = Math.min(od.rate, book.taxiRate ?? 0);
       if (taxiIn > 0) book.taxiCredit = (book.taxiCredit ?? 0) + taxiIn;
-      const fleet = this.cars.filter(c => !(c as TaxiActor).taxi && c.destination === od.to && c.path[0] === od.from);
+      const fleet = this.cars.filter(c => !(c as TaxiActor).taxi && !c.workCitizen && c.destination === od.to && c.path[0] === od.from);
       while ((book.taxiCredit ?? 0) >= 1 && fleet.length) { (fleet.shift() as TaxiActor).taxi = true; book.taxiCredit = (book.taxiCredit ?? 0) - 1; }
     }
   }
   get frame():TrafficGameFrame {
     this.markDispatchedTaxis();
+    this.claimNewWorkTrips();
     const cars=this.cars.map(c=>{const car:GameCar={id:c.id,from:c.path[c.index],to:c.path[c.index+1],blocked:c.blocked,progress:c.progress,lane:c.lane,speed:c.speed,destination:c.destination,nextVisit:(c.visits??0)+1,junction:this.junctions.has(c.path[c.index+1]),...(c.path[c.index+2]===undefined?{}:{nextCell:c.path[c.index+2],nextLane:Math.min(c.lane,this.laneCount(linkKey(c.path[c.index+1],c.path[c.index+2]))-1)})};if((c as TaxiActor).taxi)(car as unknown as {taxi?:boolean}).taxi=true;return car;});
     const grouped=new Map<string,GameRenderGroup>(),loads=new Map<number,{cell:number;load:number;queued:number}>();
     for(const c of cars){const key=linkKey(c.from,c.to),link=this.network.links.get(key);let group=grouped.get(key);if(!group){group={key,from:c.from,to:c.to,amount:0,queued:0,storage:(link?.lanes??0)*STORAGE_PER_LANE,closed:!link};grouped.set(key,group);}group.amount++;if(c.blocked)group.queued++;let load=loads.get(c.to);if(!load){load={cell:c.to,load:0,queued:0};loads.set(c.to,load);}load.load++;if(c.blocked)load.queued++;}
@@ -420,6 +503,6 @@ export class TrafficGame {
     const groups=[...grouped.values()].sort((a,b)=>a.key.localeCompare(b.key));
     const bus=this.bus?{bus:{totals:[...this.busTotals.values()].map(t=>({...t})).sort((a,b)=>a.from-b.from||a.to-b.to||a.lineId-b.lineId),injected:{...this.busInjected},diverted:this.busDiverted,returned:this.busReturned}}:{};
     const signals:TrafficSignalFrame={topology:this.signature,phases:[...this.junctions].filter(node=>!this.bends.has(node)).sort((a,b)=>a-b).map(node=>{const approach=this.signals.get(node)?.approach??null;return {node,approach,state:approach===null?'all-red':'green'};})};
-    return {navigation:{...this.navigation},signals,...bus,...(this.taxiTrips?{taxiTrips:{trips:this.taxiTrips,tiles:this.taxiTiles}}:{}),step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
+    return {navigation:{...this.navigation},signals,...bus,...(this.workIssued.size?{workTrips:[...this.workIssued].map(([id,t])=>({id,day:t.day}))}:{}),...(this.workExpirations.length?{expiredWorkTrips:this.workExpirations.map(e=>({...e}))}:{}),...(this.taxiTrips?{taxiTrips:{trips:this.taxiTrips,tiles:this.taxiTiles}}:{}),step:this.stepValue,offered:this.offered,completed:this.completed,dropped:this.dropped,cancelled:this.cancelled,waiting:this.ods.reduce((n,o)=>n+o.waiting,0),moving:cars.length,blocked:cars.filter(c=>c.blocked).length,clippedRate:this.clippedRate,demandRate:this.ods.reduce((n,o)=>n+o.rate,0),roads:this.map.cells.filter(c=>c.road).length,congestedLinks:groups.filter(g=>g.queued>0).length,cars,groups,loadByCell:[...loads.values()].sort((a,b)=>a.cell-b.cell)};
   }
 }

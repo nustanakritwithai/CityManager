@@ -959,7 +959,7 @@ async function boot() {
     view.traffic.update(dt, !paused && !document.hidden);
     trafficLayer?.setVisible(visual.settings.traffic);
     taxiSession.bind(city);
-    trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt);
+    trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt, parkRuntime.activity.day);
     if (trafficLayer && taxiFeature) {
       taxiFares.observe(city, trafficLayer.taxiTrips(), !paused && !previewOnly && !recoveryOnly);
     }
