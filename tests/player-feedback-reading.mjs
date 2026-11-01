@@ -20,7 +20,9 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
     }
     return out;
   }
-  await evaluate("window.__uxReadingClicks=[];document.addEventListener('click',e=>{const t=e.target.closest?.('button,summary,canvas');if(t){window.__uxReadingClicks.push({tag:t.tagName,id:t.id,data:{...t.dataset},trusted:e.isTrusted});window.__uxReadingClicks=window.__uxReadingClicks.slice(-8)}},{capture:true})");
+  // Record the native gesture sequence on the isolated synthetic fixture so a
+  // canvas selection followed by an unexpected control activation is visible.
+  await evaluate("window.__uxReadingClicks=[];for(const type of ['pointerdown','pointerup','click'])document.addEventListener(type,e=>{const t=e.target.closest?.('button,summary,canvas');if(t){window.__uxReadingClicks.push({type,tag:t.tagName,id:t.id,data:{...t.dataset},trusted:e.isTrusted,pointerId:e.pointerId,pointerType:e.pointerType,x:e.clientX,y:e.clientY,at:performance.now()});window.__uxReadingClicks=window.__uxReadingClicks.slice(-36)}},{capture:true})");
   const close = async () => { if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector'); };
   async function open(name) {
     await close();
