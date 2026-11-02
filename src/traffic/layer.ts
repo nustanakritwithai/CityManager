@@ -134,13 +134,13 @@ export class TrafficLayer {
   * The engine commits time/arrival only after this gate grants the complete sweep. */
  private busIntentGeometry=new WeakMap<BusTurnIntent,{id:string;samples:readonly PresentationObstacle[]}>();
  private busMovementGate:BusMovementGate=(proposal,others)=>{
-  const peers=others.filter(b=>b.id!==proposal.busId&&b.phase!=='home'),options={stops:this.city?.bus?.stops??[]};
+  const peers=others.filter(b=>b.id!==proposal.busId&&b.phase!=='home'),options={stops:this.city?.bus?.stops??[],cellCount:this.city?.cells.length};
   const project=(snapshot:typeof proposal.from)=>busPoses([snapshot],options)[0];
   return this.presenter.allowBusMovement(proposal.busId,project(proposal.from),project(proposal.to),busPoses(peers,options),proposal.samples.map(project),proposal.turns?.map(turn=>{let geometry=this.busIntentGeometry.get(turn);if(!geometry){geometry={id:turn.id,samples:turn.samples.map(project)};this.busIntentGeometry.set(turn,geometry);}return geometry;}));
  };
  private busObstacles(){
   if(!this.bus||!this.city)return [];
-  return busPoses(this.bus.engine.snapshot(this.minute).filter(b=>b.phase!=='home'),{stops:this.city.bus?.stops??[]});
+  return busPoses(this.bus.engine.snapshot(this.minute).filter(b=>b.phase!=='home'),{stops:this.city.bus?.stops??[],cellCount:this.city.cells.length});
  }
 
  destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;this.signalDisplay.clear();try{this.signalScene?.destroy();}catch{/* best-effort owned graphics cleanup */}try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
