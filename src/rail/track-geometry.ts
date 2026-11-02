@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 import type {RailGraph} from './graph.ts';
 export type TrackMeshData={color:string;positions:number[];normals:number[];indices:number[];boxes:number};
 /** Static track boxes batched by shared finish: three meshes, not seven draws per edge. */
@@ -10,7 +11,7 @@ export function trackMeshData(graph:RailGraph):TrackMeshData[]{
  };
  const seen=new Set<string>();
  for(const link of graph.links){const key=[Math.min(link.from,link.to),Math.max(link.from,link.to)].join(':');if(seen.has(key))continue;seen.add(key);
-  const ax=(link.from%24-11.5)*2,az=(Math.floor(link.from/24)-11.5)*2,bx=(link.to%24-11.5)*2,bz=(Math.floor(link.to/24)-11.5)*2,horizontal=az===bz,x=(ax+bx)/2,z=(az+bz)/2;
+  const a=expandedCellCoordinate(link.from),b=expandedCellCoordinate(link.to),ax=(a.x-11.5)*2,az=(a.z-11.5)*2,bx=(b.x-11.5)*2,bz=(b.z-11.5)*2,horizontal=az===bz,x=(ax+bx)/2,z=(az+bz)/2;
   // Grey ballast bed, dark sleepers across it and two bright steel rails on top.
   box(x,.1,z,horizontal?2:.74,.06,horizontal?.74:2,'#a7a397');
   for(const offset of [-.75,-.25,.25,.75])box(x+(horizontal?offset:0),.145,z+(horizontal?0:offset),horizontal?.1:.6,.04,horizontal?.6:.1,'#5a4a3b');

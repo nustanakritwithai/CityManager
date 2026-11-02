@@ -1,8 +1,10 @@
+import { expandedRoadDirection } from '../expanded-road-topology.ts';
+import { expandedCellCoordinate, EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
 import {SignalPeers,type SignalPeerSnapshot} from './signal-peers.ts';
 import {buildSignalCorridors,neighborSignalBias,type SignalCorridor,type NeighborSignalState} from './signal-coordination.ts';
 import {chooseSignal,signalTopologyKey,type TrafficSignalFrame,type SignalPhase,type SignalDemand} from './adaptive-signals.ts';
 import type {GameModalStats} from './game-modal.ts';
-import {roadNeighbors,validateRoadTopology,type RoadMap} from '../road-topology.ts';
+import {roadNeighborsFor,validateRoadTopology,type RoadMap} from '../road-topology.ts';
 import type {City} from '../sim.ts';
 import type {TaxiDepotSite} from '../taxi/sites.ts';
 import {buildNetwork,linkKey,type LinkNetwork} from './network.ts';
@@ -33,9 +35,9 @@ export type GameRenderGroup = {key:string;from:number;to:number;amount:number;qu
 export type TrafficGameFrame = {navigation?:NavigationStats;signals?:TrafficSignalFrame;modal?:GameModalStats|null;bus?:GameBusFrame;workTrips?:{id:number;day:number}[];expiredWorkTrips?:{sequence:number;id:number}[];/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
 type OD = GameDemand & {waiting:number;path:number[]|null};
 type Actor = {visits?:number;id:number;destination:number;path:number[];index:number;blocked:boolean;progress:number;speed:number;lane:number;workClaimPending?:boolean;workCitizen?:string};
-const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<576;
+const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<EXPANDED_MAP_CELLS;
 const pair=(a:number,b:number)=>`${a}:${b}`;
-const frontages=(map:RoadMap,at:number):number[]=>map.cells[at]?.road?[at]:roadNeighbors(at).filter(i=>map.cells[i]?.road).sort((a,b)=>a-b);
+const frontages=(map:RoadMap,at:number):number[]=>map.cells[at]?.road?[at]:roadNeighborsFor(map,at).filter(i=>map.cells[i]?.road).sort((a,b)=>a-b);
 /** Cab flow already included in an OD rate. Omitted from the public demand type so bus can extend the frame types on their own lines. */
 type TaxiDemand = GameDemand & {taxiRate?: number};
 type TaxiOd = OD & {taxiRate?: number; taxiCredit?: number; taxiMarkedStep?: number};
@@ -62,12 +64,12 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;
   // the buildings and road map are unchanged; these are not real trip records.
   for(const h of city.households){const at=h.home===null?undefined:homeAccess.get(h.home);if(at!==undefined)homes.set(at,(homes.get(at)??0)+h.members);}
   const depots=city.taxi?.depots??[],ids=new Set<number>();if(!Array.isArray(depots)||depots.length>4)throw Error('Invalid traffic game taxi depots');
-  const saved=depots.map(d=>{if(!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
+  const saved=depots.map(d=>{if(!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||d.cell>=map.cells.length||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
   // Session depots are in-memory only. Ignored unless the taxi flag is on, so traffic-off
   // and taxi-off captures stay identical to a city with no taxi service.
   const session=options.taxiEnabled?options.sessionDepots??boundTaxiDepots:[];
   if(!Array.isArray(session)||saved.length+session.length>4)throw Error('Invalid traffic game taxi depots');
-  const extra=session.map(d=>{if(!d||!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
+  const extra=session.map(d=>{if(!d||!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||d.cell>=map.cells.length||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
   const result:TrafficGameInput={map,homes:[...homes].map(([cell,amount])=>({cell,amount})),destinations:[...destinations].map(([cell,amount])=>({cell,amount})),taxis:options.taxiEnabled?[...saved,...extra]:[]};
   if(options.workClock){
     // New work actors can only be claimed in the work window or when a
@@ -97,11 +99,11 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;
  * close disconnected ones; when none are reachable retain an unreachable OD so
  * the game can display pressure until a road repair. */
 export function trafficGameSampleFromInput(input:TrafficGameInput):TrafficGameSample {
-  if(!input||!input.map||!Array.isArray(input.map.cells)||input.map.cells.length!==576||input.map.cells.some(c=>!c||typeof c.road!=='boolean')||!Array.isArray(input.homes)||!Array.isArray(input.destinations)||input.homes.length>576||input.destinations.length>576||[...input.homes,...input.destinations].some(x=>!x||!cell(x.cell)||!Number.isFinite(x.amount)||x.amount<0))throw Error('Invalid traffic game input');
+  if(!input||!input.map||!Array.isArray(input.map.cells)||![576,EXPANDED_MAP_CELLS].includes(input.map.cells.length)||input.map.cells.some(c=>!c||typeof c.road!=='boolean')||!Array.isArray(input.homes)||!Array.isArray(input.destinations)||input.homes.length>input.map.cells.length||input.destinations.length>input.map.cells.length||[...input.homes,...input.destinations].some(x=>!x||!cell(x.cell)||x.cell>=input.map.cells.length||!Number.isFinite(x.amount)||x.amount<0))throw Error('Invalid traffic game input');
   if(input.map.roadTopology)validateRoadTopology(input.map,input.map.roadTopology);
   const net=buildNetwork(input.map),work=[...input.destinations].sort((a,b)=>a.cell-b.cell),demand:GameDemand[]=[];
   const cached=new Map<number,Int16Array>();
-  const distances=(from:number)=>{let dist=cached.get(from);if(dist)return dist;dist=new Int16Array(576);dist.fill(-1);dist[from]=0;const queue=[from];for(let i=0;i<queue.length;i++)for(const l of net.out.get(queue[i])??[])if(dist[l.to]<0){dist[l.to]=dist[queue[i]]+1;queue.push(l.to);}cached.set(from,dist);return dist;};
+  const distances=(from:number)=>{let dist=cached.get(from);if(dist)return dist;dist=new Int16Array(input.map.cells.length);dist.fill(-1);dist[from]=0;const queue=[from];for(let i=0;i<queue.length;i++)for(const l of net.out.get(queue[i])??[])if(dist[l.to]<0){dist[l.to]=dist[queue[i]]+1;queue.push(l.to);}cached.set(from,dist);return dist;};
   for(const {cell:parcel,amount:weight} of [...input.homes].sort((a,b)=>a.cell-b.cell)) {
     const origins=frontages(input.map,parcel),options:{from:number;to:number;distance:number;size:number;parcel:number}[]=[];
     for(const d of work){let best:{from:number;to:number;distance:number}|null=null;
@@ -110,7 +112,7 @@ export function trafficGameSampleFromInput(input:TrafficGameInput):TrafficGameSa
     }
     // If no destination is reachable, preserve one representative disconnected
     // pressure route when both parcels have frontage; repair can then unlock it.
-    if(!options.length&&origins.length){for(const d of work){const to=frontages(input.map,d.cell).find(n=>n!==origins[0]);if(to!==undefined)options.push({from:origins[0],to,distance:Math.abs(to%24-origins[0]%24)+Math.abs(Math.floor(to/24)-Math.floor(origins[0]/24)),size:d.amount,parcel:d.cell});}}
+    if(!options.length&&origins.length){for(const d of work){const to=frontages(input.map,d.cell).find(n=>n!==origins[0]);if(to!==undefined)options.push({from:origins[0],to,distance:Math.abs(expandedCellCoordinate(to).x-expandedCellCoordinate(origins[0]).x)+Math.abs(expandedCellCoordinate(to).z-expandedCellCoordinate(origins[0]).z),size:d.amount,parcel:d.cell});}}
     options.sort((a,b)=>a.distance-b.distance||a.parcel-b.parcel||a.from-b.from||a.to-b.to);
     for(const {from,to,size} of options.slice(0,2))demand.push({from,to,rate:Math.sqrt(weight*size)*.12});
   }
@@ -121,11 +123,11 @@ export function trafficGameSampleFromInput(input:TrafficGameInput):TrafficGameSa
 export const captureTrafficGameSample=(city:City):TrafficGameSample=>trafficGameSampleFromInput(captureTrafficGameInput(city));
 
 function cleanSample(sample:TrafficGameSample) {
-  if(!sample||sample.clippedRate!==undefined&&(!Number.isFinite(sample.clippedRate)||sample.clippedRate<0||sample.clippedRate>Number.MAX_SAFE_INTEGER)||!sample.map||!Array.isArray(sample.map.cells)||sample.map.cells.length!==576||sample.map.cells.some(c=>!c||typeof c.road!=='boolean')||!Array.isArray(sample.demand)||sample.demand.length>4096)throw Error('Invalid traffic game sample');
+  if(!sample||sample.clippedRate!==undefined&&(!Number.isFinite(sample.clippedRate)||sample.clippedRate<0||sample.clippedRate>Number.MAX_SAFE_INTEGER)||!sample.map||!Array.isArray(sample.map.cells)||![576,EXPANDED_MAP_CELLS].includes(sample.map.cells.length)||sample.map.cells.some(c=>!c||typeof c.road!=='boolean')||!Array.isArray(sample.demand)||sample.demand.length>4096)throw Error('Invalid traffic game sample');
   const map:RoadMap={cells:sample.map.cells.map(c=>({road:c.road})),...(sample.map.roadTopology?{roadTopology:structuredClone(sample.map.roadTopology)}:{})};
   if(map.roadTopology)validateRoadTopology(map,map.roadTopology);
   const grouped=new Map<string,GameDemand>();let clippedRate=sample.clippedRate??0;
-  for(const d of sample.demand){if(!d||!cell(d.from)||!cell(d.to)||typeof d.rate!=='number'||!Number.isFinite(d.rate)||d.rate<0||d.rate>1_000_000)throw Error('Invalid traffic game demand');const taxi=asTaxiDemand(d).taxiRate??0;if(asTaxiDemand(d).taxiRate!==undefined&&(typeof asTaxiDemand(d).taxiRate!=='number'||!Number.isFinite(taxi)||taxi<0||taxi>d.rate+1e-6))throw Error('Invalid traffic game taxi demand');if(d.from===d.to){clippedRate+=d.rate;continue;}const k=pair(d.from,d.to),old=grouped.get(k) as TaxiDemand|undefined;if(old){old.rate+=d.rate;old.taxiRate=(old.taxiRate??0)+taxi;}else if(taxi>0){const row:TaxiDemand={from:d.from,to:d.to,rate:d.rate,taxiRate:taxi};grouped.set(k,row);}else grouped.set(k,{from:d.from,to:d.to,rate:d.rate});}
+  for(const d of sample.demand){if(!d||!cell(d.from)||!cell(d.to)||d.from>=sample.map.cells.length||d.to>=sample.map.cells.length||typeof d.rate!=='number'||!Number.isFinite(d.rate)||d.rate<0||d.rate>1_000_000)throw Error('Invalid traffic game demand');const taxi=asTaxiDemand(d).taxiRate??0;if(asTaxiDemand(d).taxiRate!==undefined&&(typeof asTaxiDemand(d).taxiRate!=='number'||!Number.isFinite(taxi)||taxi<0||taxi>d.rate+1e-6))throw Error('Invalid traffic game taxi demand');if(d.from===d.to){clippedRate+=d.rate;continue;}const k=pair(d.from,d.to),old=grouped.get(k) as TaxiDemand|undefined;if(old){old.rate+=d.rate;old.taxiRate=(old.taxiRate??0)+taxi;}else if(taxi>0){const row:TaxiDemand={from:d.from,to:d.to,rate:d.rate,taxiRate:taxi};grouped.set(k,row);}else grouped.set(k,{from:d.from,to:d.to,rate:d.rate});}
   const rows=[...grouped.values()].sort((a,b)=>a.from-b.from||a.to-b.to);
   // Aggregate adjacent ordered ODs into at most 64 representative bins. The
   // total demand from all areas is included; excess above per-bin capacity is
@@ -172,7 +174,7 @@ export class TrafficGame {
     const cancels=new Set(cancelIds),retirements=new Set(retiredIds);
     if(cancels.size!==cancelIds.length||retirements.size!==retiredIds.length||cancelIds.some(id=>retirements.has(id)))throw Error('Invalid traffic work trip identities');
     const ids=new Set<string>();
-    for(const c of input.candidates){if(!c||typeof c.citizenId!=='string'||!c.citizenId||c.citizenId.length>128||ids.has(c.citizenId)||!cell(c.home)||!cell(c.work))throw Error('Invalid traffic work trip candidate');ids.add(c.citizenId);}
+    for(const c of input.candidates){if(!c||typeof c.citizenId!=='string'||!c.citizenId||c.citizenId.length>128||ids.has(c.citizenId)||!cell(c.home)||!cell(c.work)||c.home>=this.map.cells.length||c.work>=this.map.cells.length)throw Error('Invalid traffic work trip candidate');ids.add(c.citizenId);}
     this.workExpirationAck=Math.max(this.workExpirationAck,input.ack);
     this.workExpirations=this.workExpirations.filter(e=>e.sequence>this.workExpirationAck);
     const absolute=input.day*1440+input.minute;
@@ -222,7 +224,7 @@ export class TrafficGame {
   private busShareFor(od:OD):GameBusShare|null {if(!this.bus)return null;const k=pair(od.from,od.to);if(!this.bus.shares.has(k))this.bus.shares.set(k,gameBusShare(this.bus.input,od.from,od.to));return this.bus.shares.get(k)!;}
   constructor(sample:TrafficGameSample){const s=cleanSample(sample);this.map=s.map;this.signature=this.key(s.map);this.network=buildNetwork(this.map);this.replaceRows(s.rows,s.clippedRate);this.prepareJunctions();this.replan();}
   private key(map:RoadMap){return signalTopologyKey(map);}
-  private prepareJunctions(){this.signals.clear();this.junctionRequests.clear();const adj=new Map<number,Set<number>>();for(const l of this.network.links.values())for(const [a,b] of [[l.from,l.to],[l.to,l.from]])(adj.get(a)??adj.set(a,new Set()).get(a)!).add(b);this.bends=new Set([...adj].filter(([n,v])=>v.size===2&&[...v].reduce((sum,i)=>sum+i,0)!==2*n).map(([n])=>n));this.junctions=new Set([...adj].filter(([n,v])=>v.size>2||v.size===2&&[...v].reduce((sum,i)=>sum+i,0)!==2*n).map(([n])=>n));this.prepareSignalPeers();}
+  private prepareJunctions(){this.signals.clear();this.junctionRequests.clear();const adj=new Map<number,Set<number>>();for(const l of this.network.links.values())for(const [a,b] of [[l.from,l.to],[l.to,l.from]])(adj.get(a)??adj.set(a,new Set()).get(a)!).add(b);const bent=(n:number,v:Set<number>)=>{const [a,b]=[...v].map(expandedCellCoordinate),p=expandedCellCoordinate(n);return a.x+b.x!==2*p.x||a.z+b.z!==2*p.z;};this.bends=new Set([...adj].filter(([n,v])=>v.size===2&&bent(n,v)).map(([n])=>n));this.junctions=new Set([...adj].filter(([n,v])=>v.size>2||v.size===2&&bent(n,v)).map(([n])=>n));this.prepareSignalPeers();}
   private prepareSignalPeers():void {
     this.signalSnapshots.clear();this.signalSnapshotStep=this.junctionClock;this.signalCorridors=buildSignalCorridors(this.network,this.junctions,this.bends);
     const graph={revision:this.signature,nodes:[...this.junctions].filter(n=>!this.bends.has(n)),corridors:[...this.signalCorridors.values()]};
@@ -289,8 +291,8 @@ export class TrafficGame {
       if(!tail){c.blocked=true;c.speed=0;return false;}c.path=[from,...tail];c.index=0;
     }
     const nextCell=c.path[c.index+2],priorCell=c.path[c.index-1];
-    const approachingTurn=nextCell!==undefined&&head-from!==nextCell-head&&c.progress>.45;
-    const leavingTurn=priorCell!==undefined&&from-priorCell!==head-from&&c.progress<JUNCTION_CLEAR;
+    const approachingTurn=nextCell!==undefined&&expandedRoadDirection(from,head)!==expandedRoadDirection(head,nextCell)&&c.progress>.45;
+    const leavingTurn=priorCell!==undefined&&expandedRoadDirection(priorCell,from)!==expandedRoadDirection(from,head)&&c.progress<JUNCTION_CLEAR;
     const maxSpeed=(approachingTurn||leavingTurn?TRAFFIC_SPACING.turnSpeedTiles:TRAFFIC_SPACING.maxSpeedTiles)*W;
     const junction=this.junctions.has(head),holder=grant.get(head),blockedNode=junction&&holder!==c.id;
     let ahead=this.leaderOf(c);

@@ -49,6 +49,15 @@ export class CityGround {
     const surface = new Entity('Baked grass surface');
     surface.addComponent('render', { meshInstances: [new MeshInstance(floor, groundMaterial)], castShadows: false, receiveShadows: true });
     this.root.addChild(surface);
+    // Keep the original surface and UVs untouched; the appended north strip shares its texture.
+    const north = new Mesh(app.graphicsDevice), northExtent=extent+4*unit;
+    north.setPositions([-extent,.025,-northExtent, -extent,.025,-extent, extent,.025,-extent, extent,.025,-northExtent]);
+    north.setNormals([0,1,0, 0,1,0, 0,1,0, 0,1,0]);
+    north.setUvs(0,[0,-4/size, 0,0, 1,0, 1,-4/size]);
+    north.setIndices([0,1,2,0,2,3]); north.update();
+    const extension=new Entity('Northern buildable ground');
+    extension.addComponent('render',{meshInstances:[new MeshInstance(north,groundMaterial)],castShadows:false,receiveShadows:true});
+    this.root.addChild(extension);
 
     const positions: number[] = [], normals: number[] = [], indices: number[] = [];
     const quad = (x0: number, z0: number, x1: number, z1: number) => {
@@ -60,9 +69,10 @@ export class CityGround {
     const halfLine = .011;
     for (let n = 0; n <= size; n++) {
       const d = n * unit - extent;
-      quad(d - halfLine, -extent, d + halfLine, extent);
+      quad(d - halfLine, -extent - 4*unit, d + halfLine, extent);
       quad(-extent, d - halfLine, extent, d + halfLine);
     }
+    for (let row=1;row<=4;row++) { const d=-extent-row*unit; quad(-extent,d-halfLine,extent,d+halfLine); }
     const gridMesh = new Mesh(app.graphicsDevice);
     gridMesh.setPositions(positions); gridMesh.setNormals(normals); gridMesh.setIndices(indices); gridMesh.update();
     const gridMaterial = new StandardMaterial();

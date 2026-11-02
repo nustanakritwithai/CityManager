@@ -1,4 +1,4 @@
-import { roadDriveAllowed, roadNeighbors, type RoadMap } from '../road-topology.ts';
+import { roadDriveAllowed, roadNeighborsFor, type RoadMap } from '../road-topology.ts';
 /**
  * Directed link graph for the aggregate traffic model, built strictly from road-topology rules:
  * a link a→b exists iff roadDriveAllowed(a,b) — so parallel non-junction roads stay separate,
@@ -17,7 +17,7 @@ export function resolveTrafficZone(net: LinkNetwork, zone: number): number[] {
 function updateFrontages(c: RoadMap, net: LinkNetwork) {
   if (!net.frontages) return;
   net.frontages.clear();
-  c.cells.forEach((cell, i) => net.frontages!.set(parcelTrafficZone(i), cell.road ? [i] : roadNeighbors(i).filter(n => c.cells[n]?.road).sort((a, b) => a - b)));
+  c.cells.forEach((cell, i) => net.frontages!.set(parcelTrafficZone(i), cell.road ? [i] : roadNeighborsFor(c,i).filter(n => c.cells[n]?.road).sort((a, b) => a - b)));
 }
 export const linkKey = (a: number, b: number) => `${a}>${b}`;
 function makeLink(c: RoadMap, a: number, b: number, capacity = LANE_CAPACITY_VPH): Link {
@@ -27,7 +27,7 @@ function makeLink(c: RoadMap, a: number, b: number, capacity = LANE_CAPACITY_VPH
   return { from: a, to: b, length: TILE_LENGTH_M, freeFlowKmh: FREE_FLOW_KMH, lanes, capacityPerHour: lanes * capacity };
 }
 function addCell(c: RoadMap, net: LinkNetwork, a: number) {
-  for (const b of roadNeighbors(a)) if (roadDriveAllowed(c, a, b)) net.links.set(linkKey(a, b), makeLink(c, a, b, net.capacityPerLane));
+  for (const b of roadNeighborsFor(c,a)) if (roadDriveAllowed(c, a, b)) net.links.set(linkKey(a, b), makeLink(c, a, b, net.capacityPerLane));
 }
 function reindex(net: LinkNetwork) {
   net.out.clear();
@@ -36,6 +36,7 @@ function reindex(net: LinkNetwork) {
   }
 }
 export function buildNetwork(c: RoadMap, options: { capacityPerLane?: number; parcelZones?: boolean } = {}): LinkNetwork {
+  if (options.parcelZones && c.cells.length !== 576) throw Error('Legacy aggregate parcel-zone protocol does not support expanded maps');
   if (options.capacityPerLane !== undefined && (!Number.isFinite(options.capacityPerLane) || options.capacityPerLane <= 0)) throw Error('Invalid road capacity');
   const net: LinkNetwork = { links: new Map(), out: new Map(), ...(options.capacityPerLane === undefined ? {} : { capacityPerLane: options.capacityPerLane }), ...(options.parcelZones ? { frontages: new Map<number, number[]>() } : {}) };
   c.cells.forEach((cell, i) => { if (cell.road) addCell(c, net, i); });
@@ -44,9 +45,9 @@ export function buildNetwork(c: RoadMap, options: { capacityPerLane?: number; pa
 /** Rebuild only links touching `cells` (and their neighbours) after a road edit. Mutates `net`. */
 export function rebuildRegion(c: RoadMap, net: LinkNetwork, cells: Iterable<number>): LinkNetwork {
   const region = new Set<number>();
-  for (const i of cells) { region.add(i); for (const n of roadNeighbors(i)) region.add(n); }
+  for (const i of cells) { region.add(i); for (const n of roadNeighborsFor(c,i)) region.add(n); }
   for (const [k, l] of net.links) if (region.has(l.from) || region.has(l.to)) net.links.delete(k);
-  for (const a of region) if (c.cells[a]?.road) for (const b of roadNeighbors(a)) {
+  for (const a of region) if (c.cells[a]?.road) for (const b of roadNeighborsFor(c,a)) {
     if (roadDriveAllowed(c, a, b)) net.links.set(linkKey(a, b), makeLink(c, a, b, net.capacityPerLane));
     if (roadDriveAllowed(c, b, a)) net.links.set(linkKey(b, a), makeLink(c, b, a, net.capacityPerLane));
   }

@@ -1,3 +1,5 @@
+import { cellWorldPosition, worldPositionCell } from './expanded-map-geometry.ts';
+import { expandedCellAt, expandedCellCoordinate, EXPANDED_MAP_CELLS } from './expanded-map-grid.ts';
 import { roadLinked, roadTopologyKey } from './road-topology.ts';
 import {
   AppBase, AppOptions, createGraphicsDevice, DEVICETYPE_WEBGL2,
@@ -219,7 +221,7 @@ export class CityView {
     for (let n = 0; n < 34; n++) {
       const angle = n * 2.39996;
       const x = Math.cos(angle) * (SIZE + 1.7), z = Math.sin(angle) * (SIZE + 1.7);
-      if (Math.abs(x) < SIZE - 1 && Math.abs(z) < SIZE - 1 || x < -SIZE && Math.abs(z - gate.z) < 3) continue;
+      if (Math.abs(x) < SIZE - 1 && Math.abs(z) < SIZE - 1 || x < -SIZE && Math.abs(z - gate.z) < 3 || Math.abs(x)<=SIZE+2 && z>=-SIZE-10 && z<=-SIZE+2) continue;
       this.plantTree(x, Math.max(.04, this.world.height(x, z)), z, 1);
     }
     for (const spot of this.world.treeSpots) this.plantTree(spot.x, spot.y, spot.z, spot.scale);
@@ -252,7 +254,7 @@ export class CityView {
     for (const id of this.pointers.keys()) if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);
     this.pointers.clear();
   }
-  position(i: number) { return { x: ((i % SIZE) - (SIZE - 1) / 2) * UNIT, z: (Math.floor(i / SIZE) - (SIZE - 1) / 2) * UNIT }; }
+  position(i:number) { return cellWorldPosition(i,UNIT); }
   project(i: number) {
     const p = this.position(i); const v = this.camera.camera!.worldToScreen(new Vec3(p.x, 0.1, p.z));
     return { x: v.x, y: v.y };
@@ -263,8 +265,7 @@ export class CityView {
     const a = this.camera.camera!.screenToWorld(x, y, 0.1), b = this.camera.camera!.screenToWorld(x, y, 200);
     const t = -a.y / (b.y - a.y);
     const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
-    const gx = Math.floor(px / UNIT + SIZE / 2), gz = Math.floor(pz / UNIT + SIZE / 2);
-    return gx >= 0 && gx < SIZE && gz >= 0 && gz < SIZE ? gz * SIZE + gx : null;
+    return worldPositionCell(px,pz,this.lastScene?.city.cells.length===EXPANDED_MAP_CELLS,UNIT);
   }
   updateCamera() {
     const elevation = 0.88;
@@ -276,14 +277,14 @@ export class CityView {
   /** Centre the camera on a parcel (used by the issue list). */
   focus(cell: number) {
     const { x, z } = this.position(cell);
-    this.target.set(Math.max(-22, Math.min(22, x)), 0, Math.max(-22, Math.min(22, z))); this.updateCamera();
+    this.target.set(Math.max(-22, Math.min(22, x)), 0, Math.max(this.lastScene?.city.cells.length === EXPANDED_MAP_CELLS ? -30 : -22, Math.min(22, z))); this.updateCamera();
   }
   pan(dx: number, dy: number) {
     const scale = this.radius / 700;
     this.target.x += (-dx * Math.cos(this.yaw) - dy * Math.sin(this.yaw)) * scale;
     this.target.z += (dx * Math.sin(this.yaw) - dy * Math.cos(this.yaw)) * scale;
     this.target.x = Math.max(-22, Math.min(22, this.target.x));
-    this.target.z = Math.max(-22, Math.min(22, this.target.z)); this.updateCamera();
+    this.target.z = Math.max(this.lastScene?.city.cells.length === EXPANDED_MAP_CELLS ? -30 : -22, Math.min(22, this.target.z)); this.updateCamera();
   }
   control(action: string) {
     if (this.cameraBlocked) return;
@@ -415,7 +416,9 @@ export class CityView {
     const fadeLater: Entity[] = [];
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
-      const links = cell.road ? [roadLinked(city, i, i + (-1)), roadLinked(city, i, i + (1)), roadLinked(city, i, i + (-24)), roadLinked(city, i, i + (24))].map(Number).join('') : '';
+      const coord=expandedCellCoordinate(i); const neighbor=(dx:number,dz:number)=>expandedCellAt(coord.x+dx,coord.z+dz);
+      const linked=(dx:number,dz:number)=>{const n=neighbor(dx,dz);return n !== null && roadLinked(city,i,n);};
+      const links = cell.road ? [linked(-1,0),linked(1,0),linked(0,-1),linked(0,1)].map(Number).join('') : '';
       const fertility = cell.zone === 'F' ? city.resources.fertility[i] : '';
       // Night lights only for real occupancy: residents at home or allocated workers on site.
       const lit = !!b && (b.zone === 'R' ? city.households.some(h => h.home === b.id) : city.firms.some(f => f.building === b.id && firmWorkerCount(city, f.id) > 0));
@@ -436,13 +439,13 @@ export class CityView {
       this.tiles.set(i, { entity: tile, signature });
       if (b && !reach || plant && !plantOn || campus && !campus.open) fadeLater.push(tile);
       if (cell.road) {
-        const horizontal = (roadLinked(city, i, i + (-1))) || (roadLinked(city, i, i + (1)));
-        const vertical = (roadLinked(city, i, i + (-24))) || (roadLinked(city, i, i + (24)));
+        const horizontal = (linked(-1,0)) || (linked(1,0));
+        const vertical = (linked(0,-1)) || (linked(0,1));
         const open = new Set<Side>();
-        if (roadLinked(city, i, i + (-1)) || i === GATEWAY) open.add('-x');
-        if (roadLinked(city, i, i + (1))) open.add('+x');
-        if (roadLinked(city, i, i + (-24))) open.add('-z');
-        if (roadLinked(city, i, i + (24))) open.add('+z');
+        if (linked(-1,0) || i === GATEWAY) open.add('-x');
+        if (linked(1,0)) open.add('+x');
+        if (linked(0,-1)) open.add('-z');
+        if (linked(0,1)) open.add('+z');
         const choice = roadTileFor(open, i), model = this.assets?.road(choice.tile, connected.has(i));
         if (model) { model.setLocalEulerAngles(0, choice.rotation, 0); model.setLocalPosition(0, .03, 0); tile.addChild(model); }
         else {
@@ -454,7 +457,7 @@ export class CityView {
         if (direction) {
           const arrows = new Entity('Two lanes one-way arrows'); tile.addChild(arrows);
           // Local +z arrow, rotated to match the selected grid direction.
-          arrows.setLocalEulerAngles(0, direction === 1 ? 90 : direction === -1 ? -90 : direction === -SIZE ? 180 : 0, 0);
+          arrows.setLocalEulerAngles(0, direction === 1 || direction === 'east' ? 90 : direction === -1 || direction === 'west' ? -90 : direction === -SIZE || direction === 'north' ? 180 : 0, 0);
           for (const lane of [-.36, .36]) {
             this.box(arrows, lane, .18, 0, .055, .012, .48, '#ffffff', false);
             const left = this.box(arrows, lane - .08, .18, .17, .055, .012, .23, '#ffffff', false);
@@ -463,7 +466,7 @@ export class CityView {
           }
         }
         // Lamps stand on the sidewalk of straight streets, every fourth parcel along the street.
-        const along = horizontal && !vertical ? i % SIZE : vertical && !horizontal ? Math.floor(i / SIZE) : -1;
+        const along = horizontal && !vertical ? i % SIZE : vertical && !horizontal ? expandedCellCoordinate(i).z : -1;
         if (connected.has(i) && along >= 0 && along % 4 === 0) {
           const lamp = this.assets?.streetlight();
           if (lamp) {
@@ -642,8 +645,8 @@ export class CityView {
     for (let i = 0; i < city.cells.length; i++) if (city.cells[i].road) {
       const { x, z } = this.position(i);
       for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        const cx = i % SIZE + dx, cz = Math.floor(i / SIZE) + dz;
-        if (cx >= 0 && cz >= 0 && cx < SIZE && cz < SIZE && !city.cells[cz * SIZE + cx].road) band(x, z, dx, dz, .98, 1.34, 100);
+        const coordinate=expandedCellCoordinate(i), next=expandedCellAt(coordinate.x+dx,coordinate.z+dz);
+        if (next !== null && next < city.cells.length && !city.cells[next].road) band(x, z, dx, dz, .98, 1.34, 100);
       }
     }
     for (const building of city.buildings) {

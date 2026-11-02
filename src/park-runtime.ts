@@ -1,7 +1,7 @@
 /** Application clock and atomic local save for the reviewed park components.
  * The economic engine remains the only owner of jobs, payroll and daily steps.
  */
-import { deserialize, serialize, type City } from './sim.ts';
+import { deserialize, serialize, expandValidatedCity, type City } from './sim.ts';
 import { parkWorkers, PARK_STAFF } from './parks.ts';
 import { createParkActivity, advanceParkActivity, reconcileParkActivity, startParkActivityDay,
   parkActivityAbsoluteMinute, prepareParkActivity, restoreParkActivity, type ParkActivityState } from './park-activity.ts';
@@ -123,8 +123,16 @@ export function deserializeParkSession(json: string): { city: City; runtime: Par
   const parsed = JSON.parse(json);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid city save');
   const { parkRuntime, ...citySave } = parsed;
-  if (parkRuntime !== undefined && !((parsed.version === 25 && parsed.rulesVersion === 'chain-20') || (parsed.version === 24 && parsed.rulesVersion === 'chain-19') || (parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12') || (parsed.version === 18 && parsed.rulesVersion === 'chain-13') || (parsed.version === 19 && parsed.rulesVersion === 'chain-14') || (parsed.version === 20 && parsed.rulesVersion === 'chain-15') || (parsed.version === 21 && parsed.rulesVersion === 'chain-16') || (parsed.version === 22 && parsed.rulesVersion === 'chain-17') || (parsed.version === 23 && parsed.rulesVersion === 'chain-18'))) throw new Error('Park runtime requires save v15 through v25 with matching rules');
+  if (parkRuntime !== undefined && !((parsed.version === 26 && parsed.rulesVersion === 'chain-21') || (parsed.version === 25 && parsed.rulesVersion === 'chain-20') || (parsed.version === 24 && parsed.rulesVersion === 'chain-19') || (parsed.version === 15 && parsed.rulesVersion === 'chain-10') || (parsed.version === 16 && parsed.rulesVersion === 'chain-11') || (parsed.version === 17 && parsed.rulesVersion === 'chain-12') || (parsed.version === 18 && parsed.rulesVersion === 'chain-13') || (parsed.version === 19 && parsed.rulesVersion === 'chain-14') || (parsed.version === 20 && parsed.rulesVersion === 'chain-15') || (parsed.version === 21 && parsed.rulesVersion === 'chain-16') || (parsed.version === 22 && parsed.rulesVersion === 'chain-17') || (parsed.version === 23 && parsed.rulesVersion === 'chain-18'))) throw new Error('Park runtime requires save v15 through v26 with matching rules');
   const city = deserialize(JSON.stringify(citySave));
   const runtime = parkRuntime === undefined ? createParkRuntime(city) : restoreRuntime(city, parkRuntime,JSON.stringify(citySave));
   return { city, runtime };
+}
+
+/** Expand a fully decoded session without touching the source bytes or advancing any clocks. */
+export function expandValidatedParkSession(session: {city:City;runtime:ParkRuntime}): {city:City;runtime:ParkRuntime} {
+  if(session.city.cells.length===672)return session;
+  const city=expandValidatedCity(session.city);
+  const rail=session.runtime.rail?.rebindExpandedCity(session.city,city,parkActivityAbsoluteMinute(session.runtime.activity));
+  return {city,runtime:{...session.runtime,...(rail?{rail}:{})}};
 }

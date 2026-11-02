@@ -1,11 +1,14 @@
 import { roadLinked } from './road-topology.ts';
 /** Read-only shortest paths over four-neighbor road cells. */
 import { GATEWAY, SIZE, type City } from './sim.ts';
+import { expandedCellNeighbors, EXPANDED_MAP_CELLS } from './expanded-map-grid.ts';
+import { expandedRoadLinked, type ExpandedRoadMap } from './expanded-road-topology.ts';
 
 type RoadMap = Pick<City, 'cells' | 'roadTopology'>;
-const valid = (city: RoadMap, index: number) => Number.isInteger(index) && index >= 0 && index < SIZE * SIZE && index < city.cells.length;
+const valid = (city: RoadMap, index: number) => Number.isInteger(index) && index >= 0 && index < city.cells.length && (city.cells.length === SIZE * SIZE || city.cells.length === EXPANDED_MAP_CELLS);
 
-function neighbors(index: number): number[] {
+function neighbors(city: RoadMap, index: number): number[] {
+  if (city.cells.length === EXPANDED_MAP_CELLS) return expandedCellNeighbors(index);
   const x = index % SIZE;
   return [
     ...(x > 0 ? [index - 1] : []),
@@ -17,7 +20,7 @@ function neighbors(index: number): number[] {
 
 function frontage(city: RoadMap, index: number): number[] {
   if (!valid(city, index)) return [];
-  return city.cells[index].road ? [index] : neighbors(index).filter(next => city.cells[next]?.road);
+  return city.cells[index].road ? [index] : neighbors(city,index).filter(next => city.cells[next]?.road);
 }
 
 /** Inclusive road cells; endpoints may be road-fronted parcels. Empty means no route. */
@@ -34,8 +37,9 @@ export function shortestRoadRoute(city: RoadMap, from: number, to: number): numb
       for (let at = current; at !== -1; at = previous.get(at)!) path.push(at);
       return path.reverse();
     }
-    for (const next of neighbors(current)) {
-      if (!roadLinked(city,current,next) || previous.has(next)) continue;
+    for (const next of neighbors(city,current)) {
+      const linked = city.cells.length === EXPANDED_MAP_CELLS ? expandedRoadLinked(city as unknown as ExpandedRoadMap,current,next) : roadLinked(city,current,next);
+      if (!linked || previous.has(next)) continue;
       previous.set(next, current);
       queue.push(next);
     }

@@ -1,4 +1,4 @@
-import { edgeKey } from './road-topology.ts';
+import { roadNeighborsFor, roadLinked } from './road-topology.ts';
 /**
  * Water and power (rules chain-4). Supply enters the road network at the outside gateway (a fixed
  * contract) and at city-built plants with road frontage; pipes and lines follow connected roads.
@@ -35,7 +35,6 @@ export const PLANT_LABELS: Readonly<Record<UtilityKind, string>> = Object.freeze
 export const PLANT_NAMES: Readonly<Record<UtilityKind, string>> = Object.freeze({ power: 'power plant', water: 'water pump' });
 
 const none = (): Need => ({ power: 0, water: 0 });
-const neighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(n => n >= 0 && n < SIZE * SIZE);
 
 /**
  * Units a building draws. Homes: one of each per household living there. Markets and shops: power
@@ -64,7 +63,7 @@ export type Service = {
 
 /** Parcels next to a connected road, nearest-source distances along roads, and who gets served. */
 export function utilityService(c: City, roads: ReadonlySet<number>): Service {
-  const online = new Set(c.plants.filter(p => neighbors(p.cell).some(n => roads.has(n))).map(p => p.id));
+  const online = new Set(c.plants.filter(p => roadNeighborsFor(c,p.cell).some(n => roads.has(n))).map(p => p.id));
   const plants = none();
   for (const p of c.plants) if (online.has(p.id)) plants[p.kind] += PLANTS[p.kind].capacity;
   const capacity = { power: c.utilities.outside.power + plants.power, water: c.utilities.outside.water + plants.water };
@@ -76,8 +75,8 @@ export function utilityService(c: City, roads: ReadonlySet<number>): Service {
     // With no source at all, retain the gateway seed so connected zero-need
     // buildings still have a network distance and can be marked served.
     if (c.utilities.outside[kind] > 0 || plants[kind] === 0) seed(GATEWAY);
-    for (const p of c.plants) if (p.kind === kind && online.has(p.id)) for (const n of neighbors(p.cell)) seed(n);
-    for (let q = 0; q < queue.length; q++) for (const n of neighbors(queue[q])) if (roads.has(n) && !c.roadTopology?.blocked.includes(edgeKey(queue[q],n)) && !distances.has(n)) { distances.set(n, distances.get(queue[q])! + 1); queue.push(n); }
+    for (const p of c.plants) if (p.kind === kind && online.has(p.id)) for (const n of roadNeighborsFor(c,p.cell)) seed(n);
+    for (let q = 0; q < queue.length; q++) for (const n of roadNeighborsFor(c,queue[q])) if (roads.has(n) && roadLinked(c,queue[q],n) && !distances.has(n)) { distances.set(n, distances.get(queue[q])! + 1); queue.push(n); }
     return distances;
   };
   const roadsByKind = { power: roadDistances('power'), water: roadDistances('water') };
@@ -88,7 +87,7 @@ export function utilityService(c: City, roads: ReadonlySet<number>): Service {
     need.set(b.id, buildingNeed(b.zone, b.level, households.get(b.id) ?? 0));
     for (const kind of UTILITY_KINDS) {
       const roadDistance = roadsByKind[kind];
-      const d = Math.min(...neighbors(b.cell).map(n => roadDistance.get(n) ?? Infinity), roadDistance.get(b.cell) ?? Infinity);
+      const d = Math.min(...roadNeighborsFor(c,b.cell).map(n => roadDistance.get(n) ?? Infinity), roadDistance.get(b.cell) ?? Infinity);
       if (d < Infinity) distanceByKind[kind].set(b.id, d);
     }
     const d = Math.min(distanceByKind.power.get(b.id) ?? Infinity, distanceByKind.water.get(b.id) ?? Infinity);

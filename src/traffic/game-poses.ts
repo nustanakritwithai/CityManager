@@ -1,8 +1,10 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 import {LANE_SLOTS,LANE_START,laneOffset,laneSlotCentres} from '../citizen-road-queue.ts';
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
 import type {GameCar,GameRenderGroup} from './game.ts';
 import {TRAFFIC_SPACING} from './spacing.ts';
 
+const coord=(cell:number,size:number)=>size===24 ? expandedCellCoordinate(cell) : {x:cell%size,z:Math.floor(cell/size)};
 /** Rendering is cosmetic: the game model still tracks at most 128 cars. */
 export const GAME_VISUAL_CAR_CAP=64;
 function turnHint(c:GameCar,g:GameRenderGroup,size:number,unit:number,bx:number,bz:number,hx:number,hz:number){
@@ -13,7 +15,7 @@ function turnHint(c:GameCar,g:GameRenderGroup,size:number,unit:number,bx:number,
   const offset=laneOffset({cell:g.to,incoming:g.to-g.from,lane:c.lane??0})*unit;
   return {upcomingTurn:{x:bx+hz*offset,z:bz-hx*offset,headingX:hx,headingZ:hz,nodeX:bx,nodeZ:bz,...entry}};
  }
- const nx=((c.nextCell%size)-(size-1)/2)*unit,nz=(Math.floor(c.nextCell/size)-(size-1)/2)*unit,nhx=Math.sign(nx-bx),nhz=Math.sign(nz-bz);
+ const next=coord(c.nextCell,size),nx=(next.x-(size-1)/2)*unit,nz=(next.z-(size-1)/2)*unit,nhx=Math.sign(nx-bx),nhz=Math.sign(nz-bz);
  if(Math.abs(nx-bx)+Math.abs(nz-bz)!==unit||(!c.junction&&hx*nhx+hz*nhz!==0))return {};
  const offset=laneOffset({cell:c.nextCell,incoming:c.nextCell-g.to,lane:c.nextLane??c.lane??0})*unit;
  return {upcomingTurn:{x:bx+nhz*offset+nhx*.355*unit,z:bz-nhx*offset+nhz*.355*unit,headingX:nhx,headingZ:nhz,nodeX:bx,nodeZ:bz,...entry}};
@@ -26,8 +28,8 @@ type Candidate={pose:CitizenVehiclePose;cell:number;link:string};
 function spatialSample(candidates:readonly Candidate[],size:number,limit:number):CitizenVehiclePose[] {
  // Preserve the pre-cap output exactly when no sampling is needed.
  if(candidates.length<=limit)return candidates.map(c=>c.pose);
- const sectors=new Map<number,Map<string,CitizenVehiclePose[]>>();
- for(const c of candidates){const x=c.cell%size,y=Math.floor(c.cell/size),sx=Math.min(7,Math.floor(x*8/size)),sy=Math.min(7,Math.floor(y*8/size)),id=sy*8+sx;
+ const sectors=new Map<number,Map<string,CitizenVehiclePose[]>>(),expanded=size===24&&candidates.some(c=>c.cell>=576);
+ for(const c of candidates){const p=coord(c.cell,size),x=p.x,y=p.z+(expanded?4:0),sx=Math.min(7,Math.floor(x*8/size)),sy=Math.min(7,Math.floor(y*8/(size+(expanded?4:0)))),id=sy*8+sx;
   let links=sectors.get(id);if(!links){links=new Map();sectors.set(id,links);}const bucket=links.get(c.link)??[];bucket.push(c.pose);links.set(c.link,bucket);}
  const order=[...sectors].sort((a,b)=>a[0]-b[0]).map(([,links])=>({links:[...links].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([,poses])=>({poses,next:0})),cursor:0}));
  const out:CitizenVehiclePose[]=[];
@@ -50,8 +52,8 @@ export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGrou
   const g=groupByKey.get(key);if(!g||g.closed)continue;
   const lanes=Math.max(1,Math.min(2,Math.round(g.storage/TRAFFIC_SPACING.maxPerLanePerTile))),cap=lanes*Math.max(LANE_SLOTS,TRAFFIC_SPACING.maxPerLanePerTile);
   const selected=[...unsorted].sort((a,b)=>a.id-b.id).slice(0,cap);
-  const ax=((g.from%size)-(size-1)/2)*unit,az=(Math.floor(g.from/size)-(size-1)/2)*unit;
-  const bx=((g.to%size)-(size-1)/2)*unit,bz=(Math.floor(g.to/size)-(size-1)/2)*unit;
+  const a=coord(g.from,size),b=coord(g.to,size),ax=(a.x-(size-1)/2)*unit,az=(a.z-(size-1)/2)*unit;
+  const bx=(b.x-(size-1)/2)*unit,bz=(b.z-(size-1)/2)*unit;
   const hx=Math.sign(bx-ax),hz=Math.sign(bz-az);
   const placed=selected.some(c=>typeof c.progress==='number');
   if(placed){

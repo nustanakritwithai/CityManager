@@ -1,20 +1,28 @@
+import { expandedCellNeighbors, EXPANDED_MAP_CELLS } from './expanded-map-grid.ts';
+import { expandedRoadLinked, expandedRoadDriveAllowed, validateExpandedRoadTopology, setExpandedRoadJunction, configureExpandedRoadPath, forgetExpandedRoadTopology, type ExpandedRoadTopology } from './expanded-road-topology.ts';
 /** Physical road junctions are distinct from vehicle direction. Legacy maps have all adjacent links. */
 const SIZE = 24, CELLS = SIZE * SIZE;
-export type RoadTopology = { version: 1; blocked: number[]; oneWay: Record<string, number> };
+export type LegacyRoadTopology = { version: 1; blocked: number[]; oneWay: Record<string, number> };
+export type RoadTopology = LegacyRoadTopology | ExpandedRoadTopology;
 export type RoadMap = { cells: { road: boolean }[]; roadTopology?: RoadTopology };
 export const roadNeighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < CELLS - SIZE ? i + SIZE : -1].filter(n => n >= 0);
+/** Geometry based on the actual map footprint; legacy callers stay frozen. */
+export const roadNeighborsFor = (map: Pick<RoadMap,'cells'>, i: number) => map.cells.length === EXPANDED_MAP_CELLS ? expandedCellNeighbors(i) : roadNeighbors(i);
 export const edgeKey = (a: number, b: number) => Math.min(a, b) * CELLS + Math.max(a, b);
 export function roadLinked(c: RoadMap, a: number, b: number): boolean {
+  if (c.cells.length === EXPANDED_MAP_CELLS) return expandedRoadLinked(c as {cells:{road:boolean}[];roadTopology?:ExpandedRoadTopology}, a, b);
   return !!c.cells[a]?.road && !!c.cells[b]?.road && roadNeighbors(a).includes(b) && !c.roadTopology?.blocked.includes(edgeKey(a,b));
 }
 /** A junction permits turns, but never driving opposite the arrow of either road segment. */
 export function roadDriveAllowed(c: RoadMap, a: number, b: number): boolean {
+  if (c.cells.length === EXPANDED_MAP_CELLS) return expandedRoadDriveAllowed(c as {cells:{road:boolean}[];roadTopology?:ExpandedRoadTopology}, a, b);
   if (!roadLinked(c,a,b)) return false;
-  const delta=b-a;
-  return c.roadTopology?.oneWay[a] !== -delta && c.roadTopology?.oneWay[b] !== -delta;
+  const delta=b-a, topology=c.roadTopology as LegacyRoadTopology | undefined;
+  return topology?.oneWay[a] !== -delta && topology?.oneWay[b] !== -delta;
 }
 export function validateRoadTopology(c: RoadMap, value: unknown): asserts value is RoadTopology {
-  const t=value as RoadTopology;
+  if (c.cells.length === EXPANDED_MAP_CELLS) { validateExpandedRoadTopology(c.cells, value); return; }
+  const t=value as LegacyRoadTopology;
   if (!t || typeof t!=='object' || Array.isArray(t) || Object.keys(t).sort().join(',')!=='blocked,oneWay,version' || t.version!==1 || !Array.isArray(t.blocked) || t.blocked.length>SIZE*(SIZE-1)*2 || !t.oneWay || typeof t.oneWay!=='object' || Array.isArray(t.oneWay)) throw Error('Invalid road topology');
   let previous=-1;
   for(const key of t.blocked) {
@@ -25,14 +33,16 @@ export function validateRoadTopology(c: RoadMap, value: unknown): asserts value 
   if(Object.keys(t.oneWay).length>CELLS)throw Error('Too many road directions');
   for(const [key,dir] of Object.entries(t.oneWay)) if(!/^(0|[1-9]\d*)$/.test(key)||Number(key)>=CELLS||!c.cells[Number(key)]?.road||![1,-1,SIZE,-SIZE].includes(dir))throw Error('Invalid one-way road');
 }
-const copyTopology=(c:RoadMap):RoadTopology=>({version:1,blocked:[...(c.roadTopology?.blocked??[])],oneWay:{...c.roadTopology?.oneWay}});
+const copyTopology=(c:RoadMap):LegacyRoadTopology=>({version:1,blocked:[...(c.roadTopology?.blocked??[])],oneWay:{...(c.roadTopology as LegacyRoadTopology | undefined)?.oneWay}});
 export function setRoadJunction(c:RoadMap,a:number,b:number,connected:boolean):boolean {
+  if(c.cells.length === EXPANDED_MAP_CELLS) return setExpandedRoadJunction(c as {cells:{road:boolean}[];roadTopology?:ExpandedRoadTopology},a,b,connected);
   if(!c.cells[a]?.road||!c.cells[b]?.road||!roadNeighbors(a).includes(b))return false;
   const t=copyTopology(c),set=new Set(t.blocked),key=edgeKey(a,b);if(connected)set.delete(key);else set.add(key);
   t.blocked=[...set].sort((a,b)=>a-b);c.roadTopology=t;return true;
 }
 /** Drawing opens its selected edges. Existing crossing roads keep their connections and arrows. */
 export function configureRoadPath(c:RoadMap,path:number[],newCells:ReadonlySet<number>,oneWay:boolean):void {
+  if(c.cells.length === EXPANDED_MAP_CELLS) { configureExpandedRoadPath(c as {cells:{road:boolean}[];roadTopology?:ExpandedRoadTopology},path,newCells,oneWay); return; }
   const t=copyTopology(c),blocked=new Set(t.blocked),edges=new Set(path.slice(1).map((b,i)=>edgeKey(path[i],b)));
   // A single missing tile between opposite roads repairs that axis. An ambiguous
   // isolated/crossing tile needs a directed stroke to choose its connections.
@@ -55,10 +65,11 @@ export function configureRoadPath(c:RoadMap,path:number[],newCells:ReadonlySet<n
   if(c.roadTopology || t.blocked.length || Object.keys(t.oneWay).length)c.roadTopology=t;
 }
 export function forgetRoadTopology(c:RoadMap,i:number):void {
+  if(c.cells.length === EXPANDED_MAP_CELLS) { forgetExpandedRoadTopology(c as {cells:{road:boolean}[];roadTopology?:ExpandedRoadTopology},i); return; }
   if(!c.roadTopology)return;const t=copyTopology(c);t.blocked=t.blocked.filter(k=>Math.floor(k/CELLS)!==i&&k%CELLS!==i);delete t.oneWay[i];c.roadTopology=t;
 }
 export const roadTopologyKey=(c:RoadMap)=>c.roadTopology?JSON.stringify(c.roadTopology):'';
 
 export function clearRoadDirections(c:RoadMap,path:readonly number[]):void {
- if(!c.roadTopology)return;const t=copyTopology(c);for(const i of path)delete t.oneWay[i];c.roadTopology=t;
+ if(!c.roadTopology)return; if(c.roadTopology.version===2){const t={...c.roadTopology,blocked:[...c.roadTopology.blocked],oneWay:{...c.roadTopology.oneWay}};for(const i of path)delete t.oneWay[i];c.roadTopology=t;return;} const t=copyTopology(c);for(const i of path)delete t.oneWay[i];c.roadTopology=t;
 }

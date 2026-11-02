@@ -1,9 +1,10 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 /**
  * Bus depots and stops (PR B2, bus-design.th.md). Pure data, rules and validation; no sim.ts import
  * so sim.ts can depend on it without a cycle. Stored only in the optional `city.bus` save section
  * (City.version stays 9). Round 1 is economy-neutral: nothing here charges money.
  */
-import { roadLinked, roadNeighbors, type RoadMap } from '../road-topology.ts';
+import { roadLinked, roadNeighborsFor, type RoadMap } from '../road-topology.ts';
 import { BUS_LIMITS, type BusDepot, type BusLine, type BusState, type BusStop, type BusStopSide } from './types.ts';
 export const createBus = (): BusState => ({ version: 1, rules: 'bus-1', depots: [], stops: [], lines: [] });
 type Host = { bus?: BusState };
@@ -21,17 +22,17 @@ const SIDES: readonly BusStopSide[] = ['n', 'e', 's', 'w'];
  */
 export function busStopSides(c: RoadMap, i: number, width: number): { sides: BusStopSide[] } | { reason: string } {
   if (!c.cells[i]?.road) return { reason: 'ป้ายรถเมล์ต้องอยู่บนถนน' };
-  const linked = roadNeighbors(i).filter(n => roadLinked(c, i, n));
+  const linked = roadNeighborsFor(c,i).filter(n => roadLinked(c, i, n));
   if (linked.length === 0) return { reason: 'ถนนช่วงนี้ไม่เชื่อมกับถนนอื่น' };
   if (linked.length > 2) return { reason: 'ห้ามวางป้ายรถเมล์ที่ทางแยก' };
-  const horizontal = linked.every(n => Math.abs(n - i) === 1), vertical = linked.every(n => Math.abs(n - i) === width);
+  const origin=expandedCellCoordinate(i), horizontal=linked.every(n=>expandedCellCoordinate(n).z===origin.z), vertical=linked.every(n=>expandedCellCoordinate(n).x===origin.x);
   if (!horizontal && !vertical) return { reason: 'ห้ามวางป้ายรถเมล์ที่หัวมุมถนน' };
   const dir = c.roadTopology?.oneWay[i];
-  if (dir === 1) return { sides: ['n'] }; if (dir === -1) return { sides: ['s'] };
-  if (dir === width) return { sides: ['e'] }; if (dir === -width) return { sides: ['w'] };
+  if (dir === 1 || dir === 'east') return { sides: ['n'] }; if (dir === -1 || dir === 'west') return { sides: ['s'] };
+  if (dir === width || dir === 'south') return { sides: ['e'] }; if (dir === -width || dir === 'north') return { sides: ['w'] };
   return { sides: horizontal ? ['n', 's'] : ['e', 'w'] };
 }
-const manhattan = (a: number, b: number, w: number) => Math.abs((a % w) - (b % w)) + Math.abs(Math.floor(a / w) - Math.floor(b / w));
+const manhattan = (a:number,b:number,w:number) => {if(w!==24)return Math.abs(a%w-b%w)+Math.abs(Math.floor(a/w)-Math.floor(b/w));const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b);return Math.abs(x.x-y.x)+Math.abs(x.z-y.z);};
 /** Stop placement reason (null = ok) for a specific side, ignoring the stop `except` (for re-checks). */
 export function busStopReason(c: RoadMap & Host, i: number, side: BusStopSide, width: number, except?: number): string | null {
   const s = busStopSides(c, i, width);

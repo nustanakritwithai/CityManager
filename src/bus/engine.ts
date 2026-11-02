@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 /**
  * BusEngine (PR B4, bus-design.th.md) — pure, deterministic, event-driven bus service. Modelled on
  * TaxiEngine phases. No UI, saves or economy. Driven by absolute GAME minutes (`advanceTo`).
@@ -18,13 +19,13 @@ import { BUS_BODY, BUS_LANE_OFFSET, busLevelForCapacity } from './geometry.ts';
 import { TRAFFIC_SPACING } from '../traffic/spacing.ts';
 import { buildNetwork, linkKey, type LinkNetwork } from '../traffic/network.ts';
 import { linkTimes, shortestPath } from '../traffic/routing.ts';
-import { roadNeighbors } from '../road-topology.ts';
+import { roadNeighborsFor } from '../road-topology.ts';
 import { BusRouteCache, busServiceOrder, type BusHost, type BusLineRoute } from './lines.ts';
 import { BUS_CAPACITY, BUS_DWELL_MIN, BUS_PCU, BUS_SERVICE, type BusEvent, type BusPhase, type BusRequestMass, type BusSnapshot } from './types.ts';
 
 export const BUS_MAX_WAIT_MIN = 30;
 export const BUS_RETAINED_FLEET_LIMIT = 80;
-export const BUS_ROUTE_PLAN_CELL_LIMIT=24*24+1;
+export const BUS_ROUTE_PLAN_CELL_LIMIT=28*24+1;
 export const BUS_ROUTE_PLAN_SAMPLE_LIMIT=2*BUS_ROUTE_PLAN_CELL_LIMIT;
 /** A stopped bus must fit between both junction rotation envelopes, with bumper gaps.
  * Uses the actual applied class, not the requested future depot refit. */
@@ -37,7 +38,7 @@ export function busConflictClusters(path:readonly number[],junctions:ReadonlySet
   const nodes:number[]=[];
   for(let i=1;i+1<path.length;i++){
     const a=path[i-1],n=path[i],z=path[i+1];
-    if(junctions.has(n)||(n%24-a%24)*(z%24-n%24)+(Math.floor(n/24)-Math.floor(a/24))*(Math.floor(z/24)-Math.floor(n/24))===0)nodes.push(i);
+    if(junctions.has(n)||(expandedCellCoordinate(n).x-expandedCellCoordinate(a).x)*(expandedCellCoordinate(z).x-expandedCellCoordinate(n).x)+(expandedCellCoordinate(n).z-expandedCellCoordinate(a).z)*(expandedCellCoordinate(z).z-expandedCellCoordinate(n).z)===0)nodes.push(i);
   }
   const clusters:number[][]=[];
   for(const index of nodes){const last=clusters.at(-1),previous=last?.at(-1);if(previous!==undefined&&!busClusterPocket(capacity,(index-previous)*2))last!.push(index);else clusters.push([index]);}
@@ -102,7 +103,7 @@ export class BusEngine {
     this.revision++; this.movementReset?.();
     const first = !this.net; this.routes = next; this.net = buildNetwork(this.host); this.times = this.fixedTimes ?? linkTimes(this.net, new Map());
     const neighbors=new Map<number,Set<number>>();for(const l of this.net.links.values())for(const [a,z]of[[l.from,l.to],[l.to,l.from]])(neighbors.get(a)??neighbors.set(a,new Set()).get(a)!).add(z);
-    this.conflictNodes=new Set([...neighbors].filter(([id,n])=>{if(n.size>2)return true;if(n.size!==2)return false;const[a,z]=[...n];return (a%24-id%24)*(z%24-id%24)+(Math.floor(a/24)-Math.floor(id/24))*(Math.floor(z/24)-Math.floor(id/24))===0;}).map(([id])=>id));
+    this.conflictNodes=new Set([...neighbors].filter(([id,n])=>{if(n.size>2)return true;if(n.size!==2)return false;const[a,z]=[...n];return (expandedCellCoordinate(a).x-expandedCellCoordinate(id).x)*(expandedCellCoordinate(z).x-expandedCellCoordinate(id).x)+(expandedCellCoordinate(a).z-expandedCellCoordinate(id).z)*(expandedCellCoordinate(z).z-expandedCellCoordinate(id).z)===0;}).map(([id])=>id));
     this.clusterPlans=new WeakMap();this.maneuverPlans=new WeakMap();
 
     for (const r of this.routes) for (let k = 0; k < r.buses; k++) if ((!this.movementGate || this.buses.length < BUS_RETAINED_FLEET_LIMIT) && !this.buses.some(b => b.lineId === r.lineId && b.k === k)) {
@@ -162,7 +163,7 @@ export class BusEngine {
   private goHome(b: Bus, t: number): void {
     const depot = this.depotCell(b.lineId); b.returning = true;
     let best: number[] | null = null;
-    if (depot !== undefined) for (const n of roadNeighbors(depot).filter(n => this.host.cells[n]?.road).sort((x, y) => x - y)) { const p = n === b.cell ? [n] : shortestPath(this.net, this.times, b.cell, n); if (p && (!best || p.length < best.length)) best = p; }
+    if (depot !== undefined) for (const n of roadNeighborsFor(this.host,depot).filter(n => this.host.cells[n]?.road).sort((x, y) => x - y)) { const p = n === b.cell ? [n] : shortestPath(this.net, this.times, b.cell, n); if (p && (!best || p.length < best.length)) best = p; }
     if (depot === undefined && this.movementGate) { b.phase='running'; b.path=b.at=undefined;b.until=t+5;return; }
     if (depot === undefined || !this.host.cells[b.cell]?.road && b.cell === depot) { this.park(b, t); return; }
     if (!best) { b.phase = 'running'; b.path = b.at = undefined; b.until = t + 5; return; } // stuck: retry
@@ -243,7 +244,7 @@ export class BusEngine {
     if (b.returning) {
       const depot = this.depotCell(b.lineId); this.cut(b, t);
       if (this.movementGate && depot === undefined) { this.goHome(b,t); return; }
-      if (depot !== undefined && !roadNeighbors(depot).includes(b.cell)) { this.goHome(b, t); return; } // was stuck: retry
+      if (depot !== undefined && !roadNeighborsFor(this.host,depot).includes(b.cell)) { this.goHome(b, t); return; } // was stuck: retry
       this.park(b, t); if (b.retired && (!r || b.k >= r.buses)) this.buses = this.buses.filter(x => x !== b); return;
     }
     if (!r) { this.goHome(b, t); return; }
@@ -291,7 +292,7 @@ export class BusEngine {
     } else if (b.returning) {
       this.cut(copy, t); const depot = this.depotCell(b.lineId);
       if (this.movementGate && depot === undefined) this.goHome(copy,t);
-      else if (depot !== undefined && !roadNeighbors(depot).includes(copy.cell)) this.goHome(copy, t); else this.park(copy, t);
+      else if (depot !== undefined && !roadNeighborsFor(this.host,depot).includes(copy.cell)) this.goHome(copy, t); else this.park(copy, t);
     } else if (!r) this.goHome(copy, t);
     else { const order = this.order(r), idx = b.idx >= order.length - 1 ? 0 : b.idx; copy.cell = this.stopCell(order[idx])!; copy.path = copy.at = undefined; copy.phase = 'dwelling'; }
     return copy;

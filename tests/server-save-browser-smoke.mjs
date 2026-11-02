@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { inflateSync, deflateSync } from 'node:zlib';
 import { createServerCityService, hash } from '../server/city-saves/service.mjs';
+let landEvidence={status:'not-run'};
 let trafficGapEvidence={status:'not-run',reason:'Bumper-gap acceptance is opt-in for the exact traffic transition.'};
 let railEvidence={status:'not-run',reason:'Rail UI acceptance is opt-in for the exact rail transition.'};
 let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
@@ -271,6 +272,12 @@ async function run(){
   assert.equal(await evaluate('!!window.cityManager'),false,'no offline city entry after server load failure');assert.equal(f.state.active,null);await clean();
   const acknowledged=await f.service.mutate(OWNER,randomUUID(),{action:'create',cityId:randomUUID(),raw:serverSeed,metadata:{name:'acknowledged fixture',population:0,tick:JSON.parse(serverSeed).tick}});
   assert.equal(acknowledged.raw,serverSeed);f.mode='ok';await enter();
+  if(process.env.CITYMANAGER_LAND_CHECKS==='1'){
+   const source=JSON.parse(serverSeed), expanded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));
+   assert.equal(f.state.active.raw,serverSeed,'loading migration does not write original bytes');
+   assert.deepEqual(expanded.cells.slice(0,576),source.cells);assert.deepEqual(expanded.resources.fertility.slice(0,576),source.resources.fertility);
+   for(const key of ['seed','rng','tick','nextId','buildings','households','firms','accounts','ledger','goods','goodsLedger','cropLedger','market'])assert.deepEqual(expanded[key],source[key],`preserve ${key}`);
+  }
   assert.equal(f.state.active.metadata.tick,JSON.parse(serverSeed).tick);assert.equal(f.state.archives.size,0,'obsolete browser copies are neither imported nor archived');assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')"),seed);await clean();
   assert.equal(await evaluate("!!document.querySelector('#save:not(:disabled)')"),true,'real Save control available after authenticated entry');
   if(process.env.CITYMANAGER_PR182_CHECKS==='1'){const {pr182VisualChecks}=await import('./pr182-visual-checks.mjs');await pr182VisualChecks({send,evaluate,capture});await clean();}
@@ -296,7 +303,13 @@ async function run(){
   }
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
-  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,25,'actual built game saves commercial checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-20');await clean();await capture('server-save-acknowledged');
+  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,26,'actual built game saves expanded checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).mapBaseVersion,25);assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-21');await clean();await capture('server-save-acknowledged');
+  if(process.env.CITYMANAGER_LAND_CHECKS==='1'){
+   const {landExpansionChecks}=await import('./land-expansion-browser-checks.mjs');
+   landEvidence=await landExpansionChecks({send,evaluate,capture,until,
+    acknowledge:async()=>{const revision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>revision,'land server ACK');await settled();return JSON.parse(f.state.active.raw);},
+    reload:async()=>{expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;}});
+  }
   if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){
    diagnostics.phase='actual bumper-gap traffic UI';trafficGapEvidence={status:'running'};
    const {trafficGapBrowserChecks}=await import('./traffic-gap-browser-checks.mjs');
@@ -424,9 +437,9 @@ const selfTestOnly=process.argv.includes('--self-test'),started=new Date().toISO
 const output=resolve('.test-output/server-save-smoke');await mkdir(output,{recursive:true});
 try {
  if(selfTestOnly)await selfTest();else await run();
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':runLostAckNextSave(process.env)?'passed':'passed-with-exclusion',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':runLostAckNextSave(process.env)?'passed':'passed-with-exclusion',toolbarEvidence,railEvidence,trafficGapEvidence,landEvidence,diagnostics},null,2));
 } catch(error) {
- await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,diagnostics,error:String(error?.stack??error)},null,2));
+ await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,landEvidence,diagnostics,error:String(error?.stack??error)},null,2));
  // Emit only bounded synthetic request and click metadata so CI logs can
  // distinguish a missed click from a failed ACK when artifacts are unavailable.
  if(diagnostics.lostAck?.posts){const {initialRevision,headRevision,initialReceiptCount,receiptCount,posts,fixtureAudit,network,ui}=diagnostics.lostAck;console.error('Lost ACK diagnostic',JSON.stringify({initialRevision,headRevision,initialReceiptCount,receiptCount,posts:posts.map(({sameOriginalKey,action,expectedRevision})=>({sameOriginalKey,action,expectedRevision})),fixtureAudit,network,retryMouse:diagnostics.retryMouse,ui:{bannerVisible:ui?.bannerVisible,saveDisabled:ui?.saveDisabled,clicks:ui?.clicks}}));}

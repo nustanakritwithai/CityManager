@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 import {roamRng} from '../taxi/rrt-roam.ts';
 import {linkKey,type LinkNetwork} from './network.ts';
 import {shortestPath,pathTime} from './routing.ts';
@@ -24,7 +25,7 @@ function validateEndpoints(from:number,to:number){
 function explore(net:LinkNetwork,times:ReadonlyMap<string,number>,from:number,to:number,o:RrtRouteOptions,cells:readonly number[]){
  const maxNodes=o.maxNodes??CAR_RRT_NODES,maxAttempts=o.maxAttempts??CAR_RRT_ATTEMPTS,width=o.width??24;
  const rng=roamRng(o.seed,`car-od:${from}:${to}`,o.epoch,from),parent=new Map<number,number>([[from,-1]]),nodes=[from];
- const distance=(a:number,b:number)=>Math.abs(a%width-b%width)+Math.abs(Math.floor(a/width)-Math.floor(b/width));
+ const distance=(a:number,b:number)=>{if(width!==24)return Math.abs(a%width-b%width)+Math.abs(Math.floor(a/width)-Math.floor(b/width));const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b);return Math.abs(x.x-y.x)+Math.abs(x.z-y.z);};
  let iterations=0;
  while(!parent.has(to)&&nodes.length<maxNodes&&iterations<maxAttempts){
   iterations++;const sample=rng()<CAR_RRT_GOAL_BIAS?to:cells[Math.floor(rng()*cells.length)];

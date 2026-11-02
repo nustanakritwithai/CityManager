@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from './expanded-map-grid.ts';
 import {installRailManagement} from './rail/management.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { installSaveManagement } from './save-management-dialog.ts';
@@ -85,7 +86,7 @@ import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
 import { installHudRow } from './hud-row.ts';
-import { createParkRuntime, advanceParkRuntime, reconcileParkRuntime, serializeParkSession, deserializeParkSession, type ParkRuntime } from './park-runtime.ts';
+import { createParkRuntime, advanceParkRuntime, reconcileParkRuntime, serializeParkSession, deserializeParkSession, expandValidatedParkSession, type ParkRuntime } from './park-runtime.ts';
 import { housingLevel } from './housing.ts';
 import { parkActivityDiagnostics } from './park-activity.ts';
 import { parkRecreationResidentIds } from './park-recreation-activity.ts';
@@ -417,16 +418,16 @@ function renderPlace() {
     const firm = building && city.firms.find(f => f.building === building.id);
     const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex);
     const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
-    $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (cellIndex % SIZE + 1) + ',' + (Math.floor(cellIndex / SIZE) + 1);
+    $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (expandedCellCoordinate(cellIndex).x + 1) + ',' + (expandedCellCoordinate(cellIndex).z + 1);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, cell.zone === 'C' && !!building && building.level <= 3, !!park);
-    if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
+    if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${expandedCellCoordinate(cellIndex).x + 1},${expandedCellCoordinate(cellIndex).z + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
     const busCaption = busController?.caption(cellIndex); if (busCaption) $('#place-subtitle').textContent = busCaption;
     const rail = !cell.road && !cell.zone ? railUi?.placeCard(cellIndex) : null;
-    if (rail) { $('#selection-title').textContent = `${rail.title} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = rail.subtitle; railCard = rail.card; }
+    if (rail) { $('#selection-title').textContent = `${rail.title} · ${expandedCellCoordinate(cellIndex).x + 1},${expandedCellCoordinate(cellIndex).z + 1}`; $('#place-subtitle').textContent = rail.subtitle; railCard = rail.card; }
     const bus = rail ? null : busController?.placeCard(cellIndex);
-    if (bus) { $('#selection-title').textContent = `${bus.title} · ${cellIndex % SIZE + 1},${Math.floor(cellIndex / SIZE) + 1}`; $('#place-subtitle').textContent = bus.subtitle; busCard = bus.card; }
+    if (bus) { $('#selection-title').textContent = `${bus.title} · ${expandedCellCoordinate(cellIndex).x + 1},${expandedCellCoordinate(cellIndex).z + 1}`; $('#place-subtitle').textContent = bus.subtitle; busCard = bus.card; }
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
@@ -577,7 +578,7 @@ function syncTaxiInspector() {
   const depot = cell === null ? undefined : taxiSession.at(cell);
   box.hidden = !depot;
   if (!depot || cell === null) return;
-  $('#selection-title').textContent = `อู่แท็กซี่ #${depot.id} · ${cell % SIZE + 1},${Math.floor(cell / SIZE) + 1}`;
+  $('#selection-title').textContent = `อู่แท็กซี่ #${depot.id} · ${expandedCellCoordinate(cell).x + 1},${expandedCellCoordinate(cell).z + 1}`;
   $('#place-subtitle').textContent = `ระดับ ${depot.level} · ${depot.level === 1 ? 4 : 8} คัน · ${depot.open ? 'เปิดบริการ' : 'ปิดบริการ'}`;
   view?.setTaxiDepots(taxiSession.depots());
 }
@@ -606,7 +607,7 @@ function updateMapInfo(placement: Preview | null) {
 async function boot() {
   const serverEntry=await requireServerCityEntry(()=>{const fresh=createCity(61025,{starter:STARTER});return serializeParkSession(fresh,createParkRuntime(fresh));},(import.meta as ImportMeta & {env:Record<string,string|undefined>}).env.VITE_CITY_SAVE_URL);
   const serverSave=serverEntry.client;
-  const restored=deserializeParkSession(serverEntry.raw);
+  const restored=expandValidatedParkSession(deserializeParkSession(serverEntry.raw));
   city=restored.city;parkRuntime=restored.runtime;taxiSession.bind(city);
   if(!city.education)adoptSavedEducation(city);
   syncEducationTools();paused=true;
@@ -847,7 +848,7 @@ async function boot() {
             await serverSave.archive({source:'conflict-session',raw});
             resolvingConflict=true;if(serverSave.conflict)serverSave.discardConflictedAttempt();
             const active=await serverSave.load();if(!active||'deleted' in active)throw Error('เมืองหลักถูกลบแล้ว กรุณาโหลดหน้าใหม่เพื่อเริ่มเมืองใหม่');
-            const loaded=deserializeParkSession(active.raw);cityGeneration++;city=loaded.city;parkRuntime=loaded.runtime;
+            const loaded=expandValidatedParkSession(deserializeParkSession(active.raw));cityGeneration++;city=loaded.city;parkRuntime=loaded.runtime;
             taxiSession.bind(city);publishTaxi(true);cueLimiter.reset();syncEducationTools();ownerDecisionSession.reset(city);ownerDecisionPanel?.reset();
             resolvingConflict=false;selected=roadStart=null;inspector(false);setTool('select');autosave.adoptLoaded();saveFeedback.recovered();render();
           }finally{saveBusy=false;}
@@ -910,7 +911,7 @@ async function boot() {
           }
           const checked=await serverSave.load();
           if(!checked||'deleted' in checked||checked.cityId!==createdAcknowledgement.cityId||checked.revision!==createdAcknowledgement.revision||checked.rawHash!==createdAcknowledgement.rawHash)throw Error('เมืองหลักเปลี่ยนระหว่างตรวจเมืองใหม่ กรุณาโหลดหน้าใหม่');
-          const loaded=deserializeParkSession(checked.raw);cityGeneration++;city=loaded.city;parkRuntime=loaded.runtime;
+          const loaded=expandValidatedParkSession(deserializeParkSession(checked.raw));cityGeneration++;city=loaded.city;parkRuntime=loaded.runtime;
           taxiSession.bind(city);publishTaxi(true);cueLimiter.reset();syncEducationTools();ownerDecisionSession.reset(city);ownerDecisionPanel?.reset();
           selected=roadStart=null;inspector(false);setTool('select');paused=true;autosave.adoptLoaded();saveFeedback.recovered();render();
         }finally{saveBusy=false;}

@@ -1,5 +1,6 @@
 import { Entity, Mesh, MeshInstance, StandardMaterial, Color, BLEND_NORMAL, type AppBase } from 'playcanvas';
 import type { Atmosphere } from './atmosphere.ts';
+import { hash, noise, smooth, mix, worldEdgeDistance, worldOnHighway, playableWorldSurface } from './scene-world-terrain.ts';
 
 /**
  * Decorative surroundings outside the 24 × 24 build grid: mainland and highway to the
@@ -8,20 +9,6 @@ import type { Atmosphere } from './atmosphere.ts';
  */
 const EXTENT = 112, STEP = 1.6, WATER_Y = -.32;
 
-function hash(x: number, y: number, salt: number): number {
-  let n = Math.imul(x + salt * 7919, 374761393) + Math.imul(y - salt, 668265263);
-  n = Math.imul(n ^ (n >>> 13), 1274126177);
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
-}
-function noise(x: number, y: number, scale: number, salt: number): number {
-  const gx = x / scale, gy = y / scale, ix = Math.floor(gx), iy = Math.floor(gy), fx = gx - ix, fy = gy - iy;
-  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
-  const a = hash(ix, iy, salt) * (1 - u) + hash(ix + 1, iy, salt) * u, b = hash(ix, iy + 1, salt) * (1 - u) + hash(ix + 1, iy + 1, salt) * u;
-  return a * (1 - v) + b * v;
-}
-const fbm = (x: number, z: number, salt: number) => noise(x, z, 26, salt) * .55 + noise(x, z, 11, salt + 3) * .3 + noise(x, z, 4.5, salt + 9) * .15;
-const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
-const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 type Rgb = [number, number, number];
 const hex = (h: string): Rgb => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 const mixRgb = (a: Rgb, b: Rgb, t: number): Rgb => [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)];
@@ -66,7 +53,7 @@ export class CityWorld {
     for (let attempt = 0; attempt < 900 && this.treeSpots.length < 150; attempt++) {
       const x = -EXTENT + hash(attempt, 3, 41) * EXTENT * 2, z = -EXTENT + hash(attempt, 7, 43) * EXTENT * 2;
       const d = this.edgeDistance(x, z), y = this.height(x, z);
-      if (d < 3 || d > 62 || y < .25 || this.onHighway(x, z) || noise(x, z, 14, 61) < .42) continue;
+      if (x >= -this.half-2 && x <= this.half+2 && z >= -this.half-10 && z <= -this.half+2 || d < 3 || d > 62 || y < .25 || this.onHighway(x, z) || noise(x, z, 14, 61) < .42) continue;
       this.treeSpots.push({ x, y, z, scale: .75 + hash(attempt, 11, 47) * .55 });
     }
     app.root.addChild(this.root);
@@ -74,33 +61,15 @@ export class CityWorld {
 
   /** Distance outside the square build area (0 at its edge). */
   private edgeDistance(x: number, z: number) {
-    const dx = Math.max(0, Math.abs(x) - this.half), dz = Math.max(0, Math.abs(z) - this.half);
-    return Math.hypot(dx, dz) + Math.min(0, Math.max(Math.abs(x), Math.abs(z)) - this.half);
+    return worldEdgeDistance(x, z, this.half);
   }
-  private onHighway(x: number, z: number) { return x < -this.half && Math.abs(z - this.gateZ) < 3.2; }
-
-  /** How far the land reaches from the grid edge in this direction before the beach. */
-  private coastReach(x: number, z: number) {
-    const angle = Math.atan2(z, x), west = Math.max(0, -Math.cos(angle)), north = Math.max(0, -Math.sin(angle)), east = Math.max(0, Math.cos(angle));
-    const south = Math.max(0, Math.sin(angle));
-    const reach = 2.6 + west * 70 + north * 16 + east * 9 - south * 1.2;
-    return reach + (noise(x, z, 17, 5) - .5) * (6 + north * 10 + east * 10);
-  }
+  private onHighway(x: number, z: number) { return worldOnHighway(x, z, this.half, this.gateZ); }
 
   height(x: number, z: number): number { return this.surface(x, z).y; }
 
   /** Height plus the 0..1 beach blend used for colouring. */
   private surface(x: number, z: number): { y: number; beach: number } {
-    const d = this.edgeDistance(x, z);
-    if (d <= 0) return { y: -.02, beach: 0 };
-    const reach = this.coastReach(x, z);
-    const angle = Math.atan2(z, x), hilly = Math.max(0, -Math.sin(angle)) * .9 + Math.max(0, Math.cos(angle)) * .75 + Math.max(0, -Math.cos(angle)) * .2;
-    let land = (fbm(x, z, 21) - .35) * 1.2 * smooth(2.5, 9, d) + Math.pow(fbm(x * .9, z * .9, 33), 1.8) * 17 * hilly * smooth(5, 18, d) * smooth(reach + 2, reach - 8, d);
-    land = Math.max(.04, land) * smooth(0, 2.2, d);
-    if (this.onHighway(x, z)) land = mix(land, .03, smooth(3.2, 1.6, Math.abs(z - this.gateZ)));
-    const beach = smooth(reach - 1.5, reach + 3.5, d);
-    const seabed = -.55 - smooth(reach + 3, reach + 18, d) * 2.4;
-    return { y: mix(land, seabed, beach), beach };
+    return playableWorldSurface(x, z, this.half, this.gateZ);
   }
 
   private colour(x: number, y: number, z: number, beach: number): Rgb {

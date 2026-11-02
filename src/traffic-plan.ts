@@ -1,3 +1,4 @@
+import { expandedCellNeighbors } from './expanded-map-grid.ts';
 import { roadLinked, roadDriveAllowed, roadTopologyKey } from './road-topology.ts';
 /**
  * Decorative city life: which cars, trucks, walkers and smoke plumes to show.
@@ -20,7 +21,7 @@ export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; ret
 export type Walker = { key: string; route: number[]; colour: number };
 export type TrafficPlan = { cars: Vehicle[]; trucks: Vehicle[]; walkers: Walker[]; smoke: number[]; signature: string };
 
-const neighbours = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(n => n >= 0);
+const neighbours = (i:number) => expandedCellNeighbors(i);
 
 /** Visual-only hash; never the simulation RNG. */
 export function visualHash(a: number, b = 0): number {

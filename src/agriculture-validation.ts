@@ -1,3 +1,4 @@
+import { isCanonicalExpandedResourceMap } from './expanded-map-migration.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
@@ -38,7 +39,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   // Missing boundary means this is an old snapshot and must use its old rules.
   const unified = c.commercialUnifiedStartTick !== undefined;
   if (unified) requireThat(isSafeCount(c.commercialUnifiedStartTick) && c.commercialUnifiedStartTick <= c.tick);
-  requireThat(isCanonicalResourceMap(c.resources, c.seed));
+  requireThat(c.cells.length === 672 ? isCanonicalExpandedResourceMap(c.resources, c.seed) : isCanonicalResourceMap(c.resources, c.seed));
   requireThat(isSafeCount(c.agricultureStartTick) && c.agricultureStartTick <= c.tick);
   requireThat(object(c.crops) && ['harvested', 'processed', 'consumed', 'writtenOff'].every(key => isSafeCount(c.crops[key as keyof City['crops']])));
   requireThat(Array.isArray(c.cropLedger) && Array.isArray(c.ownerLabor));

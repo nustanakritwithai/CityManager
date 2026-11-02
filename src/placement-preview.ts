@@ -16,10 +16,10 @@ export type Preview = { ok: boolean; cells: PreviewCell[]; cost: number; label: 
 const ZONE_NAMES: Record<Exclude<Zone, null>, string> = { R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' };
 const DEMOLITION_COST = 2_000;
 const credits = (satang: number) => (satang / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
-const inMap = (cell: number) => Number.isInteger(cell) && cell >= 0 && cell < SIZE * SIZE;
+const inMap = (cell:number,city:City) => Number.isInteger(cell) && cell >= 0 && cell < city.cells.length;
 
 export function previewPlacement(city: City, tool: string, start: number | null, hover: number | null): Preview | null {
-  if (hover === null || !inMap(hover)) return null;
+  if (hover === null || !inMap(hover,city)) return null;
   const treasury = treasurySpendable(city);
   const taxiHere = taxiEnabled() && sharedTaxiSession().at(hover);
   if (tool === 'taxi') {
@@ -28,7 +28,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
   }
   if (tool === 'road') {
     const path = start === null ? [hover] : roadPath(start, hover);
-    if (!path.length) return null;
+    if (!path.length || path.some(i=>!inMap(i,city))) return null;
     const taxiBlock = taxiEnabled() ? new Set(path.filter(i => sharedTaxiSession().at(i))) : new Set<number>();
     const blocked = new Set(path.filter(i => city.cells[i].building !== null || plantAt(city, i) || parkAt(city, i) || taxiBlock.has(i)));
     const added = path.filter(i => !city.cells[i].road), cost = added.length * ROAD_COST;

@@ -1,4 +1,5 @@
-import {roadNeighbors,roadTopologyKey,validateRoadTopology,type RoadMap} from '../road-topology.ts';
+import { EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
+import {roadNeighborsFor,roadTopologyKey,validateRoadTopology,type RoadMap} from '../road-topology.ts';
 import {buildNetwork,type LinkNetwork} from './network.ts';
 import {TAXI_DEPOT_UNITS,type TaxiDepotSite} from '../taxi/sites.ts';
 import {TAXI_AVAILABILITY_CAP} from '../taxi/types.ts';
@@ -18,7 +19,7 @@ export type GameRailLine={id:string;revision:number;stations:[{cell:number;open:
  * need an explicit shared-track capacity policy before being enabled. */
 export type GameModalConfig={taxis:readonly TaxiDepotSite[];rail:readonly GameRailLine[]};
 export type GameModalStats={clippedRate:number;clippedBefore:number;rawRoadBefore:number;rawRoadAfter:number;roadBefore:number;roadAfter:number;railDiverted:number;taxiDiverted:number;taxiLoaded:number;taxiEmpty:number;railByLine:{id:string;shifted:number}[];taxiByDepot:{id:number;shifted:number}[]};
-const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<576;
+const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<EXPANDED_MAP_CELLS;
 const finite=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>=0;
 const signature=(map:RoadMap)=>map.cells.map(c=>c.road?'1':'0').join('')+roadTopologyKey(map);
 function reachable(net:LinkNetwork,starts:readonly number[],limit=Infinity):Map<number,number>{
@@ -32,18 +33,18 @@ function railConnected(links:readonly RailLink[],from:number,to:number):boolean 
 /** Build only when city roads or the player's upgrade layout changes. The saved
  * prototypes are read as inputs; nothing here writes City, a financial journal or storage. */
 export function compileGameModal(map:RoadMap,config:GameModalConfig) {
- if(!map||!Array.isArray(map.cells)||map.cells.length!==576||map.cells.some(c=>!c||typeof c.road!=='boolean')||!config||!Array.isArray(config.taxis)||config.taxis.length>4||!Array.isArray(config.rail)||config.rail.length>1)throw Error('Invalid modal game configuration');
+ if(!map||!Array.isArray(map.cells)||![576,EXPANDED_MAP_CELLS].includes(map.cells.length)||map.cells.some(c=>!c||typeof c.road!=='boolean')||!config||!Array.isArray(config.taxis)||config.taxis.length>4||!Array.isArray(config.rail)||config.rail.length>1)throw Error('Invalid modal game configuration');
  if(map.roadTopology)validateRoadTopology(map,map.roadTopology);
  const net=buildNetwork(map),ids=new Set<number>();
  const taxis=[...(config.taxis as readonly TaxiDepotSite[])].sort((a,b)=>a.id-b.id).map(d=>{
-  if(!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid taxi depot');ids.add(d.id);
-  const starts=roadNeighbors(d.cell).filter(i=>map.cells[i].road),coverage=d.open?reachable(net,starts,GAME_TAXI_RADIUS_ROAD_HOPS):new Map<number,number>();
+  if(!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||d.cell>=map.cells.length||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid taxi depot');ids.add(d.id);
+  const starts=roadNeighborsFor(map,d.cell).filter(i=>map.cells[i].road),coverage=d.open?reachable(net,starts,GAME_TAXI_RADIUS_ROAD_HOPS):new Map<number,number>();
   return {id:d.id,coverage,capacity:d.open?TAXI_DEPOT_UNITS[d.level]*GAME_TAXI_CAPACITY_PER_UNIT:0};
  });
  const lineIds=new Set<string>();
  const rail=[...(config.rail as readonly GameRailLine[])].sort((a,b)=>a.id.localeCompare(b.id)).map(line=>{
   if(typeof line.id!=='string'||!line.id||line.id.length>100||lineIds.has(line.id)||!Array.isArray(line.stations)||line.stations.length!==2||!finite(line.capacity)||line.capacity>20||!Array.isArray(line.links)||line.links.length>2208)throw Error('Invalid rail line');lineIds.add(line.id);
-  const [a,b]=line.stations;if(!a||!b||!cell(a.cell)||!cell(b.cell)||a.cell===b.cell||typeof a.open!=='boolean'||typeof b.open!=='boolean')throw Error('Invalid rail stations');
+  const [a,b]=line.stations;if(!a||!b||!cell(a.cell)||!cell(b.cell)||a.cell>=map.cells.length||b.cell>=map.cells.length||a.cell===b.cell||typeof a.open!=='boolean'||typeof b.open!=='boolean')throw Error('Invalid rail stations');
   // Reuse PR124's rail topology validation and preserve its round-trip requirement.
   const graph=createRailGraph(line.revision,line.links);
   // PR124's current placement policy reserves empty parcels and has no grade

@@ -1,3 +1,4 @@
+import { expandedCellCoordinate, expandedCellPath, EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
 /** Application-owned passenger infrastructure. No road admission or money mutation.
  * Service policy must be supplied explicitly; the pending traffic bridge owns leases. */
 import type {City} from '../sim.ts';
@@ -29,7 +30,7 @@ function validate(state:RailNetworkState){
     ||!Array.isArray(state.stations)||state.stations.length>2||!state.graph||!exact(state.graph,'links,revision')||!Array.isArray(state.graph.links)||state.graph.links.length>2208
     ||state.graph.links.some(l=>!l||!exact(l,'from,minutes,to')))throw Error('Invalid rail network');
   const ids=new Set<string>(),cells=new Set<number>();
-  for(const site of state.stations){if(!site||!exact(site,'cell,id')||!validId(site.id)||!safeCount(site.cell)||site.cell>=576||ids.has(site.id)||cells.has(site.cell))throw Error('Invalid rail station site');ids.add(site.id);cells.add(site.cell);}
+  for(const site of state.stations){if(!site||!exact(site,'cell,id')||!validId(site.id)||!safeCount(site.cell)||site.cell>=EXPANDED_MAP_CELLS||ids.has(site.id)||cells.has(site.cell))throw Error('Invalid rail station site');ids.add(site.id);cells.add(site.cell);}
   const graph=createRailGraph(state.graph.revision,state.graph.links);
   if(Object.hasOwn(state,'model')&&(!state.model||typeof state.model!=='object'))throw Error('Invalid rail model');
   if(state.model){const m=state.model;if(!exact(m,'accepting,nextOfferMinute,nextSequence,offeredPersons,retiredPersons,version')||m.version!==1||typeof m.accepting!=='boolean'||![m.nextSequence,m.nextOfferMinute,m.offeredPersons,m.retiredPersons].every(safeCount)||m.retiredPersons>m.offeredPersons||m.nextOfferMinute<state.minute||m.nextOfferMinute>state.minute+60)throw Error('Invalid rail model counters');}
@@ -67,6 +68,11 @@ export class RailNetworkRuntime {
       ||value.binding.cityRevision!==coreRevision(cityRaw)||value.binding.cityId!==value.network?.cityId||value.binding.epoch!==value.network?.epoch||value.binding.revision!==value.network?.revision)throw Error('Rail city revision mismatch');
     const runtime=new RailNetworkRuntime(city,value.network);runtime.assertCity(city,minute);runtime.assertParcels();runtime.publishReservations();return runtime;
   }
+  rebindExpandedCity(oldCity:City,newCity:City,minute:number):RailNetworkRuntime {
+    this.assertCity(oldCity,minute);
+    if(oldCity.cells.length!==576||newCity.cells.length!==EXPANDED_MAP_CELLS||JSON.stringify(oldCity.cells)!==JSON.stringify(newCity.cells.slice(0,576)))throw Error('Invalid rail map migration');
+    const copy=new RailNetworkRuntime(newCity,this.snapshot);copy.assertParcels();copy.publishReservations();return copy;
+  }
   assertCity(city:City,minute:number){if(city!==this.city||minute!==this.state.minute)throw Error('Rail belongs to a different city or clock');}
   capture(city:City,cityRaw:string,minute:number):RailSessionSave {this.assertCity(city,minute);this.assertParcels();const network=this.snapshot;validate(network);return {version:1,binding:{cityId:network.cityId,epoch:network.epoch,revision:network.revision,cityRevision:coreRevision(cityRaw)},network};}
   get snapshot():RailNetworkState {return structuredClone(this.state);}
@@ -89,9 +95,9 @@ export class RailNetworkRuntime {
   }
   /** One transaction: validate the whole straight route before publishing reservations. */
   addTrackPath(from:number,to:number){
-    this.assertWritable();if(!safeCount(from)||!safeCount(to)||from>=576||to>=576||from===to||from%24!==to%24&&Math.floor(from/24)!==Math.floor(to/24))throw Error('Choose two different cells in one straight row or column');
-    const delta=from%24===to%24?24*Math.sign(to-from):Math.sign(to-from),cells:number[]=[];
-    for(let n=from;;n+=delta){this.available(n);cells.push(n);if(n===to)break;}
+    this.assertWritable();if(!safeCount(from)||!safeCount(to)||from>=this.city.cells.length||to>=this.city.cells.length||from===to)throw Error('Choose two different cells in one straight row or column');
+    const a=expandedCellCoordinate(from),b=expandedCellCoordinate(to); if(a.x!==b.x&&a.z!==b.z)throw Error('Choose two different cells in one straight row or column');
+    const cells=expandedCellPath(from,to);for(const cell of cells)this.available(cell);
     let links=[...this.state.graph.links];for(let i=1;i<cells.length;i++){const a=cells[i-1],b=cells[i];links=links.filter(l=>!(l.from===a&&l.to===b||l.from===b&&l.to===a));links.push({from:a,to:b,minutes:GAME_RAIL_TRACK_MINUTES},{from:b,to:a,minutes:GAME_RAIL_TRACK_MINUTES});}
     if(links.length>GAME_RAIL_MAX_TRACK_SEGMENTS*2)throw Error('V1 rail supports at most 96 track segments');
     const graph=createRailGraph(this.state.graph.revision+1,links);this.rail?.replaceGraph(graph);this.state.graph=graph;this.sync();this.changed();

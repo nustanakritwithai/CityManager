@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 /**
  * Bus ↔ game integration (PR B5). Created ONLY when `busEnabled()` (BUS_ENABLED or `?bus=1`).
  * Flag off → nothing is constructed and the traffic clock gets no demand filter: identical game.
@@ -38,7 +39,7 @@ export class BusIntegration {
   get pendingReturn() { let n = 0; for (const p of this.pending.values()) n += p.persons; return n; }
   private carMinutes(from: number, to: number) {
     if (this.o.carMinutes) return this.o.carMinutes(from, to);
-    const w = this.o.width; return (Math.abs(from % w - to % w) + Math.abs(Math.floor(from / w) - Math.floor(to / w))) * .5;
+    const w=this.o.width; if(w!==24)return (Math.abs(from%w-to%w)+Math.abs(Math.floor(from/w)-Math.floor(to/w)))*.5; const a=expandedCellCoordinate(from),b=expandedCellCoordinate(to);return (Math.abs(a.x-b.x)+Math.abs(a.z-b.z))*.5;
   }
   private busCost(from: number, to: number): BusOdCost | null {
     const b = this.host.bus; if (!b) return null;
