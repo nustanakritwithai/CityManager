@@ -3,6 +3,7 @@ import { MONTH, summary, utilityStatus, type City } from './sim.ts';
 import { cityOverview } from './context-data.ts';
 import { appendEvent, type CityEvent } from './event-text.ts';
 import { buildingIssues } from './map-overlay.ts';
+import { alertIssues } from './building-issues.ts';
 import { iconElement } from './ui-icons.ts';
 
 const KPI_ICONS: Record<string, string> = { treasury: 'coin', people: 'people', jobs: 'worker', utilities: 'power', warnings: 'info' };
@@ -48,8 +49,8 @@ export class CityHud {
     if (key === this.key) return;
     this.key = key;
     const s = current ?? summary(city), o = cityOverview(city, s), u = utilityStatus(city), untilPay = MONTH - city.tick % MONTH;
-    const vacancies = s.openJobs, issues = buildingIssues(city);
-    this.renderIssues(city, issues);
+    const vacancies = s.openJobs, allIssues = buildingIssues(city), issues = alertIssues(allIssues);
+    this.renderIssues(city, allIssues);
     this.strip.dataset.paused = String(paused);
     this.strip.replaceChildren(
       this.item('treasury', 'เงินคลัง', money(o.treasury), `30 วัน ${signed(o.net)}`, o.net < 0 ? 'bad' : ''),

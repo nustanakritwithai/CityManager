@@ -203,3 +203,21 @@ test('issue section sizes the shared span icon wrapper and preserves KPI-first o
   assert.match(main, /\$\('#entity-content'\)\.after\(issueHost\)/);
   assert.match(main, /\$\('#building-issue-details'\)\.scrollIntoView\(\{ block: 'start', inline: 'nearest' \}\)/);
 });
+
+import { issueVisibility, alertIssues } from '../src/building-issues.ts';
+import { mapIssueShown, NEARBY_ISSUE_RADIUS } from '../src/building-issue-layout.ts';
+test('map badges by urgency: problems always, quiet hints only up close, routine state never', () => {
+  assert.equal(issueVisibility({ kind: 'no-road', tone: 'bad' }), 'alert');
+  assert.equal(issueVisibility({ kind: 'no-workers', tone: 'bad' }), 'alert');
+  assert.equal(issueVisibility({ kind: 'empty-home', tone: 'warn' }), 'nearby');
+  assert.equal(issueVisibility({ kind: 'education', tone: 'upgrade' }), 'nearby');
+  assert.equal(issueVisibility({ kind: 'upgrade', tone: 'upgrade' }), 'nearby');
+  assert.equal(issueVisibility({ kind: 'importing', tone: 'warn' }), 'panel');
+  assert.equal(issueVisibility({ kind: 'paused', tone: 'inactive' }), 'panel');
+  assert.equal(mapIssueShown('alert', 180), true);
+  assert.equal(mapIssueShown('nearby', 65), false, 'default view hides next-level hints');
+  assert.equal(mapIssueShown('nearby', NEARBY_ISSUE_RADIUS), true);
+  assert.equal(mapIssueShown('panel', 19), false);
+  const fact = (kind: any, tone: any) => ({ kind, tone, text: '', detail: '', cell: 1, details: [], remaining: 0 });
+  assert.deepEqual(alertIssues([fact('no-power', 'bad'), fact('education', 'upgrade'), fact('paused', 'inactive')]).map(i => i.kind), ['no-power']);
+});
