@@ -19,6 +19,7 @@ import { SceneTraffic } from './scene-traffic.ts';
 import { CityWorld } from './scene-world.ts';
 import type { Atmosphere, Quality } from './atmosphere.ts';
 import type { Overlay, Tone } from './map-overlay.ts';
+import { CanvasSelectionClickGuard } from './canvas-selection-click.ts';
 
 const UNIT = 2;
 const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
@@ -299,6 +300,12 @@ export class CityView {
   }
   input() {
     const c = this.canvas;
+    const selectionClicks = new CanvasSelectionClickGuard();
+    document.addEventListener('pointerdown', e => selectionClicks.clear(e.pointerId), true);
+    document.addEventListener('pointercancel', e => selectionClicks.clear(e.pointerId), true);
+    document.addEventListener('click', e => {
+      if (selectionClicks.blocks(e as PointerEvent, e.target === c)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
     c.addEventListener('contextmenu', e => e.preventDefault());
     c.addEventListener('wheel', e => { e.preventDefault(); if (this.cameraBlocked) return; this.radius = Math.max(19, Math.min(180, this.radius * Math.exp(e.deltaY * 0.001))); this.updateCamera(); }, { passive: false });
     c.addEventListener('pointerdown', e => {
@@ -336,7 +343,7 @@ export class CityView {
       this.dragStart = null;
       if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) > 7) this.down.moved = true;
       if (this.down && !this.down.moved && !this.down.multi && this.down.button === 0) {
-        const index = this.pick(e.clientX, e.clientY); if (index !== null) this.onCell(index);
+        const index = this.pick(e.clientX, e.clientY); if (index !== null) { if (e.isTrusted && e.pointerType === 'touch') selectionClicks.arm(e.pointerId, e.timeStamp); this.onCell(index); }
       } else if (!this.cameraBlocked && this.down && this.down.moved && !this.down.multi && this.down.button === 0 && this.mode === 'road') {
         const end = this.pick(e.clientX, e.clientY);
         if (this.down.cell !== null && end !== null) this.onRoad(this.down.cell, end);

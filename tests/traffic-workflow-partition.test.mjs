@@ -7,8 +7,8 @@ test('traffic acceptance partitions bounded cases and gates every result',()=>{
  const checks=job('checks'),fault=job('fault'),browser=job('browser'),gate=job('enabled');
  for(const part of [checks,fault,browser,gate])assert.match(part,/timeout-minutes: 10/);
  assert.match(checks,/traffic-game-cases\.test\.ts/);assert.match(checks,/traffic-game-stress\.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000/);
- assert.match(fault,/needs: checks/);assert.match(fault,/traffic-default-fault-smoke\.mjs/);assert.match(fault,/traffic-game-fault-\$\{\{ matrix\.case \}\}-evidence/);assert.match(fault,/case: \[preferences, economy, construct, async\]/);assert.match(fault,/fail-fast: false/);assert.match(fault,/TRAFFIC_FAULT_CASE: \$\{\{ matrix\.case \}\}/);
- assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);for(const [mode,cases] of [['normal',['lifecycle','economy','bypass','dense','peak']],['fallback',['lifecycle','economy','bypass','dense']]])for(const name of cases)assert.ok(browser.includes(`- name: ${mode}-${name}\n            case: ${name}\n            blocked: '${mode==='fallback'?'1':'0'}'\n            software: '${mode==='fallback'?'1':'0'}'`));assert.equal((browser.match(/- name: (normal|fallback)-/g)??[]).length,9);
+ assert.match(fault,/needs: checks/);assert.match(fault,/traffic-default-fault-smoke\.mjs/);assert.match(fault,/traffic-game-fault-\$\{\{ matrix\.case \}\}-evidence/);assert.match(fault,/\["preferences","economy","construct","async"\]/);assert.match(fault,/\["preferences"\]/);assert.match(fault,/fail-fast: false/);assert.match(fault,/TRAFFIC_FAULT_CASE: \$\{\{ matrix\.case \}\}/);
+ assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);for(const [mode,cases] of [['normal',['lifecycle','economy','bypass','dense','peak','work-expiry']],['fallback',['lifecycle','economy','bypass','dense']]])for(const name of cases)assert.ok(browser.includes(`- name: ${mode}-${name}\n            case: ${name}\n            blocked: '${mode==='fallback'?'1':'0'}'\n            software: '${mode==='fallback'?'1':'0'}'`));assert.equal((browser.match(/- name: (normal|fallback)-/g)??[]).length,10);
  assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.name \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
  assert.match(gate,/needs: \[checks, fault, browser\]/);assert.match(gate,/if: always\(\)/);for(const name of ['checks','fault','browser'])assert.match(gate,new RegExp(`needs\\.${name}\\.result.*'success'`));
  assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '1'/g)??[]).length,1);
@@ -18,7 +18,7 @@ test('exact scoped routing propagates to downstream traffic jobs and aggregate w
  const scoped=['vehicle','visual-final','server-save','classic-toolbar','history','commercial','rail','hud-polish','panel-polish','rail-polish','rail-scene','rail-map','bus-polish','bus-scene','bus-map','save-cleanup','browser-storage','smoke-retry','map-declutter'];
  const checks=job('checks'),gate=job('enabled');
  const exclusions=part=>[...part.matchAll(/(?:steps\.scope|needs\.checks)\.outputs\.kind != '([^']+)'/g)].map(m=>m[1]);
- const checkRoutes=[...new Set(exclusions(checks))];assert.deepEqual(checkRoutes,scoped);
+ const checkRoutes=[...new Set(exclusions(checks))];assert.deepEqual(checkRoutes,[...scoped,'traffic-work-expiry']);
  for(const name of ['fault','browser']){
   const header=job(name).split('runs-on:')[0];
   assert.match(header,/needs: checks/);
@@ -62,4 +62,23 @@ test('presenter-only route still requires migrated fault and full browser matrix
  assert.equal(yaml.includes("'traffic-presenter'"),false);
  for(const name of ['traffic-server-entry-fixture.test.mjs','traffic-default-fault-smoke.mjs','traffic-game-smoke.mjs','traffic-lane-order.test.ts'])assert.ok(yaml.includes(name));
  const main=readFileSync('.github/workflows/citymanager.yml','utf8');assert.ok(main.includes("(steps.scope.outputs.kind == 'traffic-gap' || steps.scope.outputs.kind == 'traffic-presenter') && 'bumper-gap'"));
+});
+
+test('work-trip expiry regressions are mandatory for full and traffic changes',()=>{
+ const checks=job('checks'),marker='name: Verify work-trip expiration and fixture preflight';
+ const at=checks.indexOf(marker);assert.ok(at>=0,'Dedicated work-trip check exists');
+ const block=checks.slice(at,checks.indexOf('\n      - ',at));
+ for(const file of ['traffic-work-expiry-game.test.ts','traffic-work-expiry-worker.test.ts','traffic-work-expiry-layer.test.ts','traffic-work-expiry-presentation.test.ts','traffic-work-stall.test.ts','traffic-work-expiry-browser-fixture.test.ts','traffic-work-expiry-browser-checks.test.mjs'])assert.ok(block.includes(`tests/${file}`),`${file} is executed`);
+ assert.doesNotMatch(block,/continue-on-error/);
+ const guard=checks.slice(checks.lastIndexOf('\n      - if:',at),at);
+ assert.doesNotMatch(guard,/kind != '(?:full|traffic-presenter|traffic-gap|traffic-work-expiry)'/);
+ assert.equal((text.match(/- 'src\/park-activity\.ts'/g)??[]).length,2,'PR and main push triggers both include work roster dependency');
+});
+
+test('work-only route retains the exact expiry and preference cases, excluding other browser cases explicitly',()=>{
+ const fault=job('fault'),browser=job('browser'),main=readFileSync('.github/workflows/citymanager.yml','utf8');
+ assert.match(fault,/kind == 'traffic-work-expiry'.*\["preferences"\]/);
+ assert.match(browser,/Excluded by exact work-trip scope; this case was not run/);
+ assert.match(browser,/kind != 'traffic-work-expiry' \|\| matrix\.name == 'normal-work-expiry'/);
+ for(const name of ['traffic-work-expiry-game.test.ts','traffic-work-expiry-worker.test.ts','traffic-work-expiry-layer.test.ts','traffic-work-expiry-presentation.test.ts','traffic-work-stall.test.ts','park-activity-roster-index.test.ts','park-activity.test.ts','park-education-reservations.test.ts','education-session.test.ts','server-city-save.test.ts','mobile-gesture.test.ts','building-card-data.test.ts','context-data.test.ts'])assert.ok(main.includes(name),name);
 });

@@ -35,15 +35,25 @@ jobs:
       - name: Select exact commercial scope
         id: scope
         run: node scripts/ci-visual-scope.mjs
-      - run: node --test tests/ci-visual-scope.test.mjs tests/panel-server-entry-fixture.test.mjs
+      - name: Verify exact work-only scope
+        if: steps.scope.outputs.kind == 'traffic-work-expiry'
+        run: node --test tests/ci-visual-scope.test.mjs
+      - name: Record work-only exclusions
+        if: steps.scope.outputs.kind == 'traffic-work-expiry'
+        run: Write-Output 'Unrelated panel suite and browser acceptance not run for this exact work-trip scope.'
+      - if: steps.scope.outputs.kind != 'traffic-work-expiry'
+        run: node --test tests/ci-visual-scope.test.mjs tests/panel-server-entry-fixture.test.mjs
       - name: Verify relevant panel data
+        if: steps.scope.outputs.kind != 'traffic-work-expiry'
         run: |
           if ('${{ steps.scope.outputs.kind }}' -eq 'commercial') {
             node --experimental-strip-types --test tests/signal-client.test.ts tests/signal-data.test.ts tests/signal-reading.test.ts
             if ($LASTEXITCODE -ne 0) { throw 'Commercial panel data failed.' }
           } else { npm test; if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' } }
-      - run: npm run build
+      - if: steps.scope.outputs.kind != 'traffic-work-expiry'
+        run: npm run build
       - name: Exercise reports with intercepted mocks only
+        if: steps.scope.outputs.kind != 'traffic-work-expiry'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           $readingPreview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4187', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/reading-preview.log -RedirectStandardError .test-output/reading-preview-error.log
@@ -63,7 +73,7 @@ jobs:
           }
 
       - name: Preserve actual panel evidence
-        if: always()
+        if: always() && steps.scope.outputs.kind != 'traffic-work-expiry'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: signal-reading-evidence

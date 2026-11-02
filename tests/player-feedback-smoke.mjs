@@ -7,40 +7,44 @@ import { resolve, extname, sep } from 'node:path';
 import { createCity, buildCampus, campusSiteReason, step, adoptSavedEducation, deserialize, serialize, isRetail, isMarket } from '../src/sim.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
-import { reachTouch } from './touch-reach.mjs';
+import {reachTrafficControl,trafficHttpHandler,installTrafficNetworkFence} from './traffic-server-entry-fixture.mjs';
+import {createFeedbackServerFixture} from './player-feedback-server-fixture.mjs';
 import { verifyReadingPanels } from './player-feedback-reading.mjs';
 
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT);
 const runtimeOnly = process.env.CITYMANAGER_UX_RUNTIME_ONLY === '1';
+const workTouchOnly = process.env.CITYMANAGER_UX_WORK_TOUCH_ONLY === '1';
 if (!debugPort) throw Error('Set CITYMANAGER_DEBUG_PORT to your isolated test browser.');
-const root = resolve('dist'), output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/player-feedback');
+const root = resolve('dist'), output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/player-feedback'),origin='http://127.0.0.1:4176';
 await mkdir(output, { recursive: true });
 const mime = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.glb': 'model/gltf-binary', '.png': 'image/png', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.ogg': 'audio/ogg' };
-const server = createServer(async (req, res) => {
+const fixtureServer=createFeedbackServerFixture(origin+'/CityManager/'),httpErrors=[],deliveries=[];
+const handler=trafficHttpHandler({origin,upstream:origin+'/CityManager/',fixture:fixtureServer,errors:httpErrors,deliveries,forward:async target=>{
   try {
-    const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname).replace(/^\/CityManager\/?/, '');
+    const path = decodeURIComponent(target.pathname).replace(/^\/CityManager\/?/, '');
     const file = resolve(root, path || 'index.html');
-    if (file !== root && !file.startsWith(root + sep)) { res.writeHead(403); res.end(); return; }
-    const bytes = await readFile(file); res.writeHead(200, { 'Content-Type': mime[extname(file)] || 'application/octet-stream' }); res.end(bytes);
-  } catch { res.writeHead(404); res.end(); }
-});
+    if (file !== root && !file.startsWith(root + sep)) return new Response(null,{status:403});
+    const bytes = await readFile(file);return new Response(bytes,{status:200,headers:{'Content-Type':mime[extname(file)]||'application/octet-stream'}});
+  } catch { return new Response(null,{status:404}); }
+}});
+const server=createServer((req,res)=>void handler(req,res));
 await new Promise(r => server.listen(4176, '127.0.0.1', r));
 const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
 const target = targets.find(item => item.type === 'page' && /CityManager/.test(item.url))
   ?? targets.find(item => item.type === 'page' && item.url === 'about:blank');
 assert.ok(target, 'explicitly isolated CityManager or blank test target');
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout; const pending = new Map(), errors = [], checks = [], landscapeLayouts = [], readingLayouts = [];
+let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout,networkProbe=null,faultContext=null; const pending = new Map(), errors = [], externalRequests=[], checks = [], landscapeLayouts = [], readingLayouts = [];
 function send(method, params = {}) {
   return new Promise((resolve, reject) => { const id = ++sequence; const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 15000); pending.set(id, { resolve: r => { clearTimeout(timer); resolve(r); }, reject: e => { clearTimeout(timer); reject(e); } }); ws.send(JSON.stringify({ id, method, params })); });
 }
-ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id) { const p = pending.get(m.id); pending.delete(m.id); if (p) m.error ? p.reject(m.error) : p.resolve(m.result); } else if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); };
+ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id) { const p = pending.get(m.id); pending.delete(m.id); if (p) m.error ? p.reject(Object.assign(Error(JSON.stringify(m.error)),{cdpError:m.error})) : p.resolve(m.result); } else if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails);else if(m.method==='Page.javascriptDialogOpening')void fixtureServer.core.dialog(m.params,send).catch(e=>errors.push(String(e)));else if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(networkProbe?.active&&u===networkProbe.url)networkProbe.requestId=m.params.requestId;else if(/^https?:/.test(u)&&new URL(u).origin!==origin)externalRequests.push(u);}else if(m.method==='Network.loadingFailed'&&m.params.requestId===networkProbe?.requestId)networkProbe.failed=m.params; };
 const evaluate = async expression => { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(expression, timeout = 15000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); } throw Error(`Timed out: ${expression}`); }
 async function tap(x, y) { await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); }
 async function button(selector) {
-  if (await reachTouch(evaluate, button, selector)) return;
+  if (await reachTrafficControl(evaluate, button, selector)) return;
   stage = `Activate ${selector}`; console.log(stage);
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'})`);
   await sleep(100);
@@ -63,29 +67,21 @@ async function cell(index) {
 }
 async function shot(name) { stage = `Screenshot ${name}`; const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 75, captureBeyondViewport: false }); await writeFile(resolve(output, name + '.jpg'), Buffer.from(r.data, 'base64')); console.log(stage); }
 async function game() { if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector'); await button('#toggle-game-menu'); }
-// A quota fallback now requires the player's explicit existing-Save confirmation.
 async function retrySave() {
-  await game();await button('#save');
-  await until("!!document.querySelector('#save-promotion-confirm[open]')||document.querySelector('#save-failure-banner').hidden");
-  if(await evaluate("!!document.querySelector('#save-promotion-confirm[open]')")){
-    await button('#save-promotion-accept');
-    // A readonly Load has already cleared its warning. Wait for the actual
-    // asynchronous confirmation attempt to finish before injecting next faults.
-    await until("!document.querySelector('#save-promotion-confirm')");
+  if(faultContext){
+    fixtureServer.setFault(false);await button('#save-failure-retry');
+    const start=Date.now();while(Date.now()-start<30000&&fixtureServer.active.revision<faultContext.before.revision+2)await sleep(80);
+    assert.ok(fixtureServer.active.revision>=faultContext.before.revision+2,'Retry receives an ACK for the refused intent and a distinct current-state ACK');
+    await until("document.querySelector('#save-failure-banner').hidden");fixtureServer.assertRetry(faultContext.index,faultContext.before);faultContext=null;
+  }else{
+    await game();const revision=fixtureServer.active.revision;await button('#save');const start=Date.now();while(Date.now()-start<30000&&fixtureServer.active.revision<=revision)await sleep(80);
+    assert.ok(fixtureServer.active.revision>revision,'Native Save receives a server ACK');await until("document.querySelector('#save-failure-banner').hidden");
   }
-  await until("document.querySelector('#save-failure-banner').hidden");
+  await fixtureServer.core.assertNoCityWrites(evaluate);
 }
-// After accepting the compressed local save, writes use IDB rather than the
-// legacy primary. Fail only the backend under test; never synthesize UI warnings.
-async function failLocalWrites(label, backend='active') {
-  assert.ok(['active','legacy'].includes(backend));
-  await evaluate(`(()=>{window.__uxIdbPut??=IDBObjectStore.prototype.put;window.__uxIdbFailures=0;IDBObjectStore.prototype.put=function(...args){if(${JSON.stringify(backend)}==='active'&&this.transaction.db.name==='citymanager.emergency-recovery-v1'){window.__uxIdbFailures++;throw new DOMException(${JSON.stringify(label)},'QuotaExceededError')}return window.__uxIdbPut.apply(this,args)};Storage.prototype.setItem=function(k,v){if(${JSON.stringify(backend)}==='legacy'&&k.startsWith('citymanager.'))throw new DOMException(${JSON.stringify(label)},'QuotaExceededError');return window.__uxWrite.call(this,k,v)}})()`);
-}
-
-async function restoreLocalWrites() {await evaluate('Storage.prototype.setItem=window.__uxWrite;if(window.__uxIdbPut)IDBObjectStore.prototype.put=window.__uxIdbPut');}
-async function durableActiveState() {
- return evaluate(`new Promise((resolve,reject)=>{const q=indexedDB.open('citymanager.emergency-recovery-v1');q.onerror=()=>reject(q.error);q.onsuccess=()=>{const db=q.result,names=[...db.objectStoreNames].sort(),t=db.transaction(names,'readonly'),rows={};for(const name of names){rows[name]=[];const c=t.objectStore(name).openCursor();c.onsuccess=()=>{if(c.result){rows[name].push([c.result.key,c.result.value]);c.result.continue()}}}t.oncomplete=()=>{db.close();resolve(JSON.stringify(rows))};t.onabort=()=>{db.close();reject(t.error)}}})`);
-}
+// Fail only the isolated server service; the real UI and client transport run.
+async function failServerWrites(){assert.equal(faultContext,null);await fixtureServer.core.settle();faultContext={before:fixtureServer.active,index:fixtureServer.attempts.length};fixtureServer.setFault(true);}
+async function restoreServerWrites(){fixtureServer.setFault(false);}
 
 
 const city = createCity(3, { starter: true });
@@ -93,10 +89,15 @@ const schoolCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'sch
 const universityCell = city.cells.findIndex((_, i) => campusSiteReason(city, i, 'university') === null); assert.ok(buildCampus(city, universityCell, 'university').ok);
 for (let i = 0; i < 12; i++) step(city);
 const fixture = serializeParkSession(city, createParkRuntime(city));
-// The same real published-save replay used by building-cards-smoke includes a
-// retailer, whose taller financial card exposed the warning/landscape regression.
+// Start from the published-save replay used by building-cards-smoke. The current
+// UI displays commercial levels 1–3 as markets, so make the replay's retailer a
+// level-4 shop for this isolated visual fixture and verify it survives loading.
 const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
 const cardCity = deserialize(serializeV4(prior)); adoptSavedEducation(cardCity);
+const retailBuilding = cardCity.buildings.find(b => cardCity.firms.some(f => f.building === b.id && isRetail(f)));
+assert.ok(retailBuilding, 'Replay contains a retailer for the shop visual fixture');
+retailBuilding.level = 4;
+assert.equal(deserialize(serialize(cardCity)).buildings.find(b => b.id === retailBuilding.id)?.level, 4, 'Shop fixture survives validated save round trip');
 const cardCases = ['house','shop','market','factory','farm'].map(kind => {
   const b = cardCity.buildings.find(b => kind === 'house' ? b.zone === 'R' : cardCity.firms.some(f => f.building === b.id && (kind === 'shop' ? isRetail(f) : kind === 'market' ? isMarket(f) : f.zone === (kind === 'farm' ? 'F' : 'I'))));
   assert.ok(b, 'Real day29 replay contains ' + kind); return { kind, cell:b.cell };
@@ -108,12 +109,13 @@ await writeFile(resolve(output, 'synthetic-fixture.json'), fixture);
 let injected;
 try {
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
-  await send('Network.setBlockedURLs', { urls: ['*citymanager-api*', '*citymanager.157-85-96-139.sslip.io*', '*157.85.96.139:5444*'] });
+  await fixtureServer.core.install(send);
+  await installTrafficNetworkFence({send,evaluate,protocol:await(await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(),origin,observeProbe:url=>(networkProbe={url})});
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
-  injected = await send('Page.addScriptToEvaluateOnNewDocument', { source: `if(location.origin==='http://127.0.0.1:4176'){localStorage.clear();localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixture)});localStorage.setItem('citymanager.guide.v1','skipped');window.__uxWrite=Storage.prototype.setItem;window.__uxDownloads=0;window.__uxIntervals=[];const nativeInterval=window.setInterval;window.setInterval=function(fn,ms,...args){if(ms===60000)window.__uxIntervals.push(fn);return nativeInterval(fn,ms,...args)};}` });
-  await send('Page.navigate', { url: 'http://127.0.0.1:4176/CityManager/' });
-  await until('!!window.cityManager && cityManager.visuals().ready', 30000);
+  injected = await send('Page.addScriptToEvaluateOnNewDocument', { source: `if(location.origin===${JSON.stringify(origin)}){localStorage.setItem('citymanager.guide.v1','skipped');window.__uxIntervals=[];const nativeInterval=window.setInterval;window.setInterval=function(fn,ms,...args){if(ms===60000)window.__uxIntervals.push(fn);return nativeInterval(fn,ms,...args)};const transaction=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(stores,mode,...rest){if(mode==='readwrite'&&/citymanager/.test(this.name))window.__panelCityWrites.push('IDB:'+this.name);return transaction.call(this,stores,mode,...rest)};}` });
+  await fixtureServer.core.seed(fixture);fixtureServer.core.allowNavigation();await send('Page.navigate', { url: origin+'/CityManager/' });
+  await fixtureServer.core.enter({send,evaluate,button,until,timeout:30000});
   assert.deepEqual(await evaluate('({width:innerWidth,height:innerHeight})'), { width: 390, height: 844 });
   if (!runtimeOnly) {
   await shot('08-campuses-after');
@@ -155,12 +157,14 @@ try {
   assert.equal(await evaluate('JSON.parse(cityManager.snapshot()).tick'), campusActionTick, 'campus feedback and capacity refresh within the same paused day');
   checks.push('school costs and actual cohort progress, toggle feedback, single-charge upgrade');
   }
-  await game(); await button('#save');
-  await until("document.querySelector('#autosave-status').textContent.includes('บันทึกสำเร็จล่าสุด')");
-  await evaluate("window.__uxSaved=localStorage.getItem('citymanager.save.v7');Storage.prototype.setItem=function(k,v){if(k.startsWith('citymanager.'))throw new DOMException('Synthetic quota','QuotaExceededError');return window.__uxWrite.call(this,k,v)}");
+  await game();const initialRevision=fixtureServer.active.revision;await button('#save');
+  {const start=Date.now();while(Date.now()-start<30000&&fixtureServer.active.revision<=initialRevision)await sleep(80);assert.ok(fixtureServer.active.revision>initialRevision,'Manual Save receives an authoritative server ACK');}
+  await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์')&&!document.querySelector('#save-failure-banner:not([hidden])')");
+  await failServerWrites();
   await button('#save');
   await until("!document.querySelector('#save-failure-banner').hidden");
-  assert.equal(await evaluate("localStorage.getItem('citymanager.save.v7')===window.__uxSaved"), true);
+  assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/,'Warning explains the authoritative server-only boundary');
+  assert.deepEqual(fixtureServer.active,faultContext.before,'Failed server save preserves the acknowledged head');await fixtureServer.core.assertNoCityWrites(evaluate);
   await shot('12-manual-save-failure-after');
   await button('#close-inspector'); await button('#hud-more');
   // Bounded layout-only diagnostic: measure the previous fixed-menu offset,
@@ -181,25 +185,21 @@ try {
   await button('#cancel-tool'); await cell(schoolCell);
   assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"), false);
   await shot('13-save-warning-across-panels');
-  await evaluate("window.__uxAnchorClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download.startsWith('citymanager-day-'))window.__uxDownloads++;else window.__uxAnchorClick.call(this)}");
-  await button('#save-failure-export'); assert.equal(await evaluate('window.__uxDownloads'), 1);
-  assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"), false, 'requesting export is not a successful local save');
-  await evaluate('Storage.prototype.setItem=window.__uxWrite;HTMLAnchorElement.prototype.click=window.__uxAnchorClick');
+  assert.equal(await evaluate("!!document.querySelector('#save-failure-export,[download],input[type=file]')"),false,'Server-only save failure does not offer local city export');
+  await restoreServerWrites();
   await retrySave();
-  checks.push('manual quota failure preserves save, persists across tools/panels, export uses existing path, successful retry clears warning');
+  checks.push('manual server failure preserves acknowledged head, persists across tools/panels and exact retry clears warning without browser city writes');
   // Advance actual game state so the periodic autosave has a changed revision to save.
   await button('#panel-pause'); const before = await evaluate('JSON.parse(cityManager.snapshot()).tick'); await until(`JSON.parse(cityManager.snapshot()).tick>${before}`); await button('#panel-pause');
-  const activeBeforeQuota=await durableActiveState(),legacyBeforeQuota=await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))');
-  await failLocalWrites('Synthetic active-IDB autosave quota');
+  await failServerWrites();const activeBeforeFailure=fixtureServer.active;
   await evaluate('window.__uxIntervals.forEach(fn=>fn())');
   await until("!document.querySelector('#save-failure-banner').hidden");
-  assert.ok(await evaluate('window.__uxIdbFailures>0'),'autosave failed a real active-IDB write');
-  assert.equal(await durableActiveState(),activeBeforeQuota,'failed active autosave cannot rotate emergency branches or marker');
-  assert.equal(await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))'),legacyBeforeQuota,'failed active autosave preserves every legacy byte');
+  assert.ok(fixtureServer.attempts.slice(faultContext.index).some(p=>p.status===503),'Periodic autosave reaches the failing real server transport');
+  assert.deepEqual(fixtureServer.active,activeBeforeFailure,'Failed autosave preserves the authoritative head');await fixtureServer.core.assertNoCityWrites(evaluate);
   await shot('14-autosave-failure-after');
-  await restoreLocalWrites();await evaluate('window.__uxIntervals.forEach(fn=>fn())');
-  await until("document.querySelector('#save-failure-banner').hidden"); checks.push('periodic autosave failure and real successful retry');
-  assert.equal(await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))'),legacyBeforeQuota,'successful active retry preserves every legacy byte');
+  await restoreServerWrites();await evaluate('window.__uxIntervals.forEach(fn=>fn())');
+  {const start=Date.now();while(Date.now()-start<30000&&fixtureServer.active.revision<faultContext.before.revision+2)await sleep(80);assert.ok(fixtureServer.active.revision>=faultContext.before.revision+2);}
+  await until("document.querySelector('#save-failure-banner').hidden");fixtureServer.assertRetry(faultContext.index,faultContext.before);faultContext=null;await fixtureServer.core.assertNoCityWrites(evaluate);checks.push('periodic autosave failure and exact server-acknowledged retry');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Emulation.setTouchEmulationEnabled', { enabled: false });
   mobile = false;
@@ -209,7 +209,7 @@ try {
   await evaluate("document.querySelector('#education-details').scrollIntoView({block:'start'})");
   await shot('15-desktop-campus-after');
   await game();
-  await failLocalWrites('Synthetic desktop local-storage quota');
+  await failServerWrites();
   await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
   await button('#close-inspector'); await cell(schoolCell);
   assert.equal(await evaluate("document.querySelector('#inspector').getBoundingClientRect().bottom<=document.querySelector('.tool-dock').getBoundingClientRect().top"), true, 'desktop warning preserves space between the inspector and build tools');
@@ -217,25 +217,50 @@ try {
   await evaluate("document.querySelector('#education-details').scrollIntoView({block:'start'})");
   assert.equal(await evaluate("(()=>{const p=document.querySelector('#panel-pause').getBoundingClientRect(),b=document.querySelector('#save-failure-banner').getBoundingClientRect();return b.top>=0&&b.right<=innerWidth&&b.bottom<=p.top&&!!document.elementFromPoint(p.x+p.width/2,p.y+p.height/2)?.closest('#panel-pause')})()"), true, 'desktop warning leaves the panel clock reachable');
   await shot('16-desktop-save-warning-after');
-  await restoreLocalWrites();
+  await restoreServerWrites();
   await retrySave();
   checks.push('desktop campus details and active persistent save warning at 1280x900, reachable panel clock, successful retry');
   await send('Emulation.setDeviceMetricsOverride', { width:844, height:390, screenWidth:844, screenHeight:390, deviceScaleFactor:1, mobile:true });
   await send('Emulation.setTouchEmulationEnabled', { enabled:true, maxTouchPoints:1 });
   mobile = true;
   stage = 'Load the real six-card replay for landscape';
-  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(cardCity))})`);
-  await button('#load'); await until('JSON.parse(cityManager.snapshot()).tick===29');
+  if(!await evaluate('window.cityManager.parks().paused'))await button('#panel-pause');
+  await fixtureServer.core.leave({send,evaluate,until});
+  const cardRaw=serializeParkSession(cardCity,createParkRuntime(cardCity));await fixtureServer.core.seed(cardRaw);fixtureServer.core.allowNavigation();await send('Page.navigate',{url:origin+'/CityManager/'});
+  await fixtureServer.core.enter({send,evaluate,button,until,timeout:30000});await until('JSON.parse(cityManager.snapshot()).tick===29');
   const cardSnapshot = await evaluate('cityManager.snapshot()');
-  const switchLegacy=await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))');
-  await retrySave();
-  assert.equal(await evaluate('JSON.stringify(Object.entries(localStorage).sort(([a],[b])=>a.localeCompare(b)))'),switchLegacy,'confirmed readonly city switch never writes legacy slots');
-  assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'confirmed switch saves exactly the chosen city');
+  assert.equal(fixtureServer.active.raw,cardRaw,'Server fixture loads the exact acknowledged card city');await fixtureServer.core.assertNoCityWrites(evaluate);
+  assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Confirmed server entry preserves exactly the chosen city');
+  // Reproduce the touch whose compatibility click previously selected a factory
+  // recipe. Follow it with a real new tap and a real keyboard activation.
+  stage='Verify canvas touch, next tap and keyboard';
+  await send('Emulation.setDeviceMetricsOverride',{width:360,height:740,screenWidth:360,screenHeight:780,deviceScaleFactor:1,mobile:true});
+  await until('innerWidth===360&&innerHeight===740');
+  const factoryEntry=cardCases.find(entry=>entry.kind==='factory');assert.ok(factoryEntry);
+  if(await evaluate("document.querySelector('#inspector').dataset.open==='true'"))await button('#close-inspector');
+  const openFactory=async()=>{await cell(factoryEntry.cell);await until("document.querySelector('#entity-content').dataset.cardKind==='factory'");await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Canvas touch does not activate a newly opened factory control');};
+  await openFactory();await button('#close-inspector');await until("document.querySelector('#inspector').dataset.open!=='true'");
+  assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'The next deliberate touch remains functional');
+  await openFactory();await evaluate("window.__keyboardTrace=[];for(const type of ['keydown','keyup','click'])document.addEventListener(type,e=>window.__keyboardTrace.push({type,key:e.key??'',target:e.target?.id??'',trusted:e.isTrusted,defaultPrevented:e.defaultPrevented}),true);document.querySelector('#close-inspector').focus()");
+  assert.equal(await evaluate('document.activeElement?.id'),'close-inspector','Keyboard focus is on the native close button');
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',text:'\r',unmodifiedText:'\r',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+  try{await until("document.querySelector('#inspector').dataset.open!=='true'");}catch(error){console.error('Keyboard activation diagnostic',JSON.stringify(await evaluate('({active:document.activeElement?.id,events:window.__keyboardTrace})')));throw error;}
+  assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Keyboard activation remains functional');
+  checks.push('canvas touch does not activate a new factory control; following touch and keyboard activation work');
+  if (workTouchOnly) {
+    await shot('work-touch-keyboard');
+    await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts, failServerWrites, restoreServerWrites, retrySave, factoryOnly:true });
+    checks.push('factory reading: all four actual values on 360 and 390 phone viewports with and without save warning, DOM/visual order and scrolling');
+  }
+  if (!workTouchOnly) {
+  await send('Emulation.setDeviceMetricsOverride',{width:844,height:390,screenWidth:844,screenHeight:390,deviceScaleFactor:1,mobile:true});
+  await until('innerWidth===844&&innerHeight===390');
   const matrixFailures = [];
   for (const warning of [false,true]) {
     if (warning) {
       await game();
-      await failLocalWrites('Synthetic landscape active-IDB quota');
+      await failServerWrites();
       await button('#save'); await until("!document.querySelector('#save-failure-banner').hidden");
     }
     for (const [index, entry] of cardCases.entries()) {
@@ -247,7 +272,7 @@ try {
         await until(`document.querySelector('#entity-content').dataset.cardKind===${JSON.stringify(entry.kind)}`);
         await evaluate("document.querySelector('#inspector-body').scrollTop=0;new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
         stage = 'Measure landscape ' + label;
-        landscapeLayout = await evaluate(`(()=>{const panel=document.querySelector('#inspector').getBoundingClientRect(),body=document.querySelector('#inspector-body').getBoundingClientRect(),header=document.querySelector('#inspector .inspector-heading').getBoundingClientRect(),visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>body.top&&r.top<body.bottom&&getComputedStyle(e).visibility!=='hidden'},full=e=>{const r=e.getBoundingClientRect();return visible(e)&&r.top>=body.top&&r.bottom<=body.bottom&&r.left>=body.left&&r.right<=body.right};const metrics=[...document.querySelectorAll('.bc-kpis [data-context-metric],.bc-kpis [data-card-metric]')];return{viewport:[innerWidth,innerHeight],panelTop:panel.top,headerHeight:header.height,bodyHeight:body.height,heroVisible:full(document.querySelector('#entity-content .bc-hero')),visibleKeyMetrics:metrics.filter(visible).length,fullyVisibleKeyMetrics:metrics.filter(full).length,fullyVisibleKeyValues:metrics.flatMap(e=>[...e.querySelectorAll('dd')]).filter(full).length,horizontalOverflow:document.querySelector('#inspector-body').scrollWidth>document.querySelector('#inspector-body').clientWidth+1,warningVisible:!document.querySelector('#save-failure-banner').hidden,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-export']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})}})()`);
+        landscapeLayout = await evaluate(`(()=>{const panel=document.querySelector('#inspector').getBoundingClientRect(),body=document.querySelector('#inspector-body').getBoundingClientRect(),header=document.querySelector('#inspector .inspector-heading').getBoundingClientRect(),visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>body.top&&r.top<body.bottom&&getComputedStyle(e).visibility!=='hidden'},full=e=>{const r=e.getBoundingClientRect();return visible(e)&&r.top>=body.top&&r.bottom<=body.bottom&&r.left>=body.left&&r.right<=body.right};const metrics=[...document.querySelectorAll('.bc-kpis [data-context-metric],.bc-kpis [data-card-metric]')];return{viewport:[innerWidth,innerHeight],panelTop:panel.top,headerHeight:header.height,bodyHeight:body.height,heroVisible:full(document.querySelector('#entity-content .bc-hero')),visibleKeyMetrics:metrics.filter(visible).length,fullyVisibleKeyMetrics:metrics.filter(full).length,fullyVisibleKeyValues:metrics.flatMap(e=>[...e.querySelectorAll('dd')]).filter(full).length,horizontalOverflow:document.querySelector('#inspector-body').scrollWidth>document.querySelector('#inspector-body').clientWidth+1,warningVisible:!document.querySelector('#save-failure-banner').hidden,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-retry']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})}})()`);
         Object.assign(landscapeLayout,{kind:entry.kind,warning});
         landscapeLayouts.push(landscapeLayout);
         await shot((17+index+(warning?cardCases.length:0))+'-landscape-'+label);
@@ -256,7 +281,7 @@ try {
         assert.ok(landscapeLayout.heroVisible && landscapeLayout.visibleKeyMetrics>=2,'Identity and at least two real metrics: '+label);
         assert.ok(landscapeLayout.fullyVisibleKeyMetrics>=2 && landscapeLayout.fullyVisibleKeyValues>=2,'At least two complete labelled metric tiles and values: '+label);
         assert.equal(landscapeLayout.horizontalOverflow,false,'No horizontal overflow: '+label);
-        assert.ok(landscapeLayout.controls.every(c=>c.width>=44&&c.height>=44&&c.hit),'44px reachable Back/clock/close/Export: '+label);
+        assert.ok(landscapeLayout.controls.every(c=>c.width>=44&&c.height>=44&&c.hit),'44px reachable Back/clock/close/Retry: '+label);
         if (entry.kind==='factory' || entry.kind==='farm') {
           const selector = entry.kind==='factory' ? '[data-recipe][aria-pressed="true"]' : '[data-crop][aria-pressed="true"]';
           await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center',behavior:'instant'})`);
@@ -275,13 +300,14 @@ try {
   await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'),false);
   await button('#panel-pause'); assert.equal(await evaluate('cityManager.parks().paused'),true);
   assert.equal(await evaluate("document.querySelector('#save-failure-banner').hidden"),false);
-  await restoreLocalWrites();
+  await restoreServerWrites();
   await retrySave();
   checks.push('all six cards at landscape 844x390, warning on/off: complete identity and at least two complete labelled numeric metrics, unchanged city data, no horizontal overflow, 44px reachable controls and real save retry');
-  await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts, failLocalWrites, restoreLocalWrites, retrySave });
+  await verifyReadingPanels({ send, evaluate, button, cell, game, until, shot, sleep, cardCases, layouts:readingLayouts, failServerWrites, restoreServerWrites, retrySave });
   checks.push('seven tall reading panels across phone, short, landscape and wide-request viewports, warning on/off: >=90% panel height, contained scroll content, inline persistent warning, physical 44px controls, full primary values at normal reading heights, unchanged city data');
-  assert.equal(errors.length, 0, JSON.stringify(errors));
-  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, readingLayouts, checks, errors }, null, 2));
+  } else { checks.push('Other cards and reading matrices excluded from this focused touch and factory check'); }
+  await fixtureServer.core.assertNoCityWrites(evaluate);assert.deepEqual(httpErrors,[]);assert.deepEqual(externalRequests,[]);assert.equal(errors.length, 0, JSON.stringify(errors));
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({ passed: true, commit:process.env.CITYMANAGER_UX_COMMIT, runtimeOnly, workTouchOnly, mobile: [390,844], desktop: [1280,900], schoolCell, universityCell, warningMenuLayout, landscapeLayout, landscapeLayouts, readingLayouts, checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   const failedStage = stage;
@@ -290,6 +316,6 @@ try {
   throw error;
 } finally {
   if (injected) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: injected.identifier }).catch(() => {});
-  await evaluate('if(window.__uxWrite)Storage.prototype.setItem=window.__uxWrite;if(window.__uxIdbPut)IDBObjectStore.prototype.put=window.__uxIdbPut').catch(() => {});
+  fixtureServer.setFault(false);
   ws.close(); server.close();
 }

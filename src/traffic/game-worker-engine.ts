@@ -24,6 +24,9 @@ export function createTrafficGameWorkerEngine(){
    else if(message.epoch!==epoch)throw Error('Traffic game worker epoch mismatch');
    if(message.commitPrevious){if(!candidate)throw Error('Missing traffic game candidate');base=candidate;}
    candidate=base.clone();candidate.setSample(sample);
+   // Work trips use the supplied city clock; the worker never reads wall time.
+   // Expiry receipts stay with the candidate until an accepted frame is acked.
+   if(message.sample.work!==undefined)candidate.setWork(message.sample.work);
    // Bus (optional): absent input keeps the game byte-identical. Validated inside setBus.
    if(message.sample.bus!==undefined)candidate.setBus(message.sample.bus);
    const frame={...(message.advance?candidate.step(false):candidate.frame),modal};seq=message.seq;

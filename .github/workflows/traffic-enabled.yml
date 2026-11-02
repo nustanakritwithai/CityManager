@@ -13,6 +13,7 @@ on:
       - 'src/main.ts'
       - 'src/sim.ts'
       - 'src/park-runtime.ts'
+      - 'src/park-activity.ts'
       - 'src/road-topology.ts'
       - 'tests/traffic-*'
       - 'scripts/traffic-game-*'
@@ -31,6 +32,7 @@ on:
       - 'src/main.ts'
       - 'src/sim.ts'
       - 'src/park-runtime.ts'
+      - 'src/park-activity.ts'
       - 'src/road-topology.ts'
       - 'tests/traffic-*'
       - 'scripts/traffic-game-*'
@@ -71,18 +73,21 @@ jobs:
         run: npm ci --no-audit --no-fund
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter'
         run: node --test tests/traffic-workflow-partition.test.mjs
-      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter'
+      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter' && steps.scope.outputs.kind != 'traffic-work-expiry'
         run: node --experimental-strip-types --test tests/traffic-server-entry-fixture.test.mjs tests/traffic-worker-cycle.test.ts tests/traffic-worker-cycle-presentation.test.ts tests/traffic-lane-order.test.ts tests/traffic-adaptive-signals.test.ts tests/traffic-signal-coordination.test.ts tests/traffic-signal-peers.test.ts tests/traffic-signal-display.test.ts tests/traffic-signal-lifecycle.test.ts tests/traffic-signal-browser-checks.test.mjs tests/traffic-rrt-navigation.test.ts tests/taxi-dispatch.test.ts tests/taxi-traffic-game.test.ts tests/bus-bridge.test.ts tests/bus-buildings.test.ts tests/bus-engine.test.ts tests/bus-game.test.ts tests/bus-integration.test.ts tests/bus-level.test.ts tests/bus-lines.test.ts tests/bus-mode-share.test.ts tests/bus-movement-gate.test.ts tests/bus-player.test.ts tests/bus-render.test.ts tests/traffic-junction-fairness.test.ts tests/traffic-gap-browser-checks.test.mjs tests/traffic-presentation.test.ts tests/traffic-spacing.test.ts tests/traffic-clock.test.ts tests/traffic-routing.test.ts tests/traffic-fleet.test.ts tests/traffic-network.test.ts tests/traffic-demand.test.ts tests/citizen-road-queue.test.ts tests/citizen-vehicle-poses.test.ts
-      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter'
+      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter' && steps.scope.outputs.kind != 'traffic-work-expiry'
         run: node --experimental-strip-types --test tests/traffic-game.test.ts tests/traffic-game-worker-client.test.ts tests/traffic-game-worker-engine.test.ts tests/traffic-game-poses.test.ts tests/traffic-game-layer.test.ts tests/traffic-game-status.test.ts tests/traffic-game-peak-fixture.test.ts tests/traffic-game-peak-metrics.test.ts tests/traffic-game-fallback-metrics.test.ts tests/traffic-game-modal.test.ts tests/traffic-game-cases.test.ts
       - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter'
+        name: Verify work-trip expiration and fixture preflight
+        run: node --experimental-strip-types --test tests/traffic-work-expiry-game.test.ts tests/traffic-work-expiry-worker.test.ts tests/traffic-work-expiry-layer.test.ts tests/traffic-work-expiry-presentation.test.ts tests/traffic-work-stall.test.ts tests/traffic-work-expiry-browser-fixture.test.ts tests/traffic-work-expiry-browser-checks.test.mjs
+      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter' && steps.scope.outputs.kind != 'traffic-work-expiry'
         run: node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
-      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter'
+      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter' && steps.scope.outputs.kind != 'traffic-work-expiry'
         run: node --experimental-strip-types --test tests/traffic-decorative-initialization.test.ts
-      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter'
+      - if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter' && steps.scope.outputs.kind != 'traffic-work-expiry'
         run: node --experimental-strip-types tests/traffic-default-fault-smoke.mjs --preflight
       - name: Bounded synthetic game throughput and worker isolation
-        if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter'
+        if: steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter' && steps.scope.outputs.kind != 'traffic-work-expiry'
         run: |
           New-Item -ItemType Directory -Force .test-output | Out-Null
           node --experimental-strip-types scripts/traffic-game-stress.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000 > .test-output/traffic-game-stress.json
@@ -111,7 +116,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        case: [preferences, economy, construct, async]
+        case: ${{ fromJSON(needs.checks.outputs.kind == 'traffic-work-expiry' && '["preferences"]' || '["preferences","economy","construct","async"]') }}
     env:
       TRAFFIC_FAULT_CASE: ${{ matrix.case }}
     defaults:
@@ -188,6 +193,10 @@ jobs:
             case: peak
             blocked: '0'
             software: '0'
+          - name: normal-work-expiry
+            case: work-expiry
+            blocked: '0'
+            software: '0'
           - name: fallback-lifecycle
             case: lifecycle
             blocked: '1'
@@ -216,14 +225,20 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Record work-only exclusions
+        if: needs.checks.outputs.kind == 'traffic-work-expiry' && matrix.name != 'normal-work-expiry'
+        run: Write-Output 'Excluded by exact work-trip scope; this case was not run.'
       - run: npm ci --no-audit --no-fund
+        if: needs.checks.outputs.kind != 'traffic-work-expiry' || matrix.name == 'normal-work-expiry'
       - run: npm run build
+        if: needs.checks.outputs.kind != 'traffic-work-expiry' || matrix.name == 'normal-work-expiry'
         env:
           VITE_MARKET_URL: ''
           VITE_CITY_ADVISOR_ONLINE: 'false'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
       - name: Bounded browser acceptance
+        if: needs.checks.outputs.kind != 'traffic-work-expiry' || matrix.name == 'normal-work-expiry'
         env:
           TRAFFIC_GAME_CASE: ${{ matrix.case }}
           CITYMANAGER_BLOCK_MODELS: ${{ matrix.blocked }}
@@ -242,7 +257,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Allocation-game browser acceptance failed.' }
           } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: always() && (needs.checks.outputs.kind != 'traffic-work-expiry' || matrix.name == 'normal-work-expiry')
         with:
           name: traffic-game-${{ matrix.name }}-evidence
           path: |

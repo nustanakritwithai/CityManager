@@ -242,6 +242,22 @@ test('bus scene presentation requires its reviewed source diff and rejects engin
  for(const invalid of [[],paths.filter(p=>p!=='src/bus/overlay.ts'),paths.filter(p=>p!=='tests/bus-scene.test.ts'),...['index.html','src/main.ts','src/bus/engine.ts','src/bus/lines.ts','src/bus/panel.ts','src/sim.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(busScenePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
 
+import {workExpiryPaths,workExpiryPathsOnly,workExpiryOnly,workExpirySelectorMatches} from '../scripts/ci-visual-scope.mjs';
+test('work-expiry scope requires exact paths, base tree, source and gate evidence',()=>{
+ assert.equal(workExpiryPathsOnly(workExpiryPaths),true);
+ assert.equal(workExpiryOnly(workExpiryPaths),false);
+ for(const invalid of [[],workExpiryPaths.slice(1),[...workExpiryPaths,'src/server-city-save.ts'],[...workExpiryPaths,'src/rail/network-runtime.ts']])assert.equal(workExpiryPathsOnly(invalid),false);
+ assert.equal(visualKind(workExpiryPaths,{workExpiryBaseTree:'wrong',workExpirySourceDiff:'wrong',workExpiryGates:'wrong'}),'full');
+});
+
+test('work scope rejects any unreviewed selector mutation',()=>{
+ const selector=readFileSync('scripts/ci-visual-scope.mjs','utf8');
+ assert.equal(workExpirySelectorMatches(selector),true);
+ assert.equal(workExpirySelectorMatches(selector+'\n// unexpected change'),false);
+ assert.equal(workExpirySelectorMatches(selector.replace('return towerOnly(paths)', 'return true || towerOnly(paths)')),false);
+ assert.equal(workExpirySelectorMatches(selector.replace(/const workExpirySelectorHash='[0-9a-f]{64}';/,'')),false);
+});
+
 import {busMapSources,busMapPathsOnly,busMapOnly} from '../scripts/ci-visual-scope.mjs';
 test('bus map overlay requires its reviewed source diff and rejects engine, 3D, save and simulation paths',()=>{
  const paths=[...busMapSources,'tests/bus-map.test.ts','docs/bus-map-ci-scope.md'];
@@ -264,6 +280,18 @@ test('browser-storage removal needs its reviewed diff and rejects save format, s
  assert.equal(browserStoragePathsOnly(paths),true);
  assert.equal(browserStorageOnly(paths),false);assert.equal(browserStorageOnly(paths,{browserStorageSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!=='src/session-memory.ts'),...['index.html','src/main.ts','src/save-storage.ts','src/server-city-save.ts','src/park-runtime.ts','src/sim.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(browserStoragePathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
+
+test('work-only scope skips unrelated fact and signal suites without changing fallback',()=>{
+ for(const file of ['city-questions.yml','signal-reading.yml']){
+  const workflow=readFileSync(`.github/workflows/${file}`,'utf8');
+  assert.match(workflow,/name: Verify exact work-only scope\s+if: steps\.scope\.outputs\.kind == 'traffic-work-expiry'\s+run: node --test tests\/ci-visual-scope\.test\.mjs/);
+  assert.match(workflow,/name: Record work-only exclusions\s+if: steps\.scope\.outputs\.kind == 'traffic-work-expiry'/);
+  assert.match(workflow,/name: Verify relevant panel data\s+if: steps\.scope\.outputs\.kind != 'traffic-work-expiry'/);
+  assert.match(workflow,/if: steps\.scope\.outputs\.kind != 'traffic-work-expiry'\s+run: npm run build/);
+  assert.match(workflow,/name: Preserve actual panel evidence\s+if: always\(\) && steps\.scope\.outputs\.kind != 'traffic-work-expiry'/);
+  assert.match(workflow,/else \{ npm test; if \(\$LASTEXITCODE -ne 0\)/,'Other routes retain original full fallback');
+ }
 });
 
 import {smokeRetrySources,smokeRetryPathsOnly,smokeRetryOnly} from '../scripts/ci-visual-scope.mjs';

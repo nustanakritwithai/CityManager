@@ -21,7 +21,7 @@ test('game layer is save-neutral, pauses, and fences old city workers',()=>{
  const layer=new TrafficLayer({} as never,()=>true,m=>faults.push(m),()=>{const w=new FakeWorker();workers.push(w);return w as never;},scene as never,undefined,()=>now);
  layer.frame(city,0,false,.25);workers[0].flush();for(let i=0;i<4;i++){now+=250;layer.frame(city,0,false,.25);}workers[0].flush();
  assert.equal(layer.diagnostics.mode,'allocation-game');assert.ok(layer.diagnostics.step>=1);assert.equal(serialize(city),before);
- const timing=layer.diagnostics.timing;assert.ok(timing.samples>=2&&timing.frames>=5&&timing.projections>=2);assert.ok(timing.maxCaptureSubmitMs>=timing.lastCaptureSubmitMs&&timing.maxFrameMs>=timing.lastFrameMs&&timing.maxProjectionMs>=timing.lastProjectionMs);
+ const timing=layer.diagnostics.timing;assert.ok(timing.samples>=2&&timing.frames>=5&&timing.projections>=2);assert.ok(timing.maxCaptureSubmitMs>=timing.lastCaptureSubmitMs&&timing.maxFrameMs>=timing.lastFrameMs&&timing.maxProjectionMs>=timing.lastProjectionMs);assert.ok(timing.maxInputMs>=timing.lastInputMs&&timing.maxPostMs>=timing.lastPostMs);assert.ok(Math.abs(timing.lastInputMs+timing.lastPostMs-timing.lastCaptureSubmitMs)<.01);
  layer.frame(city,0,true,.25);workers[0].flush();layer.frame(city,0,true,.25);const paused=layer.diagnostics.step;
  for(let i=0;i<8;i++)layer.frame(city,0,true,.25);workers[0].flush();assert.equal(layer.diagnostics.step,paused);
  const next=createCity(123);layer.frame(next,0,true,.1);assert.equal(workers[0].terminated,true);workers[1].flush();assert.equal(layer.diagnostics.step,0);assert.equal(layer.diagnostics.timing.samples,1);assert.equal(layer.diagnostics.timing.frames,1);assert.deepEqual(faults,[]);assert.ok(draws.length>0);

@@ -44,6 +44,18 @@ html #inspector #panel-pause { flex:0 0 auto; min-height:max(44px,calc(44 * var(
 #save-failure-banner button { flex-shrink:0; min-height:max(44px,calc(44 * var(--reader-unit,1px))); min-width:max(44px,calc(44 * var(--reader-unit,1px))); padding:6px 10px; font-size:calc(14 * var(--reader-unit,1px)); color:#1b2438; background:#f3c46b; }
 #autosave-status[data-failed=true] { color:#ffd2a0; }
 html #inspector > #save-failure-banner { position:static; transform:none; width:auto; flex:0 0 auto; margin:4px 4px 0; box-shadow:none; }
+/* Keep the factory chain in its DOM and keyboard order on narrow phones.
+   Reduce empty spacing, not text size or the 44px action targets. */
+@media (max-width:700px) {
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain { grid-template-columns:repeat(3,minmax(0,1fr)); gap:calc(2 * var(--bc-unit)); }
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step { padding:calc(2 * var(--bc-unit)); gap:calc(1 * var(--bc-unit)); }
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step .cx-metrics { grid-template-columns:minmax(0,1fr); gap:calc(1 * var(--bc-unit)); }
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step :is(dt,dd,.bc-chain-label) { overflow-wrap:anywhere; }
+  /* Narrow columns must not inherit the general card's two-line label clamp. */
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step .cx-metric dt { display:block; white-space:normal; overflow:visible; text-overflow:clip; -webkit-line-clamp:unset; line-clamp:unset; }
+  /* Thai glyphs need enough actual line-box height, not just visible overflow. */
+  html[data-touch-ui=true] #entity-content[data-card-kind="factory"] .bc-chain-step .cx-metric :is(dt,dd) { line-height:1.7; }
+}
 /* On tall/portrait phones the inline warning also consumes reading space.
    Keep actual values before editable production choices while it is present. */
 @media (max-width:700px), (min-height:501px) {
@@ -51,6 +63,7 @@ html #inspector > #save-failure-banner { position:static; transform:none; width:
   html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind] > * { order:2; }
   html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind] > :is(.bc-hero,.flow-strip) { order:0; }
   html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind] > :is([data-card-section=occupancy],[data-card-section=members],[data-card-section=production],[data-card-section=plot],[data-card-section=harvest],[data-card-section=stock],[data-card-section=trade]) { order:1; }
+  html[data-touch-ui=true] #inspector:has(> #save-failure-banner:not([hidden])) #entity-content[data-card-kind="factory"] > :is(.bc-hero,.flow-strip,[data-card-section],*) { order:0; }
 }
 html:not([data-touch-ui=true]):has(#save-failure-banner:not([hidden])) #inspector[data-open=true] { top:max(91px,calc(var(--save-warning-height,0px) + 6px)); }
 /* The touch menu and KPI chip are independently fixed, so move their shared

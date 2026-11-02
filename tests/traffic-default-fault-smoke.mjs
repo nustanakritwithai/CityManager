@@ -87,8 +87,10 @@ async function assertFaultWorkers(fault,count,where){
 }
 async function literalReload(){
  assert.equal(await evaluate('location.search'),'','UI removes query override before reload');
- const oldBoot=await evaluate('window.__boot'),before=server.active;
- await settleInterceptions();server.allowNavigation();await send('Page.reload');await server.enter({send,evaluate,button,until});
+ const oldBoot=await evaluate('window.__boot');
+ // Capture the comparison head only after outstanding interception work drains,
+ // immediately before the fixture captures its navigation baseline.
+ await settleInterceptions();await server.settle();const before=server.active;server.allowNavigation();await send('Page.reload');await server.enter({send,evaluate,button,until});
  assert.notEqual(await evaluate('window.__boot'),oldBoot);
  assert.equal(server.active.raw,before.raw,'Literal reload preserves exact bytes, no reseed');assert.equal(server.active.cityId,before.cityId);assert.equal(server.navigationEvidence.at(-1).beforeRevision,before.revision,'Any lifecycle revision is verified by the exact POST/ACK chain');
  assert.equal(await evaluate('window.cityManager.snapshot()'),cityRaw);await preserved();
@@ -98,6 +100,9 @@ async function literalReload(){
  * asserting the economic City and all durable bytes remain untouched. */
 async function revealDecorativeCars(){
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
+ // Visual preferences are page-memory only; select noon through the real UI
+ // rather than relying on the obsolete localStorage seed.
+ await button('#atmosphere-toggle');await button('input[name="atmosphere-time"][value="noon"]');await button('#atmosphere-toggle');
  await until('window.cityManager.atmosphere().hour===12.5');
  await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await button('#park-recreation button[data-speed]');await button('#close-inspector');
  assert.equal(await evaluate('window.cityManager.parks().speed'),1/1440);await button('#pause');
@@ -113,6 +118,16 @@ async function acknowledgeCurrentCity(){
  assert.equal(serialize(deserializeParkSession(server.active.raw).city),expectedThreeDays,'Durable server city includes exact three-day economy despite traffic faults');
  await button('#close-inspector');await preserved();
 }
+// The short decorative reveal advances sub-day park state even though City day
+// stays fixed. Establish its exact durable session before the reload chain.
+async function acknowledgeRevealedSession(){
+ await gameMenu();await until("!!document.querySelector('#save:not(:disabled)')");const revision=server.active.revision;await button('#save');
+ const deadline=Date.now()+30000;while(server.active.revision<=revision&&Date.now()<deadline)await sleep(80);
+ assert.ok(server.active.revision>revision,'Native Save ACKs the revealed session');
+ await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')");await server.settle();
+ assert.equal(server.active.raw,await evaluate('window.cityManager.sessionSnapshot()'),'Server ACK contains the exact paused session');
+ assert.equal(serialize(deserializeParkSession(server.active.raw).city),cityRaw,'Reveal does not advance the economic City');await button('#close-inspector');await preserved();
+}
 async function threeDays(){await evaluate(`window.__stop=false;(()=>{const watch=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=${city.tick+3}){if(!window.cityManager.parks().paused)document.querySelector('#pause').click();window.__stop=true;}else requestAnimationFrame(watch)};requestAnimationFrame(watch)})()`);await button('#pause');await until('window.__stop&&window.cityManager.parks().paused',45000);assert.equal(await evaluate('window.cityManager.snapshot()'),expectedThreeDays,'real city economy/journals match pure three-day replay');await preserved();await acknowledgeCurrentCity();}
 try{
  let page;for(let i=0;i<100;i++){try{page=(await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(p=>p.type==='page'&&p.url==='about:blank');if(page)break;}catch{}await sleep(100);}if(launchError)throw launchError;assert.ok(page,'Edge started');ws=new WebSocket(page.webSocketDebuggerUrl);
@@ -120,9 +135,9 @@ try{
  await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});await send('Runtime.enable');await send('Page.enable');await server.install(send);await send('Network.enable');await send('Network.setCacheDisabled',{cacheDisabled:true});networkFence=await installTrafficNetworkFence({send,evaluate,protocol:await (await fetch(`http://127.0.0.1:${port}/json/protocol`)).json(),origin:base.origin,observeProbe});await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,screenWidth:1440,screenHeight:1000,deviceScaleFactor:1,mobile:false});
  if(testPlan.preferences){
  await scenario({name:'fresh no-query default'});assert.equal(await evaluate(`${model}!==null`),expectDefault);assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),null);if(expectDefault)await waitModel();checks.push('fresh no-query boot uses configured default; no preference is invented');
- await scenario({name:'UI OFF followed by literal reload',query:expectDefault?'':'?traffic=1'});await waitModel();await gameMenu();await button('#traffic-game-toggle');await until(`${model}===null`);assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),'0');await literalReload();assert.equal(await evaluate(`${model}===null`),true);assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),'0');await revealDecorativeCars();checks.push('UI OFF survives actual Page.reload with server ACK and standalone market bytes preserved');
- await scenario({name:'traffic preference read denied',pref:'0',denyGet:true});assert.equal(await evaluate('window.__denied.includes("get")'),true);assert.equal(await evaluate(`${model}!==null`),expectDefault);if(expectDefault)await waitModel();assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),'0');await preserved();checks.push('traffic-key get denial uses the configured default without modifying saved OFF or city data');
- await scenario({name:'traffic preference write denied',denySet:true,query:'?traffic=1'});await waitModel();assert.equal(await evaluate('window.__denied.includes("set")'),true);await gameMenu();await button('#traffic-game-toggle');await until(`${model}===null`);assert.match(await evaluate('document.querySelector("#status").textContent'),/เปลี่ยนเฉพาะรอบนี้/);assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),null);await literalReload();assert.equal(await evaluate(`${model}!==null`),expectDefault);await preserved();checks.push('traffic-key set denial applies only for this visit and clearly discloses non-durability');
+ await scenario({name:'UI OFF is visit-only',query:expectDefault?'':'?traffic=1'});await waitModel();await gameMenu();await button('#traffic-game-toggle');await until(`${model}===null`);assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),null);await revealDecorativeCars();await acknowledgeRevealedSession();await literalReload();assert.equal(await evaluate(`${model}!==null`),expectDefault);assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),null);await preserved();checks.push('UI OFF applies for this visit; reload restores configured default without browser preference writes, retaining acknowledged server city');
+ await scenario({name:'legacy traffic preference ignored',pref:'0',denyGet:true});assert.equal(await evaluate('window.__denied.includes("get")'),false);assert.equal(await evaluate(`${model}!==null`),expectDefault);if(expectDefault)await waitModel();assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),'0');await preserved();checks.push('legacy browser preference is neither read nor modified; server city remains intact');
+ await scenario({name:'traffic preference avoids browser writes',denySet:true,query:'?traffic=1'});await waitModel();assert.equal(await evaluate('window.__denied.includes("set")'),false);await gameMenu();await button('#traffic-game-toggle');await until(`${model}===null`);assert.equal(await evaluate('window.__denied.includes("set")'),false);assert.equal(await evaluate("window.__nativeGet('citymanager.traffic')"),null);await literalReload();assert.equal(await evaluate(`${model}!==null`),expectDefault);await preserved();checks.push('query and UI preference use page memory without browser writes; reload restores default and preserves server city');
  }
  if(testPlan.economy){await scenario({name:'OFF economy baseline',pref:'0'});assert.equal(await evaluate(`${model}===null`),true);await threeDays();checks.push('three-day OFF economy matches deterministic replay');}
  for(const fault of testPlan.faults){const entry=await scenario({name:`Worker ${fault} failure`,pref:'1',fault});await until(`${model}?.failure`);await assertFaultWorkers(fault,entry.faultSessions,'before fault exercise');await revealDecorativeCars();assert.equal(await evaluate(`${model}.cars`),0);await until('/แบบจำลองไม่พร้อม/.test(document.querySelector("#traffic-game-status").textContent)');await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await evaluate('document.querySelector("#traffic-game-status").scrollIntoView({block:"nearest"})');assert.equal(await evaluate('(()=>{const e=document.querySelector("#traffic-game-status"),r=e.getBoundingClientRect();return !e.hidden&&r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight})()'),true,'failure label visible');const shot=await send('Page.captureScreenshot',{format:'png'});await writeFile(resolve(output,`worker-${fault}.png`),Buffer.from(shot.data,'base64'));await button('#close-inspector');await preserved();await threeDays();const workers=await assertFaultWorkers(fault,entry.faultSessions,'after fault exercise');checks.push({fault,explicitEntry:entry.explicitEntry,workers,check:'one failed worker per City session, all constructed workers terminated, no retry; failure label, decorative cars, server durability, zero browser city writes and three-day economy'});}
