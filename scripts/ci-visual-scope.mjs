@@ -191,6 +191,12 @@ export const smokeRetrySources=['tests/server-save-browser-smoke.mjs'];
 const smokeRetryAllowed=new Set([...smokeRetrySources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/smoke-retry-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/traffic-workflow-partition.test.mjs']);
 export function smokeRetryPathsOnly(paths){return smokeRetrySources.every(p=>paths.includes(p))&&paths.every(p=>smokeRetryAllowed.has(p));}
 export function smokeRetryOnly(paths,evidence={}){return smokeRetryPathsOnly(paths)&&matchesReviewedSources(evidence,{smokeRetrySourceDiff:'d6c198c3e42fc58ef239863b4543161a5ff5e3e3a557c83c814dae069bf2fd99'});}
+// Map declutter: building issues tiered by urgency (alert / nearby / panel) for badges, minimap, HUD and chime.
+// Presentation only: issue detection, simulation, save and server are unchanged.
+export const mapDeclutterSources=['src/audio-cues.ts','src/building-issue-layout.ts','src/building-issues.css','src/building-issues.ts','src/city-hud.ts','src/map-markers.ts','src/minimap.ts','tests/building-issues.test.ts'];
+const mapDeclutterAllowed=new Set([...mapDeclutterSources,'.github/workflows/citymanager.yml','.github/workflows/entity-explanation.yml','.github/workflows/owner-decisions.yml','.github/workflows/player-feedback.yml','.github/workflows/traffic-enabled.yml','docs/map-declutter-ci-scope.md','scripts/ci-visual-scope.mjs','tests/ci-visual-scope.test.mjs','tests/traffic-workflow-partition.test.mjs']);
+export function mapDeclutterPathsOnly(paths){return ['src/building-issues.ts','src/map-markers.ts','tests/building-issues.test.ts'].every(p=>paths.includes(p))&&paths.every(p=>mapDeclutterAllowed.has(p));}
+export function mapDeclutterOnly(paths,evidence={}){return mapDeclutterPathsOnly(paths)&&matchesReviewedSources(evidence,{mapDeclutterSourceDiff:'REVIEWED_HASH'});}
 export const trafficPresenterSources=["src/traffic/presentation.ts"];
 const trafficPresenterAllowed=new Set(["docs/TRAFFIC-PRESENTER-PERFORMANCE.md", "tests/traffic-game-cases.test.ts", "src/traffic/presentation.ts", ".github/workflows/citymanager.yml", ".github/workflows/traffic-enabled.yml", "scripts/ci-visual-scope.mjs", "tests/ci-visual-scope.test.mjs", "tests/traffic-workflow-partition.test.mjs", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-game-cases.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs", "docs/server-save-ci-migration.md"]);
 export function trafficPresenterPathsOnly(paths){return ["src/traffic/presentation.ts", "tests/traffic-lane-order.test.ts", "tests/traffic-default-fault-smoke.mjs", "tests/traffic-game-smoke.mjs", "tests/traffic-server-entry-fixture.mjs", "tests/traffic-server-entry-fixture.test.mjs"].every(p=>paths.includes(p))&&paths.every(p=>trafficPresenterAllowed.has(p));}
@@ -215,6 +221,7 @@ export function visualKind(paths, evidence = {}) {
   if(saveCleanupOnly(paths,evidence))return 'save-cleanup';
   if(browserStorageOnly(paths,evidence))return 'browser-storage';
   if(smokeRetryOnly(paths,evidence))return 'smoke-retry';
+  if(mapDeclutterOnly(paths,evidence))return 'map-declutter';
   if(hudPolishOnly(paths,evidence))return 'hud-polish';
   if(panelPolishOnly(paths,evidence))return 'panel-polish';
   if(conflictFeedbackPathsOnly(paths)&&serverSaveConflictFeedbackOnly(evidence))return 'server-save';
@@ -267,6 +274,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return git(['show',`${head}:${p}`]);
       });
     }
+    if(mapDeclutterPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.mapDeclutterSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...mapDeclutterSources]);}
     if(smokeRetryPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.smokeRetrySourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...smokeRetrySources]);}
     if(browserStoragePathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.browserStorageSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...browserStorageSources]);}
     if(saveCleanupPathsOnly(paths)){const {base,head}=changedRange(process.env.GITHUB_EVENT_NAME,event,git);evidence.saveCleanupSourceDiff=git(["diff", "--no-ext-diff", "--no-renames", "--binary", "--full-index", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--diff-algorithm=myers", "--no-indent-heuristic",base,head,'--',...saveCleanupSources]);}

@@ -273,3 +273,11 @@ test('save smoke hardening needs its reviewed diff and rejects any game, save cl
  assert.equal(smokeRetryOnly(paths),false);assert.equal(smokeRetryOnly(paths,{smokeRetrySourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],...['index.html','src/main.ts','src/server-city-save.ts','src/save-feedback-panel.ts','server/city-saves/service.mjs','tests/server-city-save.test.ts'].map(p=>[...paths,p])]){assert.equal(smokeRetryPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+import {mapDeclutterSources,mapDeclutterPathsOnly,mapDeclutterOnly} from '../scripts/ci-visual-scope.mjs';
+test('map declutter needs its reviewed diff and rejects simulation, save and server paths',()=>{
+ const paths=[...mapDeclutterSources,'docs/map-declutter-ci-scope.md'];
+ assert.equal(mapDeclutterPathsOnly(paths),true);
+ assert.equal(mapDeclutterOnly(paths),false);assert.equal(mapDeclutterOnly(paths,{mapDeclutterSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
+ for(const invalid of [[],paths.filter(p=>p!=='src/map-markers.ts'),...['index.html','src/main.ts','src/sim.ts','src/map-overlay.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(mapDeclutterPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
+});
