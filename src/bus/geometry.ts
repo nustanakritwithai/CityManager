@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 /**
  * Grid geometry for bus drawing. World axes match `renderer.position`: +x east, +z south,
  * 2 world units per cell, origin at the map centre. Pure: no scene graph.
@@ -14,7 +15,7 @@ export const BUS_HOME_PITCH = 0.48;
 export const BUS_CROWD_CAP = 8;
 
 export function cellCenter(cell: number, size = BUS_MAP_SIZE, unit = BUS_MAP_UNIT) {
-  return { x: ((cell % size) - (size - 1) / 2) * unit, z: (Math.floor(cell / size) - (size - 1) / 2) * unit };
+  const p=size===24?expandedCellCoordinate(cell):{x:cell%size,z:Math.floor(cell/size)}; return { x:(p.x-(size-1)/2)*unit,z:(p.z-(size-1)/2)*unit };
 }
 /** Canvas pixel for a world point. Cell centres land in the middle of the minimap square. */
 export function worldToCanvas(x: number, z: number, cellPx: number, size = BUS_MAP_SIZE, unit = BUS_MAP_UNIT) {

@@ -1,3 +1,4 @@
+import { expandedCellAt, expandedCellCoordinate } from '../expanded-map-grid.ts';
 import { linkKey, type LinkNetwork } from '../traffic/network.ts';
 /**
  * Seeded RRT roaming for idle taxis (pure, deterministic). The tree grows only along `net.out`
@@ -22,7 +23,8 @@ export function roamRng(seed: number, taxiId: string, period: number, start: num
 export function planRoam(net: LinkNetwork, times: ReadonlyMap<string, number>, start: number, o: RoamOptions): RoamPlan {
   const maxNodes = o.maxNodes ?? RRT_MAX_NODES, maxMin = o.maxMinutes ?? RRT_MAX_MINUTES, W = o.width;
   const rng = roamRng(o.seed, o.taxiId, o.period, start);
-  const xy = (c: number) => [c % W, Math.floor(c / W)] as const;
+  const expandedGrid=W===24&&[...net.out.keys()].some(c=>c>=576);
+  const xy = (c:number) => {if(W===24 && c>=0 && c<672){const p=expandedCellCoordinate(c);return [p.x,p.z] as const;}return [c%W,Math.floor(c/W)] as const;};
   const dist = (a: number, b: number) => { const [ax, ay] = xy(a), [bx, by] = xy(b); return Math.abs(ax - bx) + Math.abs(ay - by); };
   const parent = new Map<number, number>([[start, -1]]), mins = new Map<number, number>([[start, 0]]), nodes = [start];
   const demand = [...o.demandCells].sort((a, b) => a - b);
@@ -31,7 +33,7 @@ export function planRoam(net: LinkNetwork, times: ReadonlyMap<string, number>, s
     // Sample: demand cell (bias) or a random cell near a random tree node.
     let sample: number;
     if (demand.length && rng() < RRT_DEMAND_BIAS) sample = demand[Math.floor(rng() * demand.length)];
-    else { const [x, y] = xy(nodes[Math.floor(rng() * nodes.length)]); sample = Math.max(0, y + Math.floor(rng() * 9) - 4) * W + Math.min(W - 1, Math.max(0, x + Math.floor(rng() * 9) - 4)); }
+    else { const [x, y] = xy(nodes[Math.floor(rng() * nodes.length)]); const sy=y+Math.floor(rng()*9)-4,sx=Math.min(W-1,Math.max(0,x+Math.floor(rng()*9)-4)); sample=expandedGrid ? expandedCellAt(sx,Math.max(-4,Math.min(23,sy)))! : Math.max(0,sy)*W+sx; }
     let near = nodes[0], nd = Infinity;
     for (const n of nodes) { const d = dist(n, sample); if (d < nd) { nd = d; near = n; } }
     // Extend one legal link toward the sample.

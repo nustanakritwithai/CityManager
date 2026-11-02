@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 import { PEOPLE_PER_VEHICLE, type OdEntry, type TripPurpose } from '../traffic/types.ts';
 import { PARKING_PENALTY_MIN, TAXI_PURPOSES, TAXI_THETA, VALUE_OF_TIME_SATANG_PER_MIN, type TaxiCarry, type TaxiOdCost, type TaxiRequestMass } from '../taxi/types.ts';
 import { taxiFareSatang, taxiShare } from '../taxi/mode-share.ts';
@@ -8,7 +9,7 @@ import { BUS_AVAILABILITY_CAP, BUS_FARE_SATANG, BUS_PURPOSES, BUS_RIDE_PENALTY_M
  * then takes its unchanged binary-logit share of the people who did not choose bus, so with no bus
  * offered the taxi result is identical to `splitTaxiDemand`.
  */
-const manhattan = (a: number, b: number, w: number) => Math.abs((a % w) - (b % w)) + Math.abs(Math.floor(a / w) - Math.floor(b / w));
+const manhattan = (a:number,b:number,w:number)=>{if(w!==24)return Math.abs(a%w-b%w)+Math.abs(Math.floor(a/w)-Math.floor(b/w));const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b);return Math.abs(x.x-y.x)+Math.abs(x.z-y.z);};
 /** Nearest stops on one common line within walk radius of both ends (ties: lower walk → line id → stop ids). */
 export function busAccess(from: number, to: number, stops: readonly BusStop[], lines: readonly BusLine[], width: number, radius = BUS_WALK_RADIUS) {
   if (!Number.isSafeInteger(width) || width < 1) throw RangeError('busAccess needs the map width');

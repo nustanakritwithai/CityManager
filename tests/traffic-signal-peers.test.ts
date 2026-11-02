@@ -36,7 +36,7 @@ test('finite full-map cache bounds and unchanged topology reuse do not add per-m
  const nodes=Array.from({length:576},(_,i)=>i),corridors=nodes.flatMap(from=>[...(from%24<23?[{from,to:from+1}]:[]),...(from<552?[{from,to:from+24}]:[])]),g={revision:'full',nodes,corridors},peers=new SignalPeers(g),before=peers.stats();
  assert.equal(before.searches,576);assert.ok(before.expanded<=576*47&&before.attempts<=576*192&&before.routes<=576*8);
  const unchanged=peers.withGraph({...g,revision:'full-new-epoch'});assert.equal(unchanged.stats().searches,before.searches);assert.strictEqual(unchanged.routes(0)[0].path,peers.routes(0)[0].path);
- assert.throws(()=>new SignalPeers({...g,nodes:[...nodes,576]}),/graph/);assert.throws(()=>new SignalPeers({...g,corridors:Array.from({length:2305},()=>({from:0,to:1}))}),/graph/);
+ assert.throws(()=>new SignalPeers({...g,nodes:[...nodes,672]}),/graph/);assert.throws(()=>new SignalPeers({...g,corridors:Array.from({length:2689},()=>({from:0,to:1}))}),/graph/);
 });
 test('same-topology reset rejects old reply even when sequence and clock restart, without replanning routes',()=>{
  const g=graph(),peers=new SignalPeers(g),oldRequest=peers.request(0,0)[0],oldReply=peers.reply(oldRequest,snapshot(oldRequest.destination))!;

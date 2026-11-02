@@ -51,3 +51,17 @@ test('known delete rejection retains its original reason and retry never sends a
   assert.equal(calls,1);assert.equal(rejected.confirmed?.raw,current.raw);assert.equal(rejected.deleted,null);assert.equal(rejected.pending,true);
  }
 });
+test('expanded city survives isolated server ACK, CAS and reload without changing the original snapshot',async()=>{
+ const {createCity,serialize,buildRoad,zoneCell}=await import('../src/sim.ts');
+ const {createParkRuntime,serializeParkSession,deserializeParkSession,expandValidatedParkSession}=await import('../src/park-runtime.ts');
+ const {expandedCellAt}=await import('../src/expanded-map-grid.ts');
+ const legacy=createCity(777),oldRaw=serializeParkSession(legacy,createParkRuntime(legacy)),h=harness();
+ await h.client.load(); const first=await h.client.create(oldRaw,meta);assert.equal(first.raw,oldRaw);
+ const active=expandValidatedParkSession(deserializeParkSession(first.raw));
+ const north=expandedCellAt(5,-1)!,parcel=expandedCellAt(6,-1)!;
+ assert.ok(buildRoad(active.city,5,north).ok);assert.ok(zoneCell(active.city,parcel,'R').ok);
+ const expandedRaw=serializeParkSession(active.city,active.runtime); const saved=await h.client.save(expandedRaw,meta);
+ assert.equal(saved.raw,expandedRaw);assert.equal(saved.revision,2);assert.equal(h.state().snapshots[0].raw,oldRaw);
+ const loaded=await h.service.read(owner);assert.equal(loaded.raw,expandedRaw);
+ const restored=deserializeParkSession(loaded.raw);assert.deepEqual(restored.city.cells,active.city.cells);assert.deepEqual(restored.city.resources,active.city.resources);
+});

@@ -1,3 +1,4 @@
+import { expandedCellCoordinate, EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
 import {roamRng} from '../taxi/rrt-roam.ts';
 
 /** Logical, synchronous in-worker communication, not vehicle routing or hop latency. */
@@ -17,12 +18,12 @@ function freezeSnapshot(s:SignalPeerSnapshot):Readonly<SignalPeerSnapshot>{
  return Object.freeze({...s,...(s.byApproach?{byApproach:Object.freeze({...s.byApproach})}:{})});
 }
 function build(graph:SignalPeerGraph,seed:number,prior?:Cache):Cache{
- const nodes=[...new Set(graph.nodes)].sort((a,b)=>a-b);if(!graph.revision||graph.nodes.length>576||graph.corridors.length>2304||nodes.length>576||nodes.some(n=>!integer(n)||n>=576)||!Number.isSafeInteger(seed))throw Error('Invalid signal peer graph');
+ const nodes=[...new Set(graph.nodes)].sort((a,b)=>a-b);if(!graph.revision||graph.nodes.length>EXPANDED_MAP_CELLS||graph.corridors.length>2688||nodes.length>EXPANDED_MAP_CELLS||nodes.some(n=>!integer(n)||n>=EXPANDED_MAP_CELLS)||!Number.isSafeInteger(seed))throw Error('Invalid signal peer graph');
  const known=new Set(nodes),adj=new Map(nodes.map(n=>[n,new Set<number>()])),direct=new Map(nodes.map(n=>[n,new Set<number>()]));
  for(const e of graph.corridors){if(!known.has(e.from)||!known.has(e.to)||e.from===e.to)throw Error('Invalid signal corridor');adj.get(e.from)!.add(e.to);adj.get(e.to)!.add(e.from);direct.get(e.from)!.add(e.to);}
  if([...direct.values()].some(s=>s.size>4)||[...adj.values()].some(s=>s.size>4))throw Error('Signal corridor degree exceeds road-grid bound');
  const routes=new Map<number,readonly SignalPeerRoute[]>(),byId=new Map<string,SignalPeerRoute>();const signatures=new Map<number,string>();let searches=prior?.searches??0,expanded=prior?.expanded??0,attempts=prior?.attempts??0;
- const distance=(a:number,b:number)=>Math.abs(a%24-b%24)+Math.abs(Math.floor(a/24)-Math.floor(b/24));
+ const distance=(a:number,b:number)=>Math.abs(expandedCellCoordinate(a).x-expandedCellCoordinate(b).x)+Math.abs(expandedCellCoordinate(a).z-expandedCellCoordinate(b).z);
  for(const origin of nodes){
   // Only the radius-three communication neighborhood can affect this tree.
   const neighborhood=new Map([[origin,0]]),pending=[origin];for(let i=0;i<pending.length;i++){const n=pending[i],d=neighborhood.get(n)!;if(d>=SIGNAL_PEER_HOPS)continue;for(const to of adj.get(n)!)if(!neighborhood.has(to)){neighborhood.set(to,d+1);pending.push(to);}}

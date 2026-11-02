@@ -1,3 +1,4 @@
+import { expandedCellCoordinate, expandedCellNeighbors } from './expanded-map-grid.ts';
 /** Deterministic recreation sidecar. One economic tick is still one day.
  * The caller supplies integer game minutes; neither wall time nor atmosphere is read.
  * Identities are constituent slots of existing household counts, not extra population.
@@ -19,8 +20,8 @@ type Point = { x: number; z: number };
 type StaffedPark = City['parks'][number] & { staffing?: { allocations: { householdId: number; parkId: number; skill: typeof WORKER_SKILLS[number]; workers: number }[] } };
 type Job = { firmId: number | null; parkJobId: number | null };
 const integer = (n: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): n is number => Number.isSafeInteger(n) && (n as number) >= min && (n as number) <= max;
-const neighbours = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(n => n >= 0);
-const centre = (cell: number): Point => ({ x: cell % SIZE + .5, z: Math.floor(cell / SIZE) + .5 });
+const neighbours = (i:number) => expandedCellNeighbors(i);
+const centre = (cell:number):Point => {const p=expandedCellCoordinate(cell);return {x:p.x+.5,z:p.z+.5};};
 const lerp = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
 const identity = (householdId: number, slot: number) => `h:${householdId}:m:${slot}`;
 const hash = (value: string): number => { let n = 2166136261; for (const char of value) n = Math.imul(n ^ char.charCodeAt(0), 16777619); return n >>> 0; };
@@ -127,7 +128,7 @@ function checkContext(city: City, context: ParkActivityContext) {
  * There is no water terrain in canonical City; all routing stays inside the map.
  */
 export function parkPedestrianRoute(city: City, homeCell: number, parkCell: number): number[] {
-  if (!integer(homeCell, 0, SIZE * SIZE - 1) || !integer(parkCell, 0, SIZE * SIZE - 1) || homeCell === parkCell) return [];
+  if (!integer(homeCell, 0, city.cells.length - 1) || !integer(parkCell, 0, city.cells.length - 1) || homeCell === parkCell) return [];
   const open = walkable(city), previous = new Map<number, number>([[homeCell, -1]]), depth = new Map([[homeCell, 1]]), queue = [homeCell];
   for (let q = 0; q < queue.length; q++) {
     const here = queue[q];
@@ -304,7 +305,7 @@ export function restoreParkActivity(city: City, json: string): ParkActivityState
   if (!s || s.version !== 1 || !integer(s.day) || !integer(s.minute, 0, 1440) || !integer(s.completed) || !integer(s.cancelled) || !integer(s.routeSearches) || !(s.lastCancellation === null || typeof s.lastCancellation === 'string') || !Array.isArray(s.visitors) || s.visitors.length > MAX_PARK_VISITORS || !Array.isArray(s.visited) || s.visited.some(id => typeof id !== 'string' || !/^h:[1-9]\d*:m:\d+$/.test(id)) || new Set(s.visited).size !== s.visited.length) fail();
   const ids = new Set<string>(), reservations = new Set<string>();
   for (const v of s.visitors) {
-    if (!v || !integer(v.householdId, 1) || !integer(v.memberSlot) || v.citizenId !== identity(v.householdId, v.memberSlot) || ids.has(v.citizenId) || !s.visited.includes(v.citizenId) || !integer(v.homeId, 1) || !integer(v.homeCell, 0, SIZE * SIZE - 1) || !integer(v.parkId, 1) || !integer(v.parkCell, 0, SIZE * SIZE - 1) || !integer(v.slot, 0, 5) || reservations.has(`${v.parkId}:${v.slot}`) || typeof v.employed !== 'boolean' || !(v.firmId === null || integer(v.firmId, 1)) || !integer(v.departureMinute, 600, 1320) || !['travel', 'enter', 'stroll', 'wait', 'meet', 'sit', 'leave'].includes(v.phase) || !integer(v.phaseMinute) || !Array.isArray(v.route) || v.route.length < 2 || v.route.length > MAX_PARK_ROUTE_CELLS || v.route[0] !== v.homeCell || v.route.at(-1) !== v.parkCell || new Set(v.route).size !== v.route.length || v.route.some((cell, i) => !integer(cell, 0, SIZE * SIZE - 1) || (i > 0 && !neighbours(v.route[i - 1]).includes(cell))) || v.phaseMinute >= duration(v) || (v.phase === 'sit' && v.slot > 1) || !(v.partnerId === null || typeof v.partnerId === 'string') || (v.phase === 'meet') !== (v.partnerId !== null) || (v.phase === 'travel' && v.phaseMinute !== Math.max(0, s.minute - v.departureMinute)) || (v.phase !== 'travel' && v.departureMinute > s.minute)) fail();
+    if (!v || !integer(v.householdId, 1) || !integer(v.memberSlot) || v.citizenId !== identity(v.householdId, v.memberSlot) || ids.has(v.citizenId) || !s.visited.includes(v.citizenId) || !integer(v.homeId, 1) || !integer(v.homeCell, 0, city.cells.length - 1) || !integer(v.parkId, 1) || !integer(v.parkCell, 0, city.cells.length - 1) || !integer(v.slot, 0, 5) || reservations.has(`${v.parkId}:${v.slot}`) || typeof v.employed !== 'boolean' || !(v.firmId === null || integer(v.firmId, 1)) || !integer(v.departureMinute, 600, 1320) || !['travel', 'enter', 'stroll', 'wait', 'meet', 'sit', 'leave'].includes(v.phase) || !integer(v.phaseMinute) || !Array.isArray(v.route) || v.route.length < 2 || v.route.length > MAX_PARK_ROUTE_CELLS || v.route[0] !== v.homeCell || v.route.at(-1) !== v.parkCell || new Set(v.route).size !== v.route.length || v.route.some((cell, i) => !integer(cell, 0, city.cells.length - 1) || (i > 0 && !neighbours(v.route[i - 1]).includes(cell))) || v.phaseMinute >= duration(v) || (v.phase === 'sit' && v.slot > 1) || !(v.partnerId === null || typeof v.partnerId === 'string') || (v.phase === 'meet') !== (v.partnerId !== null) || (v.phase === 'travel' && v.phaseMinute !== Math.max(0, s.minute - v.departureMinute)) || (v.phase !== 'travel' && v.departureMinute > s.minute)) fail();
     if (!(v.parkJobId === null || integer(v.parkJobId, 1)) || (v.parkJobId !== null && v.firmId !== null)) fail();
     ids.add(v.citizenId); reservations.add(`${v.parkId}:${v.slot}`);
   }

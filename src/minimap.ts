@@ -1,5 +1,7 @@
+import { mapLayout, cellMapPosition, mapPositionCell, formatCellCoordinate } from './expanded-map-geometry.ts';
+import { EXPANDED_MAP_CELLS } from './expanded-map-grid.ts';
 /**
- * Minimap (desktop corner) and the full city map (M): the 24 × 24 grid drawn from the city's
+ * Minimap (desktop corner) and the full city map (M): the 24 × 28 grid drawn from the city's
  * own cells, with the camera's view, the selection and problem markers. Clicking moves the
  * camera (minimap) or opens the place (map). Read-only over City.
  */
@@ -20,11 +22,12 @@ const BUILT: Record<string, string> = { R: '#3f9c6b', C: '#3c84b8', I: '#c27a3a'
 const NAMES = { shop: 'ร้าน', market: 'ตลาด', I: 'โรงงาน', F: 'ฟาร์ม' } as const;
 
 function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { view?: View; selected?: number | null; issues?: Set<number>; labels?: boolean }) {
-  const cell = size / SIZE;
+  const expanded=city.cells.length===EXPANDED_MAP_CELLS, {cell,xOffset,yOffset}=mapLayout(size,expanded);
+  const point=(i:number)=>cellMapPosition(i,size,expanded);
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = '#6f9a62'; ctx.fillRect(0, 0, size, size);
   for (let i = 0; i < city.cells.length; i++) {
-    const c = city.cells[i], x = (i % SIZE) * cell, y = Math.floor(i / SIZE) * cell;
+    const c = city.cells[i], {x,y} = point(i);
     if (c.road) { ctx.fillStyle = i === GATEWAY ? '#f3c46b' : '#556078'; ctx.fillRect(x, y, cell, cell); continue; }
     if (!c.zone) continue;
     ctx.fillStyle = FILL[c.zone]; ctx.fillRect(x + .5, y + .5, cell - 1, cell - 1);
@@ -36,18 +39,18 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
   }
   if (opts.issues?.size) {
     for (const i of opts.issues) {
-      const x = (i % SIZE + .5) * cell, y = (Math.floor(i / SIZE) + .5) * cell;
+      const p=point(i), x=p.x+.5*cell, y=p.y+.5*cell;
       ctx.beginPath(); ctx.arc(x, y, Math.max(2.5, cell * .22), 0, Math.PI * 2); ctx.fillStyle = '#ff6b5b'; ctx.fill();
       ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff'; ctx.stroke();
     }
   }
   if (opts.selected != null) {
-    const i = opts.selected, x = (i % SIZE) * cell, y = Math.floor(i / SIZE) * cell;
+    const i = opts.selected, {x,y} = point(i);
     ctx.lineWidth = 2; ctx.strokeStyle = '#fff1bb'; ctx.strokeRect(x + 1, y + 1, cell - 2, cell - 2);
   }
   if (opts.view) {
     // The camera looks from its position toward the target; draw the rough ground footprint.
-    const v = opts.view, cx = (v.target.x / UNIT + (SIZE - 1) / 2 + .5) * cell, cy = (v.target.z / UNIT + (SIZE - 1) / 2 + .5) * cell;
+    const v = opts.view, cx = xOffset + (v.target.x / UNIT + (SIZE - 1) / 2 + .5) * cell, cy = yOffset + (v.target.z / UNIT + (SIZE - 1) / 2 + .5) * cell;
     const half = v.radius * .5 / UNIT * cell, depth = v.radius * .36 / UNIT * cell;
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(-v.yaw + Math.PI);
     ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.setLineDash([]);
@@ -57,7 +60,7 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
   if (opts.labels) {
     ctx.font = `600 ${Math.max(10, cell * .42)}px "IBM Plex Sans Thai", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const label = (text: string, i: number) => {
-      const x = (i % SIZE + .5) * cell, y = (Math.floor(i / SIZE) + .5) * cell - cell * .75;
+      const p=point(i), x=p.x+.5*cell, y=p.y-.25*cell;
       ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(15, 25, 46,.85)'; ctx.strokeText(text, x, y); ctx.fillStyle = '#f4f8f2'; ctx.fillText(text, x, y);
     };
     for (const f of city.firms) {
@@ -66,8 +69,10 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     }
     label('ประตูเมือง', GATEWAY);
   }
+  ctx.save(); ctx.translate(xOffset,yOffset);
   paintBusOverlay(ctx, cell, !!opts.labels);
   paintRailOverlay(ctx, cell, !!opts.labels);
+  ctx.restore();
 }
 
 function setupCanvas(canvas: HTMLCanvasElement, size: number) {
@@ -75,9 +80,9 @@ function setupCanvas(canvas: HTMLCanvasElement, size: number) {
   canvas.style.width = `${size}px`; canvas.style.height = `${size}px`;
   const ctx = canvas.getContext('2d')!; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return ctx;
 }
-const cellAt = (canvas: HTMLCanvasElement, e: PointerEvent | MouseEvent) => {
-  const r = canvas.getBoundingClientRect(), col = Math.floor((e.clientX - r.left) / r.width * SIZE), row = Math.floor((e.clientY - r.top) / r.height * SIZE);
-  return col < 0 || row < 0 || col >= SIZE || row >= SIZE ? null : row * SIZE + col;
+const cellAt = (canvas: HTMLCanvasElement, e: PointerEvent | MouseEvent, expanded: boolean) => {
+  const r=canvas.getBoundingClientRect();
+  return mapPositionCell(e.clientX-r.left,(e.clientY-r.top)*r.width/r.height,r.width,expanded);
 };
 
 export class Minimap {
@@ -100,7 +105,7 @@ export class Minimap {
     head.append(title, open);
     this.canvas.className = 'minimap-canvas'; this.canvas.setAttribute('role', 'img'); this.canvas.setAttribute('aria-label', 'แผนที่ย่อ แตะเพื่อเลื่อนกล้องไปที่จุดนั้น');
     this.ctx = setupCanvas(this.canvas, 152);
-    this.canvas.addEventListener('pointerdown', e => { const cell = cellAt(this.canvas, e); if (cell !== null) { this.onFocus(cell); this.redraw(true); } });
+    this.canvas.addEventListener('pointerdown', e => { const cell = cellAt(this.canvas, e, this.city?.cells.length === EXPANDED_MAP_CELLS); if (cell !== null) { this.onFocus(cell); this.redraw(true); } });
     this.root.append(head, this.canvas); document.body.append(this.root);
     // Full map overlay.
     this.map.className = 'city-map'; this.map.hidden = true; this.map.setAttribute('role', 'dialog'); this.map.setAttribute('aria-label', 'แผนที่เมือง');
@@ -114,8 +119,8 @@ export class Minimap {
       const item = document.createElement('span'); item.className = `city-map-key ${tone}`; item.textContent = label; legend.append(item);
     }
     this.mapCanvas.className = 'city-map-canvas';
-    this.mapCanvas.addEventListener('pointermove', e => this.describe(cellAt(this.mapCanvas, e)));
-    this.mapCanvas.addEventListener('click', e => { const cell = cellAt(this.mapCanvas, e); if (cell !== null) { this.toggleMap(false); this.onOpen(cell); } });
+    this.mapCanvas.addEventListener('pointermove', e => this.describe(cellAt(this.mapCanvas, e, this.city?.cells.length === EXPANDED_MAP_CELLS)));
+    this.mapCanvas.addEventListener('click', e => { const cell = cellAt(this.mapCanvas, e, this.city?.cells.length === EXPANDED_MAP_CELLS); if (cell !== null) { this.toggleMap(false); this.onOpen(cell); } });
     this.mapInfo.className = 'city-map-info'; this.mapInfo.textContent = matchMedia('(pointer: coarse)').matches ? 'แตะช่องเพื่อเปิดข้อมูลสถานที่' : 'ชี้เพื่อดูว่าตรงนั้นคืออะไร · คลิกเพื่อเปิดข้อมูลสถานที่ · กด M หรือ Esc เพื่อปิด';
     this.map.append(bar, legend, this.mapCanvas, this.mapInfo); document.body.append(this.map);
   }
@@ -144,9 +149,9 @@ export class Minimap {
   }
   private describe(cell: number | null) {
     if (cell === null || !this.city) return;
-    const c = this.city.cells[cell], col = cell % SIZE + 1, row = Math.floor(cell / SIZE) + 1, b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
+    const c = this.city.cells[cell], b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
     const kind = c.road ? (cell === GATEWAY ? 'ประตูเมือง' : 'ถนน') : !c.zone ? 'ที่ดินว่าง' : b ? `${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} #${b.id} · ระดับ ${b.level}` : `โซน${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} (ว่าง)`;
     const bus = busCellNote(cell), rail = railCellNote(cell);
-    this.mapInfo.textContent = `${col},${row} · ${rail || bus || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}`;
+    this.mapInfo.textContent = `${formatCellCoordinate(cell)} · ${rail || bus || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}`;
   }
 }

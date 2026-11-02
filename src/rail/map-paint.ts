@@ -1,7 +1,8 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 /** 2D railway for the minimap and the full city map: lilac track, numbered stations, gold train. */
 import {publishedRailMap} from './map-state.ts';
 const SIZE=24;
-const centre=(cell:number,px:number)=>({x:(cell%SIZE+.5)*px,y:(Math.floor(cell/SIZE)+.5)*px});
+const centre=(cell:number,px:number)=>{const p=expandedCellCoordinate(cell);return {x:(p.x+.5)*px,y:(p.z+.5)*px};};
 export function paintRailOverlay(ctx:CanvasRenderingContext2D,cellPx:number,labels:boolean){
   const map=publishedRailMap();if(!map||(!map.links.length&&!map.stations.length))return;
   ctx.save();ctx.lineCap='round';ctx.lineJoin='round';

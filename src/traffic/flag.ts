@@ -15,7 +15,7 @@ export function trafficModelEnabled(search = globalThis.location?.search ?? '', 
   try {const saved=storage?.getItem(TRAFFIC_STORAGE_KEY);if(saved==='1')return true;if(saved==='0')return false;}catch{/* denied storage uses default */}
   return TRAFFIC_GAME_DEFAULT;
 }
-type Topo = { blocked: number[]; oneWay: Record<string, number> };
+type Topo = { version?:number; blocked: number[]; oneWay: Record<string, number|string> };
 const CELLS = 576;
 /** Cells whose road flag or junction/one-way topology changed between two snapshots. */
 export function changedRoadCells(before: readonly boolean[], after: readonly boolean[], topoBefore: string, topoAfter: string): number[] {
@@ -24,7 +24,7 @@ export function changedRoadCells(before: readonly boolean[], after: readonly boo
   if (topoBefore !== topoAfter) {
     const parse = (t: string): Topo => t ? JSON.parse(t) : { blocked: [], oneWay: {} }, x = parse(topoBefore), y = parse(topoAfter);
     const bx = new Set(x.blocked), by = new Set(y.blocked);
-    for (const k of [...bx].filter(k => !by.has(k)).concat([...by].filter(k => !bx.has(k)))) { out.add(Math.floor(k / CELLS)); out.add(k % CELLS); }
+    for (const k of [...bx].filter(k => !by.has(k)).concat([...by].filter(k => !bx.has(k)))) { const radix = (bx.has(k) ? x.version : y.version) === 2 ? 672 : CELLS; out.add(Math.floor(k / radix)); out.add(k % radix); }
     for (const c of new Set([...Object.keys(x.oneWay), ...Object.keys(y.oneWay)])) if (x.oneWay[c] !== y.oneWay[c]) out.add(Number(c));
   }
   return [...out].sort((a, b) => a - b);

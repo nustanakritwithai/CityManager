@@ -9,7 +9,7 @@
  */
 import { buildNetwork, linkKey, type LinkNetwork } from '../traffic/network.ts';
 import { linkTimes, shortestPath } from '../traffic/routing.ts';
-import { roadNeighbors, type RoadMap } from '../road-topology.ts';
+import { roadNeighborsFor, type RoadMap } from '../road-topology.ts';
 import { createBus } from './buildings.ts';
 import { BUS_DEPOT_BUSES, BUS_DWELL_MIN, BUS_LIMITS, type BusLevel, type BusLine, type BusState } from './types.ts';
 
@@ -114,7 +114,7 @@ export function busLineRoutes(c: BusHost, o: BusRouteOptions = {}): readonly Bus
     let fromDepot: number[] | null = null;
     if (depot && ids.length) {
       const first = stopById.get(order[0])!.cell;
-      for (const n of roadNeighbors(depot.cell).filter(n => c.cells[n]?.road).sort((x, y) => x - y)) { const p = route(n, first); if (p && (!fromDepot || legSeconds(p) < legSeconds(fromDepot))) fromDepot = p; }
+      for (const n of roadNeighborsFor(c,depot.cell).filter(n => c.cells[n]?.road).sort((x, y) => x - y)) { const p = route(n, first); if (p && (!fromDepot || legSeconds(p) < legSeconds(fromDepot))) fromDepot = p; }
     }
     if (!reason && !fromDepot) reason = 'unreachable';
     let buses = 0;

@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 import { linkKey, type LinkNetwork } from '../traffic/network.ts';
 import { TAXI_DEPOT_UNITS, type TaxiDepotSite } from './sites.ts';
 export type { TaxiDepotSite } from './sites.ts';
@@ -218,7 +219,8 @@ export class TaxiEngine {
     const W = this.width, ordered = [...this.units].sort((a, b) => (a.id < b.id ? -1 : 1));
     const claimOf = (x: Unit) => (x.state === 'idle' ? x.cell : x.state === 'roaming' ? x.target ?? x.cell : -1);
     const claims = new Map<Unit, number>(); for (const x of ordered) { const c = claimOf(x); if (c >= 0) claims.set(x, c); }
-    const crowd = (self: Unit, c: number) => { let n = 0; const cx = c % W, cy = Math.floor(c / W); for (const [x, k] of claims) if (x !== self && Math.abs(k % W - cx) + Math.abs(Math.floor(k / W) - cy) <= TAXI_SPREAD_RADIUS) n++; return n; };
+    const point=(c:number)=>W===24&&c<672?expandedCellCoordinate(c):{x:c%W,z:Math.floor(c/W)};
+    const crowd = (self: Unit, c: number) => { let n=0;const p=point(c);for(const [x,k] of claims){const q=point(k);if(x!==self&&Math.abs(q.x-p.x)+Math.abs(q.z-p.z)<=TAXI_SPREAD_RADIUS)n++;}return n; };
     const explore = (c: number) => TAXI_EXPLORE_WEIGHT * mean * Math.min(1, (t - (this.lastSeen.get(c) ?? -Infinity)) / TAXI_EXPLORE_HORIZON_MIN);
     const stale = [...this.net.out.keys()].filter(c => !(t - (this.lastSeen.get(c) ?? -Infinity) < TAXI_EXPLORE_HORIZON_MIN));
     const targets = [...new Set([...w.keys(), ...stale])];

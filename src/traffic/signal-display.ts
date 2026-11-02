@@ -1,4 +1,5 @@
-import {roadDriveAllowed,roadNeighbors,type RoadMap} from '../road-topology.ts';
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
+import {roadDriveAllowed,roadNeighborsFor,type RoadMap} from '../road-topology.ts';
 import {signalTopologyKey} from './adaptive-signals.ts';
 export type SignalPhase={node:number;approach:number|null;state:'green'|'all-red'};
 export type SignalFrame={topology:string;phases:readonly SignalPhase[]};
@@ -9,7 +10,7 @@ export class TrafficSignalDisplay {
  private topology='';private incoming=new Map<number,number[]>();private heads:SignalHead[]=[];
  reset(map:RoadMap):void {
   this.topology=signalTopologyKey(map);this.incoming.clear();this.heads=[];
-  map.cells.forEach((c,node)=>{if(c.road)this.incoming.set(node,roadNeighbors(node).filter(from=>roadDriveAllowed(map,from,node)));});
+  map.cells.forEach((c,node)=>{if(c.road)this.incoming.set(node,roadNeighborsFor(map,node).filter(from=>roadDriveAllowed(map,from,node)));});
  }
  clear():void{this.heads=[];}
  accept(frame:SignalFrame|undefined):readonly SignalHead[]{
@@ -17,8 +18,8 @@ export class TrafficSignalDisplay {
   const seen=new Set<number>();
   for(const p of frame.phases){
    const arms=this.incoming.get(p.node);if(seen.has(p.node)||!arms||!['green','all-red'].includes(p.state)||p.state==='green'&&(p.approach===null||!arms.includes(p.approach))||p.state==='all-red'&&p.approach!==null)throw Error('Invalid committed traffic signal');seen.add(p.node);
-   for(const from of arms){const hx=Math.sign(p.node%24-from%24),hz=Math.sign(Math.floor(p.node/24)-Math.floor(from/24));
-    this.heads.push({node:p.node,approach:from,x:(p.node%24-11.5)*2-hx*SIGNAL_STOP_OFFSET+hz*SIGNAL_ROADSIDE_OFFSET,z:(Math.floor(p.node/24)-11.5)*2-hz*SIGNAL_STOP_OFFSET-hx*SIGNAL_ROADSIDE_OFFSET,headingX:hx,headingZ:hz,state:p.state==='green'&&p.approach===from?'green':'red',allRed:p.state==='all-red'});
+   for(const from of arms){const node=expandedCellCoordinate(p.node), source=expandedCellCoordinate(from),hx=Math.sign(node.x-source.x),hz=Math.sign(node.z-source.z);
+    this.heads.push({node:p.node,approach:from,x:(node.x-11.5)*2-hx*SIGNAL_STOP_OFFSET+hz*SIGNAL_ROADSIDE_OFFSET,z:(node.z-11.5)*2-hz*SIGNAL_STOP_OFFSET-hx*SIGNAL_ROADSIDE_OFFSET,headingX:hx,headingZ:hz,state:p.state==='green'&&p.approach===from?'green':'red',allRed:p.state==='all-red'});
    }
   }
   return this.heads;

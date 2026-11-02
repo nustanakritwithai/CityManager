@@ -1,3 +1,5 @@
+import { formatCellCoordinate } from '../expanded-map-geometry.ts';
+import { expandedCellCoordinate, expandedCellPath } from '../expanded-map-grid.ts';
 import type {City} from '../sim.ts';
 import type {ParkRuntime} from '../park-runtime.ts';
 import type {CityView} from '../renderer.ts';
@@ -17,11 +19,10 @@ type Pending={rail:RailNetworkRuntime|undefined;city:City;runtime:ParkRuntime;in
 type Ask={title:string;icon:string;detail?:string;cells?:number[];tone?:'danger'};
 const SIZE=24;
 /** Player-facing "column,row" like the place panel, never the internal cell index. */
-export const cellLabel=(cell:number)=>`(${cell%SIZE+1},${Math.floor(cell/SIZE)+1})`;
+export const cellLabel=(cell:number)=>`(${formatCellCoordinate(cell)})`;
 /** Cells from `a` to `b` along one row or column, or just the two ends when they are not aligned. */
 export function straight(a:number,b:number):number[]{
-  const ax=a%SIZE,ay=Math.floor(a/SIZE),bx=b%SIZE,by=Math.floor(b/SIZE);if(a===b)return [a];if(ax!==bx&&ay!==by)return [a,b];
-  const step=ax===bx?SIZE*Math.sign(by-ay):Math.sign(bx-ax),cells=[a];for(let c=a;c!==b;)cells.push(c+=step);return cells;
+  const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b);if(a===b)return [a];if(x.x!==y.x&&x.z!==y.z)return [a,b];return expandedCellPath(a,b);
 }
 const connected=(links:readonly {from:number;to:number}[],a:number,b:number)=>{const seen=new Set([a]),queue=[a];while(queue.length){const at=queue.shift()!;if(at===b)return true;for(const l of links)if(l.from===at&&!seen.has(l.to)){seen.add(l.to);queue.push(l.to);}}return false;};
 const element=<K extends keyof HTMLElementTagNameMap>(tag:K,text='')=>{const node=document.createElement(tag);node.textContent=text;return node;};

@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 /**
  * Bus ↔ #126 traffic allocation game: pure, worker-safe shapes and the mode-share step.
  * Main thread compiles `GameBusInput` from `city.bus` + BusEngine routes; the worker game
@@ -27,7 +28,7 @@ export type GameBusTotal = { from: number; to: number; lineId: number; fromStopI
 export type GameBusFrame = { totals: GameBusTotal[]; injected: Record<string, number>; diverted: number; returned: number };
 
 const W = 24;
-const carMinutes = (a: number, b: number) => (Math.abs(a % W - b % W) + Math.abs(Math.floor(a / W) - Math.floor(b / W))) * .5;
+const carMinutes = (a:number,b:number)=>{const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b);return (Math.abs(x.x-y.x)+Math.abs(x.z-y.z))*.5;};
 /** Bus offer + logit share for one OD (null = no bus). Pure; deterministic. */
 export function gameBusShare(input: GameBusInput, from: number, to: number): GameBusShare | null {
   if (from === to) return null;

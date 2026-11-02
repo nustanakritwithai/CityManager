@@ -1,3 +1,4 @@
+import { expandedCellCoordinate } from '../expanded-map-grid.ts';
 import {stationAxis,stationEnds,trackMeshData} from './track-geometry.ts';
 import {Entity,Mesh,MeshInstance} from 'playcanvas';
 import type {CityView} from '../renderer.ts';
@@ -78,7 +79,7 @@ export class SceneRail {
     put(-.25,.42,.86,.42,.05,.14,'#8a5d3a',false);put(-.72,.5,.83,.26,.32,.22,'#efe6d2');
     // Buffer stop at the dead end, opposite the only track that leaves.
     const next=stationEnds(station.cell,graph);
-    if(next!==null){const nx=next%24-station.cell%24,nz=Math.floor(next/24)-Math.floor(station.cell/24),end=-(axis==='x'?nx:nz)*.86;put(end,.24,0,.1,.18,.5,'#c0392b');put(end,.3,0,.12,.04,.54,'#f4efe2',false);}
+    if(next!==null){const a=expandedCellCoordinate(next),b=expandedCellCoordinate(station.cell),nx=a.x-b.x,nz=a.z-b.z,end=-(axis==='x'?nx:nz)*.86;put(end,.24,0,.1,.18,.5,'#c0392b');put(end,.3,0,.12,.04,.54,'#f4efe2',false);}
   }
   /** City/runtime replacement must not reuse an equal revision from another snapshot. */
   invalidateInfrastructure(){this.revision='';}

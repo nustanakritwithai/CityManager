@@ -1,20 +1,20 @@
+import { roadNeighborsFor } from '../road-topology.ts';
 import {isRailReserved,RAIL_PARCEL_MESSAGE} from '../rail/reserved-parcels.ts';
 import { connectedRoads, SIZE, campusAt, parkAt, plantAt, type City, type Result } from '../sim.ts';
 import { taxiAt } from '../taxi/buildings.ts';
 import { busDepotAt, busStopAt, busStopReason, busStopSides, createBus, removeBusDepotFromState, removeStopsFromState } from './buildings.ts';
 import { BUS_DEPOT_BUSES, BUS_LIMITS, busEnabled, type BusDepot, type BusStopSide } from './types.ts';
 /** Placement for bus depots and stops (PR B2). Round 1: no build cost, no upkeep, no economy effect. */
-const neighbours = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i - SIZE, i + SIZE].filter(n => n >= 0 && n < SIZE * SIZE);
 const canAllocateId = (c: City) => Number.isSafeInteger(c.nextId) && c.nextId >= 1 && c.nextId <= Number.MAX_SAFE_INTEGER - 3;
 const OFF = 'ระบบรถเมล์ยังไม่เปิดใช้';
 /** Same rule as campuses / taxi depots: empty, unzoned lot beside a road connected to the city gate. */
 export function busDepotReason(c: City, i: number, enabled = busEnabled()): string | null {
   if (!enabled) return OFF;
-  if (!Number.isInteger(i) || i < 0 || i >= SIZE * SIZE) return 'ตำแหน่งอยู่นอกแผนที่';
+  if (!Number.isInteger(i) || i < 0 || i >= c.cells.length) return 'ตำแหน่งอยู่นอกแผนที่';
   if(isRailReserved(c,i))return RAIL_PARCEL_MESSAGE;
   const cell = c.cells[i];
   if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return 'อู่รถเมล์ต้องใช้แปลงว่างที่ยังไม่ลงโซน';
-  if (!neighbours(i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';
+  if (!roadNeighborsFor(c,i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';
   if ((c.bus?.depots.length ?? 0) >= BUS_LIMITS.depots || !canAllocateId(c)) return `สร้างอู่รถเมล์ได้สูงสุด ${BUS_LIMITS.depots} แห่ง`;
   return null;
 }
@@ -44,7 +44,7 @@ export function removeBusDepot(c: City, id: number): Result {
 export function defaultBusStopSide(c: City, i: number): BusStopSide | null { const s = busStopSides(c, i, SIZE); return 'sides' in s ? s.sides[0] : null; }
 export function busStopSiteReason(c: City, i: number, side: BusStopSide | null = defaultBusStopSide(c, i), enabled = busEnabled()): string | null {
   if (!enabled) return OFF;
-  if (!Number.isInteger(i) || i < 0 || i >= SIZE * SIZE) return 'ตำแหน่งอยู่นอกแผนที่';
+  if (!Number.isInteger(i) || i < 0 || i >= c.cells.length) return 'ตำแหน่งอยู่นอกแผนที่';
   if ((c.bus?.stops.length ?? 0) >= BUS_LIMITS.stops || !canAllocateId(c)) return `วางป้ายรถเมล์ได้สูงสุด ${BUS_LIMITS.stops} ป้าย`;
   if (busStopAt(c, i)) return 'มีป้ายรถเมล์อยู่แล้ว';
   if (!side) { const s = busStopSides(c, i, SIZE); return 'reason' in s ? s.reason : 'ด้านของป้ายไม่ถูกต้อง'; }

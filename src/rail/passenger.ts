@@ -41,7 +41,7 @@ function validateConfig(config: PassengerRailConfig): void {
   if (![config.id, config.lineId, config.trainId].every(validId) || config.stations.length !== 2 || config.stations[0].id === config.stations[1].id || config.stations[0].cell === config.stations[1].cell
     || ![config.seats, config.minimumDwellMinutes, config.minimumDepartureIntervalMinutes, config.maxBatches].every(positive)) throw Error('Invalid two-terminal rail config');
   if(config.seats>256||config.maxBatches>1024||config.minimumDwellMinutes>1440||config.minimumDepartureIntervalMinutes>1440)throw Error('Rail service exceeds supported bounds');
-  for (const s of config.stations) if (!validId(s.id) || !safeCount(s.cell) || s.cell >= 576 || ![s.queueCapacity, s.boardingPerMinute, s.alightingPerMinute].every(positive)) throw Error('Invalid passenger station');
+  for (const s of config.stations) if (!validId(s.id) || !safeCount(s.cell) || s.cell >= 672 || ![s.queueCapacity, s.boardingPerMinute, s.alightingPerMinute].every(positive)) throw Error('Invalid passenger station');
   for(const s of config.stations)if(s.queueCapacity>1024||s.boardingPerMinute>256||s.alightingPerMinute>256)throw Error('Rail station exceeds supported bounds');
 }
 function sameOffer(a: PassengerOffer, b: PassengerOffer): boolean {

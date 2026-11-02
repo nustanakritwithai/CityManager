@@ -37,7 +37,7 @@ export function busDrawList(
   const overlay = busOverlay(city);
   // True home buses are stored inside their depot; panel.live.home retains their count.
   // Waiting/running buses are never omitted for congestion.
-  const buses = busPoses(snapshots.filter(bus => bus.phase !== 'home'), { detail, stops: city.bus?.stops ?? [] });
+  const buses = busPoses(snapshots.filter(bus => bus.phase !== 'home'), { detail, stops: city.bus?.stops ?? [], cellCount: city.cells.length });
   const stops: BusStopMark[] = overlay.stops.map(stop => ({ ...stop, waiting: Math.max(0, waitingAt(stop.id) || 0) }));
   const captions: BusCaption[] = [];
   for (const line of overlay.lines) if (line.labelCell != null) captions.push({ lineId: line.lineId, text: line.caption, cell: line.labelCell, color: line.color, paused: line.paused });

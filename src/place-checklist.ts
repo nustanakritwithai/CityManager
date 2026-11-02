@@ -1,3 +1,4 @@
+import { roadNeighborsFor } from './road-topology.ts';
 /**
  * Growth checklist for a vacant zoned parcel, read from the simulator's own `explainCell`
  * blockers so it can never disagree with what growth actually checks. Presentation only.
@@ -52,7 +53,7 @@ export type RoadFacts = { gateway: boolean; connected: boolean; stepsToGateway: 
 /** Facts about one road cell: route length to the west gateway and the parcels it fronts. */
 export function roadFacts(city: City, cell: number): RoadFacts | null {
   if (!city.cells[cell]?.road) return null;
-  const neighbours = (i: number) => [i - SIZE, i + SIZE, i % SIZE ? i - 1 : -1, (i + 1) % SIZE ? i + 1 : -1].filter(n => n >= 0 && n < city.cells.length);
+  const neighbours = (i:number) => roadNeighborsFor(city,i);
   const steps = new Map<number, number>([[GATEWAY, 0]]), queue = city.cells[GATEWAY]?.road ? [GATEWAY] : [];
   for (let k = 0; k < queue.length; k++) for (const n of neighbours(queue[k])) if (roadLinked(city, queue[k], n) && !steps.has(n)) { steps.set(n, steps.get(queue[k])! + 1); queue.push(n); }
   const front = neighbours(cell).filter(n => !city.cells[n].road && city.cells[n].zone);

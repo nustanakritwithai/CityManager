@@ -1,3 +1,4 @@
+import { formatCellCoordinate } from './expanded-map-geometry.ts';
 import { firmGoodsName } from './goods-view.ts';
 import { MONTH, summary, utilityStatus, type City } from './sim.ts';
 import { cityOverview } from './context-data.ts';
@@ -100,7 +101,7 @@ export class CityHud {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'issue-link';
       const firm = building && city.firms.find(f => f.building === building.id);
       const name = building ? (firm && building.zone !== 'R' ? firmGoodsName(city, firm) : { R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[building.zone]) + ` #${building.id}` : `แปลง ${issue.cell}`;
-      const where = `${issue.cell % 24 + 1},${Math.floor(issue.cell / 24) + 1}`;
+      const where=formatCellCoordinate(issue.cell);
       button.append(Object.assign(document.createElement('strong'), { textContent: name }), Object.assign(document.createElement('span'), { textContent: `${issue.text} · ${where}` }));
       button.dataset.issue = issue.kind; button.setAttribute('aria-label', `ไปที่${name}: ${issue.text}`);
       if (building) button.addEventListener('click', () => this.onIssue(issue.cell, building.id));

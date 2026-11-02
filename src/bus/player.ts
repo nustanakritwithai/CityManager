@@ -1,3 +1,4 @@
+import { formatCellCoordinate } from '../expanded-map-geometry.ts';
 /**
  * Player-facing bus actions (PR B6). Placement, line drafts and the panel read model.
  * Writes go through the existing line/placement APIs. Fare and upkeep come from PR #129
@@ -27,7 +28,7 @@ export type BusPreview = { ok: boolean; cells: { cell: number; ok: boolean }[]; 
 export type BusRemovalImpact = { kind: 'stop' | 'depot'; id: number; cell: number; lineIds: number[]; title: string; body: string };
 export type BusRemovalVia = 'bulldoze' | 'direct';
 
-const coord = (cell: number) => `${(cell % SIZE) + 1},${Math.floor(cell / SIZE) + 1}`;
+const coord=(cell:number)=>formatCellCoordinate(cell);
 const ids = (list: number[]) => list.length ? list.map(id => `#${id}`).join(' ') : 'ไม่มีสาย';
 const ghost = (host: BusHost): BusHost => ({ cells: host.cells, roadTopology: host.roadTopology, nextId: host.nextId, bus: host.bus ? structuredClone(host.bus) : undefined });
 const lineById = (host: BusHost, id: number) => host.bus?.lines.find(line => line.id === id);

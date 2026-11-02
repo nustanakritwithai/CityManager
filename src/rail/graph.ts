@@ -1,20 +1,20 @@
 /** Preparation-only rail topology. Explicit cardinal links, independent of road connectivity.
  * No elevation/crossing/placement policy is inferred here; those remain owner decisions. */
-import { roadNeighbors } from '../road-topology.ts';
+import { expandedCellNeighbors, EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
 
 export type RailLink = { from: number; to: number; minutes: number };
 export type RailGraph = { revision: number; links: RailLink[] };
 export type RailPath = { cells: number[]; minutes: number };
 export const safeCount = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 export const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-zA-Z0-9:_-]{1,100}$/.test(id);
-const cell = (n: unknown): n is number => safeCount(n) && n < 24 * 24;
+const cell = (n: unknown): n is number => safeCount(n) && n < EXPANDED_MAP_CELLS;
 
 export function createRailGraph(revision: number, links: readonly RailLink[]): RailGraph {
   if (!safeCount(revision)) throw Error('Invalid rail graph revision');
   const seen = new Set<string>();
   for (const l of links) {
     const key = `${l.from}:${l.to}`;
-    if (!cell(l.from) || !cell(l.to) || !roadNeighbors(l.from).includes(l.to) || !safeCount(l.minutes) || l.minutes < 1 || seen.has(key)) throw Error('Invalid or duplicate rail link');
+    if (!cell(l.from) || !cell(l.to) || !expandedCellNeighbors(l.from).includes(l.to) || !safeCount(l.minutes) || l.minutes < 1 || seen.has(key)) throw Error('Invalid or duplicate rail link');
     seen.add(key);
   }
   return { revision, links: links.map(l => ({ ...l })).sort((a, b) => a.from - b.from || a.to - b.to) };

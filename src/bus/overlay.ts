@@ -1,3 +1,4 @@
+import { expandedCellAt, expandedCellCoordinate } from '../expanded-map-grid.ts';
 /**
  * Map overlay for bus lines, stops and depots. Reads `busLineRoutes` (polyline, legs, stops,
  * running/suspended, reason, headway). Suspended lines are dashed and captioned with the reason.
@@ -107,11 +108,10 @@ function depotVisual(depot: { id: number; cell: number; level: 1 | 2 | 3; open: 
 const SIZE = 24;
 /** Unit grid direction from a depot cell to its first road neighbour (east when none). */
 export function depotFacing(cell: number, city?: { cells: { road: boolean }[] }): { x: number; z: number } {
-  const col = cell % SIZE;
-  for (const [dx, dz] of [[0, 1], [1, 0], [0, -1], [-1, 0]] as const) {
-    if ((dx === 1 && col === SIZE - 1) || (dx === -1 && col === 0)) continue;
-    const next = cell + dx + dz * SIZE;
-    if (city?.cells[next]?.road) return { x: dx, z: dz };
+  const p=expandedCellCoordinate(cell);
+  for (const [dx,dz] of [[0,1],[1,0],[0,-1],[-1,0]] as const) {
+    const next=expandedCellAt(p.x+dx,p.z+dz);
+    if(next!==null && city?.cells[next]?.road)return {x:dx,z:dz};
   }
   return { x: 1, z: 0 };
 }

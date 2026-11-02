@@ -309,3 +309,11 @@ test('map declutter needs its reviewed diff and rejects simulation, save and ser
  assert.equal(mapDeclutterOnly(paths),false);assert.equal(mapDeclutterOnly(paths,{mapDeclutterSourceDiff:'changed'}),false);assert.equal(visualKind(paths),'full','reviewed source diff evidence required');
  for(const invalid of [[],paths.filter(p=>p!=='src/map-markers.ts'),...['index.html','src/main.ts','src/sim.ts','src/map-overlay.ts','src/server-city-save.ts','server/city-saves/service.mjs'].map(p=>[...paths,p])]){assert.equal(mapDeclutterPathsOnly(invalid),false);assert.equal(visualKind(invalid),'full');}
 });
+
+test('land expansion route binds exact source, base tree, gates and rejects extra paths',async()=>{
+ const m=await import('../scripts/ci-visual-scope.mjs');
+ const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8').replace(/\r\n/g,'\n');
+ const e={landBaseTree:'fc445721a62fa2765fb2a6faad4c7a0975e5e13f',landSelector:read('scripts/ci-visual-scope.mjs'),landContent:JSON.stringify(m.landSources.map(p=>[p,read(p)])),landGates:JSON.stringify(m.landGates.map(p=>[p,read(p)]))};
+ assert.equal(m.landExpansionOnly(m.landPaths,e),true);assert.equal(m.visualKind(m.landPaths,e),'land-expansion');
+ assert.equal(m.landExpansionOnly([...m.landPaths,'src/pages-auth.ts'],e),false);assert.equal(m.landExpansionOnly(m.landPaths,{...e,landContent:e.landContent+' '}),false);assert.equal(m.landExpansionOnly(m.landPaths,{...e,landBaseTree:'0'.repeat(40)}),false);assert.equal(m.landExpansionOnly(m.landPaths,{...e,landSelector:e.landSelector+' '}),false);
+});

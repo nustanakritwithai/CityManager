@@ -22,11 +22,12 @@ export type BusDrawPose = {
 export type BusPoseOptions = {
   detail?: readonly { id: string; returning: boolean }[];
   stops?: readonly { cell: number; side: BusStopSide }[];
-  size?: number; unit?: number;
+  size?: number; unit?: number; cellCount?: number;
 };
 
 export function busPoses(snapshots: readonly BusSnapshot[], opts: BusPoseOptions = {}): BusDrawPose[] {
-  const size = opts.size ?? BUS_MAP_SIZE, unit = opts.unit ?? BUS_MAP_UNIT, cells = size * size, seen = new Set<string>();
+  const size = opts.size ?? BUS_MAP_SIZE, unit = opts.unit ?? BUS_MAP_UNIT, cells = opts.cellCount ?? size * size, seen = new Set<string>();
+  if (!Number.isSafeInteger(cells) || (cells !== size * size && !(size === BUS_MAP_SIZE && cells === 672))) throw new Error('Invalid bus map bounds');
   const returning = new Map((opts.detail ?? []).map(d => [d.id, d.returning]));
   const stopAt = new Map<number, BusStopSide>();
   for (const stop of opts.stops ?? []) if (!stopAt.has(stop.cell)) stopAt.set(stop.cell, stop.side);
