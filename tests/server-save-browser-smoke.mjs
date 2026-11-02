@@ -273,7 +273,8 @@ async function run(){
   const acknowledged=await f.service.mutate(OWNER,randomUUID(),{action:'create',cityId:randomUUID(),raw:serverSeed,metadata:{name:'acknowledged fixture',population:0,tick:JSON.parse(serverSeed).tick}});
   assert.equal(acknowledged.raw,serverSeed);f.mode='ok';await enter();
   if(process.env.CITYMANAGER_LAND_CHECKS==='1'){
-   const source=JSON.parse(serverSeed), expanded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));
+   const {deserializeParkSession}=await import('../src/park-runtime.ts');
+   const source=deserializeParkSession(serverSeed).city, expanded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));
    assert.equal(f.state.active.raw,serverSeed,'loading migration does not write original bytes');
    assert.deepEqual(expanded.cells.slice(0,576),source.cells);assert.deepEqual(expanded.resources.fertility.slice(0,576),source.resources.fertility);
    for(const key of ['seed','rng','tick','nextId','buildings','households','firms','accounts','ledger','goods','goodsLedger','cropLedger','market'])assert.deepEqual(expanded[key],source[key],`preserve ${key}`);
