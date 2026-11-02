@@ -21,6 +21,11 @@ jobs:
           node-version: '24'
       - name: Run focused mock tests
         run: node --test tests/pages-login-races.test.mjs tests/pages-login-thai.test.mjs tests/pages-login-public-contract.test.mjs
+      - name: Install Thai fonts for synthetic rendering
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-thai-tlwg
+          fc-list :lang=th | grep -q .
       - name: Run isolated synthetic mobile browser
         env:
           CHROME_BIN: /usr/bin/google-chrome
