@@ -3,9 +3,9 @@ import type { Atmosphere } from './atmosphere.ts';
 import { hash, noise, smooth, mix, worldEdgeDistance, worldOnHighway, playableWorldSurface } from './scene-world-terrain.ts';
 
 /**
- * Decorative surroundings outside the 24 × 24 build grid: mainland and highway to the
- * west gateway, hills to the north/east, beaches and a shallow sea to the south.
- * Visual only: none of this is buildable, picked or simulated.
+ * Decorative surroundings around the build grid: mainland and highway to the west,
+ * hills to the north/east, beaches and a shallow sea to the south. The north strip
+ * is prepared separately for the appended playable land; the surroundings remain visual only.
  */
 const EXTENT = 112, STEP = 1.6, WATER_Y = -.32;
 

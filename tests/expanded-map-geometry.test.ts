@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import { cellWorldPosition,worldPositionCell,mapLayout,cellMapPosition,mapPositionCell } from '../src/expanded-map-geometry.ts';
+import { cellWorldPosition,worldPositionCell,mapLayout,cellMapPosition,mapPositionCell,formatCellCoordinate } from '../src/expanded-map-geometry.ts';
 test('world picking and minimap clicks map every cell correctly at desktop and phone sizes',()=>{
  for(const size of [152,260,320,640]) for(let id=0;id<672;id++){
   const w=cellWorldPosition(id);assert.equal(worldPositionCell(w.x,w.z,true),id);
@@ -10,3 +10,5 @@ test('world picking and minimap clicks map every cell correctly at desktop and p
  assert.equal(mapPositionCell(0,0,320,true),null);assert.equal(mapPositionCell(320,320,320,true),null);
  assert.equal(worldPositionCell(-25,0,true),null);assert.equal(worldPositionCell(0,-33,true),null);
 });
+
+test('labels retain old row numbers and name northern rows explicitly',()=>{assert.equal(formatCellCoordinate(5),'6,1');assert.equal(formatCellCoordinate(653),'6,เหนือ 1');assert.equal(formatCellCoordinate(581),'6,เหนือ 4');});

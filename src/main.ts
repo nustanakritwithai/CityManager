@@ -1,4 +1,4 @@
-import { expandedCellCoordinate } from './expanded-map-grid.ts';
+import { formatCellCoordinate } from './expanded-map-geometry.ts';
 import {installRailManagement} from './rail/management.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { installSaveManagement } from './save-management-dialog.ts';
@@ -418,16 +418,16 @@ function renderPlace() {
     const firm = building && city.firms.find(f => f.building === building.id);
     const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex);
     const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
-    $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + (expandedCellCoordinate(cellIndex).x + 1) + ',' + (expandedCellCoordinate(cellIndex).z + 1);
+    $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + formatCellCoordinate(cellIndex);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, cell.zone === 'C' && !!building && building.level <= 3, !!park);
-    if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${expandedCellCoordinate(cellIndex).x + 1},${expandedCellCoordinate(cellIndex).z + 1}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
+    if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
     const busCaption = busController?.caption(cellIndex); if (busCaption) $('#place-subtitle').textContent = busCaption;
     const rail = !cell.road && !cell.zone ? railUi?.placeCard(cellIndex) : null;
-    if (rail) { $('#selection-title').textContent = `${rail.title} · ${expandedCellCoordinate(cellIndex).x + 1},${expandedCellCoordinate(cellIndex).z + 1}`; $('#place-subtitle').textContent = rail.subtitle; railCard = rail.card; }
+    if (rail) { $('#selection-title').textContent = `${rail.title} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = rail.subtitle; railCard = rail.card; }
     const bus = rail ? null : busController?.placeCard(cellIndex);
-    if (bus) { $('#selection-title').textContent = `${bus.title} · ${expandedCellCoordinate(cellIndex).x + 1},${expandedCellCoordinate(cellIndex).z + 1}`; $('#place-subtitle').textContent = bus.subtitle; busCard = bus.card; }
+    if (bus) { $('#selection-title').textContent = `${bus.title} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = bus.subtitle; busCard = bus.card; }
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
@@ -578,7 +578,7 @@ function syncTaxiInspector() {
   const depot = cell === null ? undefined : taxiSession.at(cell);
   box.hidden = !depot;
   if (!depot || cell === null) return;
-  $('#selection-title').textContent = `อู่แท็กซี่ #${depot.id} · ${expandedCellCoordinate(cell).x + 1},${expandedCellCoordinate(cell).z + 1}`;
+  $('#selection-title').textContent = `อู่แท็กซี่ #${depot.id} · ${formatCellCoordinate(cell)}`;
   $('#place-subtitle').textContent = `ระดับ ${depot.level} · ${depot.level === 1 ? 4 : 8} คัน · ${depot.open ? 'เปิดบริการ' : 'ปิดบริการ'}`;
   view?.setTaxiDepots(taxiSession.depots());
 }

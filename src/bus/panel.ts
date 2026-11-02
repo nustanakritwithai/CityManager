@@ -1,4 +1,4 @@
-import { expandedCellCoordinate } from '../expanded-map-grid.ts';
+import { formatCellCoordinate } from '../expanded-map-geometry.ts';
 /**
  * Touch line panel and the stop/line composer. Buttons are at least 44px.
  * Live figures are read from trafficLayer.bus when that engine exists.
@@ -45,7 +45,7 @@ const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
 /** ①, ②… for a stop's place in a line; plain numbers after twenty. */
 export const stopOrdinal = (index: number) => CIRCLED[index] ?? String(index + 1);
 /** Player-facing "column,row" like the place panel, never the internal cell index. */
-export const busCellLabel=(cell:number)=>{const p=expandedCellCoordinate(cell);return `(${p.x+1},${p.z+1})`;};
+export const busCellLabel=(cell:number)=>`(${formatCellCoordinate(cell)})`;
 
 function button(doc: Document, label: string, action: string, onClick: () => void, extra: Record<string, string> = {}) {
   const node = doc.createElement('button');

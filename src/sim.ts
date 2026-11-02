@@ -811,7 +811,7 @@ function blockers(c: City, i: number): string[] {
 export function explainCell(c: City, i: number): string[] {
   const park = parkAt(c, i);
   if (park) return [`สวนสาธารณะ #${park.id} · เลเวล ${park.level} · พื้นที่ 1 ช่อง`, `ค่าบำรุง ${PARK.upkeep / 100} ต่อเดือนจากคลังเมือง · ไม่ต้องติดถนน`, 'รุ่นแรกยังไม่มีพื้นที่บริการหรือโบนัสเศรษฐกิจ'];
-  if (!validIndex(i, c)) return ['Select a parcel inside the 24 × 24 map.'];
+  if (!validIndex(i, c)) return ['Select a parcel inside the map.'];
   const cell = c.cells[i];
   if (cell.road) return [i === GATEWAY ? 'Reserved outside gateway.' : 'Grid road.', connectedRoads(c).has(i) ? 'Connected to outside market.' : 'Disconnected: no route to the west outside gateway.', 'Road construction 50 credits/cell; upkeep 0.10 credits/day/cell.'];
   if (!cell.zone) return ['Unzoned land. Choose R homes, C commercial level-one markets or I industry, then tap this parcel.', 'Buildings require connected road frontage, power, water, demand and viable expected rent.'];

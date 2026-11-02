@@ -305,12 +305,6 @@ async function run(){
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
   const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,26,'actual built game saves expanded checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).mapBaseVersion,25);assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-21');await clean();await capture('server-save-acknowledged');
-  if(process.env.CITYMANAGER_LAND_CHECKS==='1'){
-   const {landExpansionChecks}=await import('./land-expansion-browser-checks.mjs');
-   landEvidence=await landExpansionChecks({send,evaluate,capture,until,
-    acknowledge:async()=>{const revision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>revision,'land server ACK');await settled();return JSON.parse(f.state.active.raw);},
-    reload:async()=>{expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;}});
-  }
   if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){
    diagnostics.phase='actual bumper-gap traffic UI';trafficGapEvidence={status:'running'};
    const {trafficGapBrowserChecks}=await import('./traffic-gap-browser-checks.mjs');
@@ -418,6 +412,13 @@ async function run(){
   f.mode='archive-error';expectedConfirm=true;await pressRetry(false);await until(async()=>expectedConfirm===null,'archive failure confirmation');await until(()=>evaluate("document.querySelector('#status')?.textContent.includes('fixture-archive-unavailable')"),'archive failure surfaced');assert.deepEqual(f.state.active,remote);assert.equal(f.state.archives.size,archiveCount,'failed archive preserves both states');assert.equal(f.posts.length,conflictStart+1,'archive failure cannot overwrite');
   f.mode='ok';expectedConfirm=true;await pressRetry(false);await until(async()=>expectedConfirm===null,'successful recovery confirmation');await until(()=>evaluate("document.querySelector('#status')?.textContent.includes('เก็บสำเนางานที่ขัดแย้งแล้ว')"),'confirmed conflict recovery');assert.deepEqual(f.state.active,remote,'recovery never overwrites remote head');assert.equal(f.state.archives.get(hash(localRaw))?.raw,localRaw,'exact conflicted bytes archived');assert.ok(f.state.archives.get(hash(localRaw))?.sources.includes('conflict-session'));await clean();
   assert.equal(await evaluate("!!document.querySelector('.market-launch')"),false,'trading stays disabled');
+  if(process.env.CITYMANAGER_LAND_CHECKS==='1'){
+   const {landExpansionChecks}=await import('./land-expansion-browser-checks.mjs');
+   landEvidence=await landExpansionChecks({send,evaluate,capture,until,
+    acknowledge:async()=>{const revision=f.state.active.revision;await click('#save');await until(async()=>f.state.active.revision>revision,'land server ACK');await settled();return JSON.parse(f.state.active.raw);},
+    reload:async()=>{expectReloadDialog=true;await send('Page.reload',{ignoreCache:true});await enter({afterReload:true});expectReloadDialog=false;}});
+   await clean();
+  }
   assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser exception or renderer crash');
   console.log('PASS built server-save browser acceptance: load failure+retry/server-ACK-only entry/v24 checkpoint/manual ACK/autosave/reload/quota/network retry/management cancel-delete-fresh/tombstone reload/conflict/no browser city writes');
  }catch(error){acceptanceError=error;diagnostics.acceptanceError=String(error?.stack??error);}

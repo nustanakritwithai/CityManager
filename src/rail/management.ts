@@ -1,3 +1,4 @@
+import { formatCellCoordinate } from '../expanded-map-geometry.ts';
 import { expandedCellCoordinate, expandedCellPath } from '../expanded-map-grid.ts';
 import type {City} from '../sim.ts';
 import type {ParkRuntime} from '../park-runtime.ts';
@@ -18,7 +19,7 @@ type Pending={rail:RailNetworkRuntime|undefined;city:City;runtime:ParkRuntime;in
 type Ask={title:string;icon:string;detail?:string;cells?:number[];tone?:'danger'};
 const SIZE=24;
 /** Player-facing "column,row" like the place panel, never the internal cell index. */
-export const cellLabel=(cell:number)=>{const p=expandedCellCoordinate(cell);return `(${p.x+1},${p.z+1})`;};
+export const cellLabel=(cell:number)=>`(${formatCellCoordinate(cell)})`;
 /** Cells from `a` to `b` along one row or column, or just the two ends when they are not aligned. */
 export function straight(a:number,b:number):number[]{
   const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b);if(a===b)return [a];if(x.x!==y.x&&x.z!==y.z)return [a,b];return expandedCellPath(a,b);

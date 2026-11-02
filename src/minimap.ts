@@ -1,7 +1,7 @@
-import { mapLayout, cellMapPosition, mapPositionCell } from './expanded-map-geometry.ts';
-import { expandedCellAt, expandedCellCoordinate, EXPANDED_MAP_CELLS } from './expanded-map-grid.ts';
+import { mapLayout, cellMapPosition, mapPositionCell, formatCellCoordinate } from './expanded-map-geometry.ts';
+import { EXPANDED_MAP_CELLS } from './expanded-map-grid.ts';
 /**
- * Minimap (desktop corner) and the full city map (M): the 24 × 24 grid drawn from the city's
+ * Minimap (desktop corner) and the full city map (M): the 24 × 28 grid drawn from the city's
  * own cells, with the camera's view, the selection and problem markers. Clicking moves the
  * camera (minimap) or opens the place (map). Read-only over City.
  */
@@ -149,9 +149,9 @@ export class Minimap {
   }
   private describe(cell: number | null) {
     if (cell === null || !this.city) return;
-    const c = this.city.cells[cell], coordinate=expandedCellCoordinate(cell), col = coordinate.x + 1, row = coordinate.z + 1, b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
+    const c = this.city.cells[cell], b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
     const kind = c.road ? (cell === GATEWAY ? 'ประตูเมือง' : 'ถนน') : !c.zone ? 'ที่ดินว่าง' : b ? `${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} #${b.id} · ระดับ ${b.level}` : `โซน${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} (ว่าง)`;
     const bus = busCellNote(cell), rail = railCellNote(cell);
-    this.mapInfo.textContent = `${col},${row} · ${rail || bus || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}`;
+    this.mapInfo.textContent = `${formatCellCoordinate(cell)} · ${rail || bus || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}`;
   }
 }
