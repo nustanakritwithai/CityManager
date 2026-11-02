@@ -13,6 +13,12 @@ test('disjoint CI partitions preserve every former full/core/extended assertion 
  assert.throws(()=>trafficGameCase('peak',true),/normal assets/);assert.throws(()=>trafficGameCase('typo',true),/Unknown/);
 });
 
+test('work-expiry native case is an additional normal-asset partition',()=>{
+ const work=trafficGameCase('work-expiry',false);assert.equal(work.workExpiry,true);assert.equal(work.expectedChecks,4);
+ assert.equal(work.output,'normal-work-expiry');assert.equal(work.lifecycle||work.economy||work.bypass||work.dense||work.peak,false);
+ assert.throws(()=>trafficGameCase('work-expiry',true),/normal assets/);
+});
+
 test('standalone mobile partitions load the actual viewport-meta page before asserting 390px',async()=>{
  const {readFileSync}=await import('node:fs');const source=readFileSync(new URL('traffic-game-smoke.mjs',import.meta.url),'utf8');
  assert.match(source,/viewport\(true,false\);d=await navigate\(denseRaw,'\?traffic=0',blocked\)/,'OFF boots at the same mobile metrics as ON');
@@ -27,4 +33,7 @@ test('four disjoint fault jobs preserve all seven assertions exactly once with u
  const {trafficFaultCase}=await import('./traffic-game-cases.mjs'),{readFileSync}=await import('node:fs');const full=trafficFaultCase(),parts=['preferences','economy','construct','async'].map(trafficFaultCase);
  assert.equal(full.expectedChecks,7);assert.equal(parts.reduce((n,p)=>n+p.expectedChecks,0),7);assert.equal(parts.filter(p=>p.preferences).length,1);assert.equal(parts.filter(p=>p.economy).length,1);assert.deepEqual(parts.flatMap(p=>p.faults),['construct','async']);assert.throws(()=>trafficFaultCase('typo'),/Unknown/);
  const source=readFileSync(new URL('traffic-default-fault-smoke.mjs',import.meta.url),'utf8');assert.match(source,/180000/);assert.match(source,/for\(const fault of testPlan\.faults\)/);assert.match(source,/await threeDays\(\);const workers=await assertFaultWorkers/);assert.match(source,/checks.length,testPlan.expectedChecks/);assert.match(source,/if\(testPlan.preferences\)/);assert.match(source,/if\(testPlan.economy\)/);
+ assert.match(source,/UI OFF is visit-only/);assert.match(source,/legacy traffic preference ignored/);assert.match(source,/traffic preference avoids browser writes/);assert.match(source,/await settleInterceptions\(\);await server.settle\(\);const before=server.active;server.allowNavigation\(\)/);
+ assert.match(source,/button\('#atmosphere-toggle'\);await button\('input\[name="atmosphere-time"\]\[value="noon"\]'\)/,'Decorative fallback sets noon through the current page-memory UI');
+ assert.match(source,/server\.active\.raw,await evaluate\('window\.cityManager\.sessionSnapshot\(\)'\)/,'Paused revealed session must receive an exact server ACK');assert.match(source,/await revealDecorativeCars\(\);await acknowledgeRevealedSession\(\);await literalReload\(\)/);
 });

@@ -34,7 +34,7 @@ export function createTrafficServerFixture(pageUrl){
   const work=(async()=>{
    const post=new URL(params.request.url).pathname==='/citymanager-api/v1/city-save'&&params.request.method==='POST';
    const get=new URL(params.request.url).pathname==='/citymanager-api/v1/city-save'&&params.request.method==='GET';
-   const event=post?{command:JSON.parse(params.request.postData)}:get?{}:null;
+   const event=post?{command:JSON.parse(params.request.postData),requestKey:Object.entries(params.request.headers??{}).find(([name])=>name.toLowerCase()==='idempotency-key')?.[1]}:get?{}:null;
    const target=post?(generations.get(event.command.cityId)??fixture):fixture,retired=target!==fixture;
    const previous=retired?target.active:null;
    if(retired){assert.equal(event.command.action,'save','Retired scenario permits only lifecycle Save');assert.ok(outgoingSnapshots.has(event.command.cityId),'Retired Save requires an observed outgoing session');assert.equal(event.command.raw,outgoingSnapshots.get(event.command.cityId),'Retired lifecycle Save matches exact observed outgoing session');retiredWrites.push(event);}
@@ -86,7 +86,16 @@ export function createTrafficServerFixture(pageUrl){
    await wait("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
    await settle();const readStart=reads.length;await button('.guest-entry-card button');
    await wait('!!window.cityManager&&window.cityManager.visuals().ready');
-   await settle();navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor)));
+   await settle();try{navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor)));}
+   catch(error){
+    // Preserve the original failing assertion and attach only synthetic request
+    // metadata. In particular, never log raw city bytes or the request key.
+    const detail={baselineRevision:head.revision,finalRevision:fixture.active?.revision,cursor:baseline.cursor,totalWrites:writes.length,writes:writes.slice(-40).map((event,offset)=>{const index=Math.max(0,writes.length-40)+offset;return {index,status:event.status,expectedRevision:event.command?.expectedRevision,ackRevision:event.response?.revision,repeatedKey:!!event.requestKey&&writes.slice(0,index).some(other=>other.requestKey===event.requestKey)};})};
+    // AssertionError caches its stack before message mutation; print the bounded
+    // metadata separately so CI logs retain the same non-sensitive evidence.
+    console.error('Traffic lifecycle metadata:',JSON.stringify(detail));
+    error.message+=`; lifecycle=${JSON.stringify(detail)}`;throw error;
+   }
    const loaded=reads.slice(readStart).at(-1);assert.equal(loaded?.status,200,'Entry must read a real acknowledged server head');assert.deepEqual(loaded.response,fixture.active,'Entered GET must match final durable revision, not an older racing head');
    await noPanelCityWrites(evaluate);
    return fixture.active;
