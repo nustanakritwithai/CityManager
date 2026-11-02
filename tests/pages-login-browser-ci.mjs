@@ -72,6 +72,7 @@ try{
  await waitFor("Boolean(window.__authPost)",'synthetic authorization');
  const authorization=calls.find(c=>c.path.endsWith('/pages/authorize'));assert.deepEqual(authorization.body,{challenge:'c'.repeat(43)});assert.equal(authorization.csrf,'synthetic');
  assert.equal(await evalJS("window.__authPost[1]"),'https://nustanakritwithai.github.io');
+ assert.match(await evalJS("document.getElementById('message').textContent"),/ส่งรหัสอนุญาตไปยังเกมแล้ว.*ตรวจสอบผลในเกม/);assert.doesNotMatch(await evalJS("document.getElementById('message').textContent"),/เข้าสู่บัญชีสำเร็จ/);
  assert.deepEqual(blocked,[],'no external or unexpected requests');
  console.log('PASS: synthetic mobile Thai page, Guest distinction, cancellation/create, recovery and double-click');
 }finally{ws.close();chrome.kill('SIGTERM');await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true});}

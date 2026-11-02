@@ -22,7 +22,7 @@ test('Thai labels, accessible controls, responsive rules, and inline CSP-compati
  assert.match(html,/<label for="recovery">/);assert.doesNotMatch(html,/<(?:script|link)[^>]+(?:src|href)=/i);assert.doesNotMatch(html,/\son\w+\s*=/i);
 });
 test('authorization and safe invalid request preserve origin and CSRF',async()=>{
- const r=await setup();await r.get('use').onclick();const a=r.calls.find(c=>c.path.endsWith('/pages/authorize'));assert.deepEqual(JSON.parse(a.init.body),{challenge});assert.equal(a.init.method,'POST');assert.equal(a.init.credentials,'same-origin');assert.equal(a.init.headers['x-csrf-token'],'test-only');assert.equal(r.messages[0].target,origin);
+ const r=await setup();await r.get('use').onclick();const a=r.calls.find(c=>c.path.endsWith('/pages/authorize'));assert.deepEqual(JSON.parse(a.init.body),{challenge});assert.equal(a.init.method,'POST');assert.equal(a.init.credentials,'same-origin');assert.equal(a.init.headers['x-csrf-token'],'test-only');assert.equal(r.messages[0].target,origin);assert.match(r.get('message').textContent,/ส่งรหัสอนุญาตไปยังเกมแล้ว.*ตรวจสอบผลในเกม/);assert.doesNotMatch(r.get('message').textContent,/เข้าสู่บัญชีสำเร็จ/);
  const invalid=await setup({opener:false});await invalid.get('use').onclick();assert.match(invalid.get('message').textContent,/คำขอเข้าใช้งานไม่ถูกต้อง/);assert.ok(!invalid.calls.some(c=>c.path.endsWith('/authorize')));
 });
 test('new account is explicit, cancel is safe, duplicate clicks are suppressed',async()=>{
