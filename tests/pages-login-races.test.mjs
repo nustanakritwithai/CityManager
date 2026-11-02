@@ -9,15 +9,15 @@ const owner='11111111-1111-4111-8111-111111111111',state='s'.repeat(43),challeng
 const reply=(body={},ok=true)=>({ok,json:async()=>body});
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}}
 async function setup({auto=false,holdInitialIdentity=false,handle=null,idPrefix='request'}={}){
- const elements=new Map(),calls=[],listeners=new Map(),holds=new Map();let count=0,allow=true;
+ const elements=new Map(),calls=[],listeners=new Map(),holds=new Map(),timers=new Map();let count=0,allow=true,timerId=0;
  const get=id=>{if(!elements.has(id))elements.set(id,{disabled:false,textContent:'',value:''});return elements.get(id)};
  const opener={postMessage:()=>{}};
  const win={opener,addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name)};
  const initialIdentity=holdInitialIdentity?deferred():null;if(initialIdentity)holds.set('/citymanager-api/v1/me',initialIdentity);
- const ctx={URLSearchParams,location:{search:`?${auto?'auto=1&':''}state=${state}&challenge=${challenge}`},document:{cookie:'cm_csrf=fixture',getElementById:get},window:win,setInterval:()=>1,clearInterval:()=>{},setTimeout:()=>1,clearTimeout:()=>{},crypto:{randomUUID:()=>`${idPrefix}-${++count}`},confirm:()=>allow,fetch:async(path,init)=>{calls.push({path,body:init?.body});if(holds.has(path)){const held=holds.get(path);holds.delete(path);return held.promise}if(handle){const result=await handle(path,init);if(result)return result}if(path.endsWith('/v1/me'))return reply({guest_id:owner});if(path.endsWith('/recovery-prepare')){const id=JSON.parse(init.body).request_id;return reply({request_id:id,recovery_code:`code-${id}`})}return reply({code:'auth-code'})}};
+ const ctx={URLSearchParams,location:{search:`?${auto?'auto=1&':''}state=${state}&challenge=${challenge}`},document:{cookie:'cm_csrf=fixture',getElementById:get},window:win,setInterval:()=>1,clearInterval:()=>{},setTimeout:(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id),crypto:{randomUUID:()=>`${idPrefix}-${++count}`},confirm:()=>allow,fetch:async(path,init)=>{calls.push({path,body:init?.body});if(holds.has(path)){const held=holds.get(path);holds.delete(path);return held.promise}if(handle){const result=await handle(path,init);if(result)return result}if(path.endsWith('/v1/me'))return reply({guest_id:owner});if(path.endsWith('/recovery-prepare')){const id=JSON.parse(init.body).request_id;return reply({request_id:id,recovery_code:`code-${id}`})}return reply({code:'auth-code'})}};
  vm.createContext(ctx);vm.runInContext(script,ctx);for(let i=0;i<8;i++)await Promise.resolve();
  const hold=path=>{const d=deferred();holds.set('/citymanager-api/v1/'+path,d);return d};
- return {get,calls,listeners,win,hold,initialIdentity,force:code=>vm.runInContext(code,ctx),allow:value=>{allow=value},count:path=>calls.filter(c=>c.path.endsWith(path)).length};
+ return {get,calls,listeners,win,hold,initialIdentity,fireWait:()=>{for(const [id,timer] of [...timers])if(timer.ms===15000){timers.delete(id);timer.fn()}},force:code=>vm.runInContext(code,ctx),allow:value=>{allow=value},count:path=>calls.filter(c=>c.path.endsWith(path)).length};
 }
 test('confirm A blocks prepare B and all session-changing actions until A finishes',async()=>{
  const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();
@@ -73,4 +73,14 @@ test('documented limitation: reload after an uncertain confirm loses the in-memo
  const first=await setup();await first.get('code').onclick();const held=first.hold('pages/recovery-confirm');const confirming=first.get('confirm-code').onclick();held.reject(new TypeError('connection lost'));await confirming;assert.match(first.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(first.get('secret').textContent,'code-request-1');
  // A fresh VM represents a reload: it has no copy of the previous page's memory.
  const reloaded=await setup();assert.equal(reloaded.get('secret').textContent,'');assert.equal(reloaded.get('confirm-code').disabled,true);await reloaded.get('confirm-code').onclick();assert.equal(reloaded.count('/recovery-confirm'),0);
+});
+
+test('pending recovery remains confirmable after authorization is sent',async()=>{
+ const r=await setup();await r.get('code').onclick();const oldCode=r.get('secret').textContent;await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.equal(r.get('secret').textContent,oldCode);assert.equal(r.get('confirm-code').disabled,false);assert.equal(r.get('use').disabled,true);assert.equal(r.get('new').disabled,true);assert.equal(r.get('recover').disabled,true);await r.get('confirm-code').onclick();assert.equal(JSON.parse(r.calls.find(c=>c.path.endsWith('/recovery-confirm')).body).recovery_code,oldCode);assert.equal(r.get('secret').textContent,'');
+});
+test('recovery can be prepared and confirmed after authorization is sent',async()=>{
+ const r=await setup();await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.equal(r.get('code').disabled,false);await r.get('code').onclick();assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('confirm-code').disabled,false);await r.get('confirm-code').onclick();assert.equal(r.count('/recovery-confirm'),1);assert.equal(r.get('secret').textContent,'');
+});
+test('stalled confirmation warns of uncertain outcome, preserves code and prevents conflicting requests',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();r.fireWait();assert.match(r.get('message').textContent,/ผลอาจยังไม่แน่นอน/);assert.match(r.get('message').textContent,/เก็บไว้ในที่ปลอดภัย/);assert.equal(r.get('secret').textContent,'code-request-1');for(const id of ['use','new','recover','code','confirm-code'])assert.equal(r.get(id).disabled,true);await r.get('confirm-code').onclick();await r.get('code').onclick();assert.equal(r.count('/recovery-confirm'),1);assert.equal(r.count('/recovery-prepare'),1);held.resolve(reply());await confirming;assert.match(r.get('message').textContent,/ยืนยันรหัสกู้คืนแล้ว/);assert.equal(r.get('secret').textContent,'');
 });

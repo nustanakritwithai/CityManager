@@ -62,18 +62,26 @@ try{
  assert.equal(calls.filter(c=>c.path.endsWith('/auth/guest')).length,1);assert.equal(calls.find(c=>c.path.endsWith('/auth/guest')).csrf,'synthetic');
  await evalJS("document.querySelectorAll('details')[1].open=true; document.getElementById('code').click()");await waitFor("document.getElementById('secret').textContent==='SYNTHETIC-RECOVERY-CODE'",'synthetic recovery code');
  await evalJS("document.querySelectorAll('details')[1].scrollIntoView({block:'start'})");await shot('02-mobile-recovery.png');
- await evalJS("document.getElementById('confirm-code').click(); document.getElementById('confirm-code').click()");await waitFor("document.getElementById('confirm-code').disabled",'confirmation lock');
- for(let i=0;i<100&&!releaseConfirm;i++)await new Promise(r=>setTimeout(r,50));assert.ok(releaseConfirm,'confirmation reached the synthetic server');assert.equal(calls.filter(c=>c.path.endsWith('/recovery-confirm')).length,1,'double click suppressed');releaseConfirm();
- await waitFor("document.getElementById('message').textContent.includes('ยืนยันรหัสกู้คืนแล้ว')",'synthetic confirmation');
- assert.equal(await evalJS("document.getElementById('secret').textContent"),'');
- const confirm=calls.find(c=>c.path.endsWith('/recovery-confirm'));assert.equal(confirm.body.recovery_code,'SYNTHETIC-RECOVERY-CODE');assert.equal(confirm.csrf,'synthetic');
  // The fake opener receives the message in memory; no real game or origin is contacted.
  await evalJS("window.opener={postMessage:(...args)=>window.__authPost=args};document.getElementById('use').click()");
  await waitFor("Boolean(window.__authPost)",'synthetic authorization');
  const authorization=calls.find(c=>c.path.endsWith('/pages/authorize'));assert.deepEqual(authorization.body,{challenge:'c'.repeat(43)});assert.equal(authorization.csrf,'synthetic');
  assert.equal(await evalJS("window.__authPost[1]"),'https://nustanakritwithai.github.io');
  assert.match(await evalJS("document.getElementById('message').textContent"),/ส่งรหัสอนุญาตไปยังเกมแล้ว.*ตรวจสอบผลในเกม/);assert.doesNotMatch(await evalJS("document.getElementById('message').textContent"),/เข้าสู่บัญชีสำเร็จ/);
+ assert.equal(await evalJS("document.getElementById('secret').textContent"),'SYNTHETIC-RECOVERY-CODE');assert.equal(await evalJS("document.getElementById('confirm-code').disabled"),false);
  await evalJS("document.getElementById('message').scrollIntoView({block:'center'})");await shot('03-mobile-authorization-sent.png');
+ // Accelerate only the warning timer, while the fake server deliberately holds confirmation.
+ await evalJS("window.__realSetTimeout=window.setTimeout;window.setTimeout=(fn,ms)=>window.__realSetTimeout(fn,ms===15000?20:ms);document.getElementById('confirm-code').click();document.getElementById('confirm-code').click()");
+ await waitFor("document.getElementById('message').textContent.includes('ผลอาจยังไม่แน่นอน')",'stalled request warning');
+ for(let i=0;i<100&&!releaseConfirm;i++)await new Promise(r=>setTimeout(r,50));assert.ok(releaseConfirm,'confirmation reached the synthetic server');assert.equal(calls.filter(c=>c.path.endsWith('/recovery-confirm')).length,1,'double click suppressed');
+ assert.equal(await evalJS("document.getElementById('secret').textContent"),'SYNTHETIC-RECOVERY-CODE');assert.equal(await evalJS("document.getElementById('code').disabled"),true);
+ await evalJS("document.getElementById('message').scrollIntoView({block:'center'})");await shot('04-mobile-stalled-confirmation.png');releaseConfirm();
+ await waitFor("document.getElementById('message').textContent.includes('ยืนยันรหัสกู้คืนแล้ว')",'synthetic confirmation');assert.equal(await evalJS("document.getElementById('secret').textContent"),'');
+ const confirm=calls.find(c=>c.path.endsWith('/recovery-confirm'));assert.equal(confirm.body.recovery_code,'SYNTHETIC-RECOVERY-CODE');assert.equal(confirm.csrf,'synthetic');
+ // Recovery management remains usable even after authorization was sent.
+ releaseConfirm=null;await evalJS("document.getElementById('code').click()");await waitFor("document.getElementById('secret').textContent==='SYNTHETIC-RECOVERY-CODE'",'new recovery after authorization');
+ await evalJS("document.getElementById('confirm-code').click()");for(let i=0;i<100&&!releaseConfirm;i++)await new Promise(r=>setTimeout(r,50));assert.ok(releaseConfirm);releaseConfirm();
+ await waitFor("document.getElementById('secret').textContent===''",'new code confirmation');assert.equal(calls.filter(c=>c.path.endsWith('/recovery-confirm')).length,2);
  assert.deepEqual(blocked,[],'no external or unexpected requests');
  console.log('PASS: synthetic mobile Thai page, Guest distinction, cancellation/create, recovery and double-click');
 }finally{ws.close();chrome.kill('SIGTERM');await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true});}
