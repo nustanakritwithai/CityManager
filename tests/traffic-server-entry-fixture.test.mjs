@@ -229,3 +229,53 @@ test('lifecycle reload waits through fixture entry before checking the new boot 
  assert.ok(start>=0&&reload>=0&&entry>reload&&check>entry);
  assert.equal(segment.slice(reload,entry).includes('await until('),false,'no unguarded boot poll during navigation');
 });
+
+test('manual save and later same-byte ACKs form an exact chain before and across reload',async()=>{
+ const {assertTrafficManualSaveChain}=await import('./traffic-server-entry-fixture.mjs');
+ const live=loadedTrafficSession(raw),session=serializeParkSession(live.city,live.runtime);
+ const f=createTrafficServerFixture(url),before=await f.seed(session),send=async()=>{},cursor=f.writes.length;
+ const save=revision=>request('POST',{action:'save',cityId:before.cityId,expectedRevision:revision,raw:session,metadata:before.metadata});
+ await f.intercept(save(1),send);const acknowledged=f.active;
+ await f.intercept(save(2),send);const beforeReload=f.active;
+ assert.deepEqual(assertTrafficManualSaveChain(before,acknowledged,beforeReload,f.writes.slice(cursor),f.writes.slice(0,cursor),session),{beforeRevision:1,afterRevision:3,lifecycleSaves:2});
+ const writes=f.writes.slice(cursor);
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,beforeReload,writes.slice(1),[],session));
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,beforeReload,[writes[0],{...writes[1],response:{...writes[1].response,raw:'wrong'}}],[],session));
+ assert.throws(()=>assertTrafficManualSaveChain(before,{...acknowledged,revision:99},beforeReload,writes,[],session));
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,{...beforeReload,deleted:true},writes,[],session),/Live heads/);
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,{...beforeReload,revision:4},writes,[],session),/Every revision/);
+ f.allowNavigation(session);
+ const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
+ await f.enter({evaluate,button:async()=>{await f.intercept(save(3),send);await f.intercept(save(4),send);await f.intercept(request('GET'),send);}});
+ assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:3,afterRevision:5,lifecycleSaves:2});
+ assert.equal(f.active.raw,session);assert.equal(f.active.revision,5);
+});
+
+
+test('a pre-click autosave cannot impersonate successful manual Save',async()=>{
+ const {completeTrafficManualSave,assertTrafficManualSaveChain}=await import('./traffic-server-entry-fixture.mjs');
+ const live=loadedTrafficSession(raw),session=serializeParkSession(live.city,live.runtime);
+ const f=createTrafficServerFixture(url),before=await f.seed(session),send=async()=>{};let manualSuccess=false,manualEnabled=false;
+ const evaluate=async()=>manualSuccess;
+ const until=async expression=>{assert.match(expression,/#inspector-status/);if(!manualSuccess)throw Error('Manual success not observed');};
+ const button=async selector=>{assert.equal(selector,'#save');if(manualEnabled){await f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:2,raw:session,metadata:before.metadata}),send);manualSuccess=true;}};
+ // Autosave lands after the snapshot and before click. It has a valid ACK and
+ // same bytes, but absent manual completion still fails the real manual waiter.
+ await f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:1,raw:session,metadata:before.metadata}),send);
+ const autosave=f.active;
+ assert.deepEqual(assertTrafficManualSaveChain(before,autosave,autosave,f.writes,[],session),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+ await assert.rejects(completeTrafficManualSave(evaluate,button,until),/Manual success not observed/);
+ manualEnabled=true;await completeTrafficManualSave(evaluate,button,until);
+ assert.deepEqual(assertTrafficManualSaveChain(before,autosave,f.active,f.writes,[],session),{beforeRevision:1,afterRevision:3,lifecycleSaves:2});
+ await assert.rejects(completeTrafficManualSave(evaluate,button,until),/must be fresh/);
+});
+
+test('manual-only success signal follows awaited explicit server save',async()=>{
+ const {readFileSync}=await import('node:fs');const source=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
+ const signal='บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่';
+ assert.equal(source.split(signal).length-1,1,'Success text is exclusive to explicit Save');
+ const start=source.indexOf("$('#save').addEventListener('click'"),end=source.indexOf('const campusAction',start);
+ const handler=source.slice(start,end);assert.ok(start>=0&&end>start);
+ assert.ok(handler.includes(`await trackedSave(true);sound('ui-save');status('${signal}')`));
+ assert.match(source,/route\?\.page === 'game'.*\$\('#inspector-status'\)\.textContent = text/);
+});

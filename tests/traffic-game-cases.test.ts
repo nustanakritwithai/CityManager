@@ -60,3 +60,19 @@ test('four disjoint fault jobs preserve all seven assertions exactly once with u
  assert.match(source,/button\('#atmosphere-toggle'\);await button\('input\[name="atmosphere-time"\]\[value="noon"\]'\)/,'Decorative fallback sets noon through the current page-memory UI');
  assert.match(source,/server\.active\.raw,await evaluate\('window\.cityManager\.sessionSnapshot\(\)'\)/,'Paused revealed session must receive an exact server ACK');assert.match(source,/await revealDecorativeCars\(\);await acknowledgeRevealedSession\(\);await literalReload\(\)/);
 });
+
+test('lifecycle reload anchors its ACK chain at actual pre-navigation head',async()=>{
+ const {readFileSync}=await import('node:fs');const source=readFileSync(new URL('traffic-game-smoke.mjs',import.meta.url),'utf8');
+ const block=source.slice(source.indexOf("setStage('save and server reload')"),source.indexOf("setStage('toggle and visit-only preference')"));
+ const sequence=[
+  'await settleInterceptions();await serverFixture.settle();const beforeSave=serverFixture.active,saveCursor=serverFixture.writes.length;',
+  "await completeTrafficManualSave(evaluate,button,until);const acknowledged=await waitServerRaw(expectedSaved,oldRevision);",
+  'await settleInterceptions();await serverFixture.settle();const beforeReload=serverFixture.active;',
+  'assertTrafficManualSaveChain(beforeSave,acknowledged,beforeReload,serverFixture.writes.slice(saveCursor),serverFixture.writes.slice(0,saveCursor),saved);',
+  "serverFixture.allowNavigation(saved);await send('Page.reload',{ignoreCache:true});await serverFixture.enter({send,evaluate,button,until});",
+  "assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);assert.equal(serverFixture.active.raw,saved);",
+  'serverFixture.navigationEvidence.at(-1).beforeRevision===beforeReload.revision',
+ ];
+ const verify=(s:string)=>{let at=-1;for(const part of sequence){const next=s.indexOf(part,at+1);assert.ok(next>at,`Missing or out-of-order reload proof: ${part}`);at=next;}};
+ verify(block);for(const part of sequence)assert.throws(()=>verify(block.replace(part,'')),/Missing or out-of-order reload proof/);
+});

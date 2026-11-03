@@ -52,6 +52,27 @@ export function assertNavigationSaveChain(before,after,writes,priorWrites=[],out
  assert.equal(after.raw,latestRaw,'Final durable bytes must match the last verified ACK');
  return {beforeRevision:before.revision,afterRevision:revision,lifecycleSaves};
 }
+// Validate every post-click ACK, including a later same-session save arriving
+// while the browser reports the first ACK. Navigation begins from the actual
+// last observed head, never from a stale status-wait snapshot.
+const MANUAL_SAVE_SUCCESS='บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่';
+// The game-menu status is produced only after the actual native Save handler
+// has awaited its explicit server save. An autosave badge alone is not proof.
+export async function completeTrafficManualSave(evaluate,button,until){
+ const expression=`document.querySelector('#inspector-status')?.textContent===${JSON.stringify(MANUAL_SAVE_SUCCESS)}`;
+ assert.equal(await evaluate(expression),false,'Manual success must be fresh before the click');
+ await button('#save');
+ await until(expression);
+}
+export function assertTrafficManualSaveChain(before,acknowledged,after,writes,priorWrites,raw){
+ assert.ok(acknowledged&&acknowledged.revision>before.revision,'Manual save must advance the server revision');
+ assert.equal(acknowledged.cityId,before.cityId);assert.equal(acknowledged.raw,raw);
+ assert.ok(writes.some(e=>e.status===200&&e.response?.cityId===before.cityId&&e.response?.revision===acknowledged.revision&&e.response?.raw===raw),'Manual saved revision requires its exact observed ACK');
+ const chain=assertNavigationSaveChain(before,after,writes,priorWrites,raw);
+ assert.ok(acknowledged.revision<=after.revision,'Manual ACK cannot exceed the durable navigation baseline');
+ assert.ok(chain.lifecycleSaves>0,'Manual save must produce an observed new revision');
+ return chain;
+}
 export function createTrafficServerFixture(pageUrl){
  const url=new URL(pageUrl);assert.equal(url.protocol,'http:','Traffic fixture requires loopback HTTP');
  let fixture=createPanelServerFixture(pageUrl),navigationAllowed=false,navigation=null;
