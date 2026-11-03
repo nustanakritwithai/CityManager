@@ -4,9 +4,9 @@ import { createCity, deserialize, serialize, step, summary } from '../src/sim.ts
 import { cityGoals } from '../src/city-goals.ts';
 import { keepSupplied } from './plants.ts';
 
-test('seeded cities that win stay self-reliant for three years: farms pay their wages and no firm runs dry', { timeout: 120_000 }, () => {
+test('legacy seeded cities that win stay self-reliant for three years: farms pay their wages and no firm runs dry', { timeout: 120_000 }, () => {
   for (const seed of [61025, 2026]) {
-    let c = createCity(seed), wonAt = 0;
+    let c = createCity(seed), wonAt = 0; delete c.goalRulesVersion;
     for (let d = 1; d <= 1080; d++) {
       step(c); keepSupplied(c);
       if (!wonAt && cityGoals(c).won) wonAt = d;

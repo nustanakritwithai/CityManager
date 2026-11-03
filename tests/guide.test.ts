@@ -34,7 +34,7 @@ test('following the guide from an empty map walks every step and leaves a city t
   assert.deepEqual(seen, ['road', 'homes', 'farm', 'factory', 'commerce', 'play', 'chain', 'grow', 'utilities', 'done']);
   assert.ok(cityGoals(c).level >= 3);
   for (let d = 0; d < 420 && !cityGoals(c).won; d++) step(c);
-  assert.equal(cityGoals(c).won, true, 'a guided city can win');
+  assert.equal(cityGoals(c).won, false, 'the guided starter road alone does not satisfy the expanded challenge');
 });
 
 test('the win screen shows once per city: never on load, never again after a dip', () => {

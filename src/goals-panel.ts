@@ -4,6 +4,8 @@
  */
 import { WinLatch, cityGoals, cityRecord, type CityGoals, type SideMission } from './city-goals.ts';
 import type { City } from './sim.ts';
+import type { CityChallenge } from './city-challenges.ts';
+import type { PopulationGuidance } from './population-guidance.ts';
 import './goals.css';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string) => {
@@ -39,7 +41,7 @@ export class GoalPill {
 }
 
 /** The five stages as a stepper, with the open checks of the next stage spelled out. */
-export function renderGoalsCard(host: HTMLElement, goals: CityGoals, missions: readonly SideMission[] = []) {
+export function renderGoalsCard(host: HTMLElement, goals: CityGoals, missions: readonly SideMission[] = [], challenges: readonly CityChallenge[] = [], population: PopulationGuidance | null = null) {
   const head = el('div', 'dash-head'); head.append(el('h3', '', 'เป้าหมายเมือง'), el('span', 'dash-note', goals.won ? 'ชนะแล้ว · เล่นต่อได้' : `ระดับ ${goals.level}/5`));
   const steps = el('ol', 'goal-steps');
   for (const stage of goals.stages) {
@@ -48,7 +50,7 @@ export function renderGoalsCard(host: HTMLElement, goals: CityGoals, missions: r
     li.append(el('b', 'goal-step-mark', stage.done ? '✓' : String(stage.level)), el('span', 'goal-step-name', stage.name));
     steps.append(li);
   }
-  const parts: HTMLElement[] = [head, steps];
+  const parts: HTMLElement[] = [head, steps, el('p', 'dash-note-line', 'ระบบตรวจเงื่อนไขทุกระดับตามสภาพเมือง หากระดับถัดไปครบอยู่แล้ว อาจผ่านหลายระดับพร้อมกัน')];
   if (goals.next) {
     const next = el('section', 'goal-next'); next.append(el('h4', '', `ถัดไป: ${goals.next.name}`));
     const list = el('ul', 'goal-checks');
@@ -57,8 +59,15 @@ export function renderGoalsCard(host: HTMLElement, goals: CityGoals, missions: r
       if (check.value) li.append(el('small', '', check.value));
       list.append(li);
     }
-    next.append(list, el('p', 'dash-note-line', goals.next.hint)); parts.push(next);
-  } else parts.push(el('p', 'dash-note-line', 'เมืองผลิตสินค้าพอขายเอง ไม่ต้องนำเข้า และเงินคลังเติบโต เล่นต่อแบบอิสระได้ หรือเริ่มเมืองใหม่จากเมนูเกม'));
+    next.append(list, el('p', 'dash-note-line', goals.next.hint));
+    if (population) {
+      const note = el('section', 'goal-population-guidance'); note.dataset.populationGuidance = 'true';
+      note.append(el('h5', '', 'ทำไมประชากรอาจยังไม่เพิ่ม'), el('p', '', population.reason),
+        el('p', '', population.capital), el('p', '', population.action));
+      next.append(note);
+    }
+    parts.push(next);
+  } else parts.push(el('p', 'dash-note-line', 'ทำครบเป้าหมายแล้ว ทั้งการส่งสินค้าให้ร้าน การซื้อของครัวเรือน และการเติบโตของเงินคลัง เล่นต่อได้ หรือเริ่มเมืองใหม่จากเมนูเกม'));
   if (missions.length) {
     const completed = missions.filter(m => m.done).length;
     const side = el('section', 'goal-missions');
@@ -77,6 +86,25 @@ export function renderGoalsCard(host: HTMLElement, goals: CityGoals, missions: r
     }
     side.append(top, list, el('p', 'goal-missions-note', 'อ่านจากข้อมูลเมืองจริง · ไม่มีรางวัลเงิน · สถานะเปลี่ยนได้เมื่อเมืองเปลี่ยน'));
     parts.push(side);
+  }
+  if (challenges.length) {
+    const completed = challenges.filter(challenge => challenge.done).length;
+    const section = el('section', 'goal-missions');
+    const top = el('div', 'goal-missions-head');
+    top.append(el('h4', '', 'ความท้าทายขั้นสูง'), el('span', '', `${completed}/${challenges.length} สำเร็จ`));
+    const list = el('ul', 'goal-mission-list');
+    for (const challenge of challenges) {
+      const item = el('li', challenge.done ? 'done' : ''); item.dataset.challenge = challenge.id;
+      const line = el('div', 'goal-mission-line');
+      line.append(el('strong', '', challenge.done ? `✓ ${challenge.name}` : challenge.name),
+        el('span', '', `${challenge.current}/${challenge.target} ${challenge.unit}`));
+      const meter = el('progress', 'goal-mission-meter');
+      meter.max = Math.max(1, challenge.target); meter.value = Math.min(meter.max, challenge.current);
+      meter.setAttribute('aria-label', `${challenge.name}: ${challenge.current} จาก ${challenge.target} ${challenge.unit}`);
+      item.append(line, meter, el('p', '', challenge.hint)); list.append(item);
+    }
+    section.append(top, list, el('p', 'goal-missions-note', 'อ่านจากข้อมูลเมืองจริง · ไม่มีรางวัลเงิน · สถานะเปลี่ยนได้เมื่อเมืองเปลี่ยน'));
+    parts.push(section);
   }
   host.replaceChildren(...parts);
 }
@@ -107,7 +135,7 @@ export class WinWatch {
     const fresh = el('button', 'win-new', 'เริ่มเมืองใหม่'); fresh.type = 'button';
     keep.onclick = () => dialog.close(); fresh.onclick = () => { dialog.close(); this.onNewCity(); };
     const actions = el('div', 'win-actions'); actions.append(keep, fresh);
-    dialog.append(el('p', 'win-kicker', 'ผ่านครบ 5 ระดับ'), title, el('p', '', 'โรงงานในเมืองผลิตพอให้ร้านขาย ไม่ต้องนำเข้า และเงินคลังเพิ่มขึ้น 3 เดือนติดกัน'), stats, actions);
+    dialog.append(el('p', 'win-kicker', 'ผ่านครบ 5 ระดับ'), title, el('p', '', 'ร้านได้รับสินค้าจากโรงงานในเมือง ครัวเรือนซื้อสินค้า และเงินคลังเพิ่มขึ้น 3 เดือนติดกัน'), stats, actions);
     document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
   }
 }

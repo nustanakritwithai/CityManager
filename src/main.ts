@@ -41,7 +41,6 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { createTaxiFareAccumulator } from './taxi/fares.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
@@ -150,7 +149,6 @@ let pausedByTyphoonAuto = false;
 let trafficOn = false;
 let taxiFeature = false;
 const taxiSession = sharedTaxiSession();
-const taxiFares = createTaxiFareAccumulator();
 let taxiView: SceneTaxiVehicles | undefined;
 let taxiButton: HTMLButtonElement | undefined;
 type Route = { page: 'city' | 'help' | 'game' | 'signals' } | { page: 'place'; cell: number; buildingId: number | null } | { page: 'household'; id: number; sourceBuildingId: number; sourceCell: number };
@@ -388,7 +386,7 @@ function factoryRecipeAction(firmId: number, recipe: 'rice-mill' | 'cannery' | '
   if (result.ok) ownerDecisionSession.syncExternal(city, 'manual-factory-recipe');
   status(result.message); render();
 }
-function renderPlace() {
+function renderPlace(goals: ReturnType<typeof cityGoals>) {
   const metrics: HTMLElement[] = [], tags: HTMLElement[] = [], reasons: string[] = [];
   let checklist: HTMLElement | null = null, railCard: HTMLElement | null = null, busCard: HTMLElement | null = null;
   const cellIndex = route?.page === 'place' ? route.cell : null;
@@ -505,7 +503,7 @@ function renderPlace() {
   let issueHost = document.getElementById('building-issue-details');
   if (!issueHost) { issueHost = document.createElement('section'); issueHost.id = 'building-issue-details'; $('#entity-content').after(issueHost); }
   renderBuildingIssues(city, route?.page === 'place' ? cellIndex : null, issueHost);
-  if (page === 'city') { renderCityOverview(city); renderEducationOverview(); dashboard?.update(city); renderParkPanel(); }
+  if (page === 'city') { renderCityOverview(city); renderEducationOverview(); dashboard?.update(city, goals); renderParkPanel(); }
   decoratePanels($('#inspector'));
 }
 function validateRoute() {
@@ -557,7 +555,7 @@ function render() {
     const spark = demandSparkline(history, zone); if (spark) item.insertAdjacentHTML('beforeend', spark);
     demand.append(item);
   }
-  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); cityNetwork?.update(city); guide?.update(city); minimap?.update(city, selected); renderPlace(); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
+  $('#growth-summary').replaceChildren(demand); cityStatsPanel?.update(city); cityNetwork?.update(city); guide?.update(city); minimap?.update(city, selected); renderPlace(goals); entityExplanationPanel?.sync(); ownerDecisionPanel?.sync();
   if (route?.page === 'city' || route?.page === 'help') renderSubmenus(city, null);
   const start = view.dragStart ?? roadStart; const preview = start === null ? (hover === null ? [] : [hover]) : hover === null ? [start] : roadPath(start, hover);
   const busPreview = route ? null : busController?.preview(tool, hover) ?? null;
@@ -579,7 +577,7 @@ function syncTaxiInspector() {
   box.hidden = !depot;
   if (!depot || cell === null) return;
   $('#selection-title').textContent = `อู่แท็กซี่ #${depot.id} · ${formatCellCoordinate(cell)}`;
-  $('#place-subtitle').textContent = `ระดับ ${depot.level} · ${depot.level === 1 ? 4 : 8} คัน · ${depot.open ? 'เปิดบริการ' : 'ปิดบริการ'}`;
+  $('#place-subtitle').textContent = `ระดับ ${depot.level} · ${depot.level === 1 ? 4 : 8} คัน · ${depot.open ? 'เปิดบริการ' : 'ปิดบริการ'} · ยังไม่เก็บค่าโดยสารเข้าคลัง`;
   view?.setTaxiDepots(taxiSession.depots());
 }
 function updateMapInfo(placement: Preview | null) {
@@ -667,7 +665,7 @@ async function boot() {
   });
   $('#open-signals').addEventListener('click', () => { if (signalsEnabled()) openRoute({ page: 'signals' }); });
   taxiFeature = taxiEnabled();
-  if (taxiFeature) { toolNames.taxi = 'อู่แท็กซี่'; help.taxi = 'อู่แท็กซี่ · แปลงว่างติดถนน · ไม่มีค่าก่อสร้าง · รถแท็กซี่รับเที่ยวตามความหนาแน่นเมื่อเปิดการจราจรจำลอง · รอบนี้ยังไม่ลงเซฟ'; }
+  if (taxiFeature) { toolNames.taxi = 'อู่แท็กซี่'; help.taxi = 'อู่แท็กซี่ · แปลงว่างติดถนน · ไม่มีค่าก่อสร้าง · รถแท็กซี่จำลองเมื่อเปิดการจราจร · อู่บันทึกในเซฟ · ยังไม่เก็บค่าโดยสารเข้าคลัง'; }
   view = await CityView.create($('#city-canvas'), taxiActivate, index => { if (hover !== index) { hover = index; if (tool === 'F' && !route) { const hint = farmHint(index); $('#tool-help').textContent = hint; status(hint); } render(); } }, (a, b) => {
     const path = roadPath(a, b);
     if (taxiOccupies(path)) { status('มีอู่แท็กซี่ขวางทาง ต้องรื้อก่อนสร้างถนน'); render(); return; }
@@ -945,7 +943,7 @@ async function boot() {
       $('#building-issue-details').scrollIntoView({ block: 'start', inline: 'nearest' });
     }
   });
-  dashboard = new OverviewDashboard($('#city-dashboard'));
+  dashboard = new OverviewDashboard($('#city-dashboard'), tool => setTool(tool));
   cityHud = new CityHud((cell, buildingId) => { view.focus(cell); openRoute({ page: 'place', cell, buildingId }); }, () => {
     openRoute({ page: 'city' });
     const issues = document.querySelector<HTMLDetailsElement>('#issue-section'); if (issues) { issues.open = true; issues.scrollIntoView({ block: 'start' }); }
@@ -963,9 +961,6 @@ async function boot() {
     trafficLayer?.setVisible(visual.settings.traffic);
     taxiSession.bind(city);
     trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt, parkRuntime.activity.day);
-    if (trafficLayer && taxiFeature) {
-      taxiFares.observe(city, trafficLayer.taxiTrips(), !paused && !previewOnly && !recoveryOnly);
-    }
     if(trafficLayer){const d=trafficLayer.diagnostics;view.traffic.setCarsEnabled(Boolean(d.failure));const text=trafficGameStatus(d);if(text!==trafficText){trafficText=text;trafficInfo.textContent=text;}const hotspot=d.loadByCell.reduce<typeof d.loadByCell[number]|null>((best,row)=>row.queued>0&&(!best||row.queued>best.queued)?row:best,null);bottleneckCell=hotspot?.cell??null;trafficFocus.hidden=bottleneckCell===null;}
 
     // `trafficLayer.bus` stays null on integrate/transport until bus is re-wired onto the #126 worker game.

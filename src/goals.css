@@ -41,6 +41,9 @@ html[data-touch-ui] .goal-pill { min-width: 44px; min-height: 44px; margin: -12p
 #inspector .goal-checks small { color: var(--pnl-muted); font-size: calc(13 * var(--u)); font-variant-numeric: tabular-nums; }
 #inspector .goal-check-mark { color: var(--pnl-faint); }
 #inspector .goal-checks li.done .goal-check-mark { color: var(--pnl-good); }
+#inspector .goal-population-guidance { margin-top: calc(10 * var(--u)); padding: calc(10 * var(--u)); border-left: 3px solid var(--pnl-accent); background: var(--pnl-bg); }
+#inspector .goal-population-guidance h5 { margin: 0 0 calc(5 * var(--u)); color: var(--pnl-text); font-size: calc(13 * var(--u)); }
+#inspector .goal-population-guidance p { margin: calc(5 * var(--u)) 0 0; color: var(--pnl-muted); font-size: calc(12 * var(--u)); line-height: 1.45; }
 
 .win-dialog { max-width: 380px; text-align: left; }
 .win-dialog .win-kicker { margin: 0 0 4px; color: var(--c-accent); font-size: 13px; font-weight: 700; letter-spacing: .04em; }

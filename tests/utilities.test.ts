@@ -16,7 +16,7 @@ test('the gateway contract caps growth until the city builds plants; plants lift
   assert.deepEqual(svc.capacity, OUTSIDE_SUPPLY, 'a new city has only the gateway contract');
   assert.ok(svc.used.power <= OUTSIDE_SUPPLY.power && svc.used.water <= OUTSIDE_SUPPLY.water);
   assert.equal(cityGoals(capped).won, false, 'without plants the sample city cannot win');
-  const supplied = createCity(61025); let won = 0;
+  const supplied = createCity(61025); delete supplied.goalRulesVersion; let won = 0;
   for (let d = 1; d <= 720; d++) { step(supplied); keepSupplied(supplied); if (!won && cityGoals(supplied).won) won = d; }
   assert.ok(supplied.plants.length >= 2 && won > 0, `with plants the city wins (day ${won})`);
   assert.ok(summary(supplied).population > summary(capped).population);

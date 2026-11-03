@@ -1,9 +1,10 @@
 /**
  * City goals: five stages from first household to a self-reliant city. Read-only over the
- * canonical state and its ledgers; nothing here is saved, so a loaded city shows its real stage.
+ * canonical state and ledgers. Progress is not saved; a rules-version marker selects old or new goals.
  */
 import { CROPS, PRODUCTS, RECIPES } from './goods.ts';
 import { MONTH, farmCrop, isCommercial, summary, type City } from './sim.ts';
+import { mainGoalNetwork, GOAL_SERVED_ROADS, GOAL_SERVED_ROADS_PER_AXIS, GOAL_LARGE_CITY_POPULATION, GOAL_LARGE_CITY_SALES } from './main-goal-network.ts';
 
 export type GoalCheck = { label: string; done: boolean; value?: string };
 export type GoalStage = { level: number; id: string; name: string; hint: string; checks: GoalCheck[]; done: boolean };
@@ -46,6 +47,8 @@ export function cityGoals(c: City, s = summary(c)): CityGoals {
   const treasury = treasuryAtMonthEnds(c, GOAL_GROWTH_MONTHS);
   const growing = treasury ? treasury.slice(1).filter((v, i) => v > treasury[i]).length : 0;
   const fullMonth = c.tick >= MONTH;
+  const expandedGoals = c.goalRulesVersion === 2;
+  const network = expandedGoals ? mainGoalNetwork(c) : null;
   const stages: Omit<GoalStage, 'done'>[] = [
     { level: 1, id: 'village', name: 'หมู่บ้าน', hint: 'ต่อถนนจากประตูเมือง วางโซนบ้านข้างถนน แล้วกดเล่น',
       checks: [{ label: 'มีครัวเรือนย้ายเข้าบ้าน', done: housed > 0, value: `${count(housed)} ครัวเรือน` }] },
@@ -55,16 +58,26 @@ export function cityGoals(c: City, s = summary(c)): CityGoals {
         { label: 'โรงงานแปรรูปพืชผลใน 30 วัน', done: recentCrops.some(e => e.kind === 'process') },
       ] },
     { level: 3, id: 'town', name: 'เมืองเล็ก', hint: 'วางโซนพาณิชย์ข้างถนน ร้านค้าจะเปิดเมื่อโรงงานมีคนงาน',
-      checks: [{ label: 'ร้านค้าขายสินค้าที่โรงงานในเมืองผลิต', done: wholesale > 0 && sold > 0, value: `ขาย ${count(sold)} หน่วยใน 30 วัน` }] },
+      checks: expandedGoals ? [
+        { label: 'ร้านรับสินค้าจากโรงงานในเมืองใน 30 วัน', done: wholesale > 0, value: `${count(wholesale)} หน่วย` },
+        { label: 'ครัวเรือนซื้อสินค้าจากร้านใน 30 วัน', done: sold > 0, value: `${count(sold)} หน่วย` },
+      ] : [{ label: 'ร้านค้าขายสินค้าที่โรงงานในเมืองผลิต', done: wholesale > 0 && sold > 0, value: `ขาย ${count(sold)} หน่วยใน 30 วัน` }] },
     { level: 4, id: 'city', name: 'เมือง', hint: 'เพิ่มบ้านและที่ทำงานให้สมดุล คนว่างงานไม่ย้ายเข้า งานว่างดึงคนเข้าเมือง',
       checks: [
         { label: `ประชากรอย่างน้อย ${count(GOAL_POPULATION)} คน`, done: s.population >= GOAL_POPULATION, value: `${count(s.population)}/${count(GOAL_POPULATION)} คน` },
         { label: `แรงงานมีงานอย่างน้อย ${Math.round(GOAL_EMPLOYMENT * 100)}%`, done: s.workforce > 0 && employment >= GOAL_EMPLOYMENT, value: `${Math.round(employment * 100)}%` },
       ] },
-    { level: 5, id: 'self-reliant', name: 'เมืองพึ่งพาตนเองได้', hint: 'ให้โรงงานผลิตพอขาย ไม่ต้องนำเข้า และใช้เงินคลังไม่เกินภาษีที่เก็บได้',
+    { level: 5, id: 'self-reliant', name: 'เมืองพึ่งพาตนเองได้', hint: expandedGoals ? 'ขยายถนนที่เชื่อมประตูเมืองให้มีบ้านที่มีคนอยู่หรือกิจการที่มีคนทำงาน ทั้งสองต้องมีน้ำไฟ และกระจายทั้งแนวนอนและแนวตั้ง ทางแยกแต่ละช่องนับได้หนึ่งทิศเท่านั้น เพิ่มประชากรและยอดขาย พร้อมรักษาคลังให้เติบโต' : 'ให้โรงงานผลิตพอขาย ไม่ต้องนำเข้า และใช้เงินคลังไม่เกินภาษีที่เก็บได้',
       checks: [
+        ...(network ? [
+          { label: `ถนนเชื่อมประตูเมืองที่มีบ้านหรือกิจการใช้งานอย่างน้อย ${GOAL_SERVED_ROADS} ช่อง`, done: network.served >= GOAL_SERVED_ROADS, value: `${network.served}/${GOAL_SERVED_ROADS} ช่อง` },
+          { label: `ถนนแนวนอนที่มีบ้านหรือกิจการใช้งานอย่างน้อย ${GOAL_SERVED_ROADS_PER_AXIS} ช่อง`, done: network.horizontal >= GOAL_SERVED_ROADS_PER_AXIS, value: `${network.horizontal}/${GOAL_SERVED_ROADS_PER_AXIS} ช่อง` },
+          { label: `ถนนแนวตั้งที่มีบ้านหรือกิจการใช้งานอย่างน้อย ${GOAL_SERVED_ROADS_PER_AXIS} ช่อง`, done: network.vertical >= GOAL_SERVED_ROADS_PER_AXIS, value: `${network.vertical}/${GOAL_SERVED_ROADS_PER_AXIS} ช่อง` },
+          { label: `ประชากรอย่างน้อย ${GOAL_LARGE_CITY_POPULATION} คน`, done: s.population >= GOAL_LARGE_CITY_POPULATION, value: `${count(s.population)}/${GOAL_LARGE_CITY_POPULATION} คน` },
+        ] : []),
         { label: 'ร้านไม่ต้องนำเข้าสินค้า 30 วัน', done: fullMonth && imported === 0, value: imported ? `นำเข้า ${count(imported)} หน่วย` : undefined },
-        { label: `ขายสินค้าในเมืองอย่างน้อย ${count(GOAL_LOCAL_SALES)} หน่วยใน 30 วัน`, done: sold >= GOAL_LOCAL_SALES, value: `${count(sold)}/${count(GOAL_LOCAL_SALES)}` },
+        ...(expandedGoals ? [{ label: 'ร้านรับสินค้าจากโรงงานในเมืองใน 30 วัน', done: wholesale > 0, value: `${count(wholesale)} หน่วย` }] : []),
+        { label: `${expandedGoals ? 'ครัวเรือนซื้อสินค้าจากร้าน' : 'ขายสินค้าในเมือง'}อย่างน้อย ${count(expandedGoals ? GOAL_LARGE_CITY_SALES : GOAL_LOCAL_SALES)} หน่วยใน 30 วัน`, done: sold >= (expandedGoals ? GOAL_LARGE_CITY_SALES : GOAL_LOCAL_SALES), value: `${count(sold)}/${count(expandedGoals ? GOAL_LARGE_CITY_SALES : GOAL_LOCAL_SALES)}` },
         { label: `เงินคลังเพิ่มขึ้น ${GOAL_GROWTH_MONTHS} เดือนติดกัน`, done: growing === GOAL_GROWTH_MONTHS, value: treasury ? `${growing}/${GOAL_GROWTH_MONTHS} เดือน` : 'รอครบ 3 เดือน' },
       ] },
   ];

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collectTaxiFares, createCity, deserialize, serialize, taxiTripFare, TAXI_TRIP_FARE } from '../src/sim.ts';
+import { createCity, deserialize, serialize, step } from '../src/sim.ts';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { treasuryBudget } from '../src/overview-data.ts';
 import { createTaxiSession } from '../src/taxi/session.ts';
 import { taxiSiteReason } from '../src/taxi/placement.ts';
 import { captureTrafficGameInput, TrafficGame, type TrafficGameSample } from '../src/traffic/game.ts';
@@ -28,43 +31,67 @@ test('old saves without a taxi section load with no depots', () => {
   assert.deepEqual(session.depots(), []);
 });
 
-test('a completed taxi trip credits its fare to the treasury ledger', () => {
+test('visual taxi trips never enter city accounting across speeds, pause and reload', { timeout: 60_000 }, () => {
+  // Production must not connect cosmetic traffic counters to the money ledger.
+  const scan = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? scan(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : []);
+  for (const file of scan(new URL('../src', import.meta.url).pathname))
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /createTaxiFareAccumulator|collectTaxiFares|taxiFares\.observe/, file);
   const roads = new Set([25, 26, 27, 28]);
   const sample: TrafficGameSample = { map: { cells: Array.from({ length: 576 }, (_, i) => ({ road: roads.has(i) })) }, demand: [{ from: 25, to: 28, rate: 1, taxiRate: 1 } as TrafficGameSample['demand'][number]] };
-  const game = new TrafficGame(sample);
-  let f = game.frame;
-  for (let i = 0; i < 20 && !f.taxiTrips; i++) { game.step(); f = game.frame; }
-  assert.ok(f.taxiTrips && f.taxiTrips.trips >= 1, JSON.stringify(f.taxiTrips));
-  const { trips, tiles } = f.taxiTrips!;
-  assert.equal(tiles, trips * 3);
-  const city = createCity(61025), before = city.accounts.treasury;
-  const fare = collectTaxiFares(city, trips, tiles);
-  assert.equal(fare, taxiTripFare(trips, tiles));
-  assert.equal(fare, trips * TAXI_TRIP_FARE.base + tiles * TAXI_TRIP_FARE.perTile);
-  assert.equal(city.accounts.treasury, before + fare);
-  assert.deepEqual(city.ledger.at(-1), { tick: city.tick, from: 'outside', to: 'treasury', amount: fare, reason: 'Taxi fares' });
-  assert.equal(deserialize(serialize(city)).accounts.treasury, before + fare);
+  function run(visualStepsPerDay: number) {
+    let city = createCity(61025);
+    const session = createTaxiSession(); session.bind(city);
+    const site = city.cells.findIndex((_, i) => taxiSiteReason(city, i, true) === null);
+    assert.equal(session.place(city, site, true, true).ok, true);
+    const game = new TrafficGame(sample);
+    for (let day = 0; day < 60; day++) {
+      // Rendering may repeat while paused, but city time and money must not move.
+      const beforePause = serialize(city); for (let i = 0; i < 5; i++) game.step();
+      assert.equal(serialize(city), beforePause);
+      for (let i = 0; i < visualStepsPerDay; i++) game.step();
+      step(city);
+      if (day === 29) city = deserialize(serialize(city));
+    }
+    assert.ok(game.frame.taxiTrips && game.frame.taxiTrips.trips > 0, 'visual taxi vehicles still complete');
+    assert.equal(city.ledger.some(e => e.reason === 'Taxi fares'), false);
+    assert.equal(city.taxi?.depots.length, 1, 'depot remains saved and functional');
+    return { treasury: city.accounts.treasury, ledger: city.ledger, trips: game.frame.taxiTrips.trips };
+  }
+  const slowVisual = run(2), fastVisual = run(100);
+  assert.ok(fastVisual.trips > slowVisual.trips, 'test actually varies cosmetic traffic rate');
+  assert.equal(slowVisual.treasury, fastVisual.treasury);
+  assert.deepEqual(slowVisual.ledger, fastVisual.ledger);
 });
 
-test('fares accrue in memory and post one integer ledger entry per in-game day', async () => {
-  const { createTaxiFareAccumulator } = await import('../src/taxi/fares.ts');
-  const city = createCity(61025), acc = createTaxiFareAccumulator(), start = city.ledger.length, before = city.accounts.treasury;
-  let trips = 0, tiles = 0, posted = 0;
-  acc.observe(city, { trips, tiles }, true);
-  for (let day = 0; day < 5; day++) {
-    for (let frame = 0; frame < 600; frame++) { if (frame % 3 === 0) { trips++; tiles += 4; } posted += acc.observe(city, { trips, tiles }, true); }
-    city.tick++; posted += acc.observe(city, { trips, tiles }, true);
-  }
-  const fares = city.ledger.slice(start).filter(e => e.reason === 'Taxi fares');
-  assert.equal(fares.length, 5);
-  for (const e of fares) { assert.ok(Number.isSafeInteger(e.amount) && e.amount > 0); assert.equal(e.from, 'outside'); assert.equal(e.to, 'treasury'); }
-  assert.equal(posted, taxiTripFare(trips, tiles));
-  assert.equal(city.accounts.treasury, before + posted);
-  assert.deepEqual(acc.pending(), { trips: 0, tiles: 0 });
-  // Paused/preview frames accrue nothing; a game reset (counter drops) is not a negative fare.
-  acc.observe(city, { trips: trips + 50, tiles: tiles + 200 }, false); acc.observe(city, { trips: 1, tiles: 3 }, true);
-  city.tick++; assert.equal(acc.observe(city, { trips: 1, tiles: 3 }, true), taxiTripFare(1, 3));
-  assert.equal(deserialize(serialize(city)).accounts.treasury, city.accounts.treasury);
+test('an open depot with no city demand earns no fares', () => {
+  const city = createCity(1, { starter: false });
+  const session = createTaxiSession(); session.bind(city);
+  const site = city.cells.findIndex((_, i) => taxiSiteReason(city, i, true) === null);
+  assert.equal(session.place(city, site, true, true).ok, true);
+  const input = captureTrafficGameInput(city, { taxiEnabled: true });
+  assert.equal(input.homes.length, 0); assert.equal(input.destinations.length, 0);
+  assert.equal(input.taxis.length, 1);
+  for (let i = 0; i < 60; i++) step(city);
+  assert.equal(city.ledger.some(e => e.reason === 'Taxi fares'), false);
+  assert.equal(city.taxi?.depots[0].open, true);
+});
+
+test('historical fare entries and treasury survive loading without new taxi revenue', () => {
+  const c = createCity(61025), amount = 12_345;
+  // A legitimate journal entry from an earlier version, not a new payment.
+  c.accounts.outside -= amount; c.accounts.treasury += amount;
+  c.ledger.push({ tick: c.tick, from: 'outside', to: 'treasury', amount, reason: 'Taxi fares' });
+  const before = c.accounts.treasury, old = serialize(c), loaded = deserialize(old);
+  assert.equal(loaded.accounts.treasury, before);
+  assert.deepEqual(loaded.ledger, c.ledger);
+  assert.equal(treasuryBudget(loaded).income.find(e => e.key === 'legacy-taxi-fares')?.amount, amount);
+  const reference = createCity(61025);
+  for (let i = 0; i < 20; i++) { step(loaded); step(reference); }
+  assert.equal(loaded.ledger.filter(e => e.reason === 'Taxi fares').length, 1, 'no new fare before normal journal compaction');
+  for (let i = 20; i < 60; i++) { step(loaded); step(reference); }
+  assert.equal(loaded.accounts.treasury - reference.accounts.treasury, amount, 'historical balance survives compaction');
+  assert.equal(loaded.ledger.some(e => e.reason === 'Taxi fares'), false, 'only normal historical compaction removes old raw rows');
+  assert.deepEqual(deserialize(serialize(loaded)), loaded);
 });
 
 test('first taxi save keeps a compressed before-taxi backup that still restores losslessly', async () => {
