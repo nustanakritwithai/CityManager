@@ -10,9 +10,9 @@ export const RECENT_ENTRIES = 3;
 /** Kinds shown by name; smaller ones fold into one "other" row so the summary stays short. */
 export const DIGEST_GROUPS = 4;
 
-/** "ซื้อขายพืชผล · รายการ #2286" and "Crop export #2288" become one kind each. */
+/** "ซื้อขายพืชผล · รายการ #2286" and "ครัวเรือน #27 ซื้อสินค้า" become one kind each: entry and party numbers drop. */
 export function groupLabel(label: string): string {
-  const base = label.replace(/\s*(?:·\s*)?(?:รายการ\s*)?#\d+\s*$/u, '').replace(/^รายการอื่น:\s*/u, '').trim();
+  const base = label.replace(/^รายการอื่น:\s*/u, '').replace(/\s*(?:·\s*)?(?:รายการ\s*)?#\d+\s*$/u, '').replace(/\s*#\d+/gu, '').replace(/\s{2,}/gu, ' ').trim();
   return base || label;
 }
 

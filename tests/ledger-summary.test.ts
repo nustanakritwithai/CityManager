@@ -8,6 +8,7 @@ test('entry numbers fold into one kind per label', () => {
   assert.equal(groupLabel('ซื้อขายพืชผล · รายการ #2286'), 'ซื้อขายพืชผล');
   assert.equal(groupLabel('ส่งออกพืชผลส่วนเกิน'), 'ส่งออกพืชผลส่วนเกิน');
   assert.equal(groupLabel('รายการอื่น: Crop export #2288'), 'Crop export');
+  assert.equal(groupLabel('ครัวเรือน #27 ซื้อสินค้า'), 'ครัวเรือน ซื้อสินค้า');
   assert.equal(groupLabel('#12'), '#12');
 });
 
