@@ -603,7 +603,7 @@ function updateMapInfo(placement: Preview | null) {
 }
 
 async function boot() {
-  const serverEntry=await requireServerCityEntry(()=>{const fresh=createCity(61025,{starter:STARTER});return serializeParkSession(fresh,createParkRuntime(fresh));},(import.meta as ImportMeta & {env:Record<string,string|undefined>}).env.VITE_CITY_SAVE_URL);
+  const serverEntry=await requireServerCityEntry((import.meta as ImportMeta & {env:Record<string,string|undefined>}).env.VITE_CITY_SAVE_URL);
   const serverSave=serverEntry.client;
   const restored=expandValidatedParkSession(deserializeParkSession(serverEntry.raw));
   city=restored.city;parkRuntime=restored.runtime;taxiSession.bind(city);
@@ -830,7 +830,6 @@ async function boot() {
   };
   const autosave=createAutosave({canSave:()=>!managingSave&&!resolvingConflict&&!serverSave.conflict&&!serverSave.deleted,save:()=>trackedSave(),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
   autosave.adoptLoaded();installAutosave(document,window,autosave,()=>document.hidden);
-  if(serverEntry.migrationIssues.length){const warning=document.createElement('p');warning.id='city-migration-warning';warning.setAttribute('role','status');warning.textContent=`เปิดเมืองหลักจากเซิร์ฟเวอร์แล้ว แต่ยังย้ายเซฟเก่าไม่ครบ: ${serverEntry.migrationIssues.join(', ')} · ข้อมูลเก่ายังอยู่ ไม่ถูกลบ`;$('#save').insertAdjacentElement('afterend',warning);}
   window.addEventListener('beforeunload',event=>{if(saveBusy||serverSave.pending||serializeParkSession(city,parkRuntime,city.market)!==serverSave.confirmed?.raw){event.preventDefault();event.returnValue='';}});
   $('#save').addEventListener('click',async()=>{
     if(saveBusy||managingSave)return;

@@ -1,4 +1,4 @@
-/** Periodic + lifecycle autosave for the local browser save. Pure controller so it can be tested headlessly. */
+/** Periodic and lifecycle autosave controller, independent of the persistence transport. */
 export const AUTOSAVE_INTERVAL_MS = 60_000;
 
 export type AutosaveResult = { ok: true; at: number } | { ok: false; at: number; quota: boolean; message: string };
@@ -33,7 +33,7 @@ export function createAutosave(opts: AutosaveOptions) {
     finally { running = false; }
   }
   return { run, flush() { void run(true); }, reset(){savedTick=null;savedRevision=null;last=null;adopted=false;},
-    /** After a Load: the slot already holds these bytes, so skip autosave until the city changes. Does not claim a save happened. */
+    /** After a load, skip autosave until the city changes. Does not claim a save happened. */
     adoptLoaded(){savedTick=opts.tick();savedRevision=opts.revision?.()??savedTick;last=null;adopted=true;}, markSaved(tick: number) { savedTick = tick;savedRevision=opts.revision?.()??tick; last = { ok: true, at: now() }; }, get last() { return last; } };
 }
 
@@ -47,7 +47,5 @@ export function installAutosave(doc: Listen, win: Listen & { setInterval(fn: () 
 
 export function describeAutosave(r: AutosaveResult, fmt: (at: number) => string = at => new Date(at).toLocaleTimeString()): string {
   if (r.ok) return `บันทึกอัตโนมัติแล้ว ${fmt(r.at)}`;
-  return r.quota
-    ? 'บันทึกอัตโนมัติไม่สำเร็จ: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) — เซฟหลักเดิมยังอยู่ แต่สำเนาอัตโนมัติอาจเปลี่ยนแล้ว ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์สำรองก่อน'
-    : `บันทึกอัตโนมัติไม่สำเร็จ: ${r.message} — เซฟเดิมยังอยู่`;
+  return `บันทึกอัตโนมัติไม่สำเร็จ: ${r.message} — การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์ กรุณาอย่าปิดหน้านี้และลองบันทึกอีกครั้ง`;
 }

@@ -17,6 +17,8 @@ test('production entry and save integration has no browser city writer or offlin
  assert.ok(gate.indexOf('await client.load()')<gate.indexOf('await client.create('));
  assert.ok(!gate.includes('client.archive('));
  assert.ok(!gate.includes('inventoryLegacyCities'));
+ assert.doesNotMatch(gate,/migrationIssues|save-storage|storage\?:unknown/);
+ assert.doesNotMatch(main,/city-migration-warning|serverEntry\.migrationIssues/);
  assert.ok(!readFileSync(new URL('../src/city-save-auth.ts',import.meta.url),'utf8').includes('citymanager.save.'));
  assert.ok(!readFileSync(new URL('../src/city-save-auth.ts',import.meta.url),'utf8').includes('/v1/auth/guest'));
 });

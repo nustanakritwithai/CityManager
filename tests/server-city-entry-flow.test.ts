@@ -14,7 +14,7 @@ function fixture(options:{activeRaw?:string|null;conflict?:boolean;deleted?:bool
  Object.defineProperty(globalThis,'document',{configurable:true,value:{body,createElement:()=>new Element()}});
  Object.defineProperty(globalThis,'window',{configurable:true,value:{confirm:()=>{throw Error('unexpected local candidate choice');},innerWidth:360,screen:{width:360},navigator:{maxTouchPoints:1},matchMedia:()=>({matches:true,addEventListener(){},removeEventListener(){}}),addEventListener(){},removeEventListener(){},visualViewport:null}});
  const city=createCity(61025),raw=serializeParkSession(city,createParkRuntime(city));
- const calls:string[]=[],reads:string[]=[];let activeRaw=options.activeRaw===undefined?raw:options.activeRaw;
+ const calls:string[]=[];let activeRaw=options.activeRaw===undefined?raw:options.activeRaw;
  let deletedHead:any=options.deleted?{deleted:true,owner,cityId:'22222222-2222-4222-8222-222222222222',revision:5,archiveHash:'a'.repeat(64)}:null;
  const client:any={pending:false,conflict:options.conflict??false,
  load:async()=>{calls.push('load');return deletedHead??(activeRaw===null?null:{raw:activeRaw});},
@@ -23,15 +23,16 @@ function fixture(options:{activeRaw?:string|null;conflict?:boolean;deleted?:bool
  retry:async()=>{calls.push('retry');client.pending=false;activeRaw=raw;return {raw};},
  discardConflictedAttempt:()=>{calls.push('discard');client.conflict=false;client.pending=false;}};
  const auth:any={connect:async()=>owner,prepare:async()=>{},request:async()=>{}};
- const storage:any={get length(){throw Error('obsolete city inventory forbidden');},key:()=>{throw Error('obsolete city inventory forbidden');},getItem:(key:string)=>{reads.push(key);if(key!=='citymanager.market.v10')throw Error('obsolete city bytes forbidden');return null;}};
- const promise=requireServerCityEntry(()=>{throw Error('browser fallback forbidden');},undefined,{auth,storage,createClient:()=>client});
+ const protectedBytes=new Map([['citymanager.save.v7','original city bytes'],['citymanager.backup.latest','original backup bytes']]),storageTouches:string[]=[];
+ for(const key of ['localStorage','sessionStorage','indexedDB'])for(const host of [globalThis,window])Object.defineProperty(host,key,{configurable:true,get(){storageTouches.push(key);throw Error('browser storage access forbidden');}});
+ const promise=requireServerCityEntry(undefined,{auth,createClient:()=>client});
  const overlay=body.children[1],card=overlay.children[0],button=card.children[2],status=card.children[3];
- return {promise,overlay,game,button,status,calls,reads,raw,client,setActive:(value:string)=>{activeRaw=value;deletedHead=null;}};
+ return {promise,overlay,game,button,status,calls,raw,client,protectedBytes,storageTouches,setActive:(value:string)=>{activeRaw=value;deletedHead=null;}};
 }
 async function ready(){await Promise.resolve();await Promise.resolve();}
-function cleanup(){for(const key of ['HTMLElement','document','window'])delete (globalThis as any)[key];}
+function cleanup(){for(const key of ['HTMLElement','document','window','localStorage','sessionStorage','indexedDB'])delete (globalThis as any)[key];}
 test('semantic invalid server city keeps game inert and permits retry',async()=>{const f=fixture({activeRaw:'{}'});try{await ready();await f.button.onclick!();assert.equal(f.overlay.removed,false);assert.equal(f.game.inert,true);assert.match(f.status.textContent,/ยังเข้าเมืองไม่ได้/);f.setActive(f.raw);await f.button.onclick!();assert.equal((await f.promise).raw,f.raw);assert.equal(f.game.inert,false);}finally{cleanup();}});
-test('server city opens without reading browser storage, archiving or being blocked by obsolete local city data',async()=>{const f=fixture();try{await ready();await f.button.onclick!();const result=await f.promise;assert.equal(result.raw,f.raw);assert.deepEqual(result.migrationIssues,[]);assert.deepEqual(f.calls,['load']);assert.deepEqual(f.reads,[],'No Guest pin or city is read from the browser');}finally{cleanup();}});
+test('server city opens without reading browser storage, archiving or being blocked by obsolete local city data',async()=>{const f=fixture();try{await ready();await f.button.onclick!();const result=await f.promise;assert.equal(result.raw,f.raw);assert.deepEqual(f.calls,['load']);assert.deepEqual(f.storageTouches,[]);assert.deepEqual([...f.protectedBytes],[['citymanager.save.v7','original city bytes'],['citymanager.backup.latest','original backup bytes']]);}finally{cleanup();}});
 test('missing server head never imports browser city and requires a second explicit fresh creation click',async()=>{const f=fixture({activeRaw:null});try{await ready();await f.button.onclick!();assert.equal(f.overlay.removed,false);assert.deepEqual(f.calls,['load']);assert.equal(f.button.textContent,'เริ่มเมืองใหม่');await f.button.onclick!();const result=await f.promise;assert.equal(JSON.parse(result.raw).market.guestId,owner);assert.deepEqual(f.calls,['load','load','create','load']);}finally{cleanup();}});
 test('server load failure does not create or use a browser fallback',async()=>{const f=fixture({activeRaw:null});try{await ready();f.client.load=async()=>{throw Error('unavailable');};await f.button.onclick!();assert.equal(f.overlay.removed,false);assert.ok(!f.calls.includes('create'));assert.match(f.status.textContent,/unavailable/);}finally{cleanup();}});
 test('rejected create intent resolves only by reading authoritative server state',async()=>{const f=fixture({conflict:true});try{await ready();await f.button.onclick!();assert.equal((await f.promise).raw,f.raw);assert.deepEqual(f.calls,['discard','load']);}finally{cleanup();}});

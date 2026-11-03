@@ -65,3 +65,23 @@ test('expanded city survives isolated server ACK, CAS and reload without changin
  const loaded=await h.service.read(owner);assert.equal(loaded.raw,expandedRaw);
  const restored=deserializeParkSession(loaded.raw);assert.deepEqual(restored.city.cells,active.city.cells);assert.deepEqual(restored.city.resources,active.city.resources);
 });
+
+
+test('autosave reports an uncertain ACK and retries the exact pending server attempt before saving',async()=>{
+ const {createAutosave,describeAutosave}=await import('../src/autosave.ts');
+ const h=harness();await h.client.load();await h.client.create(raw,meta);h.lose();
+ const current=raw+' ';const results=[];
+ const auto=createAutosave({tick:()=>2,revision:()=>current,onResult:r=>results.push(r),save:async()=>{
+  if(h.client.pending)await h.client.retry();
+  await h.client.save(current,{...meta,tick:2});
+ }});
+ const failed=await auto.run();assert.equal(failed?.ok,false);assert.equal(h.client.confirmed?.revision,1);
+ assert.equal((await h.service.read(owner)).revision,2);assert.equal((await h.service.read(owner)).raw,current);
+ assert.match(describeAutosave(failed!),/ยังไม่ยืนยันบนเซิร์ฟเวอร์/);assert.equal(h.client.pending,true);
+ const saved=await auto.run();assert.equal(saved?.ok,true);assert.equal(h.client.confirmed?.revision,3);
+ assert.equal((await h.service.read(owner)).raw,current);assert.equal(h.client.pending,false);
+ const posts=h.calls.filter(c=>c.init?.method==='POST').slice(1);assert.deepEqual(posts[0],posts[1]);
+ assert.notEqual(posts[1].init.headers['Idempotency-Key'],posts[2].init.headers['Idempotency-Key']);
+ assert.equal(JSON.parse(posts[2].init.body).expectedRevision,2);assert.equal(results.length,2);
+ assert.equal(await auto.run(),null);
+});
