@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createCity, deserialize, serialize, step } from '../src/sim.ts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { treasuryBudget } from '../src/overview-data.ts';
 import { createTaxiSession } from '../src/taxi/session.ts';
 import { taxiSiteReason } from '../src/taxi/placement.ts';
@@ -34,7 +35,7 @@ test('old saves without a taxi section load with no depots', () => {
 test('visual taxi trips never enter city accounting across speeds, pause and reload', { timeout: 60_000 }, () => {
   // Production must not connect cosmetic traffic counters to the money ledger.
   const scan = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? scan(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : []);
-  for (const file of scan(new URL('../src', import.meta.url).pathname))
+  for (const file of scan(fileURLToPath(new URL('../src', import.meta.url))))
     assert.doesNotMatch(readFileSync(file, 'utf8'), /createTaxiFareAccumulator|collectTaxiFares|taxiFares\.observe/, file);
   const roads = new Set([25, 26, 27, 28]);
   const sample: TrafficGameSample = { map: { cells: Array.from({ length: 576 }, (_, i) => ({ road: roads.has(i) })) }, demand: [{ from: 25, to: 28, rate: 1, taxiRate: 1 } as TrafficGameSample['demand'][number]] };
