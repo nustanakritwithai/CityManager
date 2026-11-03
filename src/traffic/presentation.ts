@@ -12,6 +12,13 @@ const distance=(a:CitizenVehiclePose,b:CitizenVehiclePose)=>Math.hypot(a.x-b.x,a
 function footprint(p:PresentationObstacle){const hx=Math.abs(p.headingX),hz=Math.abs(p.headingZ);return {minX:p.x-(hx*p.length+hz*p.width)/2,maxX:p.x+(hx*p.length+hz*p.width)/2,minZ:p.z-(hz*p.length+hx*p.width)/2,maxZ:p.z+(hz*p.length+hx*p.width)/2};}
 const body=(p:CitizenVehiclePose)=>footprint({...p,length:TRAFFIC_SPACING.lengths.sedan,width:.3});
 const intersects=(a:ReturnType<typeof body>,b:ReturnType<typeof body>,gap:number=TRAFFIC_SPACING.standstillGap)=>a.minX-gap<b.maxX-EPS&&b.minX-gap<a.maxX-EPS&&a.minZ-gap<b.maxZ-EPS&&b.minZ-gap<a.maxZ-EPS;
+/** Conservative broad phase followed by the original exact child-box checks. */
+export function presentationUnionIntersectsBox(union:Box,boxes:readonly Box[],other:Box):boolean {
+ return intersects(union,other)&&boxes.some(box=>intersects(box,other));
+}
+export function presentationUnionsIntersect(a:Box,as:readonly Box[],b:Box,bs:readonly Box[]):boolean {
+ return intersects(a,b)&&as.some(x=>bs.some(y=>intersects(x,y)));
+}
 /** Conservative continuous body sweep, including intermediate rotation (not just endpoint boxes). */
 export function presentationSweep(from:PresentationObstacle,to:PresentationObstacle):Box {
  const a=footprint(from),b=footprint(to),box={minX:Math.min(a.minX,b.minX),maxX:Math.max(a.maxX,b.maxX),minZ:Math.min(a.minZ,b.minZ),maxZ:Math.max(a.maxZ,b.maxZ)};
@@ -275,12 +282,15 @@ export class TrafficPresentation {
   // Safe births are deferred rather than flashed for a frame and subsequently hidden.
   if(this.selectedOwner){this.birthDeferredFrames+=this.pending.length?1:0;this.drainFrames++;this.drainSeconds+=Math.min(dt,.25);this.maxDrainSeconds=Math.max(this.maxDrainSeconds,this.drainSeconds);}
   for(const p of this.pending){if(this.entries.size>=this.limit||this.selectedOwner)break;
+   // Do not introduce a new leader ahead of an already committed corridor.
+   // Reject before constructing turn geometry when the answer is already known.
+   if(corners.some(c=>c.active&&this.entries.has(c.owner)&&incomingPredecessor(this.entries.get(c.owner)!.pose,p,c.gate)))continue;
    const candidate:Entry={pose:{...p},last:{...p},path:[],speed:0,distance:0,motion:'waiting',retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()};
    const birthPlans=nodePlans(candidate);
-   // Do not introduce a new leader ahead of an already committed corridor.
-   if(corners.some(c=>c.active&&this.entries.has(c.owner)&&incomingPredecessor(this.entries.get(c.owner)!.pose,p,c.gate)))continue;
    if(birthPlans.some(n=>[...this.entries.values()].some(e=>incomingPredecessor(p,e.pose,n.gate))))continue;
-   if(birthPlans.some(n=>[...footprints.values()].some(b=>n.boxes.some(a=>intersects(a,b)))||obstacles.some(b=>n.boxes.some(a=>intersects(a,b)))||corners.some(c=>c.active&&n.boxes.some(a=>c.boxes.some(b=>intersects(a,b))))||reservations.some(r=>r.boxes.some(b=>n.boxes.some(a=>intersects(a,b))))))continue;
+   // Each union box encloses all of its exact boxes. A miss cannot intersect
+   // any child box; a hit still runs the original exact collision checks.
+   if(birthPlans.some(n=>[...footprints.values()].some(b=>presentationUnionIntersectsBox(n.box,n.boxes,b))||obstacles.some(b=>presentationUnionIntersectsBox(n.box,n.boxes,b))||corners.some(c=>c.active&&presentationUnionsIntersect(n.box,n.boxes,c.box,c.boxes))||reservations.some(r=>r.boxes.some(b=>presentationUnionIntersectsBox(n.box,n.boxes,b)))))continue;
    if(clear(p,p.vehicleId)){this.entries.set(p.vehicleId,{pose:{...p},last:{...p},path:[],speed:Math.max(0,Math.min(2,p.speed??0)),distance:0,motion:'waiting',retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()});footprints.set(p.vehicleId,body(p));this.admitted++;
     for(const plan of birthPlans){const r:CornerReservation={owner:p.vehicleId,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:plan.boxes.some(b=>intersects(body(p),b)),active:true};this.corners.set(`${p.vehicleId}@${plan.key}`,r);corners.push(r);}
    }}
