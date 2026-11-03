@@ -11,7 +11,9 @@ import {trafficNetworkRules} from './traffic-server-entry-fixture.mjs';
 import {createCity as oldCity4,step as oldStep4,serialize as oldSerialize4} from '../src/legacy-v4.ts';
 import {createCity as oldCity5,step as oldStep5,serialize as oldSerialize5} from '../src/legacy-v5.ts';
 import {deserializeParkSession,expandValidatedParkSession,serializeParkSession} from '../src/park-runtime.ts';
-import {adoptSavedEducation} from '../src/sim.ts';
+import {adoptSavedEducation,createCity,step,serialize,deserialize,zoneCell,access,isRetail,firmCapacity,ownerFinance} from '../src/sim.ts';
+import {commercialPresentation} from '../src/commercial-visuals.ts';
+import {buildingCardData} from '../src/building-card-data.ts';
 
 // This is the real scenario preflight only: --preflight exits before the fixture
 // server, output directories or browser process are created.
@@ -64,4 +66,17 @@ test('agriculture fence denies provider and foreign origins while allowing the s
  const decision=url=>rules.find(rule=>new URLPattern(rule.urlPattern).test(url))?.block;
  for(const path of ['/api/city-advisor/report','/CityManager/api/city-advisor/report','/x/y/api/city-advisor/report?q=1','/api/city-advisor/other','/CityManager/api/city-advisor/other','/x/y/api/city-advisor/other?q=1','/chat/completions','/CityManager/chat/completions','/x/y/chat/completions?q=1'])assert.equal(decision(origin+path),true,path);
  assert.equal(decision(origin+'/citymanager-api/v1/city-save'),false);assert.equal(decision(origin+'/CityManager/assets/game.js'),false);assert.equal(decision('https://example.com/chat/completions'),true);
+});
+
+
+test('fresh commercial replay selects the real level-one building and its current exact tier label',async()=>{
+ const start=createCity(61025),candidates=start.cells.map((cell,index)=>({cell,index})).filter(({cell,index})=>!cell.road&&cell.building===null&&access(start,index)).sort((a,b)=>Math.abs(a.index%24-6)+Math.abs(Math.floor(a.index/24)-12)-Math.abs(b.index%24-6)-Math.abs(Math.floor(b.index/24)-12));
+ const farmCell=candidates.find(({index})=>start.resources.fertility[index]>=50).index,marketCell=candidates.find(({index})=>index!==farmCell).index;
+ const city=deserialize(serialize(start));assert.equal(zoneCell(city,farmCell,'F').ok,true);assert.equal(zoneCell(city,marketCell,'C').ok,true);let firm;
+ for(let day=0;day<180;day++){const before=deserialize(serialize(city));step(city);deserialize(serialize(city));firm=city.firms.find(f=>isRetail(f)&&!before.firms.some(old=>old.id===f.id));if(firm)break;}
+ assert.ok(firm,'A genuine fresh commercial firm is created');const building=city.buildings.find(b=>b.id===firm.building);assert.ok(building);
+ assert.equal(firm.zone,'C');assert.equal(building.zone,'C');assert.equal(building.level,1);assert.equal(firmCapacity(building),1);assert.ok(firm.owner);assert.equal(ownerFinance(city,firm.id)?.ownerHouseholdId,firm.owner.householdId);assert.ok(city.ledger.some(e=>e.from==='household:'+firm.owner.householdId&&e.to===firm.wallet&&e.amount===60000));
+ const card=buildingCardData(city,building.id);assert.ok(card);assert.equal(card.identity.buildingId,building.id);assert.equal(card.identity.firmId,firm.id);assert.equal(commercialPresentation(building.level).label,'ตลาด · ระดับ 1/9');
+ const panel=await readFile(new URL('../src/context-panels.ts',import.meta.url),'utf8'),runner=await readFile(new URL('./agriculture-smoke.mjs',import.meta.url),'utf8');
+ assert.match(panel,/labels\[data.kind\] = commercialPresentation\(selectedBuilding.level\)\.label/);assert.ok(runner.includes("'ตลาด · ระดับ 1/9'"));assert.ok(runner.includes('await inspectBusiness(commercialAfter,newCommercial)'));assert.ok(runner.includes("await metrics({'owner-household':newCommercial.owner.householdId})"));assert.ok(runner.includes('await oneTick(commercialAfter)'));
 });
