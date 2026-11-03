@@ -810,12 +810,13 @@ async function boot() {
   let saveSuccessLabel='บันทึกบนเซิร์ฟเวอร์แล้ว';
   const saveFeedback=installSaveFeedback(saveBadge,()=>$<HTMLButtonElement>('#save').click(),()=>saveSuccessLabel);
   const enqueueSave=createSaveAttemptQueue();
-  const trackedSave=(explicit=false):Promise<{revision:string;current:boolean}>=>{
+  const trackedSave=(explicit=false,onStart?:()=>void):Promise<{revision:string;current:boolean}>=>{
     const captured=city,generation=cityGeneration;
     // Start popup synchronously from the Save gesture if the memory token expired.
     const authenticated=explicit?serverEntry.auth.connect():Promise.resolve();
     void authenticated.catch(()=>{});
     return enqueueSave(async()=>{
+      if(captured===city&&generation===cityGeneration)onStart?.();
       if(managingSave)throw Error('กำลังจัดการเซฟ หยุดการบันทึกอัตโนมัติไว้');
       if(captured!==city||generation!==cityGeneration)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');
       const attempt=saveFeedback.begin();saveBusy=true;
@@ -830,7 +831,7 @@ async function boot() {
       finally{saveBusy=false;}
     });
   };
-  const autosave=createAutosave({needsRetry:()=>serverSave.pending,canSave:()=>!managingSave&&!resolvingConflict&&!serverSave.conflict&&!serverSave.deleted,save:()=>trackedSave(),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
+  const autosave=createAutosave({needsRetry:()=>serverSave.pending,canSave:()=>!managingSave&&!resolvingConflict&&!serverSave.conflict&&!serverSave.deleted,save:onStart=>trackedSave(false,onStart),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
   autosave.adoptLoaded();installAutosave(document,window,autosave,()=>document.hidden);
   window.addEventListener('beforeunload',event=>{if(shouldWarnBeforeUnload({running:autosave.running,failed:autosave.last?.ok===false,busy:saveBusy,pending:serverSave.pending,conflict:serverSave.conflict,raw:serializeParkSession(city,parkRuntime,city.market),confirmedRaw:serverSave.confirmed?.raw})){event.preventDefault();event.returnValue='';}});
   $('#save').addEventListener('click',async()=>{

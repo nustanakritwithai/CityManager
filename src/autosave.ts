@@ -10,7 +10,7 @@ export function isQuotaError(error: unknown): boolean {
 }
 
 export interface AutosaveOptions {
-  save: () => void | {revision:string|number} | Promise<void | {revision:string|number}>;
+  save: (onStart:()=>void) => void | {revision:string|number} | Promise<void | {revision:string|number}>;
   tick: () => number;
   revision?:()=>string;
   onResult: (result: AutosaveResult) => void;
@@ -28,8 +28,10 @@ export function createAutosave(opts: AutosaveOptions) {
     const tick = opts.tick();
     let revision:string|number;try{revision=opts.revision?.()??tick;}catch(error){return finish({ok:false,at:now(),quota:isQuotaError(error),message:error instanceof Error?error.message:String(error)});}
     if (!force && !opts.needsRetry?.() && savedRevision === revision && (last?.ok || adopted)) return null;
-    running = true;adopted=false;const generation=savedGeneration,complete=(result:AutosaveResult)=>generation===savedGeneration?finish(result):result;
-    try { const saved=await opts.save();if(generation===savedGeneration){savedTick = tick; savedRevision=saved?.revision??revision; adopted=false;}return complete({ ok: true, at: now() }); }
+    running = true;adopted=false;let generation=savedGeneration;const complete=(result:AutosaveResult)=>generation===savedGeneration?finish(result):result;
+    // Serialized transports call onStart when queued work really starts. A manual
+    // acknowledgement ahead of it must not suppress this later work's result.
+    try { const saved=await opts.save(()=>{generation=savedGeneration;});if(generation===savedGeneration){savedTick = tick; savedRevision=saved?.revision??revision; adopted=false;}return complete({ ok: true, at: now() }); }
     catch (error) { return complete({ ok: false, at: now(), quota: isQuotaError(error), message: error instanceof Error ? error.message : String(error) }); }
     finally { running = false; }
   }

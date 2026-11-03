@@ -198,8 +198,10 @@ try {
   assert.deepEqual(fixtureServer.active,activeBeforeFailure,'Failed autosave preserves the authoritative head');await fixtureServer.core.assertNoCityWrites(evaluate);
   await shot('14-autosave-failure-after');
   await restoreServerWrites();await evaluate('window.__uxIntervals.forEach(fn=>fn())');
-  {const start=Date.now();while(Date.now()-start<30000&&fixtureServer.active.revision<faultContext.before.revision+2)await sleep(80);assert.ok(fixtureServer.active.revision>=faultContext.before.revision+2);}
-  await until("document.querySelector('#save-failure-banner').hidden");fixtureServer.assertRetry(faultContext.index,faultContext.before);faultContext=null;await fixtureServer.core.assertNoCityWrites(evaluate);checks.push('periodic autosave failure and exact server-acknowledged retry');
+  // Unlike explicit Retry, a paused automatic retry verifies the exact replayed
+  // head with a fresh GET rather than uploading the same session a second time.
+  await until("document.querySelector('#save-failure-banner').hidden",30000);await fixtureServer.core.settle();
+  fixtureServer.assertVerifiedRetry(faultContext.index,faultContext.before,await evaluate('cityManager.sessionSnapshot()'));faultContext=null;await fixtureServer.core.assertNoCityWrites(evaluate);checks.push('periodic autosave failure, exact server-acknowledged retry and fresh read verification without a duplicate write');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Emulation.setTouchEmulationEnabled', { enabled: false });
   mobile = false;

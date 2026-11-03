@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAutosave, installAutosave, isQuotaError, describeAutosave } from '../src/autosave.ts';
+import { createSaveAttemptQueue } from '../src/save-feedback.ts';
 // Transport-neutral stub: test autosave scheduling without browser persistence.
 class Store { value: string | null = null; limit = Infinity; read() { return this.value; } async write(v: string) { if (v.length > this.limit) { const e = new Error('exceeded the quota'); e.name = 'QuotaExceededError'; throw e; } this.value = v; } }
 const tickOver = () => new Promise(r => setImmediate(r));
@@ -63,4 +64,32 @@ test('queued work is synchronously visible and failed verification remains retry
  let fail=true;const auto=createAutosave({tick:()=>1,revision:()=>'same',onResult:()=>{},save:async()=>{if(fail)throw Error('verification-failed');return {revision:'same'};}});
  auto.adoptLoaded();const pending=auto.run(true);assert.equal(auto.running,true);await pending;assert.equal(auto.running,false);assert.equal(auto.last?.ok,false);
  fail=false;assert.equal((await auto.run())?.ok,true,'Failed force verification is not skipped merely because bytes are unchanged');
+});
+
+test('automatic verification queued behind manual ACK reports its own failure and retries',async()=>{
+ const queue=createSaveAttemptQueue();let release!:()=>void,attempts=0;
+ const held=new Promise<void>(r=>release=r);
+ const auto=createAutosave({tick:()=>1,revision:()=>'same',onResult:()=>{},save:onStart=>queue(async()=>{onStart();attempts++;if(attempts===1)throw Error('verification-failed');return {revision:'same'};})});
+ auto.adoptLoaded();
+ const manual=queue(async()=>{await held;auto.markSaved(1,'same');});
+ const checking=auto.run(true);release();await manual;assert.equal((await checking)?.ok,false);
+ assert.equal(auto.last?.ok,false,'Manual success before the verification cannot hide its failure');
+ assert.equal((await auto.run())?.ok,true,'A later timer retries unchanged bytes');assert.equal(attempts,2);
+});
+
+test('reset after queued work starts still prevents stale completion from overwriting loaded state',async()=>{
+ let started!:()=>void,release!:()=>void;const inFlight=new Promise<void>(r=>started=r),held=new Promise<void>(r=>release=r);let current='old';
+ const auto=createAutosave({tick:()=>1,revision:()=>current,onResult:()=>{},save:async onStart=>{onStart();started();await held;throw Error('old verification failed');}});
+ const checking=auto.run(true);await inFlight;current='new';auto.adoptLoaded();release();assert.equal((await checking)?.ok,false);
+ assert.equal(auto.last,null);assert.equal(await auto.run(),null,'Loaded state remains adopted');
+});
+
+test('replacing city before queued work starts does not attach stale failure to the new city',async()=>{
+ const queue=createSaveAttemptQueue();let release!:()=>void,cityGeneration=1,current='old',notified=0;const held=new Promise<void>(r=>release=r);
+ const blocker=queue(async()=>{await held;});
+ const auto=createAutosave({tick:()=>1,revision:()=>current,onResult:()=>{notified++;},save:onStart=>{
+  const captured=cityGeneration;return queue(async()=>{if(captured===cityGeneration)onStart();if(captured!==cityGeneration)throw Error('city changed');return {revision:current};});
+ }});
+ const checking=auto.run(true);cityGeneration++;current='new';auto.adoptLoaded();release();await blocker;assert.equal((await checking)?.ok,false);
+ assert.equal(notified,0);assert.equal(auto.last,null);assert.equal(await auto.run(),null);
 });

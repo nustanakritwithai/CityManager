@@ -9,8 +9,10 @@ test('entry keeps no browser-held Guest pin: identity comes only from the server
 test('production entry and save integration has no browser city writer or offline escape',()=>{
  const main=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
  for(const forbidden of ['autoWipeOnce','restoreStartupCity','saveLocalCitySession','saveRecoveryCopy','saveActiveLocalSave','saveStoredCity','saveGuard','rememberResumeChoice','deleteOldSaves'])assert.ok(!main.includes(forbidden),forbidden);
- assert.match(main,/await serverSave.save\(raw/);
- assert.match(main,/await serverSave.retry\(\)/);
+ assert.match(main,/await persistServerCity\(serverSave/);
+ const lifecycle=readFileSync(new URL('../src/server-save-lifecycle.ts',import.meta.url),'utf8');
+ assert.match(lifecycle,/await client.retry\(\)/);
+ assert.match(lifecycle,/explicit\?client.save\(snapshot.raw,snapshot.metadata\):client.saveOrVerify\(snapshot.raw,snapshot.metadata\)/);
  assert.match(main,/market-disabled-server-save-required/);
  const gate=readFileSync(new URL('../src/server-city-entry.ts',import.meta.url),'utf8');
  assert.ok(!gate.includes('เล่นออฟไลน์'));

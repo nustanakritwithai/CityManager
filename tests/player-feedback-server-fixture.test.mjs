@@ -1,10 +1,42 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {readFileSync} from 'node:fs';
 import {createFeedbackServerFixture} from './player-feedback-server-fixture.mjs';
+import {ServerCitySaveClient} from '../src/server-city-save.ts';
+import {persistServerCity} from '../src/server-save-lifecycle.ts';
+import {PANEL_OWNER} from './panel-server-entry-fixture.mjs';
 import {trafficHttpHandler} from './traffic-server-entry-fixture.mjs';import {EventEmitter} from 'node:events';
 import {adoptSavedEducation,buildCampus,campusSiteReason,createCity,deserialize,step} from '../src/sim.ts';import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
 import {createCity as oldCity,step as oldStep,serialize as oldSerialize} from '../src/legacy-v4.ts';
 const origin='http://127.0.0.1:4176',url=origin+'/CityManager/',city=createCity(42),raw=serializeParkSession(city,createParkRuntime(city));
 const request=(body,key)=>({requestId:randomUUID(),request:{url:origin+'/citymanager-api/v1/city-save',method:'POST',headers:{'Idempotency-Key':key},postData:JSON.stringify(body)}});
+const readRequest=()=>({requestId:randomUUID(),request:{url:origin+'/citymanager-api/v1/city-save',method:'GET',headers:{}}});
+test('unchanged automatic UX retry replays the exact intent then freshly verifies the same head without a duplicate write',async()=>{
+ const f=createFeedbackServerFixture(url),before=await f.core.seed(raw),calls=[];
+ const client=new ServerCitySaveClient(async(path,init={})=>{
+  calls.push(structuredClone(init));let response,status;
+  await f.intercept({requestId:randomUUID(),request:{url:origin+'/citymanager-api'+path,method:init.method??'GET',headers:init.headers??{},postData:init.body}},async(_method,payload)=>{status=payload.responseCode;response=JSON.parse(Buffer.from(payload.body,'base64').toString());});
+  if(status!==200)throw Object.assign(Error(response.error),{status});return response;
+ },PANEL_OWNER);
+ await client.load();const currentRaw=raw+' ',capture=()=>({raw:currentRaw,metadata:before.metadata});
+ f.setFault(true);await assert.rejects(persistServerCity(client,capture),error=>error.status===503);assert.deepEqual(f.active,before);assert.equal(client.pending,true);
+ f.setFault(false);const result=await persistServerCity(client,capture);
+ assert.equal(result.operation,'verified');assert.equal(client.pending,false);assert.equal(f.assertVerifiedRetry(0,before,currentRaw).finalRevision,before.revision+1);
+ assert.deepEqual(calls.map(c=>c.method??'GET'),['GET','POST','POST','GET']);assert.deepEqual(calls[1],calls[2]);assert.equal(calls.at(-1).cache,'no-store');
+});
+
+test('automatic retry evidence rejects missing, stale, failed or mismatched reads, new writes and changed current bytes',async()=>{
+ const f=createFeedbackServerFixture(url),before=await f.core.seed(raw),key=randomUUID(),command={action:'save',cityId:before.cityId,expectedRevision:before.revision,raw,metadata:before.metadata},send=async()=>{};
+ f.setFault(true);await f.intercept(request(command,key),send);f.setFault(false);
+ await f.intercept(readRequest(),send);await f.intercept(request(command,key),send);
+ assert.throws(()=>f.assertVerifiedRetry(0,before,raw),/fresh successful server read/,'A read before the replay ACK cannot prove recovery');
+ await f.intercept(readRequest(),send);assert.equal(f.assertVerifiedRetry(0,before,raw).finalRevision,before.revision+1);
+ const verified=f.reads.at(-1),response=verified.response;verified.status=503;
+ assert.throws(()=>f.assertVerifiedRetry(0,before,raw),/fresh successful server read/);verified.status=200;
+ verified.response={...response,revision:response.revision+1};assert.throws(()=>f.assertVerifiedRetry(0,before,raw),/exact retried ACK/);verified.response=response;
+ assert.throws(()=>f.assertVerifiedRetry(0,before,raw+' '),/unchanged current session/);
+ await f.intercept(request({...command,expectedRevision:f.active.revision},randomUUID()),send);
+ assert.throws(()=>f.assertVerifiedRetry(0,before,raw),/must not create a distinct write/);
+});
+
 test('synthetic UX outage preserves server head and requires exact retry plus a new fenced save',async()=>{
  const f=createFeedbackServerFixture(url),before=await f.core.seed(raw),key=randomUUID(),command={action:'save',cityId:before.cityId,expectedRevision:before.revision,raw,metadata:before.metadata};let delivered=[];
  const send=async(method,payload)=>{delivered.push(payload.responseCode);};f.setFault(true);await f.intercept(request(command,key),send);assert.deepEqual(f.active,before);assert.equal(delivered.at(-1),503);
@@ -20,6 +52,7 @@ test('UX browser suite uses server entry, native retry and retains the full layo
  const source=readFileSync(new URL('./player-feedback-smoke.mjs',import.meta.url),'utf8'),reading=readFileSync(new URL('./player-feedback-reading.mjs',import.meta.url),'utf8');
  assert.match(source,/fixtureServer\.core\.seed\(fixture\)/);assert.match(source,/fixtureServer\.core\.enter\(/);assert.match(source,/installTrafficNetworkFence\(/);
  assert.match(source,/button\('#save-failure-retry'\)/);assert.match(source,/fixtureServer\.assertRetry\(/);assert.match(source,/fixtureServer\.core\.assertNoCityWrites\(evaluate\)/);
+ assert.match(source,/fixtureServer\.assertVerifiedRetry\(faultContext\.index,faultContext\.before,await evaluate\('cityManager\.sessionSnapshot\(\)'\)\)/);
  assert.doesNotMatch(source,/localStorage\.setItem\(['"]citymanager\.save/);assert.doesNotMatch(source,/button\('#save-failure-export'\)/);
  assert.match(source,/for \(const warning of \[false,true\]\)/);assert.match(reading,/for \(const viewport of views\)/);assert.match(reading,/for \(const name of pages\)/);assert.match(reading,/#save-failure-retry/);
  const css=readFileSync(new URL('../src/player-feedback.css',import.meta.url),'utf8');
