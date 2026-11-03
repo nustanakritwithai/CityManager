@@ -1,6 +1,7 @@
 import { assertKeycapContract } from './visual-final-toolbar.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { railPathsOnly, railOnly, commercialPathsOnly, commercialOnly, sessionLifetimePathsOnly, sessionLifetimeOnly, historyPathsOnly, historyOnly, classicToolbarPathsOnly, classicToolbarOnly, hudPolishPathsOnly, hudPolishOnly, conflictFeedbackPathsOnly, serverSaveConflictFeedbackOnly, managementPathsOnly, serverSaveManagementOnly, towerOnly, visualKind, toolbarMainOnly, matchesReviewedSources, serverSaveEntryOnly, changedPaths, visualSources } from '../scripts/ci-visual-scope.mjs';
@@ -312,8 +313,27 @@ test('map declutter needs its reviewed diff and rejects simulation, save and ser
 
 test('land expansion route binds exact source, base tree, gates and rejects extra paths',async()=>{
  const m=await import('../scripts/ci-visual-scope.mjs');
- const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8').replace(/\r\n/g,'\n');
- const e={landBaseTree:'fc445721a62fa2765fb2a6faad4c7a0975e5e13f',landSelector:read('scripts/ci-visual-scope.mjs'),landContent:JSON.stringify(m.landSources.map(p=>[p,read(p)])),landGates:JSON.stringify(m.landGates.map(p=>[p,read(p)]))};
+ // Read the exact reviewed merge, not the changing checkout. Production's own
+ // pinned hashes independently verify the selector, source and gate content.
+ // CI fetches complete history; an unavailable commit must fail, not silently skip.
+ const reviewedCommit='31389949527c8d0b3eee4bfec5326d62df839721';
+ const historical=p=>{
+  try{return execFileSync('git',['show',`${reviewedCommit}:${p}`],{cwd:new URL('../',import.meta.url),encoding:'utf8',maxBuffer:16*1024*1024}).replace(/\r\n/g,'\n');}
+  catch(error){throw new Error(`Cannot read reviewed land-expansion fixture ${reviewedCommit}:${p}; Git and the reviewed commit must be available`,{cause:error});}
+ };
+ const e={landBaseTree:'fc445721a62fa2765fb2a6faad4c7a0975e5e13f',landSelector:historical('scripts/ci-visual-scope.mjs'),landContent:JSON.stringify(m.landSources.map(p=>[p,historical(p)])),landGates:JSON.stringify(m.landGates.map(p=>[p,historical(p)]))};
  assert.equal(m.landExpansionOnly(m.landPaths,e),true);assert.equal(m.visualKind(m.landPaths,e),'land-expansion');
- assert.equal(m.landExpansionOnly([...m.landPaths,'src/pages-auth.ts'],e),false);assert.equal(m.landExpansionOnly(m.landPaths,{...e,landContent:e.landContent+' '}),false);assert.equal(m.landExpansionOnly(m.landPaths,{...e,landBaseTree:'0'.repeat(40)}),false);assert.equal(m.landExpansionOnly(m.landPaths,{...e,landSelector:e.landSelector+' '}),false);
+ for(const [paths,evidence] of [
+  [[...m.landPaths,'src/pages-auth.ts'],e],
+  [m.landPaths,{...e,landContent:e.landContent+' '}],
+  [m.landPaths,{...e,landBaseTree:'0'.repeat(40)}],
+  [m.landPaths,{...e,landSelector:e.landSelector+' '}],
+  [m.landPaths,{...e,landGates:e.landGates+' '}],
+  [m.landPaths.slice(1),e],
+  [[...m.landPaths,m.landPaths[0]],e],
+ ]){assert.equal(m.landExpansionOnly(paths,evidence),false);assert.equal(m.visualKind(paths,evidence),'full');}
+ const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8').replace(/\r\n/g,'\n');
+ const current={landBaseTree:e.landBaseTree,landSelector:read('scripts/ci-visual-scope.mjs'),landContent:JSON.stringify(m.landSources.map(p=>[p,read(p)])),landGates:JSON.stringify(m.landGates.map(p=>[p,read(p)]))};
+ assert.equal(m.visualKind(m.landPaths,current),'full','current source and gates are not the reviewed snapshot');
+ assert.equal(m.visualKind(['src/main.ts','src/sim.ts','src/traffic/game.ts','src/main-goal-network.ts'],e),'full','the current change set never takes the land-only route');
 });
