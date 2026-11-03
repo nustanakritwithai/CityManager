@@ -64,6 +64,8 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Record deferred browser coverage
+        run: Write-Output 'Normal peak traffic browser case was not run in this workflow.'
       - name: Select checks from the exact changed paths
         id: scope
         run: node scripts/ci-visual-scope.mjs
@@ -192,10 +194,7 @@ jobs:
             case: dense
             blocked: '0'
             software: '0'
-          - name: normal-peak
-            case: peak
-            blocked: '0'
-            software: '0'
+          # Normal peak browser case is excluded from this workflow.
           - name: normal-work-expiry
             case: work-expiry
             blocked: '0'

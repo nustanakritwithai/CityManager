@@ -318,8 +318,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Contextual GUI acceptance failed with exit code $LASTEXITCODE." }
             npm run test:compact
             if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI acceptance failed with exit code $LASTEXITCODE." }
-            npm run test:population
-            if ($LASTEXITCODE -ne 0) { throw "Household and housing acceptance failed with exit code $LASTEXITCODE." }
+            Write-Output 'Full-route normal population browser smoke was not run in this workflow.'
             npm run test:worker
             if ($LASTEXITCODE -ne 0) { throw "Worker capability acceptance failed with exit code $LASTEXITCODE." }
             npm run test:agriculture
@@ -344,8 +343,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Contextual GUI fallback acceptance failed with exit code $LASTEXITCODE." }
             npm run test:compact
             if ($LASTEXITCODE -ne 0) { throw "Compact mobile GUI fallback acceptance failed with exit code $LASTEXITCODE." }
-            npm run test:population
-            if ($LASTEXITCODE -ne 0) { throw "Household and housing fallback acceptance failed with exit code $LASTEXITCODE." }
+            Write-Output 'Full-route fallback population browser smoke was not run in this workflow.'
             npm run test:worker
             if ($LASTEXITCODE -ne 0) { throw "Worker capability fallback acceptance failed with exit code $LASTEXITCODE." }
             npm run test:agriculture

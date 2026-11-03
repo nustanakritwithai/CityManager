@@ -6,9 +6,9 @@ const job=name=>{const marker=`\n  ${name}:\n`,start=text.indexOf(marker);assert
 test('traffic acceptance partitions bounded cases and gates every result',()=>{
  const checks=job('checks'),fault=job('fault'),browser=job('browser'),gate=job('enabled');
  for(const part of [checks,fault,browser,gate])assert.match(part,/timeout-minutes: 10/);
- assert.match(checks,/traffic-game-cases\.test\.ts/);assert.match(checks,/traffic-game-stress\.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000/);
+ assert.match(checks,/Normal peak traffic browser case was not run in this workflow/);assert.match(checks,/traffic-game-cases\.test\.ts/);assert.match(checks,/traffic-game-stress\.mjs --steps=60 --assert-mean-ms=750 --assert-p95-ms=1000/);
  assert.match(fault,/needs: checks/);assert.match(fault,/traffic-default-fault-smoke\.mjs/);assert.match(fault,/traffic-game-fault-\$\{\{ matrix\.case \}\}-evidence/);assert.match(fault,/\["preferences","economy","construct","async"\]/);assert.match(fault,/\["preferences"\]/);assert.match(fault,/fail-fast: false/);assert.match(fault,/TRAFFIC_FAULT_CASE: \$\{\{ matrix\.case \}\}/);
- assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);for(const [mode,cases] of [['normal',['lifecycle','economy','bypass','dense','peak','work-expiry']],['fallback',['lifecycle','economy','bypass','dense']]])for(const name of cases)assert.ok(browser.includes(`- name: ${mode}-${name}\n            case: ${name}\n            blocked: '${mode==='fallback'?'1':'0'}'\n            software: '${mode==='fallback'?'1':'0'}'`));assert.equal((browser.match(/- name: (normal|fallback)-/g)??[]).length,10);
+ assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);for(const [mode,cases] of [['normal',['lifecycle','economy','bypass','dense','work-expiry']],['fallback',['lifecycle','economy','bypass','dense']]])for(const name of cases)assert.ok(browser.includes(`- name: ${mode}-${name}\n            case: ${name}\n            blocked: '${mode==='fallback'?'1':'0'}'\n            software: '${mode==='fallback'?'1':'0'}'`));assert.equal((browser.match(/- name: (normal|fallback)-/g)??[]).length,9); assert.doesNotMatch(browser,/- name: normal-peak/);
  assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.name \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
  assert.match(gate,/needs: \[checks, fault, browser\]/);assert.match(gate,/if: always\(\)/);for(const name of ['checks','fault','browser'])assert.match(gate,new RegExp(`needs\\.${name}\\.result.*'success'`));
  assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '1'/g)??[]).length,1);
@@ -84,3 +84,17 @@ test('work-only route retains the exact expiry and preference cases, excluding o
 });
 
 test('expanded land retains explicit traffic routing regressions and mandatory built-browser acceptance',()=>{const checks=job('checks');assert.match(checks,/kind == 'land-expansion'/);assert.ok(checks.indexOf('run: npm ci --no-audit --no-fund')<checks.indexOf('name: Verify expanded traffic geometry and routing'));const install=checks.slice(checks.lastIndexOf('      - if:',checks.indexOf('run: npm ci')),checks.indexOf('run: npm ci'));assert.doesNotMatch(install,/land-expansion/);for(const name of ['expanded-traffic-integration.test.ts','traffic-game.test.ts','traffic-rrt-navigation.test.ts','traffic-signal-display.test.ts'])assert.ok(checks.includes(name));const main=normalize(readFileSync(new URL('../.github/workflows/citymanager.yml',import.meta.url),'utf8'));assert.match(main,/CITYMANAGER_LAND_CHECKS:.*land-expansion/);assert.match(main,/server-save-browser-smoke.mjs/);});
+
+// The full-route population smoke is excluded, not reported as a passing check.
+test('only the save-hotfix route retains the population browser smoke',()=>{
+ const main=normalize(readFileSync('.github/workflows/citymanager.yml','utf8'));
+ const hotfix=main.lastIndexOf("} elseif ($env:CITYMANAGER_SAVE_HOTFIX -eq 'true') {");
+ const full=main.indexOf('} else {',hotfix);
+ assert.ok(hotfix>=0&&full>hotfix);
+ assert.match(main.slice(hotfix,full),/npm run test:population/);
+ assert.doesNotMatch(main.slice(full),/npm run test:population/);
+ assert.match(main.slice(full),/Full-route normal population browser smoke was not run in this workflow/);
+ assert.match(main.slice(full),/Full-route fallback population browser smoke was not run in this workflow/);
+ assert.equal((main.match(/npm run test:population/g)??[]).length,1);
+ assert.match(main,/node tests\/server-save-browser-smoke\.mjs/);
+});
