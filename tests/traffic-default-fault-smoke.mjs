@@ -90,9 +90,14 @@ async function literalReload(){
  const oldBoot=await evaluate('window.__boot');
  // Capture the comparison head only after outstanding interception work drains,
  // immediately before the fixture captures its navigation baseline.
- await settleInterceptions();await server.settle();const before=server.active;server.allowNavigation();await send('Page.reload');await server.enter({send,evaluate,button,until});
+ await settleInterceptions();await server.settle();const before=server.active;
+ assert.equal(await evaluate('window.cityManager.parks().paused'),true);
+ const outgoing=await evaluate('window.cityManager.sessionSnapshot()');
+ assert.equal(serialize(loadedTrafficSession(outgoing).city),cityRaw,'Captured reload session preserves the economic city');
+ server.allowNavigation(outgoing);await send('Page.reload');await server.enter({send,evaluate,button,until});
  assert.notEqual(await evaluate('window.__boot'),oldBoot);
- assert.equal(server.active.raw,before.raw,'Literal reload preserves exact bytes, no reseed');assert.equal(server.active.cityId,before.cityId);assert.equal(server.navigationEvidence.at(-1).beforeRevision,before.revision,'Any lifecycle revision is verified by the exact POST/ACK chain');
+ const navigation=server.navigationEvidence.at(-1);
+ assert.equal(server.active.raw,navigation.lifecycleSaves ? outgoing : before.raw,'Reload retains the exact acknowledged baseline or captured outgoing bytes, no reseed');assert.equal(server.active.cityId,before.cityId);assert.equal(navigation.beforeRevision,before.revision,'Any lifecycle revision is verified by the exact POST/ACK chain');
  assert.equal(await evaluate('window.cityManager.snapshot()'),cityRaw);await preserved();
 }
 /** Creation can happen at START_HOUR before noon is applied: cars begin parked.

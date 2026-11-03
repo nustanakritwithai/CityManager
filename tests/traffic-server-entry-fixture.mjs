@@ -19,10 +19,10 @@ export const assertTrafficAutosaveCity = (raw, restoredCity) => {
 };
 import {serialize} from '../src/sim.ts';
 import {createPanelServerFixture,assertNoCityWrites as noPanelCityWrites} from './panel-server-entry-fixture.mjs';
-export function assertNavigationSaveChain(before,after,writes,priorWrites=[]){
+export function assertNavigationSaveChain(before,after,writes,priorWrites=[],outgoingRaw=before.raw){
  assert.ok(before&&after&&!before.deleted&&!after.deleted,'Live heads required across navigation');
- assert.equal(after.raw,before.raw,'Navigation cannot replace acknowledged bytes');assert.equal(after.cityId,before.cityId);
- let revision=before.revision, lifecycleSaves=0;
+ assert.equal(after.cityId,before.cityId);
+ let revision=before.revision, lifecycleSaves=0, latestRaw=before.raw;
  const acknowledged=new Map();
  for(const event of priorWrites){
   if(event.requestKey&&event.status===200&&event.command?.cityId===before.cityId&&event.response?.cityId===before.cityId&&event.response?.revision<=before.revision){
@@ -34,8 +34,7 @@ export function assertNavigationSaveChain(before,after,writes,priorWrites=[]){
  for(const event of writes){
   assert.equal(event.status,200,'Lifecycle save must receive a successful service ACK');
   assert.equal(event.command.action,'save');assert.equal(event.command.cityId,before.cityId);
-  assert.equal(event.command.raw,before.raw,'Lifecycle flush retains exact acknowledged session');
-  assert.equal(event.response.raw,before.raw);assert.equal(event.response.cityId,before.cityId);
+  assert.equal(event.response.cityId,before.cityId);
   const previous=event.requestKey&&acknowledged.get(event.requestKey);
   if(previous){
    assert.deepEqual(event.command,previous.command,'Repeated key must have the exact same command');
@@ -44,10 +43,13 @@ export function assertNavigationSaveChain(before,after,writes,priorWrites=[]){
    continue;
   }
   assert.equal(event.command.expectedRevision,revision,'Lifecycle writes form an exact revision chain');
+  assert.equal(event.command.raw,outgoingRaw,'Lifecycle flush must match the captured outgoing session');
+  assert.equal(event.response.raw,outgoingRaw,'Service ACK must retain the captured outgoing bytes');
   assert.equal(event.response.revision,++revision,'Each real ACK advances exactly once');
-  lifecycleSaves++;if(event.requestKey)acknowledged.set(event.requestKey,event);
+  latestRaw=outgoingRaw;lifecycleSaves++;if(event.requestKey)acknowledged.set(event.requestKey,event);
  }
  assert.equal(after.revision,revision,'Every revision increase must have an observed matching service ACK');
+ assert.equal(after.raw,latestRaw,'Final durable bytes must match the last verified ACK');
  return {beforeRevision:before.revision,afterRevision:revision,lifecycleSaves};
 }
 export function createTrafficServerFixture(pageUrl){
@@ -86,7 +88,13 @@ export function createTrafficServerFixture(pageUrl){
   assert.equal(ack.metadata.population,restored.city.households.reduce((n,h)=>n+h.members,0));
   return ack;
  };
- const permitBeforeUnload=()=>{navigationAllowed=true;navigation={head:fixture.active,cursor:writes.length};};
+ const permitBeforeUnload=(outgoingRaw)=>{
+  if(outgoingRaw!==undefined){
+   const current=deserializeParkSession(outgoingRaw);
+   assertTrafficAutosaveCity(fixture.active.raw,current.city);
+  }
+  navigationAllowed=true;navigation={head:fixture.active,cursor:writes.length,outgoingRaw};
+ };
  const dialog=async(params,send)=>{
   assert.ok(navigationAllowed&&params.type==='beforeunload','Only explicit traffic fixture navigation may accept beforeunload');
   navigationAllowed=false;await send('Page.handleJavaScriptDialog',{accept:true});
@@ -113,7 +121,7 @@ export function createTrafficServerFixture(pageUrl){
    await wait("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
    await settle();const readStart=reads.length;await button('.guest-entry-card button');
    await wait('!!window.cityManager&&window.cityManager.visuals().ready');
-   await settle();try{navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor),writes.slice(0,baseline.cursor)));}
+   await settle();try{navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor),writes.slice(0,baseline.cursor),baseline.outgoingRaw??head.raw));}
    catch(error){
     // Preserve the original failing assertion and attach only synthetic request
     // metadata. In particular, never log raw city bytes or the request key.

@@ -33,6 +33,31 @@ test('only explicitly authorized beforeunload is handled, once; entry needs an A
  await f.install(send);assert.equal(sent.at(-1)[0],'Page.addScriptToEvaluateOnNewDocument');assert.ok(sent.at(-1)[1].source.includes('__panelCityWrites'));
 });
 
+test('reload lifecycle accepts only the captured economically identical migrated session',async()=>{
+ const f=createTrafficServerFixture(url),before=await f.seed(raw),live=loadedTrafficSession(raw);
+ const outgoing=serializeParkSession(live.city,live.runtime);assert.notEqual(outgoing,before.raw,'legacy seed expands to the real live session');
+ const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
+ f.allowNavigation(outgoing);
+ const payload={action:'save',cityId:before.cityId,expectedRevision:before.revision,raw:outgoing,metadata:before.metadata};
+ await f.enter({evaluate,button:async()=>{await f.intercept(request('POST',payload),async()=>{});await f.intercept(request('GET'),async()=>{});}});
+ assert.equal(f.active.raw,outgoing);assert.equal(f.active.revision,2);
+ assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+ const changed=structuredClone(live.city);step(changed);
+ assert.throws(()=>f.allowNavigation(serializeParkSession(changed,createParkRuntime(changed))),/Autosave changes runtime, not economic City/);
+ const g=createTrafficServerFixture(url),other=await g.seed(raw);g.allowNavigation(outgoing);
+ await assert.rejects(g.enter({evaluate,button:async()=>{
+  await g.intercept(request('POST',{...payload,cityId:other.cityId,raw:outgoing+' '}),async()=>{});
+  await g.intercept(request('GET'),async()=>{});
+ }}),/Lifecycle flush must match the captured outgoing session/);
+});
+
+test('no lifecycle save retains exact original acknowledged bytes',async()=>{
+ const f=createTrafficServerFixture(url),before=await f.seed(raw),live=loadedTrafficSession(raw);
+ f.allowNavigation(serializeParkSession(live.city,live.runtime));
+ await f.enter({button:async()=>{await f.intercept(request('GET'),async()=>{});},evaluate:async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true});
+ assert.deepEqual(f.active,before);assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:1,afterRevision:1,lifecycleSaves:0});
+});
+
 test('read-only navigation predicates retry only known destroyed-context errors',async()=>{
  const f=createTrafficServerFixture(url);await f.seed(raw);let calls=0;
  await f.enter({button:async()=>{await f.intercept(request('GET'),async()=>{});},evaluate:async e=>{if(++calls===1)throw Object.assign(Error('navigation'),{cdpError:{code:-32000,message:'Inspected target navigated or closed'}});return e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;}});
@@ -193,4 +218,14 @@ test('autosave compares the exact expanded economic city and rejects any economi
  assert.deepEqual(loadedTrafficSession(serializeParkSession(changed,createParkRuntime(changed))).city,changed,'economic change is a valid, replayable city');
  assert.throws(()=>assertTrafficAutosaveCity(raw,changed),/Autosave changes runtime, not economic City/);
  assert.notEqual(serializeParkSession(live.city,live.runtime),saved,'runtime really changed');
+});
+
+test('lifecycle reload waits through fixture entry before checking the new boot marker',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const source=readFileSync(new URL('./traffic-game-smoke.mjs',import.meta.url),'utf8');
+ const start=source.indexOf("setStage('save and server reload')"),end=source.indexOf("setStage('toggle and visit-only preference')",start);
+ const segment=source.slice(start,end),reload=segment.indexOf("await send('Page.reload'");
+ const entry=segment.indexOf('await serverFixture.enter(',reload),check=segment.indexOf("assert.notEqual(await evaluate('window.__trafficGameBoot'),oldBoot",entry);
+ assert.ok(start>=0&&reload>=0&&entry>reload&&check>entry);
+ assert.equal(segment.slice(reload,entry).includes('await until('),false,'no unguarded boot poll during navigation');
 });
