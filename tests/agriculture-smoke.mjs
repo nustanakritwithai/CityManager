@@ -1,3 +1,4 @@
+import { commercialPresentation } from '../src/commercial-visuals.ts';
 import { browserSnapshotState } from './browser-snapshot.ts';
 // Agriculture-first real-browser acceptance. Root runs suites sequentially.
 // No provider calls; all fixtures are actual replayed or strictly migrated city state.
@@ -18,6 +19,13 @@ import { panelProviderDenials, isPanelProviderRequest } from './panel-network-de
 const upstreamUrl=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
 const output=resolve('.test-output'),shots=resolve(process.env.CITYMANAGER_SCREENSHOT_DIR||'docs/agriculture-preview');
 const blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1',skills=['general','manufacturing','retail'];
+// Rendering follows building zone and level, not the firm's trading role.
+function agricultureVisualExpectations(city){
+ const commercialTiers={market:0,building:0,mall:0};
+ for(const b of city.buildings)if(b.zone==='C')commercialTiers[commercialPresentation(b.level).tier]++;
+ return {farmPlots:city.buildings.filter(b=>b.zone==='F').length,marketStalls:commercialTiers.market,commercialTiers};
+}
+
 const hash=raw=>createHash('sha256').update(raw).digest('hex');
 const oldRaw=await readFile(new URL('./fixtures/legacy-v3-day180.json',import.meta.url),'utf8'),old=JSON.parse(oldRaw);
 assert.equal(hash(oldRaw),'59518ff5b7d2a7c7de52ef8cb8362ed387f91df67ffc09934c93e97f3a556693');
@@ -141,7 +149,8 @@ for(const [label,before,after] of [['v3',imported,stopped],['chain',chainBefore,
 {const c=live(disconnectedAfter);assert.equal(buildRoad(c,cutCell,cutCell).ok,true);assert.equal(serialize(c),serialize(live(restored)),'expanded road reconnect parity');}
 const fixture={seed:61025,legacyV3Hash:hash(oldRaw),chainTick:chainAfter.tick,ownerActionTick:ownerScene.tick,chainHash:hash(serialize(chainAfter)),seen,milestones,growth:growthFixture};
 if(process.argv.includes('--preflight')){
- console.log(JSON.stringify(fixture,null,2));process.exit(0);}
+ const boundary={buildings:[1,2,3,4,6,7,9].map(level=>({zone:'C',level})).concat([{zone:'F',level:1}])};
+ console.log(JSON.stringify({...fixture,visualExpected:agricultureVisualExpectations(live(chainAfter)),visualBoundary:agricultureVisualExpectations(boundary)},null,2));process.exit(0);}
 
 const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [], external=[],providerRequests=[];
 let networkProbe;const observeProbe=url=>(networkProbe={url,active:false,requestId:null,failed:null});
@@ -224,7 +233,7 @@ try {
   checks.push('Seeded fertility is stable through server save/reload and actual F/C tools pick and zone flat connected parcels without changing resources, accounts or construction-grid semantics');
 
   await load(chainBefore);await oneTick(chainAfter);await inspectBusiness(chainAfter,farm);await screenshot('agriculture-farm.png');await inspectBusiness(chainAfter,market);await screenshot('agriculture-market.png');await inspectBusiness(chainAfter,factory);await screenshot('agriculture-factory.png');
-  const rendered=await evaluate('window.cityManager.agriculture()');assert.equal(rendered.farmPlots,chainAfter.buildings.filter(b=>b.zone==='F').length);assert.equal(rendered.marketStalls,chainAfter.firms.filter(isMarket).length);assert.deepEqual(await state(),live(chainAfter));
+  const rendered=await evaluate('window.cityManager.agriculture()'),expectedVisuals=agricultureVisualExpectations(live(chainAfter));assert.equal(rendered.farmPlots,expectedVisuals.farmPlots);assert.equal(rendered.marketStalls,expectedVisuals.marketStalls);assert.deepEqual(rendered.commercialTiers,expectedVisuals.commercialTiers);assert.deepEqual(await state(),live(chainAfter));
   await load(directBefore);await oneTick(direct);assert.ok(directSales.length);await load(chainAfter);
   checks.push('Separate authentic legacy-market replay includes direct crop sales and actual payments');
   checks.push('One actual seeded daily tick exactly matches F→T→I crop recipe→C→household; farm/market/factory real stock, book cost, fertility, workers and rendered facilities match state');

@@ -22,6 +22,10 @@ test('full agriculture scenario preflight retains native chain and direct legacy
  assert.equal(r.status,0,r.stderr);const report=JSON.parse(r.stdout);
  for(const flag of ['harvest','farmToMarket','marketToFactory','process','factoryToShop','shopToHousehold','marketToHousehold'])assert.equal(report.seen[flag],true,flag);
  assert.equal(report.chainTick,30);assert.equal(report.ownerActionTick,35);assert.equal(report.growth.birthTick,390);
+ assert.equal(report.visualExpected.marketStalls,2);assert.notEqual(report.visualExpected.marketStalls,1);
+ assert.deepEqual(report.visualExpected.commercialTiers,{market:2,building:0,mall:0});
+ assert.equal(report.visualBoundary.farmPlots,1);assert.equal(report.visualBoundary.marketStalls,3);
+ assert.deepEqual(report.visualBoundary.commercialTiers,{market:3,building:2,mall:2});
 });
 
 test('v3, v4 and v5 real service heads retain original bytes before expanded-session ACK and reload',async()=>{
@@ -79,4 +83,21 @@ test('fresh commercial replay selects the real level-one building and its curren
  const card=buildingCardData(city,building.id);assert.ok(card);assert.equal(card.identity.buildingId,building.id);assert.equal(card.identity.firmId,firm.id);assert.equal(commercialPresentation(building.level).label,'ตลาด · ระดับ 1/9');
  const panel=await readFile(new URL('../src/context-panels.ts',import.meta.url),'utf8'),runner=await readFile(new URL('./agriculture-smoke.mjs',import.meta.url),'utf8');
  assert.match(panel,/labels\[data.kind\] = commercialPresentation\(selectedBuilding.level\)\.label/);assert.ok(runner.includes("'ตลาด · ระดับ 1/9'"));assert.ok(runner.includes('await inspectBusiness(commercialAfter,newCommercial)'));assert.ok(runner.includes("await metrics({'owner-household':newCommercial.owner.householdId})"));assert.ok(runner.includes('await oneTick(commercialAfter)'));
+});
+
+
+test('legacy chain counts rendered commercial tiers by building level, not firm role',async()=>{
+ const old=oldCity4(61025);for(let i=0;i<29;i++)oldStep4(old);
+ const city=deserialize(oldSerialize4(old));adoptSavedEducation(city);step(city);assert.equal(city.tick,30);
+ const rows=city.buildings.filter(b=>b.zone==='C').map(b=>({id:b.id,level:b.level,kind:city.firms.find(f=>f.building===b.id)?.commercialKind}));
+ assert.deepEqual(rows,[{id:11,level:1,kind:'market'},{id:15,level:2,kind:'retail'}]);
+ assert.equal(city.firms.filter(f=>f.commercialKind==='market').length,1);
+ assert.deepEqual([1,2,3,4,6,7,9].map(level=>commercialPresentation(level).tier),['market','market','market','building','building','mall','mall']);
+ const renderer=await readFile(new URL('../src/renderer.ts',import.meta.url),'utf8'),smoke=await readFile(new URL('./agriculture-smoke.mjs',import.meta.url),'utf8');
+ assert.ok(renderer.includes("if (b.zone === 'C') { this.commercial(tile, b.level, commercialLit); continue; }"));
+ assert.ok(renderer.includes("new Entity(`Commercial ${plan.tier}`)"));assert.ok(renderer.includes("findByName('Commercial market')"));
+ assert.ok(smoke.includes('assert.equal(rendered.farmPlots,expectedVisuals.farmPlots)'));
+ assert.ok(smoke.includes('assert.equal(rendered.marketStalls,expectedVisuals.marketStalls)'));
+ assert.ok(smoke.includes('assert.deepEqual(rendered.commercialTiers,expectedVisuals.commercialTiers)'));
+ assert.ok(smoke.includes('assert.deepEqual(await state(),live(chainAfter))'));
 });
