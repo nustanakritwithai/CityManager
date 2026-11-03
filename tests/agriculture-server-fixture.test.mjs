@@ -60,7 +60,7 @@ test('bounded per-document model audit waits for late console delivery and rejec
 
 test('browser harness requires loopback service, acknowledged saves and full scenario checks',async()=>{
  const s=await readFile(new URL('./agriculture-smoke.mjs',import.meta.url),'utf8');
- assert.ok(s.indexOf("assert.equal(occupied, false")<s.indexOf('await startPersistenceFixture(upstreamUrl)'));
+ assert.ok(s.indexOf("assert.equal(occupied, false")<s.indexOf('await startPersistenceFixture(upstreamUrl,{traceSaves:true})'));
  for(const text of ['modelAudit.verify(modelBefore)','modelAudit.assertComplete()','await storage.settle()','expectedRevision=before.revision+(failOnce?2:1)','assert.equal(events.length,failOnce?2:1)','assert.equal(e.command.expectedRevision,before.revision+i)','assert.equal(e.response.revision,before.revision+i+1)','assert.equal(events[0].requestKey,rejected.requestKey)','assert.deepEqual(events[0].command,rejected.command)','assert.notEqual(events[0].requestKey,events[1].requestKey)','installTrafficNetworkFence','additionalBlocked:panelProviderDenials(allowed.origin)','assert.deepEqual(providerRequests,[])','isPanelProviderRequest(u)','await loadRaw(oldRaw)','await loadRaw(legacyV4Raw)','await loadRaw(oldGrowthRaw)','await oneTick(direct)','cropCash-cropCost-goodsPurchase+householdSales','await storage.assertNoCityWrites(evaluate)'])assert.ok(s.includes(text),text);
  assert.doesNotMatch(s,/localStorage\.setItem\(['"]citymanager\.save/);
 });

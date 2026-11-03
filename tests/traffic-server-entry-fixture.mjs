@@ -195,23 +195,23 @@ export function recordFixtureHttpFailure(error,{req,res,errors,failureDetails,ki
  const codes=['ECONNRESET','ETIMEDOUT','ABORT_ERR','UND_ERR_SOCKET'];
  const errorCode=codes.includes(error?.code)?error.code:null,causeCode=codes.includes(error?.cause?.code)?error.cause.code:null;
  errors.push(`Fixture transport failure: ${errorName}${errorCode?` (${errorCode})`:''}`);
- failureDetails.push({kind,phase,method:['GET','HEAD','POST'].includes(req.method)?req.method:'OTHER',bodyBytes,bodyComplete,requestComplete:req.complete??null,requestAborted:req.aborted??null,responseHeadersSent:res.headersSent,responseFinished:res.writableFinished??null,responseDestroyed:res.destroyed??null,serviceStatus,errorName,errorCode,causeCode});
- if(failureDetails.length>32)failureDetails.shift();
+ const detail={kind,phase,method:['GET','HEAD','POST'].includes(req.method)?req.method:'OTHER',bodyBytes,bodyComplete,requestComplete:req.complete??null,requestAborted:req.aborted??null,responseHeadersSent:res.headersSent,responseFinished:res.writableFinished??null,responseDestroyed:res.destroyed??null,serviceStatus,errorName,errorCode,causeCode};failureDetails.push(detail);
+ if(failureDetails.length>32)failureDetails.shift();return detail;
 }
-export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,failureDetails=[],forward=fetch}){
+export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,failureDetails=[],forward=fetch,trace}){
  const base=new URL(upstream);assert.equal(base.hostname,'127.0.0.1');assert.equal(base.protocol,'http:');
- return async(req,res)=>{let kind='unvalidated',phase='validate',bodyBytes=0,bodyComplete=false,serviceStatus=null;try{
+ return async(req,res)=>{let kind='unvalidated',phase='validate',bodyBytes=0,bodyComplete=false,serviceStatus=null,traceId=null;try{
   assert.equal(req.headers.host,new URL(origin).host,'Only the exact isolated fixture host is served');
   const target=new URL(req.url,origin);assert.equal(target.origin,origin);assert.ok(req.url.startsWith('/')&&!req.url.startsWith('//'));
   if(target.pathname==='/__traffic_network_fence_page'){kind='fence';assert.equal(req.method,'GET');res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Isolated network fence</title>');return;}
   if(target.pathname.startsWith('/citymanager-api/')){
-   kind=target.pathname==='/citymanager-api/v1/city-save'?'city-save':'other-api';phase='read-body';
+   kind=target.pathname==='/citymanager-api/v1/city-save'?'city-save':'other-api';traceId=trace?.httpStart(req,res)??null;phase='read-body';
    let data='';for await(const chunk of req){data+=chunk;bodyBytes+=Buffer.byteLength(chunk);assert.ok(Buffer.byteLength(data)<=10*1024*1024,'Bounded fixture request');}
    bodyComplete=true;phase='service';
    const record={method:req.method,path:target.pathname,finished:false,closed:false};deliveries.push(record);
    res.once('finish',()=>{record.finished=true;});res.once('close',()=>{record.closed=true;});
    assert.equal(await fixture.intercept({requestId:'http-'+deliveries.length,request:{url:target.href,method:req.method,headers:req.headers,postData:data}},async(method,payload)=>{
-    assert.equal(method,'Fetch.fulfillRequest');record.status=payload.responseCode;serviceStatus=payload.responseCode;phase='respond';
+    assert.equal(method,'Fetch.fulfillRequest');record.status=payload.responseCode;serviceStatus=payload.responseCode;phase='respond';trace?.httpResponse(traceId,payload.responseCode,payload.body);
     res.writeHead(payload.responseCode,Object.fromEntries(payload.responseHeaders.map(h=>[h.name,h.value])));res.end(Buffer.from(payload.body,'base64'));
    }),true);
    return;
@@ -223,7 +223,7 @@ export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,fa
   const headers={};for(const [key,value] of response.headers)if(!['content-encoding','content-length','transfer-encoding','connection'].includes(key))headers[key]=value;
   phase='read-asset';res.writeHead(response.status,headers);res.end(req.method==='HEAD'?undefined:Buffer.from(await response.arrayBuffer()));
  }catch(error){
-  recordFixtureHttpFailure(error,{req,res,errors,failureDetails,kind,phase,bodyBytes,bodyComplete,serviceStatus});
+  const detail=recordFixtureHttpFailure(error,{req,res,errors,failureDetails,kind,phase,bodyBytes,bodyComplete,serviceStatus});trace?.httpFailure(traceId,detail);
   if(!res.headersSent&&!res.destroyed)res.writeHead(500,{'Content-Type':'text/plain'});if(!res.destroyed)res.end('Isolated fixture request failed');
  }};
 }
