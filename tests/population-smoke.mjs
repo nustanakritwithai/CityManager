@@ -115,6 +115,8 @@ async function button(selector) { if (await reachTrafficControl(evaluate, button
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,physicalWidth:r.width*k,physicalHeight:r.height*k,touch:navigator.maxTouchPoints>0,disabled:e.disabled}})()`);
   assert.ok(p.width && p.height && !p.disabled, `Visible enabled ${selector}`);
   if (p.touch) assert.ok(p.physicalWidth >= 43.5 && p.physicalHeight >= 43.5, `44px physical touch target ${selector}: ${JSON.stringify(p)}`);
+  if(selector==='.guest-entry-card button'&&p.touch){const readable=await evaluate(`(()=>{const e=document.querySelector('.guest-entry-card p'),r=document.querySelector('.guest-entry-card').getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{font:parseFloat(getComputedStyle(e).fontSize)*k,left:r.left,right:r.right,width:innerWidth}})()`);assert.ok(readable.font>=13.5&&readable.left>=0&&readable.right<=readable.width+1,`Readable contained guest entry ${JSON.stringify(readable)}`);}
+
   assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}: ${JSON.stringify(p)}`);
   await click(p.x, p.y);
 }

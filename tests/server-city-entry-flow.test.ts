@@ -5,14 +5,14 @@ import {createCity} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
 const owner='00000000-0000-4000-8000-000000000001';
 class Element {
- children:Element[]=[];inert=false;removed=false;hidden=false;disabled=false;value='';textContent='';className='';onclick:(()=>Promise<void>)|null=null;
+ style={setProperty:(_name:string,_value:string)=>{}};children:Element[]=[];inert=false;removed=false;hidden=false;disabled=false;value='';textContent='';className='';onclick:(()=>Promise<void>)|null=null;
  append(...nodes:Element[]){this.children.push(...nodes);}setAttribute(){}replaceChildren(){this.children=[];}remove(){this.removed=true;}
 }
 function fixture(options:{activeRaw?:string|null;conflict?:boolean;deleted?:boolean}={}){
  const body=new Element(),game=new Element();body.append(game);
  Object.defineProperty(globalThis,'HTMLElement',{configurable:true,value:Element});
  Object.defineProperty(globalThis,'document',{configurable:true,value:{body,createElement:()=>new Element()}});
- Object.defineProperty(globalThis,'window',{configurable:true,value:{confirm:()=>{throw Error('unexpected local candidate choice');}}});
+ Object.defineProperty(globalThis,'window',{configurable:true,value:{confirm:()=>{throw Error('unexpected local candidate choice');},innerWidth:360,screen:{width:360},navigator:{maxTouchPoints:1},matchMedia:()=>({matches:true,addEventListener(){},removeEventListener(){}}),addEventListener(){},removeEventListener(){},visualViewport:null}});
  const city=createCity(61025),raw=serializeParkSession(city,createParkRuntime(city));
  const calls:string[]=[],reads:string[]=[];let activeRaw=options.activeRaw===undefined?raw:options.activeRaw;
  let deletedHead:any=options.deleted?{deleted:true,owner,cityId:'22222222-2222-4222-8222-222222222222',revision:5,archiveHash:'a'.repeat(64)}:null;

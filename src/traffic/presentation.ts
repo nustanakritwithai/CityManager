@@ -200,6 +200,12 @@ export class TrafficPresentation {
  }
  reconcileBuses(ids:readonly string[]):void {const live=new Set(ids);for(const id of this.busPositions.keys())if(!live.has(id))this.busPositions.delete(id);for(const [id,r]of this.reservations)if(!live.has(r.owner))this.reservations.delete(id);if(this.selectedOwner&&!live.has(this.selectedOwner))this.selectedOwner=null;}
  clearBusReservations():void {this.reservations.clear();this.busPositions.clear();this.selectedOwner=null;this.selectedBusEpoch.clear();this.selectedPeerBodies=[];this.birthOpportunity=1;}
+ /** Detached ownership snapshot for one cancellation; never mutates reservations. */
+ cornerOwnersFor(id:string):{owner:string;active:boolean;entered:boolean}[] {
+  const result:{owner:string;active:boolean;entered:boolean}[]=[];
+  for(const r of this.corners.values())if(r.owner===id)result.push({owner:r.owner,active:r.active,entered:r.entered});
+  return result;
+ }
  /** Immediately remove explicitly cancelled car identities. Normal completed
   * trips still use the terminal path in update(); this path is reserved for a
   * an explicitly identified cancellation or its worker receipt.
