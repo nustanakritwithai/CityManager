@@ -92,3 +92,13 @@ test('road and building QA fences deny and report provider attempts without rela
  assert.match(issues,/Fetch\.failRequest/,'Legacy interception has an additional provider fail-closed check');
  assert.match(issues,/panelServer\.active\.revision,\s*ack\.revision/,'Read-only issue UI cannot create saves');
 });
+
+
+test('submenu browser verifies the complete assumptions and new cost/fare disclosures', () => {
+ const runner=readFileSync(new URL('./submenus-smoke.mjs',import.meta.url),'utf8');
+ const ui=readFileSync(new URL('../src/submenus.ts',import.meta.url),'utf8');
+ const setup=ui.slice(ui.indexOf('function setupRules()'),ui.indexOf('function updateRules()'));
+ const titles=[...setup.matchAll(/ruleCard\('[^']+',\s*(?:'([^']+)'|`([^`]+)`)/g)].map(m=>m[1]??m[2]);
+ assert.deepEqual(titles,['ค่าบริการพื้นฐานเมือง','แท็กซี่และค่าโดยสาร','วันและเงินเป็นจำนวนแน่นอน','น้ำและไฟตามถนนและกำลังผลิต','ทุนเริ่มต้นและทุนขยายมีต้นทาง','อาหารหนึ่งหน่วยต่อคนต่อวัน','พืชผลและวัตถุดิบมีต้นทาง','ลูกจ้างและผู้ทำกิจการเอง','แผนที่กริดราบ ${SIZE} × ${SIZE}','ต้นแบบแรกที่ตรวจสอบได้']);
+ for(const text of ['assert.equal(rules.length,10', 'assert.deepEqual(rules.slice(0,8)', 'rules[8].title', 'rules[9].title', 'rules.every(r=>r.icon&&r.body)', '50 บาทต่อประชากร', 'ไม่มีหนี้ค้าง', 'ยังไม่เก็บค่าโดยสารเข้าคลัง', 'ไม่หักยอดหรือแก้รายการค่าโดยสารเดิม']) assert.ok(runner.includes(text),text);
+});

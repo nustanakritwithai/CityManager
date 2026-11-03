@@ -6,7 +6,7 @@ import {SceneCitizenVehicles} from '../scene-citizen-vehicles.ts';
 import {taxiEnabled} from '../taxi/buildings.ts';
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
 import {captureTrafficGameInput,gameCarIsTaxi,WORK_TRIP_START_MINUTE,WORK_TRIP_END_MINUTE,type TrafficGameInput,type TrafficGameFrame} from './game.ts';
-import {gamePoses} from './game-poses.ts';
+import {gamePoseSets} from './game-poses.ts';
 import {createTrafficGameClient} from './game-worker-client.ts';
 import type {BusMovementGate,BusTurnIntent} from '../bus/engine.ts';
 import {BusGameBridge} from '../bus/game-bridge.ts';
@@ -61,7 +61,7 @@ export class TrafficLayer {
     for(const x of expired){if(frame.cars.some(c=>c.id===x.id))throw Error('Expired work car remains active');this.workCancel.delete(x.id);this.workExpiryAck=Math.max(this.workExpiryAck,x.sequence);}
     this.presenter.expire(expired.map(x=>`game:${x.id}`));
     const outstanding=new Set((frame.workTrips??[]).map(t=>t.id));for(const id of this.workRetired)if(!outstanding.has(id))this.workRetired.delete(id);
-    const cars=frame.cars.filter(c=>!this.workCancel.has(c.id));const signalHeads=this.signalDisplay.accept(frame.signals);this.signalScene?.sync(signalHeads);try{this.bus?.onFrame(frame.bus,this.minute);}catch(error){this.fail(error);}this.presenter.update(gamePoses(cars,frame.groups,24,2,128),gamePoses(cars,frame.groups),cars.filter(c=>!gameCarIsTaxi(c)).map(c=>`game:${c.id}`));this.renderDirty=true;
+    const cars=frame.cars.filter(c=>!this.workCancel.has(c.id));const signalHeads=this.signalDisplay.accept(frame.signals);this.signalScene?.sync(signalHeads);try{this.bus?.onFrame(frame.bus,this.minute);}catch(error){this.fail(error);}const poses=gamePoseSets(cars,frame.groups);this.presenter.update(poses.full,poses.preferred,cars.filter(c=>!gameCarIsTaxi(c)).map(c=>`game:${c.id}`));this.renderDirty=true;
     const ms=performance.now()-start;this.timing.projections++;this.timing.lastProjectionMs=ms;this.timing.maxProjectionMs=Math.max(this.timing.maxProjectionMs,ms);
    },onFailure:message=>this.fail(message)});
    this.submit(city,false,this.paused);
