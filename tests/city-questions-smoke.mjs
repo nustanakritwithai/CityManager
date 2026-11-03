@@ -1,3 +1,4 @@
+import { browserSnapshotState } from './browser-snapshot.ts';
 // Local game UI acceptance. Every report request is mocked; no provider calls or secrets.
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -51,7 +52,7 @@ async function until(expression) {
   throw Error(`Condition timeout ${expression}`);
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = async () => deserialize(await evaluate('window.cityManager.snapshot()'));
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
@@ -86,9 +87,10 @@ async function loadCity(city) {
 async function ask(intent, entityId) {
   await choose('#city-question-intent', intent);
   if (entityId !== undefined) await choose('#city-question-entity', String(entityId));
-  const before = await state(), calls = reportRequests.length;
+  const before = await state(), beforeRaw = await evaluate('window.cityManager.snapshot()'), calls = reportRequests.length;
   await button('#city-question-ask');
   assert.deepEqual(await state(), before, `Question ${intent} is read-only`);
+  assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw, 'Question preserves exact snapshot bytes');
   assert.equal(reportRequests.length, calls, `Question ${intent} sends no additional data`);
   assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'observed');
   assert.equal(await evaluate('Number(document.querySelector("#city-question-answer").dataset.snapshotTick)'), before.tick);
@@ -209,7 +211,7 @@ try {
   assert.equal(await evaluate(`document.elementFromPoint(${mapPoint.x},${mapPoint.y})?.id`), 'city-canvas', 'Native input genuinely hits the selected house parcel');
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: mapPoint.x, y: mapPoint.y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
   await paints();
-  const removed = await state(), expectedRemoved = structuredClone(mature);
+  const removed = await state(), removedRaw = await evaluate('window.cityManager.snapshot()'), expectedRemoved = structuredClone(mature);
   adoptSavedEducation(expectedRemoved);
   assert.equal(bulldoze(expectedRemoved, house.cell).ok, true);
   assert.deepEqual(removed, expectedRemoved, 'Only the actual native demolition changes the same city, without a reload or clock advance');
@@ -221,6 +223,7 @@ try {
   assert.notEqual(await evaluate('document.querySelector("#city-question-entity").value'), String(house.id), 'Selector no longer offers the removed selected entity');
   assert.equal(await evaluate('document.querySelectorAll("#city-question-answer [data-fact-id]").length'), 0, 'Old entity facts are removed from the DOM, including hidden disclosures');
   assert.deepEqual(await state(), removed, 'Opening questions after removal is read-only');
+  assert.equal(await evaluate('window.cityManager.snapshot()'), removedRaw, 'Opening questions preserves exact snapshot bytes');
   checks.push('Same-day native demolition clears a captured house answer and removed ID without city replacement; ordinary navigation preserves it');
   await button('[data-tool="select"]'); await loadCity(mature); await ask('business.detail', firm.id);
 
@@ -241,12 +244,13 @@ try {
   await expectFact('city.housing.population', displaced.households.reduce((n, item) => n + item.members, 0), 'คน');
   checks.push('Actual demolition-displaced households remain in population and use explicit home=null counts; loading resets old answers');
 
-  const immutable = await state();
+  const immutable = await state(), immutableRaw = await evaluate('window.cityManager.snapshot()');
   for (const viewport of [{ width: 360, height: 780, screenWidth: 360, screenHeight: 780 }, { width: 980, height: 2120, screenWidth: 390, screenHeight: 844 }]) {
     await measureViewport(viewport); await screenshot(viewport.width === 980 ? 's22-wide-city-facts.png' : 's22-city-facts.png');
     await button('[data-fact-id="city.housing.population"] .city-question-evidence>summary');
     await button('.city-question-scope>summary');
     assert.deepEqual(await state(), immutable, 'Mobile disclosures do not mutate city');
+    assert.equal(await evaluate('window.cityManager.snapshot()'), immutableRaw, 'Mobile disclosures preserve exact snapshot bytes');
   }
   checks.push('S22 normal and wide-request emulation retain readable essential text,44px controls, no horizontal overflow and read-only disclosures');
   await assertNoCityWrites(evaluate);

@@ -27,6 +27,11 @@ export function presentationSweep(from:PresentationObstacle,to:PresentationObsta
 export function presentationCarSweep(from:CitizenVehiclePose,to:CitizenVehiclePose):Box {
  const start=Math.atan2(from.headingZ,from.headingX);let end=Math.atan2(to.headingZ,to.headingX);while(end-start>Math.PI)end-=2*Math.PI;while(end-start< -Math.PI)end+=2*Math.PI;
  const lo=Math.min(start,end),hi=Math.max(start,end),length=TRAFFIC_SPACING.lengths.sedan,width=.3;
+ // Most frames move straight with unchanged heading. The support extrema over a
+ // zero-width angular interval are its single endpoint; avoid scanning critical
+ // angles and allocating arrays while preserving the exact endpoint arithmetic.
+ if(lo===hi){const c=Math.abs(Math.cos(lo)),s=Math.abs(Math.sin(lo)),hx=(length*c+width*s)/2,hz=(width*c+length*s)/2;
+  return {minX:Math.min(from.x,to.x)-hx,maxX:Math.max(from.x,to.x)+hx,minZ:Math.min(from.z,to.z)-hz,maxZ:Math.max(from.z,to.z)+hz};}
  const support=(x:number,z:number)=>{const values=[lo,hi],critical=Math.atan2(z,x);for(let k=-2;k<=2;k++)for(const a of [critical,-critical,Math.PI-critical,Math.PI+critical]){const angle=a+k*2*Math.PI;if(angle>=lo&&angle<=hi)values.push(angle);}return Math.max(...values.map(a=>(x*Math.abs(Math.cos(a))+z*Math.abs(Math.sin(a)))/2));};
  const hx=support(length,width),hz=support(width,length);
  return {minX:Math.min(from.x,to.x)-hx,maxX:Math.max(from.x,to.x)+hx,minZ:Math.min(from.z,to.z)-hz,maxZ:Math.max(from.z,to.z)+hz};

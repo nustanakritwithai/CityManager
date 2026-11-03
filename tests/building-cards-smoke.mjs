@@ -1,3 +1,4 @@
+import { browserSnapshotState } from './browser-snapshot.ts';
 // Focused visual-card acceptance. Root runs installed Edge sequentially; no provider requests.
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
@@ -43,7 +44,7 @@ async function send(method, params = {}) { const id = ++sequence; const promise 
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId,kind:document.querySelector("#entity-content").dataset.cardKind})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
@@ -86,6 +87,7 @@ function observedTrade(city, wallet, crops, direction) {
   return { quantity, cash, unit: cash % quantity === 0 ? cash / quantity : null, status: cash % quantity === 0 ? 'observed' : 'non-integer' };
 }
 async function card(city, kind, target) {
+  const beforeRaw = await evaluate('window.cityManager.snapshot()');
   await paints();
   const current = await route(); assert.equal(current.kind, kind); assert.equal(current.id, String(target.id));
   const dom = await evaluate(`(()=>{const h=document.querySelector('#entity-content');return{heroes:h.querySelectorAll('.bc-hero').length,icons:h.querySelectorAll('.bc-type-icon').length,label:h.querySelector('.bc-type-label')?.textContent.trim(),period:[...h.querySelectorAll('.bc-period')].map(e=>({fromTick:e.dataset.fromTick,toTick:e.dataset.toTick,inclusive:e.dataset.inclusive})),sections:[...h.querySelectorAll('.bc-section[data-card-section]')].map(e=>e.dataset.cardSection),stats:Object.fromEntries([...h.querySelectorAll('[data-card-metric]')].map(e=>[e.dataset.cardMetric,{value:e.dataset.value,status:e.dataset.status}])),contextKeys:[...h.querySelectorAll('[data-context-metric]')].map(e=>e.dataset.contextMetric)}})()`);
@@ -123,6 +125,7 @@ async function card(city, kind, target) {
     for (const key of ['inflow', 'outflow', 'net']) assert.equal(dom.stats[`cash-${key}`], undefined, 'No household wallet total is presented as house value');
   } else for (const key of ['inflow', 'outflow', 'net']) assert.equal(dom.stats[`cash-${key}`]?.value, String(expected[key]), `${kind} actual period cash-${key}`);
   assert.deepEqual(await state(), city, 'Read-only card selection leaves exact simulation and journals untouched');
+  assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw, 'Card selection preserves exact snapshot bytes');
 }
 async function screenshot(name) { await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const capture = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(capture.data, 'base64')); screenshots.push(name); }
 async function viewport(metric) { await close(); await send('Emulation.setDeviceMetricsOverride', { ...metric, deviceScaleFactor: 1 }); await send('Emulation.setTouchEmulationEnabled', { enabled: metric.mobile, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&screen.width===${metric.screenWidth}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`); await paints(); }

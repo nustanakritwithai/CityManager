@@ -73,9 +73,11 @@ test('farm zone accepts low fertility and invalid selection changes nothing', ()
 
 test('legacy v9 and v10 retain their market identity and load without advancing time', () => {
   const city = createCity(61025, { starter: false });
-  delete city.education; const { foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farmLevelStart, ...base } = city;
+  delete city.education; delete city.goalRulesVersion; delete city.commercialUnifiedStartTick; delete city.commercialUnifiedBaseline;
+  const { foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farmLevelStart, ...base } = city;
   const legacy = { ...base, version: 9, rulesVersion: 'chain-4' };
-  assert.deepEqual(deserialize(JSON.stringify(legacy)), city);
+  const migrated = deserialize(JSON.stringify(legacy));
+  assert.deepEqual(migrated, { ...city, commercialUnifiedStartTick: city.tick, commercialUnifiedBaseline: { moneyEntries: city.ledger.length, cropEntries: city.cropLedger.length, goodsEntries: city.goodsLedger.length } });
   const market = { version: 10 as const, rulesVersion: 'chain-5' as const, cityId: 'x', guestId: null, operations: [], escrow: [], receipts: {}, seq: '0' };
   const loaded = deserialize(JSON.stringify({ ...legacy, version: 10, rulesVersion: 'chain-5', market }));
   assert.deepEqual(loaded.market, market);

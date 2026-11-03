@@ -6,6 +6,14 @@ import { previewPlacement } from '../src/placement-preview.ts';
 import { createEducation, EDUCATION_COST } from '../src/education.ts';
 import { saveStoredCity } from '../src/save-storage.ts';
 
+function assertEducationEnvelope(raw: string) {
+  const save = JSON.parse(raw);
+  assert.equal(save.version, 25); assert.equal(save.rulesVersion, 'chain-20');
+  assert.equal(save.commercialBaseVersion, save.history ? 24 : 22);
+  if (save.history) assert.equal(save.historyBaseVersion, 22);
+  assert.equal(save.education?.rules, 'education-1');
+}
+
 const sum = (c: City) => Object.values(c.accounts).reduce((total, value) => total + value, 0);
 const skills = (c: City) => c.households.map(h => h.workerSkills.general + h.workerSkills.manufacturing + h.workerSkills.retail);
 
@@ -13,7 +21,7 @@ test('every city calculates education, and an older save gains no diplomas from 
   const city = createCity(61025);
   assert.equal(city.education?.origin, 'new-city');
   assert.equal(city.education?.residentBasic, 0);
-  assert.equal(JSON.parse(serialize(city)).version, 22);
+  assertEducationEnvelope(serialize(city));
   const older = createCity(61025);
   delete older.education;
   const migrated = deserialize(serialize(older));
@@ -23,6 +31,24 @@ test('every city calculates education, and an older save gains no diplomas from 
   assert.equal(migrated.education?.residentBasic, 0);
   assert.equal(migrated.education?.people.length, 0);
   assert.equal(skills(migrated).every((count, index) => count === migrated.households[index].workforce), true);
+});
+
+test('an authentic v22 education save retains its education, accounts and jobs when loaded', () => {
+  const raw = readFileSync(new URL('./fixtures/business-capacity-v22.json', import.meta.url), 'utf8');
+  const old = JSON.parse(raw), loaded = deserialize(raw);
+  assert.equal(old.version, 22); assert.equal(old.rulesVersion, 'chain-17');
+  for (const key of ['education', 'accounts', 'households', 'firms', 'employment', 'ownerLabor', 'buildings', 'market'] as const)
+    assert.deepEqual(loaded[key], old[key], key);
+  const through = loaded.history?.throughTick ?? -1;
+  assert.deepEqual(loaded.ledger, old.ledger.filter((e: { tick: number }) => e.tick > through));
+  const historic: Record<string, number> = {};
+  for (const e of old.ledger.filter((row: { tick: number }) => row.tick <= through)) {
+    historic[e.from] = (historic[e.from] ?? 0) - e.amount; historic[e.to] = (historic[e.to] ?? 0) + e.amount;
+  }
+  for (const key of new Set([...Object.keys(historic), ...Object.keys(loaded.history?.accounts ?? {})]))
+    assert.equal(loaded.history?.accounts[key] ?? 0, historic[key] ?? 0, `compacted ${key}`);
+  assert.deepEqual(deserialize(serialize(loaded)), loaded);
+  assert.equal(readFileSync(new URL('./fixtures/business-capacity-v22.json', import.meta.url), 'utf8'), raw);
 });
 
 test('an older save adopts only an empty education record and its original bytes stay unchanged', () => {
@@ -99,7 +125,7 @@ test('a new city can reach a higher credential without outside graduates, and re
   const savedBasic = city.education!.residentBasic;
   const reloaded = deserialize(serialize(city));
   assert.equal(reloaded.education?.residentBasic, savedBasic);
-  assert.equal(JSON.parse(serialize(reloaded)).version, 22);
+  assertEducationEnvelope(serialize(reloaded));
   assert.equal(reloaded.education?.completed.basic, city.education?.completed.basic);
 });
 
@@ -130,14 +156,15 @@ test('high housing stays put, the next upgrade waits for education, and demoliti
 test('education save backs up the previous city and does not touch guest identity', () => {
   const memory = new Map<string, string>();
   const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value); } };
-  const prior = createCity(61025);
-  delete prior.education;
-  const old = serialize(prior);
+  // Genuine older v16 session, rather than a v25 wrapper with education deleted.
+  const old = readFileSync(new URL('./fixtures/housing-v16-park-session.json', import.meta.url), 'utf8');
+  assert.equal(JSON.parse(old).version, 16);
+  assert.equal(deserialize(old).education, undefined, 'the genuine older save has no education state');
   storage.setItem('citymanager.save.v7', old);
   const next = createCity(61025);
   saveStoredCity(storage, serialize(next), null);
   assert.equal(memory.get('citymanager.backup.before-education'), old);
-  assert.equal(JSON.parse(memory.get('citymanager.save.v7')!).version, 22);
+  assertEducationEnvelope(memory.get('citymanager.save.v7')!);
   assert.equal(JSON.parse(old).market, undefined);
 });
 

@@ -32,9 +32,21 @@ test('households with no paid work for two months leave gradually with their sav
   const outside = c.accounts.outside;
   closeIndustry(c);
   const months: [number, number][] = [], predicted = new Map<number, number>();
+  // Observe exits at settlement: old money rows are compacted rather than retained forever.
+  const exits: City['ledger'] = []; const wages: City['ledger'] = c.ledger.filter(e => e.reason === 'Monthly wages');
   for (let d = 0; d < 300; d++) {
     for (const h of c.households) { const day = departureDay(c, h.id); if (day !== null && !predicted.has(h.id)) predicted.set(h.id, day); else if (day === null) predicted.delete(h.id); }
-    const count = c.households.length, left = c.migration.departures ?? 0, present = new Set(c.households.map(h => h.id)); step(c);
+    const count = c.households.length, left = c.migration.departures ?? 0, present = new Set(c.households.map(h => h.id));
+    const opening = { ...c.accounts }, historicIncome = { ...c.history?.lastIncome }; step(c);
+    const today = c.ledger.filter(e => e.tick === c.tick);
+    for (const e of today) if (e.reason === 'Emigration savings') {
+      const prior = today.slice(0, today.indexOf(e)).reduce((n, row) => n + (row.to === e.from ? row.amount : 0) - (row.from === e.from ? row.amount : 0), opening[e.from] ?? 0);
+      assert.equal(e.amount, prior, 'all remaining wallet cash leaves');
+      const lastHistoricalIncome = historicIncome[e.from];
+      assert.ok(lastHistoricalIncome === undefined || lastHistoricalIncome <= e.tick - DEPARTURE_MONTHS * MONTH, 'compacted income is outside the protection window');
+      assert.equal(c.accounts[e.from], 0); assert.equal(e.to, 'outside'); exits.push(e);
+    }
+    wages.push(...today.filter(e => e.reason === 'Monthly wages'));
     for (const id of present) if (!c.households.some(h => h.id === id)) assert.ok(predicted.has(id) && c.tick >= predicted.get(id)!, `household ${id} left on day ${c.tick}, predicted ${predicted.get(id)}`);
     if (c.tick % MONTH === 0) months.push([count, (c.migration.departures ?? 0) - left]);
     if (c.tick % 90 === 0) c = deserialize(serialize(c));
@@ -44,10 +56,9 @@ test('households with no paid work for two months leave gradually with their sav
   assert.ok(c.households.length >= DEPARTURE_FLOOR);
   assert.ok(months.every(([count, left]) => left <= Math.ceil(count * .2)), `at most a fifth leave each month: ${JSON.stringify(months)}`);
   assert.ok(months.filter(([, left]) => left > 0).length >= 2, 'the exodus spreads over several months');
-  const exits = c.ledger.filter(e => e.reason === 'Emigration savings');
   assert.ok(exits.length > 0 && exits.every(e => e.to === 'outside' && c.accounts[e.from] === 0 && !c.households.some(h => h.wallet === e.from)), 'savings leave with the household; its wallet stays at zero');
   for (const e of exits) {
-    assert.ok(!c.ledger.some(w => w.reason === 'Monthly wages' && w.to === e.from && w.tick > e.tick - DEPARTURE_MONTHS * MONTH), 'nobody paid in the last two months leaves');
+    assert.ok(!wages.some(w => w.to === e.from && w.tick > e.tick - DEPARTURE_MONTHS * MONTH && w.tick <= e.tick), 'nobody paid in the last two months leaves');
     assert.ok(e.tick % MONTH === 0, 'departures happen at month settlement');
   }
   assert.ok(c.accounts.outside > outside - 10_000_000, 'money is conserved through outside');

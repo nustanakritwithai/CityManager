@@ -4,11 +4,22 @@ import {performance} from 'node:perf_hooks';
 import {population2000Fixture} from './population-capacity-fixture.ts';
 import {step,serialize,deserialize,summary,MONTH} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
+import {cropJournalLength,goodsJournalLength,moneyJournalLength} from '../src/city-history.ts';
 
 test('2000 actual people retain identity, balanced money, bounded employment and complete saves over payroll',t=>{
- const a=population2000Fixture(),original=new Map(a.households.map(h=>[h.id,{...h}])),first=summary(a);
+ const fixture=population2000Fixture(),raw=serialize(fixture),a=deserialize(raw);
+ // Saving checkpoints completed months: validate original people and balances while
+ // comparing subsequent replay against the canonical compacted state.
+ assert.deepEqual(a.households,fixture.households); assert.deepEqual(a.accounts,fixture.accounts);
+ assert.deepEqual(a.firms,fixture.firms); assert.deepEqual(a.buildings,fixture.buildings);
+ assert.equal(moneyJournalLength(a),moneyJournalLength(fixture));
+ assert.equal(cropJournalLength(a),cropJournalLength(fixture)); assert.equal(goodsJournalLength(a),goodsJournalLength(fixture));
+ assert.equal((a.history?.totals.moneyAmount??0)+a.ledger.reduce((n,e)=>n+e.amount,0), (fixture.history?.totals.moneyAmount??0)+fixture.ledger.reduce((n,e)=>n+e.amount,0));
+ assert.equal((a.history?.totals.cropQuantity??0)+a.cropLedger.reduce((n,e)=>n+e.quantity,0), (fixture.history?.totals.cropQuantity??0)+fixture.cropLedger.reduce((n,e)=>n+e.quantity,0));
+ assert.equal((a.history?.totals.goodsQuantity??0)+a.goodsLedger.reduce((n,e)=>n+e.quantity,0), (fixture.history?.totals.goodsQuantity??0)+fixture.goodsLedger.reduce((n,e)=>n+e.quantity,0));
+ const original=new Map(a.households.map(h=>[h.id,{...h}])),first=summary(a);
  assert.equal(first.population,2000);assert.equal(first.households,668);assert.equal(first.workforce,1334);assert.equal(a.firms.length,64);
- const raw=serialize(a);assert.deepEqual(deserialize(raw),a);
+ assert.deepEqual(deserialize(raw),a);
  const b=deserialize(raw),times:number[]=[],fullSizeTimes:number[]=[];let checkedMonth=false;
  for(let i=0;i<31;i++){
   const fullSize=summary(a).population===2000,began=performance.now();step(a);const elapsed=performance.now()-began;times.push(elapsed);if(fullSize)fullSizeTimes.push(elapsed);step(b);

@@ -4,7 +4,7 @@ import {serialize} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
 import {TrafficGame,captureTrafficGameSample,GAME_MAX_CARS} from '../src/traffic/game.ts';
 import {gamePoses,GAME_VISUAL_CAR_CAP} from '../src/traffic/game-poses.ts';
-import {trafficGamePeakFixture} from './traffic-game-peak-fixture.ts';
+import {trafficGamePeakFixture,peakLiveCity} from './traffic-game-peak-fixture.ts';
 
 test('validated stress city produces near-cap real model poses without changing city bytes',()=>{
  const city=trafficGamePeakFixture(),before=serialize(city);
@@ -12,6 +12,7 @@ test('validated stress city produces near-cap real model poses without changing 
  assert.equal(city.cells.filter(c=>c.road).length,490);
  const runtime=createParkRuntime(city),session=serializeParkSession(city,runtime);
  assert.equal(serialize(deserializeParkSession(session).city),before);
+ const live=peakLiveCity(session,city); assert.equal(live.cells.length,672); assert.equal(serialize(deserializeParkSession(session).city),before);
  const sample=captureTrafficGameSample(city),game=new TrafficGame(sample);
  assert.equal(sample.demand.length,42);
  let peakMoving=0,peakPoses=0,peakUncapped=0;const twin=game.clone();

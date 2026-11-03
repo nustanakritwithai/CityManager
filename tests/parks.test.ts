@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { GATEWAY, SIZE, MONTH, access, buildPark, parkAt, buildPlant, buildRoad, bulldoze, createCity, homeOccupancy, deserialize, serialize, step, zoneCell, type City } from '../src/sim.ts';
 import { PARK, MAX_PARKS } from '../src/parks.ts';
@@ -60,16 +61,18 @@ test('park blocks roads, zones and plants without relaxing their road requiremen
 
 test('calendar maintenance charges once per month, including after reload; demolition ends upkeep', () => {
   let c = city(); assert.equal(buildPark(c, 0).ok, true); const id = c.parks[0].id;
-  run(c, MONTH - 1); assert.equal(c.ledger.some(e => e.reason === `Monthly park upkeep #${id}`), false);
-  run(c, 1); const entries = () => c.ledger.filter(e => e.reason === `Monthly park upkeep #${id}`);
+  const charges: City['ledger'] = [];
+  const observe = (days: number) => { for (let i = 0; i < days; i++) { step(c); charges.push(...c.ledger.filter(e => e.tick === c.tick && e.reason === `Monthly park upkeep #${id}`)); } };
+  observe(MONTH - 1); assert.equal(charges.length, 0);
+  observe(1); const entries = () => charges;
   assert.deepEqual(entries().map(e => [e.tick, e.amount, e.from, e.to]), [[30, PARK.upkeep, 'treasury', 'upkeep']]);
-  c = deserialize(serialize(c)); run(c, 1); assert.equal(entries().length, 1);
-  run(c, MONTH - 1); assert.deepEqual(entries().map(e => e.tick), [30, 60]);
+  c = deserialize(serialize(c)); observe(1); assert.equal(entries().length, 1);
+  observe(MONTH - 1); assert.deepEqual(entries().map(e => e.tick), [30, 60]);
   const before = c.accounts.treasury; assert.equal(bulldoze(c, 0).ok, true);
   assert.equal(c.accounts.treasury, before - 2000); assert.equal(c.parks.length, 0);
   assert.equal(c.ledger.filter(e => e.reason === `Demolish park #${id}`).length, 1);
   const after = c.accounts.treasury; assert.equal(bulldoze(c, 0).ok, true); assert.equal(c.accounts.treasury, after);
-  run(c, 60); assert.equal(entries().length, 2); assert.equal(sum(c), 0);
+  observe(60); assert.equal(entries().length, 2); assert.equal(sum(c), 0);
   assert.deepEqual(deserialize(serialize(c)), c);
 });
 
@@ -85,7 +88,7 @@ test('park upkeep follows existing treasury clipping without negative funds or d
 });
 
 test('v15 validates one-tile level-1 park ownership and construction evidence; old v13 remains intact', () => {
-  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 22);
+  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 25); assert.equal(raw.rulesVersion, 'chain-20'); assert.equal(raw.commercialBaseVersion, 22);
   for (const change of [
     (x: any) => { x.parks[0].width = 2; }, (x: any) => { x.parks[0].cells = [0, 1]; },
     (x: any) => { x.parks[0].level = 0; }, (x: any) => { x.parks[0].level = 2; },
@@ -94,10 +97,12 @@ test('v15 validates one-tile level-1 park ownership and construction evidence; o
     (x: any) => { x.ledger = x.ledger.filter((e: any) => !/^Build park/.test(e.reason)); },
     (x: any) => { delete x.parks; },
   ]) { const invalid = structuredClone(raw); change(invalid); assert.throws(() => deserialize(JSON.stringify(invalid)), /corrupt/i); }
-  const oldCity = createCity(61025); run(oldCity, 60); const old = JSON.parse(serialize(oldCity));
-  delete old.education; old.version = 13; old.rulesVersion = 'chain-8'; delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
+  // The v15 fixture has no parks; it is also valid under v13 after removing the park section.
+  const old = JSON.parse(readFileSync(new URL('./fixtures/retail-v15.json', import.meta.url), 'utf8'));
+  assert.deepEqual(old.parks, []); delete old.parks; old.version = 13; old.rulesVersion = 'chain-8';
   const loaded = deserialize(JSON.stringify(old)); assert.deepEqual(loaded.parks, []);
-  for (const key of ['accounts', 'ledger', 'buildings', 'households', 'firms', 'rng', 'tick', 'nextId']) assert.deepEqual((loaded as any)[key], old[key]);
+  for (const key of ['accounts', 'buildings', 'households', 'firms', 'rng', 'tick', 'nextId']) assert.deepEqual((loaded as any)[key], old[key]);
+  assert.deepEqual(loaded.ledger, old.ledger.filter((e: any) => e.tick > (loaded.history?.throughTick ?? -1)));
 });
 
 test('first park save keeps exact pre-park bytes and backup failure preserves primary save', () => {
@@ -111,33 +116,38 @@ test('first park save keeps exact pre-park bytes and backup failure preserves pr
   assert.throws(() => saveStoredCity(failing, next, null), /quota/); assert.equal(failing.getItem(SAVE_KEY), previous);
 });
 
-test('no-park city changes only the audited owner payout before residential progression', () => {
-  // Keep the original pre-owner-policy hashes. Comparing a6f4ada to 69b39d1
-  // found exactly four changed fields per seed: one day-90 firm-16 payout,
-  // its owner.withdrawn total, and the two cash balances. Restore ONLY those
-  // audited deltas in a copy; every unrelated field must still match the old
-  // whole-city hash. See docs/OWNER-PROFIT.md for the earned-funds calculation.
-  const baselines = [
-    { seed: 61025, owner: 6, oldPayout: 13_890, payout: 5_470, hash: 'd319b45b4283300213db12f3b9eb52f6efa7688f86b6016b177150e3d17cd6a8' },
-    { seed: 20261023, owner: 4, oldPayout: 11_700, payout: 1_070, hash: '709783b3251ed89b36daa99b2045cf3020a7085ba005df7edc4fc0992eaf447f' },
-  ] as const;
-  for (const expected of baselines) {
-    const c = createCity(expected.seed); run(c, 119);
-    assert.deepEqual(c.parks, []); assert.equal(sum(c), 0);
-    const comparison = structuredClone(c), firm = comparison.firms.find(f => f.id === 16)!;
-    assert.equal(firm.owner?.householdId, expected.owner);
-    const wallet = `household:${expected.owner}`;
-    const entries = comparison.ledger.filter(e => e.tick === 90 && e.from === firm.wallet && e.reason === 'Owner profit distribution');
-    assert.equal(entries.length, 1);
-    assert.equal(entries[0].to, wallet); assert.equal(entries[0].amount, expected.payout);
-    const delta = expected.oldPayout - expected.payout;
-    entries[0].amount += delta; firm.owner!.withdrawn += delta;
-    comparison.accounts[firm.wallet] -= delta; comparison.accounts[wallet] += delta;
-    const { parks: _parks, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, ...legacy } = comparison;
-    assert.equal(createHash('sha256').update(JSON.stringify(legacy)).digest('hex'), expected.hash);
-    assert.deepEqual(deserialize(serialize(c)), c);
-    assert.ok(c.buildings.filter(b => b.zone === 'R').every(b => b.level <= 3));
-    run(c, 1);
-    for (const b of c.buildings.filter(b => b.zone === 'R' && b.level >= 4)) assert.equal(homeOccupancy(c, b.id).households >= 3, true, 'apartment tier is reached only from a full cottage');
+test('no-park cities keep accounting and owner distributions deterministic through saves and residential growth', () => {
+  // Independent hashes were produced by main 31389949527c8d0b3eee4bfec5326d62df839721.
+  // The only intended financial difference in this scenario is the three new service
+  // bills; normalize their explicit amounts back out before comparing all state
+  // except journals/checkpoint metadata, which have their own assertions below.
+  const expected = new Map([
+    [61025, { owner: 'household:4', amounts: [36420, 72720, 99690], hash: '28c0c38b3cb1829d21672c31345681f4e53404abf02f4d4cd11060a9cee2bd87' }],
+    [20261023, { owner: 'household:2', amounts: [29310, 72720, 99570], hash: '4f4406287f83d464ff646df8ccb2931f72e93e9a47f1ea3e7e1e18f3251fcd9a' }],
+  ]);
+  for (const seed of [61025, 20261023]) {
+    const c = createCity(seed); run(c, 59); const loaded = deserialize(serialize(c));
+    const payouts = c.ledger.filter(e => e.reason === 'Owner profit distribution').map(e => [e.tick, e.from, e.to, e.amount]);
+    const bills = c.ledger.filter(e => e.reason === 'Monthly municipal services').map(e => e.amount);
+    for (let d = 60; d <= 120; d++) {
+      step(c); step(loaded);
+      assert.deepEqual(c, loaded, `seed ${seed}, day ${d}`);
+      payouts.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Owner profit distribution').map(e => [e.tick, e.from, e.to, e.amount]));
+      bills.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Monthly municipal services').map(e => e.amount));
+      if (d === 119) {
+        assert.deepEqual(bills, [40000, 40000, 55000]);
+        assert.deepEqual(payouts, expected.get(seed)!.amounts.map((amount, index) => [30 * (index + 1), 'firm:8', expected.get(seed)!.owner, amount]));
+        const { ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
+        const amount = bills.reduce((n, value) => n + value, 0);
+        const normalized = { ...state, accounts: { ...accounts, treasury: accounts.treasury + amount, upkeep: accounts.upkeep - amount } };
+        assert.equal(createHash('sha256').update(JSON.stringify(normalized)).digest('hex'), expected.get(seed)!.hash, `seed ${seed} pre-PR main trajectory after accounting for service bills`);
+      }
+      assert.deepEqual(c.parks, []); assert.equal(sum(c), 0);
+      assert.ok(!c.ledger.some(e => /^Monthly park (wages|upkeep)/.test(e.reason)));
+      const balances: Record<string, number> = { ...c.history?.accounts };
+      for (const e of c.ledger) { balances[e.from] = (balances[e.from] ?? 0) - e.amount; balances[e.to] = (balances[e.to] ?? 0) + e.amount; }
+      for (const key of new Set([...Object.keys(c.accounts), ...Object.keys(balances)])) assert.equal(balances[key] ?? 0, c.accounts[key] ?? 0, key);
+    }
+    for (const b of c.buildings.filter(b => b.zone === 'R' && b.level >= 4)) assert.ok(homeOccupancy(c, b.id).households >= 3, 'apartment tier is reached only from a full cottage');
   }
 });

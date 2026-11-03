@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
-import {createTrafficServerFixture,assertNavigationSaveChain,reachTrafficControl} from './traffic-server-entry-fixture.mjs';
+import {createTrafficServerFixture,assertNavigationSaveChain,reachTrafficControl,loadedTrafficSession} from './traffic-server-entry-fixture.mjs';
 const url='http://127.0.0.1:4195/CityManager/';
 import {createCity,step} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
@@ -125,9 +125,13 @@ test('network fence is ordered exact-origin only, requires protocol support and 
  const blocked=target=>rules.find(rule=>new URLPattern(rule.urlPattern).test(target))?.block;
  for(const target of ['https://example.com/account','http://127.0.0.1:9999/','http://localhost:4195/'])assert.equal(blocked(target),true);assert.equal(blocked(origin+'/citymanager-api/v1/city-save'),false);assert.equal(blocked(origin+'/CityManager/assets/kenney-city/models/tree.glb?x=1'),true);
  assert.equal(rules[0].block,true);assert.match(rules[0].urlPattern,/models/);assert.deepEqual(rules[1],{urlPattern:origin+'/*',block:false});assert.deepEqual(rules.slice(2).map(x=>x.block),[true,true]);assert.throws(()=>trafficNetworkRules('http://example.com'));
+ const denied=[origin+'/api/city-advisor/*',origin+'/chat/completions*'],restricted=trafficNetworkRules(origin,false,denied);
+ const decision=target=>restricted.find(rule=>new URLPattern(rule.urlPattern).test(target))?.block;
+ assert.equal(decision(origin+'/api/city-advisor/report'),true);assert.equal(decision(origin+'/chat/completions'),true);
+ assert.equal(decision(origin+'/citymanager-api/v1/city-save'),false);assert.equal(decision('https://example.com/'),true);
  const protocol={domains:[{domain:'Network',commands:[{name:'setBlockedURLs',parameters:[{name:'urlPatterns'}]}]}]};let evidence,commands=[];
  const options={protocol,origin,send:async(method,params)=>commands.push({method,params}),observeProbe:target=>(evidence={url:target}),evaluate:async expression=>{if(expression.startsWith('fetch'))evidence.failed={blockedReason:'inspector'};return true;}};
- await installTrafficNetworkFence(options);assert.equal(commands[0].method,'Network.setBlockedURLs');assert.equal(new URL(evidence.url).hostname,'localhost');
+ await installTrafficNetworkFence({...options,additionalBlocked:denied});assert.equal(commands[0].method,'Network.setBlockedURLs');assert.deepEqual(commands[0].params.urlPatterns,restricted);assert.equal(new URL(evidence.url).hostname,'localhost');
  await assert.rejects(installTrafficNetworkFence({...options,protocol:{domains:[]}}),/must support/);
  await assert.rejects(installTrafficNetworkFence({...options,evaluate:async expression=>{if(expression.startsWith('fetch'))evidence.failed={blockedReason:'other'};return true;}}),/Must be CDP block/);
 });
@@ -135,3 +139,15 @@ test('network fence is ordered exact-origin only, requires protocol support and 
  test('browser runners never pause API or asset requests through Fetch after native HTTP migration',async()=>{
  const {readFileSync}=await import('node:fs');for(const file of ['traffic-game-smoke.mjs','traffic-default-fault-smoke.mjs']){const source=readFileSync(new URL(file,import.meta.url),'utf8');assert.equal(source.includes("send('Fetch.enable'"),false);assert.equal(source.includes("m.method==='Fetch.requestPaused'"),false);assert.ok(source.includes('installTrafficNetworkFence('));assert.ok(source.includes('httpFixture.errors,[]'));}
  });
+
+
+test('expected live session applies the real map migration without rewriting server bytes or advancing time', async () => {
+ const f=createTrafficServerFixture(url),ack=await f.seed(raw), loaded=loadedTrafficSession(ack.raw);
+ assert.equal(JSON.parse(ack.raw).version,25); assert.equal(loaded.city.cells.length,672);
+ assert.deepEqual(loaded.city.cells.slice(0,576),city.cells);
+ assert.deepEqual(loaded.city.accounts,city.accounts); assert.deepEqual(loaded.city.ledger,city.ledger);
+ assert.equal(loaded.city.tick,city.tick); assert.equal(loaded.runtime.activity.minute,0);
+ assert.equal(f.active.raw,raw); assert.equal(f.active.revision,1);
+ const expandedRaw=serializeParkSession(loaded.city,loaded.runtime);
+ assert.deepEqual(loadedTrafficSession(expandedRaw),loaded);
+});

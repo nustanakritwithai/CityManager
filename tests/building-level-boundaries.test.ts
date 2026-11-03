@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, adoptSavedEducation, housingUpgradeStatus, productionUpgradeStatus, retailGrowthStatus, isMarket, isRetail, zoneCell, access, type Building } from '../src/sim.ts';
 import { factoryLevel } from '../src/factory-levels.ts';
+import { RETAIL_MAX_LEVEL } from '../src/retail-capacity.ts';
 import { farmStockCapacity, proposeHarvest, proposeRecipe } from '../src/agriculture.ts';
 import { HOUSING_LEVELS } from '../src/housing.ts';
 import { populationFixture } from './population-capacity-fixture.ts';
 import { holdEducationReady } from './education-ready.ts';
 
-const maximum = (b: Building) => b.zone === 'R' || b.zone === 'I' ? 9 : b.zone === 'F' ? 6 : 7;
+const maximum = (b: Building) => b.zone === 'R' || b.zone === 'I' ? 9 : b.zone === 'F' ? 6 : RETAIL_MAX_LEVEL;
 
 test('filled apartment and condo tiers upgrade once on the same tile, while absent credentials still block them', () => {
   // Reconciled synthetic census: enough real household records to fill the upper tiers.
@@ -45,7 +46,7 @@ test('filled apartment and condo tiers upgrade once on the same tile, while abse
   }
 });
 
-test('all maximum levels survive old-save education adoption and monthly review without another upgrade charge', () => {
+test('all maximum levels survive education adoption and monthly review without another upgrade charge', () => {
   const source = createCity(61025); for (let day = 0; day < 119; day++) step(source);
   source.utilities.outside = { power: 1000, water: 1000 };
   delete source.education;
@@ -53,10 +54,13 @@ test('all maximum levels survive old-save education adoption and monthly review 
     if (b.zone === 'C' && source.firms.some(f => f.building === b.id && isMarket(f))) continue;
     b.level = maximum(b); if (b.zone === 'R') b.housingType = 'condo';
   }
-  const raw = serialize(source); assert.equal(JSON.parse(raw).version, 19);
+  const raw = serialize(source), envelope = JSON.parse(raw);
+  assert.equal(envelope.version, 25); assert.equal(envelope.rulesVersion, 'chain-20');
+  assert.equal(envelope.commercialBaseVersion, 24); assert.equal(envelope.historyBaseVersion, 19);
+  assert.equal(envelope.education, undefined);
   const city = deserialize(raw), identities = city.buildings.map(b => ({ ...b }));
   const people = city.households.map(h => [h.id, h.members, h.home]);
-  const investments = city.ledger.filter(e => /height investment$/.test(e.reason)).length;
+  const previousTick = city.tick;
   adoptSavedEducation(city);
   assert.deepEqual(city.buildings, identities); assert.equal(city.education!.residentBasic, 0); assert.equal(city.education!.residentHigher, 0);
   for (const b of city.buildings.filter(b => b.zone === 'R')) assert.equal(housingUpgradeStatus(city, b).next, null);
@@ -71,7 +75,7 @@ test('all maximum levels survive old-save education adoption and monthly review 
   const arrivals = city.households.filter(h => !people.some(([id]) => id === h.id));
   assert.equal(arrivals.length, city.ledger.filter(e => e.tick === city.tick && e.reason === 'New household arrival savings').length);
   for (const h of arrivals) assert.ok(city.ledger.some(e => e.tick === city.tick && e.to === h.wallet && e.reason === 'New household arrival savings' && e.amount === 150_000));
-  assert.equal(city.ledger.filter(e => /height investment$/.test(e.reason)).length, investments);
+  assert.equal(city.ledger.filter(e => e.tick > previousTick && /height investment$/.test(e.reason)).length, 0, 'no new upgrade is charged');
   assert.equal(Object.values(city.accounts).reduce((sum, value) => sum + value, 0), 0);
   assert.deepEqual(deserialize(serialize(city)), city);
   assert.equal(serialize(source), raw, 'loading and migration never alter the original snapshot');

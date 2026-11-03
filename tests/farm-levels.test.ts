@@ -85,7 +85,8 @@ test('six actual allocations harvest once and replay survives later demolition',
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   b.level = 6;
   const needed = 6 - firmWorkerCount(c, f.id);
-  const candidates = c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed);
+  const onFarm = new Set(c.employment.filter(e => e.firmId === f.id).map(e => e.householdId));
+  const candidates = c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing' && !onFarm.has(e.householdId)).slice(0, needed);
   assert.equal(candidates.length, needed);
   for (const allocation of candidates) allocation.firmId = f.id;
   step(c);
@@ -104,7 +105,8 @@ test('replay rejects a six-worker harvest truncated to the three-worker store', 
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   b.level = 6;
   const needed = 6 - firmWorkerCount(c, f.id);
-  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed)) a.firmId = f.id;
+  const onFarm = new Set(c.employment.filter(e => e.firmId === f.id).map(e => e.householdId));
+  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing' && !onFarm.has(e.householdId)).slice(0, needed)) a.firmId = f.id;
   step(c);
   const bad = structuredClone(c), harvest = bad.cropLedger.find(e => e.tick === bad.tick && e.kind === 'harvest' && e.to === f.wallet)!;
   const exported = bad.cropLedger.find(e => e.tick === bad.tick && e.kind === 'export' && e.from === f.wallet)!;
@@ -135,7 +137,8 @@ test('v15 migration fixes the boundary and admits valid pre- and post-upgrade ha
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   assert.equal(b.level, 4); b.level = 6;
   const needed = 6 - firmWorkerCount(c, f.id);
-  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed)) a.firmId = f.id;
+  const onFarm = new Set(c.employment.filter(e => e.firmId === f.id).map(e => e.householdId));
+  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing' && !onFarm.has(e.householdId)).slice(0, needed)) a.firmId = f.id;
   step(c);
   assert.ok(c.cropLedger.some(e => e.kind === 'harvest' && e.tick === c.tick && e.workers === 6));
   assert.deepEqual(deserialize(serialize(c)), c);

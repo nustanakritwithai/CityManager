@@ -53,7 +53,28 @@ export function compactCityHistory(c: City): boolean {
  const structural=(e:Entry)=> e.reason==='Initial municipal grant'||e.reason==='New household arrival savings'&&wallets.has(e.to)||
   /^(?:Build |Demolish park|Self-employed |Market to shop conversion|Business takeover refit|Industry expansion capital|Outside industry (?:bootstrap equity|equity)|Funded industry |Industry expansion residual return)/.test(e.reason)&&
   (wallets.has(e.from)&&e.from.startsWith('firm:')||wallets.has(e.to)&&e.to.startsWith('firm:')||[...e.reason.matchAll(/#(\d+)/g)].some(m=>ids.has(Number(m[1]))));
- const structuralProofs=[...(prior?.structuralProofs??[]),...money].filter(structural);
+ const allProofs=[...(prior?.structuralProofs??[]),...money];
+ const fundedId=(e:Entry)=>/^(?:Industry expansion capital|Funded industry (?:demolition|takeover)|Industry expansion residual return) #([1-9]\d*)$/.exec(e.reason)?.[1];
+ // Keep or discard each funded-child lifecycle as a unit. A live sponsor alone does
+ // not make every old, zero-balance child relevant. A live takeover successor does
+ // need its refit marker, which in turn requires the original funding proof.
+ const lifecycleIds=new Set<string>();
+ const lifecycles=new Map<string,Entry[]>();
+ for(const e of [...allProofs,...tailMoney]) { const id=fundedId(e); if(id) lifecycles.set(id,[...(lifecycles.get(id)??[]),e]); }
+ // Do not turn a previously damaged partial lifecycle into a seemingly valid save
+ // by pruning its remaining evidence. Runtime-created and loaded states must carry
+ // the original funding and (once closed) the original closure marker.
+ for(const [id,entries] of lifecycles) {
+  const funded=entries.some(e=>e.reason===`Industry expansion capital #${id}`);
+  const closed=entries.some(e=>e.reason===`Funded industry demolition #${id}`||e.reason===`Funded industry takeover #${id}`);
+  if(!funded||(!c.firms.some(f=>String(f.id)===id)&&!closed)) throw Error('Incomplete funded industry lifecycle evidence');
+ }
+ for(const e of [...allProofs,...tailMoney]) {
+  const id=fundedId(e); if(!id)continue;
+  const successor=/^Funded industry takeover #/.test(e.reason)&&c.firms.some(f=>f.wallet===e.from&&f.takenOverAt===e.tick);
+  if(wallets.has(`firm:${id}`)||ids.has(Number(id))||successor)lifecycleIds.add(id);
+ }
+ const structuralProofs=allProofs.filter(e=>{const id=fundedId(e);return id ? lifecycleIds.has(id) : structural(e);});
  for(const [wallet,value] of Object.entries(accounts))if(value===0)delete accounts[wallet];
  for(const [wallet,value] of Object.entries(goodsBalances))if(value===0)delete goodsBalances[wallet];
  for(const wallet of Object.keys(firstProduction))if(!wallets.has(wallet)&&!structuralProofs.some(e=>e.from===wallet))delete firstProduction[wallet];

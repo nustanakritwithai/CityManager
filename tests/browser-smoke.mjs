@@ -1,3 +1,4 @@
+import { browserSnapshotState } from './browser-snapshot.ts';
 // Small dependency-free CDP smoke test against the installed Microsoft Edge.
 // Runs real browser/WebGL; emulated mobile metrics do not establish device QA.
 import { spawn } from 'node:child_process';
@@ -88,7 +89,7 @@ async function until(expression, timeout = 15000) {
   while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(100); }
   throw new Error(`Condition timed out: ${expression}`);
 }
-const state = async () => await evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const text = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
 const paused = () => evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"');
 async function game() {

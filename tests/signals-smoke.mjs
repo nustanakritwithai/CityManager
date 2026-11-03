@@ -1,10 +1,11 @@
+import { browserSnapshotState } from './browser-snapshot.ts';
 // Installed Edge, isolated loopback port/profile; no provider or authentication calls.
 import { documentIdentityScript, navigateDocument } from './active-local-save-navigation.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, summary, housingCapacity } from '../src/sim.ts';
+import { createCity, step, serialize, deserialize, summary, housingCapacity } from '../src/sim.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
@@ -42,7 +43,7 @@ async function until(expression) {
   throw Error(`Condition timeout ${expression}`);
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 async function button(selector) {
   if (await reachTouch(evaluate, button, selector)) return;
@@ -105,7 +106,7 @@ try {
   const fixture = createCity(61025); for (let n = 0; n < 65; n++) step(fixture);
   await button('#toggle-game-menu');
   await evaluate(`localStorage.removeItem('citymanager.save.v7');localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
-  const before = await state(); assert.deepEqual(before, fixture);
+  const before = await state(), beforeRaw = await evaluate('window.cityManager.snapshot()'); assert.deepEqual(before, fixture);
   await openSignals();
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'offline');
   assert.equal(await evaluate('document.querySelector("#signal-content").dataset.snapshotTick'), '65');
@@ -120,16 +121,16 @@ try {
   });
   assert.equal(await count('[data-signal-metric=population]'), 1);
   assert((await count('[data-missing-id^="missing.prior."]')) > 0);
-  assert.deepEqual(await state(), before, 'Opening report is read-only');
-  await button('#signal-refresh'); assert.deepEqual(await state(), before, 'Manual capture is read-only');
+  assert.deepEqual(await state(), before, 'Opening report is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw);
+  await button('#signal-refresh'); assert.deepEqual(await state(), before, 'Manual capture is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw);
   await shot('desktop-signals.png');
   checks.push('Actual people, household, employment, housing-capacity and credit units match save-v6 simulation with missing first history and no mutation');
 
   await button('#close-inspector'); await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=68'); await button('#pause');
-  const advanced = await state(); await openSignals();
+  const advanced = await state(), advancedRaw = await evaluate('window.cityManager.snapshot()'); await openSignals();
   assert.equal(await count('[data-signal-id^="trend."]'), 9);
-  assert.deepEqual(await state(), advanced, 'Comparative report is read-only');
+  assert.deepEqual(await state(), advanced, 'Comparative report is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), advancedRaw);
   await button('#close-inspector'); await button('#pause');
   await until(`JSON.parse(window.cityManager.snapshot()).tick>${advanced.tick}`); await button('#pause');
   await button('#toggle-inspector'); await button('#open-signals');
@@ -148,9 +149,9 @@ try {
   assert(mobile.height >= 740 * .9 && mobile.scrollWidth <= mobile.clientWidth + 1, 'Tall mobile reading surface has no horizontal overflow');
   assert(mobile.refreshWidth >= 44 && mobile.refreshHeight >= 44, '44px refresh control');
   await shot('mobile-signals.png');
-  const immutable = await state();
+  const immutable = await state(), immutableRaw = await evaluate('window.cityManager.snapshot()');
   await button('.signal-missing>summary'); await button('.signal-provenance>summary');
-  assert.deepEqual(await state(), immutable, 'Disclosures are read-only');
+  assert.deepEqual(await state(), immutable, 'Disclosures are read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), immutableRaw);
   await button('#submenu-back'); assert.equal(await evaluate('document.querySelector("#inspector").dataset.page'), 'city');
   await button('#close-inspector');
   assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'), 'false');

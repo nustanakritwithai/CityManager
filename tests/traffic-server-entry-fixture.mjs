@@ -8,7 +8,9 @@ export async function reachTrafficControl(evaluate,button,selector){
  if(selector==='#save')return false;
  return reachTouch(evaluate,button,selector);
 }
-import {deserializeParkSession} from '../src/park-runtime.ts';
+import {deserializeParkSession,expandValidatedParkSession} from '../src/park-runtime.ts';
+/** Match the app's validated 24×24 → 24×28 session migration without modifying the server ACK. */
+export const loadedTrafficSession = raw => expandValidatedParkSession(deserializeParkSession(raw));
 import {createPanelServerFixture,assertNoCityWrites as noPanelCityWrites} from './panel-server-entry-fixture.mjs';
 export function assertNavigationSaveChain(before,after,writes){
  assert.ok(before&&after&&!before.deleted&&!after.deleted,'Live heads required across navigation');
@@ -165,15 +167,15 @@ export async function startTrafficHttpFixture(upstream){
  handler=trafficHttpHandler({origin,upstream,fixture,errors,deliveries});
  return {url,fixture,errors,deliveries,async close(){server.closeAllConnections();await new Promise((ok,bad)=>server.close(error=>error?bad(error):ok()));}};
 }
-export function trafficNetworkRules(origin,blockedModels=false){
+export function trafficNetworkRules(origin,blockedModels=false,additionalBlocked=[]){
  const url=new URL(origin);assert.equal(url.hostname,'127.0.0.1');assert.equal(url.protocol,'http:');
- return [ ...(blockedModels?[{urlPattern:origin+'/CityManager/assets/kenney-city/models/*.glb',block:true}]:[]),
+ return [ ...additionalBlocked.map(urlPattern=>({urlPattern,block:true})), ...(blockedModels?[{urlPattern:origin+'/CityManager/assets/kenney-city/models/*.glb',block:true}]:[]),
   {urlPattern:origin+'/*',block:false},{urlPattern:'http://*:*/*',block:true},{urlPattern:'https://*:*/*',block:true}];
 }
-export async function installTrafficNetworkFence({send,evaluate,protocol,origin,blockedModels=false,observeProbe}){
+export async function installTrafficNetworkFence({send,evaluate,protocol,origin,blockedModels=false,additionalBlocked=[],observeProbe}){
  const command=protocol.domains.find(d=>d.domain==='Network')?.commands.find(c=>c.name==='setBlockedURLs');
  assert.ok(command?.parameters.some(p=>p.name==='urlPatterns'),'Browser must support ordered fail-closed network rules');
- await send('Network.setBlockedURLs',{urlPatterns:trafficNetworkRules(origin,blockedModels)});
+ await send('Network.setBlockedURLs',{urlPatterns:trafficNetworkRules(origin,blockedModels,additionalBlocked)});
  await send('Page.navigate',{url:origin+'/__traffic_network_fence_page'});
  const readyDeadline=Date.now()+5000;while(!await evaluate(`location.origin===${JSON.stringify(origin)}&&document.readyState==='complete'`)){assert.ok(Date.now()<readyDeadline,'Native fixture fence page must load');await new Promise(r=>setTimeout(r,20));}
  // A different loopback origin proves blocking without contacting any external host.
@@ -182,5 +184,5 @@ export async function installTrafficNetworkFence({send,evaluate,protocol,origin,
  const result=await evaluate(`fetch(${JSON.stringify(probe)}).then(()=>false,()=>true)`);assert.equal(result,true,'Other-origin request must be blocked');
  const deadline=Date.now()+5000;while(!evidence.failed&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
  assert.equal(evidence.failed?.blockedReason,'inspector','Must be CDP block, not DNS/CORS/connection failure');evidence.active=false;
- return {rules:trafficNetworkRules(origin,blockedModels),probe:evidence};
+ return {rules:trafficNetworkRules(origin,blockedModels,additionalBlocked),probe:evidence};
 }

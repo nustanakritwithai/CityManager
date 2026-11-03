@@ -4,14 +4,31 @@ import { createCity, step, serialize, deserialize, summary, MAX_CITY_HOUSEHOLDS,
 import { populationFixture as fixture } from './population-capacity-fixture.ts';
 import { saveStoredCity, SAVE_KEY, POPULATION_BACKUP_KEY, populationBackupKeys, readStoredCity } from '../src/save-storage.ts';
 import { createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
+import { moneyJournalLength, cropJournalLength, goodsJournalLength } from '../src/city-history.ts';
+
+
+/** Deserialization may compact old journal prefixes; retained state and total history must agree. */
+function assertResumable(c: City) {
+  const raw = serialize(c), loaded = deserialize(raw);
+  const { ledger: _l, cropLedger: _c, goodsLedger: _g, history: _h, ...before } = c;
+  const { ledger: _ll, cropLedger: _cc, goodsLedger: _gg, history: _hh, ...after } = loaded;
+  assert.deepEqual(after, before);
+  assert.equal(moneyJournalLength(loaded), moneyJournalLength(c));
+  assert.equal(cropJournalLength(loaded), cropJournalLength(c));
+  assert.equal(goodsJournalLength(loaded), goodsJournalLength(c));
+  assert.equal((loaded.history?.totals.moneyAmount ?? 0) + loaded.ledger.reduce((n, e) => n + e.amount, 0), (c.history?.totals.moneyAmount ?? 0) + c.ledger.reduce((n, e) => n + e.amount, 0));
+  assert.equal((loaded.history?.totals.cropQuantity ?? 0) + loaded.cropLedger.reduce((n, e) => n + e.quantity, 0), (c.history?.totals.cropQuantity ?? 0) + c.cropLedger.reduce((n, e) => n + e.quantity, 0));
+  assert.equal((loaded.history?.totals.goodsQuantity ?? 0) + loaded.goodsLedger.reduce((n, e) => n + e.quantity, 0), (c.history?.totals.goodsQuantity ?? 0) + c.goodsLedger.reduce((n, e) => n + e.quantity, 0));
+  assert.equal(serialize(deserialize(serialize(loaded))), serialize(loaded));
+}
 
 test('the 129th household requires actual funded jobs and housing; funding is recorded once',()=>{
-  const c=fixture(128);const old=serialize(c);assert.equal(JSON.parse(old).version,22);assert.deepEqual(deserialize(old),c);
+  const c=fixture(128);const old=serialize(c);assert.equal(JSON.parse(old).version,25);assert.equal(JSON.parse(old).commercialBaseVersion,22);assertResumable(c);
   const before=c.accounts.outside;step(c);
   assert.equal(c.households.length,129);assert.equal(c.populationCapacityVersion,1);
   const arrivals=c.ledger.filter(e=>e.tick===c.tick&&e.reason==='New household arrival savings');assert.equal(arrivals.length,1);assert.equal(arrivals[0].amount,150000);
   assert.equal(c.accounts.outside,before-150000);assert.equal(Object.values(c.accounts).reduce((a,b)=>a+b,0),0);
-  assert.equal(JSON.parse(serialize(c)).version,22);assert.equal(c.populationCapacityVersion,1);assert.deepEqual(deserialize(serialize(c)),c);
+  assert.equal(JSON.parse(serialize(c)).version,25);assert.equal(c.populationCapacityVersion,1);assertResumable(c);
   for(const change of [(v:City)=>{v.utilities.outside={power:20,water:20};},(v:City)=>{v.firms=[];},(v:City)=>{const empty=v.buildings.find(b=>b.zone==='R'&&!v.households.some(h=>h.home===b.id))!;v.buildings=v.buildings.filter(b=>b.id!==empty.id);v.cells[empty.cell].building=null;}]){
     const blocked=fixture(128);change(blocked);step(blocked);assert.equal(blocked.households.length,128);
   }
@@ -30,13 +47,15 @@ test('1000+ actual people and more than 256 job allocations survive complete rec
 
 test('population envelope preserves road topology and requires matching version marker',()=>{
   const c=fixture(129);c.roadTopology={version:1,blocked:[],oneWay:{}};const raw=serialize(c);
-  assert.deepEqual(deserialize(raw),c);
+  assertResumable(c);
   for(const edit of [(v:any)=>v.populationCapacityVersion=2,(v:any)=>v.rulesVersion='chain-15',(v:any)=>v.roadTopology.version=2]){const bad=JSON.parse(raw);edit(bad);assert.throws(()=>deserialize(JSON.stringify(bad)));}
   const tooMany=fixture(129,false,false);tooMany.households=Array(MAX_CITY_HOUSEHOLDS+1).fill(tooMany.households[0]);assert.throws(()=>deserialize(serialize(tooMany)));
 });
 
 test('old bytes backed up before large-population save; full/quota backups preserve old primary',()=>{
-  const smaller=fixture(128),larger=fixture(129);delete smaller.education;delete larger.education;const old=serialize(smaller),next=serialize(larger);
+  const smaller=fixture(128),larger=fixture(129);delete smaller.education;delete larger.education;
+  const legacy=JSON.parse(serialize(smaller)); delete legacy.goalRulesVersion; delete legacy.commercialUnifiedStartTick; delete legacy.commercialUnifiedBaseline; delete legacy.commercialBaseVersion; legacy.version=19; legacy.rulesVersion='chain-14';
+  const old=JSON.stringify(legacy),next=serialize(larger); assert.doesNotThrow(()=>deserialize(old));
   const data=new Map<string,string>([[SAVE_KEY,old]]),storage={getItem:(k:string)=>data.get(k)??null,setItem:(k:string,v:string)=>{data.set(k,v);}};
   saveStoredCity(storage,next,null);assert.equal(data.get(POPULATION_BACKUP_KEY),old);assert.equal(data.get(SAVE_KEY),next);assert.equal(readStoredCity(storage,'backup')?.raw,old);
   saveStoredCity(storage,next,null);assert.equal(data.get(POPULATION_BACKUP_KEY),old);

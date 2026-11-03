@@ -25,7 +25,7 @@ test('a working factory opens shops that sell local goods to households, with mo
   assert.ok(shops.length >= 1, 'at least one shop opened');
   for (const shop of shops) {
     const b = c.buildings.find(b => b.id === shop.building)!;
-    assert.equal(b.zone, 'C'); assert.ok(b.level >= 2);
+    assert.equal(b.zone, 'C'); assert.ok(b.level >= 1, 'unified shops open at level one');
     assert.ok(shop.owner
       ? observed.some(e => e.reason === 'Owner capital contribution' && e.from === `household:${shop.owner!.householdId}` && e.to === shop.wallet)
       : observed.some(e => e.reason === 'Outside firm equity investment' && e.from === 'outside' && e.to === shop.wallet));
@@ -36,12 +36,15 @@ test('a working factory opens shops that sell local goods to households, with mo
   conserved(c); assert.deepEqual(deserialize(serialize(c)), c);
 });
 
-test('no factory with workers means no shop demand and no shop', () => {
+test('without factories a unified shop can sell local crops but no manufactured goods', () => {
   const c = strip(false);
   for (let d = 0; d < 120; d++) step(c);
-  assert.equal(retailDemand(c), 0);
-  assert.equal(c.firms.filter(isRetail).length, 0);
+  assert.equal(c.firms.filter(f => f.zone === 'I').length, 0, 'the fixture has no factories');
+  assert.equal(retailDemand(c), 0, 'existing coverage meets current demand');
+  assert.ok(c.firms.filter(isRetail).length > 0, 'a food shop can open without a factory');
+  assert.ok(c.crops.consumed > 0, 'households buy local crops');
   assert.equal(c.goods.consumed, 0);
+  conserved(c); assert.deepEqual(deserialize(serialize(c)), c);
 });
 
 test('the shop site is the first connected vacant commercial parcel, read without the simulation RNG', () => {
