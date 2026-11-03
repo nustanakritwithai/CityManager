@@ -1,5 +1,8 @@
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
+import { createPanelModelAudit } from './panel-model-audit.mjs';
 import { browserSnapshotState } from './browser-snapshot.ts';
-import { assertSavedCity } from './park-session-assertions.mjs';
+import { panelEntryCity, loadPanelCity, saveAndReloadPanel } from './panel-ui-server.mjs';
+import { startTrafficHttpFixture, reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
 // Measured compact/tall GUI acceptance. Root runs this sequentially on CDP 9349.
 // Baseline mode captures deployed d40; candidate mode reads that frozen JSON only.
 import { spawn } from 'node:child_process';
@@ -12,7 +15,8 @@ import { reachTouch } from './touch-reach.mjs';
 
 const mode = process.env.CITYMANAGER_COMPACT_MODE || 'candidate';
 const referenceCommit = 'd40cd6982ce644ed1e555565d48cf2c1efbdc047';
-const url = process.env.CITYMANAGER_URL || (mode === 'baseline' ? 'https://nustanakritwithai.github.io/CityManager/' : 'http://127.0.0.1:4173/CityManager/');
+const upstream = process.env.CITYMANAGER_URL || (mode === 'baseline' ? 'https://nustanakritwithai.github.io/CityManager/' : 'http://127.0.0.1:4173/CityManager/');
+const httpFixture = mode === 'baseline' ? null : await startTrafficHttpFixture(upstream), server = httpFixture?.fixture, url = httpFixture?.url ?? upstream;
 const baselinePath = resolve(process.env.CITYMANAGER_COMPACT_BASELINE || 'docs/compact-preview/baseline.json');
 const shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || `docs/compact-preview/${mode}`), output = resolve('.test-output');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
@@ -24,7 +28,8 @@ for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqu
 for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
 for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
 if (mode !== 'baseline') adoptSavedEducation(migrated);
-const city = mode === 'baseline' ? legacy : migrated, fixture = mode === 'baseline' ? legacyRaw : serialize(city);
+const fixture = mode === 'baseline' ? legacyRaw : serialize(migrated);
+const city = mode === 'baseline' ? legacy : panelEntryCity(fixture);
 const home = city.buildings.find(b => b.zone === 'R'), company = city.firms.find(f => mode === 'baseline' ? f.employees.length > 1 : firmWorkerCount(city, f.id) > 1) || city.firms[0];
 const firmBuilding = city.buildings.find(b => b.id === company.building), resident = city.households.find(h => h.home === home.id);
 const checks = [], errors = [], expectedErrors = [], screenshots = [], measures = [], liveInputs = [];
@@ -34,19 +39,29 @@ assert.equal(occupied, false, 'Run browser suites sequentially; CDP 9349 is occu
 // Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
 const profile = await mkdtemp(resolve(output, 'edge-compact-'));
 const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-let ws, id = 0; const pending = new Map(); const sleep = ms => new Promise(r => setTimeout(r, ms));
+let ws, id = 0, networkProbe=null; const pending = new Map(), externalRequests=[], providerRequests=[]; const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) { const key = ++id; const p = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(key); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(key, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id: key, method, params })); return p; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(80); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = async () => mode === 'baseline' ? evaluate('JSON.parse(window.cityManager.snapshot())') : browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
-async function button(selector) { if (await reachTouch(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`); assert.ok(r.w && r.h && !r.disabled, selector); assert.equal(await evaluate(`!!document.elementFromPoint(${r.x},${r.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}`); await click(r.x, r.y); }
+async function button(selector) { if (await (mode === 'baseline' ? reachTouch : reachTrafficControl)(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const r = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`); assert.ok(r.w && r.h && !r.disabled, selector); assert.equal(await evaluate(`!!document.elementFromPoint(${r.x},${r.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}`); await click(r.x, r.y); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu})');
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : name === 'help' ? '#toggle-help' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}`); }
-async function loadFixture() { await page(mode === 'baseline' ? 'city' : 'game'); if ((await route()).submenu) await button('#submenu-back'); await evaluate(`localStorage.setItem(${JSON.stringify(mode === 'baseline' ? 'citymanager.save.v1' : 'citymanager.save.v7')},${JSON.stringify(fixture)})`); await button('#load'); await until(`JSON.parse(window.cityManager.snapshot()).tick===${city.tick}`).catch(() => {}); assert.deepEqual(await state(), city); await close(); }
+const modelAudit=mode==='baseline'?null:createPanelModelAudit({blocked,expectedErrors,evaluate,sleep});
+async function loadFixture() {
+  if(mode==='baseline'){
+    await page('city');if((await route()).submenu)await button('#submenu-back');
+    await evaluate(`localStorage.setItem('citymanager.save.v1',${JSON.stringify(fixture)})`);await button('#load');
+    await until(`JSON.parse(window.cityManager.snapshot()).tick===${city.tick}`).catch(()=>{});assert.deepEqual(await state(),city);await close();return;
+  }
+  const before=modelAudit.begin();await loadPanelCity(server,fixture,{send,evaluate,button,until,url:url+'?starter=1'});await modelAudit.verify(before);
+  assert.deepEqual(await state(),city,'Authenticated server entry restores the expanded fixture');
+}
+
 async function place(building) { await close(); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${building.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
 async function viewport(metric) { const { name, ...dimensions } = metric; await close(); await send('Emulation.setDeviceMetricsOverride', { ...dimensions, deviceScaleFactor: 1, mobile: true }); await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&innerHeight===${metric.height}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`); await paints(); }
 async function shot(name) { await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(r.data, 'base64')); screenshots.push(name); }
@@ -184,9 +199,11 @@ async function candidateAssertions() {
   checks.push('Compact native event and meaning disclosures reveal the exact accounts, tick, amount and reason with 44px targets');
   await liveRow(); assert.deepEqual(await state(), city); checks.push('Actual trusted mouse and touch ledger presses survive 200ms live refreshes with the same DOM, exact journal identity and preserved native expansion');
   await page('game');
-  for (const id of ['save', 'load', 'new-city', 'inspector-status']) assert.equal(await evaluate(`!!document.querySelector('#${id}')?.closest('#game-content')`), true, `${id} belongs only to explicit Game page`);
-  await tall('s22-game'); await button('#save'); await assertSavedCity(evaluate, fixture); await shot('game-menu.png');
-  await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
+  for (const id of ['save', 'new-city', 'inspector-status']) assert.equal(await evaluate(`!!document.querySelector('#${id}')?.closest('#game-content')`), true, `${id} belongs only to explicit Game page`);
+  assert.equal(await evaluate('document.querySelector("#load")===null'),true,'The obsolete local Load control is absent');
+  await tall('s22-game'); const modelBefore=modelAudit.begin();await saveAndReloadPanel(server,city,{send,evaluate,button,until});await modelAudit.verify(modelBefore); await page('game'); await shot('game-menu.png');
+  const beforeCancel=server.active, writesBeforeCancel=server.writes.length;
+  await button('#new-city'); assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), true); await button('#save-management-cancel'); assert.deepEqual(await state(), city); assert.deepEqual(server.active,beforeCancel,'Cancel leaves the server head and revision unchanged');assert.equal(server.writes.length,writesBeforeCancel);await server.assertNoCityWrites(evaluate);
   await key('Escape'); assert.notEqual((await route()).open, 'true'); await mapRestored(); checks.push('Game menu owns persistence/status; actual Save, confirmation Cancel and Back/Escape preserve state and restore the map');
   for (const item of [
     { name: 'browser-height', width: 360, height: 600, screenWidth: 360, screenHeight: 780 },
@@ -200,13 +217,14 @@ async function candidateAssertions() {
     await page('city'); await tall(`${item.name}-city`); await page('help'); await tall(`${item.name}-help`);
     await page('game'); await tall(`${item.name}-game`);
     if (item.width === 980) {
+      const beforeCancel=server.active, writesBeforeCancel=server.writes.length;
       await button('#new-city'); const dialog = await evaluate('(()=>{const d=document.querySelector("dialog[open]"),r=d.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight,buttons:[...d.querySelectorAll("button")].map(e=>{const b=e.getBoundingClientRect();return{w:b.width*k,h:b.height*k,font:parseFloat(getComputedStyle(e).fontSize)*k,hit:!!document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest("dialog button")}})}})()');
-      assert.ok(dialog.left >= 0 && dialog.right <= dialog.width && dialog.top >= 0 && dialog.bottom <= dialog.height); assert.ok(dialog.buttons.every(b => b.w >= 43.5 && b.h >= 43.5 && b.font >= 13.5 && b.hit), 'Wide-request New/Cancel retain 44px physical targets and readable type'); await button('dialog button:first-of-type'); assert.deepEqual(await state(), city);
+      assert.ok(dialog.left >= 0 && dialog.right <= dialog.width && dialog.top >= 0 && dialog.bottom <= dialog.height); assert.ok(dialog.buttons.every(b => b.w >= 43.5 && b.h >= 43.5 && b.font >= 13.5 && b.hit), 'Wide-request New/Cancel retain 44px physical targets and readable type'); await button('#save-management-cancel'); assert.deepEqual(await state(), city);assert.deepEqual(server.active,beforeCancel,'Cancel leaves server head unchanged');assert.equal(server.writes.length,writesBeforeCancel);await server.assertNoCityWrites(evaluate);
     }
     await mapRestored();
   }
   assert.equal(await evaluate('(()=>{const s=document.querySelector("meta[name=viewport]").content.toLowerCase();return s.includes("user-scalable=no")||s.includes("maximum-scale")})()'), false);
-  assert.deepEqual(await state(), city); assert.deepEqual(errors, []); if (blocked) assert.equal(expectedErrors.length, 41); else assert.equal((await evaluate('window.cityManager.visuals()')).loaded.length, 41);
+  assert.deepEqual(await state(), city); assert.deepEqual(httpFixture.errors,[]);assert.deepEqual(externalRequests,[]);assert.deepEqual(providerRequests,[],'Compact QA never attempts advisor/provider requests');await server.assertNoCityWrites(evaluate); modelAudit.assertComplete();assert.deepEqual(errors, []); if (blocked) assert.equal((await evaluate('window.cityManager.visuals()')).failed.length,41); else assert.equal((await evaluate('window.cityManager.visuals()')).loaded.length, 41);
   checks.push('S22-like 360, reduced browser/keyboard heights, landscape and 980-layout/screen390 keep tall content, sticky controls, zoom availability and restored map');
   const version = await send('Browser.getVersion'), report = { schema: 1, mode, date: new Date().toISOString(), url, browser: version.product, baseline: { path: baselinePath, sourceCommit: referenceCommit, fixtureSha256: baseline.fixture.sha256, htmlSha256: baseline.provenance.htmlSha256 }, fixture: { seed: city.seed, tick: city.tick, sha256: hash(fixture) }, checks, errors, expectedModelErrors: expectedErrors.length, measures, liveInputs, screenshots, note: 'Viewport, browser/keyboard-height and physical-screen ratio are emulated. No user-photo dimensions or real-device/browser-mode claims.' };
   await writeFile(resolve(output, 'compact-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
@@ -214,10 +232,16 @@ async function candidateAssertions() {
 try {
   let tabs; for (let n = 0; n < 100; n++) { try { tabs = await (await fetch('http://127.0.0.1:9349/json/list')).json(); break; } catch { await sleep(100); } }
   assert.ok(tabs?.length); ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); } if (m.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'Failed' }); };
+  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); } if (mode==='baseline'&&m.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'Failed' }); if(mode!=='baseline'&&m.method==='Page.javascriptDialogOpening')void server.dialog(m.params,send).catch(error=>errors.push(String(error))); if(mode!=='baseline'&&m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(networkProbe?.active&&u===networkProbe.url)networkProbe.requestId=m.params.requestId;else {if(isPanelProviderRequest(u))providerRequests.push(u);if(/^https?:/.test(u)&&new URL(u).origin!==new URL(url).origin)externalRequests.push(u);}}if(mode!=='baseline'&&m.method==='Network.loadingFailed'&&m.params.requestId===networkProbe?.requestId)networkProbe.failed=m.params; };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true }); await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  if (blocked) await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
-  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready'); if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
+  if(mode==='baseline'){
+    if(blocked)await send('Fetch.enable',{patterns:[{urlPattern:'*kenney-city/models/*.glb',requestStage:'Request'}]});
+    await send('Page.navigate',{url:url+'?starter=1'});await until('!!window.cityManager');await until('window.cityManager.visuals().ready');
+    if(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"'))await button('#pause');
+  }else{
+    await server.install(send);
+    await installTrafficNetworkFence({send,evaluate,protocol:await (await fetch('http://127.0.0.1:9349/json/protocol')).json(),origin:new URL(url).origin,blockedModels:blocked,additionalBlocked:[...panelProviderDenials(new URL(url).origin),new URL(url).origin+'/api/city-advisor/*',new URL(url).origin+'/*/api/city-advisor/*'],observeProbe:probe=>(networkProbe={url:probe})});
+  }
   await loadFixture(); await primaryCapture(); assert.deepEqual(await state(), city); assert.deepEqual(errors, []);
   const version = await send('Browser.getVersion');
   if (mode === 'baseline') {
@@ -226,4 +250,4 @@ try {
     await mkdir(dirname(baselinePath), { recursive: true }); await writeFile(baselinePath, JSON.stringify(result, null, 2)); console.log(JSON.stringify(result, null, 2));
   } else { await candidateAssertions(); }
 } catch (error) { if (ws?.readyState === 1) try { await shot('compact-failure.png'); console.error(await route()); } catch {} console.error('Compact layout measurements', JSON.stringify(measures)); console.error('Unexpected browser errors', errors); throw error; }
-finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }
+finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); if(httpFixture)await httpFixture.close(); }

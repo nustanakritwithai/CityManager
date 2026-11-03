@@ -1,29 +1,33 @@
 import { browserSnapshotState } from './browser-snapshot.ts';
+import { createPanelModelAudit } from './panel-model-audit.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
 // Real installed Edge, native DOM input and WebGL; no downloaded browser.
 import {spawn} from 'node:child_process';
 import {mkdir,readFile,writeFile,mkdtemp} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
-import {adoptSavedEducation,createCity,deserialize,serialize} from '../src/sim.ts';
-import { assertOriginalSave } from './education-adoption.mjs';
+import {adoptSavedEducation,createCity,deserialize,expandValidatedCity,serialize} from '../src/sim.ts';
+import { startTrafficHttpFixture, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
 import { reachTouch } from './touch-reach.mjs';
 const legacyRaw=await readFile(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),legacy=JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const fixture=deserialize(legacyRaw),fixtureJson=serialize(fixture);assert.equal(fixture.version, 9);
-for(const key of ['accounts','ledger','goodsLedger','goods'])assert.deepEqual(fixture[key],legacy[key]);
-for(const key of ['seed','rng','tick','nextId'])assert.equal(fixture[key],legacy[key]);
-adoptSavedEducation(fixture);
+const legacyCity=deserialize(legacyRaw),fixtureJson=serialize(legacyCity);assert.equal(legacyCity.version, 9);
+for(const key of ['accounts','ledger','goodsLedger','goods'])assert.deepEqual(legacyCity[key],legacy[key]);
+for(const key of ['seed','rng','tick','nextId'])assert.equal(legacyCity[key],legacy[key]);
+const fixture=expandValidatedCity(legacyCity);adoptSavedEducation(fixture);
 const output=resolve('.test-output'), shots=resolve(process.env.CITYMANAGER_SCREENSHOT_DIR||'docs/submenu-preview');
-const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
+const upstream=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
 await mkdir(output,{recursive:true}); await mkdir(shots,{recursive:true});
 // Isolate this suite from the shared 9349/profile used by adjacent browser processes.
 const debugPort=9371, profile=await mkdtemp(resolve(output,'submenu-profile-'));
 let occupied=false;try{occupied=(await fetch(`http://127.0.0.1:${debugPort}/json/version`,{signal:AbortSignal.timeout(500)})).ok;}catch{}
 assert.equal(occupied,false,'Submenu browser port already in use');
+const httpFixture=await startTrafficHttpFixture(upstream), server=httpFixture.fixture, url=httpFixture.url;
 const child=spawn(process.env.CITYMANAGER_BROWSER||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',['--headless=new','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-component-update','--remote-debugging-address=127.0.0.1',`--remote-debugging-port=${debugPort}`,`--user-data-dir=${profile}`,'about:blank'],{windowsHide:true,stdio:'ignore'});
-let ws,id=0; const pending=new Map(), errors=[],expected=[],checks=[],screenshots=[];
+let ws,id=0,networkProbe=null; const pending=new Map(), errors=[],expected=[],checks=[],screenshots=[],externalRequests=[],providerRequests=[];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const modelAudit=createPanelModelAudit({blocked:process.env.CITYMANAGER_BLOCK_MODELS==='1',expectedErrors:expected,evaluate,sleep});
 async function send(method,params={}) {const key=++id; const promise=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('CDP timeout '+method)),30000);pending.set(key,{resolve:v=>{clearTimeout(timer);resolve(v)},reject});});ws.send(JSON.stringify({id:key,method,params}));return promise;}
 async function evaluate(expression){const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
 async function until(expression,timeout=15000){const started=Date.now();while(Date.now()-started<timeout){if(await evaluate(expression))return;await sleep(80);}throw Error('Timed out '+expression);}
@@ -37,6 +41,12 @@ async function button(selector){ if (await reachTouch(evaluate, button, selector
 }
 async function key(value,code=value){await send('Input.dispatchKeyEvent',{type:'keyDown',key:value,code,windowsVirtualKeyCode:value==='Escape'?27:undefined});await send('Input.dispatchKeyEvent',{type:'keyUp',key:value,code,windowsVirtualKeyCode:value==='Escape'?27:undefined});}
 const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
+async function loadServerCity(raw,expectedCity){
+ await server.leave({send,evaluate,until});
+ const ack=await server.seed(raw);assert.equal(ack.raw,raw);assert.equal(ack.revision,1);
+ const before=modelAudit.begin();await send('Page.navigate',{url:url+'?starter=1'});await server.enter({evaluate,button});await modelAudit.verify(before);
+ assert.deepEqual(await state(),expectedCity);server.assertDurable(raw,ack.revision);await server.assertNoCityWrites(evaluate);
+}
 async function screenshot(name){await sleep(80);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(resolve(shots,name),Buffer.from(r.data,'base64'));screenshots.push(name);}
 async function open(section){const page=['#guide','#simulation-rules'].includes(section)?'help':'city';if(await evaluate('document.querySelector("#inspector").dataset.open!=="true"||document.querySelector("#inspector").dataset.page!=='+JSON.stringify(page))){if(await evaluate('document.querySelector("#inspector").dataset.open==="true"'))await button('#close-inspector');await button(page==='help'?'#toggle-help':'#toggle-inspector');}if(await evaluate('!!document.querySelector("#inspector").dataset.submenu'))await button('#submenu-back');await button(`${section}>summary`);await until(`document.querySelector('#inspector').dataset.submenu===${JSON.stringify(section.slice(1))}`);}
 async function layout(){return evaluate(`(()=>{const panel=document.querySelector('#inspector'),r=panel.getBoundingClientRect(),body=document.querySelector('#inspector-body'),ratio=Math.min(1,screen.width/innerWidth),content=body.querySelector('.sm-content'),font=parseFloat(getComputedStyle(content.querySelector('p')).fontSize);return{width:innerWidth,height:innerHeight,screenWidth:screen.width,touch:matchMedia('(any-pointer:coarse)').matches,maxTouch:navigator.maxTouchPoints,left:r.left,right:r.right,top:r.top,bottom:r.bottom,scrollWidth:body.scrollWidth,clientWidth:body.clientWidth,font,physicalFont:font*ratio,buttons:['#close-inspector','#submenu-back'].map(s=>{const e=document.querySelector(s),b=e.getBoundingClientRect();return{selector:s,width:b.width*ratio,height:b.height*ratio,hit:!!document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest(s)}})}})()`);}
@@ -46,21 +56,16 @@ function assertRows(actual, journal, kind){for(let i=0;i<actual.length;i++){cons
 try{
  let tabs;for(let n=0;n<100;n++){try{tabs=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();break;}catch{await sleep(100);}}
  assert.ok(tabs?.length);ws=new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
- ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error'){const a=m.params.args,blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1'&&a.length===2&&/^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value)&&a[1]?.value==='Network error';(blocked?expected:errors).push(a);}};
- await send('Runtime.enable');await send('Page.enable');
+ ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}if(m.method==='Page.javascriptDialogOpening')void server.dialog(m.params,send).catch(error=>errors.push(error.message));if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(networkProbe?.active&&u===networkProbe.url)networkProbe.requestId=m.params.requestId;else {if(isPanelProviderRequest(u))providerRequests.push(u);if(/^https?:/.test(u)&&new URL(u).origin!==new URL(url).origin)externalRequests.push(u);}}if(m.method==='Network.loadingFailed'&&m.params.requestId===networkProbe?.requestId)networkProbe.failed=m.params;if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error'){const a=m.params.args,blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1'&&a.length===2&&/^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value)&&a[1]?.value==='Network error';(blocked?expected:errors).push(a);}};
+ await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Network.setCacheDisabled',{cacheDisabled:true});await server.install(send);
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:2,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
- if(process.env.CITYMANAGER_BLOCK_MODELS==='1') {
-  // Browser-side URL blocking keeps the same real missing-model scenario without
-  // 41 asynchronous Fetch.pause/fail CDP round trips (which can deadlock startup).
-  await send('Network.enable');await send('Network.setCacheDisabled',{cacheDisabled:true});
-  await send('Network.setBlockedURLs',{urls:['*kenney-city/models/*.glb']});
- }
- await send('Page.navigate',{url:url+'?starter=1'});await until('!!window.cityManager');await until('window.cityManager.visuals().ready');await button('#pause');
- // Asset startup can take multiple simulated days on a loaded runner. Load an
- // explicit pristine city through the same real controls before the empty-state check.
- await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(createCity(61025)))})`);await button('#load');await button('#close-inspector');
+ await installTrafficNetworkFence({send,evaluate,protocol:await(await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(),origin:new URL(url).origin,blockedModels:process.env.CITYMANAGER_BLOCK_MODELS==='1',additionalBlocked:panelProviderDenials(new URL(url).origin),observeProbe:probe=>(networkProbe={url:probe})});
+ // Seed real server ACKs and enter through the visible authenticated gate. The app
+ // opens paused; the empty-city check must never race simulated time.
+ const emptyRaw=serialize(createCity(61025)),empty=expandValidatedCity(deserialize(emptyRaw));
+ await loadServerCity(emptyRaw,empty);
  const initial=await state();assert.equal(initial.goodsLedger.length,0);await open('#goods-section');assert.equal(await evaluate('!!document.querySelector("#goods-ledger .sm-empty")'),true);await assertLayout();await screenshot('phone-goods-empty.png');assert.deepEqual(await state(),initial);checks.push('Empty goods state is explicit and does not mutate the city');
- await button('#close-inspector');await button('#toggle-game-menu');await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`);await button('#load');assert.deepEqual(await state(),fixture,'Loaded legacy city keeps every saved field and adds only the empty education record');await assertOriginalSave(evaluate,fixtureJson);await button('#close-inspector');const baseline=await state(),baselineRaw=await evaluate('window.cityManager.snapshot()');
+ await button('#close-inspector');await loadServerCity(fixtureJson,fixture);const baseline=await state(),baselineRaw=await evaluate('window.cityManager.snapshot()'),baselineHead=server.active;
  const home=baseline.buildings.find(b=>b.zone==='R'),homePoint=await evaluate(`window.cityManager.cellScreen(${home.cell})`);assert.equal(await evaluate(`document.elementFromPoint(${homePoint.x},${homePoint.y})?.id`),'city-canvas');await click(homePoint.x,homePoint.y);
  for(const [kind,section,root,journal,initialCount]of[['money','#money-section','#ledger',baseline.ledger,12],['goods','#goods-section','#goods-ledger',baseline.goodsLedger,10]]){
   await open(section);await assertLayout();let actual=await rows(kind);assert.equal(actual.length,Math.min(initialCount,journal.length));assertRows(actual,journal,kind);assert.match(await evaluate(`document.querySelector('${root} .sm-scope').textContent`),/ข้อมูลทั้งเมือง.*เรียงจากรายการล่าสุด/);await screenshot(`phone-${kind}.png`);
@@ -85,6 +90,7 @@ try{
  // button just before desktop CSS hides it, producing a stale (0,0) hit target.
  await until('innerWidth===1440&&screen.width===1440&&document.documentElement.dataset.touchUi==="false"');
  await open('#money-section');await assertLayout();await screenshot('desktop-money.png');assert.deepEqual(await state(),baseline);assert.equal(await evaluate('window.cityManager.snapshot()'),baselineRaw);assert.equal(await evaluate('(()=>{const s=document.querySelector("meta[name=viewport]").content.toLowerCase().replaceAll(" ","");return s.includes("user-scalable=no")||s.includes("maximum-scale")})()'),false);checks.push('360px, phone-requested 980px/screen390, landscape and desktop layouts keep text and controls usable with zoom available');
- assert.deepEqual(errors,[]);if(process.env.CITYMANAGER_BLOCK_MODELS==='1'){assert.equal(expected.length,41);const visual=await evaluate('window.cityManager.visuals()');assert.equal(visual.failed.length,41);assert.equal(visual.loaded.length,0);}else assert.equal((await evaluate('window.cityManager.visuals()')).loaded.length,41);
+ server.assertDurable(baselineHead.raw,baselineHead.revision);await server.assertNoCityWrites(evaluate);
+ assert.deepEqual(httpFixture.errors,[]);assert.deepEqual(externalRequests,[]);assert.deepEqual(providerRequests,[]);assert.deepEqual(errors,[]);modelAudit.assertComplete();if(process.env.CITYMANAGER_BLOCK_MODELS==='1'){const visual=await evaluate('window.cityManager.visuals()');assert.equal(visual.failed.length,41);assert.equal(visual.loaded.length,0);}else assert.equal((await evaluate('window.cityManager.visuals()')).loaded.length,41);
  const version=await send('Browser.getVersion'),report={date:new Date().toISOString(),url,browser:version.product,checks,errors,expectedModelErrors:expected.length,layouts,screenshots,note:'Installed Edge; screen/touch emulation does not establish a real phone browser mode or real-device QA.'};await writeFile(resolve(output,'submenus-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
-}catch(error){if(ws?.readyState===1)try{await screenshot('submenu-failure.png');console.error(await evaluate('({section:document.querySelector("#inspector")?.dataset.submenu,status:document.querySelector("#status")?.textContent})'));}catch{}console.error('Browser errors',errors);throw error;}finally{if(ws?.readyState===1){try{await send('Browser.close')}catch{}ws.close()}child.kill();}
+}catch(error){if(ws?.readyState===1)try{await screenshot('submenu-failure.png');console.error(await evaluate('({section:document.querySelector("#inspector")?.dataset.submenu,status:document.querySelector("#status")?.textContent})'));}catch{}console.error('Browser errors',errors);throw error;}finally{if(ws?.readyState===1){try{await send('Browser.close')}catch{}ws.close()}child.kill();await httpFixture.close();}

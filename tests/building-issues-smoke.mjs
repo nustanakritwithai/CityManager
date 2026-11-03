@@ -3,28 +3,27 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, buildCampus, toggleCampus, bulldoze, GATEWAY } from '../src/sim.ts';
+import { serialize } from '../src/sim.ts';
+import { buildingIssuesFixture } from './building-issues-fixture.ts';
+import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
 import { buildingIssues } from '../src/building-issues.ts';
-import { SAVE_KEY } from '../src/save-storage.ts';
 import { reachTouch } from './touch-reach.mjs';
+import { installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
 
-const city = createCity(61025); for (let day = 0; day < 90; day++) step(city);
-let campusCell = -1;
-for (let cell = 0; cell < city.cells.length; cell++) if (buildCampus(city, cell, 'school').ok) { campusCell = cell; break; }
-assert.ok(campusCell >= 0); toggleCampus(city, city.education.campuses[0].id);
-assert.ok(bulldoze(city, GATEWAY + 1).ok);
-const raw = serialize(city); assert.deepEqual(deserialize(raw), city);
-assert.ok(buildingIssues(city).some(issue => issue.remaining > 0));
+const { raw, city, campusCell } = buildingIssuesFixture();
 if (process.argv.includes('--preflight')) { console.log(JSON.stringify({ campusCell, issues: buildingIssues(city).map(i => ({ cell: i.cell, kind: i.kind, remaining: i.remaining })) })); process.exit(0); }
 const output = resolve('.test-output/building-issues'), port = 9369;
 const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const origin = new URL(url); assert.equal(origin.hostname, '127.0.0.1');
+const panelServer = createPanelServerFixture(url);
 await mkdir(output, { recursive: true });
 let occupied = false; try { occupied = (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Do not attach to another browser session');
 const profile = await mkdtemp(resolve(output, 'profile-'));
 const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-let ws, seq = 0; const pending = new Map(), errors = [], external = [], checks = [];
+let ws, seq = 0; const pending = new Map(), errors = [], external = [], providerRequests = [], checks = [];
+let networkProbe; const observeProbe = url => (networkProbe = {url, active:false, requestId:null, failed:null});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const watchdog = setTimeout(() => { child.kill(); console.error('Building issue acceptance timed out'); process.exit(1); }, 180_000);
 async function send(method, params = {}) { const id = ++seq; const result = new Promise((yes, no) => { const timer = setTimeout(() => { pending.delete(id); no(Error(`CDP timeout: ${method}`)); }, 30_000); pending.set(id, { yes: value => { clearTimeout(timer); yes(value); }, no: error => { clearTimeout(timer); no(error); } }); }); ws.send(JSON.stringify({ id, method, params })); return result; }
@@ -40,13 +39,14 @@ async function touch(p, drag = false) { await send('Input.dispatchTouchEvent', {
 try {
   let targets; for (let i = 0; i < 100; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); break; } catch { await sleep(100); } }
   assert.ok(targets?.length, 'Installed browser started'); ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise((yes, no) => { ws.onopen = yes; ws.onerror = no; });
-  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.no(Error(JSON.stringify(m.error))) : p.yes(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.text); if (m.method === 'Fetch.requestPaused') { const local = new URL(m.params.request.url).origin === origin.origin; if (!local) external.push(m.params.request.url); void send(local ? 'Fetch.continueRequest' : 'Fetch.failRequest', local ? { requestId: m.params.requestId } : { requestId: m.params.requestId, errorReason: 'BlockedByClient' }); } };
-  await send('Runtime.enable'); await send('Page.enable'); await send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.no(Error(JSON.stringify(m.error))) : p.yes(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.text); if (m.method === 'Page.javascriptDialogOpening') void panelServer.dialog(m.params, send).catch(error => errors.push(String(error))); if (m.method === 'Network.loadingFailed' && m.params.requestId === networkProbe?.requestId) networkProbe.failed = m.params; if (m.method === 'Network.requestWillBeSent') { const u=m.params.request.url; if(networkProbe?.active && u===networkProbe.url) networkProbe.requestId=m.params.requestId; else { if (isPanelProviderRequest(u)) providerRequests.push(u); if (/^https?:/.test(u) && new URL(u).origin!==origin.origin) external.push(u); } } if (m.method === 'Fetch.requestPaused') { void (async () => { if (isPanelProviderRequest(m.params.request.url)) { providerRequests.push(m.params.request.url); await send('Fetch.failRequest', {requestId:m.params.requestId,errorReason:'BlockedByClient'}); return; } if (await panelServer.intercept(m.params, send)) return; const local = new URL(m.params.request.url).origin === origin.origin; await send(local ? 'Fetch.continueRequest' : 'Fetch.failRequest', local ? { requestId: m.params.requestId } : { requestId: m.params.requestId, errorReason: 'BlockedByClient' }); })().catch(error => { errors.push(String(error)); void send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'Aborted' }).catch(() => {}); }); } };
+  await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await installTrafficNetworkFence({send,evaluate,protocol:await(await fetch(`http://127.0.0.1:${port}/json/protocol`)).json(),origin:origin.origin,additionalBlocked:panelProviderDenials(origin.origin),observeProbe}); await panelServer.install(send); await send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url }); await until('!!window.cityManager');
+  const ack = await panelServer.load(raw, { send, evaluate, button, url });
+  assert.equal(ack.raw, raw, 'Server acknowledges exact legacy fixture bytes');
+  assert.equal(ack.revision, 1, 'Initial server creation yields revision one');
   if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
-  await button('#toggle-game-menu'); await evaluate(`localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(raw)})`); await button('#load'); await close();
-  const before = await evaluate('window.cityManager.snapshot()'); assert.equal(before, raw);
+  const before = await evaluate('window.cityManager.snapshot()'); assert.equal(before, serialize(city), 'Live city exactly matches validated migrated fixture');
   for (const mobile of [false, true]) {
     if (mobile) { await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 }); await paints(); }
     const p = await marker(); assert.ok(p, 'An unobstructed issue marker is visible'); assert.ok(p.w >= 44 && p.h >= 44 && p.label);
@@ -75,7 +75,10 @@ try {
     await button('[data-tool="road"]'); assert.ok(await evaluate('[...document.querySelectorAll(".map-issue")].every(e=>getComputedStyle(e).pointerEvents==="none")')); await button('[data-tool="select"]'); await screenshot(mobile ? 'mobile-issue-map.png' : 'desktop-issue-map.png');
     checks.push(`${mobile ? '390px touch-emulated' : 'Desktop mouse'}: 44px accessible badge, drag vs tap, existing place route, exact reasons, read-only and road-tool pass-through`);
   }
-  assert.deepEqual(errors, []); assert.deepEqual(external, []);
+  await assertNoCityWrites(evaluate);
+  assert.equal(panelServer.active.raw, raw, 'Read-only marker interactions never rewrite server ACK');
+  assert.equal(panelServer.active.revision, ack.revision, 'Read-only marker interactions never advance server revision');
+  assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(providerRequests, [], 'No advisor/provider requests');
   await writeFile(resolve(output, 'report.json'), JSON.stringify({ checks, errors, external, note: 'Headless browser; touch and viewport emulated, no physical-device FPS claim.' }, null, 2)); console.log(JSON.stringify({ checks, errors, external }));
 } catch (error) { if (ws?.readyState === 1) try { await screenshot('failure.png'); } catch {} throw error; }
 finally { clearTimeout(watchdog); if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }

@@ -2,22 +2,25 @@ import { browserSnapshotState } from './browser-snapshot.ts';
 // Small dependency-free CDP smoke test against the installed Microsoft Edge.
 // Runs real browser/WebGL; emulated mobile metrics do not establish device QA.
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { access, createCity, step, buildPark, bulldoze, GATEWAY, deserialize, serialize, firmWorkerCount } from '../src/sim.ts';
+import { access, createCity, step, buildPark, bulldoze, GATEWAY, deserialize, serialize, firmWorkerCount, expandValidatedCity, adoptSavedEducation } from '../src/sim.ts';
 import { PARK, PARK_STAFF } from '../src/parks.ts';
-import { createParkRuntime, advanceParkRuntime, serializeParkSession } from '../src/park-runtime.ts';
-import { reachTouch } from './touch-reach.mjs';
-import { assertAdoptedCity, assertOriginalSave } from './education-adoption.mjs';
+import { createParkRuntime, advanceParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
+import { trafficHttpHandler, reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
+import { createFeedbackServerFixture } from './player-feedback-server-fixture.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
+
 
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const fixture = deserialize(legacyRaw), fixtureJson = serialize(fixture);
-assert.equal(fixture.version, 9);
-for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(fixture[key], legacy[key]);
-for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], legacy[key]);
+const legacyCity = deserialize(legacyRaw), fixtureJson = serialize(legacyCity);
+assert.equal(legacyCity.version, 9);
+for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(legacyCity[key], legacy[key]);
+for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(legacyCity[key], legacy[key]);
 
 /** Capture every intentionally intercepted request and settle the CDP response.
  * Rejections remain test failures; teardown cancellation is recorded separately. */
@@ -56,9 +59,16 @@ if (process.argv.includes('--intercept-preflight')) {
   console.log('Interception success/failure/pending-cleanup bookkeeping preflight passed'); process.exit(0);
 }
 
+const fixture = expandValidatedCity(legacyCity); adoptSavedEducation(fixture);
 const root = process.cwd(), output = resolve(root, '.test-output');
 const screenshots = resolve(root, process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/screenshots');
-const targetUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
+const upstream = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
+const httpErrors = [], deliveries = []; let handler;
+const proxy = createServer((req, res) => void handler(req, res));
+await new Promise((resolve, reject) => { proxy.once('error', reject); proxy.listen(0, '127.0.0.1', resolve); });
+const origin = `http://127.0.0.1:${proxy.address().port}`, targetUrl = origin + new URL(upstream).pathname;
+const feedback = createFeedbackServerFixture(targetUrl), server = feedback.core;
+handler = trafficHttpHandler({origin, upstream, fixture: feedback, errors: httpErrors, deliveries});
 await mkdir(output, { recursive: true }); await mkdir(screenshots, { recursive: true });
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT || 9349);
 const edge = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
@@ -68,6 +78,7 @@ const profile = await mkdtemp(resolve(output, `edge-profile-${debugPort}-`));
 const child = spawn(edge, ['--headless=new', ...softwareFlags, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0, closing = false; const pending = new Map(); const errors = []; const expectedAssetErrors = []; const checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+let completedEntries = 0, networkProbe = null; const externalRequests = [], providerRequests = [];
 async function send(method, params = {}) {
   const id = ++sequence;
   const result = new Promise((resolve, reject) => {
@@ -106,8 +117,9 @@ async function clickAt(x, y) {
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
 }
 async function button(selector) {
-  if (await reachTouch(evaluate, button, selector)) return;
+  if (await reachTrafficControl(evaluate, button, selector)) return;
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Control is actually hit: ${selector}`);
   await clickAt(p.x, p.y);
 }
 const cellPoint = index => evaluate(`window.cityManager.cellScreen(${index})`);
@@ -115,6 +127,46 @@ async function cell(index) { const p = await cellPoint(index); await clickAt(p.x
 async function key(key, code = key) {
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: key === 'Escape' ? 27 : key === ' ' ? 32 : undefined });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: key === 'Escape' ? 27 : key === ' ' ? 32 : undefined });
+}
+// All scenarios use the actual isolated service and native authenticated entry.
+// Reseeding is a new scenario, not an in-app Load operation.
+async function verifyEntryModels() {
+  completedEntries++;
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') {
+    await interceptions.settle(); const visuals = await evaluate('window.cityManager.visuals()');
+    assert.equal(visuals.failed.length, 41); assert.equal(visuals.loaded.length, 0);
+    for (let n = 0; n < 100 && expectedAssetErrors.length < 41 * completedEntries; n++) await sleep(50);
+    assert.equal(expectedAssetErrors.length, 41 * completedEntries, 'Each fresh document reports exactly its blocked models');
+  }
+}
+async function enterScenario(raw) {
+  await server.leave({send, evaluate, until});
+  const ack = await server.seed(raw); assert.equal(ack.raw, raw); assert.equal(ack.revision, 1);
+  await send('Page.navigate', {url: targetUrl + '?starter=1'}); await server.enter({evaluate, button}); await verifyEntryModels();
+  server.assertDurable(raw, 1); await server.assertNoCityWrites(evaluate); return ack;
+}
+async function saveSession() {
+  await game(); await server.settle();
+  const raw = await evaluate('window.cityManager.sessionSnapshot()'), revision = server.active.revision, cursor = server.writes.length;
+  await button('#save');
+  const start = Date.now();
+  while (Date.now() - start < 30000) {
+    if (server.active.raw === raw && server.active.revision > revision && await evaluate("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')")) {
+      await until("document.querySelector('#status').textContent.includes('บันทึกเมืองบนเซิร์ฟเวอร์แล้ว')");
+      await server.settle(); const head = server.assertDurable(raw);
+      assert.ok(server.writes.slice(cursor).some(event => event.status === 200 && event.command.action === 'save' && event.command.cityId === head.cityId && event.command.raw === raw && event.response.raw === raw && event.response.revision === head.revision && event.command.expectedRevision === head.revision - 1), 'Exact native Save has an observed contiguous server ACK');
+      await server.assertNoCityWrites(evaluate); return head;
+    }
+    await sleep(80);
+  }
+  throw Error('Exact session was not acknowledged by the server');
+}
+async function reloadAcknowledged(head) {
+  await server.leave({send, evaluate, until});
+  await send('Page.navigate', {url: targetUrl + '?starter=1'}); await server.enter({evaluate, button}); await verifyEntryModels();
+  assert.equal(server.active.cityId, head.cityId); assert.equal(server.active.raw, head.raw);
+  assert.ok(server.active.revision >= head.revision); // fixture verifies every lifecycle revision ACK
+  await server.assertNoCityWrites(evaluate);
 }
 async function screenshot(name) {
   const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
@@ -138,14 +190,17 @@ try {
         /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(args[0]?.value) && args[1]?.value === 'Network error';
       (deliberatelyBlocked ? expectedAssetErrors : errors).push(args);
     }
+    if (message.method === 'Network.requestWillBeSent') { const u = message.params.request.url; if (networkProbe?.active && u === networkProbe.url) networkProbe.requestId = message.params.requestId; else { if (isPanelProviderRequest(u)) providerRequests.push(u); if (/^https?:/.test(u) && new URL(u).origin !== origin) externalRequests.push(u); } }
+    if (message.method === 'Network.loadingFailed' && message.params.requestId === networkProbe?.requestId) networkProbe.failed = message.params;
+    if (message.method === 'Page.javascriptDialogOpening') void server.dialog(message.params, send).catch(error => errors.push(String(error)));
     if (message.method === 'Fetch.requestPaused') interceptions.handle(message.params);
   };
-  await send('Runtime.enable'); await send('Page.enable');
+  await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', {cacheDisabled: true}); await server.install(send);
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: targetUrl + '?starter=1' });
-  console.log('Edge navigated; awaiting game startup');
-  await until('!!window.cityManager');
+  await installTrafficNetworkFence({send, evaluate, protocol: await (await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(), origin, additionalBlocked: panelProviderDenials(origin), observeProbe: probe => (networkProbe = {url: probe})});
+  await enterScenario(serialize(createCity(61025)));
+  console.log('Authenticated server entry completed');
   console.log('Game started; awaiting admitted models');
   await until('window.cityManager.visuals().ready');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') await interceptions.settle();
@@ -153,7 +208,7 @@ try {
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(visualStatus.failed.length, 41);
   else assert.equal(visualStatus.loaded.length, 41);
   assert.equal(await evaluate('window.cityManager.engine'), 'PlayCanvas 2.23.3');
-  await button('#pause'); assert.equal(await paused(), true);
+  assert.equal(await paused(), true);
   checks.push('Real Edge WebGL2 startup and pause');
   console.log('Edge WebGL startup, models and pause passed');
   const groundState = await evaluate('window.cityManager.ground()');
@@ -167,9 +222,9 @@ try {
   assert.deepEqual(await state(), beforeGridTools, 'Ground and grid modes never mutate the city');
   checks.push('Original bounded ground textures and construction-only grid do not mutate simulation');
   // Preserve a deterministic, paused baseline through the public Save control.
-  await game(); await button('#save'); const saved = await state();
-  assert.match(await text('#status'), /Saved day/);
-  await button('#new-city'); await button('dialog button:first-of-type');
+  const baselineHead = await saveSession(); const saved = await state();
+  assert.match(await text('#status'), /บันทึกเมืองบนเซิร์ฟเวอร์แล้ว/);
+  await button('#new-city'); await button('#save-management-cancel');
   await button('#new-city'); await key('Escape');
   assert.equal(await evaluate('!!document.querySelector("dialog[open]")'), false);
   assert.deepEqual(await state(), saved); checks.push('Game-menu new-city cancel and Escape keep state'); await closeInspector();
@@ -215,8 +270,9 @@ try {
   await button('[data-tool="select"]'); await cell(15 * 24 + 14);
   assert.match(await text('#explanation'), /ยังไม่มีถนนข้างแปลงที่เชื่อมถึงประตูภายนอก/);
   await screenshot('desktop-disconnected.png'); checks.push('Drag road, zoning, picking and disconnected explanation');
-  await game(); await button('#load'); assert.deepEqual(await state(), saved); assert.equal(await paused(), true); await closeInspector();
-  checks.push('Save/load round trip restores exact paused simulation');
+  await enterScenario(baselineHead.raw); assert.deepEqual(await state(), saved); assert.equal(await paused(), true);
+  checks.push('A separately seeded acknowledged baseline restores the exact paused simulation after edits');
+  await button('[data-camera="zoom-out"]'); await button('[data-camera="zoom-out"]');
   const parkCell = 16 * 24 + 12, beforePark = await state();
   assert.equal(access(beforePark, parkCell), false, 'test garden is isolated from roads');
   await button('[data-tool="park"]'); await cell(parkCell);
@@ -230,19 +286,22 @@ try {
   assert.match(await text('#place-tags'), /ไม่ต้องติดถนน/);
   assert.doesNotMatch(await text('#explanation'), /ต้องเชื่อมถนน|เครือข่ายไม่พอ|ยังไม่มีโซน/);
   await screenshot('desktop-park.png');
-  await game(); await button('#save'); await closeInspector();
+  const parkHead = await saveSession(); await closeInspector();
+  await reloadAcknowledged(parkHead); assert.deepEqual(await state(), withPark);
+  await button('[data-camera="zoom-out"]'); await button('[data-camera="zoom-out"]');
   await button('[data-tool="bulldoze"]'); await cell(parkCell);
   const removedPark = await state(); assert.equal(removedPark.parks.length, beforePark.parks.length);
   assert.equal(removedPark.accounts.treasury, withPark.accounts.treasury - 2000);
   await cell(parkCell); assert.deepEqual((await state()).accounts, removedPark.accounts);
-  await game(); await button('#load'); assert.deepEqual(await state(), withPark);
+  await enterScenario(parkHead.raw); assert.deepEqual(await state(), withPark);
   await closeInspector(); await button('[data-tool="select"]');
-  checks.push('Off-road one-cell park: real UI construction, duplicate click, detail, save, demolition and load');
+  checks.push('Off-road one-cell park: real UI construction, duplicate click, detail, acknowledged save/reload, demolition and a separately seeded restoration');
   const staffFixture = createCity(61025);
   for (let day = 0; day < 45; day++) step(staffFixture);
   for (let i = 0; i < staffFixture.cells.length; i++) if (staffFixture.cells[i].road && i !== GATEWAY) bulldoze(staffFixture, i);
   buildPark(staffFixture, parkCell);
-  await game(); await evaluate('localStorage.setItem("citymanager.save.v7",' + JSON.stringify(serialize(staffFixture)) + ')'); await button('#load'); await closeInspector();
+  await enterScenario(serialize(staffFixture)); await closeInspector();
+  await button('[data-camera="zoom-out"]'); await button('[data-camera="zoom-out"]');
   await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=46'); await button('#pause');
   const staffed = await state(), staffedPark = staffed.parks[0];
@@ -255,16 +314,18 @@ try {
   assert.match(await text('#place-metrics'), /100%/);
   await screenshot('desktop-park-workforce.png');
   const staffOwed = Object.values(staffedPark.staffing.workDays).reduce((n, d) => n + d * PARK_STAFF.dailyWage, 0);
-  await game(); await button('#save'); await closeInspector();
+  const staffedHead = await saveSession(); await closeInspector();
+  await reloadAcknowledged(staffedHead); assert.deepEqual(await state(), staffed);
+  await button('[data-camera="zoom-out"]'); await button('[data-camera="zoom-out"]');
   await button('[data-tool="bulldoze"]'); await cell(parkCell);
   const staffRemoved = await state(); assert.equal(staffRemoved.parks.length, 0);
   assert.equal(staffRemoved.ledger.filter(e => e.reason === 'Monthly park wages #' + staffedPark.id).reduce((n, e) => n + e.amount, 0), staffOwed);
-  await game(); await button('#load'); assert.deepEqual(await state(), staffed); await closeInspector();
-  checks.push('Real park staffing after a browser day without roads: staffing/capacity/wage UI, earned payroll on removal and exact save/load');
+  await enterScenario(staffedHead.raw); assert.deepEqual(await state(), staffed); await closeInspector();
+  checks.push('Real park staffing after a browser day without roads: staffing/capacity/wage UI, earned payroll on removal and exact acknowledged save/reload');
 
   // A valid real economy supplies the people and paid municipal allocation. Only
   // the saved minute is staged; browser controls drive all subsequent activity.
-  const activityCity = deserialize(serialize(staffFixture)); step(activityCity);
+  const activityCity = expandValidatedCity(deserialize(serialize(staffFixture))); step(activityCity);
   const activityRuntime = createParkRuntime(activityCity);
   for (let minute = 0; minute < 1200; minute++) {
     advanceParkRuntime(activityCity, activityRuntime, 1, () => step(activityCity));
@@ -272,7 +333,7 @@ try {
   }
   assert.ok(activityRuntime.activity.visitors.length > 0 && Object.keys(activityRuntime.recreation.citizens).length > 0);
   const activitySave = serializeParkSession(activityCity, activityRuntime);
-  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(activitySave)})`); await button('#load');
+  await enterScenario(activitySave);
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), activitySave);
   await closeInspector(); await button('#toggle-inspector');
   await button('#park-recreation > button');
@@ -290,24 +351,26 @@ try {
   await button('#toggle-inspector');
   assert.equal(await evaluate('document.querySelector("#park-recreation-data details").open'), true);
   await screenshot('desktop-park-recreation.png');
-  await game(); await button('#save'); const sessionSaved = await evaluate('window.cityManager.sessionSnapshot()');
-  await closeInspector(); await button('#pause');
-  await sleep(1200); await button('#pause'); await game(); await button('#load');
+  const sessionHead = await saveSession(), sessionSaved = sessionHead.raw;
+  await reloadAcknowledged(sessionHead);
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
+  const savedMinute = await evaluate('window.cityManager.parks().minute');
+  await button('#pause'); await until(`window.cityManager.parks().minute > ${savedMinute}`, 8000); await button('#pause');
+  assert.notEqual(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved, 'Live recreation actually advances after the saved session');
+  await enterScenario(sessionSaved);
+  assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved, 'A fresh acknowledged scenario restores the earlier fractional runtime');
   const corruptSession = JSON.parse(sessionSaved); corruptSession.parkRuntime.recreation.minute++;
-  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(JSON.stringify(corruptSession))})`);
-  await button('#load'); assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
-  assert.match(await text('#inspector-status'), /โหลดไม่สำเร็จ.*sidecar clock mismatch/);
-  await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await closeInspector();
-  checks.push('Real citizen identities, staffed visit benefit, citizen-speed pause, persistent provenance table, atomic fractional save/load, corrupt-sidecar rejection');
+  assert.throws(() => deserializeParkSession(JSON.stringify(corruptSession)), /sidecar clock mismatch/);
+  server.assertDurable(sessionSaved); await closeInspector();
+  checks.push('Real citizen identities, staffed visit benefit, citizen-speed pause, provenance table and exact fractional server ACK/reload; corrupt sidecar rejected by decoder');
 
   await button('[data-camera="reset"]');
-  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assertAdoptedCity(await state(), fixture, 'Loaded legacy city'); await assertOriginalSave(evaluate, fixtureJson); await closeInspector();
+  await enterScenario(fixtureJson); assert.deepEqual(await state(), fixture, 'Authenticated entry expands and adopts the decoded legacy city'); await closeInspector();
   await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=90', 15000);
   await button('#pause'); const grown = await state();
   assert.ok(grown.buildings.length > 0); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason.includes('purchase'))); assert.ok(grown.ledger.some(e => e.tick > 65 && e.reason === 'Monthly wages'));
-  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(fixtureJson)})`); await button('#load'); assertAdoptedCity(await state(), fixture, 'Restored legacy city'); await assertOriginalSave(evaluate, fixtureJson); await closeInspector();
+  await enterScenario(fixtureJson); assert.deepEqual(await state(), fixture, 'A fresh acknowledged scenario restores the legacy city'); await closeInspector();
   if (process.env.CITYMANAGER_BLOCK_MODELS !== '1') assert.equal((await evaluate('window.cityManager.visuals()')).failed.length, 0, 'Models instantiate successfully after growth');
   await screenshot('desktop-city.png'); checks.push('10x real purchases and monthly wages after frozen legacy migration; identical paused financial/spatial fixture restored for GUI checks');
   if (process.env.CITYMANAGER_VISUAL_PREVIEW === '1') {
@@ -407,20 +470,24 @@ try {
   await screenshot('mobile-ledger.png');
   const scroll = await evaluate('({x:document.querySelector("#inspector-body").scrollWidth,width:document.querySelector("#inspector-body").clientWidth})');
   assert.ok(scroll.x <= scroll.width, 'Inspector content does not overflow horizontally');
-  await game(); await button('#save');
-  const savedMessage = await text('#inspector-status'); assert.match(savedMessage, /Saved day/);
+  const mobileHead = await saveSession();
+  assert.match(await text('#inspector-status'), /บันทึกเมืองบนเซิร์ฟเวอร์แล้ว/);
   assert.equal(await evaluate('document.querySelector("#inspector-status").getBoundingClientRect().height>0'), true, 'Save feedback remains visible while the toolbar is hidden');
-  await evaluate('window.__restoreStorage=Storage.prototype.setItem;Storage.prototype.setItem=function(){throw new DOMException("Acceptance quota failure", "QuotaExceededError")}');
-  try {
-    await game(); await button('#save');
-    assert.notEqual(await text('#inspector-status'), savedMessage, 'Storage rejection reports a different visible result');
-    assert.match(await text('#inspector-status'), /บันทึกไม่ได้/);
-    assert.equal(await text('#inspector-status'), await text('#status'));
-  } finally { await evaluate('Storage.prototype.setItem=window.__restoreStorage;delete window.__restoreStorage'); }
-  await game(); await button('#load');
-  assert.equal(await text('#inspector-status'), await text('#status'));
-  assert.deepEqual(await state(), beforeMobileSelection, 'Explicit Game-menu save/load preserves the exact city');
-  checks.push('Mobile Game menu exposes save success, quota rejection and load feedback without a persistent entity footer');
+  const failedHead = server.active, faultIndex = feedback.attempts.length;
+  feedback.setFault(true); await button('#save');
+  await until('!!document.querySelector("#save-failure-banner:not([hidden])")');
+  assert.deepEqual(server.active, failedHead, 'A refused server save preserves exact head and revision');
+  assert.deepEqual(await state(), beforeMobileSelection); await server.assertNoCityWrites(evaluate);
+  assert.match(await text('#inspector-status'), /ยังบันทึกไม่ได้/);
+  feedback.setFault(false); await button('#save-failure-retry');
+  const retryDeadline = Date.now() + 30000;
+  while (server.active.revision < failedHead.revision + 2 && Date.now() < retryDeadline) await sleep(80);
+  await until('!!document.querySelector("#save-failure-banner[hidden]")');
+  feedback.assertRetry(faultIndex, failedHead); const retriedHead = server.active;
+  assert.equal(retriedHead.raw, mobileHead.raw);
+  await reloadAcknowledged(retriedHead);
+  assert.deepEqual(await state(), beforeMobileSelection, 'Authenticated reload restores the exact acknowledged city');
+  checks.push('Mobile Game menu exposes server success and failure, exact retry ACK and authenticated reload without a persistent entity footer');
   if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
   const firm = beforeMobileSelection.firms[0];
   const firmBuilding = beforeMobileSelection.buildings.find(b => b.id === firm.building);
@@ -450,7 +517,7 @@ try {
   assert.match(await text('#place-metrics'), /1 ช่อง/);
   await screenshot('mobile-park.png');
   checks.push('Mobile 390px park tool and one-cell placement/detail are reachable');
-  await game(); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(sessionSaved)})`); await button('#load');
+  await enterScenario(sessionSaved);
   assert.equal(await evaluate('window.cityManager.sessionSnapshot()'), sessionSaved);
   await closeInspector(); await button('#toggle-inspector');
   if (!await evaluate('document.querySelector("#park-recreation-data details").open')) await button('#park-recreation-data summary');
@@ -459,14 +526,16 @@ try {
   assert.ok((await evaluate('window.cityManager.parks()')).renderedVisitors > 0);
   await screenshot('mobile-park-recreation.png');
   checks.push('390px mobile real citizens, atomic reload and bounded horizontally scrolling recreation table');
+  await server.settle(); await server.assertNoCityWrites(evaluate); assert.deepEqual(httpErrors, [], 'Native loopback service and asset proxy must not fail'); assert.deepEqual(externalRequests, [], 'No external requests'); assert.deepEqual(providerRequests, [], 'No provider requests');
   if (process.env.CITYMANAGER_BLOCK_MODELS === '1') { await interceptions.settle(); await send('Fetch.disable'); await interceptions.settle(); }
   assert.deepEqual(errors, [], 'No browser runtime/console errors');
-  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 41, 'Only the 41 deliberately blocked model requests failed');
+  if (process.env.CITYMANAGER_BLOCK_MODELS === '1') assert.equal(expectedAssetErrors.length, 41 * completedEntries, 'Exactly 41 model requests fail on each authenticated page entry');
   const version = await send('Browser.getVersion');
   const report = { date: new Date().toISOString(), url: targetUrl, browser: version.product, engine: 'PlayCanvas 2.23.3', visuals: visualStatus, ground: groundState, checks, errors, expectedAssetErrors, interceptions: interceptions.snapshot(), screenshots: ['desktop-disconnected.png', 'desktop-city.png', 'desktop-park.png', 'mobile-park.png', ...(process.env.CITYMANAGER_VISUAL_PREVIEW === '1' ? ['desktop-closeup.png', 'desktop-build-grid.png'] : []), 'mobile-inspector.png', 'mobile-ledger.png', 'mobile-firm.png', 'mobile-city.png'], note: 'Headless installed Edge. Mobile metrics/touch are emulated, not real-device QA.' };
   await writeFile(resolve(output, 'browser-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } catch (error) {
+  feedback.setFault(false);
   // Do not let a screenshot, protocol hang or cleanup hide the actual failure.
   console.error('Primary browser acceptance failure:', error instanceof Error ? error.stack : String(error));
   console.error('Intercepted model requests at failure:', JSON.stringify(interceptions.snapshot()));
@@ -490,4 +559,5 @@ try {
   // a cleanup-time rejection can no longer replace an earlier primary failure.
   for (const item of [...pending.values()]) item.reject(Error('CDP cleanup cancelled pending command'));
   try { child.kill(); } catch {}
+  proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve));
 }

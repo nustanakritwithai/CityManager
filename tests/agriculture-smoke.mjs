@@ -1,5 +1,4 @@
 import { browserSnapshotState } from './browser-snapshot.ts';
-import { assertSavedCity } from './park-session-assertions.mjs';
 // Agriculture-first real-browser acceptance. Root runs suites sequentially.
 // No provider calls; all fixtures are actual replayed or strictly migrated city state.
 import { spawn } from 'node:child_process';
@@ -8,12 +7,15 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, deserialize, zoneCell, bulldoze, buildRoad, access, employmentForHousehold, employmentForFirm, householdWorkerCount, firmWorkerCount, housingCapacity, firmCapacity, firmRent, ownerFinance, contributeOwnerCapital, withdrawOwnerProfit, industryGrowthStatus, summary, WAGES, MONTH } from '../src/sim.ts';
-import { deserializeParkSession } from '../src/park-runtime.ts';
+import { deserializeParkSession,expandValidatedParkSession } from '../src/park-runtime.ts';
 import { untyped } from './untyped.ts';
 import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 import { createCity as createCityV5, step as stepV5, serialize as serializeV5, summary as summaryV5 } from '../src/legacy-v5.ts';
-import { reachTouch } from './touch-reach.mjs';
-const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
+import { startPersistenceFixture } from './persistence-server-fixture.mjs';
+import { reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
+import { createPanelModelAudit } from './panel-model-audit.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
+const upstreamUrl=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
 const output=resolve('.test-output'),shots=resolve(process.env.CITYMANAGER_SCREENSHOT_DIR||'docs/agriculture-preview');
 const blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1',skills=['general','manufacturing','retail'];
 const hash=raw=>createHash('sha256').update(raw).digest('hex');
@@ -43,9 +45,17 @@ assert.deepEqual(createCity(61025).resources,resources);assert.notDeepEqual(crea
 const seen={harvest:false,farmToMarket:false,marketToFactory:false,process:false,factoryToShop:false,shopToHousehold:false,marketToHousehold:false};
 let chainBefore,chainAfter,ownerScene;const milestones=[];
 function assertLabor(city){for(const h of city.households){const wages=employmentForHousehold(city,h.id),own=city.ownerLabor.filter(e=>e.householdId===h.id);for(const skill of skills)assert.ok([...wages,...own].filter(e=>e.skill===skill).reduce((n,e)=>n+e.workers,0)<=h.workerSkills[skill]);assert.ok([...wages,...own].reduce((n,e)=>n+e.workers,0)<=h.workforce);}for(const f of city.firms.filter(f=>isMarket(f))){assert.equal(employmentForFirm(city,f.id).length,0);assert.deepEqual(f.workDays,{});assert.ok(firmWorkerCount(city,f.id)<=1);}}
+// Separate actual legacy-market direct-sale scenario: remove the competing
+// factory through the game rule, then step the authentic migrated city.
+const direct=deserialize(serialize(fresh));
+for(const f of [...direct.firms].filter(f=>f.zone==='I'))assert.equal(bulldoze(direct,direct.buildings.find(b=>b.id===f.building).cell).ok,true);
+const directBefore=deserialize(serialize(direct));step(direct);const directSales=direct.cropLedger.filter(e=>e.tick===direct.tick&&e.kind==='consumption'&&direct.firms.some(f=>isMarket(f)&&f.wallet===e.from));
+assert.ok(directSales.length,'A genuine legacy market sells fresh crops directly to households');
+for(const e of directSales)assert.ok(direct.ledger.some(m=>m.tick===e.tick&&m.from===e.to&&m.to===e.from&&m.amount===e.cash&&m.reason===e.reason));
+seen.marketToHousehold=true;
 for(let n=0;n<360;n++){
  const previous=deserialize(serialize(fresh));step(fresh);deserialize(serialize(fresh));assert.deepEqual(fresh.resources,resources);assertLabor(fresh);
- const cropEvents=fresh.cropLedger.slice(previous.cropLedger.length),goodsEvents=fresh.goodsLedger.slice(previous.goodsLedger.length),zone=wallet=>{const f=fresh.firms.find(f=>f.wallet===wallet);return f&&(isMarket(f)?'T':f.zone)};
+ const cropEvents=fresh.cropLedger.filter(e=>e.tick===fresh.tick),goodsEvents=fresh.goodsLedger.filter(e=>e.tick===fresh.tick),zone=wallet=>{const f=fresh.firms.find(f=>f.wallet===wallet);return f&&(isMarket(f)?'T':f.zone)};
  for(const e of cropEvents){if(e.kind==='harvest')seen.harvest=true;if(e.kind==='trade'&&zone(e.from)==='F'&&zone(e.to)==='T')seen.farmToMarket=true;if(e.kind==='trade'&&zone(e.from)==='T'&&zone(e.to)==='I')seen.marketToFactory=true;if(e.kind==='process'){seen.process=true;assert.equal(e.quantity,2*e.batches);assert.equal(e.outputQuantity,8*e.batches);assert.ok(fresh.goodsLedger.some(g=>g.tick===e.tick&&g.reason==='Crop recipe #'+e.id&&g.quantity===e.outputQuantity));}if(e.kind==='consumption'&&zone(e.from)==='T'&&e.to.startsWith('household:'))seen.marketToHousehold=true;}
  for(const e of goodsEvents){if(zone(e.from)==='I'&&zone(e.to)==='C')seen.factoryToShop=true;if(zone(e.from)==='C'&&e.to.startsWith('household:'))seen.shopToHousehold=true;}
  for(const t of previous.firms.filter(f=>isMarket(f)))assert.ok(cropEvents.filter(e=>e.from===t.wallet&&(e.kind==='trade'||e.kind==='consumption')).reduce((n,e)=>n+e.quantity,0)<=t.cropInventory,'Newly purchased market stock cannot resell this tick');
@@ -56,7 +66,7 @@ for(let n=0;n<360;n++){
  if([30,60,120,180,360].includes(fresh.tick))milestones.push({tick:fresh.tick,cropEvents:fresh.cropLedger.length,crops:{...fresh.crops},firms:fresh.firms.map(f=>({id:f.id,zone:f.zone,workers:firmWorkerCount(fresh,f.id),cropInventory:f.cropInventory}))});
  if(chainAfter&&ownerScene&&fresh.tick>=180)break;
 }
-assert.ok(chainBefore&&chainAfter,'Real seeded agriculture must reach both F→T→I→C→HH and direct T→HH by day360: '+JSON.stringify(seen));
+assert.ok(chainBefore&&chainAfter,'The chain plus separate genuine legacy-market sale must be observed: '+JSON.stringify(seen));
 assert.ok(ownerScene,'A real profitable household market must allow a funded 100-credit contribution and lawful profit draw by day360');
 const market=chainAfter.firms.find(f=>isMarket(f)),farm=chainAfter.firms.find(f=>f.zone==='F'),factory=chainAfter.firms.find(f=>f.zone==='I');assert.ok(market&&farm&&factory);
 const marketOwner=chainAfter.households.find(h=>h.id===market.owner.householdId);assert.ok(marketOwner);
@@ -68,20 +78,29 @@ const disconnectedAfter=deserialize(serialize(disconnected));step(disconnectedAf
 const restored=deserialize(serialize(disconnectedAfter));assert.equal(buildRoad(restored,cutCell,cutCell).ok,true);const recovered=deserialize(serialize(restored));step(recovered);deserialize(serialize(recovered));assert.ok(recovered.ownerLabor.some(e=>e.firmId===market.id));
 const ownerMarket=ownerScene.firms.find(f=>isMarket(f)&&(()=>{const c=deserialize(serialize(ownerScene));return contributeOwnerCapital(c,f.id,10000).ok&&withdrawOwnerProfit(c,f.id,10000).ok;})());assert.ok(ownerMarket);
 const contributed=deserialize(serialize(ownerScene));assert.equal(contributeOwnerCapital(contributed,ownerMarket.id,10000).ok,true);const withdrawn=deserialize(serialize(contributed));assert.equal(withdrawOwnerProfit(withdrawn,ownerMarket.id,10000).ok,true);deserialize(serialize(withdrawn));
-// Independent amounts for these real v4-migrated fixtures: day 30's former
-// 7,070 drawable is entirely retained development profit, not a second payout.
+// Independently reconcile the real v4-migrated market's day-30 profit,
+// retained development reserve, tax, distribution and cash.
 const chainFinance=ownerFinance(chainAfter,market.id);
-assert.equal(chainAfter.tick,30);assert.equal(market.profit,35346);
-assert.equal(market.owner.taxPaid,7069);assert.equal(market.owner.withdrawn,21207);
-assert.equal(chainFinance.developmentReserve,7070);assert.equal(chainFinance.withdrawAvailable,0);
-assert.equal(chainAfter.accounts[market.wallet],51774);
+assert.equal(chainAfter.tick,30);
+// Independent journal audit for the modern unified-basket trajectory: crop
+// sales release recorded inventory cost, while finished goods use cash flows.
+const cropSales=chainAfter.cropLedger.filter(e=>e.from===market.wallet&&(e.kind==='trade'||e.kind==='consumption'));
+const cropCash=cropSales.reduce((n,e)=>n+e.cash,0),cropCost=cropSales.reduce((n,e)=>n+e.fromValue,0);
+assert.equal(cropCash,54800);assert.equal(cropCost,18150);
+const goodsPurchase=chainAfter.ledger.filter(e=>e.from===market.wallet&&e.reason==='Local wholesale goods').reduce((n,e)=>n+e.amount,0);
+const householdSales=chainAfter.ledger.filter(e=>e.to===market.wallet&&/^Household #\d+ purchase$/.test(e.reason)).reduce((n,e)=>n+e.amount,0);
+assert.equal(goodsPurchase,6300);assert.equal(householdSales,3200);
+assert.equal(market.profit,cropCash-cropCost-goodsPurchase+householdSales-10000-800);assert.equal(market.profit,22750);
+assert.equal(market.owner.taxPaid,4550);assert.equal(market.owner.withdrawn,13650);
+assert.equal(chainFinance.developmentReserve,4550);assert.equal(chainFinance.withdrawAvailable,0);
+assert.equal(chainAfter.accounts[market.wallet],48550);
 const retainedOnly=deserialize(serialize(chainAfter)),retainedBefore=serialize(retainedOnly);
 assert.equal(withdrawOwnerProfit(retainedOnly,market.id,1).ok,false);assert.equal(serialize(retainedOnly),retainedBefore);
 // Keep actual eligible withdrawal coverage: fresh day-35 earnings fund the
 // same native 10,000 contribution/draw flow and its exact counterparty ledger.
-assert.equal(ownerScene.tick,35);assert.equal(ownerFinance(ownerScene,ownerMarket.id).withdrawAvailable,11788);
-assert.equal(ownerFinance(contributed,ownerMarket.id).withdrawAvailable,11788,'Capital contribution is not profit');
-assert.equal(ownerFinance(withdrawn,ownerMarket.id).withdrawAvailable,1788);
+assert.equal(ownerScene.tick,35);assert.equal(ownerFinance(ownerScene,ownerMarket.id).withdrawAvailable,10135);
+assert.equal(ownerFinance(contributed,ownerMarket.id).withdrawAvailable,10135,'Capital contribution is not profit');
+assert.equal(ownerFinance(withdrawn,ownerMarket.id).withdrawAvailable,135);
 const ownerWallet=`household:${ownerMarket.owner.householdId}`;
 assert.deepEqual(contributed.ledger.at(-1),{tick:35,from:ownerWallet,to:ownerMarket.wallet,amount:10000,reason:'Owner capital contribution'});
 assert.deepEqual(withdrawn.ledger.at(-1),{tick:35,from:ownerMarket.wallet,to:ownerWallet,amount:10000,reason:'Owner profit distribution'});
@@ -112,34 +131,64 @@ assert.ok(!growthBorn.ledger.some(e=>e.to===fundedFirm.wallet&&e.from==='outside
 assert.equal(growthBorn.accounts[fundedFirm.wallet],260000);assert.ok(growthBorn.accounts[sponsor.wallet]>=30000);
 for(const city of [growthStart,growthBefore,growthBorn,growthFinal]){assert.equal(Object.values(city.accounts).reduce((n,x)=>n+x,0),0);assert.equal(city.crops.harvested-city.crops.processed-city.crops.consumed-city.crops.writtenOff-(city.crops.exported??0),city.firms.reduce((n,f)=>n+f.cropInventory,0));}
 const growthFixture={legacyVersion:5,legacyTick:388,legacyHash:hash(oldGrowthRaw),legacyPopulation:oldGrowthSummary.population,legacyJobs:oldGrowthSummary.jobs,earlyTick:growthEarly.tick,beforeBirthTick:growthBefore.tick,birthTick:growthBorn.tick,finalTick:growthFinal.tick,finalPopulation:summary(growthFinal).population,finalJobs:summary(growthFinal).jobs,sponsorFirmId:sponsor.id,fundedFirmId:fundedFirm.id,capital:funding.capital};
+// Server entry expands the map before the browser can step or edit. Prove the
+// specific scenario transitions still match independent original-map replays.
+const live=city=>{const result=expandValidatedParkSession(deserializeParkSession(serialize(city))).city;if(!result.education)adoptSavedEducation(result);return result;};
+for(const [label,before,after] of [['v3',imported,stopped],['chain',chainBefore,chainAfter],['direct',directBefore,direct],['cut',disconnected,disconnectedAfter],['reconnect',restored,recovered],['growth',growthBefore,growthBorn],...growthSteps.slice(1).map((c,i)=>['continued growth',growthSteps[i],c])]){
+ const candidate=live(before);step(candidate);assert.equal(serialize(candidate),serialize(live(after)),label+' expanded one-step parity');
+}
+{const c=live(chainAfter);assert.equal(bulldoze(c,cutCell).ok,true);assert.equal(serialize(c),serialize(live(disconnected)),'expanded road cut parity');}
+{const c=live(disconnectedAfter);assert.equal(buildRoad(c,cutCell,cutCell).ok,true);assert.equal(serialize(c),serialize(live(restored)),'expanded road reconnect parity');}
 const fixture={seed:61025,legacyV3Hash:hash(oldRaw),chainTick:chainAfter.tick,ownerActionTick:ownerScene.tick,chainHash:hash(serialize(chainAfter)),seen,milestones,growth:growthFixture};
-if(process.argv.includes('--preflight')){console.log(JSON.stringify(fixture,null,2));process.exit(0);}
+if(process.argv.includes('--preflight')){
+ console.log(JSON.stringify(fixture,null,2));process.exit(0);}
 
-const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [];
-const keys = ['citymanager.save.v7', 'citymanager.save.v6', 'citymanager.save.v5', 'citymanager.save.v4', 'citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2, 3, 4, 5, 6].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
+const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [], external=[],providerRequests=[];
+let networkProbe;const observeProbe=url=>(networkProbe={url,active:false,requestId:null,failed:null});
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
-assert.equal(occupied, false, 'Worker browser suite must run sequentially; CDP9349 is occupied');
+assert.equal(occupied, false, 'Agriculture browser suite must run sequentially; CDP9349 is occupied');
+const server=await startPersistenceFixture(upstreamUrl),url=server.url,allowed=new URL(url),storage=server.fixture,interceptionErrors=[];
 // Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
 const profile = await mkdtemp(resolve(output, 'edge-agriculture-'));
 const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map(), sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) { const id = ++sequence; const promise = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id, method, params })); return promise; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
+const modelAudit=createPanelModelAudit({blocked,expectedErrors,evaluate,sleep});
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
 const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
-async function button(selector) { if (await reachTouch(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,physicalWidth:r.width*k,physicalHeight:r.height*k,touch:navigator.maxTouchPoints>0,disabled:e.disabled}})()`); assert.ok(p.w && p.h && !p.disabled, `Visible enabled ${selector}`); if (p.touch) assert.ok(p.physicalWidth >= 43.5 && p.physicalHeight >= 43.5, `44px ${selector}: ${JSON.stringify(p)}`); assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actual hit ${selector}`); await click(p.x, p.y); }
+async function button(selector) { if (await reachTrafficControl(evaluate, button, selector)) return; await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints(); const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,physicalWidth:r.width*k,physicalHeight:r.height*k,touch:navigator.maxTouchPoints>0,disabled:e.disabled}})()`); assert.ok(p.w && p.h && !p.disabled, `Visible enabled ${selector}`); if (p.touch) assert.ok(p.physicalWidth >= 43.5 && p.physicalHeight >= 43.5, `44px ${selector}: ${JSON.stringify(p)}`); assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actual hit ${selector}`); await click(p.x, p.y); }
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(city) { await page('game'); const planted=serialize(city); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(planted)})`); await button('#load'); const expected=deserialize(planted); adoptSavedEducation(expected); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), planted, 'Loading does not rewrite the original save bytes'); await close(); }
-async function oneTick(city) { await close(); await button('[data-speed="1"]'); await evaluate(`requestAnimationFrame(function stopAtDay(){if(JSON.parse(window.cityManager.snapshot()).tick>=${city.tick})document.querySelector('#pause').click();else requestAnimationFrame(stopAtDay)})`); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${city.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`); assert.deepEqual(await state(), city); }
+async function loadRaw(raw){
+ await storage.leave({send,evaluate,until});const ack=await storage.seed(raw),modelBefore=modelAudit.begin();
+ storage.allowNavigation();await send('Page.navigate',{url});await storage.enter({evaluate,button});await modelAudit.verify(modelBefore);
+ assert.equal(ack.raw,raw);assert.equal(ack.revision,1);await storage.assertNoCityWrites(evaluate);
+ const parsed=expandValidatedParkSession(deserializeParkSession(raw)).city;if(!parsed.education)adoptSavedEducation(parsed);
+ assert.deepEqual(await state(),parsed);return ack;
+}
+async function load(city){await loadRaw(serialize(city));}
+async function saveReload({failOnce=false}={}){
+ await page('game');const before=storage.active,raw=await evaluate('window.cityManager.sessionSnapshot()'),cursor=storage.writes.length;
+ if(failOnce){server.setSaveFailure(true);await button('#save');await until("!!document.querySelector('#save-failure-banner:not([hidden])')");assert.ok(server.rejected.length);assert.deepEqual(storage.active,before);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);server.setSaveFailure(false);await button('#save-failure-retry');}else await button('#save');
+ const expectedRevision=before.revision+(failOnce?2:1),deadline=Date.now()+30000;
+ while(storage.active.revision<expectedRevision&&Date.now()<deadline)await sleep(80);
+ await storage.settle();assert.equal(storage.active.revision,expectedRevision,'Wait for each observed durable ACK, not a stale status label');
+ await until("!!document.querySelector('#save-failure-banner[hidden]')&&document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')");const events=storage.writes.slice(cursor),ack=storage.active;
+ assert.equal(events.length,failOnce?2:1);assert.equal(ack.revision,before.revision+events.length);assert.equal(ack.raw,raw);
+ if(failOnce){const rejected=server.rejected.at(-1);assert.equal(events[0].requestKey,rejected.requestKey);assert.deepEqual(events[0].command,rejected.command);assert.notEqual(events[0].requestKey,events[1].requestKey);}
+ for(const [i,e]of events.entries()){assert.equal(e.status,200);assert.equal(e.command.expectedRevision,before.revision+i);assert.equal(e.command.raw,raw);assert.equal(e.response.raw,raw);assert.equal(e.response.revision,before.revision+i+1);}
+ const modelBefore=modelAudit.begin();storage.allowNavigation(raw);await send('Page.reload',{ignoreCache:true});await storage.enter({evaluate,button});await modelAudit.verify(modelBefore);
+ assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),raw);await storage.assertNoCityWrites(evaluate);return ack;
+}
+async function oneTick(city) { await close(); await button('[data-speed="1"]'); await evaluate(`requestAnimationFrame(function stopAtDay(){if(JSON.parse(window.cityManager.snapshot()).tick>=${city.tick})document.querySelector('#pause').click();else requestAnimationFrame(stopAtDay)})`); await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${city.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`); assert.deepEqual(await state(), live(city)); }
 async function place(city, id) { await close(); await button('[data-tool="select"]'); await paints(); const b = city.buildings.find(b => b.id === id), p = await evaluate(`window.cityManager.cellScreen(${b.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${id}'`); }
 async function metrics(expected) { const actual = await evaluate('Object.fromEntries([...document.querySelectorAll("#entity-content [data-context-metric]")].map(e=>[e.dataset.contextMetric,e.dataset.value]))'); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact metric ${key}`); }
-async function storage() { return evaluate(`Object.fromEntries(${JSON.stringify(keys)}.map(key=>[key,localStorage.getItem(key)]))`); }
 async function screenshot(name,resetScroll=true) { if(resetScroll)await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(r.data, 'base64')); screenshots.push(name); }
 async function viewport(metric) { await close(); await send('Emulation.setDeviceMetricsOverride', { ...metric, deviceScaleFactor: 1 }); await send('Emulation.setTouchEmulationEnabled', { enabled: metric.mobile, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&screen.width===${metric.screenWidth}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`); await paints(); }
 async function layout() { const m = await evaluate(`(()=>{const p=document.querySelector('#inspector'),r=p.getBoundingClientRect(),b=document.querySelector('#inspector-body'),k=Math.min(1,screen.width/innerWidth);return{width:innerWidth,height:innerHeight,screenWidth:screen.width,left:r.left,right:r.right,top:r.top,bottom:r.bottom,bodyWidth:b.clientWidth,bodyScroll:b.scrollWidth,buttons:['#submenu-back','#close-inspector'].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,w:r.width*k,h:r.height*k,hit:!!document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(s)}})}})()`); assert.ok(m.left >= 0 && m.right <= m.width + 1 && m.top >= 0 && m.bottom <= m.height + 1, JSON.stringify(m)); assert.ok(m.bodyScroll <= m.bodyWidth + 1); assert.ok(m.buttons.every(b => b.w >= 43.5 && b.h >= 43.5 && b.hit), JSON.stringify(m)); layouts.push(m); }
@@ -147,85 +196,71 @@ async function layout() { const m = await evaluate(`(()=>{const p=document.query
 try {
   let tabs; for (let n = 0; n < 100; n++) { try { tabs = await (await fetch('http://127.0.0.1:9349/json/list')).json(); break; } catch { await sleep(100); } }
   assert.ok(tabs?.some(t => t.type === 'page')); ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); } if (m.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'Failed' }); };
+  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); } if(m.method==='Page.javascriptDialogOpening')void storage.dialog(m.params,send).catch(e=>interceptionErrors.push(String(e)));if(m.method==='Network.loadingFailed'&&m.params.requestId===networkProbe?.requestId)networkProbe.failed=m.params;if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(networkProbe?.active&&u===networkProbe.url)networkProbe.requestId=m.params.requestId;else{if(isPanelProviderRequest(u))providerRequests.push(u);if(/^https?:/.test(u)&&new URL(u).origin!==allowed.origin)external.push(u);}} };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  if (blocked) await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
-  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready');
-  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
+  await installTrafficNetworkFence({send,evaluate,protocol:await(await fetch('http://127.0.0.1:9349/json/protocol')).json(),origin:allowed.origin,blockedModels:blocked,additionalBlocked:panelProviderDenials(allowed.origin),observeProbe});await storage.install(send);
 
-  const v1Raw=await readFile(new URL('./fixtures/legacy-v1-day65.json',import.meta.url),'utf8'),v2Raw=await readFile(new URL('./fixtures/legacy-v2-day65.json',import.meta.url),'utf8'),sentinel=serialize(createCity(91));
-  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(v1Raw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(v2Raw)});localStorage.setItem('citymanager.save.v3',${JSON.stringify(oldRaw)});localStorage.setItem('citymanager.save.v7',${JSON.stringify(sentinel)})`);
-  await page('game');const originalStorage=await storage();await button('#load-v3');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),originalStorage);await button('#load-v3');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),originalStorage);
-  await evaluate('window.__agStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v3"))throw new DOMException("Agriculture backup quota","QuotaExceededError");return window.__agStorageSet.call(this,k,v)}');
-  try{await button('#save');assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/บันทึกสำเนากู้คืนในเบราว์เซอร์แล้ว/);assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),originalStorage);}finally{await evaluate('Storage.prototype.setItem=window.__agStorageSet;delete window.__agStorageSet');}
-  // Explicitly choose the original import again: test normal-primary migration
-  // separately from the confirmed active-IDB path covered by save-safety.
-  await button('#load-v3');
-  await button('#save');const backed=await storage();assert.equal(backed['citymanager.save.v3'],oldRaw);assert.equal(backed['citymanager.save.v2'],v2Raw);assert.equal(backed['citymanager.save.v1'],v1Raw);assert.equal(backed['citymanager.backup.v3'],oldRaw);assert.equal(backed['citymanager.backup.latest'],'citymanager.backup.v3');const savedRaw=await assertSavedCity(evaluate,imported);const savedCity=deserializeParkSession(savedRaw).city;assert.deepEqual(savedCity.accounts,importedMoney,'Saved money matches the imported city');assert.deepEqual(savedCity.households,importedPeople,'Saved people match the imported city');assert.deepEqual(savedCity.goods,importedGoods,'Saved goods match the imported city');await button('#save');assert.deepEqual(await storage(),backed);
-  await evaluate('localStorage.setItem("citymanager.save.v7","{broken")');const corrupt=await storage();await button('#load');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),corrupt);await button('#load-backup');assert.deepEqual(await state(),imported);assert.deepEqual(await storage(),corrupt);await button('#save');assert.deepEqual(await storage(),backed);
-  await close();await oneTick(stopped);assert.equal((await state()).goods.produced,imported.goods.produced);
-  checks.push('Actual strict v3 import is read-only and idempotent, adds zero crop stock, stops input-free factory production; v6 Save first preserves immutable v3 bytes and original v1/v2, handles quota/corruption/recovery without replacing old saves');
-
-  await page('game');await evaluate(`localStorage.setItem('citymanager.save.v4',${JSON.stringify(legacyV4Raw)})`);const beforeV4Load=await storage();
-  await button('#load-v4');assert.deepEqual(await state(),legacyV4Imported);assert.deepEqual(await storage(),beforeV4Load);await button('#load-v4');assert.deepEqual(await state(),legacyV4Imported);assert.deepEqual(await storage(),beforeV4Load);
-  await evaluate('window.__commercialStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v4"))throw new DOMException("Commercial v4 backup quota","QuotaExceededError");return window.__commercialStorageSet.call(this,k,v)}');
-  try{await button('#save');assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/บันทึกสำเนากู้คืนในเบราว์เซอร์แล้ว/);assert.deepEqual(await state(),legacyV4Imported);assert.deepEqual(await storage(),beforeV4Load);}finally{await evaluate('Storage.prototype.setItem=window.__commercialStorageSet;delete window.__commercialStorageSet');}
-  // Explicitly choose the original import again: test normal-primary migration
-  // separately from the confirmed active-IDB path covered by save-safety.
-  await button('#load-v4');
-  await button('#save');const afterV4Save=await storage();assert.equal(afterV4Save['citymanager.backup.v4'],legacyV4Raw);assert.equal(afterV4Save['citymanager.save.v4'],legacyV4Raw);await assertSavedCity(evaluate,legacyV4Imported);await button('#save');assert.deepEqual(await storage(),afterV4Save);await button('#load');assert.deepEqual(await state(),legacyV4Imported);await button('#load');assert.deepEqual(await state(),legacyV4Imported);
-  checks.push('Actual v4 import maps existing market to commercial L1 and legacy retailer to L2–4 with identical IDs, money, stock, owner, labor and claims; repeated Load/Save does not duplicate or upgrade twice, immutable v4 backup precedes v6 and quota aborts safely');
+  await loadRaw(oldRaw);assert.deepEqual(await state(),live(imported));assert.equal(storage.active.raw,oldRaw,'Genuine v3 bytes remain the authoritative head until an ACK');
+  await saveReload({failOnce:true});assert.deepEqual(await state(),live(imported));
+  const savedCity=deserializeParkSession(storage.active.raw).city;assert.deepEqual(savedCity.accounts,importedMoney);assert.deepEqual(savedCity.households,importedPeople);assert.deepEqual(savedCity.goods,importedGoods);
+  await oneTick(stopped);assert.equal((await state()).goods.produced,imported.goods.produced);
+  checks.push('Real v3 head loads without rewrite; a failed save retains it, retry ACK and reload preserve money and people, and the next tick cannot fabricate factory inputs');
+  await loadRaw(legacyV4Raw);assert.deepEqual(await state(),live(legacyV4Imported));assert.equal(storage.active.raw,legacyV4Raw);
+  await saveReload();assert.deepEqual(await state(),live(legacyV4Imported));
+  checks.push('Genuine v4 market and retail identities, money, stock, owner, labor and claims survive exact service ACK and reload');
 
   const start=createCity(61025);await load(start);const candidates=start.cells.map((cell,index)=>({cell,index})).filter(({cell,index})=>!cell.road&&cell.building===null&&access(start,index)).sort((a,b)=>Math.abs(a.index%24-6)+Math.abs(Math.floor(a.index/24)-12)-Math.abs(b.index%24-6)-Math.abs(Math.floor(b.index/24)-12));
   const farmCell=candidates.find(({index})=>start.resources.fertility[index]>=50).index,marketCell=candidates.find(({index})=>index!==farmCell).index;
-  const zonedFarm=deserialize(serialize(start));assert.equal(zoneCell(zonedFarm,farmCell,'F').ok,true);await button('[data-tool="F"]');await paints();let point=await evaluate(`window.cityManager.cellScreen(${farmCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);assert.deepEqual(await state(),zonedFarm);assert.equal((await evaluate('window.cityManager.agriculture()')).buildGrid,true);
+  const zonedFarm=deserialize(serialize(start));assert.equal(zoneCell(zonedFarm,farmCell,'F').ok,true);await button('[data-tool="F"]');await paints();let point=await evaluate(`window.cityManager.cellScreen(${farmCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);assert.deepEqual(await state(),live(zonedFarm));assert.equal((await evaluate('window.cityManager.agriculture()')).buildGrid,true);
   assert.equal(await evaluate('document.querySelectorAll("[data-tool=C]").length'),1,'Exactly one commercial build category');assert.equal(await evaluate('document.querySelectorAll("[data-tool=T]").length'),0,'The separate market category is removed');
-  const zonedMarket=deserialize(serialize(zonedFarm));assert.equal(zoneCell(zonedMarket,marketCell,'C').ok,true);await button('[data-tool="C"]');await paints();point=await evaluate(`window.cityManager.cellScreen(${marketCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);assert.deepEqual(await state(),zonedMarket);assert.deepEqual((await state()).resources,start.resources);
-  let commercialBefore,commercialAfter;const growing=deserialize(serialize(zonedMarket));for(let day=0;day<180;day++){const previous=deserialize(serialize(growing));step(growing);deserialize(serialize(growing));const created=growing.firms.find(f=>isMarket(f)&&!previous.firms.some(old=>old.id===f.id));if(created){commercialBefore=previous;commercialAfter=deserialize(serialize(growing));break;}}assert.ok(commercialBefore&&commercialAfter,'A fresh C parcel creates a real owner-funded commercial-L1 market');
-  assert.ok(commercialAfter.cells.every(cell=>cell.zone!=='T'));for(const f of commercialAfter.firms.filter(isMarket)){const b=commercialAfter.buildings.find(b=>b.id===f.building);assert.equal(f.zone,'C');assert.equal(b.zone,'C');assert.equal(b.level,1);assert.equal(firmCapacity(b),1);assert.ok(f.owner);assert.ok(commercialAfter.ledger.some(e=>e.from==='household:'+f.owner.householdId&&e.to===f.wallet&&e.amount===60000));}
-  await load(commercialBefore);await oneTick(commercialAfter);const newCommercial=commercialAfter.firms.find(f=>isMarket(f)&&!commercialBefore.firms.some(old=>old.id===f.id));await inspectBusiness(commercialAfter,newCommercial);assert.ok((await evaluate('document.querySelector("#entity-content .bc-type-label").textContent')).includes('พาณิชย์ระดับ 1'));await screenshot('commercial-level-one.png');
-  checks.push('One C tool actually zones and grows an owner-funded commercial-L1 market; no T zone/menu exists, live inspector shows real owner/cash/crop stock and market-specific commercial identity');
-  checks.push('Seeded fertility is stable through v6 save/load and actual F/C tools pick and zone flat connected parcels without changing resources, accounts or construction-grid semantics');
+  const zonedMarket=deserialize(serialize(zonedFarm));assert.equal(zoneCell(zonedMarket,marketCell,'C').ok,true);await button('[data-tool="C"]');await paints();point=await evaluate(`window.cityManager.cellScreen(${marketCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);assert.deepEqual(await state(),live(zonedMarket));assert.deepEqual((await state()).resources,live(start).resources);
+  let commercialBefore,commercialAfter;const growing=deserialize(serialize(zonedMarket));for(let day=0;day<180;day++){const previous=deserialize(serialize(growing));step(growing);deserialize(serialize(growing));const created=growing.firms.find(f=>isRetail(f)&&!previous.firms.some(old=>old.id===f.id));if(created){commercialBefore=previous;commercialAfter=deserialize(serialize(growing));break;}}assert.ok(commercialBefore&&commercialAfter,'A fresh C parcel creates a real owner-funded commercial-L1 retail business');const expandedCommercial=live(commercialBefore);step(expandedCommercial);assert.equal(serialize(expandedCommercial),serialize(live(commercialAfter)),'expanded new-commerce transition parity');
+  assert.ok(commercialAfter.cells.every(cell=>cell.zone!=='T'));for(const f of commercialAfter.firms.filter(isRetail)){const b=commercialAfter.buildings.find(b=>b.id===f.building);assert.equal(f.zone,'C');assert.equal(b.zone,'C');assert.equal(b.level,1);assert.equal(firmCapacity(b),1);assert.ok(f.owner);assert.ok(commercialAfter.ledger.some(e=>e.from==='household:'+f.owner.householdId&&e.to===f.wallet&&e.amount===60000));}
+  await load(commercialBefore);await oneTick(commercialAfter);const newCommercial=commercialAfter.firms.find(f=>isRetail(f)&&!commercialBefore.firms.some(old=>old.id===f.id));await inspectBusiness(commercialAfter,newCommercial);assert.ok((await evaluate('document.querySelector("#entity-content .bc-type-label").textContent')).includes('พาณิชย์ระดับ 1'));await screenshot('commercial-level-one.png');
+  checks.push('One C tool actually zones and grows an owner-funded commercial-L1 retail business; no T zone/menu exists, live inspector shows real owner/cash/crop stock and current unified commercial identity');
+  checks.push('Seeded fertility is stable through server save/reload and actual F/C tools pick and zone flat connected parcels without changing resources, accounts or construction-grid semantics');
 
   await load(chainBefore);await oneTick(chainAfter);await inspectBusiness(chainAfter,farm);await screenshot('agriculture-farm.png');await inspectBusiness(chainAfter,market);await screenshot('agriculture-market.png');await inspectBusiness(chainAfter,factory);await screenshot('agriculture-factory.png');
-  const rendered=await evaluate('window.cityManager.agriculture()');assert.equal(rendered.farmPlots,chainAfter.buildings.filter(b=>b.zone==='F').length);assert.equal(rendered.marketStalls,chainAfter.firms.filter(isMarket).length);assert.deepEqual(await state(),chainAfter);
-  checks.push('One actual seeded daily tick exactly matches F→T→I crop recipe→C→household plus direct market-crop consumption; farm/market/factory real stock, book cost, fertility, workers and rendered facilities match state');
+  const rendered=await evaluate('window.cityManager.agriculture()');assert.equal(rendered.farmPlots,chainAfter.buildings.filter(b=>b.zone==='F').length);assert.equal(rendered.marketStalls,chainAfter.firms.filter(isMarket).length);assert.deepEqual(await state(),live(chainAfter));
+  await load(directBefore);await oneTick(direct);assert.ok(directSales.length);await load(chainAfter);
+  checks.push('Separate authentic legacy-market replay includes direct crop sales and actual payments');
+  checks.push('One actual seeded daily tick exactly matches F→T→I crop recipe→C→household; farm/market/factory real stock, book cost, fertility, workers and rendered facilities match state');
 
   await page('city');await button('#crop-section>summary');await until('document.querySelector("#inspector").dataset.submenu==="crop-section"');if((await cropRows('#crop-ledger details.sm-flow-card[data-kind="crops"][data-index]')).length<chainAfter.cropLedger.length)await button('[data-kind="crops"][data-journal-action="all"]');assert.deepEqual(await cropRows('#crop-ledger details.sm-flow-card[data-kind="crops"][data-index]'),expectedCrops(chainAfter));assert.ok((await evaluate('document.querySelector("#crop-ledger").textContent')).includes('ล็อต'));await screenshot('agriculture-crop-ledger.png');await button('#submenu-back');
   await inspectBusiness(chainAfter,market);const marketEntries=expectedCrops(chainAfter,market.wallet);assert.deepEqual(await cropRows('#entity-content .cx-crop-activity details.cx-crop-card[data-kind="crops"][data-index]'),marketEntries.slice(0,8));if(marketEntries.length>8){await button(`[data-context-focus="limit:firm:${market.id}:crops"]`);assert.deepEqual(await cropRows('#entity-content .cx-crop-activity details.cx-crop-card[data-kind="crops"][data-index]'),marketEntries);await button(`[data-context-focus="limit:firm:${market.id}:crops"]`);}
-  assert.deepEqual(await state(),chainAfter);
+  assert.deepEqual(await state(),live(chainAfter));
   checks.push('Global and entity crop journals preserve every event ID/index/tick/counterparty/lot/book-value/cash/recipe field through native all/recent controls; the actual replay enforces one food unit per member and one shared opening market stock for factories and households');
 
   await ownerHousehold(chainAfter,market.owner.householdId);await screenshot('agriculture-owner-household.png');assertLabor(await state());assert.equal(employmentForFirm(chainAfter,market.id).length,0);assert.deepEqual(market.workDays,{});assert.ok(!chainAfter.ledger.some(e=>e.from===market.wallet&&e.reason==='Monthly wages'));
   checks.push('Market owner reserves one real general/retail worker before wage matching, no dependent or skill pool is double-counted, owner work is shown separately from salary jobs and no fictitious market salary is paid');
 
   await load(ownerScene);await inspectBusiness(ownerScene,ownerMarket);const contributeSelector=`[data-owner-action="contribute"][data-firm-id="${ownerMarket.id}"]`,drawSelector=`[data-owner-action="withdraw"][data-firm-id="${ownerMarket.id}"]`;
-  await button(contributeSelector);assert.deepEqual(await state(),contributed);assert.equal(await evaluate(`document.querySelector('#owner-finance-status').dataset.firmId`),String(ownerMarket.id));await button(drawSelector);assert.deepEqual(await state(),withdrawn);assert.equal(withdrawn.firms.find(f=>f.id===ownerMarket.id).monthlyExpense,ownerMarket.monthlyExpense);assert.equal(withdrawn.firms.find(f=>f.id===ownerMarket.id).monthlyRevenue,ownerMarket.monthlyRevenue);await inspectBusiness(withdrawn,withdrawn.firms.find(f=>f.id===ownerMarket.id));
+  await button(contributeSelector);assert.deepEqual(await state(),live(contributed));assert.equal(await evaluate(`document.querySelector('#owner-finance-status').dataset.firmId`),String(ownerMarket.id));await button(drawSelector);assert.deepEqual(await state(),live(withdrawn));assert.equal(withdrawn.firms.find(f=>f.id===ownerMarket.id).monthlyExpense,ownerMarket.monthlyExpense);assert.equal(withdrawn.firms.find(f=>f.id===ownerMarket.id).monthlyRevenue,ownerMarket.monthlyRevenue);await inspectBusiness(withdrawn,withdrawn.firms.find(f=>f.id===ownerMarket.id));
   for(const [action,fn] of [['contribute',contributeOwnerCapital],['withdraw',withdrawOwnerProfit]]){const expected=fn(deserialize(serialize(withdrawn)),ownerMarket.id,10000),selector=`[data-owner-action="${action}"][data-firm-id="${ownerMarket.id}"]`;assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)}).disabled`),!expected.ok);if(!expected.ok)assert.ok((await evaluate(`document.querySelector(${JSON.stringify(selector)}).title`)).trim().length>0);}
   await screenshot('agriculture-owner-finance.png');
   checks.push('Native 100-credit owner contribution/profit draw exactly match funded counterparty transfers, shared household cash and protected working-capital limits; equity actions never become duplicate business revenue/expense and disabled controls expose an actual reason');
 
-  await load(chainAfter);await close();await button('[data-tool="bulldoze"]');await paints();point=await evaluate(`window.cityManager.cellScreen(${cutCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);assert.deepEqual(await state(),disconnected);await oneTick(disconnectedAfter);await inspectBusiness(disconnectedAfter,disconnectedAfter.firms.find(f=>f.id===market.id));await screenshot('agriculture-disconnected.png');await close();await button('[data-tool="road"]');await paints();point=await evaluate(`window.cityManager.cellScreen(${cutCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);await click(point.x,point.y);assert.deepEqual(await state(),restored);await oneTick(recovered);await inspectBusiness(recovered,recovered.firms.find(f=>f.id===market.id));assertLabor(recovered);
+  await load(chainAfter);await close();await button('[data-tool="bulldoze"]');await paints();point=await evaluate(`window.cityManager.cellScreen(${cutCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);assert.deepEqual(await state(),live(disconnected));await oneTick(disconnectedAfter);await inspectBusiness(disconnectedAfter,disconnectedAfter.firms.find(f=>f.id===market.id));await screenshot('agriculture-disconnected.png');await close();await button('[data-tool="road"]');await paints();point=await evaluate(`window.cityManager.cellScreen(${cutCell})`);assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`),'city-canvas');await click(point.x,point.y);await click(point.x,point.y);assert.deepEqual(await state(),live(restored));await oneTick(recovered);await inspectBusiness(recovered,recovered.firms.find(f=>f.id===market.id));assertLabor(recovered);
   checks.push('Real road demolition disconnects the market or owner home and suspends its trade and active owner labor without losing held stock/book values; real road rebuilding and next tick restore operation with exact cash/resource/journal reconciliation');
 
-  await load(chainAfter);for(const metric of [{width:360,height:740,screenWidth:360,screenHeight:780,mobile:true},{width:844,height:390,screenWidth:844,screenHeight:390,mobile:true},{width:980,height:2120,screenWidth:390,screenHeight:844,mobile:true}]){await viewport(metric);await inspectBusiness(chainAfter,market);await layout();if(metric.width===360)await screenshot('agriculture-phone-market.png');const b=chainAfter.buildings.find(b=>b.id===market.building),camera=await evaluate(`window.cityManager.cellScreen(${b.cell})`);await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:camera.x,y:camera.y,deltaX:0,deltaY:-180});assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${b.cell})`),camera);await key('Escape');assert.notEqual((await route()).open,'true');await page('game');await layout();await button('#save');await assertSavedCity(evaluate,chainAfter);await button('#load');assert.deepEqual(await state(),chainAfter);assert.equal(await evaluate('localStorage.getItem("citymanager.save.v3")'),oldRaw);assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v3")'),oldRaw);await close();}
-  checks.push('Farm/market contextual data and owner controls remain contained at 360 portrait, landscape and 980-layout/screen390; actual 44px Back/close, camera isolation, exact v6 save/load and preserved v3 recovery pass without unexpected runtime errors');
+  await load(chainAfter);for(const metric of [{width:360,height:740,screenWidth:360,screenHeight:780,mobile:true},{width:844,height:390,screenWidth:844,screenHeight:390,mobile:true},{width:980,height:2120,screenWidth:390,screenHeight:844,mobile:true}]){await viewport(metric);await inspectBusiness(chainAfter,market);await layout();if(metric.width===360)await screenshot('agriculture-phone-market.png');const b=chainAfter.buildings.find(b=>b.id===market.building),camera=await evaluate(`window.cityManager.cellScreen(${b.cell})`);await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:camera.x,y:camera.y,deltaX:0,deltaY:-180});assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${b.cell})`),camera);await key('Escape');assert.notEqual((await route()).open,'true');await page('game');await layout();await saveReload();assert.deepEqual(await state(),live(chainAfter));await close();}
+  checks.push('Farm/market contextual data and owner controls remain contained at 360 portrait, landscape and 980-layout/screen390; actual 44px Back/close, camera isolation, exact server save/reload pass without unexpected runtime errors');
 
   await viewport({width:1440,height:1000,screenWidth:1440,screenHeight:1000,mobile:false});
   await load(growthEarly);await growthMetrics(growthEarly);await evaluate('document.querySelector("[data-growth-status]").scrollIntoView({block:"start"})');await screenshot('growth-capital-saving.png',false);
   assert.equal(industryGrowthStatus(growthEarly).ready,false);assert.equal(await evaluate('document.querySelector("[data-growth-status]").dataset.ready'),'false');
-  await page('game');await evaluate(`localStorage.setItem('citymanager.save.v5',${JSON.stringify(oldGrowthRaw)})`);const growthStorageBefore=await storage();await button('#load-v5');assert.deepEqual(await state(),growthStart);assert.deepEqual(await storage(),growthStorageBefore,'An explicit original-v5 import is read-only');
-  await button('#save');const growthStorageSaved=await storage();assert.equal(growthStorageSaved['citymanager.save.v5'],oldGrowthRaw);assert.equal(growthStorageSaved['citymanager.backup.v5'],oldGrowthRaw);await assertSavedCity(evaluate,growthStart);await button('#save');assert.deepEqual(await storage(),growthStorageSaved);await button('#load');await button('#load');assert.deepEqual(await state(),growthStart);assert.deepEqual(await storage(),growthStorageSaved);
-  checks.push('A genuine v5 day388 plateau imports without changing IDs, money, stock, residents, claims or time; v6 Save first preserves one immutable v5 backup and repeated Load/Save never duplicates or upgrades it; saving-capital UI equals actual reserved-cash facts');
+  await loadRaw(oldGrowthRaw);assert.deepEqual(await state(),live(growthStart));assert.equal(storage.active.raw,oldGrowthRaw);
+  await saveReload();assert.deepEqual(await state(),live(growthStart));
+  checks.push('Genuine v5 plateau loads without rewriting its head and survives an exact service ACK and reload');
 
-  await load(growthBefore);await oneTick(growthBorn);assert.deepEqual(await state(),growthBorn);assertLabor(growthBorn);await inspectBusiness(growthBorn,fundedFirm);
+  await load(growthBefore);await oneTick(growthBorn);assert.deepEqual(await state(),live(growthBorn));assertLabor(growthBorn);await inspectBusiness(growthBorn,fundedFirm);
   assert.deepEqual(await evaluate('(()=>{const e=document.querySelector("[data-industry-funding]");return e&&{sponsor:Number(e.dataset.sponsorId),capital:Number(e.dataset.capital)}})()'),{sponsor:sponsor.id,capital:300000});
   await evaluate('document.querySelector("[data-industry-funding]").scrollIntoView({block:"start"})');await screenshot('growth-funded-factory.png',false);
   checks.push('One actual daily tick commissions a paid industrial employer from the recorded sponsor→firm 300000-satang capital transfer, retains reserves, pays real construction and begins with zero workers/input/output rather than outside gifts or invented jobs');
 
   for(const next of growthSteps.filter(city=>city.tick>growthBorn.tick))await oneTick(next);
-  assert.deepEqual(await state(),growthFinal);assertLabor(growthFinal);await page('city');
+  assert.deepEqual(await state(),live(growthFinal));assertLabor(growthFinal);await page('city');
   const grownSummary=summary(growthFinal),cityMetrics=await evaluate('Object.fromEntries([...document.querySelectorAll("#city-overview [data-context-metric]")].map(e=>[e.dataset.contextMetric,e.dataset.value]))');
   for(const key of ['population','workforce','jobs','employed'])assert.equal(cityMetrics[key],String(grownSummary[key]));
   assert.ok(grownSummary.population>10&&grownSummary.jobs>8&&grownSummary.employed>8);assert.ok(growthFinal.cropLedger.slice(growthBorn.cropLedger.length).filter(e=>e.kind==='process').every(e=>e.quantity===e.batches*2&&e.outputQuantity===e.batches*8));
@@ -235,14 +270,14 @@ try {
   const growthMidFirm=growthFinal.firms.find(f=>f.id===fundedFirm.id);assert.ok(Object.keys(growthMidFirm.workDays).length>0,'Mid-month recovery fixture retains actually earned wage claims');
   for(const metric of [{width:360,height:740,screenWidth:360,screenHeight:780,mobile:true},{width:980,height:2120,screenWidth:390,screenHeight:844,mobile:true}]){
     await viewport(metric);await inspectBusiness(growthFinal,growthMidFirm);await layout();await evaluate('document.querySelector("[data-industry-funding]").scrollIntoView({block:"start"})');if(metric.width===360)await screenshot('growth-phone-funded.png',false);
-    await page('game');await button('#save');await assertSavedCity(evaluate,growthFinal);await button('#load');assert.deepEqual(await state(),growthFinal);await button('#load');assert.deepEqual(await state(),growthFinal);assert.equal(await evaluate('localStorage.getItem("citymanager.save.v5")'),oldGrowthRaw);assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v5")'),oldGrowthRaw);
+    await page('game');await saveReload();assert.deepEqual(await state(),live(growthFinal));
     await growthMetrics(growthFinal);await layout();if(metric.width===360){await evaluate('document.querySelector("[data-growth-status]").scrollIntoView({block:"start"})');await screenshot('growth-phone-status.png',false);}await key('Escape');assert.notEqual((await route()).open,'true');
   }
-  checks.push('Mid-month v6 save/load retains sponsor provenance, cash, stock, household ownership and earned wage claims; normal and980-layout/screen390 phone views show truthful capital/funding diagnostics with contained panels and usable Back/close');
-  assert.deepEqual(errors,[]);const visuals=await evaluate('window.cityManager.visuals()');if(blocked){assert.equal(expectedErrors.length,41);assert.equal(visuals.failed.length,41);}else{assert.equal(visuals.loaded.length,41);assert.equal(visuals.failed.length,0);}
+  checks.push('Mid-month server save/reload retains sponsor provenance, cash, stock, household ownership and earned wage claims; normal and980-layout/screen390 phone views show truthful capital/funding diagnostics with contained panels and usable Back/close');
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(providerRequests,[]);assert.deepEqual(interceptionErrors,[]);assert.deepEqual(server.errors,[]);await storage.assertNoCityWrites(evaluate);modelAudit.assertComplete();
   const version=await send('Browser.getVersion'),report={date:new Date().toISOString(),url,browser:version.product,checks,errors,expectedModelErrors:expectedErrors.length,fixture,layouts,screenshots,note:'Installed headless Edge, viewport/touch emulation only; no real-phone, provider or individual-person simulation claim.'};await writeFile(resolve(output,'agriculture-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }catch(error){if(ws?.readyState===1)try{await screenshot('agriculture-failure.png');console.error('Route:',await route());}catch{}console.error('Unexpected browser errors:',errors);throw error;}
-finally{if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();}
+finally{if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();await server.close();}
 
 function expectedCrops(city,wallet){return city.cropLedger.map((e,index)=>({index,id:e.id,tick:e.tick,from:e.from,to:e.to,value:e.quantity,cropKind:e.kind,fromValue:e.fromValue,toValue:e.toValue,cash:e.cash,workers:e.workers,batches:e.batches,outputQuantity:e.outputQuantity})).reverse().filter(e=>!wallet||e.from===wallet||e.to===wallet);}
 // Native summary toggles also carry kind/index; only semantic details cards are journal rows.
@@ -254,5 +289,5 @@ async function growthMetrics(city){
   if(!await evaluate('document.querySelector("[data-growth-details]").open'))await button('[data-growth-details]>summary');
   const actual=await evaluate('Object.fromEntries([...document.querySelectorAll("[data-growth-status] [data-growth-metric]")].map(e=>[e.dataset.growthMetric,Number(e.dataset.value)]))');
   assert.deepEqual(actual,{'capital-available':expected.availableCapital,'capital-required':expected.requiredCapital,'sponsor-id':expected.sponsorFirmId??0,cash:expected.cash,'payroll-reserve':expected.payrollReserve,'tax-reserve':expected.taxReserve,'rent-reserve':expected.rentReserve,'working-reserve':expected.workingReserve,'crop-available':expected.cropAvailable,'funded-vacancies':expected.fundedVacancies});
-  assert.ok((await evaluate('document.querySelector("[data-growth-message]").textContent')).trim().length>0);assert.deepEqual(await state(),city,'Opening actual growth diagnostics does not mutate the city');
+  assert.ok((await evaluate('document.querySelector("[data-growth-message]").textContent')).trim().length>0);assert.deepEqual(await state(),live(city),'Opening actual growth diagnostics does not mutate the city');
 }
