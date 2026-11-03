@@ -276,7 +276,7 @@ test('manual-only success signal follows awaited explicit server save',async()=>
  assert.equal(source.split(signal).length-1,1,'Success text is exclusive to explicit Save');
  const start=source.indexOf("$('#save').addEventListener('click'"),end=source.indexOf('const campusAction',start);
  const handler=source.slice(start,end);assert.ok(start>=0&&end>start);
- assert.ok(handler.includes(`await trackedSave(true);sound('ui-save');status('${signal}')`));
+ assert.ok(handler.includes(`const saved=await trackedSave(true);sound('ui-save');status(saved.current?'${signal}'`),'Fresh manual success requires the acknowledged bytes to remain current');
  assert.match(source,/route\?\.page === 'game'.*\$\('#inspector-status'\)\.textContent = text/);
 });
 

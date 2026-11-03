@@ -44,3 +44,23 @@ test('after Load, autosave adopts the loaded bytes and does not rewrite them unt
   await auto.run(); assert.equal(writes, 1, 'unchanged after the write is skipped');
   auto.adoptLoaded(); await auto.run(true); assert.equal(writes, 2, 'explicit flush still writes');
 });
+
+test('autosave records the bytes actually acknowledged after queueing, not an earlier snapshot',async()=>{
+ let current='A',saved='';let release!:()=>void;const held=new Promise<void>(r=>release=r);
+ const auto=createAutosave({tick:()=>1,revision:()=>current,onResult:()=>{},save:async()=>{await held;const revision='B';saved=revision;return {revision};}});
+ const pending=auto.run();current='B';release();await pending;current='A';
+ assert.equal(saved,'B');assert.notEqual(await auto.run(),null,'Reverting to pre-queue bytes is still dirty after B was saved');
+});
+
+test('explicit saved bytes and newer generations cannot be overwritten by stale autosave completion',async()=>{
+ let current='A',calls=0,release!:(value:{revision:string})=>void;const held=new Promise<{revision:string}>(r=>release=r);
+ const auto=createAutosave({tick:()=>1,revision:()=>current,onResult:()=>{},save:async()=>{calls++;return calls===1?held:{revision:current};}});
+ const pending=auto.run();current='B';auto.markSaved(1,'B');release({revision:'A'});await pending;
+ assert.equal(await auto.run(),null,'The newer explicit B acknowledgement remains current');current='A';assert.ok(await auto.run());
+});
+
+test('queued work is synchronously visible and failed verification remains retryable',async()=>{
+ let fail=true;const auto=createAutosave({tick:()=>1,revision:()=>'same',onResult:()=>{},save:async()=>{if(fail)throw Error('verification-failed');return {revision:'same'};}});
+ auto.adoptLoaded();const pending=auto.run(true);assert.equal(auto.running,true);await pending;assert.equal(auto.running,false);assert.equal(auto.last?.ok,false);
+ fail=false;assert.equal((await auto.run())?.ok,true,'Failed force verification is not skipped merely because bytes are unchanged');
+});

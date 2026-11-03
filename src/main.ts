@@ -101,6 +101,7 @@ import './bus/player.css';
 import { installPanelTimeControls } from './panel-time-controls.ts';
 import { installSaveFeedback } from './save-feedback-panel.ts';
 import { createSaveAttemptQueue } from './save-feedback.ts';
+import { persistServerCity, shouldWarnBeforeUnload, describeServerAcknowledgement } from './server-save-lifecycle.ts';
 import './player-feedback.css';
 import './build-toolbar.css';
 
@@ -806,9 +807,10 @@ async function boot() {
   marketPanel.client.setRecoveryReadOnly(true);
   installHudRow();
   const saveBadge=document.createElement('span');saveBadge.id='autosave-status';saveBadge.setAttribute('role','status');$('#save').insertAdjacentElement('afterend',saveBadge);
-  const saveFeedback=installSaveFeedback(saveBadge,()=>$<HTMLButtonElement>('#save').click(),()=> 'บันทึกบนเซิร์ฟเวอร์แล้ว');
+  let saveSuccessLabel='บันทึกบนเซิร์ฟเวอร์แล้ว';
+  const saveFeedback=installSaveFeedback(saveBadge,()=>$<HTMLButtonElement>('#save').click(),()=>saveSuccessLabel);
   const enqueueSave=createSaveAttemptQueue();
-  const trackedSave=(explicit=false)=>{
+  const trackedSave=(explicit=false):Promise<{revision:string;current:boolean}>=>{
     const captured=city,generation=cityGeneration;
     // Start popup synchronously from the Save gesture if the memory token expired.
     const authenticated=explicit?serverEntry.auth.connect():Promise.resolve();
@@ -819,18 +821,18 @@ async function boot() {
       const attempt=saveFeedback.begin();saveBusy=true;
       try{
         await authenticated;
-        if(serverSave.pending){const retried=await serverSave.retry();if('deleted' in retried)throw Error('เมืองถูกลบแล้ว กรุณาโหลดหน้าใหม่');}
-        const raw=serializeParkSession(captured,parkRuntime,captured.market);
-        await serverSave.save(raw,citySaveMetadata(raw));
+        const {acknowledged,operation}=await persistServerCity(serverSave,()=>{if(captured!==city||generation!==cityGeneration)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');const raw=serializeParkSession(captured,parkRuntime,captured.market);return {raw,metadata:citySaveMetadata(raw)};},explicit);
         if(captured!==city||generation!==cityGeneration){saveFeedback.cancel(attempt);throw Error('เมืองเปลี่ยนระหว่างบันทึก');}
-        saveFeedback.succeeded(attempt);
+        const feedback=describeServerAcknowledgement(operation,acknowledged.raw,serializeParkSession(city,parkRuntime,city.market));saveSuccessLabel=feedback.label;
+        if(explicit)autosave.markSaved(acknowledged.metadata.tick,acknowledged.raw);
+        saveFeedback.succeeded(attempt);return {revision:acknowledged.raw,current:feedback.current};
       }catch(error){paused=true;saveFeedback.failed(`${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์ ไม่มีสำเนาในเบราว์เซอร์ กรุณาอย่าปิดหน้านี้`,attempt);throw error;}
       finally{saveBusy=false;}
     });
   };
-  const autosave=createAutosave({canSave:()=>!managingSave&&!resolvingConflict&&!serverSave.conflict&&!serverSave.deleted,save:()=>trackedSave(),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
+  const autosave=createAutosave({needsRetry:()=>serverSave.pending,canSave:()=>!managingSave&&!resolvingConflict&&!serverSave.conflict&&!serverSave.deleted,save:()=>trackedSave(),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
   autosave.adoptLoaded();installAutosave(document,window,autosave,()=>document.hidden);
-  window.addEventListener('beforeunload',event=>{if(saveBusy||serverSave.pending||serializeParkSession(city,parkRuntime,city.market)!==serverSave.confirmed?.raw){event.preventDefault();event.returnValue='';}});
+  window.addEventListener('beforeunload',event=>{if(shouldWarnBeforeUnload({running:autosave.running,failed:autosave.last?.ok===false,busy:saveBusy,pending:serverSave.pending,conflict:serverSave.conflict,raw:serializeParkSession(city,parkRuntime,city.market),confirmedRaw:serverSave.confirmed?.raw})){event.preventDefault();event.returnValue='';}});
   $('#save').addEventListener('click',async()=>{
     if(saveBusy||managingSave)return;
     try{
@@ -852,7 +854,7 @@ async function boot() {
         });
         status('เก็บสำเนางานที่ขัดแย้งแล้ว และเปิดเมืองหลักล่าสุดจากเซิร์ฟเวอร์');return;
       }
-      await trackedSave(true);sound('ui-save');status('บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่');
+      const saved=await trackedSave(true);sound('ui-save');status(saved.current?'บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่':'ยืนยันเซฟก่อนหน้าแล้ว · การเปลี่ยนแปลงใหม่ยังไม่บันทึก กรุณาบันทึกอีกครั้ง');
     }catch(error){sound('ui-error');status(`ยังบันทึกไม่ได้: ${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · อย่าปิดหน้านี้`);}
   });
   const campusAction = (action: typeof toggleCampus) => {
