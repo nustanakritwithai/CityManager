@@ -248,9 +248,17 @@ export class TrafficPresentation {
  frame(dt:number,paused:boolean,buses:readonly PresentationObstacle[]=[]):CitizenVehiclePose[]{
   if(!Number.isFinite(dt)||dt<0)throw Error('Invalid presentation timestep');if(paused)return this.shown.map(p=>({...p}));
   for(const [key,r]of this.corners){const e=this.entries.get(r.owner);if(!e||(r.entered&&(r.exit?e.pose.headingX*r.exit.headingX+e.pose.headingZ*r.exit.headingZ>.99&&(e.pose.x-r.exit.x)*r.exit.headingX+(e.pose.z-r.exit.z)*r.exit.headingZ>=-EPS:!intersects(body(e.pose),r.box)))){if(e&&r.plan!=='legacy'){if(r.visit!==undefined)e.completedVisit=Math.max(e.completedVisit,r.visit);else e.completedNodes.add(r.plan);}this.corners.delete(key);}}
-  for(const [id,e]of this.entries){const plans=nodePlans(e).filter(p=>p.key!=='legacy'||![...this.corners.values()].some(r=>r.owner===id&&r.plan!=='legacy')),desired=new Set(plans.map(p=>p.key));
-   for(const [key,r]of this.corners)if(r.owner===id&&!r.entered&&!desired.has(r.plan))this.corners.delete(key);
-   for(const plan of plans){const key=`${id}@${plan.key}`;if(!this.corners.has(key)&&[...this.corners.values()].filter(r=>r.owner===id).length>=2)break;if(!this.corners.has(key))this.corners.set(key,{owner:id,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:false,active:false});}
+  // Partition once in original map order. Each loop iteration mutates only its
+  // own entries, so other owners' snapshots remain valid.
+  const ownedByOwner=new Map<string,[string,CornerReservation][]>();
+  for(const pair of this.corners){const owner=pair[1].owner,owned=ownedByOwner.get(owner);if(owned)owned.push(pair);else ownedByOwner.set(owner,[pair]);}
+  for(const [id,e]of this.entries){
+   // The legacy decision uses the pre-prune set, as in the original algorithm.
+   const owned=ownedByOwner.get(id)??[], nonlegacy=owned.some(([,r])=>r.plan!=='legacy');
+   const plans=nodePlans(e).filter(p=>p.key!=='legacy'||!nonlegacy),desired=new Set(plans.map(p=>p.key));
+   let count=owned.length;
+   for(const [key,r]of owned)if(!r.entered&&!desired.has(r.plan)){this.corners.delete(key);count--;}
+   for(const plan of plans){const key=`${id}@${plan.key}`;if(!this.corners.has(key)){if(count>=2)break;this.corners.set(key,{owner:id,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:false,active:false});count++;}}
   }
   const obstacles=buses.map(footprint);this.acquireCorners(obstacles);
   const corners=[...this.corners.values()],reservations=[...this.reservations.values()].filter(r=>this.granted(r)),total=Math.min(dt,.25),steps=Math.max(1,Math.ceil(total/.025)),slice=total/steps;

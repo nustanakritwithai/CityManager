@@ -10,7 +10,7 @@ import { ENTITY_MODEL, ENTITY_UPSTREAM } from '../src/entity-report.mjs';
 const fixture = (days = 215) => {
   const city = createCity(61025);
   for (let day = 0; day < days; day++) step(city);
-  const firm = city.firms.find(row => row.commercialKind === 'market');
+  const firm = city.firms.find(row => row.zone === 'C' && row.owner !== null);
   assert(firm);
   const snapshot = captureOwnerSnapshot(city, firm.id);
   assert(snapshot);
@@ -23,21 +23,21 @@ const enabled = extra => ({ ownerDecisionEnabled: true, upstreamEnabled: true, a
 test('transfer fixture has actual open-month profit after tax and development retention', () => {
   // Five real simulation days after the monthly payout; no injected cash,
   // fabricated profit or modified snapshot is used to enable the provider path.
-  assert.equal(input.snapshot.tick, 215); assert.equal(transferFirm.id, 22);
-  assert.equal(transferFirm.monthlyRevenue, 34_000); assert.equal(transferFirm.monthlyExpense, 16_000);
+  assert.equal(input.snapshot.tick, 215); assert.equal(transferFirm.id, 8); assert.equal(transferFirm.commercialKind, 'retail');
+  assert.equal(transferFirm.monthlyRevenue, 82_000); assert.equal(transferFirm.monthlyExpense, 40_000);
   const finance = ownerFinance(transferCity, transferFirm.id);
-  assert.equal(finance.historyReconciled, true); assert.equal(finance.earnedWages, 0);
-  assert.equal(finance.taxReserve, 3_600); assert.equal(finance.developmentReserve, 132_200);
-  assert.equal(finance.distributable, 10_800); assert.equal(finance.withdrawAvailable, 10_800);
+  assert.equal(finance.historyReconciled, true); assert.equal(finance.earnedWages, 14_000);
+  assert.equal(finance.taxReserve, 5_600); assert.equal(finance.developmentReserve, 145_690);
+  assert.equal(finance.distributable, 16_800); assert.equal(finance.withdrawAvailable, 16_800);
   assert.equal(input.snapshot.budgetKnown, true);
-  assert.equal(input.snapshot.facts.firmCash, 188_400);
+  assert.equal(input.snapshot.facts.firmCash, 222_490);
   assert.equal(input.snapshot.facts.safeContribute, 0); assert.equal(input.snapshot.facts.safeWithdraw, 10_000);
 });
 
 test('fully distributed month-end earnings offer only hold and never call the enabled provider', async () => {
   const { city, firm, request } = fixture(210), before = serialize(city);
   const finance = ownerFinance(city, firm.id);
-  assert.equal(finance.developmentReserve, 128_600);
+  assert.equal(finance.developmentReserve, 140_090);
   assert.equal(finance.distributable, 0); assert.equal(finance.withdrawAvailable, 0);
   assert.equal(request.snapshot.facts.safeContribute, 0); assert.equal(request.snapshot.facts.safeWithdraw, 0);
   assert.deepEqual(ownerDecisionCandidates(request.snapshot), [{ id: 'hold', action: 'hold', amountSatang: 0 }]);

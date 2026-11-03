@@ -11,26 +11,49 @@ export async function reachTrafficControl(evaluate,button,selector){
 import {deserializeParkSession,expandValidatedParkSession} from '../src/park-runtime.ts';
 /** Match the app's validated 24×24 → 24×28 session migration without modifying the server ACK. */
 export const loadedTrafficSession = raw => expandValidatedParkSession(deserializeParkSession(raw));
+/** Compare all saved economic state against the actual validated live migration. */
+export const assertTrafficAutosaveCity = (raw, restoredCity) => {
+ const expected = loadedTrafficSession(raw).city;
+ assert.equal(serialize(restoredCity),serialize(expected),'Autosave changes runtime, not economic City');
+ return expected;
+};
+import {serialize} from '../src/sim.ts';
 import {createPanelServerFixture,assertNoCityWrites as noPanelCityWrites} from './panel-server-entry-fixture.mjs';
-export function assertNavigationSaveChain(before,after,writes){
+export function assertNavigationSaveChain(before,after,writes,priorWrites=[]){
  assert.ok(before&&after&&!before.deleted&&!after.deleted,'Live heads required across navigation');
  assert.equal(after.raw,before.raw,'Navigation cannot replace acknowledged bytes');assert.equal(after.cityId,before.cityId);
- let revision=before.revision;
+ let revision=before.revision, lifecycleSaves=0;
+ const acknowledged=new Map();
+ for(const event of priorWrites){
+  if(event.requestKey&&event.status===200&&event.command?.cityId===before.cityId&&event.response?.cityId===before.cityId&&event.response?.revision<=before.revision){
+   const existing=acknowledged.get(event.requestKey);
+   if(existing){assert.deepEqual(event.command,existing.command,'Repeated key must have the exact same command');assert.deepEqual(event.response,existing.response,'Repeated key must have the exact same ACK');}
+   else acknowledged.set(event.requestKey,event);
+  }
+ }
  for(const event of writes){
   assert.equal(event.status,200,'Lifecycle save must receive a successful service ACK');
   assert.equal(event.command.action,'save');assert.equal(event.command.cityId,before.cityId);
-  assert.equal(event.command.expectedRevision,revision,'Lifecycle writes form an exact revision chain');
   assert.equal(event.command.raw,before.raw,'Lifecycle flush retains exact acknowledged session');
   assert.equal(event.response.raw,before.raw);assert.equal(event.response.cityId,before.cityId);
+  const previous=event.requestKey&&acknowledged.get(event.requestKey);
+  if(previous){
+   assert.deepEqual(event.command,previous.command,'Repeated key must have the exact same command');
+   assert.deepEqual(event.response,previous.response,'Repeated key must have the exact same ACK');
+   assert.ok(event.response.revision<=revision,'Retried ACK cannot refer to a future revision');
+   continue;
+  }
+  assert.equal(event.command.expectedRevision,revision,'Lifecycle writes form an exact revision chain');
   assert.equal(event.response.revision,++revision,'Each real ACK advances exactly once');
+  lifecycleSaves++;if(event.requestKey)acknowledged.set(event.requestKey,event);
  }
  assert.equal(after.revision,revision,'Every revision increase must have an observed matching service ACK');
- return {beforeRevision:before.revision,afterRevision:revision,lifecycleSaves:writes.length};
+ return {beforeRevision:before.revision,afterRevision:revision,lifecycleSaves};
 }
 export function createTrafficServerFixture(pageUrl){
  const url=new URL(pageUrl);assert.equal(url.protocol,'http:','Traffic fixture requires loopback HTTP');
  let fixture=createPanelServerFixture(pageUrl),navigationAllowed=false,navigation=null;
- const generations=new Map(),outgoingSnapshots=new Map(),retiredWrites=[];
+ const generations=new Map(),outgoingSnapshots=new Map(),retiredWrites=[],archivedWrites=new Map();
  const writes=[],reads=[],pending=new Set(),navigationEvidence=[];
  const intercept=(params,send)=>{
   const work=(async()=>{
@@ -46,13 +69,15 @@ export function createTrafficServerFixture(pageUrl){
     return send(method,payload);
    });
    if(post)assert.equal(event.status,200,'Unexpected rejected traffic save');
-   if(retired)assertNavigationSaveChain({...previous,raw:outgoingSnapshots.get(event.command.cityId)},target.active,[event]);
+   if(retired)assertNavigationSaveChain({...previous,raw:outgoingSnapshots.get(event.command.cityId)},target.active,[event],[...(archivedWrites.get(event.command.cityId)??[]),...retiredWrites.filter(e=>e!==event)]);
    return handled;
   })();pending.add(work);void work.finally(()=>pending.delete(work)).catch(()=>{});return work;
  };
  const settle=async()=>{const deadline=Date.now()+30000;while(pending.size){if(Date.now()>=deadline)throw Error('Traffic server requests did not settle');await Promise.race([Promise.all([...pending]),new Promise(r=>setTimeout(r,80))]);}};
  const seed=async raw=>{
-  await settle();navigation=null;writes.length=0;reads.length=0;
+  await settle();navigation=null;
+  if(fixture.active?.cityId)archivedWrites.set(fixture.active.cityId,[...writes]);
+  writes.length=0;reads.length=0;
   const restored=deserializeParkSession(raw); // Validate the actual full-session contract, not a version label.
   const priorCityId=fixture.active?.cityId;const next=createPanelServerFixture(pageUrl),ack=await next.seed(raw);
   assert.equal(generations.has(ack.cityId),false,'Scenario identity must be globally fresh');fixture=next;generations.set(ack.cityId,next);
@@ -88,7 +113,7 @@ export function createTrafficServerFixture(pageUrl){
    await wait("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
    await settle();const readStart=reads.length;await button('.guest-entry-card button');
    await wait('!!window.cityManager&&window.cityManager.visuals().ready');
-   await settle();try{navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor)));}
+   await settle();try{navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor),writes.slice(0,baseline.cursor)));}
    catch(error){
     // Preserve the original failing assertion and attach only synthetic request
     // metadata. In particular, never log raw city bytes or the request key.

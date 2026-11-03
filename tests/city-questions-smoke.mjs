@@ -12,6 +12,7 @@ import { createPanelServerFixture, assertNoCityWrites } from './panel-server-ent
 import { buildLocalSignalReport } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
 import { assertAdoptedCity } from './education-adoption.mjs';
+import { questionEntryCity } from './city-questions-entry.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const workspaceOutput = resolve(root, '.test-output');
@@ -79,7 +80,7 @@ async function loadCity(city) {
   const planted=serialize(city);
   await panelServer.load(planted,{send,evaluate,button,url:url+'?advanced=1&starter=1'});
   await openSignals();await openQuestions();
-  assertAdoptedCity(await state(),city,'Server entry preserves the acknowledged city and only adopts absent education');
+  assertAdoptedCity(await state(), questionEntryCity(city), 'Server entry preserves the acknowledged city, expands legacy land and only adopts absent education');
   assert.equal(panelServer.active.raw,planted,'Opening facts never rewrites acknowledged bytes');
   await assertNoCityWrites(evaluate);
 }
@@ -211,7 +212,7 @@ try {
   assert.equal(await evaluate(`document.elementFromPoint(${mapPoint.x},${mapPoint.y})?.id`), 'city-canvas', 'Native input genuinely hits the selected house parcel');
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: mapPoint.x, y: mapPoint.y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 });
   await paints();
-  const removed = await state(), removedRaw = await evaluate('window.cityManager.snapshot()'), expectedRemoved = structuredClone(mature);
+  const removed = await state(), removedRaw = await evaluate('window.cityManager.snapshot()'), expectedRemoved = questionEntryCity(mature);
   adoptSavedEducation(expectedRemoved);
   assert.equal(bulldoze(expectedRemoved, house.cell).ok, true);
   assert.deepEqual(removed, expectedRemoved, 'Only the actual native demolition changes the same city, without a reload or clock advance');

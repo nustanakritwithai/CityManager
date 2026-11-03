@@ -4,7 +4,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize } from '../src/sim.ts';
+import { signalReadingFixture } from './signal-reading-fixture.ts';
 import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
 import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
@@ -157,8 +157,8 @@ try {
   await panelServer.install(send);
   await send('Fetch.enable', { patterns: [{urlPattern:'*/citymanager-api/*',requestStage:'Request'},{ urlPattern: '*://*/api/city-advisor/report*' }, { urlPattern: '*opentyphoon*' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  const fixture=createCity(61025);for(let day=0;day<65;day++)step(fixture);
-  await panelServer.load(serialize(fixture),{send,evaluate,button,url:url+'?advanced=1&starter=1'});
+  const { sourceRaw, fixture } = signalReadingFixture();
+  await panelServer.load(sourceRaw,{send,evaluate,button,url:url+'?advanced=1&starter=1'});
   const before = await state(), beforeRaw = await evaluate('window.cityManager.snapshot()'); assert.deepEqual(before, fixture);
 
   await openSignals(); await untilRequests(1);
@@ -263,7 +263,7 @@ try {
   await button('#close-inspector'); await releaseCancelled();
   assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'), 'false');
   assert.notEqual(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'pending');
-  await panelServer.load(serialize(fixture),{send,evaluate,button,url:url+'?advanced=1&starter=1'});
+  await panelServer.load(sourceRaw,{send,evaluate,button,url:url+'?advanced=1&starter=1'});
   behavior = 'ai'; await openSignals(); await untilRequests(9);
   await until('document.querySelector("#signal-mode").dataset.mode==="ai"');
   assert.equal(apiRequests.at(-1).priorTick, null, 'Loading a city clears ephemeral comparison history');

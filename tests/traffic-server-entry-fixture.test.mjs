@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
-import {createTrafficServerFixture,assertNavigationSaveChain,reachTrafficControl,loadedTrafficSession} from './traffic-server-entry-fixture.mjs';
+import {createTrafficServerFixture,assertNavigationSaveChain,reachTrafficControl,loadedTrafficSession,assertTrafficAutosaveCity} from './traffic-server-entry-fixture.mjs';
 const url='http://127.0.0.1:4195/CityManager/';
 import {createCity,step} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
@@ -53,14 +53,35 @@ test('reload accepts only observed exact same-raw lifecycle ACK chains and the f
  await assert.rejects(g.enter({evaluate,button:async()=>{await g.intercept(request('GET'),async()=>{});await g.intercept(request('POST',{...payload,cityId:base.cityId}),async()=>{});}}),/Entered GET must match final/);
 });
 
+test('exact idempotent lifecycle retries reuse the acknowledged revision without hiding mismatches',async()=>{
+ const f=createTrafficServerFixture(url),base=await f.seed(raw),send=async()=>{};
+ const post=request('POST',{action:'save',cityId:base.cityId,expectedRevision:1,raw,metadata:base.metadata});
+ await f.intercept(post,send);f.allowNavigation();
+ const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
+ await f.enter({evaluate,button:async()=>{await f.intercept(post,send);await f.intercept(request('GET'),send);}});
+ assert.equal(f.active.revision,2);assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:2,afterRevision:2,lifecycleSaves:0});
+ const event=f.writes[0],retry=f.writes[1];
+ assert.deepEqual(assertNavigationSaveChain(base,f.active,[event,retry]),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+ const g=createTrafficServerFixture(url),start=await g.seed(raw);g.allowNavigation();
+ const same=request('POST',{action:'save',cityId:start.cityId,expectedRevision:start.revision,raw,metadata:start.metadata});
+ await g.enter({evaluate,button:async()=>{await g.intercept(same,send);await g.intercept(same,send);await g.intercept(request('GET'),send);}});
+ assert.equal(g.active.revision,2);assert.deepEqual(g.navigationEvidence.at(-1),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+
+ for(const bad of [
+  {...retry,command:{...retry.command,metadata:{...retry.command.metadata,tick:99}}},
+  {...retry,response:{...retry.response,revision:3}},
+  {...retry,requestKey:randomUUID()},
+ ])assert.throws(()=>assertNavigationSaveChain(base,f.active,[event,bad]));
+});
+
 test('reload revision failures retain assertion and bounded non-sensitive lifecycle diagnostics',async()=>{
  const f=createTrafficServerFixture(url),base=await f.seed(raw),send=async()=>{};
  const post=request('POST',{action:'save',cityId:base.cityId,expectedRevision:1,raw,metadata:base.metadata});
  await f.intercept(post,send);f.allowNavigation();
  const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
- await assert.rejects(f.enter({evaluate,button:async()=>{await f.intercept(post,send);await f.intercept(request('GET'),send);}}),error=>{
+ await assert.rejects(f.enter({evaluate,button:async()=>{f.writes.push({...f.writes[0],requestKey:randomUUID()});await f.intercept(request('GET'),send);}}),error=>{
   assert.match(error.message,/Lifecycle writes form an exact revision chain/);
-  assert.match(error.message,/"baselineRevision":2/);assert.match(error.message,/"repeatedKey":true/);
+  assert.match(error.message,/"baselineRevision":2/);assert.match(error.message,/"repeatedKey":false/);
   assert.equal(error.message.includes(raw),false);assert.equal(error.message.includes(post.request.headers['Idempotency-Key']),false);return true;
  });
 });
@@ -76,6 +97,17 @@ test('old page unload and in-flight service request settle before a new fixture 
  await assert.rejects(f.intercept(request('POST',{action:'save',cityId:'22222222-2222-4222-8222-222222222222',expectedRevision:1,raw,metadata:before.metadata}),async()=>{}),/Unexpected rejected traffic save/);assert.equal(f.active.revision,1);
 });
 
+
+test('retired page may retry an exact ACK observed before reseeding, never a changed command',async()=>{
+ const f=createTrafficServerFixture(url),before=await f.seed(raw),send=async()=>{};
+ const post=request('POST',{action:'save',cityId:before.cityId,expectedRevision:before.revision,raw,metadata:before.metadata});
+ await f.intercept(post,send);assert.equal(f.active.revision,2);
+ await f.leave({evaluate:async e=>e==='!!window.cityManager'||e==='window.cityManager.parks().paused'?true:e==='window.cityManager.sessionSnapshot()'?raw:e==='window.__panelCityWrites'?[]:null,send:async()=>{},until:async()=>{}});
+ const current=await f.seed(raw);await f.intercept(post,send);
+ assert.equal(f.evidence.retiredWrites.at(-1).ackRevision,2);assert.deepEqual(f.active,current);
+ const altered=structuredClone(post);altered.request.postData=JSON.stringify({...JSON.parse(post.request.postData),metadata:{...before.metadata,tick:99}});
+ await assert.rejects(f.intercept(altered,send),/Unexpected rejected traffic save|same command/);assert.deepEqual(f.active,current);
+});
 
 test('traffic native Save bypasses only the obsolete local-save waiter; other controls still use reachability',async()=>{
  let evaluated=0,clicked=0;
@@ -150,4 +182,15 @@ test('expected live session applies the real map migration without rewriting ser
  assert.equal(f.active.raw,raw); assert.equal(f.active.revision,1);
  const expandedRaw=serializeParkSession(loaded.city,loaded.runtime);
  assert.deepEqual(loadedTrafficSession(expandedRaw),loaded);
+});
+
+
+test('autosave compares the exact expanded economic city and rejects any economic mutation',()=>{
+ const live=loadedTrafficSession(raw), runtime=structuredClone(live.runtime);runtime.minuteRemainder=.25;
+ const saved=serializeParkSession(live.city,runtime),restored=loadedTrafficSession(saved);
+ assert.deepEqual(assertTrafficAutosaveCity(raw,restored.city),live.city);
+ const changed=structuredClone(restored.city);step(changed);
+ assert.deepEqual(loadedTrafficSession(serializeParkSession(changed,createParkRuntime(changed))).city,changed,'economic change is a valid, replayable city');
+ assert.throws(()=>assertTrafficAutosaveCity(raw,changed),/Autosave changes runtime, not economic City/);
+ assert.notEqual(serializeParkSession(live.city,live.runtime),saved,'runtime really changed');
 });
