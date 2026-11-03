@@ -123,7 +123,7 @@ async function ownFlows(wallet) {
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)})?.dataset.scope`), 'wallet');
     const count = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector + ' .cx-count[data-total]')});return{shown:Number(e.dataset.shown),total:Number(e.dataset.total)}})()`);
     assert.equal(count.total, expected.length); assert.deepEqual(await rows(`${selector} .cx-flow-card`), expected.slice(0, count.shown));
-    if (expected.length > 8) { await button(`${selector} [data-context-flow-action="toggle"]`); assert.deepEqual(await rows(`${selector} .cx-flow-card`), expected); await button(`${selector} [data-context-flow-action="toggle"]`); }
+    if (expected.length > 3) { await button(`${selector} [data-context-flow-action="toggle"]`); assert.deepEqual(await rows(`${selector} .cx-flow-card`), expected); await button(`${selector} [data-context-flow-action="toggle"]`); }
   }
 }
 async function household(household, source) {
