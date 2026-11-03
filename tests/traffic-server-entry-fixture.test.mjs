@@ -279,3 +279,27 @@ test('manual-only success signal follows awaited explicit server save',async()=>
  assert.ok(handler.includes(`await trackedSave(true);sound('ui-save');status('${signal}')`));
  assert.match(source,/route\?\.page === 'game'.*\$\('#inspector-status'\)\.textContent = text/);
 });
+
+test('HTTP diagnostics identify partial uploads and asset failures without suppressing errors or recording payloads',async()=>{
+ const {createServer,request}=await import('node:http'),{trafficHttpHandler}=await import('./traffic-server-entry-fixture.mjs');
+ const errors=[],deliveries=[],failureDetails=[];let handler,serviceCalls=0,bodySeen;
+ const received=new Promise(resolve=>{bodySeen=resolve;});
+ const http=createServer((req,res)=>{req.once('data',bodySeen);void handler(req,res);});
+ await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));
+ const origin=`http://127.0.0.1:${http.address().port}`,fixture=createTrafficServerFixture(origin+'/CityManager/'),ack=await fixture.seed(raw),intercept=fixture.intercept;
+ fixture.intercept=async(...args)=>{serviceCalls++;return intercept(...args);};
+ handler=trafficHttpHandler({origin,upstream:origin+'/CityManager/',fixture,errors,deliveries,failureDetails,forward:async()=>{throw Object.assign(Error('private-message'),{code:'private-code',cause:{code:'UND_ERR_SOCKET'}});}});
+ const until=async predicate=>{const deadline=Date.now()+5000;while(!predicate()){assert.ok(Date.now()<deadline,'Diagnostic event arrives');await new Promise(resolve=>setTimeout(resolve,10));}};
+ try{
+  const partial=request(origin+'/citymanager-api/v1/city-save',{method:'POST',headers:{'content-length':100000,'idempotency-key':'private-key','cookie':'private-cookie'}});partial.on('error',()=>{});partial.write('private-body');
+  await Promise.race([received,new Promise((_,reject)=>setTimeout(()=>reject(Error('Incoming body not observed')),5000).unref())]);partial.destroy();await until(()=>errors.length===1);
+  assert.match(errors[0],/^Fixture transport failure: Error \(ECONNRESET\)$/);assert.equal(serviceCalls,0);assert.deepEqual(fixture.active,ack);assert.deepEqual(deliveries,[],'Incomplete requests remain outside the service ACK list');
+  assert.deepEqual(failureDetails[0],{kind:'city-save',phase:'read-body',method:'POST',bodyBytes:12,bodyComplete:false,requestComplete:false,requestAborted:true,responseHeadersSent:false,responseFinished:false,responseDestroyed:true,serviceStatus:null,errorName:'Error',errorCode:'ECONNRESET',causeCode:null});
+  const asset=await fetch(origin+'/CityManager/private-asset?token=private-query');assert.equal(asset.status,500);assert.equal(errors.length,2);assert.equal(failureDetails[1].kind,'asset');assert.equal(failureDetails[1].phase,'forward-asset');assert.equal(failureDetails[1].errorCode,null);assert.equal(failureDetails[1].causeCode,'UND_ERR_SOCKET');
+  const response=await fetch(origin+'/citymanager-api/v1/city-save',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify({action:'save',cityId:ack.cityId,expectedRevision:ack.revision,raw,metadata:ack.metadata})});
+  assert.equal(response.status,200);const saved=await response.json();assert.equal(saved.raw,raw);assert.equal(saved.revision,ack.revision+1);assert.equal(serviceCalls,1);assert.equal(errors.length,2,'Later successful save cannot hide earlier failures');assert.throws(()=>assert.deepEqual(errors,[]));
+  for(let i=0;i<34;i++)await fetch(origin+'/CityManager/private-asset');
+  assert.equal(errors.length,36,'The fail-closed error list is not truncated');assert.equal(failureDetails.length,32,'Only diagnostic details are bounded');
+  assert.doesNotMatch(JSON.stringify({errors,failureDetails}),/private-|citymanager-api|idempotency|cookie|token|raw|stack/i);
+ }finally{http.closeAllConnections();await new Promise(resolve=>http.close(resolve));}
+});

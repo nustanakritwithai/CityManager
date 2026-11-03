@@ -188,29 +188,44 @@ export function createTrafficNetworkAudit(context=()=>null){
 
 // Native HTTP transport: page-exit keepalive requests outlive their CDP Fetch IDs.
 // Reuse exactly the same real-service adapter; never mock a successful ACK.
-export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,forward=fetch}){
+// Bounded structural diagnostics only. Never retain paths, bodies, headers,
+// request keys, city IDs, error messages or stacks. Every error still fails audit.
+export function recordFixtureHttpFailure(error,{req,res,errors,failureDetails,kind,phase,bodyBytes,bodyComplete,serviceStatus=null}){
+ const errorName=['Error','TypeError','SyntaxError','AbortError','TimeoutError','AssertionError'].includes(error?.name)?error.name:'OtherError';
+ const codes=['ECONNRESET','ETIMEDOUT','ABORT_ERR','UND_ERR_SOCKET'];
+ const errorCode=codes.includes(error?.code)?error.code:null,causeCode=codes.includes(error?.cause?.code)?error.cause.code:null;
+ errors.push(`Fixture transport failure: ${errorName}${errorCode?` (${errorCode})`:''}`);
+ failureDetails.push({kind,phase,method:['GET','HEAD','POST'].includes(req.method)?req.method:'OTHER',bodyBytes,bodyComplete,requestComplete:req.complete??null,requestAborted:req.aborted??null,responseHeadersSent:res.headersSent,responseFinished:res.writableFinished??null,responseDestroyed:res.destroyed??null,serviceStatus,errorName,errorCode,causeCode});
+ if(failureDetails.length>32)failureDetails.shift();
+}
+export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,failureDetails=[],forward=fetch}){
  const base=new URL(upstream);assert.equal(base.hostname,'127.0.0.1');assert.equal(base.protocol,'http:');
- return async(req,res)=>{try{
+ return async(req,res)=>{let kind='unvalidated',phase='validate',bodyBytes=0,bodyComplete=false,serviceStatus=null;try{
   assert.equal(req.headers.host,new URL(origin).host,'Only the exact isolated fixture host is served');
   const target=new URL(req.url,origin);assert.equal(target.origin,origin);assert.ok(req.url.startsWith('/')&&!req.url.startsWith('//'));
-  if(target.pathname==='/__traffic_network_fence_page'){assert.equal(req.method,'GET');res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Isolated network fence</title>');return;}
+  if(target.pathname==='/__traffic_network_fence_page'){kind='fence';assert.equal(req.method,'GET');res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Isolated network fence</title>');return;}
   if(target.pathname.startsWith('/citymanager-api/')){
-   let data='';for await(const chunk of req){data+=chunk;assert.ok(Buffer.byteLength(data)<=10*1024*1024,'Bounded fixture request');}
+   kind=target.pathname==='/citymanager-api/v1/city-save'?'city-save':'other-api';phase='read-body';
+   let data='';for await(const chunk of req){data+=chunk;bodyBytes+=Buffer.byteLength(chunk);assert.ok(Buffer.byteLength(data)<=10*1024*1024,'Bounded fixture request');}
+   bodyComplete=true;phase='service';
    const record={method:req.method,path:target.pathname,finished:false,closed:false};deliveries.push(record);
    res.once('finish',()=>{record.finished=true;});res.once('close',()=>{record.closed=true;});
    assert.equal(await fixture.intercept({requestId:'http-'+deliveries.length,request:{url:target.href,method:req.method,headers:req.headers,postData:data}},async(method,payload)=>{
-    assert.equal(method,'Fetch.fulfillRequest');record.status=payload.responseCode;
+    assert.equal(method,'Fetch.fulfillRequest');record.status=payload.responseCode;serviceStatus=payload.responseCode;phase='respond';
     res.writeHead(payload.responseCode,Object.fromEntries(payload.responseHeaders.map(h=>[h.name,h.value])));res.end(Buffer.from(payload.body,'base64'));
    }),true);
    return;
   }
-  assert.ok(req.method==='GET'||req.method==='HEAD','Asset forwarding is read-only');
+  kind='asset';phase='validate-asset';assert.ok(req.method==='GET'||req.method==='HEAD','Asset forwarding is read-only');
   const asset=new URL(target.pathname+target.search,base);assert.equal(asset.origin,base.origin,'No external forwarding');
-  const response=await forward(asset,{method:req.method,redirect:'manual',signal:AbortSignal.timeout(30000)});
+  phase='forward-asset';const response=await forward(asset,{method:req.method,redirect:'manual',signal:AbortSignal.timeout(30000)});
   assert.ok(response.status<300||response.status>=400,'Fixture assets cannot redirect');
   const headers={};for(const [key,value] of response.headers)if(!['content-encoding','content-length','transfer-encoding','connection'].includes(key))headers[key]=value;
-  res.writeHead(response.status,headers);res.end(req.method==='HEAD'?undefined:Buffer.from(await response.arrayBuffer()));
- }catch(error){errors.push(String(error));if(!res.headersSent)res.writeHead(500,{'Content-Type':'text/plain'});res.end('Isolated fixture request failed');}};
+  phase='read-asset';res.writeHead(response.status,headers);res.end(req.method==='HEAD'?undefined:Buffer.from(await response.arrayBuffer()));
+ }catch(error){
+  recordFixtureHttpFailure(error,{req,res,errors,failureDetails,kind,phase,bodyBytes,bodyComplete,serviceStatus});
+  if(!res.headersSent&&!res.destroyed)res.writeHead(500,{'Content-Type':'text/plain'});if(!res.destroyed)res.end('Isolated fixture request failed');
+ }};
 }
 export async function startTrafficHttpFixture(upstream){
  const source=new URL(upstream);assert.equal(source.hostname,'127.0.0.1');assert.equal(source.protocol,'http:');assert.equal(source.username,'');assert.equal(source.password,'');
