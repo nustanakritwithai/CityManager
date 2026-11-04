@@ -8,16 +8,16 @@ const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const owner='11111111-1111-4111-8111-111111111111',state='s'.repeat(43),challenge='c'.repeat(43),origin='https://nustanakritwithai.github.io';
 const reply=(body={},ok=true,status=ok?200:400)=>({ok,status,json:async()=>body});
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}}
-async function setup({auto=false,holdInitialIdentity=false,handle=null,idPrefix='request'}={}){
+async function setup({auto=false,holdInitialIdentity=false,handle=null,idPrefix='request',hasOpener=true,challengeParam=challenge,stateParam=state}={}){
  const elements=new Map(),calls=[],listeners=new Map(),holds=new Map(),timers=new Map();let count=0,allow=true,timerId=0;
  const get=id=>{if(!elements.has(id))elements.set(id,{disabled:false,textContent:'',value:''});return elements.get(id)};
  const opener={postMessage:()=>{}};
- const win={opener,addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name)};
+ const win={opener:hasOpener?opener:null,addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name)};
  const initialIdentity=holdInitialIdentity?deferred():null;if(initialIdentity)holds.set('/citymanager-api/v1/me',initialIdentity);
- const ctx={URLSearchParams,location:{search:`?${auto?'auto=1&':''}state=${state}&challenge=${challenge}`},document:{cookie:'cm_csrf=fixture',getElementById:get},window:win,setInterval:()=>1,clearInterval:()=>{},setTimeout:(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id),crypto:{randomUUID:()=>`${idPrefix}-${++count}`},confirm:()=>allow,fetch:async(path,init)=>{calls.push({path,body:init?.body});if(holds.has(path)){const held=holds.get(path);holds.delete(path);return held.promise}if(handle){const result=await handle(path,init);if(result)return result}if(path.endsWith('/v1/me'))return reply({guest_id:owner});if(path.endsWith('/recovery-confirm'))return reply({state:'confirmed'});if(path.endsWith('/recovery-prepare')){const id=JSON.parse(init.body).request_id;return reply({request_id:id,recovery_code:`code-${id}`})}return reply({code:'auth-code'})}};
+ const ctx={URLSearchParams,location:{search:`?${auto?'auto=1&':''}state=${stateParam}&challenge=${challengeParam}`},document:{cookie:'cm_csrf=fixture',getElementById:get},window:win,setInterval:()=>1,clearInterval:()=>{},setTimeout:(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id),crypto:{randomUUID:()=>`${idPrefix}-${++count}`},confirm:()=>allow,fetch:async(path,init)=>{calls.push({path,body:init?.body});if(holds.has(path)){const held=holds.get(path);holds.delete(path);return held.promise}if(handle){const result=await handle(path,init);if(result)return result}if(path.endsWith('/v1/me'))return reply({guest_id:owner});if(path.endsWith('/recovery-confirm'))return reply({state:'confirmed'});if(path.endsWith('/recovery-prepare')){const id=JSON.parse(init.body).request_id;return reply({request_id:id,recovery_code:`code-${id}`})}return reply({code:'auth-code'})}};
  vm.createContext(ctx);vm.runInContext(script,ctx);for(let i=0;i<8;i++)await Promise.resolve();
  const hold=path=>{const d=deferred();holds.set('/citymanager-api/v1/'+path,d);return d};
- return {get,calls,listeners,win,hold,initialIdentity,fireWait:()=>{for(const [id,timer] of [...timers])if(timer.ms===15000){timers.delete(id);timer.fn()}},force:code=>vm.runInContext(code,ctx),allow:value=>{allow=value},count:path=>calls.filter(c=>c.path.endsWith(path)).length};
+ return {get,calls,listeners,win,hold,initialIdentity,fireWait:()=>{for(const [id,timer] of [...timers])if(timer.ms===15000){timers.delete(id);timer.fn()}},fireTimer:ms=>{for(const [id,timer] of [...timers])if(timer.ms===ms){timers.delete(id);timer.fn()}},force:code=>vm.runInContext(code,ctx),allow:value=>{allow=value},count:path=>calls.filter(c=>c.path.endsWith(path)).length};
 }
 test('confirm A blocks prepare B and all session-changing actions until A finishes',async()=>{
  const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();
@@ -111,4 +111,37 @@ test('late initial identity failure cannot erase uncertain confirmation warning'
 
 test('cancelled creation and late identity failure clears the loading indicator',async()=>{
  const r=await setup({holdInitialIdentity:true});r.allow(false);await r.get('new').onclick();r.initialIdentity.reject(new TypeError('identity unavailable'));for(let i=0;i<8;i++)await Promise.resolve();assert.match(r.get('identity').textContent,/ตรวจสอบบัญชีที่จดจำไว้ไม่ได้/);assert.equal(r.count('/auth/guest'),0)
+});
+
+
+test('auto mode blocks use without a valid opener intent, including after timeout',async()=>{
+ const r=await setup({auto:true});assert.equal(r.get('use').disabled,true);await r.get('use').onclick();await assert.rejects(r.force('continueGuest()'),/รอการยืนยันจากเกม/);assert.equal(r.count('/authorize'),0);const receive=r.listeners.get('message');const valid={type:'citymanager-auth-intent',state,expectedGuest:owner};for(const e of [{origin:'https://invalid.example',source:r.win.opener,data:valid},{origin,source:{},data:valid},{origin,source:r.win.opener,data:{...valid,state:'wrong'}},{origin,source:r.win.opener,data:{...valid,expectedGuest:'not-a-uuid'}}]){receive(e);await r.get('use').onclick();assert.equal(r.get('use').disabled,true);assert.equal(r.count('/authorize'),0)}r.fireTimer(60000);assert.equal(r.listeners.has('message'),false);await r.get('use').onclick();assert.equal(r.count('/authorize'),0);assert.equal(r.get('use').disabled,true)
+});
+test('valid delayed auto intent authorizes only the matched guest',async()=>{
+ const r=await setup({auto:true});assert.equal(r.get('use').disabled,true);await r.get('use').onclick();assert.equal(r.count('/authorize'),0);r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});for(let i=0;i<16;i++)await Promise.resolve();assert.equal(r.count('/authorize'),1);const authorization=JSON.parse(r.calls.find(c=>c.path.endsWith('/authorize')).body);assert.deepEqual(authorization,{challenge,expected_guest:owner});assert.equal(r.get('use').disabled,true)
+});
+test('auto intent matching rejects a different guest before authorization',async()=>{
+ const other='22222222-2222-4222-8222-222222222222',r=await setup({auto:true});r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:other}});for(let i=0;i<16;i++)await Promise.resolve();assert.equal(r.count('/authorize'),0);assert.match(r.get('message').textContent,/บัญชี Guest ไม่ตรง/);assert.equal(r.get('use').disabled,false);await r.get('use').onclick();assert.equal(r.count('/authorize'),0);assert.match(r.get('message').textContent,/บัญชี Guest ไม่ตรง/)
+});
+test('intent arriving while busy enables only explicit matching authorization afterward',async()=>{
+ const r=await setup({auto:true});const held=r.hold('pages/recovery-prepare'),preparing=r.get('code').onclick();r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});assert.equal(r.get('use').disabled,true);assert.equal(r.count('/authorize'),0);held.resolve(reply({request_id:'request-1',recovery_code:'code-request-1'}));await preparing;assert.equal(r.get('use').disabled,false);assert.equal(r.count('/authorize'),0);await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.deepEqual(JSON.parse(r.calls.find(c=>c.path.endsWith('/authorize')).body),{challenge,expected_guest:owner})
+});
+test('manual non-auto use remains available without opener intent',async()=>{
+ const r=await setup();assert.equal(r.get('use').disabled,false);await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.deepEqual(JSON.parse(r.calls.find(c=>c.path.endsWith('/authorize')).body),{challenge})
+});
+
+
+test('auto intent status is live, waits, and clears after a valid intent without modifying other status',async()=>{
+ assert.match(html,/<button id="use"[^>]*aria-describedby="auto-intent-status"/);assert.match(html,/<output id="auto-intent-status"[^>]*aria-live="polite"/);const r=await setup({auto:true});assert.equal(r.get('auto-intent-status').textContent,'กำลังรอการยืนยันจากเกม…');const held=r.hold('pages/recovery-prepare'),preparing=r.get('code').onclick();const actionMessage=r.get('message').textContent;r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});assert.equal(r.get('auto-intent-status').textContent,'');assert.equal(r.get('message').textContent,actionMessage);assert.equal(r.get('use').disabled,true);held.resolve(reply({request_id:'request-1',recovery_code:'code-request-1'}));await preparing;assert.equal(r.get('auto-intent-status').textContent,'');assert.equal(r.count('/authorize'),0)
+});
+test('auto intent timeout shows reopening guidance without overwriting other status',async()=>{
+ const r=await setup({auto:true});r.get('message').textContent='existing message';r.get('identity').textContent='existing identity';r.fireTimer(60000);assert.equal(r.get('auto-intent-status').textContent,'ไม่สามารถยืนยันคำขอจากเกมได้ หากกำลังจัดการรหัสกู้คืน ให้รอผลและเก็บรหัสเดิมกับรหัสใหม่ไว้ก่อนปิดหน้านี้ แล้วเปิดเข้าสู่ระบบจากเกมอีกครั้ง');assert.equal(r.get('message').textContent,'existing message');assert.equal(r.get('identity').textContent,'existing identity');assert.equal(r.get('use').disabled,true);assert.equal(r.count('/authorize'),0)
+});
+test('invalid auto entry shows reopening guidance and manual mode shows no auto status',async()=>{
+ const guidance='ไม่สามารถยืนยันคำขอจากเกมได้ หากกำลังจัดการรหัสกู้คืน ให้รอผลและเก็บรหัสเดิมกับรหัสใหม่ไว้ก่อนปิดหน้านี้ แล้วเปิดเข้าสู่ระบบจากเกมอีกครั้ง';for(const options of [{hasOpener:false},{challengeParam:'invalid'},{stateParam:'invalid'}]){const r=await setup({auto:true,...options});assert.equal(r.get('auto-intent-status').textContent,guidance);assert.equal(r.get('use').disabled,true);assert.equal(r.listeners.has('message'),false);await r.get('use').onclick();assert.equal(r.count('/authorize'),0)}const manual=await setup();assert.equal(manual.get('auto-intent-status').textContent,'');assert.equal(manual.get('use').disabled,false)
+});
+
+
+test('auto intent timeout keeps pending code and in-flight confirmation intact',async()=>{
+ const r=await setup({auto:true});await r.get('code').onclick();const code=r.get('secret').textContent,held=r.hold('pages/recovery-confirm'),confirming=r.get('confirm-code').onclick(),request=r.calls.find(c=>c.path.endsWith('/recovery-confirm')).body,actionMessage=r.get('message').textContent;r.fireTimer(60000);assert.match(r.get('auto-intent-status').textContent,/ให้รอผลและเก็บรหัสเดิมกับรหัสใหม่ไว้ก่อนปิดหน้านี้/);assert.equal(r.get('secret').textContent,code);assert.equal(r.get('message').textContent,actionMessage);assert.equal(r.get('confirm-code').disabled,true);assert.equal(r.count('/recovery-confirm'),1);await r.get('confirm-code').onclick();assert.equal(r.count('/recovery-confirm'),1);held.reject(new TypeError('connection lost'));await confirming;assert.equal(r.get('secret').textContent,code);assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(r.get('confirm-code').disabled,false);await r.get('confirm-code').onclick();const calls=r.calls.filter(c=>c.path.endsWith('/recovery-confirm'));assert.equal(calls.length,2);assert.equal(calls[1].body,request)
 });
