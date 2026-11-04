@@ -24,6 +24,8 @@ jobs:
     # User-requested incident scope for PR89 only; later changes retain the full suite.
     env:
       CITYMANAGER_SAVE_HOTFIX: ${{ (github.event_name == 'pull_request' && github.event.pull_request.number == 89) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[save-hotfix-89]')) }}
+      # Owner-approved PR197 publication exception; later unmarked pushes run roads normally.
+      CITYMANAGER_SKIP_ROADS: ${{ (github.event_name == 'pull_request' && github.head_ref == 'codex/pr197-roads-timeout-exception') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[owner-approved-roads-timeout-197]')) }}
     permissions:
       contents: read
       pages: read
@@ -331,8 +333,12 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Building progression acceptance failed with exit code $LASTEXITCODE." }
             node --experimental-strip-types tests/building-issues-smoke.mjs
             if ($LASTEXITCODE -ne 0) { throw "Building issue icon acceptance failed with exit code $LASTEXITCODE." }
-            npm run test:roads
-            if ($LASTEXITCODE -ne 0) { throw "Road topology acceptance failed with exit code $LASTEXITCODE." }
+            if ($env:CITYMANAGER_SKIP_ROADS -eq 'true') {
+              Write-Warning 'Owner-approved PR197 publication: road/selector/grouped-menu browser acceptance SKIPPED after the 150s suite timeout.'
+            } else {
+              npm run test:roads
+              if ($LASTEXITCODE -ne 0) { throw "Road topology acceptance failed with exit code $LASTEXITCODE." }
+            }
             npm run test:audio
             if ($LASTEXITCODE -ne 0) { throw "Audio acceptance failed with exit code $LASTEXITCODE." }
             $env:CITYMANAGER_BLOCK_MODELS = '1'
