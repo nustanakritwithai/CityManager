@@ -96,6 +96,11 @@ test('integration routes badge activation to the existing inspector and preserve
   assert.doesNotMatch(markers, /activate\(|onCell\(|dispatchEvent\(/, 'does not route through citizen/build command picking');
 });
 
+test('paused startup populates the marker layer after construction and visual settings', () => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /mapMarkers = new MapMarkers\(view, cell =>[\s\S]*?atmosphere = new AtmosphereController\([\s\S]*?updateMapInfo\(null\);[\s\S]*?const visual = atmosphere/);
+});
+
 
 test('live school utility allocator, not stale reports, drives exact values while paused', () => {
   const c = fixture('R'), a = GATEWAY + 4 - SIZE, b = GATEWAY + 5 - SIZE;

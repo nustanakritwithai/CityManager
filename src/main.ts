@@ -953,6 +953,9 @@ async function boot() {
   // The first render ran before the HUD existed; a paused city would otherwise show an empty summary.
   cityHud.update(city, paused);
   atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / 1440, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
+  // The first render precedes marker construction. Populate the layer now so a
+  // paused city shows its issues without requiring another player interaction.
+  updateMapInfo(null);
   const visual = atmosphere;
   audioPanel = installAudioPanel(audio, $('#atmosphere-menu'));
   // Ambience follows what the screen shows; the city-wide levels only change once a day.
