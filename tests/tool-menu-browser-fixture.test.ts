@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createCity, buildRoad, bulldoze, zoneCell, deserialize, serialize, GATEWAY, SIZE } from '../src/sim.ts';
-import { groupedToolFixture, assertGroupedRowLayout, groupedRowSwipe, groupedKeyEvents } from './grouped-tool-menu-browser.mjs';
+import { groupedToolFixture, assertGroupedRowLayout, assertGroupedLabel, groupedRowSwipe, groupedKeyEvents } from './grouped-tool-menu-browser.mjs';
 import { createTrafficServerFixture, loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
 const cell = (x: number, y: number) => y * SIZE + x;
@@ -97,6 +97,13 @@ test('only the owner-accepted university caption may overflow by up to 4px', () 
   const other = rowGeometry();
   Object.assign(other.buttons[0].label, { text: 'มหาวิทยาลัย', width: 47, scroll: 51 });
   assert.throws(() => assertGroupedRowLayout(other, serviceTools), /horizontal overflow/);
+
+  // Original 980px desktop layout displayed on a 390px touch screen: six
+  // layout pixels occupy less than three physical CSS pixels.
+  const scaled = { ...rowGeometry().buttons.at(-1)!.label, text: 'มหาวิทยาลัย', width: 121, scroll: 127 };
+  assert.doesNotThrow(() => assertGroupedLabel(scaled, 'university', 390 / 980));
+  assert.throws(() => assertGroupedLabel({ ...scaled, scroll: 132 }, 'university', 390 / 980), /horizontal overflow/);
+  assert.throws(() => assertGroupedLabel(scaled, undefined, 390 / 980), /horizontal overflow/);
 });
 
 test('row swipes remain horizontal and move away from either scroll boundary; native arrows retain correct codes', () => {

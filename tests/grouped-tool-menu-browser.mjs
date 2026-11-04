@@ -16,11 +16,12 @@ export const groupedKeyEvents = value => selectorKeyEvents(value).map(event => (
   windowsVirtualKeyCode: ({ ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, End: 35, Home: 36 })[value] ?? event.windowsVirtualKeyCode,
 }));
 
-function assertLabel(label, tool) {
+export function assertGroupedLabel(label, tool, viewportRatio = 1) {
   // PR #197: the owner accepted the original university button's 4px text
   // overflow on 2026-11-04 to preserve Claude's design. Other labels and all
   // vertical bounds retain their existing checks; larger overflow still fails.
-  const acceptedOverflow = tool === 'university' && label.text === 'มหาวิทยาลัย' ? 4 : 1;
+  // Match the physical CSS-pixel convention used by the touch target check.
+  const acceptedOverflow = tool === 'university' && label.text === 'มหาวิทยาลัย' ? 4 / viewportRatio : 1;
   assert.ok(label.scroll <= label.width + acceptedOverflow, `Label stays within its accepted horizontal overflow: ${JSON.stringify(label)}`);
   assert.ok(label.left >= label.buttonLeft - 1 && label.right <= label.buttonRight + 1 && label.top >= label.buttonTop - 1 && label.bottom <= label.buttonBottom + 1, `Whole label stays inside its button: ${JSON.stringify(label)}`);
 }
@@ -33,7 +34,7 @@ export function assertGroupedRowLayout(result, expected) {
   assert.ok(result.m.bottom <= result.a.y && result.m.y >= 0 && result.m.x >= 0 && result.m.right <= result.width && result.m.bottom <= result.height, 'Above-anchor row stays within viewport');
   assert.ok(Math.abs(result.m.h - result.a.h) < 1 && result.scrollY <= result.clientY + 1, 'Row retains original button height without vertical clipping');
   for (const [index, option] of result.buttons.entries()) {
-    assertLabel(option.label, option.tool);
+    assertGroupedLabel(option.label, option.tool, result.ratio);
     assert.ok(Math.abs(option.w - result.a.w * 1.2) < 1 && Math.abs(option.h - result.a.h) < 1, 'Row options use the actual 1.2× anchor width and unchanged height');
     assert.ok(option.w * result.ratio >= 43.5 && option.h * result.ratio >= 43.5, 'At least 44 physical CSS px in touch desktop mode');
     assert.ok(Math.abs(option.y - result.m.y) < 1, 'All options remain in one horizontal row');
@@ -61,7 +62,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     await send('Emulation.setTouchEmulationEnabled', selectorTouchEmulation(touch)); setTouch(touch); await paints();
   };
   const labelGeometry = `b=>{const e=b.querySelector('span:last-child'),r=e.getBoundingClientRect(),a=b.getBoundingClientRect();return{text:e.textContent,width:e.clientWidth,scroll:e.scrollWidth,left:r.left,right:r.right,top:r.top,bottom:r.bottom,buttonLeft:a.left,buttonRight:a.right,buttonTop:a.top,buttonBottom:a.bottom}}`;
-  const assertAnchorLabel = async id => assertLabel(await evaluate(`(${labelGeometry})(document.querySelector('#${id}-tool'))`));
+  const assertAnchorLabel = async id => assertGroupedLabel(await evaluate(`(${labelGeometry})(document.querySelector('#${id}-tool'))`));
   const geometry = async (id, name, expected) => {
     const result = await evaluate(`(()=>{const a=document.querySelector('#${id}-tool'),m=document.querySelector('#${id}-submenu'),r=e=>{const p=e.getBoundingClientRect();return{x:p.x,y:p.y,right:p.right,bottom:p.bottom,w:p.width,h:p.height}},mr=r(m),style=getComputedStyle(m);return{name:${JSON.stringify(name)},id:${JSON.stringify(id)},a:r(a),m:mr,ratio:Math.min(1,screen.width/innerWidth),width:innerWidth,height:innerHeight,layout:m.dataset.layout,direction:style.flexDirection,overflowX:style.overflowX,overflowY:style.overflowY,client:m.clientWidth,scroll:m.scrollWidth,scrollLeft:m.scrollLeft,clientY:m.clientHeight,scrollY:m.scrollHeight,buttons:[...m.querySelectorAll('button')].filter(b=>!b.hidden).map(b=>{const p=r(b),x=p.x+p.w/2,y=p.y+p.h/2;return{tool:b.dataset.tool,label:(${labelGeometry})(b),...p,centerInside:x>=mr.x&&x<mr.right&&y>=mr.y&&y<mr.bottom,hit:b.contains(document.elementFromPoint(x,y))}})}})()`);
     layouts.push(result); assertGroupedRowLayout(result, expected);
