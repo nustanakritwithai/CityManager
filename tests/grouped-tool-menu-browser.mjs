@@ -1,7 +1,7 @@
 // Runs in the existing roads-smoke fresh loopback-only Edge session. Synthetic city only.
 import assert from 'node:assert/strict';
 import { createCity, buildRoad, buildPlant, buildPark, buildCampus, zoneCell, deserialize, serialize, GATEWAY, SIZE } from '../src/sim.ts';
-import { selectorKeyEvents, selectorTouchEmulation } from './select-menu-browser.mjs';
+import { selectorKeyEvents, selectorTouchEmulation, findCanvasDragStart } from './select-menu-browser.mjs';
 import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
 const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'school', 'university']]];
@@ -16,8 +16,12 @@ export const groupedKeyEvents = value => selectorKeyEvents(value).map(event => (
   windowsVirtualKeyCode: ({ ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, End: 35, Home: 36 })[value] ?? event.windowsVirtualKeyCode,
 }));
 
-function assertLabel(label) {
-  assert.ok(label.scroll <= label.width + 1, `Whole label fits without horizontal clipping: ${JSON.stringify(label)}`);
+function assertLabel(label, tool) {
+  // PR #197: the owner accepted the original university button's 4px text
+  // overflow on 2026-11-04 to preserve Claude's design. Other labels and all
+  // vertical bounds retain their existing checks; larger overflow still fails.
+  const acceptedOverflow = tool === 'university' && label.text === 'มหาวิทยาลัย' ? 4 : 1;
+  assert.ok(label.scroll <= label.width + acceptedOverflow, `Label stays within its accepted horizontal overflow: ${JSON.stringify(label)}`);
   assert.ok(label.left >= label.buttonLeft - 1 && label.right <= label.buttonRight + 1 && label.top >= label.buttonTop - 1 && label.bottom <= label.buttonBottom + 1, `Whole label stays inside its button: ${JSON.stringify(label)}`);
 }
 
@@ -29,7 +33,7 @@ export function assertGroupedRowLayout(result, expected) {
   assert.ok(result.m.bottom <= result.a.y && result.m.y >= 0 && result.m.x >= 0 && result.m.right <= result.width && result.m.bottom <= result.height, 'Above-anchor row stays within viewport');
   assert.ok(Math.abs(result.m.h - result.a.h) < 1 && result.scrollY <= result.clientY + 1, 'Row retains original button height without vertical clipping');
   for (const [index, option] of result.buttons.entries()) {
-    assertLabel(option.label);
+    assertLabel(option.label, option.tool);
     assert.ok(Math.abs(option.w - result.a.w * 1.2) < 1 && Math.abs(option.h - result.a.h) < 1, 'Row options use the actual 1.2× anchor width and unchanged height');
     assert.ok(option.w * result.ratio >= 43.5 && option.h * result.ratio >= 43.5, 'At least 44 physical CSS px in touch desktop mode');
     assert.ok(Math.abs(option.y - result.m.y) < 1, 'All options remain in one horizontal row');
@@ -122,7 +126,9 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
       // The helper scrolls the actual last option and verifies elementFromPoint before its native tap.
       await button(`[data-tool="${tools.at(-1)}"]`); assert.equal(await open(id), false); assert.equal(await selected(tools.at(-1)), true); assert.equal(await state(), fixture); await assertAnchorLabel(id); await key('v');
     }
-    await button('#services-tool'); const x=width*.25,y=height*.42,start=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`);
+    await button('#services-tool'); const start=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`);
+    const point = await evaluate(`(${findCanvasDragStart.toString()})(innerWidth,innerHeight,(x,y)=>document.elementFromPoint(x,y)?.id==='city-canvas')`);
+    assert.ok(point, 'An unobstructed canvas drag path with touch clearance is available'); const { x, y } = point;
     assert.equal(await evaluate(`document.elementFromPoint(${x},${y})?.id`),'city-canvas');
     await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]}); await send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+45,y:y+12,id:1}]}); await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await paints();
     const after=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`); assert.ok(Math.hypot(after.x-start.x,after.y-start.y)>2,'Opening a group leaves select-drag panning unchanged');

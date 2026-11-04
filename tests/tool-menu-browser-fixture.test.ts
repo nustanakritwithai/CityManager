@@ -80,6 +80,25 @@ test('grouped browser geometry enforces row contract, bounds, full labels and re
   }
 });
 
+test('only the owner-accepted university caption may overflow by up to 4px', () => {
+  const result = rowGeometry(), university = result.buttons.at(-1)!;
+  Object.assign(university.label, { text: 'มหาวิทยาลัย', width: 47, scroll: 51 });
+  assert.doesNotThrow(() => assertGroupedRowLayout(result, serviceTools));
+
+  university.label.scroll = 52;
+  assert.throws(() => assertGroupedRowLayout(result, serviceTools), /horizontal overflow/);
+  university.label.scroll = 51;
+  university.label.bottom = university.label.buttonBottom + 2;
+  assert.throws(() => assertGroupedRowLayout(result, serviceTools), /inside its button/);
+  university.label.bottom = university.label.buttonBottom - 2;
+  Object.assign(university.label, { text: 'different caption' });
+  assert.throws(() => assertGroupedRowLayout(result, serviceTools), /horizontal overflow/);
+
+  const other = rowGeometry();
+  Object.assign(other.buttons[0].label, { text: 'มหาวิทยาลัย', width: 47, scroll: 51 });
+  assert.throws(() => assertGroupedRowLayout(other, serviceTools), /horizontal overflow/);
+});
+
 test('row swipes remain horizontal and move away from either scroll boundary; native arrows retain correct codes', () => {
   for (const scrollLeft of [0, 12]) {
     const layout = { ...rowGeometry(), scrollLeft }, swipe = groupedRowSwipe(layout);
