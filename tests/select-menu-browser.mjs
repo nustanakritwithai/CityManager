@@ -6,6 +6,14 @@ import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 // CDP validates maxTouchPoints even when disabled; zero is not an accepted value.
 export const selectorTouchEmulation = touch => touch ? { enabled: true, maxTouchPoints: 2 } : { enabled: false };
 
+// Select a real unoccluded canvas start and end for the pan, rather than
+// assuming the viewport centre cannot contain a tutorial or other overlay.
+export function findCanvasDragStart(width, height, isCanvas) {
+  const candidates = [{ x: Math.round(width / 2), y: Math.round(height * .45) }];
+  for (let y = 24; y < height - 24; y += 16) for (let x = 24; x < width - 69; x += 16) candidates.push({ x, y });
+  return candidates.find(({ x, y }) => x >= 0 && y >= 0 && x + 45 < width && y + 12 < height && isCanvas(x, y) && isCanvas(x + 45, y + 12)) ?? null;
+}
+
 // Native button activation needs Enter's character event, not only a key name.
 // Match Chromium automation: character keys use keyDown + text; others use rawKeyDown.
 export function selectorKeyEvents(value) {
@@ -85,8 +93,9 @@ export async function checkSelectMenu({ evaluate, button, click, send, screensho
     await viewport(width, height, true, screenWidth);
     await button('[data-tool="select"]'); await geometry(name); assert.equal(await selected('select'), true); assert.equal(await state(), baseline);
     // While open, a real touch drag must remain pan, never a cell command or inspector tap.
-    const start = await evaluate(`window.cityManager.cellScreen(${cell})`), x = width / 2, y = height * .45;
-    assert.equal(await evaluate(`document.elementFromPoint(${x},${y})?.id`), 'city-canvas');
+    const start = await evaluate(`window.cityManager.cellScreen(${cell})`);
+    const point = await evaluate(`(${findCanvasDragStart.toString()})(innerWidth,innerHeight,(x,y)=>document.elementFromPoint(x,y)?.id==='city-canvas')`);
+    assert.ok(point, 'An unobstructed canvas drag path is available'); const { x, y } = point;
     await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
     await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + 45, y: y + 12, id: 1 }] });
     await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await paints();

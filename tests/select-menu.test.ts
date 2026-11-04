@@ -4,7 +4,18 @@ import { readFileSync } from 'node:fs';
 import { installSelectMenu } from '../src/select-menu.ts';
 import { installToolMenu } from '../src/tool-menu.ts';
 import { createCity, serialize } from '../src/sim.ts';
-import { selectorTouchEmulation } from './select-menu-browser.mjs';
+import { findCanvasDragStart, selectorTouchEmulation } from './select-menu-browser.mjs';
+
+test('select drag finds unobstructed canvas around a central overlay', () => {
+  const hit = (x: number, y: number) => !(x > 210 && x < 630 && y > 145 && y < 310);
+  const p = findCanvasDragStart(844, 390, hit);
+  assert.ok(p); assert.ok(hit(p.x, p.y)); assert.ok(hit(p.x + 45, p.y + 12));
+  const endpointBlocked = (x: number, y: number) => !(x === 240 && y === 57);
+  const alternative = findCanvasDragStart(390, 100, endpointBlocked);
+  assert.ok(alternative); assert.ok(endpointBlocked(alternative.x + 45, alternative.y + 12));
+  assert.equal(findCanvasDragStart(45, 12, () => true), null);
+  assert.equal(findCanvasDragStart(390, 844, () => false), null);
+});
 
 test('browser harness omits an invalid zero touch-point count when returning to desktop', () => {
   assert.deepEqual(selectorTouchEmulation(false), { enabled: false });
