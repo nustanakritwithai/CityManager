@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { installSelectMenu } from '../src/select-menu.ts';
 import { installToolMenu } from '../src/tool-menu.ts';
 import { createCity, serialize } from '../src/sim.ts';
-import { findCanvasDragStart, selectorTouchEmulation } from './select-menu-browser.mjs';
+import { findCanvasDragStart, selectorTouchEmulation, selectorDragIssues } from './select-menu-browser.mjs';
 
 test('select drag finds unobstructed canvas around a central overlay', () => {
   const hit = (x: number, y: number) => !(x > 210 && x < 630 && y > 145 && y < 310);
@@ -15,6 +15,40 @@ test('select drag finds unobstructed canvas around a central overlay', () => {
   assert.ok(alternative); assert.ok(endpointBlocked(alternative.x + 45, alternative.y + 12));
   assert.equal(findCanvasDragStart(45, 12, () => true), null);
   assert.equal(findCanvasDragStart(390, 844, () => false), null);
+});
+
+test('select drag keeps the swept touch area away from HUD edges and intervening controls', () => {
+  const ui = [
+    { left: 0, right: 196, top: 0, bottom: 51 },
+    { left: 210, right: 632, top: 145, bottom: 312 },
+    { left: 235, right: 610, top: 337, bottom: 390 },
+  ];
+  const hit = (x: number, y: number) => !ui.some(r => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
+  assert.equal(hit(200, 24), true, 'An exact-pixel hit can sit only four pixels beside the HUD');
+  const point = findCanvasDragStart(844, 390, hit); assert.ok(point);
+  for (const r of ui) assert.ok(point.x + 45 + 24 < r.left || point.x - 24 > r.right || point.y + 12 + 24 < r.top || point.y - 24 > r.bottom, 'The swept touch area clears every UI rectangle');
+  // Both endpoints are canvas, but a control intersects the middle of the drag.
+  assert.equal(findCanvasDragStart(100, 70, (x: number) => x < 43 || x > 57), null);
+  assert.equal(findCanvasDragStart(100, 60, () => true), null, 'No fallback to a touch path too close to a viewport edge');
+});
+
+test('select drag diagnostics require the same trusted canvas pointer through movement and release', () => {
+  const point = { x: 150, y: 80 };
+  const event = (type: string, x = 150, y = 80) => ({ type, x, y, pointerId: 4, pointerType: 'touch', target: 'city-canvas', trusted: true });
+  const valid = [event('pointerdown'), event('pointermove', 195, 92), event('pointerup', 195, 92)];
+  assert.deepEqual(selectorDragIssues(valid, point), []);
+  assert.match(selectorDragIssues([{ ...valid[0], target: 'guide-action' }, ...valid.slice(1)], point).join(' '), /start on the canvas/);
+  assert.match(selectorDragIssues([{ ...valid[0], trusted: false }, ...valid.slice(1)], point).join(' '), /trusted touch/);
+  assert.match(selectorDragIssues([{ ...valid[0], x: 170 }, ...valid.slice(1)], point).join(' '), /requested canvas coordinates/);
+  assert.match(selectorDragIssues([valid[0], event('pointermove', 153, 82), valid[2]], point).join(' '), /beyond tap slop/);
+  assert.match(selectorDragIssues([valid[0], { ...valid[1], pointerId: 5 }, valid[2]], point).join(' '), /trusted move/);
+  assert.match(selectorDragIssues([valid[0], { ...valid[1], trusted: false }, valid[2]], point).join(' '), /trusted move/);
+  assert.match(selectorDragIssues([...valid.slice(0, 2), event('pointercancel')], point).join(' '), /cancelled.*release/);
+  assert.match(selectorDragIssues([...valid, { ...event('click'), target: 'guide-action' }], point).join(' '), /activate a UI control/);
+  assert.match(selectorDragIssues([valid[2], valid[0], valid[1]], point).join(' '), /release after movement/);
+  assert.match(selectorDragIssues([valid[1], valid[0], valid[2]], point).join(' '), /trusted move/);
+  assert.match(selectorDragIssues([...valid, { type: 'resize' }], point).join(' '), /viewport resized/);
+  assert.match(selectorDragIssues([], point).join(' '), /start on the canvas/);
 });
 
 test('browser harness omits an invalid zero touch-point count when returning to desktop', () => {

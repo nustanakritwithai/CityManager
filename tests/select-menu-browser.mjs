@@ -6,12 +6,41 @@ import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 // CDP validates maxTouchPoints even when disabled; zero is not an accepted value.
 export const selectorTouchEmulation = touch => touch ? { enabled: true, maxTouchPoints: 2 } : { enabled: false };
 
-// Select a real unoccluded canvas start and end for the pan, rather than
-// assuming the viewport centre cannot contain a tutorial or other overlay.
+// A touch needs a clear corridor, not merely two canvas pixels beside a HUD
+// control. Prefer the centre, then nearby candidates with 24px UI clearance.
 export function findCanvasDragStart(width, height, isCanvas) {
-  const candidates = [{ x: Math.round(width / 2), y: Math.round(height * .45) }];
-  for (let y = 24; y < height - 24; y += 16) for (let x = 24; x < width - 69; x += 16) candidates.push({ x, y });
-  return candidates.find(({ x, y }) => x >= 0 && y >= 0 && x + 45 < width && y + 12 < height && isCanvas(x, y) && isCanvas(x + 45, y + 12)) ?? null;
+  const clearance = 24, dx = 45, dy = 12, centre = { x: Math.round(width / 2), y: Math.round(height * .45) };
+  const candidates = [centre];
+  for (let y = clearance; y + dy + clearance < height; y += 16) for (let x = clearance; x + dx + clearance < width; x += 16) candidates.push({ x, y });
+  candidates.sort((a, b) => Math.hypot(a.x - centre.x, a.y - centre.y) - Math.hypot(b.x - centre.x, b.y - centre.y));
+  return candidates.find(({ x, y }) => {
+    if (x < clearance || y < clearance || x + dx + clearance >= width || y + dy + clearance >= height) return false;
+    if (!isCanvas(x, y) || !isCanvas(x + dx, y + dy)) return false;
+    // Sample across the swept touch area, including its far edges.
+    const xs = [x + dx + clearance], ys = [y + dy + clearance];
+    for (let px = x - clearance; px <= x + dx + clearance; px += 8) xs.push(px);
+    for (let py = y - clearance; py <= y + dy + clearance; py += 8) ys.push(py);
+    return xs.every(px => ys.every(py => isCanvas(px, py)));
+  }) ?? null;
+}
+
+// Diagnostic preconditions are additional gates, not substitutes for measured
+// camera movement and exact save neutrality in the actual browser.
+export function selectorDragIssues(events, point) {
+  const issues = [], downs = events.filter(e => e.type === 'pointerdown');
+  const down = downs[0];
+  if (downs.length !== 1 || !down?.trusted || down.pointerType !== 'touch' || down.target !== 'city-canvas') issues.push('The trusted touch must start on the canvas');
+  if (!down) return issues;
+  if (Math.hypot(down.x - point.x, down.y - point.y) > 2) issues.push('The touch start must use the requested canvas coordinates');
+  const same = events.filter(e => e.pointerId === down.pointerId);
+  if (same.some(e => e.type === 'pointercancel')) issues.push('The canvas gesture was cancelled');
+  const downIndex = events.indexOf(down);
+  const moveIndex = events.findIndex((e, i) => i > downIndex && e.pointerId === down.pointerId && e.type === 'pointermove' && e.trusted && e.target === 'city-canvas' && Math.hypot(e.x - down.x, e.y - down.y) > 7);
+  if (moveIndex < 0) issues.push('The canvas must receive a trusted move beyond tap slop after touch start');
+  if (!events.some((e, i) => i > downIndex && i > moveIndex && e.pointerId === down.pointerId && e.type === 'pointerup' && e.trusted && e.target === 'city-canvas')) issues.push('The canvas must receive the trusted pointer release after movement');
+  if (events.some(e => e.type === 'resize')) issues.push('The viewport resized during the canvas gesture');
+  if (events.some(e => e.type === 'click' && e.target !== 'city-canvas')) issues.push('A canvas drag must not activate a UI control');
+  return issues;
 }
 
 // Native button activation needs Enter's character event, not only a key name.
@@ -25,7 +54,7 @@ export function selectorKeyEvents(value) {
 }
 
 export async function checkSelectMenu({ evaluate, button, click, send, screenshot, load, close, paints, fixture, cell, setTouch }) {
-  const checks = [], layouts = [];
+  const checks = [], layouts = [], drags = [];
   const state = () => evaluate('window.cityManager.snapshot()');
   const open = () => evaluate('!document.querySelector("#select-submenu").hidden');
   const selected = tool => evaluate(`document.querySelector('[data-tool="${tool}"]').getAttribute('aria-pressed')==='true'`);
@@ -95,12 +124,20 @@ export async function checkSelectMenu({ evaluate, button, click, send, screensho
     // While open, a real touch drag must remain pan, never a cell command or inspector tap.
     const start = await evaluate(`window.cityManager.cellScreen(${cell})`);
     const point = await evaluate(`(${findCanvasDragStart.toString()})(innerWidth,innerHeight,(x,y)=>document.elementFromPoint(x,y)?.id==='city-canvas')`);
-    assert.ok(point, 'An unobstructed canvas drag path is available'); const { x, y } = point;
-    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
-    await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + 45, y: y + 12, id: 1 }] });
-    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await paints();
+    assert.ok(point, 'An unobstructed canvas drag path with touch clearance is available'); const { x, y } = point;
+    await evaluate(`(()=>{window.__selectorDragEvents=[];window.__selectorDragRecord=e=>{if(window.__selectorDragEvents.length<48)window.__selectorDragEvents.push({type:e.type,target:e.target.id||e.target.tagName||'window',trusted:e.isTrusted,pointerId:e.pointerId,pointerType:e.pointerType,x:e.clientX,y:e.clientY});};for(const type of ['pointerdown','pointermove','pointerup','pointercancel','click'])document.addEventListener(type,window.__selectorDragRecord,true);window.addEventListener('resize',window.__selectorDragRecord);})()`);
+    let events;
+    try {
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+      await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + 45, y: y + 12, id: 1 }] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await paints();
+    } finally {
+      events = await evaluate(`(()=>{for(const type of ['pointerdown','pointermove','pointerup','pointercancel','click'])document.removeEventListener(type,window.__selectorDragRecord,true);window.removeEventListener('resize',window.__selectorDragRecord);const events=window.__selectorDragEvents;delete window.__selectorDragRecord;delete window.__selectorDragEvents;return events;})()`);
+    }
     const after = await evaluate(`window.cityManager.cellScreen(${cell})`);
-    assert.ok(Math.hypot(after.x - start.x, after.y - start.y) > 2, 'Select drag still pans camera');
+    const evidence = { name, point, start, after, events }; drags.push(evidence);
+    assert.deepEqual(selectorDragIssues(events, point), [], JSON.stringify(evidence));
+    assert.ok(Math.hypot(after.x - start.x, after.y - start.y) > 2, `Select drag still pans camera: ${JSON.stringify(evidence)}`);
     assert.equal(await open(), false); assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'), 'false'); assert.equal(await state(), baseline);
     await button('[data-tool="select"]'); await button('[data-tool="bulldoze"]');
     assert.equal(await selected('bulldoze'), true); assert.equal(await open(), false); assert.equal(await state(), baseline);
@@ -109,5 +146,5 @@ export async function checkSelectMenu({ evaluate, button, click, send, screensho
     assert.equal(await open(), false); assert.equal(await state(), baseline);
   }
   checks.push('390px, 320px, landscape and touch desktop-mode retain matching >=44px buttons, unclipped popup, explicit active status and drag-pan');
-  return { checks, layouts, note: 'Installed Edge with emulated touch/viewport only; no physical Android validation.' };
+  return { checks, layouts, drags, note: 'Installed Edge with emulated touch/viewport only; no physical Android validation.' };
 }
