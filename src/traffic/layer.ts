@@ -16,6 +16,7 @@ import {TrafficPresentation,type PresentationObstacle} from './presentation.ts';
 import {WorkStallTracker} from './work-stall.ts';
 import {crossedWorkWindowDay} from './work-window.ts';
 export {trafficModelEnabled} from './flag.ts';
+type TrafficFrameMaximum={frame:number;frameMs:number;dt:number|null;paused:boolean;cityChanged:boolean;resetMs:number;captureSubmitMs:number;busMs:number;presenterMs:number;reconcileMs:number;sceneMs:number;otherMs:number;interrupted:boolean};
 
 /** Ephemeral traffic-allocation game, independent of economic state and saves.
  * Work-trip deadlines use the supplied simulated city clock.
@@ -42,6 +43,7 @@ export class TrafficLayer {
  private workStalls=new WorkStallTracker();
  private presenter=new TrafficPresentation();private drawn:CitizenVehiclePose[]=[];
  private timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
+ private maxFrameDetails:TrafficFrameMaximum|null=null;private frameCaptureMs=0;
  private anchor:number|null=null;private paused=true;private visible=true;private dirty=false;private renderDirty=true;private failure:string|null=null;
  constructor(private readonly app:AppBase,_onScreen:(cell:number)=>boolean=()=>true,private readonly onFailure:(message:string)=>void=()=>{},
    private readonly makeWorker:()=>Worker=()=>new Worker(new URL('./game-worker-entry.ts',import.meta.url),{type:'module'}),
@@ -51,6 +53,7 @@ export class TrafficLayer {
   this.signalDisplay.clear();try{this.signalScene?.sync([]);}catch{/* lost graphics */}try{this.signalScene?.setEnabled(false);}catch{/* lost graphics */}try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
  }
  private reset(city:City):void {
+  this.maxFrameDetails=null;
   this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
   this.client?.dispose();this.client=null;this.city=city;this.latest=null;this.presenter=new TrafficPresentation();this.workStalls=new WorkStallTracker();this.crossedWorkDay=null;this.drawn=[];this.anchor=null;this.dirty=false;this.renderDirty=true;this.failure=null;this.workExpiryAck=0;this.workCancel.clear();this.workRetired.clear();this.workCancellations=[];this.cars.setEnabled(this.visible);this.cars.sync([]);
   this.signalDisplay.reset(city);this.signalScene?.sync([]);this.signalScene?.setEnabled(this.visible);
@@ -69,8 +72,9 @@ export class TrafficLayer {
   } catch(error){this.fail(error);}
  }
  private submit(city:City,advance:boolean,paused:boolean):void {
-  const start=performance.now();const input=captureTrafficGameInput(city,{taxiEnabled:this.taxiOn,...(this.workClock?{workClock:{...this.workClock,ack:this.workExpiryAck,...(this.crossedWorkDay===null?{}:{crossedWorkDay:this.crossedWorkDay})}}:{})});if(input.work){input.work.cancelIds=[...this.workCancel];input.work.retiredIds=[...this.workRetired];}if(this.bus)input.bus=this.bus.input();const prepared=performance.now();this.client?.submit(input,{advance,paused});
-  const end=performance.now(),ms=end-start,inputMs=prepared-start,postMs=end-prepared;this.timing.samples++;this.timing.lastCaptureSubmitMs=ms;this.timing.maxCaptureSubmitMs=Math.max(this.timing.maxCaptureSubmitMs,ms);this.timing.lastInputMs=inputMs;this.timing.maxInputMs=Math.max(this.timing.maxInputMs,inputMs);this.timing.lastPostMs=postMs;this.timing.maxPostMs=Math.max(this.timing.maxPostMs,postMs);
+  const start=performance.now();let captured=false;try{const input=captureTrafficGameInput(city,{taxiEnabled:this.taxiOn,...(this.workClock?{workClock:{...this.workClock,ack:this.workExpiryAck,...(this.crossedWorkDay===null?{}:{crossedWorkDay:this.crossedWorkDay})}}:{})});if(input.work){input.work.cancelIds=[...this.workCancel];input.work.retiredIds=[...this.workRetired];}if(this.bus)input.bus=this.bus.input();const prepared=performance.now();this.client?.submit(input,{advance,paused});
+  const end=performance.now(),ms=end-start,inputMs=prepared-start,postMs=end-prepared;this.frameCaptureMs+=ms;captured=true;this.timing.samples++;this.timing.lastCaptureSubmitMs=ms;this.timing.maxCaptureSubmitMs=Math.max(this.timing.maxCaptureSubmitMs,ms);this.timing.lastInputMs=inputMs;this.timing.maxInputMs=Math.max(this.timing.maxInputMs,inputMs);this.timing.lastPostMs=postMs;this.timing.maxPostMs=Math.max(this.timing.maxPostMs,postMs);
+  }finally{if(!captured)this.frameCaptureMs+=performance.now()-start;}
  }
  /** Every city replacement starts a fresh game epoch; nothing is read from or
   * written to the player's save. Map edits replace the current sample. */
@@ -85,8 +89,8 @@ export class TrafficLayer {
   if(hidden&&this.city&&this.client&&!this.failure){this.paused=true;try{this.submit(this.city,false,true);}catch(error){this.fail(error);}}
  }
  frame(city:City,minuteOfDay:number,paused:boolean,dt:number,day=city.tick):void {
-  const frameStart=performance.now();
-  try{const previousClock=this.workClock,cityChanged=city!==this.city,nextClock=paused&&!cityChanged&&previousClock?previousClock:{day,minute:minuteOfDay};this.workClock=!cityChanged&&previousClock&&previousClock.day*1440+previousClock.minute>nextClock.day*1440+nextClock.minute?previousClock:nextClock;if(cityChanged){this.paused=paused;this.reset(city);}
+  const frameStart=performance.now();this.frameCaptureMs=0;let resetMs=0,busMs=0,presenterMs=0,reconcileMs=0,sceneMs=0,phase='',phaseStart=0,captureAtPhaseStart=0,interrupted=false;const cityChanged=city!==this.city;
+  try{const previousClock=this.workClock,nextClock=paused&&!cityChanged&&previousClock?previousClock:{day,minute:minuteOfDay};this.workClock=!cityChanged&&previousClock&&previousClock.day*1440+previousClock.minute>nextClock.day*1440+nextClock.minute?previousClock:nextClock;if(cityChanged){this.paused=paused;phase='reset';phaseStart=performance.now();captureAtPhaseStart=this.frameCaptureMs;this.reset(city);resetMs=performance.now()-phaseStart-(this.frameCaptureMs-captureAtPhaseStart);phase='';}
   if(!cityChanged&&!paused&&previousClock){const crossed=crossedWorkWindowDay(previousClock.day*1440+previousClock.minute,this.workClock.day*1440+this.workClock.minute);if(crossed!==null)this.crossedWorkDay=Math.max(this.crossedWorkDay??-1,crossed);}
   const effective=this.workClock;const timeBoundary=!cityChanged&&(!previousClock||previousClock.day!==effective.day||(previousClock.minute<WORK_TRIP_START_MINUTE&&effective.minute>=WORK_TRIP_START_MINUTE)||(previousClock.minute<WORK_TRIP_END_MINUTE&&effective.minute>=WORK_TRIP_END_MINUTE));
   const pauseChanged=paused!==this.paused;this.paused=paused;let advance=false;
@@ -99,19 +103,28 @@ export class TrafficLayer {
    else if(now-this.anchor>=1000){this.anchor=now;const worker=this.client.status;advance=!worker.inflight&&!worker.pending;}
 
   }
+  phase='bus';phaseStart=performance.now();
   if(this.busOn&&!this.bus&&!this.failure)this.bus=new BusGameBridge(city,this.minute,this.busMovementGate,()=>this.presenter.clearBusReservations());
   if(this.bus)this.presenter.reconcileBuses(this.bus.engine.snapshot().map(b=>b.id));
   if(this.bus&&!paused&&!this.failure){this.minute+=Math.min(.25,Math.max(0,dt))/60;this.bus.tick(this.minute);}
+  busMs=performance.now()-phaseStart;phase='';
   // The presenter evaluates expiry on every physical frame. Clock boundaries
   // alone need no worker request; a proven cancellation queues one immediately.
   if(timeBoundary&&paused)this.renderDirty=true;
   if((advance||pauseChanged||this.dirty)&&this.client&&!this.failure){this.dirty=false;this.submit(city,advance,paused);}
   if(!this.failure&&(this.renderDirty||!paused)){
-   this.drawn=this.presenter.frame(dt,paused,this.busObstacles());
-   if(this.reconcileWorkTrips(paused?0:dt)){this.drawn=this.presenter.frame(0,true);if(this.client)this.submit(city,false,paused);}
-   if(this.visible)this.cars.sync(this.drawn);this.renderDirty=false;
+   phase='bus';phaseStart=performance.now();const obstacles=this.busObstacles();busMs+=performance.now()-phaseStart;phase='';
+   phase='presenter';phaseStart=performance.now();this.drawn=this.presenter.frame(dt,paused,obstacles);presenterMs=performance.now()-phaseStart;phase='';
+   phase='reconcile';phaseStart=performance.now();captureAtPhaseStart=this.frameCaptureMs;if(this.reconcileWorkTrips(paused?0:dt)){this.drawn=this.presenter.frame(0,true);if(this.client)this.submit(city,false,paused);}reconcileMs=performance.now()-phaseStart-(this.frameCaptureMs-captureAtPhaseStart);phase='';
+   if(this.visible){phase='scene';phaseStart=performance.now();this.cars.sync(this.drawn);sceneMs=performance.now()-phaseStart;phase='';}this.renderDirty=false;
   }
-  }catch(error){this.fail(error);}finally{const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);}
+  }catch(error){interrupted=true;if(phase){const partial=performance.now()-phaseStart;if(phase==='reset')resetMs+=partial-(this.frameCaptureMs-captureAtPhaseStart);else if(phase==='bus')busMs+=partial;else if(phase==='presenter')presenterMs+=partial;else if(phase==='reconcile')reconcileMs+=partial-(this.frameCaptureMs-captureAtPhaseStart);else if(phase==='scene')sceneMs+=partial;}this.fail(error);}finally{
+   const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;const previousMax=this.timing.maxFrameMs;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);
+   // Preserve the original whole-frame epoch measurement, including startup.
+   // Copy context only after measuring a new maximum, never reset or subtract
+   // phases from the gate. Phase timings are explanatory wall-clock samples.
+   if(ms>previousMax){const captureSubmitMs=this.frameCaptureMs;this.maxFrameDetails={frame:this.timing.frames,frameMs:ms,dt:Number.isFinite(dt)?dt:null,paused,cityChanged,resetMs,captureSubmitMs,busMs,presenterMs,reconcileMs,sceneMs,otherMs:Math.max(0,ms-resetMs-captureSubmitMs-busMs-presenterMs-reconcileMs-sceneMs),interrupted:interrupted||this.failure!==null};}
+  }
  }
  /** Use sustained lack of physical progress and a full-car-length reset; a car
   * must also be blocked now. Paused frames accumulate no time. */
@@ -148,10 +161,10 @@ export class TrafficLayer {
  }
 
  destroy():void {try{this.client?.dispose();}catch{/* best effort */}this.client=null;this.signalDisplay.clear();try{this.signalScene?.destroy();}catch{/* best-effort owned graphics cleanup */}try{this.cars.destroy();}catch{/* visual cleanup must not affect city */}}
- get diagnostics(){const f=this.latest,worker=this.client?.status??null,presenter=this.presenter,bus=this.bus,signalDisplay=this.signalDisplay,signalScene=this.signalScene,workCancellations=this.workCancellations;return {...this.cars.diagnostics,mode:'allocation-game' as const,get presentation(){return presenter.diagnostics;},paused:this.paused,
+ get diagnostics(){const f=this.latest,worker=this.client?.status??null,presenter=this.presenter,bus=this.bus,signalDisplay=this.signalDisplay,signalScene=this.signalScene,workCancellations=this.workCancellations,maxFrameDetails=this.maxFrameDetails;return {...this.cars.diagnostics,mode:'allocation-game' as const,get presentation(){return presenter.diagnostics;},paused:this.paused,
   get signals(){return signalDisplay.diagnostics;},get signalRendering(){return signalScene?.diagnostics??null;},get busLedger(){return bus?.ledger()??null;},get busMovement(){return bus?.engine.movementStats??null;},busMinute:bus?.engine.now??null,busStranded:bus?.engine.strandedCount??0,ready:f!==null,updating:f===null||!!worker?.inflight||!!worker?.pending,step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
   completed:f?.completed??0,dropped:f?.dropped??0,cancelled:f?.cancelled??0,clippedRate:f?.clippedRate??0,
-  roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker,get workCancellations(){return workCancellations.map(e=>({id:e.id,before:e.before.map(o=>({...o})),after:e.after.map(o=>({...o}))}));},timing:{...this.timing}};}
+  roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,failure:this.failure,worker,get workCancellations(){return workCancellations.map(e=>({id:e.id,before:e.before.map(o=>({...o})),after:e.after.map(o=>({...o}))}));},timing:{...this.timing,get maxFrameDetails(){return maxFrameDetails?{...maxFrameDetails}:null;}}};}
  /** Cumulative completed taxi trips on the latest frame (resets with the game). */
  taxiTrips():{trips:number;tiles:number} {return this.latest?.taxiTrips??{trips:0,tiles:0};}
  /** Taxi cars already tagged on the latest frame. Null when the taxi flag is off. Bus does not use this. */
