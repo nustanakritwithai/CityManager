@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: '24'
       - name: Run focused mock tests
-        run: node --test tests/pages-login-races.test.mjs tests/pages-login-thai.test.mjs tests/pages-login-public-contract.test.mjs
+        run: node --test tests/pages-login-races.test.mjs tests/pages-login-thai.test.mjs tests/pages-login-public-contract.test.mjs tests/pages-login-backend-isolated.test.mjs
       - name: Install Thai fonts for synthetic rendering
         run: |
           sudo apt-get update -qq
