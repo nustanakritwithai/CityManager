@@ -1,7 +1,7 @@
 // Runs in the existing roads-smoke fresh loopback-only Edge session. Synthetic city only.
 import assert from 'node:assert/strict';
 import { createCity, buildRoad, buildPlant, buildPark, buildCampus, zoneCell, deserialize, serialize, GATEWAY, SIZE } from '../src/sim.ts';
-import { findCanvasDragStart, selectorKeyEvents, selectorTouchEmulation } from './select-menu-browser.mjs';
+import { selectorKeyEvents, selectorTouchEmulation } from './select-menu-browser.mjs';
 import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
 const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'school', 'university']]];
@@ -122,10 +122,8 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
       // The helper scrolls the actual last option and verifies elementFromPoint before its native tap.
       await button(`[data-tool="${tools.at(-1)}"]`); assert.equal(await open(id), false); assert.equal(await selected(tools.at(-1)), true); assert.equal(await state(), fixture); await assertAnchorLabel(id); await key('v');
     }
-    await button('#services-tool'); const start=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`);
-    // The guide can cover fixed coordinates on short landscape viewports.
-    const point=await evaluate(`(${findCanvasDragStart.toString()})(innerWidth,innerHeight,(x,y)=>document.elementFromPoint(x,y)?.id==='city-canvas')`);
-    assert.ok(point,'An unobstructed canvas drag path with touch clearance is available'); const {x,y}=point;
+    await button('#services-tool'); const x=width*.25,y=height*.42,start=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`);
+    assert.equal(await evaluate(`document.elementFromPoint(${x},${y})?.id`),'city-canvas');
     await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]}); await send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+45,y:y+12,id:1}]}); await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await paints();
     const after=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`); assert.ok(Math.hypot(after.x-start.x,after.y-start.y)>2,'Opening a group leaves select-drag panning unchanged');
     assert.equal(await open('services'),false); assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'),'false'); assert.equal(await state(),fixture);
