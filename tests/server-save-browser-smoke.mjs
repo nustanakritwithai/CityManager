@@ -75,19 +75,24 @@ async function screenshotReadback(send,probe,record){
  }
 }
 const failureAfterCleanup=(primary,errors)=>primary??(errors.length?new AggregateError(errors,'Browser fixture cleanup failed'):null);
-async function stopBrowser(child,ws){
+async function stopBrowser(child,ws,{platform=process.platform,spawnProcess=spawn,wait=sleep}={}){
  if(!child)return;
  const alive=()=>child.exitCode===null&&child.signalCode===null;
  // Ask the owned browser to shut down its children before removing its profile.
  try{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({id:2147483647,method:'Browser.close'}));}catch{/* The bounded owned-process fallback below still runs. */}
- for(let i=0;i<30&&alive();i++)await sleep(100);
- if(alive()&&child.pid){
-  if(process.platform==='win32'){
+ for(let i=0;i<30&&alive();i++)await wait(100);
+ if(alive()){
+  if(!Number.isSafeInteger(child.pid)||child.pid<=0)throw Error('Owned browser is still running without a valid PID');
+  let killFailure=null;
+  if(platform==='win32'){
    // Never target image names or unrelated browser processes.
-   await new Promise((ok,bad)=>{const killer=spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore'});const timer=setTimeout(()=>{killer.kill();bad(Error('Owned browser tree termination timed out'));},5000);killer.once('error',e=>{clearTimeout(timer);bad(e);});killer.once('close',code=>{clearTimeout(timer);code===0||!alive()?ok():bad(Error(`Owned browser taskkill exited ${code}`));});});
+   const result=await new Promise((ok,bad)=>{const killer=spawnProcess('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:['ignore','ignore','pipe']});let stderr='',denialTail='',accessDenied=false;killer.stderr?.on('data',chunk=>{const text=denialTail+String(chunk);accessDenied||=/access (?:is )?denied/i.test(text);denialTail=text.slice(-32);stderr=(stderr+String(chunk)).slice(0,4096);});const timer=setTimeout(()=>{killer.kill();bad(Error('Owned browser tree termination timed out'));},5000);killer.once('error',e=>{clearTimeout(timer);bad(e);});killer.once('close',code=>{clearTimeout(timer);ok({code,stderr,accessDenied});});});
+   if(result.code!==0||result.accessDenied){killFailure=Error(`Owned browser taskkill exited ${result.code}${result.accessDenied?' (access denied)':''}${result.stderr?': '+result.stderr.trim():''}`);if(result.accessDenied)throw killFailure;}
   }else child.kill('SIGTERM');
-  for(let i=0;i<30&&alive();i++)await sleep(100);
-  if(alive())throw Error('Owned browser did not exit');
+  // Browser.close and taskkill race with delivery of the owned child's exit
+  // event. A nonzero taskkill is not success unless that child actually exits.
+  for(let i=0;i<30&&alive();i++)await wait(100);
+  if(alive())throw killFailure??Error('Owned browser did not exit');
  }
 }
 
@@ -151,6 +156,24 @@ async function selfTest(){
  assert.equal(failureAfterCleanup(primary,[cleanup]),primary,'Cleanup cannot mask acceptance failure');
  assert.ok(failureAfterCleanup(null,[cleanup]) instanceof AggregateError,'Cleanup-only failure must fail acceptance');
  assert.equal(failureAfterCleanup(null,[]),null);
+
+ const {EventEmitter}=await import('node:events');
+ const cleanupCase=async({code=255,exitAt=Infinity,exitWithTaskkill=false,stderr='',launchError=null,pid=18765}={})=>{
+  const child={pid,exitCode:null,signalCode:null},commands=[];let waits=0;
+  const work=stopBrowser(child,{readyState:WebSocket.OPEN,send:raw=>commands.push(JSON.parse(raw))},{platform:'win32',wait:async ms=>{assert.equal(ms,100);if(++waits===exitAt)child.exitCode=0;},spawnProcess:(command,args,options)=>{
+   assert.equal(command,'taskkill');assert.deepEqual(args,['/PID','18765','/T','/F']);assert.deepEqual(options.stdio,['ignore','ignore','pipe']);
+   const killer=new EventEmitter();killer.stderr=new EventEmitter();killer.kill=()=>assert.fail('Immediate synthetic taskkill must not time out');
+   queueMicrotask(()=>{if(launchError)killer.emit('error',launchError);else{if(exitWithTaskkill)child.exitCode=0;for(const chunk of Array.isArray(stderr)?stderr:[stderr])if(chunk)killer.stderr.emit('data',chunk);killer.emit('close',code);}});return killer;
+  }});
+  return {work,child,commands,waits:()=>waits};
+ };
+ const raced=await cleanupCase({exitAt:31});await raced.work;assert.equal(raced.child.exitCode,0);assert.equal(raced.waits(),31);assert.deepEqual(raced.commands,[{id:2147483647,method:'Browser.close'}]);
+ const concurrent=await cleanupCase({exitWithTaskkill:true});await concurrent.work;assert.equal(concurrent.child.exitCode,0);assert.equal(concurrent.waits(),30,'Already observed exit during taskkill needs no extra wait');
+ for(const code of [0,255]){const alive=await cleanupCase({code});await assert.rejects(alive.work,code===0?/Owned browser did not exit/:/taskkill exited 255/);assert.equal(alive.waits(),60,'Cleanup remains bounded and never treats an unconfirmed exit as success');}
+ for(const pid of [null,0,'18765']){const missing=await cleanupCase({pid});await assert.rejects(missing.work,/without a valid PID/);assert.equal(missing.waits(),30,'An unconfirmed child without an owned PID cannot pass cleanup or invoke taskkill');}
+ const denied=await cleanupCase({stderr:'ERROR: Access is denied.',exitWithTaskkill:true});await assert.rejects(denied.work,/Access is denied/);
+ const lateDenial=await cleanupCase({code:0,stderr:['x'.repeat(4096),'Access is ','denied.'],exitWithTaskkill:true});await assert.rejects(lateDenial.work,error=>/access denied/.test(error.message)&&error.message.length<4200,'Denial detection survives truncation and split chunks without unbounded diagnostics');
+ const launchError=Object.assign(Error('spawn taskkill EACCES'),{code:'EACCES'}),unavailable=await cleanupCase({launchError});await assert.rejects(unavailable.work,error=>error===launchError);
 
  assert.equal(expectedReloadDialog('beforeunload',true),true);
  for(const [type,scope] of [['beforeunload',false],['confirm',true],['alert',true],['prompt',true]])assert.equal(expectedReloadDialog(type,scope),false);
