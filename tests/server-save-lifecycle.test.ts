@@ -93,6 +93,20 @@ test('explicit retry preserves the old request and still makes a fresh CAS after
  const posts=h.calls.filter(c=>c.method==='POST');assert.equal(posts.length,3);assert.deepEqual(posts[0].init,posts[1].init);assert.notEqual(posts[1].init.headers['Idempotency-Key'],posts[2].init.headers['Idempotency-Key']);assert.equal(h.fixture.active.revision,3);
 });
 
+test('a timer queued during delayed manual ACK finishes with read-verified feedback, not another write',async()=>{
+ const h=await setup(),gate=defer(),start=h.calls.length;
+ h.hook=async method=>{if(method==='POST')await gate.promise;};
+ const manual=h.save(true);await turn();assert.equal(h.client.pending,true);
+ // The unchanged periodic timer still runs because the manual intent is pending.
+ const checking=h.auto.run();assert.equal(h.auto.running,true);gate.release();await manual;await checking;
+ assert.deepEqual(h.calls.slice(start).map(c=>c.method),['POST','GET']);
+ assert.equal(h.calls.at(-1)?.init.cache,'no-store');assert.equal(h.fixture.active.revision,2);assert.equal(h.client.pending,false);assert.equal(h.auto.last?.ok,true);
+ assert.deepEqual(h.client.confirmed,h.fixture.active);
+ const feedback=describeServerAcknowledgement('verified',h.client.confirmed!.raw,h.raw);
+ assert.equal(feedback.current,true);assert.equal(feedback.label,'ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน');
+ h.raw=raw+' ';assert.equal(describeServerAcknowledgement('verified',h.client.confirmed!.raw,h.raw).current,false,'Edits made in flight must still reject current-save feedback');
+});
+
 test('every uncertainty or dirty state preserves the unload warning independently of event ordering',()=>{
  const base={running:false,failed:false,busy:false,pending:false,conflict:false,raw,confirmedRaw:raw};assert.equal(shouldWarnBeforeUnload(base),false);
  for(const key of ['running','failed','busy','pending','conflict'])assert.equal(shouldWarnBeforeUnload({...base,[key]:true}),true,key);

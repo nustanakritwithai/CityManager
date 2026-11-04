@@ -22,6 +22,11 @@ const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-own
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
 const runLostAckNextSave=env=>env.CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE==='1';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// A queued automatic check can truthfully replace the manual-write label after
+// its ACK. Neither pending work nor acknowledgement of older bytes is settled.
+function acknowledgedSaveUi(text,failureVisible){
+ return !failureVisible&&['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน'].some(label=>text?.startsWith(label));
+}
 // Synthetic browser fixture only. Record the visible retry click and the
 // forwarded Save click without capturing cookies, keys, or city bytes.
 function installSaveClickTrace(){
@@ -109,6 +114,10 @@ function fixtureService(){
  return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0,traceSave:false,postAudit:[]};
 }
 async function selfTest(){
+ for(const label of ['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน']){
+  assert.equal(acknowledgedSaveUi(label+' 12:00:00',false),true);assert.equal(acknowledgedSaveUi(label,true),false);
+ }
+ for(const text of [undefined,'','กำลังบันทึก… · บันทึกบนเซิร์ฟเวอร์แล้ว','บันทึกไม่สำเร็จ · ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน','ยืนยันเซฟก่อนหน้าแล้ว · มีการเปลี่ยนแปลงใหม่ที่ยังไม่บันทึก','ยังไม่มีการบันทึกสำเร็จในรอบนี้'])assert.equal(acknowledgedSaveUi(text,false),false);
  assert.equal(runLostAckNextSave({}),false);assert.equal(runLostAckNextSave({CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE:'0'}),false);assert.equal(runLostAckNextSave({CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE:'1'}),true);
  const listeners=[],syntheticWindow={},syntheticDocument={addEventListener:(type,fn,capture)=>listeners.push({type,fn,capture})};
  Function('window','document','Date',`(${installSaveClickTrace.toString()})()`)(syntheticWindow,syntheticDocument,Date);
@@ -257,7 +266,11 @@ async function run(){
   const enter=async({afterReload=false}={})=>{await until(afterReload?reloadEntryPredicate:entryPredicate,'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');};
   const clean=async()=>assert.deepEqual(await evaluate('window.__cityWrites'),[],'browser city writes prohibited');
   const failed=()=>evaluate("!!document.querySelector('#save-failure-banner:not([hidden])')");
-  const settled=(label='acknowledged save UI')=>until(()=>evaluate("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')"),label);
+  const settled=(label='acknowledged save UI')=>until(async()=>{
+   const ui=await evaluate("({text:document.querySelector('#autosave-status')?.textContent,failureVisible:!!document.querySelector('#save-failure-banner:not([hidden])')})");
+   diagnostics.saveUi={...ui,acknowledged:f.acknowledged,revision:f.state.active?.revision??null};
+   return acknowledgedSaveUi(ui.text,ui.failureVisible);
+  },label);
   const capture=async (name,{requireReady=true}={})=>{
    assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,'surface');let png;
    const probe=async()=>{assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser error or renderer crash');const health=await evaluate("({ready:window.cityManager?.visuals().ready,contextLosses:window.__contextLosses,visibility:document.visibilityState,width:innerWidth,height:innerHeight})");if(requireReady)assert.equal(health.ready,true);assert.equal(health.contextLosses,0,'WebGL context must remain live');return health;};
