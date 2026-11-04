@@ -1,0 +1,106 @@
+name: Publish verified PR197 build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-verified-pr197
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      VERIFIED_RUN_ID: '41791603252'
+      VERIFIED_SHA: '4e3a4e0bbdfd6f9fd4509ae17aed1e6e1114abb0'
+      ARTIFACT_ID: '13303961091'
+    steps:
+      - name: Check out the publication commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Require completed verification and identical source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'nustanakritwithai/CityManager'
+          test "$(git rev-parse "${VERIFIED_SHA}^{tree}")" = 'a7db4234fb93f6be16355b852f4d7fc42d6d8c31'
+          # Only this delivery workflow may differ from the fully verified tree.
+          git diff --exit-code "$VERIFIED_SHA" HEAD -- . ':(exclude).github/workflows/publish-verified-pr197.yml'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN_ID" > verified-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN_ID/jobs?filter=latest&per_page=100" > verified-jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" > verified-artifact.json
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const read = file => JSON.parse(readFileSync(file, 'utf8'));
+          const run = read('verified-run.json'), jobs = read('verified-jobs.json'), artifact = read('verified-artifact.json');
+          assert.equal(run.id, Number(process.env.VERIFIED_RUN_ID));
+          assert.equal(run.workflow_id, 394619525);
+          assert.equal(run.head_sha, process.env.VERIFIED_SHA);
+          assert.equal(run.event, 'pull_request');
+          assert.equal(run.status, 'completed');
+          assert.equal(run.conclusion, 'success');
+          const verify = jobs.jobs.find(job => job.name === 'Verify exact source');
+          assert.equal(verify?.conclusion, 'success');
+          for (const name of ['Test deterministic simulation and save boundaries', 'Verify preserved advisor contract offline', 'Verify admitted asset integrity', 'Type check and build static game', 'Save smoke on built bundle (deploy gate)', 'Upload Pages market verification artifact', 'Verify the built game in installed Edge', 'Verify preserved signal GUI without provider calls']) {
+            assert.equal(verify.steps.find(step => step.name === name)?.conclusion, 'success', name);
+          }
+          assert.equal(artifact.id, Number(process.env.ARTIFACT_ID));
+          assert.equal(artifact.name, 'citymanager-pages-market-verification-dist');
+          assert.equal(artifact.workflow_run.id, run.id);
+          assert.equal(artifact.workflow_run.head_sha, process.env.VERIFIED_SHA);
+          assert.equal(artifact.expired, false);
+          assert.equal(artifact.digest, 'sha256:49edef6d86abb9fdbb1d91cf933c2a000281682e463e6e07a82025e4d6556c16');
+          console.log('Verified production artifact is bound to the successful same-source PR199 run; road-suite exception was explicitly approved by the owner.');
+          NODE
+      - name: Download the immutable verified production artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > verified-build.zip
+          echo '49edef6d86abb9fdbb1d91cf933c2a000281682e463e6e07a82025e4d6556c16  verified-build.zip' | sha256sum --check
+          unzip -q verified-build.zip -d dist
+          test -f dist/index.html
+          echo '2fc7bea4bb678d3db7f32a78bd862e44ad065b61739a5fb0dc23c26045e56366  dist/assets/index-BfWGL2T4.css' | sha256sum --check
+      - name: Read existing Pages metadata
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
+        with:
+          enablement: 'false'
+      - name: Package the verified artifact without rebuilding
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
+        with:
+          path: dist
+      - name: Require main to still name this publication commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
+      - name: Publish the verified artifact
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+      - name: Verify public assets and unauthenticated save boundary
+        env:
+          CITYMANAGER_URL: https://nustanakritwithai.github.io/CityManager/
+        run: |
+          sleep 30
+          node tests/server-save-live-readonly.mjs
