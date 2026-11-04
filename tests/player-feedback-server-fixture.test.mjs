@@ -3,12 +3,34 @@ import {createFeedbackServerFixture} from './player-feedback-server-fixture.mjs'
 import {ServerCitySaveClient} from '../src/server-city-save.ts';
 import {persistServerCity} from '../src/server-save-lifecycle.ts';
 import {PANEL_OWNER} from './panel-server-entry-fixture.mjs';
+import {settleFeedbackProjection} from './player-feedback-projection.mjs';
+import {Camera,GraphNode,Vec3,ASPECT_MANUAL} from 'playcanvas';
 import {trafficHttpHandler} from './traffic-server-entry-fixture.mjs';import {EventEmitter} from 'node:events';
 import {adoptSavedEducation,buildCampus,campusSiteReason,createCity,deserialize,step} from '../src/sim.ts';import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
 import {createCity as oldCity,step as oldStep,serialize as oldSerialize} from '../src/legacy-v4.ts';
 const origin='http://127.0.0.1:4176',url=origin+'/CityManager/',city=createCity(42),raw=serializeParkSession(city,createParkRuntime(city));
 const request=(body,key)=>({requestId:randomUUID(),request:{url:origin+'/citymanager-api/v1/city-save',method:'POST',headers:{'Idempotency-Key':key},postData:JSON.stringify(body)}});
 const readRequest=()=>({requestId:randomUUID(),request:{url:origin+'/citymanager-api/v1/city-save',method:'GET',headers:{}}});
+test('native cell taps wait for the actual PlayCanvas projection cache after viewport rotation',async()=>{
+ const camera=new Camera(),node=new GraphNode();camera.node=node;camera.aspectRatioMode=ASPECT_MANUAL;
+ const resize=(width,height)=>{camera.aspectRatio=width/height;const radius=Math.max(42,Math.min(100,42*.86/(width/height)));node.setPosition(-10+Math.sin(Math.PI/4)*radius*Math.cos(.88),radius*Math.sin(.88),Math.cos(Math.PI/4)*radius*Math.cos(.88));node.lookAt(new Vec3(-10,0,0));};
+ const target=new Vec3(-5,.1,5);resize(360,740);camera.worldToScreen(target,360,740);resize(844,390);
+ const read=async()=>{const p=camera.worldToScreen(target,844,390);return {viewport:[844,390],point:{x:p.x,y:p.y}};};
+ const stale=await read();let frames=0;
+ const settled=await settleFeedbackProjection({read,afterRender:async()=>{
+  frames++;
+  // The exact cache invalidation performed by CameraComponent.onAppPrerender.
+  camera._viewMatDirty=true;camera._viewProjMatDirty=true;
+ }});
+ assert.notDeepEqual(settled,stale,'Viewport dimensions alone can accompany stale projected coordinates');
+ assert.deepEqual(settled,await read());assert.ok(frames>=2,'One frame cannot establish projection stability');
+});
+
+test('projection readiness waits through changing canvas geometry and fails instead of tapping an unstable target',async()=>{
+ let frame=0;const read=async()=>({viewport:[844,390],canvas:[frame<3?360:844,390],point:{x:frame<3?frame:42,y:100}});
+ const settled=await settleFeedbackProjection({read,afterRender:async()=>{frame++;}});assert.equal(frame,4);assert.equal(settled.point.x,42);
+ frame=0;await assert.rejects(settleFeedbackProjection({read:async()=>({point:{x:frame,y:0}}),afterRender:async()=>{frame++;},now:()=>frame,timeout:3}),/did not stabilize/);
+});
 test('unchanged automatic UX retry replays the exact intent then freshly verifies the same head without a duplicate write',async()=>{
  const f=createFeedbackServerFixture(url),before=await f.core.seed(raw),calls=[];
  const client=new ServerCitySaveClient(async(path,init={})=>{
@@ -53,6 +75,13 @@ test('UX browser suite uses server entry, native retry and retains the full layo
  assert.match(source,/fixtureServer\.core\.seed\(fixture\)/);assert.match(source,/fixtureServer\.core\.enter\(/);assert.match(source,/installTrafficNetworkFence\(/);
  assert.match(source,/button\('#save-failure-retry'\)/);assert.match(source,/fixtureServer\.assertRetry\(/);assert.match(source,/fixtureServer\.core\.assertNoCityWrites\(evaluate\)/);
  assert.match(source,/fixtureServer\.assertVerifiedRetry\(faultContext\.index,faultContext\.before,await evaluate\('cityManager\.sessionSnapshot\(\)'\)\)/);
+ assert.match(source,/await settleFeedbackProjection\(/);assert.match(source,/requestAnimationFrame\(\(\)=>setTimeout\(/);
+ assert.match(source,/return \{ kind, cell:b\.cell, buildingId:b\.id \}/);assert.match(source,/householdId:family\.id, buildingId:familyHome\.id/);
+ for(const runner of [source,reading]){
+  assert.match(runner,/dataset\.scope==='place'.*dataset\.cell/);
+  assert.match(runner,/assert\.equal\(await evaluate\("document\.querySelector\('#entity-content'\)\.dataset\.entityId"\),String\(entry\.buildingId\)/);
+  assert.match(runner,/assert\.equal\(await evaluate\("document\.querySelector\('#entity-content'\)\.dataset\.entityId"\),String\(entry\.householdId\?\?entry\.buildingId\)/);
+ }
  assert.doesNotMatch(source,/localStorage\.setItem\(['"]citymanager\.save/);assert.doesNotMatch(source,/button\('#save-failure-export'\)/);
  assert.match(source,/for \(const warning of \[false,true\]\)/);assert.match(reading,/for \(const viewport of views\)/);assert.match(reading,/for \(const name of pages\)/);assert.match(reading,/#save-failure-retry/);
  const css=readFileSync(new URL('../src/player-feedback.css',import.meta.url),'utf8');

@@ -1,6 +1,7 @@
 // Invoked by roads-smoke in its fresh loopback-only browser. All city data is synthetic.
 import assert from 'node:assert/strict';
 import { bulldoze, deserialize, serialize } from '../src/sim.ts';
+import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
 // CDP validates maxTouchPoints even when disabled; zero is not an accepted value.
 export const selectorTouchEmulation = touch => touch ? { enabled: true, maxTouchPoints: 2 } : { enabled: false };
@@ -42,7 +43,8 @@ export async function checkSelectMenu({ evaluate, button, click, send, screensho
     assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); await paints();
   };
   await viewport(1440, 1000, false); await load(fixture); await close();
-  const baseline = await state(); assert.equal(baseline, fixture);
+  const loadedFixture = serialize(loadedTrafficSession(fixture).city);
+  const baseline = await state(); assert.equal(baseline, loadedFixture);
   assert.equal(await evaluate('document.querySelectorAll(".tool-buttons [data-tool=bulldoze]").length'), 0);
   assert.equal(await evaluate('document.querySelectorAll("[data-tool=bulldoze]").length'), 1);
   await button('[data-tool="select"]'); assert.equal(await open(), true); await geometry('desktop');
@@ -74,7 +76,7 @@ export async function checkSelectMenu({ evaluate, button, click, send, screensho
   await key('b'); await button('[data-tool="select"]'); assert.equal(await selected('select'), true); assert.equal(await open(), true);
   await button('[data-tool="bulldoze"]'); assert.equal(await selected('bulldoze'), true); assert.equal(await open(), false); assert.equal(await state(), baseline);
   await screenshot('selector-desktop-demolition-active.png');
-  const expected = deserialize(fixture); assert.equal(bulldoze(expected, cell).ok, true);
+  const expected = deserialize(loadedFixture); assert.equal(bulldoze(expected, cell).ok, true);
   await tapCell(cell); assert.equal(await state(), serialize(expected), 'Explicit demolition executes the unchanged command, including exact cost and ledger');
   await button('[data-tool="select"]'); await key('Escape'); await load(fixture); await close();
   checks.push('B arms; V/P/Escape/arrow cancel; keyboard open is read-only; explicit demolition retains exact simulation/accounting');

@@ -242,8 +242,8 @@ try {
   await runBoundary(150,[shop]);
   assert.equal(cityGoals(snapshots.get(150).after).won,false,'Expanded-map fixture has not reached the win dialog at this boundary');
   assert.equal(await evaluate('!!document.querySelector("dialog.win-dialog[open]")'),false);
-  await inspect(shop.building,'shop'); assert.equal(await evaluate('document.querySelector("#entity-content [data-retail-growth]")?.dataset.retailGrowth'),String(shop.firm.id));
-  assert.match(await evaluate('document.querySelector("#entity-content [data-retail-growth]").textContent'), /ค่าก่อสร้าง 200 เครดิต[\s\S]*สำรองเมือง/); await screenshot('desktop-shop.png'); checks.push('Natural day-150 shop upgrade matches replay, paid cost, identity and capacity');
+  await inspect(shop.building,'shop'); assert.equal(await evaluate('document.querySelector("#entity-content [data-commercial-growth]")?.dataset.commercialGrowth'),String(shop.firm.id));
+  assert.match(await evaluate('document.querySelector("#entity-content [data-commercial-growth]").textContent'), /ค่าก่อสร้าง 200 เครดิต[\s\S]*สำรองเมือง/); await screenshot('desktop-shop.png'); checks.push('Natural day-150 shop upgrade matches replay, paid cost, identity and capacity');
   // Separate natural revised-goal win retains the actual Continue interaction.
   await load(victoryRaw);assert.deepEqual(await state(),victoryBefore);await close();
   await button('[data-speed="1"]');await button('#pause');
