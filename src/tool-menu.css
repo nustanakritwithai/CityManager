@@ -16,6 +16,7 @@ html .select-menu-anchor[data-demolition-active=true] .tool-icon { color:#ffd1c4
 /* Row popups (construction, services) sit side by side above the dock and scroll sideways on narrow screens. */
 .tool-submenu[data-layout=row] { flex-direction:row; overflow-x:auto; overflow-y:hidden; }
 .tool-submenu[data-layout=row] .tool-option { flex:none; }
-.tool-submenu[data-layout=row] .tool-option > span:last-child { white-space:nowrap; }
+/* Long Thai labels wrap inside the fixed row cells instead of clipping. */
+.tool-submenu[data-layout=row] .tool-option > span:last-child { white-space:normal; }
 /* The status line sits where an open popup appears; hide it until the popup closes. */
 body[data-tool-menu-open=true] .status-chip { visibility:hidden; }
