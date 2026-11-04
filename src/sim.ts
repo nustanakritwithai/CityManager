@@ -37,6 +37,9 @@ export const MAX_CITY_HOUSEHOLDS = MAX_CITY_BUILDINGS * Math.max(...HOUSING_LEVE
 export const GATEWAY = 12 * SIZE;
 export const MONTH = 30;
 export const ROAD_COST = 5_000;
+/** Monthly contracted sanitation and general municipal services, per resident (satang).
+ * These are abstract operating costs, not a simulated service-quality system. */
+export const MUNICIPAL_SERVICE_PER_RESIDENT = 5_000;
 export const WAGES = { I: 60_000, C: 42_000, F: 42_000 } as const;
 export type Zone = 'R' | 'C' | 'I' | 'F' | null;
 export type Cell = { road: boolean; zone: Zone; building: number | null };
@@ -54,7 +57,7 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
  * it (those stay untyped). A fresh city starts empty; a migrated v7 city records its stock on load.
  */
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
-export type City = { commercialUnifiedStartTick?: number; commercialUnifiedBaseline?: {moneyEntries:number;cropEntries:number;goodsEntries:number};
+export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; commercialUnifiedBaseline?: {moneyEntries:number;cropEntries:number;goodsEntries:number};
   history?: CityHistory;
   populationCapacityVersion?: 1;
   businessCapacityVersion?: 1;
@@ -415,15 +418,6 @@ function trimWorkAssignments(c: City): void {
       }
     }
   }
-}
-
-/** Taxi fare per completed passenger trip, integer satang: base + per road tile driven. */
-export const TAXI_TRIP_FARE = Object.freeze({ base: 50, perTile: 10 });
-export const taxiTripFare = (trips: number, tiles: number): number => Math.max(0, Math.floor(trips)) * TAXI_TRIP_FARE.base + Math.max(0, Math.floor(tiles)) * TAXI_TRIP_FARE.perTile;
-/** Credit completed taxi trips' fares to the treasury (riders pay from outside the modelled wallets). Returns satang paid. */
-export function collectTaxiFares(c: City, trips: number, tiles: number): number {
-  const fare = taxiTripFare(trips, tiles);
-  return fare > 0 ? transfer(c, 'outside', 'treasury', fare, 'Taxi fares') : 0;
 }
 
 /** Every transfer has a debit and credit. Outside is the sole permitted negative source account. */
@@ -1056,6 +1050,11 @@ function settleMonth(c: City) {
   for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
   for (const p of c.plants) transfer(c, 'treasury', 'upkeep', PLANTS[p.kind].upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
   for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
+  // Services scale with the people actually present at settlement, not empty housing.
+  // As with other upkeep, only available (non-payroll-reserved) cash is paid; no debt
+  // is created and loading an existing city does not itself charge a past bill.
+  const residents = c.households.reduce((n, h) => n + h.members, 0);
+  transfer(c, 'treasury', 'upkeep', residents * MUNICIPAL_SERVICE_PER_RESIDENT, 'Monthly municipal services');
   const { retrained, departed } = reviewLabour(c);
   c.lastEvent = 'Month settled: actual firm wages, household rent, water/power bills and taxes are in the money ledger.'
     + (retrained ? ` ${retrained} idle specialist worker(s) retrained as general workers for open jobs in the other trade.` : '')
@@ -1369,7 +1368,7 @@ function stepWithRoads(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -1400,6 +1399,7 @@ export function expandValidatedCity(c: City): City {
   return { ...expanded, ...(topology ? {roadTopology: topology} : {}) } as City;
 }
 export function serialize(c: City, market?: City['market']): string {
+  if (c.goalRulesVersion !== undefined && c.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   if (c.roadTopology) validateRoadTopology(c, c.roadTopology);
   const expanded = c.populationCapacityVersion === 1 || c.households.length > 128 || c.employment.length > 256;
   const educated = c.education !== undefined;
@@ -1823,8 +1823,11 @@ export function busValidationView(c: City): BusValidationView {
 }
 export function deserialize(json: string): City {
   const header=JSON.parse(json);
+  if (header?.goalRulesVersion !== undefined && header.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   if(header?.history&&header.version!==24&&header.version!==25&&header.version!==26)throw Error('Unsupported or corrupt history checkpoint: requires save v24');
   const city = deserializeVersioned(json);
+  // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
+  if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.
   if ('taxi' in city) validateTaxi(city.taxi, taxiValidationView(city));
   if ('bus' in city) { validateBus(city.bus, busValidationView(city)); reconcileBusStops(city, SIZE); }

@@ -14,8 +14,8 @@ test('a fresh city starts at level 0 and the starter city climbs the stages in o
   for (const stage of g.stages) assert.equal(stage.done, stage.level <= g.level, 'stages are cumulative');
 });
 
-test('a well-run seeded city wins within 15 months, and reading goals never changes the city', () => {
-  const c = createCity(61025); let wonAt = 0;
+test('a legacy seeded city wins within 15 months, and reading goals never changes the city', () => {
+  const c = createCity(61025); delete c.goalRulesVersion; let wonAt = 0;
   for (let d = 1; d <= 450 && !wonAt; d++) { step(c); keepSupplied(c); const before = serialize(c); if (cityGoals(c).won) wonAt = d; assert.equal(serialize(c), before); }
   assert.ok(wonAt > 120 && wonAt <= 450, `won on day ${wonAt}`);
   const g = cityGoals(c); assert.equal(g.level, 5); assert.equal(g.next, null);
@@ -31,7 +31,7 @@ test('treasury month-end balances match the balance recorded while the city ran'
 });
 
 test('one import in the last 30 days or a shrinking treasury withholds the win', () => {
-  const c = createCity(61025);
+  const c = createCity(61025); delete c.goalRulesVersion;
   for (let d = 1; d <= 450 && !cityGoals(c).won; d++) { step(c); keepSupplied(c); }
   assert.ok(cityGoals(c).won);
   const imported = deserialize(serialize(c)), shop = imported.goodsLedger.find(e => e.reason === 'Wholesale stock delivery')!.to;

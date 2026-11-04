@@ -19,7 +19,7 @@ test('sound settings default on at a low level, clamp every volume and survive b
 });
 
 test('city cues follow real changes: new buildings, arrivals, month end, shops and goal levels', () => {
-  const c = createCity(61025), heard = new Set<string>();
+  const c = createCity(61025), heard = new Set<string>(); delete c.goalRulesVersion;
   for (let d = 1; d <= 400; d++) {
     const before = cueSnapshot(c), bytes = serialize(c); step(c); keepSupplied(c);
     assert.notEqual(serialize(c), bytes);

@@ -66,19 +66,21 @@ body:has(#city-stats:not([hidden])) .status-chip { visibility: hidden; }
 /* Entry screen: the game's navy and gold, a city skyline mark and one gold primary button. */
 body .guest-entry-gate { background: radial-gradient(120% 90% at 50% 0%, #2b4166 0%, #17223a 55%, #0e1628 100%); }
 body .guest-entry-card {
-  position: relative; padding: 40px 26px 28px; border: 1px solid #f3c46b40; border-radius: 22px;
+  position: relative; padding: calc(40 * var(--entry-unit)) calc(26 * var(--entry-unit)) calc(28 * var(--entry-unit)); border: 1px solid #f3c46b40; border-radius: 22px;
   background: linear-gradient(180deg, #1d2a47f2, #141d33f7); box-shadow: 0 24px 70px #050b1aa6, inset 0 1px 0 #ffffff14;
 }
 body .guest-entry-card::before {
-  content: ''; display: block; width: 56px; height: 44px; margin: 0 auto 14px;
+  content: ''; display: block; width: calc(56 * var(--entry-unit)); height: calc(44 * var(--entry-unit)); margin: 0 auto calc(14 * var(--entry-unit));
   background: linear-gradient(#f3c46b, #f3c46b) 4px 18px / 12px 26px no-repeat, linear-gradient(#f3c46b, #f3c46b) 22px 4px / 12px 40px no-repeat, linear-gradient(#f3c46b, #f3c46b) 40px 24px / 12px 20px no-repeat;
+  background-size: calc(12 * var(--entry-unit)) calc(26 * var(--entry-unit)), calc(12 * var(--entry-unit)) calc(40 * var(--entry-unit)), calc(12 * var(--entry-unit)) calc(20 * var(--entry-unit));
+  background-position: calc(4 * var(--entry-unit)) calc(18 * var(--entry-unit)), calc(22 * var(--entry-unit)) calc(4 * var(--entry-unit)), calc(40 * var(--entry-unit)) calc(24 * var(--entry-unit));
   opacity: .9;
 }
 body .guest-entry-card h1 { margin-bottom: 8px; letter-spacing: .04em; }
-body .guest-entry-card p { font-size: 15px; }
+body .guest-entry-card p { font-size: calc(15 * var(--entry-unit)); }
 body .guest-entry-card button { border-color: #f6d891; background: linear-gradient(#f5d385, #d9a447); color: #1d1405; font-weight: 700; box-shadow: 0 6px 18px #d9a44740; }
 body .guest-entry-card button:hover:not(:disabled) { background: linear-gradient(#ffe0a0, #e2ad52); }
-body .guest-entry-card .guest-entry-note { margin-top: 16px; font-size: 13px; }
+body .guest-entry-card .guest-entry-note { margin-top: calc(16 * var(--entry-unit)); font-size: calc(13 * var(--entry-unit)); }
 html #inspector .panel-time-controls { align-self: center; }
 html:not([data-touch-ui=true]) #inspector .inspector-heading { padding-top: 10px; padding-bottom: 6px; }
 html body #game-content .save-group.primary .save-controls { display: block; }

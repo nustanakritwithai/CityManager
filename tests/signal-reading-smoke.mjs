@@ -1,9 +1,10 @@
+import { browserSnapshotState } from './browser-snapshot.ts';
 // Public-client UX exercised with intercepted mock reports only; never contact the provider.
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize } from '../src/sim.ts';
+import { signalReadingFixture } from './signal-reading-fixture.ts';
 import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
 import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
@@ -50,7 +51,7 @@ async function untilRequests(count) {
   assert.equal(apiRequests.length, count, 'Exactly one mock request per explicit action');
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = async () => deserialize(await evaluate('window.cityManager.snapshot()'));
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const panelServer=createPanelServerFixture(url);
 const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 const visible = selector => evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e&&!e.hidden&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0})()`);
@@ -156,9 +157,9 @@ try {
   await panelServer.install(send);
   await send('Fetch.enable', { patterns: [{urlPattern:'*/citymanager-api/*',requestStage:'Request'},{ urlPattern: '*://*/api/city-advisor/report*' }, { urlPattern: '*opentyphoon*' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  const fixture=createCity(61025);for(let day=0;day<65;day++)step(fixture);
-  await panelServer.load(serialize(fixture),{send,evaluate,button,url:url+'?advanced=1&starter=1'});
-  const before = await state(); assert.deepEqual(before, fixture);
+  const { sourceRaw, fixture } = signalReadingFixture();
+  await panelServer.load(sourceRaw,{send,evaluate,button,url:url+'?advanced=1&starter=1'});
+  const before = await state(), beforeRaw = await evaluate('window.cityManager.snapshot()'); assert.deepEqual(before, fixture);
 
   await openSignals(); await untilRequests(1);
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'pending');
@@ -167,12 +168,14 @@ try {
   assert.equal(await visible('#signal-cancel'), true);
   assert.equal(await evaluate('document.querySelector("#signal-refresh").disabled'), true);
   assert.deepEqual(await state(), before, 'Opening a pending report does not mutate the simulation');
+  assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw, 'Opening preserves exact snapshot bytes');
   await button('#signal-cancel');
   assert.notEqual(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'pending');
   assert.match(await evaluate('document.querySelector("#signal-request-feedback").textContent'), /ยกเลิก|หยุดรอ/);
   await releaseCancelled();
   assert.notEqual(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'ai', 'Late cancelled reply cannot overwrite local report');
   assert.deepEqual(await state(), before);
+  assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw, 'Cancellation preserves exact snapshot bytes');
   checks.push('Loading preserves nine local metrics, visible cancellation and immutable simulation; late cancelled response is ignored');
 
   behavior = 'failure'; await button('#signal-refresh'); await untilRequests(2);
@@ -260,7 +263,7 @@ try {
   await button('#close-inspector'); await releaseCancelled();
   assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'), 'false');
   assert.notEqual(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'pending');
-  await panelServer.load(serialize(fixture),{send,evaluate,button,url:url+'?advanced=1&starter=1'});
+  await panelServer.load(sourceRaw,{send,evaluate,button,url:url+'?advanced=1&starter=1'});
   behavior = 'ai'; await openSignals(); await untilRequests(9);
   await until('document.querySelector("#signal-mode").dataset.mode==="ai"');
   assert.equal(apiRequests.at(-1).priorTick, null, 'Loading a city clears ephemeral comparison history');

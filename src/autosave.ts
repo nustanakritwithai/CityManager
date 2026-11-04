@@ -1,4 +1,4 @@
-/** Periodic + lifecycle autosave for the local browser save. Pure controller so it can be tested headlessly. */
+/** Periodic and lifecycle autosave controller, independent of the persistence transport. */
 export const AUTOSAVE_INTERVAL_MS = 60_000;
 
 export type AutosaveResult = { ok: true; at: number } | { ok: false; at: number; quota: boolean; message: string };
@@ -10,31 +10,34 @@ export function isQuotaError(error: unknown): boolean {
 }
 
 export interface AutosaveOptions {
-  save: () => void | Promise<void>;
+  save: (onStart:()=>void) => void | {revision:string|number} | Promise<void | {revision:string|number}>;
   tick: () => number;
   revision?:()=>string;
   onResult: (result: AutosaveResult) => void;
   now?: () => number;
   canSave?: () => boolean;
+  needsRetry?: () => boolean;
 }
 
 export function createAutosave(opts: AutosaveOptions) {
   const now = opts.now ?? Date.now;
-  let savedRevision:string|number|null=null, savedTick: number | null = null, running = false, last: AutosaveResult | null = null, adopted = false;
+  let savedRevision:string|number|null=null, savedTick: number | null = null, running = false, last: AutosaveResult | null = null, adopted = false, savedGeneration=0;
   const finish = (r: AutosaveResult) => { last = r; opts.onResult(r); return r; };
   async function run(force = false): Promise<AutosaveResult | null> {
     if (running || (opts.canSave && !opts.canSave())) return null;
     const tick = opts.tick();
     let revision:string|number;try{revision=opts.revision?.()??tick;}catch(error){return finish({ok:false,at:now(),quota:isQuotaError(error),message:error instanceof Error?error.message:String(error)});}
-    if (!force && savedRevision === revision && (last?.ok || adopted)) return null;
-    running = true;
-    try { await opts.save(); savedTick = tick; savedRevision=revision; adopted=false; return finish({ ok: true, at: now() }); }
-    catch (error) { return finish({ ok: false, at: now(), quota: isQuotaError(error), message: error instanceof Error ? error.message : String(error) }); }
+    if (!force && !opts.needsRetry?.() && savedRevision === revision && (last?.ok || adopted)) return null;
+    running = true;adopted=false;let generation=savedGeneration;const complete=(result:AutosaveResult)=>generation===savedGeneration?finish(result):result;
+    // Serialized transports call onStart when queued work really starts. A manual
+    // acknowledgement ahead of it must not suppress this later work's result.
+    try { const saved=await opts.save(()=>{generation=savedGeneration;});if(generation===savedGeneration){savedTick = tick; savedRevision=saved?.revision??revision; adopted=false;}return complete({ ok: true, at: now() }); }
+    catch (error) { return complete({ ok: false, at: now(), quota: isQuotaError(error), message: error instanceof Error ? error.message : String(error) }); }
     finally { running = false; }
   }
-  return { run, flush() { void run(true); }, reset(){savedTick=null;savedRevision=null;last=null;adopted=false;},
-    /** After a Load: the slot already holds these bytes, so skip autosave until the city changes. Does not claim a save happened. */
-    adoptLoaded(){savedTick=opts.tick();savedRevision=opts.revision?.()??savedTick;last=null;adopted=true;}, markSaved(tick: number) { savedTick = tick;savedRevision=opts.revision?.()??tick; last = { ok: true, at: now() }; }, get last() { return last; } };
+  return { run, flush() { void run(true); }, reset(){savedGeneration++;savedTick=null;savedRevision=null;last=null;adopted=false;},
+    /** After a load, skip autosave until the city changes. Does not claim a save happened. */
+    adoptLoaded(){savedGeneration++;savedTick=opts.tick();savedRevision=opts.revision?.()??savedTick;last=null;adopted=true;}, markSaved(tick: number,revision:string|number=opts.revision?.()??tick) { savedGeneration++;savedTick = tick;savedRevision=revision;adopted=false;last = { ok: true, at: now() }; }, get running(){return running;}, get last() { return last; } };
 }
 
 type Listen = { addEventListener(type: string, fn: () => void): void };
@@ -47,7 +50,5 @@ export function installAutosave(doc: Listen, win: Listen & { setInterval(fn: () 
 
 export function describeAutosave(r: AutosaveResult, fmt: (at: number) => string = at => new Date(at).toLocaleTimeString()): string {
   if (r.ok) return `บันทึกอัตโนมัติแล้ว ${fmt(r.at)}`;
-  return r.quota
-    ? 'บันทึกอัตโนมัติไม่สำเร็จ: พื้นที่เก็บข้อมูลเบราว์เซอร์เต็ม (quota) — เซฟหลักเดิมยังอยู่ แต่สำเนาอัตโนมัติอาจเปลี่ยนแล้ว ห้ามล้างข้อมูลเว็บไซต์ ให้ส่งออกไฟล์สำรองก่อน'
-    : `บันทึกอัตโนมัติไม่สำเร็จ: ${r.message} — เซฟเดิมยังอยู่`;
+  return `บันทึกอัตโนมัติไม่สำเร็จ: ${r.message} — การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์ กรุณาอย่าปิดหน้านี้และลองบันทึกอีกครั้ง`;
 }

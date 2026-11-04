@@ -11,7 +11,12 @@ import { renderChart, ChartModal } from './chart-modal.ts';
 import { mixBar, statTile } from './charts.ts';
 import { iconElement } from './ui-icons.ts';
 import { cityGoals, renderGoalsCard } from './goals-panel.ts';
-import { citySideMissions } from './city-goals.ts';
+import { citySideMissions, type CityGoals } from './city-goals.ts';
+import { cityChallenges } from './city-challenges.ts';
+import { populationGuidance } from './population-guidance.ts';
+import { overviewRevision } from './overview-revision.ts';
+import { municipalInvestments, renderMunicipalInvestments, type MunicipalInvestmentTool } from './municipal-investments.ts';
+import { treasurySpendable } from './sim.ts';
 import type { City } from './sim.ts';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -44,7 +49,7 @@ export class OverviewDashboard {
   private key = '';
   private chartWidth = 300;
 
-  constructor(host: HTMLElement) {
+  constructor(host: HTMLElement, private readonly onSelectTool?: (tool: MunicipalInvestmentTool) => void) {
     this.host = host;
     this.goals.id = 'dash-goals'; this.finance.id = 'dash-finance'; this.chain.id = 'dash-chain'; this.growth.id = 'dash-growth'; this.kpis.setAttribute('aria-label', 'ตัวเลขหลักของเมือง');
     const nav = el('nav', 'dash-nav'); nav.setAttribute('aria-label', 'ไปยังหมวดในภาพรวมเมือง');
@@ -63,8 +68,11 @@ export class OverviewDashboard {
   closeModal() { this.modal.close(); }
 
   /** Rebuild once per simulated day; the navigation stays put so a press is never detached. */
-  update(city: City) {
-    const key = `${city.tick}:${city.ledger.length}:${city.cropLedger.length}:${city.goodsLedger.length}`;
+  update(city: City, goals: CityGoals = cityGoals(city)) {
+    const missions = citySideMissions(city), challenges = cityChallenges(city);
+    const population = populationGuidance(city, goals);
+    // Road edits and capital changes can alter displayed state without advancing time.
+    const key = `${overviewRevision(city, goals, missions, challenges, population)}:${JSON.stringify(municipalInvestments(city))}:${treasurySpendable(city)}`;
     if (city !== this.city) this.key = ''; // A loaded city may share day and ledger sizes.
     this.city = city; this.modal.update(city);
     if (key === this.key) return;
@@ -72,7 +80,7 @@ export class OverviewDashboard {
     // Measure once before rebuilding, so building six charts does not force a layout each.
     this.chartWidth = this.width();
     const series = dailySeries(city, 30);
-    renderGoalsCard(this.goals, cityGoals(city), citySideMissions(city));
+    renderGoalsCard(this.goals, goals, missions, challenges, population);
     this.renderKpis(city, series); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
@@ -107,7 +115,7 @@ export class OverviewDashboard {
       mixBar(budget.income.map((line, i) => ({ key: line.key, label: line.label, value: line.amount, slot: i + 1 })), money, 'รายรับคลังตามแหล่ง'),
       mixBar(budget.expense.map((line, i) => ({ key: line.key, label: line.label, value: line.amount, slot: i + 1 })), money, 'รายจ่ายคลังตามประเภท'),
     );
-    this.finance.replaceChildren(this.head('การเงินของเมือง', `วันที่ ${series.ticks[0]}–${city.tick}`), this.chart('treasury', series), this.chart('cashflow', series), mix);
+    this.finance.replaceChildren(this.head('การเงินของเมือง', `วันที่ ${series.ticks[0]}–${city.tick}`), this.chart('treasury', series), this.chart('cashflow', series), mix, renderMunicipalInvestments(city, this.onSelectTool));
   }
 
   private renderChain(city: City, series: DailySeries) {

@@ -26,8 +26,13 @@ export function expandedCellAt(x: number, z: number): number | null {
 /** Cardinal neighbors in stable west, east, north, south order. */
 export function expandedCellNeighbors(cell: number): number[] {
   const { x, z } = expandedCellCoordinate(cell);
-  return [[x - 1, z], [x + 1, z], [x, z - 1], [x, z + 1]]
-    .map(([nx, nz]) => expandedCellAt(nx, nz)).filter((next): next is number => next !== null);
+  const neighbors: number[] = [];
+  if (x > 0) neighbors.push(cell - 1);
+  if (x < LEGACY_MAP_WIDTH - 1) neighbors.push(cell + 1);
+  // IDs cross the extension seam between legacy row zero and the final added row.
+  if (z > -NORTH_EXTENSION_ROWS) neighbors.push(z === 0 ? EXPANDED_MAP_CELLS - LEGACY_MAP_WIDTH + x : cell - LEGACY_MAP_WIDTH);
+  if (z < LEGACY_MAP_HEIGHT - 1) neighbors.push(z === -1 ? x : cell + LEGACY_MAP_WIDTH);
+  return neighbors;
 }
 
 /** Axis-aligned player road stroke, with horizontal movement before vertical. */

@@ -1,3 +1,6 @@
+import { assertLegacyCheckpoint } from './legacy-history-check.ts';
+import { readFileSync } from 'node:fs';
+import { cropJournalLength, goodsJournalLength, moneyJournalLength } from '../src/city-history.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { factoryCropCapacity, factoryLevel } from '../src/factory-levels.ts';
@@ -63,12 +66,12 @@ test('automatic monthly reviews upgrade same-cell factories through level nine u
     const choice = f.recipe!;
     assert.equal(selectFactoryRecipe(city,f.id,choice).ok,true);
     const identity = {building:b.id,cell:b.cell,firm:f.id,wallet:f.wallet,owner:structuredClone(f.owner),recipe:f.recipe,mode:f.recipeMode};
-    const beforeLedger = city.ledger.length; assert.ok(firmWorkerCount(city,f.id)>0);
+    assert.ok(firmWorkerCount(city,f.id)>0);
     holdEducationReady(city);
     step(city);
     assert.equal(b.level,level+1, `level ${level} upgrades`);
     assert.deepEqual({building:b.id,cell:b.cell,firm:f.id,wallet:f.wallet,owner:f.owner,recipe:f.recipe,mode:f.recipeMode},identity);
-    assert.equal(city.ledger.slice(beforeLedger).filter(e=>e.from===f.wallet && e.to==='construction' && e.amount===20000 && e.reason==='Profitable firm height investment').length,1);
+    assert.equal(city.ledger.filter(e=>e.tick===city.tick && e.from===f.wallet && e.to==='construction' && e.amount===20000 && e.reason==='Profitable firm height investment').length,1);
     assert.equal(Object.values(city.accounts).reduce((a,n)=>a+n,0),0);
     assert.deepEqual(deserialize(serialize(city)),city);
   }
@@ -77,13 +80,14 @@ test('automatic monthly reviews upgrade same-cell factories through level nine u
 test('expanded factory processes actual allocated workers and replays history after demolition', async () => {
   const { bulldoze, firmWorkerCount } = await import('../src/sim.ts');
   const { RECIPE } = await import('../src/goods.ts');
-  const city = createCity(61025); for (let day=0; day<89; day++) step(city);
+  const city = createCity(61025); for (let day=0; day<119; day++) step(city);
   const f = city.firms.find(f=>f.zone==='I')!, b = city.buildings.find(b=>b.id===f.building)!;
   b.level=9; city.utilities.outside={power:1000,water:1000};
   // Move already allocated workers: no worker or skill is invented.
   for (const e of city.employment) { e.firmId=f.id; e.occupation='manufacturing'; }
   const crop=RECIPE[f.recipe!].crop, qty=48-f.cropInventory;
-  city.cropLedger.push({id:city.cropLedger.length+1,tick:city.tick,kind:'market-receipt',from:'market-server',to:f.wallet,quantity:qty,fromValue:0,toValue:0,cash:0,workers:0,batches:0,outputQuantity:0,reason:`Market receipt #${city.cropLedger.length+1}`,crop});
+  const receiptId = cropJournalLength(city) + 1;
+  city.cropLedger.push({id:receiptId,tick:city.tick,kind:'market-receipt',from:'market-server',to:f.wallet,quantity:qty,fromValue:0,toValue:0,cash:0,workers:0,batches:0,outputQuantity:0,reason:`Market receipt #${receiptId}`,crop});
   f.cropInventory+=qty; f.crops[crop]+=qty;
   assert.deepEqual(deserialize(serialize(city)),city);
   step(city); const event=city.cropLedger.findLast(e=>e.kind==='process'&&e.from===f.wallet)!;
@@ -95,7 +99,7 @@ test('expanded factory processes actual allocated workers and replays history af
   assert.equal(bulldoze(city,b.cell).ok,true);
   assert.equal(city.firms.some(x=>x.id===f.id),false);
   assert.deepEqual(deserialize(serialize(city)),city);
-  const badBoundary=JSON.parse(serialize(city)); badBoundary.factoryProgressionStartTick=89;
+  const badBoundary=JSON.parse(serialize(city)); badBoundary.factoryProgressionStartTick=119;
   assert.throws(()=>deserialize(JSON.stringify(badBoundary)), 'known factory receipt cannot exceed the old 24-lot limit before migration');
 });
 
@@ -128,16 +132,25 @@ test('new upgrades retain working capital while old level-two economics stay unc
 });
 
 test('legacy v15 migration preserves records and applies old worker limits before the boundary', () => {
-  const source=createCity(61025); for(let day=0;day<89;day++)step(source);
-  const old=JSON.parse(serialize(source)); delete old.education; old.version=15; old.rulesVersion='chain-10'; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
-  const raw=JSON.stringify(old), loaded=deserialize(raw);
+  // Use a genuine, uncompressed v15 snapshot, rather than relabeling a
+  // modern checkpoint whose older journal has already been compacted.
+  const raw=readFileSync(new URL('./fixtures/retail-v15.json', import.meta.url), 'utf8');
+  const old=JSON.parse(raw), loaded=deserialize(raw);
   assert.equal(loaded.factoryProgressionStartTick,old.tick);
-  assert.deepEqual(loaded.cropLedger,old.cropLedger); assert.deepEqual(loaded.goodsLedger,old.goodsLedger); assert.deepEqual(loaded.accounts,old.accounts);
+  assert.deepEqual(loaded.accounts,old.accounts);
+  assertLegacyCheckpoint(loaded, old);
+  assert.equal(cropJournalLength(loaded),old.cropLedger.length);
+  assert.equal(goodsJournalLength(loaded),old.goodsLedger.length);
+  assert.equal(moneyJournalLength(loaded),old.ledger.length);
+  assert.deepEqual(loaded.cropLedger,old.cropLedger.slice(loaded.history!.cropOffset));
+  assert.deepEqual(loaded.goodsLedger,old.goodsLedger.slice(loaded.history!.goodsOffset));
+  assert.deepEqual(loaded.ledger,old.ledger.slice(loaded.history!.moneyCount));
+  assert.equal(serialize(deserialize(serialize(loaded))),serialize(loaded));
   const bad=JSON.parse(raw); bad.cropLedger.find((e:any)=>e.kind==='process').workers=7;
   assert.throws(()=>deserialize(JSON.stringify(bad)));
   const carried=JSON.parse(serialize(loaded)); carried.cropLedger.find((e:any)=>e.kind==='process').workers=7;
   assert.throws(()=>deserialize(JSON.stringify(carried)));
-  assert.equal(JSON.stringify(old),raw);
+  assert.deepEqual(JSON.parse(raw), old);
 });
 
 test('factory upgrade requires network capacity and does not fabricate workers', async () => {

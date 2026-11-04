@@ -1,4 +1,8 @@
-import { assertSavedCity } from './park-session-assertions.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
+import { createPanelModelAudit } from './panel-model-audit.mjs';
+import { browserSnapshotState } from './browser-snapshot.ts';
+import { panelEntryCity, loadPanelCity, saveAndReloadPanel } from './panel-ui-server.mjs';
+import { startTrafficHttpFixture, reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
 // Contextual-inspector acceptance using installed Edge, real input and valid saves.
 // Run sequentially with other browser scripts: this test owns CDP port 9349.
 import { spawn } from 'node:child_process';
@@ -6,11 +10,10 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { adoptSavedEducation, firmWage, createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
-import { assertOriginalSave } from './education-adoption.mjs';
-import { reachTouch } from './touch-reach.mjs';
+import { firmWage, createCity, serialize, deserialize, summary, MONTH, WAGES, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, housingCapacity, homeOccupancy } from '../src/sim.ts';
 
-const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
+const upstream = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
+const httpFixture = await startTrafficHttpFixture(upstream), server = httpFixture.fixture, url = httpFixture.url;
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/context-preview');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
 const stepLog = [], startedAt = Date.now(); let lastCommand = '';
@@ -18,13 +21,13 @@ const checks = [], screenshots = [], errors = [], expectedErrors = [], layouts =
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 const legacySha256 = createHash('sha256').update(legacyRaw).digest('hex');
 assert.equal(legacySha256, '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
-const fixture = deserialize(legacyRaw); assert.equal(fixture.version, 9);
-for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(fixture[key], legacy[key], `Migration preserves ${key}`);
-for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(fixture[key], legacy[key], `Migration preserves ${key}`);
-for (const old of legacy.firms) { const firm = fixture.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
-const fixtureJson = serialize(fixture), emptyJson = serialize(createCity(91));
-assert.deepEqual(deserialize(fixtureJson), fixture);
-adoptSavedEducation(fixture);
+const migrated = deserialize(legacyRaw); assert.equal(migrated.version, 9);
+for (const key of ['accounts', 'ledger', 'goodsLedger', 'goods']) assert.deepEqual(migrated[key], legacy[key], `Migration preserves ${key}`);
+for (const key of ['seed', 'rng', 'tick', 'nextId']) assert.equal(migrated[key], legacy[key], `Migration preserves ${key}`);
+for (const old of legacy.firms) { const firm = migrated.firms.find(f => f.id === old.id); assert.equal(firm.inventory, old.inventory); assert.deepEqual(firm.workDays, old.workDays); }
+const fixtureJson = serialize(migrated), emptyJson = serialize(createCity(91));
+assert.deepEqual(deserialize(fixtureJson), migrated);
+const fixture = panelEntryCity(fixtureJson);
 const homes = fixture.buildings.filter(b => b.zone === 'R').slice(0, 2), firms = fixture.firms.slice(0, 2);
 assert.equal(homes.length, 2, 'Fixture has two actual homes'); assert.equal(firms.length, 2, 'Fixture has two actual firms');
 const homeHousehold = fixture.households.find(h => h.home === homes[0].id);
@@ -36,7 +39,7 @@ assert.equal(occupied, false, 'CDP port 9349 must be free; do not attach to anot
 // Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
 const profile = await mkdtemp(resolve(output, 'edge-context-'));
 const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-let ws, nextId = 0; const pending = new Map();
+let ws, nextId = 0, networkProbe=null; const pending = new Map(), externalRequests=[], providerRequests=[];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++nextId;
@@ -55,11 +58,11 @@ async function until(expression, timeout = 15000) {
   const start = Date.now(); while (Date.now() - start < timeout) { if (await evaluate(expression)) return; await sleep(80); }
   throw Error(`Timed out: ${expression} · status=${await evaluate("document.querySelector(\"#status\")?.textContent").catch(()=>"?")} · tick=${await evaluate("JSON.parse(window.cityManager.snapshot()).tick").catch(()=>"?")}`);
 }
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,submenu:document.querySelector("#inspector").dataset.submenu,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function button(selector) {
-  if (await reachTouch(evaluate, button, selector)) return;
+  if (await reachTrafficControl(evaluate, button, selector)) return;
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control: '+${JSON.stringify(selector)});e.scrollIntoView({block:'nearest',inline:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
   assert.ok(point.w > 0 && point.h > 0 && !point.disabled, `Visible enabled control: ${selector}`);
   assert.equal(await evaluate(`!!document.elementFromPoint(${point.x},${point.y})?.closest(${JSON.stringify(selector)})`), true, `Control is actually hit: ${selector}`);
@@ -76,23 +79,13 @@ async function openPage(page) {
   const current = await route(); if (current.open !== 'true' || current.page !== page) { await closePanel(); await button(page === 'city' ? '#toggle-inspector' : page === 'help' ? '#toggle-help' : '#toggle-game-menu'); }
   await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(page)}&&document.querySelector('#inspector').dataset.open==='true'`);
 }
+const modelAudit=createPanelModelAudit({blocked,expectedErrors,evaluate,sleep});
 async function load(json) {
-  await openPage('game');
-  if ((await route()).submenu) await button('#submenu-back');
-  const expected = deserialize(json); adoptSavedEducation(expected);
-  // The fixture is injected behind the running game; a legitimate autosave of the running city can
-  // overwrite citymanager.save.v7 before the native Load press (seen on Edge CI: loaded day 104, not 65).
-  // Retry ONLY when the slot was proven overwritten; the loaded-state assertions below are unchanged.
-  for (let attempt = 0; ; attempt++) {
-    await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(json)})`); await button('#load');
-    if (await evaluate(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`)) break;
-    const overwritten = await evaluate(`localStorage.getItem('citymanager.save.v7')!==${JSON.stringify(json)}`);
-    if (!overwritten || attempt >= 2) break;
-    console.log('Fixture slot was overwritten by autosave before Load; re-injecting', attempt + 1);
-  }
-  await until(`JSON.parse(window.cityManager.snapshot()).tick===${expected.tick}`); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); await assertOriginalSave(evaluate, json);
-  assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")'), 'true');
+  const before=modelAudit.begin();await loadPanelCity(server,json,{send,evaluate,button,until,url:url+'?starter=1'});await modelAudit.verify(before);
+  assert.deepEqual(await state(),panelEntryCity(json),'Authenticated server entry preserves the complete expanded city and education');
 }
+async function savePanel(expected){const before=modelAudit.begin();const result=await saveAndReloadPanel(server,expected,{send,evaluate,button,until});await modelAudit.verify(before);return result;}
+
 async function cell(index, close = true) {
   if (close) await closePanel();
   // Camera controls request an on-demand PlayCanvas frame. Read the ground
@@ -165,14 +158,15 @@ try {
     const message = JSON.parse(event.data); if (message.id && pending.has(message.id)) { const item = pending.get(message.id); pending.delete(message.id); message.error ? item.reject(Error(JSON.stringify(message.error))) : item.resolve(message.result); }
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails);
     if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') { const args = message.params.args, expected = blocked && args.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(args[0]?.value) && args[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(args); }
-    if (message.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'Failed' });
+    if (message.method === 'Page.javascriptDialogOpening') void server.dialog(message.params,send).catch(error=>errors.push(String(error)));
+    if (message.method === 'Network.requestWillBeSent') { const u=message.params.request.url; if(networkProbe?.active&&u===networkProbe.url)networkProbe.requestId=message.params.requestId;else { if(isPanelProviderRequest(u))providerRequests.push(u); if(/^https?:/.test(u)&&new URL(u).origin!==new URL(url).origin)externalRequests.push(u); } }
+    if (message.method === 'Network.loadingFailed'&&message.params.requestId===networkProbe?.requestId)networkProbe.failed=message.params;
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  if (blocked) await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
-  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready');
-  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
-  await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day save loaded through explicit Game page and real Load control');
+  await server.install(send);
+  await installTrafficNetworkFence({send,evaluate,protocol:await (await fetch('http://127.0.0.1:9349/json/protocol')).json(),origin:new URL(url).origin,blockedModels:blocked,additionalBlocked:[...panelProviderDenials(new URL(url).origin),new URL(url).origin+'/api/city-advisor/*',new URL(url).origin+'/*/api/city-advisor/*'],observeProbe:probe=>(networkProbe={url:probe})});
+  await load(fixtureJson); await screenshot('desktop-overview.png'); checks.push('Valid 65-day historical city entered through authenticated server ACK');
 
   // Quality must not silently remove user-enabled vehicles, even on low/auto.
   await closePanel();await button('#atmosphere-toggle');
@@ -270,16 +264,17 @@ try {
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: projection.x, y: projection.y, deltaX: 0, deltaY: -180 }); assert.deepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await closePanel(); await key('ArrowRight'); await until(`JSON.stringify(window.cityManager.cellScreen(${homes[0].cell}))!==${JSON.stringify(JSON.stringify(projection))}`); assert.notDeepEqual(await evaluate(`window.cityManager.cellScreen(${homes[0].cell})`), projection); await button('[data-camera="reset"]'); assert.deepEqual(await state(), fixture); checks.push('Open inspector disables camera buttons and ignores wheel/arrows/q/e; closing restores camera input without model changes');
 
   await place(homes[0]); await button('[data-tool="bulldoze"]'); await cell(homes[0].cell, false); const demolished = await state(); assert.equal(demolished.buildings.some(b => b.id === homes[0].id), false); assert.notEqual((await route()).id, String(homes[0].id)); assert.deepEqual(deserialize(serialize(demolished)), demolished);
-  await openPage('game'); await button('#save'); await assertSavedCity(evaluate, demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save is exact and loading a different valid city clears old scope');
+  await openPage('game'); await savePanel(demolished); await load(fixtureJson); await button('[data-tool="select"]'); await place(homes[0]); await load(emptyJson); assert.notEqual((await route()).page, 'entity'); assert.equal(await evaluate('!!document.querySelector("#entity-content").dataset.entityId'), false); await load(fixtureJson); checks.push('Real demolition clears stale entity route; Game-menu Save receives exact server ACK and survives reload; entering a different valid city clears old scope');
 
   await viewport({ width: 390, height: 844, screenWidth: 390, screenHeight: 844, mobile: true, deviceScaleFactor: 2 });
   await place(homes[0]); await assertLayout(); await screenshot('phone-house.png'); await evaluate('document.querySelector("#entity-content .cx-household-list").scrollIntoView({block:"start"})'); await screenshot('phone-house-members.png',false); await button(`#entity-content [data-household-id="${homeHousehold.id}"]`); await assertLayout(); await screenshot('phone-household.png');
   await firm(firms[0]); await assertLayout(); await screenshot('phone-firm.png'); await evaluate('document.querySelector("#entity-content [data-context-metric=stock]").scrollIntoView({block:"start"})'); await screenshot('phone-firm-stock.png',false); await openPage('city'); await assertLayout(); await screenshot('phone-city.png'); await evaluate('document.querySelector("#city-overview .cx-period-banner").scrollIntoView({block:"start"})'); await screenshot('phone-city-flows.png',false); await submenu('#guide', 'help'); await assertLayout(); await screenshot('phone-help.png');
   for (const metric of [{ width: 360, height: 800, screenWidth: 360, screenHeight: 800, mobile: true }, { width: 980, height: 2120, screenWidth: 390, screenHeight: 844, mobile: true }, { width: 844, height: 390, screenWidth: 844, screenHeight: 390, mobile: true }]) { await viewport(metric); await firm(firms[1]); await assertLayout(); await screenshot(`context-${metric.width}.png`); if(metric.width===980){await openPage('city');await assertLayout();await screenshot('phone-wide-city.png');} }
   await viewport({ width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, mobile: false }); await firm(firms[0]); await assertLayout(); await screenshot('desktop-firm.png'); await openPage('city');await assertLayout();assert.deepEqual(await state(), fixture); checks.push('390/360 phone, 844 landscape, 980 layout on screen390 and desktop retain contained readable contexts and hit-tested Back/close');
-  assert.deepEqual(errors, []); const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 41); assert.equal(visuals.loaded.length, 0); } else assert.equal(visuals.loaded.length, 41);
-  checks.push(blocked ? 'Fallback rendering has exactly eight expected model failures and no unexpected errors' : 'All eight admitted visual models load with no runtime/console errors');
+  assert.deepEqual(httpFixture.errors,[]);assert.deepEqual(externalRequests,[]);assert.deepEqual(providerRequests,[],'Context QA never attempts advisor/provider requests');await server.assertNoCityWrites(evaluate);
+  modelAudit.assertComplete();assert.deepEqual(errors, []); const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(visuals.loaded.length, 0); } else assert.equal(visuals.loaded.length, 41);
+  checks.push(blocked ? 'Fallback rendering has exactly 41 expected model failures per visit and no unexpected errors' : 'Admitted visual models load with no runtime/console errors');
   const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, checks, errors, expectedModelErrors: expectedErrors.length, layouts, screenshots, fixture: { seed: fixture.seed, tick: fixture.tick, households: fixture.households.length, firms: fixture.firms.length }, note: 'Installed headless Edge. Viewport, physical-screen ratio and touch are emulated; no real-device or real phone browser-mode claim.' };
   await writeFile(resolve(output, 'context-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
 } catch (error) { if (ws?.readyState === 1) try { await screenshot('context-failure.png'); console.error(await route()); } catch {} console.error('Unexpected browser errors:', errors); console.error('Last completed step:', checks.length, checks.at(-1)); console.error('Recent CDP commands:', stepLog.slice(-15)); throw error; }
-finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }
+finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); await httpFixture.close(); }

@@ -10,6 +10,7 @@ import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts'
 import {reachTrafficControl,trafficHttpHandler,installTrafficNetworkFence} from './traffic-server-entry-fixture.mjs';
 import {createFeedbackServerFixture} from './player-feedback-server-fixture.mjs';
 import { verifyReadingPanels } from './player-feedback-reading.mjs';
+import {settleFeedbackProjection} from './player-feedback-projection.mjs';
 
 const debugPort = Number(process.env.CITYMANAGER_DEBUG_PORT);
 const runtimeOnly = process.env.CITYMANAGER_UX_RUNTIME_ONLY === '1';
@@ -34,7 +35,7 @@ const target = targets.find(item => item.type === 'page' && /CityManager/.test(i
   ?? targets.find(item => item.type === 'page' && item.url === 'about:blank');
 assert.ok(target, 'explicitly isolated CityManager or blank test target');
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout,networkProbe=null,faultContext=null; const pending = new Map(), errors = [], externalRequests=[], checks = [], landscapeLayouts = [], readingLayouts = [];
+let sequence = 0, stage = 'connect', mobile = true, warningMenuLayout, landscapeLayout,networkProbe=null,faultContext=null,lastCellSelection=null; const pending = new Map(), errors = [], externalRequests=[], checks = [], landscapeLayouts = [], readingLayouts = [];
 function send(method, params = {}) {
   return new Promise((resolve, reject) => { const id = ++sequence; const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)); }, 15000); pending.set(id, { resolve: r => { clearTimeout(timer); resolve(r); }, reject: e => { clearTimeout(timer); reject(e); } }); ws.send(JSON.stringify({ id, method, params })); });
 }
@@ -60,7 +61,11 @@ async function button(selector) {
 }
 async function cell(index) {
   stage = `Select parcel cell ${index}`;
-  const p = await evaluate(`cityManager.cellScreen(${index})`);
+  const projection=await settleFeedbackProjection({
+    read:()=>evaluate(`(()=>{const c=document.querySelector('#city-canvas'),r=c.getBoundingClientRect();return{viewport:[innerWidth,innerHeight],canvas:[c.width,c.height,r.x,r.y,r.width,r.height],point:cityManager.cellScreen(${index})}})()`),
+    afterRender:()=>evaluate('new Promise(resolve=>requestAnimationFrame(()=>setTimeout(()=>resolve(true),0)))'),
+  });
+  lastCellSelection={index,...projection};const p=projection.point;
   assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', 'campus is reachable on the map');
   if (mobile) await tap(p.x, p.y);
   else for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x:p.x, y:p.y, button:'left', clickCount:1 });
@@ -100,11 +105,11 @@ retailBuilding.level = 4;
 assert.equal(deserialize(serialize(cardCity)).buildings.find(b => b.id === retailBuilding.id)?.level, 4, 'Shop fixture survives validated save round trip');
 const cardCases = ['house','shop','market','factory','farm'].map(kind => {
   const b = cardCity.buildings.find(b => kind === 'house' ? b.zone === 'R' : cardCity.firms.some(f => f.building === b.id && (kind === 'shop' ? isRetail(f) : kind === 'market' ? isMarket(f) : f.zone === (kind === 'farm' ? 'F' : 'I'))));
-  assert.ok(b, 'Real day29 replay contains ' + kind); return { kind, cell:b.cell };
+  assert.ok(b, 'Real day29 replay contains ' + kind); return { kind, cell:b.cell, buildingId:b.id };
 });
 const family = cardCity.households[0], familyHome = cardCity.buildings.find(b=>b.id===family.home);
 assert.ok(familyHome, 'Replay household has a real home');
-cardCases.push({ kind:'household', cell:familyHome.cell, householdId:family.id });
+cardCases.push({ kind:'household', cell:familyHome.cell, householdId:family.id, buildingId:familyHome.id });
 await writeFile(resolve(output, 'synthetic-fixture.json'), fixture);
 let injected;
 try {
@@ -198,8 +203,10 @@ try {
   assert.deepEqual(fixtureServer.active,activeBeforeFailure,'Failed autosave preserves the authoritative head');await fixtureServer.core.assertNoCityWrites(evaluate);
   await shot('14-autosave-failure-after');
   await restoreServerWrites();await evaluate('window.__uxIntervals.forEach(fn=>fn())');
-  {const start=Date.now();while(Date.now()-start<30000&&fixtureServer.active.revision<faultContext.before.revision+2)await sleep(80);assert.ok(fixtureServer.active.revision>=faultContext.before.revision+2);}
-  await until("document.querySelector('#save-failure-banner').hidden");fixtureServer.assertRetry(faultContext.index,faultContext.before);faultContext=null;await fixtureServer.core.assertNoCityWrites(evaluate);checks.push('periodic autosave failure and exact server-acknowledged retry');
+  // Unlike explicit Retry, a paused automatic retry verifies the exact replayed
+  // head with a fresh GET rather than uploading the same session a second time.
+  await until("document.querySelector('#save-failure-banner').hidden",30000);await fixtureServer.core.settle();
+  fixtureServer.assertVerifiedRetry(faultContext.index,faultContext.before,await evaluate('cityManager.sessionSnapshot()'));faultContext=null;await fixtureServer.core.assertNoCityWrites(evaluate);checks.push('periodic autosave failure, exact server-acknowledged retry and fresh read verification without a duplicate write');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Emulation.setTouchEmulationEnabled', { enabled: false });
   mobile = false;
@@ -238,7 +245,7 @@ try {
   await until('innerWidth===360&&innerHeight===740');
   const factoryEntry=cardCases.find(entry=>entry.kind==='factory');assert.ok(factoryEntry);
   if(await evaluate("document.querySelector('#inspector').dataset.open==='true'"))await button('#close-inspector');
-  const openFactory=async()=>{await cell(factoryEntry.cell);await until("document.querySelector('#entity-content').dataset.cardKind==='factory'");await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Canvas touch does not activate a newly opened factory control');};
+  const openFactory=async()=>{await cell(factoryEntry.cell);await until("document.querySelector('#entity-content').dataset.cardKind==='factory'");assert.equal(await evaluate("document.querySelector('#entity-content').dataset.entityId"),String(factoryEntry.buildingId),'Canvas touch opens the exact factory');await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Canvas touch does not activate a newly opened factory control');};
   await openFactory();await button('#close-inspector');await until("document.querySelector('#inspector').dataset.open!=='true'");
   assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'The next deliberate touch remains functional');
   await openFactory();await evaluate("window.__keyboardTrace=[];for(const type of ['keydown','keyup','click'])document.addEventListener(type,e=>window.__keyboardTrace.push({type,key:e.key??'',target:e.target?.id??'',trusted:e.isTrusted,defaultPrevented:e.defaultPrevented}),true);document.querySelector('#close-inspector').focus()");
@@ -268,8 +275,11 @@ try {
       try {
         if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector');
         await cell(entry.cell);
+        await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.cell===${JSON.stringify(String(entry.cell))}`);
+        assert.equal(await evaluate("document.querySelector('#entity-content').dataset.entityId"),String(entry.buildingId),'Native map tap opens the exact building: '+label);
         if (entry.householdId) await button(`#entity-content [data-household-id="${entry.householdId}"]`);
         await until(`document.querySelector('#entity-content').dataset.cardKind===${JSON.stringify(entry.kind)}`);
+        assert.equal(await evaluate("document.querySelector('#entity-content').dataset.entityId"),String(entry.householdId??entry.buildingId),'Card retains the exact requested entity: '+label);
         await evaluate("document.querySelector('#inspector-body').scrollTop=0;new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
         stage = 'Measure landscape ' + label;
         landscapeLayout = await evaluate(`(()=>{const panel=document.querySelector('#inspector').getBoundingClientRect(),body=document.querySelector('#inspector-body').getBoundingClientRect(),header=document.querySelector('#inspector .inspector-heading').getBoundingClientRect(),visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>body.top&&r.top<body.bottom&&getComputedStyle(e).visibility!=='hidden'},full=e=>{const r=e.getBoundingClientRect();return visible(e)&&r.top>=body.top&&r.bottom<=body.bottom&&r.left>=body.left&&r.right<=body.right};const metrics=[...document.querySelectorAll('.bc-kpis [data-context-metric],.bc-kpis [data-card-metric]')];return{viewport:[innerWidth,innerHeight],panelTop:panel.top,headerHeight:header.height,bodyHeight:body.height,heroVisible:full(document.querySelector('#entity-content .bc-hero')),visibleKeyMetrics:metrics.filter(visible).length,fullyVisibleKeyMetrics:metrics.filter(full).length,fullyVisibleKeyValues:metrics.flatMap(e=>[...e.querySelectorAll('dd')]).filter(full).length,horizontalOverflow:document.querySelector('#inspector-body').scrollWidth>document.querySelector('#inspector-body').clientWidth+1,warningVisible:!document.querySelector('#save-failure-banner').hidden,controls:['#submenu-back','#panel-pause','#close-inspector',...(${warning}?['#save-failure-retry']:[])].map(s=>{const e=document.querySelector(s),r=e.getBoundingClientRect();return{selector:s,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})}})()`);
@@ -291,8 +301,10 @@ try {
         }
         assert.equal(await evaluate('cityManager.snapshot()'),cardSnapshot,'Card inspection preserves actual city data');
       } catch (error) {
-        matrixFailures.push({kind:entry.kind,warning,error:String(error)});
-        if (!landscapeLayouts.some(r=>r.kind===entry.kind&&r.warning===warning)) landscapeLayouts.push({kind:entry.kind,warning,error:String(error)});
+        const observed=await evaluate("({open:document.querySelector('#inspector').dataset.open,page:document.querySelector('#inspector').dataset.page,cell:document.querySelector('#entity-content').dataset.cell,entityId:document.querySelector('#entity-content').dataset.entityId,kind:document.querySelector('#entity-content').dataset.cardKind})").catch(diagnosticError=>({error:String(diagnosticError)}));
+        const failure={kind:entry.kind,warning,error:String(error),selection:lastCellSelection,observed};matrixFailures.push(failure);
+        if (!landscapeLayouts.some(r=>r.kind===entry.kind&&r.warning===warning)) landscapeLayouts.push(failure);
+        await shot('landscape-'+label+'-failure').catch(()=>{});
       }
     }
   }

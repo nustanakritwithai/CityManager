@@ -1,11 +1,13 @@
+import { browserSnapshotState } from './browser-snapshot.ts';
 // Selected-entity UX uses intercepted reports only. Never contact the provider.
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, bulldoze, contributeOwnerCapital } from '../src/sim.ts';
-import { SAVE_KEY } from '../src/save-storage.ts';
+import { serialize, deserialize, bulldoze, contributeOwnerCapital } from '../src/sim.ts';
+import { entityExplanationCity, entityInsufficientFixture } from './entity-explanation-fixture.ts';
+import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
 import { captureEntityExplanation, buildLocalEntityExplanation } from '../src/entity-explanation-data.ts';
 import { buildLocalSignalReport } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
@@ -20,9 +22,7 @@ assert.match(candidateCommit, /^[a-f0-9]{40}$/);
 const port = 9364, checks = [], errors = [], interceptionErrors = [], requests = [], cityRequests = [], held = [], screenshots = [], captures = [], layouts = [];
 let behavior = 'ai', directProviderAttempts = 0, ws, sequence = 0, currentStage = 'setup', lastCommand = null;
 const pending = new Map(), sleep = ms => new Promise(r => setTimeout(r, ms));
-const safePrefix = expression => /localStorage\.setItem|localStorage\.removeItem/.test(String(expression))
-  ? 'localStorage fixture setup (<payload omitted>)'
-  : String(expression).replace(/\s+/g, ' ').slice(0, 180);
+const safePrefix = expression => String(expression).replace(/\s+/g, ' ').slice(0, 180);
 function stage(name) { currentStage = name; console.log(`[entity QA] ${name}`); }
 await mkdir(output, { recursive: true });
 let occupied = false; try { occupied = (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) })).ok; } catch {}
@@ -56,7 +56,8 @@ async function waitRequests(expected) {
   assert.equal(requests.length, expected, 'Exactly one entity request per explicit capture/retry');
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
+const panelServer = createPanelServerFixture(url);
 const mode = () => evaluate('document.querySelector("#entity-explain-mode").dataset.mode');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); await paints(); }
 async function reveal(selector) {
@@ -76,9 +77,10 @@ async function button(selector) {
   await click(p.x, p.y);
 }
 async function close() { if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector'); }
-async function load(city) {
-  await close(); await button('#toggle-game-menu');
-  await evaluate(`localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(serialize(city))})`); await button('#load'); await close();
+async function load(city, raw) {
+  const ack = await panelServer.load(raw, { send, evaluate, button, url: url + '?advanced=1&starter=1' });
+  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
+  assert.equal(ack.raw, raw, 'Server acknowledges exact synthetic fixture bytes');
   assert.deepEqual(await state(), city, 'Load uses exact current-schema synthetic fixture');
 }
 async function selectBuilding(building) {
@@ -97,9 +99,11 @@ async function selectHousehold(city, household) {
 }
 async function capture(expectedCity, selection, expectedBehavior = 'ai') {
   behavior = expectedBehavior; const expected = captureEntityExplanation(expectedCity, selection); assert(expected);
+  const beforeRaw = await evaluate('window.cityManager.snapshot()');
   const count = requests.length; await button('#entity-explain-capture'); await waitRequests(count + 1);
   assert.deepEqual(requests.at(-1).input.snapshot, expected, 'Only bounded current entity facts, identity and accounting period are sent');
   assert.deepEqual(await state(), expectedCity, 'Capturing/asking does not mutate city, RNG, money, inventory or journals');
+  assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw, 'Capture preserves exact snapshot bytes');
   if (expectedBehavior === 'ai') await until('document.querySelector("#entity-explain-mode").dataset.mode==="ai"');
   if (expectedBehavior === 'failure' || expectedBehavior.startsWith('invalid')) await until('document.querySelector("#entity-explain-mode").dataset.mode==="fallback"');
   return expected;
@@ -122,6 +126,7 @@ async function fulfill(item, kind = item.behavior) {
   await send('Fetch.fulfillRequest', { requestId: item.requestId, responseCode: kind === 'failure' ? 503 : 200, responseHeaders, body: Buffer.from(JSON.stringify(kind === 'failure' ? { error: 'mock_unavailable' } : result)).toString('base64') });
 }
 async function intercept(params) {
+  if (await panelServer.intercept(params, send)) return;
   if (/opentyphoon|\/chat\/completions/i.test(params.request.url)) { directProviderAttempts++; await send('Fetch.failRequest', { requestId: params.requestId, errorReason: 'BlockedByClient' }); return; }
   assert.equal(new URL(params.request.url).pathname, '/api/city-advisor/report');
   if (params.request.method === 'OPTIONS') { await send('Fetch.fulfillRequest', { requestId: params.requestId, responseCode: 204, responseHeaders }); return; }
@@ -171,21 +176,21 @@ try {
   ws.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id && pending.has(message.id)) { const p = pending.get(message.id); pending.delete(message.id); message.error ? p.reject(Error(JSON.stringify(message.error))) : p.resolve(message.result); }
+    if (message.method === 'Page.javascriptDialogOpening') void panelServer.dialog(message.params, send).catch(error => interceptionErrors.push(String(error)));
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
     if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') errors.push('console.error');
     if (message.method === 'Fetch.requestPaused') void intercept(message.params).catch(error => { interceptionErrors.push(String(error)); void send('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'Aborted' }).catch(() => {}); });
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
-  await send('Fetch.enable', { patterns: [{ urlPattern: '*://*/api/city-advisor/report*' }, { urlPattern: '*opentyphoon*' }, { urlPattern: '*/chat/completions*' }] });
+  await panelServer.install(send);
+  await send('Fetch.enable', { patterns: [{ urlPattern: '*/citymanager-api/*', requestStage: 'Request' }, { urlPattern: '*://*/api/city-advisor/report*' }, { urlPattern: '*opentyphoon*' }, { urlPattern: '*/chat/completions*' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: url + '?advanced=1&starter=1' }); await until('!!window.cityManager&&window.cityManager.visuals().ready'); // experimental features are off by default
-  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
-  const fixture = createCity(61025); for (let n = 0; n < 29; n++) step(fixture);
+  const { city: fixture, raw: fixtureRaw } = entityExplanationCity();
   const factory = fixture.buildings.find(b => b.zone === 'I'), house = fixture.buildings.find(b => b.zone === 'R'); assert(factory && house);
   const owner = fixture.firms.find(f => f.owner), household = fixture.households.find(h => h.id === owner?.owner?.householdId) || fixture.households.find(h => h.home !== null); assert(household);
   const buildingSelection = { kind: 'building', buildingId: factory.id };
   stage('2 normal building and household');
-  await load(fixture); await selectBuilding(factory);
+  await load(fixture, fixtureRaw); await selectBuilding(factory);
   assert.equal(requests.length, 0, 'Selecting a building never calls the model');
   const first = await capture(fixture, buildingSelection);
   assert.equal(await evaluate('document.querySelector("#entity-explanation-host").dataset.snapshotKey'), first.snapshotKey);
@@ -231,7 +236,7 @@ try {
 
   stage('5 city replacement and deletion');
   await selectBuilding(factory); await capture(advanced, buildingSelection, 'delay');
-  await load(fixture); await selectBuilding(factory); await lateResponses();
+  await load(fixture, fixtureRaw); await selectBuilding(factory); await lateResponses();
   assert.equal(await evaluate('document.querySelector("#entity-explanation-host").dataset.snapshotKey'), '', 'Loading another city object clears even matching entity IDs');
   assert.deepEqual(await state(), fixture);
   await capture(fixture, buildingSelection, 'delay'); await close(); await button('[data-tool="bulldoze"]');
@@ -241,7 +246,7 @@ try {
   checks.push('City replacement and deletion discard pending entity replies; only a deliberate native test demolition changes the fixture');
 
   stage('6 same-day changed evidence');
-  await load(fixture);
+  await load(fixture, fixtureRaw);
   const market = fixture.firms.find(f => f.owner), marketBuilding = fixture.buildings.find(b => b.id === market?.building); assert(market && marketBuilding);
   await selectBuilding(marketBuilding); const marketSelection = { kind: 'building', buildingId: marketBuilding.id };
   const beforeContribution = await capture(fixture, marketSelection, 'delay');
@@ -255,17 +260,8 @@ try {
   checks.push('Same-tick owner-capital changes mark captured evidence stale; later response keeps its captured identity and network failure retains local facts');
 
   stage('7 insufficient evidence');
-  let insufficient;
-  const young = createCity(61025);
-  for (let n = 0; n < 35 && !insufficient; n++) {
-    for (const building of young.buildings) {
-      const snapshot = captureEntityExplanation(young, { kind: 'building', buildingId: building.id });
-      if (snapshot?.missing.length) { insufficient = { city: deserialize(serialize(young)), building: { ...building }, snapshot }; break; }
-    }
-    if (!insufficient) step(young);
-  }
-  assert(insufficient, 'Actual early-game entity provides missing evidence, rather than fabricated test values');
-  await load(insufficient.city); await selectBuilding(insufficient.building); const missingCapture = await capture(insufficient.city, { kind: 'building', buildingId: insufficient.building.id });
+  const insufficient = entityInsufficientFixture();
+  await load(insufficient.city, insufficient.raw); await selectBuilding(insufficient.building); const missingCapture = await capture(insufficient.city, { kind: 'building', buildingId: insufficient.building.id });
   assert(missingCapture.missing.length > 0); assert.deepEqual(missingCapture, insufficient.snapshot);
   await assertEvidence(missingCapture);
   assert(await evaluate('document.querySelector("#entity-explain-content").textContent.includes("ข้อมูล")'));
@@ -273,7 +269,7 @@ try {
   checks.push('Real early-game missing evidence is preserved in the exact request and displayed honestly instead of transmitting a fabricated full save or zero-filled values');
 
   stage('8 mobile layouts and preserved signal/facts');
-  await load(fixture); const selection = await selectHousehold(fixture, household); await capture(fixture, selection);
+  await load(fixture, fixtureRaw); const selection = await selectHousehold(fixture, household); await capture(fixture, selection);
   for (const viewport of [{ width: 360, height: 780, screenWidth: 360, screenHeight: 780 }, { width: 980, height: 2120, screenWidth: 360, screenHeight: 780 }]) {
     await layout(viewport); await shot(viewport.width === 980 ? 'entity-s22-wide.png' : 'entity-s22.png'); assert.deepEqual(await state(), fixture);
   }
@@ -283,6 +279,7 @@ try {
   const beforeQuestion = await state(), entityCalls = requests.length, reportCalls = cityRequests.length; await button('#city-question-ask');
   assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'observed');
   assert.equal(requests.length, entityCalls); assert.equal(cityRequests.length, reportCalls); assert.deepEqual(await state(), beforeQuestion);
+  await assertNoCityWrites(evaluate);
   assert.equal(directProviderAttempts, 0); assert.equal(interceptionErrors.length, 0, JSON.stringify(interceptionErrors)); assert.equal(errors.length, 0, JSON.stringify(errors));
   checks.push('S22 normal/wide type and touch controls remain readable; existing city signals and local fact questions retain their no-extra-data behavior');
   for (const capture of captures) await writeFile(resolve(output, capture.name), capture.bytes);

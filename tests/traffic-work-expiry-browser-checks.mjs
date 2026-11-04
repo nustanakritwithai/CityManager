@@ -11,7 +11,7 @@ export function observeWorkWorker(){
    const nativePost=worker.postMessage;
    worker.postMessage=function(message,...rest){
     const w=message?.sample?.work;
-    if(w){window.__workRequests.push({seq:message.seq,advance:message.advance,paused:message.paused,day:w.day,minute:w.minute,ack:w.ack,crossedWorkDay:w.crossedWorkDay??null,cancelIds:[...(w.cancelIds??[])],owners:window.__workOwnerSnapshot??null,at:performance.now()});if(window.__workRequests.length>160)window.__workRequests.shift();}
+    if(w){window.__workRequests.push({seq:message.seq,advance:message.advance,paused:message.paused,day:w.day,minute:w.minute,ack:w.ack,crossedWorkDay:w.crossedWorkDay??null,cancelIds:[...(w.cancelIds??[])],owners:window.__workOwnerSnapshot??null,cancellations:w.cancelIds?.length?(window.cityManager?.traffic()?.workCancellations??[]):[],at:performance.now()});if(window.__workRequests.length>160)window.__workRequests.shift();}
     return Reflect.apply(nativePost,this,[message,...rest]);
    };
    worker.addEventListener('message',event=>{
@@ -33,6 +33,17 @@ export function workAckEvidence(id,frames,requests,traffic){
  const frame=ack?frames.find(f=>f.seq===ack.seq):null;
  if(!receipt||!cancel||!ack||!frame||frame.expiredWorkTrips.some(e=>e.id===id)||frame.cars.some(c=>c.id===id)||frame.workTrips.some(c=>c.id===id)||traffic.worker?.inflight||traffic.worker?.pending||traffic.presentation.selectedIds.includes('game:'+id))return null;
  return {receipt,cancel,ack,ackFrame:{seq:frame.seq,expired:frame.expiredWorkTrips}};
+}
+
+/** Require the exact canceled ID to own an entered corridor immediately before
+ * native expiry and none immediately afterward, not a stale animation-frame read. */
+export function occupiedCancellationProof(id,cancel){
+ if(!Number.isSafeInteger(id)||id<1||!cancel?.cancelIds?.includes(id))return null;
+ const event=cancel.cancellations?.find(e=>e.id===id);
+ if(!event||!Array.isArray(event.before)||!Array.isArray(event.after))return null;
+ if(!event.before.some(c=>c.owner==='game:'+id&&c.active===true&&c.entered===true))return null;
+ if(event.after.some(c=>c.owner==='game:'+id))return null;
+ return event;
 }
 
 export function movedPoseExpression(id,pose){
@@ -66,7 +77,7 @@ export async function workExpiryBrowserChecks(h){
  await until(`window.cityManager.traffic().presentation.cornerOwners.some(c=>c.owner==='game:'+${occupiedBefore.target.id}&&c.active&&c.entered)`,30000);await screenshot('work-occupied-junction.png');
  await until(fullAck(occupiedBefore.target.id),130000);
  const occupiedAck=await evaluate(fullAck(occupiedBefore.target.id));
- assert.ok(occupiedAck.cancel.owners?.owners.some(c=>c.owner==='game:'+occupiedBefore.target.id&&c.active&&c.entered),'Last observed render frame immediately before cancellation still owns an entered corridor');
+ assert.ok(occupiedCancellationProof(occupiedBefore.target.id,occupiedAck.cancel),'Exact canceled ID owns an entered corridor immediately before expiry and releases it during expiry');
  assert.equal(await evaluate(`window.cityManager.traffic().presentation.cornerOwners.some(c=>c.owner==='game:'+${occupiedBefore.target.id})`),false,'Expired owner no longer retains a junction reservation');
  evidence.occupied={id:occupiedBefore.target.id,entered:true,ack:occupiedAck,after:await evaluate('window.cityManager.traffic().presentation.cornerOwners')};await evaluate('window.__workOwnerWatch=false');await screenshot('work-junction-released.png');await button('#pause');await waitPausedModel();checks.push('Overdue work car owns an entered corridor immediately before cancellation; worker ACK round trip releases that exact ownership');
 

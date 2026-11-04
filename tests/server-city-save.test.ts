@@ -10,7 +10,7 @@ function harness(){
  const store={read:async o=>structuredClone(state(o).head??state(o).snapshots.at(-1)??null),transaction:async(o,work)=>{const before=tail;let release;tail=new Promise(r=>release=r);await before;const original=state(o),s=structuredClone(original);try{const result=await work({requestCount:async()=>s.requests.size,current:async()=>s.head??s.snapshots.at(-1)??null,deletionFence:async()=>s.fence,wasRetired:async id=>[...s.requests.values()].some(r=>r.response.deleted&&r.response.cityId===id),resetAllowed:async()=>!blocked,retire:async v=>{if(archiveFailure)throw Error('archive-write-failed');for(const copy of s.snapshots){const a=s.archives.get(copy.rawHash)??{hash:copy.rawHash,raw:copy.raw,sources:[]};a.sources.push(`deleted:${copy.cityId}:${v.revision}:snapshot:${copy.revision}`);s.archives.set(copy.rawHash,a);}s.snapshots=[];s.head=v;s.fence=v.revision;},bytes:async()=>forcedBytes,hasArchive:async h=>s.archives.has(h),request:async id=>s.requests.get(id),record:async(id,payloadHash,response)=>s.requests.set(id,{payloadHash,response}),publish:async v=>{s.head=v;s.snapshots.push(v);s.snapshots=s.snapshots.slice(-2);},archive:async(h,raw,source)=>{const a=s.archives.get(h)??{hash:h,raw,sources:[]};if(!a.sources.includes(source))a.sources.push(source);s.archives.set(h,a);}});if(rollback){rollback=false;throw Error('commit-failed');}owners.set(o,s);return structuredClone(result);}finally{release();}},listArchives:async o=>[...state(o).archives.values()].map(({raw,...x})=>x),readArchive:async(o,h)=>state(o).archives.get(h)??null};
  const service=createServerCityService(store);const calls=[];let lose=false;
  const request=async(path,init)=>{calls.push({path,init});if(path==='/v1/city-save'&&init?.method==='POST'){const value=await service.mutate(owner,init.headers['Idempotency-Key'],JSON.parse(init.body));if(lose){lose=false;throw Error('lost-response');}return value;}if(path==='/v1/city-save')return service.read(owner);if(path==='/v1/city-save/archives')return init?.method==='POST'?service.archive(owner,JSON.parse(init.body)):service.listArchives(owner);return service.readArchive(owner,path.split('/').at(-1));};
- return {service,client:new ServerCitySaveClient(request,owner),calls,lose:()=>lose=true,full:()=>forcedBytes=MAX_OWNER_BYTES,rollback:()=>rollback=true,block:()=>blocked=true,archiveFail:()=>archiveFailure=true,state:()=>state(owner)};
+ return {service,request,client:new ServerCitySaveClient(request,owner),calls,lose:()=>lose=true,full:()=>forcedBytes=MAX_OWNER_BYTES,rollback:()=>rollback=true,block:()=>blocked=true,archiveFail:()=>archiveFailure=true,state:()=>state(owner)};
 }
 test('create and save persist exact bytes; load owner isolation',async()=>{const h=harness();await h.client.load();const c=await h.client.create(raw,meta);assert.equal(c.raw,raw);assert.equal(c.revision,1);const n=await h.client.save(raw+' ',meta);assert.equal(n.revision,2);assert.equal(n.raw,raw+' ');assert.equal(await h.service.read(other),null);});
 test('lost response retries exact id/payload and returns one committed revision',async()=>{const h=harness();await h.client.load();h.lose();await assert.rejects(h.client.create(raw,meta),/lost-response/);assert.equal(h.client.confirmed,null);assert.equal(h.client.pending,true);await assert.rejects(h.client.save(raw,meta));const c=await h.client.retry();assert.equal(c.revision,1);const posts=h.calls.filter(c=>c.init?.method==='POST');assert.deepEqual(posts[0],posts[1]);assert.equal(h.client.pending,false);});
@@ -64,4 +64,80 @@ test('expanded city survives isolated server ACK, CAS and reload without changin
  assert.equal(saved.raw,expandedRaw);assert.equal(saved.revision,2);assert.equal(h.state().snapshots[0].raw,oldRaw);
  const loaded=await h.service.read(owner);assert.equal(loaded.raw,expandedRaw);
  const restored=deserializeParkSession(loaded.raw);assert.deepEqual(restored.city.cells,active.city.cells);assert.deepEqual(restored.city.resources,active.city.resources);
+});
+
+
+test('autosave reports an uncertain ACK and retries the exact pending server attempt before saving',async()=>{
+ const {createAutosave,describeAutosave}=await import('../src/autosave.ts');
+ const h=harness();await h.client.load();await h.client.create(raw,meta);h.lose();
+ const current=raw+' ';const results=[];
+ const auto=createAutosave({tick:()=>2,revision:()=>current,onResult:r=>results.push(r),save:async()=>{
+  if(h.client.pending)await h.client.retry();
+  await h.client.save(current,{...meta,tick:2});
+ }});
+ const failed=await auto.run();assert.equal(failed?.ok,false);assert.equal(h.client.confirmed?.revision,1);
+ assert.equal((await h.service.read(owner)).revision,2);assert.equal((await h.service.read(owner)).raw,current);
+ assert.match(describeAutosave(failed!),/ยังไม่ยืนยันบนเซิร์ฟเวอร์/);assert.equal(h.client.pending,true);
+ const saved=await auto.run();assert.equal(saved?.ok,true);assert.equal(h.client.confirmed?.revision,3);
+ assert.equal((await h.service.read(owner)).raw,current);assert.equal(h.client.pending,false);
+ const posts=h.calls.filter(c=>c.init?.method==='POST').slice(1);assert.deepEqual(posts[0],posts[1]);
+ assert.notEqual(posts[1].init.headers['Idempotency-Key'],posts[2].init.headers['Idempotency-Key']);
+ assert.equal(JSON.parse(posts[2].init.body).expectedRevision,2);assert.equal(results.length,2);
+ assert.equal(await auto.run(),null);
+});
+
+test('clean automatic checks verify the exact head without POST, caching or revision adoption',async()=>{
+ const h=harness();await h.client.load();const before=await h.client.create(raw,meta);const count=h.calls.length;
+ for(let i=0;i<3;i++)assert.deepEqual(await h.client.saveOrVerify(raw,meta),before);
+ assert.deepEqual(h.calls.slice(count).map(c=>c.init),Array(3).fill({method:'GET',cache:'no-store'}));
+ assert.deepEqual(h.client.confirmed,before);assert.equal((await h.service.read(owner)).revision,1);assert.equal(h.client.pending,false);
+ await h.client.save(raw,meta);assert.equal((await h.service.read(owner)).revision,2,'Explicit Save still performs a fresh CAS');
+});
+
+test('same-byte and different-byte remote revisions both conflict without changing local ACK',async()=>{
+ for(const remoteRaw of [raw,raw+' ']){
+  const h=harness();await h.client.load();const before=await h.client.create(raw,meta);
+  await h.service.mutate(owner,crypto.randomUUID(),{action:'save',cityId:before.cityId,expectedRevision:1,raw:remoteRaw,metadata:meta});
+  await assert.rejects(h.client.saveOrVerify(raw,meta),(e:any)=>e.status===409&&e.message==='server-save-conflict');
+  assert.equal(h.client.conflict,true);assert.equal(h.client.pending,false);assert.deepEqual(h.client.confirmed,before);
+  await assert.rejects(h.client.save(raw+'  ',meta),(e:any)=>e.status===409);assert.equal((await h.service.read(owner)).revision,2);
+ }
+});
+
+test('remote deletion and replacement remain conflicts; verification never adopts a tombstone or another city',async()=>{
+ for(const replace of [false,true]){
+  const h=harness();await h.client.load();const before=await h.client.create(raw,meta);
+  await h.service.mutate(owner,crypto.randomUUID(),{action:'delete',cityId:before.cityId,expectedRevision:1});
+  if(replace){const cityId=crypto.randomUUID();await h.service.mutate(owner,crypto.randomUUID(),{action:'create',cityId,expectedRevision:2,raw:freshRaw(cityId),metadata:meta});}
+  await assert.rejects(h.client.verifyConfirmed(),(e:any)=>e.status===409);
+  assert.equal(h.client.conflict,true);assert.deepEqual(h.client.confirmed,before);assert.equal(h.client.deleted,null);
+ }
+});
+
+test('missing, malformed and failed verification cannot claim success or replace the local ACK',async()=>{
+ for(const mode of ['missing','wrong-owner','bad-hash','network','auth']){
+  const h=harness();await h.client.load();const before=await h.client.create(raw,meta);let failing=false;
+  const client=new ServerCitySaveClient(async(path,init)=>{
+   if(!failing)return h.request(path,init);
+   if(mode==='missing')return null;
+   if(mode==='wrong-owner')return {...before,owner:other};
+   if(mode==='bad-hash')return {...before,rawHash:'0'.repeat(64)};
+   throw Object.assign(Error(mode),{status:mode==='auth'?401:undefined});
+  },owner);
+  await client.load();failing=true;await assert.rejects(client.verifyConfirmed());assert.deepEqual(client.confirmed,before);assert.equal(client.pending,false);
+  assert.equal(client.conflict,mode==='missing');
+  if(mode!=='missing'){failing=false;assert.deepEqual(await client.verifyConfirmed(),before,'A transport/validation failure remains retryable');}
+ }
+});
+
+test('a server change after clean verification is still fenced by the next dirty CAS',async()=>{
+ const h=harness();await h.client.load();const before=await h.client.create(raw,meta);await h.client.verifyConfirmed();
+ await h.service.mutate(owner,crypto.randomUUID(),{action:'save',cityId:before.cityId,expectedRevision:1,raw:raw+' ',metadata:meta});
+ await assert.rejects(h.client.saveOrVerify(raw+'  ',meta),(e:any)=>e.status===409);assert.equal((await h.service.read(owner)).raw,raw+' ');assert.deepEqual(h.client.confirmed,before);
+});
+
+test('verification rejects pending writes and simultaneous work rather than dropping an uncertain intent',async()=>{
+ const h=harness();await h.client.load();await h.client.create(raw,meta);h.lose();await assert.rejects(h.client.save(raw+' ',meta));const count=h.calls.length;
+ await assert.rejects(h.client.verifyConfirmed(),/server-save-pending/);await assert.rejects(h.client.saveOrVerify(raw,meta),/server-save-pending/);assert.equal(h.calls.length,count);assert.equal(h.client.pending,true);
+ await h.client.retry();assert.equal(h.client.pending,false);assert.equal((await h.client.verifyConfirmed()).revision,2);
 });

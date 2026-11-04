@@ -8,27 +8,75 @@ export async function reachTrafficControl(evaluate,button,selector){
  if(selector==='#save')return false;
  return reachTouch(evaluate,button,selector);
 }
-import {deserializeParkSession} from '../src/park-runtime.ts';
+import {deserializeParkSession,expandValidatedParkSession} from '../src/park-runtime.ts';
+/** Match the app's validated 24×24 → 24×28 session migration without modifying the server ACK. */
+export const loadedTrafficSession = raw => expandValidatedParkSession(deserializeParkSession(raw));
+/** Compare all saved economic state against the actual validated live migration. */
+export const assertTrafficAutosaveCity = (raw, restoredCity) => {
+ const expected = loadedTrafficSession(raw).city;
+ assert.equal(serialize(restoredCity),serialize(expected),'Autosave changes runtime, not economic City');
+ return expected;
+};
+import {serialize} from '../src/sim.ts';
 import {createPanelServerFixture,assertNoCityWrites as noPanelCityWrites} from './panel-server-entry-fixture.mjs';
-export function assertNavigationSaveChain(before,after,writes){
+export function assertNavigationSaveChain(before,after,writes,priorWrites=[],outgoingRaw=before.raw){
  assert.ok(before&&after&&!before.deleted&&!after.deleted,'Live heads required across navigation');
- assert.equal(after.raw,before.raw,'Navigation cannot replace acknowledged bytes');assert.equal(after.cityId,before.cityId);
- let revision=before.revision;
+ assert.equal(after.cityId,before.cityId);
+ let revision=before.revision, lifecycleSaves=0, latestRaw=before.raw;
+ const acknowledged=new Map();
+ for(const event of priorWrites){
+  if(event.requestKey&&event.status===200&&event.command?.cityId===before.cityId&&event.response?.cityId===before.cityId&&event.response?.revision<=before.revision){
+   const existing=acknowledged.get(event.requestKey);
+   if(existing){assert.deepEqual(event.command,existing.command,'Repeated key must have the exact same command');assert.deepEqual(event.response,existing.response,'Repeated key must have the exact same ACK');}
+   else acknowledged.set(event.requestKey,event);
+  }
+ }
  for(const event of writes){
   assert.equal(event.status,200,'Lifecycle save must receive a successful service ACK');
   assert.equal(event.command.action,'save');assert.equal(event.command.cityId,before.cityId);
+  assert.equal(event.response.cityId,before.cityId);
+  const previous=event.requestKey&&acknowledged.get(event.requestKey);
+  if(previous){
+   assert.deepEqual(event.command,previous.command,'Repeated key must have the exact same command');
+   assert.deepEqual(event.response,previous.response,'Repeated key must have the exact same ACK');
+   assert.ok(event.response.revision<=revision,'Retried ACK cannot refer to a future revision');
+   continue;
+  }
   assert.equal(event.command.expectedRevision,revision,'Lifecycle writes form an exact revision chain');
-  assert.equal(event.command.raw,before.raw,'Lifecycle flush retains exact acknowledged session');
-  assert.equal(event.response.raw,before.raw);assert.equal(event.response.cityId,before.cityId);
+  assert.equal(event.command.raw,outgoingRaw,'Lifecycle flush must match the captured outgoing session');
+  assert.equal(event.response.raw,outgoingRaw,'Service ACK must retain the captured outgoing bytes');
   assert.equal(event.response.revision,++revision,'Each real ACK advances exactly once');
+  latestRaw=outgoingRaw;lifecycleSaves++;if(event.requestKey)acknowledged.set(event.requestKey,event);
  }
  assert.equal(after.revision,revision,'Every revision increase must have an observed matching service ACK');
- return {beforeRevision:before.revision,afterRevision:revision,lifecycleSaves:writes.length};
+ assert.equal(after.raw,latestRaw,'Final durable bytes must match the last verified ACK');
+ return {beforeRevision:before.revision,afterRevision:revision,lifecycleSaves};
+}
+// Validate every post-click ACK, including a later same-session save arriving
+// while the browser reports the first ACK. Navigation begins from the actual
+// last observed head, never from a stale status-wait snapshot.
+const MANUAL_SAVE_SUCCESS='บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่';
+// The game-menu status is produced only after the actual native Save handler
+// has awaited its explicit server save. An autosave badge alone is not proof.
+export async function completeTrafficManualSave(evaluate,button,until){
+ const expression=`document.querySelector('#inspector-status')?.textContent===${JSON.stringify(MANUAL_SAVE_SUCCESS)}`;
+ assert.equal(await evaluate(expression),false,'Manual success must be fresh before the click');
+ await button('#save');
+ await until(expression);
+}
+export function assertTrafficManualSaveChain(before,acknowledged,after,writes,priorWrites,raw){
+ assert.ok(acknowledged&&acknowledged.revision>before.revision,'Manual save must advance the server revision');
+ assert.equal(acknowledged.cityId,before.cityId);assert.equal(acknowledged.raw,raw);
+ assert.ok(writes.some(e=>e.status===200&&e.response?.cityId===before.cityId&&e.response?.revision===acknowledged.revision&&e.response?.raw===raw),'Manual saved revision requires its exact observed ACK');
+ const chain=assertNavigationSaveChain(before,after,writes,priorWrites,raw);
+ assert.ok(acknowledged.revision<=after.revision,'Manual ACK cannot exceed the durable navigation baseline');
+ assert.ok(chain.lifecycleSaves>0,'Manual save must produce an observed new revision');
+ return chain;
 }
 export function createTrafficServerFixture(pageUrl){
  const url=new URL(pageUrl);assert.equal(url.protocol,'http:','Traffic fixture requires loopback HTTP');
  let fixture=createPanelServerFixture(pageUrl),navigationAllowed=false,navigation=null;
- const generations=new Map(),outgoingSnapshots=new Map(),retiredWrites=[];
+ const generations=new Map(),outgoingSnapshots=new Map(),retiredWrites=[],archivedWrites=new Map();
  const writes=[],reads=[],pending=new Set(),navigationEvidence=[];
  const intercept=(params,send)=>{
   const work=(async()=>{
@@ -44,13 +92,15 @@ export function createTrafficServerFixture(pageUrl){
     return send(method,payload);
    });
    if(post)assert.equal(event.status,200,'Unexpected rejected traffic save');
-   if(retired)assertNavigationSaveChain({...previous,raw:outgoingSnapshots.get(event.command.cityId)},target.active,[event]);
+   if(retired)assertNavigationSaveChain({...previous,raw:outgoingSnapshots.get(event.command.cityId)},target.active,[event],[...(archivedWrites.get(event.command.cityId)??[]),...retiredWrites.filter(e=>e!==event)]);
    return handled;
   })();pending.add(work);void work.finally(()=>pending.delete(work)).catch(()=>{});return work;
  };
  const settle=async()=>{const deadline=Date.now()+30000;while(pending.size){if(Date.now()>=deadline)throw Error('Traffic server requests did not settle');await Promise.race([Promise.all([...pending]),new Promise(r=>setTimeout(r,80))]);}};
  const seed=async raw=>{
-  await settle();navigation=null;writes.length=0;reads.length=0;
+  await settle();navigation=null;
+  if(fixture.active?.cityId)archivedWrites.set(fixture.active.cityId,[...writes]);
+  writes.length=0;reads.length=0;
   const restored=deserializeParkSession(raw); // Validate the actual full-session contract, not a version label.
   const priorCityId=fixture.active?.cityId;const next=createPanelServerFixture(pageUrl),ack=await next.seed(raw);
   assert.equal(generations.has(ack.cityId),false,'Scenario identity must be globally fresh');fixture=next;generations.set(ack.cityId,next);
@@ -59,7 +109,13 @@ export function createTrafficServerFixture(pageUrl){
   assert.equal(ack.metadata.population,restored.city.households.reduce((n,h)=>n+h.members,0));
   return ack;
  };
- const permitBeforeUnload=()=>{navigationAllowed=true;navigation={head:fixture.active,cursor:writes.length};};
+ const permitBeforeUnload=(outgoingRaw)=>{
+  if(outgoingRaw!==undefined){
+   const current=deserializeParkSession(outgoingRaw);
+   assertTrafficAutosaveCity(fixture.active.raw,current.city);
+  }
+  navigationAllowed=true;navigation={head:fixture.active,cursor:writes.length,outgoingRaw};
+ };
  const dialog=async(params,send)=>{
   assert.ok(navigationAllowed&&params.type==='beforeunload','Only explicit traffic fixture navigation may accept beforeunload');
   navigationAllowed=false;await send('Page.handleJavaScriptDialog',{accept:true});
@@ -86,7 +142,7 @@ export function createTrafficServerFixture(pageUrl){
    await wait("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
    await settle();const readStart=reads.length;await button('.guest-entry-card button');
    await wait('!!window.cityManager&&window.cityManager.visuals().ready');
-   await settle();try{navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor)));}
+   await settle();try{navigationEvidence.push(assertNavigationSaveChain(head,fixture.active,writes.slice(baseline.cursor),writes.slice(0,baseline.cursor),baseline.outgoingRaw??head.raw));}
    catch(error){
     // Preserve the original failing assertion and attach only synthetic request
     // metadata. In particular, never log raw city bytes or the request key.
@@ -132,29 +188,44 @@ export function createTrafficNetworkAudit(context=()=>null){
 
 // Native HTTP transport: page-exit keepalive requests outlive their CDP Fetch IDs.
 // Reuse exactly the same real-service adapter; never mock a successful ACK.
-export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,forward=fetch}){
+// Bounded structural diagnostics only. Never retain paths, bodies, headers,
+// request keys, city IDs, error messages or stacks. Every error still fails audit.
+export function recordFixtureHttpFailure(error,{req,res,errors,failureDetails,kind,phase,bodyBytes,bodyComplete,serviceStatus=null}){
+ const errorName=['Error','TypeError','SyntaxError','AbortError','TimeoutError','AssertionError'].includes(error?.name)?error.name:'OtherError';
+ const codes=['ECONNRESET','ETIMEDOUT','ABORT_ERR','UND_ERR_SOCKET'];
+ const errorCode=codes.includes(error?.code)?error.code:null,causeCode=codes.includes(error?.cause?.code)?error.cause.code:null;
+ errors.push(`Fixture transport failure: ${errorName}${errorCode?` (${errorCode})`:''}`);
+ const detail={kind,phase,method:['GET','HEAD','POST'].includes(req.method)?req.method:'OTHER',bodyBytes,bodyComplete,requestComplete:req.complete??null,requestAborted:req.aborted??null,responseHeadersSent:res.headersSent,responseFinished:res.writableFinished??null,responseDestroyed:res.destroyed??null,serviceStatus,errorName,errorCode,causeCode};failureDetails.push(detail);
+ if(failureDetails.length>32)failureDetails.shift();return detail;
+}
+export function trafficHttpHandler({origin,upstream,fixture,errors,deliveries,failureDetails=[],forward=fetch,trace}){
  const base=new URL(upstream);assert.equal(base.hostname,'127.0.0.1');assert.equal(base.protocol,'http:');
- return async(req,res)=>{try{
+ return async(req,res)=>{let kind='unvalidated',phase='validate',bodyBytes=0,bodyComplete=false,serviceStatus=null,traceId=null;try{
   assert.equal(req.headers.host,new URL(origin).host,'Only the exact isolated fixture host is served');
   const target=new URL(req.url,origin);assert.equal(target.origin,origin);assert.ok(req.url.startsWith('/')&&!req.url.startsWith('//'));
-  if(target.pathname==='/__traffic_network_fence_page'){assert.equal(req.method,'GET');res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Isolated network fence</title>');return;}
+  if(target.pathname==='/__traffic_network_fence_page'){kind='fence';assert.equal(req.method,'GET');res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Isolated network fence</title>');return;}
   if(target.pathname.startsWith('/citymanager-api/')){
-   let data='';for await(const chunk of req){data+=chunk;assert.ok(Buffer.byteLength(data)<=10*1024*1024,'Bounded fixture request');}
+   kind=target.pathname==='/citymanager-api/v1/city-save'?'city-save':'other-api';traceId=trace?.httpStart(req,res)??null;phase='read-body';
+   let data='';for await(const chunk of req){data+=chunk;bodyBytes+=Buffer.byteLength(chunk);assert.ok(Buffer.byteLength(data)<=10*1024*1024,'Bounded fixture request');}
+   bodyComplete=true;phase='service';
    const record={method:req.method,path:target.pathname,finished:false,closed:false};deliveries.push(record);
    res.once('finish',()=>{record.finished=true;});res.once('close',()=>{record.closed=true;});
    assert.equal(await fixture.intercept({requestId:'http-'+deliveries.length,request:{url:target.href,method:req.method,headers:req.headers,postData:data}},async(method,payload)=>{
-    assert.equal(method,'Fetch.fulfillRequest');record.status=payload.responseCode;
+    assert.equal(method,'Fetch.fulfillRequest');record.status=payload.responseCode;serviceStatus=payload.responseCode;phase='respond';trace?.httpResponse(traceId,payload.responseCode,payload.body);
     res.writeHead(payload.responseCode,Object.fromEntries(payload.responseHeaders.map(h=>[h.name,h.value])));res.end(Buffer.from(payload.body,'base64'));
    }),true);
    return;
   }
-  assert.ok(req.method==='GET'||req.method==='HEAD','Asset forwarding is read-only');
+  kind='asset';phase='validate-asset';assert.ok(req.method==='GET'||req.method==='HEAD','Asset forwarding is read-only');
   const asset=new URL(target.pathname+target.search,base);assert.equal(asset.origin,base.origin,'No external forwarding');
-  const response=await forward(asset,{method:req.method,redirect:'manual',signal:AbortSignal.timeout(30000)});
+  phase='forward-asset';const response=await forward(asset,{method:req.method,redirect:'manual',signal:AbortSignal.timeout(30000)});
   assert.ok(response.status<300||response.status>=400,'Fixture assets cannot redirect');
   const headers={};for(const [key,value] of response.headers)if(!['content-encoding','content-length','transfer-encoding','connection'].includes(key))headers[key]=value;
-  res.writeHead(response.status,headers);res.end(req.method==='HEAD'?undefined:Buffer.from(await response.arrayBuffer()));
- }catch(error){errors.push(String(error));if(!res.headersSent)res.writeHead(500,{'Content-Type':'text/plain'});res.end('Isolated fixture request failed');}};
+  phase='read-asset';res.writeHead(response.status,headers);res.end(req.method==='HEAD'?undefined:Buffer.from(await response.arrayBuffer()));
+ }catch(error){
+  const detail=recordFixtureHttpFailure(error,{req,res,errors,failureDetails,kind,phase,bodyBytes,bodyComplete,serviceStatus});trace?.httpFailure(traceId,detail);
+  if(!res.headersSent&&!res.destroyed)res.writeHead(500,{'Content-Type':'text/plain'});if(!res.destroyed)res.end('Isolated fixture request failed');
+ }};
 }
 export async function startTrafficHttpFixture(upstream){
  const source=new URL(upstream);assert.equal(source.hostname,'127.0.0.1');assert.equal(source.protocol,'http:');assert.equal(source.username,'');assert.equal(source.password,'');
@@ -165,15 +236,15 @@ export async function startTrafficHttpFixture(upstream){
  handler=trafficHttpHandler({origin,upstream,fixture,errors,deliveries});
  return {url,fixture,errors,deliveries,async close(){server.closeAllConnections();await new Promise((ok,bad)=>server.close(error=>error?bad(error):ok()));}};
 }
-export function trafficNetworkRules(origin,blockedModels=false){
+export function trafficNetworkRules(origin,blockedModels=false,additionalBlocked=[]){
  const url=new URL(origin);assert.equal(url.hostname,'127.0.0.1');assert.equal(url.protocol,'http:');
- return [ ...(blockedModels?[{urlPattern:origin+'/CityManager/assets/kenney-city/models/*.glb',block:true}]:[]),
+ return [ ...additionalBlocked.map(urlPattern=>({urlPattern,block:true})), ...(blockedModels?[{urlPattern:origin+'/CityManager/assets/kenney-city/models/*.glb',block:true}]:[]),
   {urlPattern:origin+'/*',block:false},{urlPattern:'http://*:*/*',block:true},{urlPattern:'https://*:*/*',block:true}];
 }
-export async function installTrafficNetworkFence({send,evaluate,protocol,origin,blockedModels=false,observeProbe}){
+export async function installTrafficNetworkFence({send,evaluate,protocol,origin,blockedModels=false,additionalBlocked=[],observeProbe}){
  const command=protocol.domains.find(d=>d.domain==='Network')?.commands.find(c=>c.name==='setBlockedURLs');
  assert.ok(command?.parameters.some(p=>p.name==='urlPatterns'),'Browser must support ordered fail-closed network rules');
- await send('Network.setBlockedURLs',{urlPatterns:trafficNetworkRules(origin,blockedModels)});
+ await send('Network.setBlockedURLs',{urlPatterns:trafficNetworkRules(origin,blockedModels,additionalBlocked)});
  await send('Page.navigate',{url:origin+'/__traffic_network_fence_page'});
  const readyDeadline=Date.now()+5000;while(!await evaluate(`location.origin===${JSON.stringify(origin)}&&document.readyState==='complete'`)){assert.ok(Date.now()<readyDeadline,'Native fixture fence page must load');await new Promise(r=>setTimeout(r,20));}
  // A different loopback origin proves blocking without contacting any external host.
@@ -182,5 +253,5 @@ export async function installTrafficNetworkFence({send,evaluate,protocol,origin,
  const result=await evaluate(`fetch(${JSON.stringify(probe)}).then(()=>false,()=>true)`);assert.equal(result,true,'Other-origin request must be blocked');
  const deadline=Date.now()+5000;while(!evidence.failed&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
  assert.equal(evidence.failed?.blockedReason,'inspector','Must be CDP block, not DNS/CORS/connection failure');evidence.active=false;
- return {rules:trafficNetworkRules(origin,blockedModels),probe:evidence};
+ return {rules:trafficNetworkRules(origin,blockedModels,additionalBlocked),probe:evidence};
 }

@@ -5,15 +5,15 @@ import { mkdir, readFile, writeFile, access, readdir } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, isMarket, buildRoad } from '../src/sim.ts';
-import { SAVE_KEY } from '../src/save-storage.ts';
-import { deserializeParkSession } from '../src/park-runtime.ts';
+import { step, serialize, deserialize, buildRoad } from '../src/sim.ts';
+import { createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { captureOwnerSnapshot, proposeOwnerDecision, executeOwnerProposal, ownerStateHash } from '../src/owner-decision.ts';
 import { createOwnerDecisionSession } from '../src/owner-decision-session.ts';
-import { reachTouch } from './touch-reach.mjs';
+import { ownerBrowserFixtures } from './owner-browser-fixture.ts';
+import { startTrafficHttpFixture, reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
-const url = process.env.CITYMANAGER_OWNER_URL || 'http://127.0.0.1:4191/CityManager/';
+let url = process.env.CITYMANAGER_OWNER_URL || 'http://127.0.0.1:4191/CityManager/';
 assert.equal(new URL(url).hostname, '127.0.0.1', 'Owner QA only targets this task\'s local preview');
 const run = process.argv.includes('--run');
 assert(process.argv.slice(2).every(arg => ['--run', '--dry-run'].includes(arg)));
@@ -21,35 +21,23 @@ assert(!(run && process.argv.includes('--dry-run')));
 const candidateCommit = process.env.CITYMANAGER_OWNER_COMMIT || execFileSync('git', ['-c', `safe.directory=${repo.replaceAll('\\', '/')}`, '-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 assert.match(candidateCommit, /^[a-f0-9]{40}$/);
 const clone = city => deserialize(serialize(city));
-const young = createCity(61025);
-let monthlyFixture, manualFixture, manualProposal;
-for (let day = 1; day <= 720 && (!monthlyFixture || !manualFixture); day++) {
-  step(young);
-  const owners = young.firms.filter(firm => isMarket(firm) && firm.owner).sort((a, b) => a.id - b.id);
-  if (!monthlyFixture && young.tick % 30 === 29 && owners.length) monthlyFixture = clone(young);
-  if (!manualFixture && young.tick >= 31 && young.tick % 30 >= 1 && young.tick % 30 <= 25) {
-    for (const firm of owners) {
-      const snapshot = captureOwnerSnapshot(young, firm.id); if (!snapshot) continue;
-      const proposal = proposeOwnerDecision(snapshot);
-      if (proposal.command.type !== 'hold') { manualFixture = clone(young); manualProposal = proposal; break; }
-    }
-  }
-}
-assert(monthlyFixture && manualFixture && manualProposal, 'Natural seed61025 supplies a real monthly market and executable owner proposal');
-assert.equal(monthlyFixture.version, 9); assert.equal(SAVE_KEY, 'citymanager.save.v7');
+const { monthly: monthlyFixture, manual: manualFixture, proposal: manualProposal } = ownerBrowserFixtures();
 const evidence = {
-  candidateCommit, url, seed: 61025, saveVersion: 6, ruleOnly: true, llmImplemented: false,
+  candidateCommit, url, seed: 61025, saveVersion: 26, saveMode: 'isolated-server-ack', ruleOnly: true, llmImplemented: false,
   fixture: { monthlyTick: monthlyFixture.tick, manualTick: manualFixture.tick, firmId: manualProposal.snapshot.firmId, actorId: manualProposal.snapshot.actorId, command: manualProposal.command.type, amountSatang: manualProposal.command.amountSatang },
   safeguards: { syntheticOnly: true, providerTrafficBlocked: true, noCredentialRead: true, automaticApiCallsExpected: 0 },
 };
 if (!run) { console.log(JSON.stringify({ ...evidence, dryRun: true, browserLaunched: false, ready: true }, null, 2)); process.exit(0); }
+const httpFixture = await startTrafficHttpFixture(url), serverFixture = httpFixture.fixture;
+url = httpFixture.url; evidence.url = url;
 
 const baseOutput = resolve(process.env.CITYMANAGER_OWNER_ARTIFACTS || '.test-output/owner-decisions');
 const output = resolve(baseOutput, new Date().toISOString().replace(/[-:.]/g, '') + '-' + process.pid);
 const profile = resolve(output, 'edge-profile'); assert(profile.startsWith(output + sep));
 await mkdir(output, { recursive: true });
 await assert.rejects(access(profile), { code: 'ENOENT' }, 'Never reuse a browser profile');
-const port = 9368, pending = new Map(), requestUrls = new Map(), checks = [], layouts = [], screenshots = [], errors = [], apiAttempts = [], networkFailures = [], downloads = [];
+const port = 9368, pending = new Map(), requestUrls = new Map(), checks = [], layouts = [], screenshots = [], errors = [], apiAttempts = [], networkFailures = [], externalRequests = [], downloads = [];
+let networkProbe = null, networkFence = null;
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 const safePrefix = value => /localStorage/.test(String(value)) ? 'synthetic localStorage fixture setup (<payload omitted>)' : String(value).replace(/\s+/g, ' ').slice(0, 180);
 let ws, browser, sequence = 0, currentStage = 'setup', lastCommand = null;
@@ -74,7 +62,8 @@ async function until(expression, timeoutMs = 20000) {
   throw Error(`Condition timeout: ${safePrefix(expression)}`);
 }
 const paints = () => evaluate('new Promise(r=>{const t=setTimeout(r,100);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(t);r()}))})');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => deserialize(await evaluate('window.cityManager.snapshot()'));
+const rawState = () => evaluate('window.cityManager.snapshot()');
 const hostState = () => evaluate('({...document.querySelector("#owner-decisions").dataset})');
 const selector = (key, value) => `[${key}=${JSON.stringify(value)}]`;
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); await paints(); }
@@ -93,7 +82,7 @@ async function reveal(target) {
   throw Error('Too many disclosure ancestors');
 }
 async function button(target, allowDisabled = false) {
-  if (await reachTouch(evaluate, button, target)) return;
+  if (await reachTrafficControl(evaluate, button, target)) return;
   await reveal(target); await evaluate(`document.querySelector(${JSON.stringify(target)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(target)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
   assert(point.w > 0 && point.h > 0 && (allowDisabled || !point.disabled), `Visible control ${target}`);
@@ -109,11 +98,25 @@ async function openPanel() {
   await paints();
 }
 async function load(city) {
-  await close(); await button('#toggle-game-menu');
-  await evaluate(`localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(serialize(city))})`);
-  await button('#load'); await close();
-  assert.deepEqual(await state(), city, 'Loading preserves exact canonical v6 micro state');
+  if (await evaluate('!!window.cityManager')) { await close(); await serverFixture.leave({send,evaluate,until}); }
+  const raw = serializeParkSession(city, createParkRuntime(city));
+  await serverFixture.seed(raw); serverFixture.allowNavigation();
+  await send('Page.navigate', {url: url + '?advanced=1&starter=1'});
+  await serverFixture.enter({send,evaluate,button,until});
+  assert.equal(serverFixture.active.raw, raw, 'Entry preserves exact server ACK bytes');
+  assert.equal(await evaluate('window.cityManager.snapshot()'), serialize(city), 'Entry restores exact canonical city');
   await openPanel(); assert.equal((await hostState()).mode, 'proposal', 'Load never silently restores auto');
+}
+async function waitOwnerSave(raw, revision) {
+  const end = Date.now() + 30000;
+  while (Date.now() < end) {
+    if (serverFixture.active?.raw === raw && serverFixture.active.revision > revision) {
+      await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')");
+      return serverFixture.active;
+    }
+    await sleep(80);
+  }
+  throw Error('Owner session was not acknowledged by the isolated server');
 }
 async function mode(value) { await button(selector('data-owner-mode', value)); assert.equal((await hostState()).mode, value); }
 async function advancePast(targetTick) {
@@ -159,13 +162,18 @@ try {
   ws.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id && pending.has(message.id)) { const p = pending.get(message.id); pending.delete(message.id); message.error ? p.reject(Error(message.error.message)) : p.done(message.result); return; }
+    if (message.method === 'Page.javascriptDialogOpening') void serverFixture.dialog(message.params,send).catch(error => errors.push(String(error)));
     if (message.method === 'Runtime.exceptionThrown') errors.push(safePrefix(message.params.exceptionDetails.text));
     if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') errors.push(safePrefix(message.params.args.map(arg => arg.value || arg.description || '').join(' ')));
     if (message.method === 'Network.requestWillBeSent') {
       requestUrls.set(message.params.requestId, message.params.request.url);
+      const requestUrl = message.params.request.url;
+      if (networkProbe?.active && requestUrl === networkProbe.url) networkProbe.requestId = message.params.requestId;
+      else if (/^https?:/.test(requestUrl) && new URL(requestUrl).origin !== new URL(url).origin) externalRequests.push(new URL(requestUrl).origin + new URL(requestUrl).pathname);
       if (/api\/city-advisor|opentyphoon\.ai|chat\/completions/.test(message.params.request.url)) { const u = new URL(message.params.request.url); apiAttempts.push({ url: u.origin + u.pathname, method: message.params.request.method }); }
     }
     if (message.method === 'Network.loadingFailed') {
+      if (networkProbe?.active && message.params.requestId === networkProbe.requestId) { networkProbe.failed = message.params; return; }
       // A local blob download may terminate its navigation with ERR_ABORTED.
       const localDownload = (requestUrls.get(message.params.requestId) || '').startsWith('blob:') && message.params.errorText === 'net::ERR_ABORTED';
       if (!localDownload) networkFailures.push({ error: message.params.errorText, blockedReason: message.params.blockedReason || null });
@@ -175,43 +183,48 @@ try {
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
   await send('Network.setCacheDisabled', { cacheDisabled: true });
-  await send('Network.setBlockedURLs', { urls: ['*api.opentyphoon.ai*', '*/api/city-advisor/*', '*/chat/completions*'] });
+  networkFence = await installTrafficNetworkFence({send,evaluate,protocol:await (await fetch(`http://127.0.0.1:${port}/json/protocol`)).json(),origin:new URL(url).origin,additionalBlocked:[new URL(url).origin+'/api/city-advisor/*',new URL(url).origin+'/CityManager/api/city-advisor/*',new URL(url).origin+'/chat/completions*'],observeProbe:probe => (networkProbe={url:probe})});
   await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: output, eventsEnabled: true });
-  await send('Page.navigate', { url: url + '?advanced=1&starter=1' }); await until('!!window.cityManager'); await paints(); // experimental features are off by default
+  await serverFixture.install(send); await load(monthlyFixture); await paints();
   if (await evaluate('document.querySelector("#pause").textContent.trim()!=="▶"')) await button('#pause');
   await openPanel(); assert.equal((await hostState()).mode, 'proposal');
   const firstText = await evaluate('document.querySelector("#owner-decisions").textContent'); assert.match(firstText, /กฎ/);
   checks.push('Owner decisions are labeled local rules, default proposal, and leave the existing API idle');
 
   stage('2 manual proposal, existing-command application and duplicate prevention');
-  await load(manualFixture); const before = await state(); await button('#owner-evaluate');
+  await load(manualFixture); const before = await state(), beforeRaw = await rawState(); await button('#owner-evaluate');
   assert.deepEqual(await state(), before, 'Proposal-only evaluation has no canonical effect');
+  assert.equal(await rawState(), beforeRaw, 'Proposal evaluation preserves exact serialized city bytes');
   const row = selector('data-owner-proposal-id', manualProposal.proposalId), apply = selector('data-owner-apply', manualProposal.proposalId);
   await until(`!!document.querySelector(${JSON.stringify(row)})`);
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify(row)}).dataset.command`), manualProposal.command.type);
   assert.equal(Number(await evaluate(`document.querySelector(${JSON.stringify(row)}).dataset.amountSatang`)), manualProposal.command.amountSatang);
   const expected = clone(before), outcome = executeOwnerProposal(expected, manualProposal); assert(outcome.ok && outcome.status === 'applied');
   await button(apply); assert.deepEqual(await state(), expected, 'Only the validated existing financial command changes canonical state'); assertConservation(expected);
+  const appliedRaw = await rawState();
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify(row)}).dataset.status`), 'processed');
   if (await evaluate(`!!document.querySelector(${JSON.stringify(apply)})`)) { assert.equal(await evaluate(`document.querySelector(${JSON.stringify(apply)}).disabled`), true); await button(apply, true); }
   assert.deepEqual(await state(), expected, 'A repeated click cannot apply the same proposal twice');
-  await button('#owner-verify'); await until('["verified","verify-failed"].includes(document.querySelector("#owner-decisions").dataset.lastStatus)'); assert.equal((await hostState()).lastStatus, 'verified'); assert.deepEqual(await state(), expected);
+  assert.equal(await rawState(), appliedRaw, 'Repeated application preserves exact city bytes');
+  await button('#owner-verify'); await until('["verified","verify-failed"].includes(document.querySelector("#owner-decisions").dataset.lastStatus)'); assert.equal((await hostState()).lastStatus, 'verified'); assert.deepEqual(await state(), expected); assert.equal(await rawState(), appliedRaw, 'Replay verification preserves exact city bytes');
   checks.push('Real owner proposals are read-only until accepted, apply only their guarded command, reject duplicate UI application and replay without changing the city');
 
   stage('3 stale snapshot and explicit refresh');
   await load(manualFixture); await button('#owner-evaluate');
   const moved = await advancePast(manualFixture.tick + 1), expectedMoved = clone(manualFixture); while (expectedMoved.tick < moved.tick) step(expectedMoved);
   assert.deepEqual(moved, expectedMoved, 'Proposal mode advances only the fixed growth rules');
+  const movedRaw = await rawState();
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify(row)}).dataset.stale`), 'true');
-  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(apply)}).disabled`), true); await button(apply, true); assert.deepEqual(await state(), moved);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(apply)}).disabled`), true); await button(apply, true); assert.deepEqual(await state(), moved); assert.equal(await rawState(), movedRaw, 'Stale disabled action preserves exact city bytes');
   await button('#owner-evaluate'); const refreshed = await evaluate('[...document.querySelectorAll("[data-owner-proposal-id]")].map(e=>({id:e.dataset.ownerProposalId,tick:Number(e.dataset.tick),stale:e.dataset.stale}))');
-  assert(refreshed.length && refreshed.every(item => item.tick === moved.tick && item.stale === 'false')); assert.deepEqual(await state(), moved);
+  assert(refreshed.length && refreshed.every(item => item.tick === moved.tick && item.stale === 'false')); assert.deepEqual(await state(), moved); assert.equal(await rawState(), movedRaw, 'Refresh preserves exact city bytes');
   checks.push('Old tick snapshots are visibly stale and disabled; refresh captures actual current facts without a money mutation');
 
   stage('4 monthly off, proposal and explicit auto behavior');
   const monthly = [];
   for (const selectedMode of ['off', 'proposal', 'auto']) {
-    await load(monthlyFixture); if (selectedMode !== 'proposal') await mode(selectedMode);
+    await load(monthlyFixture); const modeRaw = await rawState(); if (selectedMode !== 'proposal') await mode(selectedMode);
+    assert.equal(await rawState(), modeRaw, 'Selecting a mode preserves exact city bytes');
     assert.deepEqual(await state(), monthlyFixture, 'Selecting mode never immediately executes a command');
     const actual = await advancePast(monthlyFixture.tick + 1), expectedCity = clone(monthlyFixture), session = createOwnerDecisionSession(expectedCity); session.setMode(selectedMode);
     while (expectedCity.tick < actual.tick) session.advance(expectedCity);
@@ -220,7 +233,7 @@ try {
     if (selectedMode === 'off') assert.equal(rows.length, 0);
     else assert(rows.length && rows.every(item => item.tick === monthlyFixture.tick + 1));
     monthly.push({ mode: selectedMode, tick: actual.tick, hash: ownerStateHash(actual), rows: rows.length });
-    await button('#owner-verify'); await until('["verified","verify-failed"].includes(document.querySelector("#owner-decisions").dataset.lastStatus)'); assert.equal((await hostState()).lastStatus, 'verified'); assert.deepEqual(await state(), actual);
+    const monthlyRaw = await rawState(); await button('#owner-verify'); await until('["verified","verify-failed"].includes(document.querySelector("#owner-decisions").dataset.lastStatus)'); assert.equal((await hostState()).lastStatus, 'verified'); assert.deepEqual(await state(), actual); assert.equal(await rawState(), monthlyRaw, 'Monthly replay verification preserves exact city bytes');
   }
   await load(manualFixture); assert.equal((await hostState()).mode, 'proposal');
   checks.push('Off, proposal and explicitly selected auto run at the real monthly boundary; existing saves always load in proposal, never auto');
@@ -240,16 +253,19 @@ try {
   assert.equal(await evaluate(`document.elementFromPoint(${roadTo.x},${roadTo.y})?.id`), 'city-canvas');
   assert.equal(await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="true"'), true, 'Road construction is tested while the simulation is paused');
   await drag(roadFrom, roadTo);
-  const roadActual = await state();
+  const roadActual = await state(), roadRaw = await rawState();
   assert.deepEqual(roadActual, expectedRoad, 'A native drag applies exactly the canonical buildRoad result, including cash and ledger entries');
   assert.equal(roadActual.ledger.at(-1).from, 'treasury'); assert.equal(roadActual.ledger.at(-1).to, 'roadworks');
   await openPanel(); assert.equal((await hostState()).mode, 'auto', 'External road construction preserves explicit auto mode after journaling');
   await button('#owner-verify'); await until('["verified","verify-failed"].includes(document.querySelector("#owner-decisions").dataset.lastStatus)');
   assert.equal((await hostState()).lastStatus, 'verified', 'The road mutation remains inside a valid replay checkpoint');
   assert.deepEqual(await state(), expectedRoad, 'Replay verification leaves the canonical city unchanged');
-  await close(); await button('#toggle-game-menu'); await button('#save');
-  const savedRoad = await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`);
-  assert.equal(savedRoad, await evaluate('window.cityManager.sessionSnapshot()'), 'The normal save stores the exact atomic city/activity/recreation session');
+  assert.equal(await rawState(), roadRaw, 'Road replay verification preserves exact city bytes');
+  await close(); await button('#toggle-game-menu');
+  const expectedSaved = await evaluate('window.cityManager.sessionSnapshot()'), oldRevision = serverFixture.active.revision;
+  await button('#save'); const savedRoad = (await waitOwnerSave(expectedSaved, oldRevision)).raw;
+  assert.equal(savedRoad, expectedSaved, 'The server ACK stores the exact atomic city/activity/recreation session');
+  await serverFixture.assertNoCityWrites(evaluate);
   const restoredRoad = deserializeParkSession(savedRoad);
   assert.equal(serialize(restoredRoad.city), serialize(expectedRoad), 'The saved city bytes preserve the exact road mutation');
   assert.deepEqual(restoredRoad.city, expectedRoad, 'The saved road ledger and wallet balances round-trip unchanged');
@@ -258,20 +274,25 @@ try {
   checks.push('A real paused drag-built road records cash and ledger exactly, keeps explicit auto mode and replay verification active, and saves atomically with matching park clocks');
 
   stage('5 read-only replay and readable S22 normal/wide evidence');
-  await load(manualFixture); await button('#owner-evaluate'); const stable = await state();
+  await load(manualFixture); await button('#owner-evaluate'); const stable = await state(), stableRaw = await rawState();
   assert.equal(await evaluate("!!document.querySelector('#owner-export')"), false, 'No checkpoint download control');
   const downloadsBefore = downloads.length;
   await button('#owner-verify'); await until("document.querySelector('#owner-decisions').dataset.lastStatus === 'verified'");
   assert.equal(downloads.length, downloadsBefore, 'Read-only replay verification does not download a city checkpoint');
   assert.deepEqual(await state(), stable, 'Replay verification never changes the city');
+  assert.equal(await rawState(), stableRaw, 'Read-only replay preserves exact city bytes');
   await evaluate('document.querySelector("#owner-decisions").scrollIntoView({block:"start"})'); await paints(); await shot('owner-decisions-desktop.png');
   await layout({ width: 360, height: 780, screenWidth: 360, screenHeight: 780 }, 'owner-decisions-s22.png');
   await layout({ width: 980, height: 2120, screenWidth: 360, screenHeight: 780 }, 'owner-decisions-s22-wide.png');
   assert.deepEqual(await state(), stable, 'Viewport changes do not change canonical state');
+  assert.equal(await rawState(), stableRaw, 'Viewport changes preserve exact city bytes');
   checks.push('Read-only replay verifies without checkpoint export; S22 normal and wide layouts retain readable Thai,44px controls and no horizontal overflow');
   assert.equal(apiAttempts.length, 0, 'No report or provider request from any rule-owner action');
+  await serverFixture.settle(); await serverFixture.assertNoCityWrites(evaluate);
+  assert.deepEqual(httpFixture.errors, [], 'Isolated server and asset proxy must not fail');
+  assert.deepEqual(externalRequests, [], 'No non-fixture HTTP requests');
   assert.equal(errors.length, 0); assert.equal(networkFailures.length, 0);
-  const qa = { ...evidence, testedAt: new Date().toISOString(), checks, monthly, layouts, screenshots, apiAttempts, browserErrors: errors, networkFailures, journalDownload: null, output, note: 'Synthetic local preview only. S22 viewport/touch emulation, not a physical handset test. No provider calls or LLM output.' };
+  const qa = { ...evidence, testedAt: new Date().toISOString(), checks, monthly, layouts, screenshots, apiAttempts, networkFence, externalRequests, browserErrors: errors, networkFailures, journalDownload: null, output, note: 'Synthetic local preview only. S22 viewport/touch emulation, not a physical handset test. No provider calls or LLM output.' };
   await writeFile(resolve(output, 'qa.json'), JSON.stringify(qa, null, 2) + '\n');
   console.log(JSON.stringify({ passed: checks.length, apiRequests: 0, browserErrors: 0, screenshots, output }));
 } catch (error) {
@@ -283,4 +304,5 @@ try {
 } finally {
   if (ws?.readyState === WebSocket.OPEN) { try { await send('Browser.close', {}, 3000); } catch {} ws.close(); }
   if (browser && browser.exitCode === null) browser.kill();
+  await httpFixture.close();
 }

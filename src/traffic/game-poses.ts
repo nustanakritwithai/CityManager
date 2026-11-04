@@ -42,8 +42,7 @@ function spatialSample(candidates:readonly Candidate[],size:number,limit:number)
 /** Capped representative positions derived only from occupied game-model links.
  * No rendered object feeds back into road capacity, demand, queues or city state.
  * The optional cap exists for equivalence tests, not to change model mass. */
-export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGroup[],size=24,unit=2,limit=GAME_VISUAL_CAR_CAP,includeTaxi=false):CitizenVehiclePose[] {
- if(!Number.isSafeInteger(limit)||limit<0||limit>128)throw Error('Invalid visual traffic cap');
+function poseCandidates(cars:readonly GameCar[],groups:readonly GameRenderGroup[],size:number,unit:number,includeTaxi:boolean):Candidate[] {
  const fleet=includeTaxi?cars:cars.filter(c=>!(c as GameCar & {taxi?:boolean}).taxi);
  const byLink=new Map<string,GameCar[]>(),groupByKey=new Map(groups.map(g=>[g.key,g]));
  for(const car of fleet){const key=`${car.from}>${car.to}`;(byLink.get(key)??byLink.set(key,[]).get(key)!).push(car);}
@@ -70,7 +69,17 @@ export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGrou
     result.push({cell:g.from,link:key,pose:{vehicleId:`game:${c.id}`,x:ax+(bx-ax)*s+hz*offset,z:az+(bz-az)*s-hx*offset,headingX:hx,headingZ:hz,paint:c.id%6,...turnHint(c,g,size,unit,bx,bz,hx,hz),laneMin:ax*hx+az*hz+LANE_START*unit,speed:c.speed===undefined?undefined:c.speed*unit,...(c.destination===g.to?{exitX:bx+hz*offset,exitZ:bz-hx*offset}:{})}});}
   }
  }
- return spatialSample(result,size,limit);
+ return result;
+}
+export function gamePoses(cars:readonly GameCar[],groups:readonly GameRenderGroup[],size=24,unit=2,limit=GAME_VISUAL_CAR_CAP,includeTaxi=false):CitizenVehiclePose[] {
+ if(!Number.isSafeInteger(limit)||limit<0||limit>128)throw Error('Invalid visual traffic cap');
+ return spatialSample(poseCandidates(cars,groups,size,unit,includeTaxi),size,limit);
+}
+/** The presenter needs both full and preferred samples from the same snapshot.
+ * Compute identical candidates once; sample independently to preserve ordering. */
+export function gamePoseSets(cars:readonly GameCar[],groups:readonly GameRenderGroup[]):{full:CitizenVehiclePose[];preferred:CitizenVehiclePose[]} {
+ const candidates=poseCandidates(cars,groups,24,2,false);
+ return {full:spatialSample(candidates,24,128),preferred:spatialSample(candidates,24,GAME_VISUAL_CAR_CAP)};
 }
 /** A bounded cosmetic interpolation between model snapshots. Simulation itself
  * stays on its independent cadence; a paused game leaves the interpolation fixed. */
