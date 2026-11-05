@@ -36,7 +36,18 @@ const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/M
 ], { windowsHide: true, stdio: 'ignore' });
 let ws, seq = 0; const pending = new Map(), errors = [], external = [], providerRequests = [], checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const watchdog = setTimeout(() => { console.error('Road topology browser acceptance timed out'); child.kill(); process.exit(1); }, 150_000);
+let stage = 'road topology';
+const watchdog = setTimeout(() => {
+  console.error(`Road browser acceptance timed out in ${stage} after 150 seconds`);
+  child.kill();
+  process.exit(1);
+}, 150_000);
+// Each complete suite has its own deadline. Individual CDP calls still have 30 seconds.
+function startNextSuite(name) {
+  console.log(`Passed ${stage}. Starting ${name}.`);
+  stage = name;
+  watchdog.refresh();
+}
 async function send(method, params = {}) {
   const id = ++seq, result = new Promise((yes, no) => { const timer = setTimeout(() => { pending.delete(id); no(Error(`CDP timeout: ${method}`)); }, 30_000); pending.set(id, { yes: v => { clearTimeout(timer); yes(v); }, no: e => { clearTimeout(timer); no(e); } }); });
   ws.send(JSON.stringify({ id, method, params })); return result;
@@ -123,8 +134,10 @@ try {
  checks.push('Failed save leaves the prior server head untouched; retry ACK and reload retain mobile junction edit');
  await selectRoad('normal');await screenshot('mobile-parallel-tool.png');
  checks.push('390px menu stacks above original button with same dimensions; chosen junction can be separated');
+ startNextSuite('select menu');
  const selectorReport = await checkSelectMenu({ evaluate, button, click, send, screenshot, load, close, paints, fixture: original, cell: cell(5,12), setTouch: value => { touchMode = value; } });
  checks.push(...selectorReport.checks); await writeFile(resolve(output,'select-menu-report.json'), JSON.stringify(selectorReport,null,2));
+ startNextSuite('grouped tool menus');
  const groupedReport = await checkGroupedToolMenus({ evaluate, button, click, send, screenshot, load, close, paints, setTouch: value => { touchMode = value; } });
  checks.push(...groupedReport.checks); await writeFile(resolve(output,'grouped-tool-menu-report.json'), JSON.stringify(groupedReport,null,2));
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(providerRequests,[],'No advisor/provider requests');assert.deepEqual(interceptionErrors,[]);assert.deepEqual(server.errors,[]);await storage.assertNoCityWrites(evaluate);console.log(JSON.stringify({checks,errors,external}));
