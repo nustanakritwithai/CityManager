@@ -2,7 +2,7 @@ import { expandedRoadDirection } from '../expanded-road-topology.ts';
 import { expandedCellCoordinate, EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
 import {SignalPeers,type SignalPeerSnapshot} from './signal-peers.ts';
 import {buildSignalCorridors,neighborSignalBias,type SignalCorridor,type NeighborSignalState} from './signal-coordination.ts';
-import {chooseSignal,signalTopologyKey,type TrafficSignalFrame,type SignalPhase,type SignalDemand} from './adaptive-signals.ts';
+import {chooseSignal,SIGNAL_URGENT_WAIT,signalTopologyKey,type TrafficSignalFrame,type SignalPhase,type SignalDemand} from './adaptive-signals.ts';
 import type {GameModalStats} from './game-modal.ts';
 import {roadNeighborsFor,validateRoadTopology,type RoadMap} from '../road-topology.ts';
 import type {City} from '../sim.ts';
@@ -12,7 +12,7 @@ import {shortestPath} from './routing.ts';
 import {createRoadNavigator,emptyNavigationStats,type NavigationStats} from './rrt-navigation.ts';
 import {gameBusShare,validGameBusInput,type GameBusFrame,type GameBusInput,type GameBusShare,type GameBusTotal} from '../bus/game-bus.ts';
 import {LANE_START,SLOT_PITCH} from '../citizen-road-queue.ts';
-import {TRAFFIC_SPACING,updateVehicleFollowing,type LaneVehicle} from './spacing.ts';
+import {JUNCTION_STOP,TRAFFIC_SPACING,updateVehicleFollowing,type LaneVehicle} from './spacing.ts';
 import {forEachParkActivityEmployedCitizen,WORK_END_MINUTE} from '../park-activity.ts';
 
 /** Bounded, ephemeral road-game traffic. One step represents one real second,
@@ -20,7 +20,7 @@ import {forEachParkActivityEmployedCitizen,WORK_END_MINUTE} from '../park-activi
  * the game never writes City, payroll or a save. */
 export const GAME_MAX_ODS=64, GAME_MAX_CARS=128, GAME_MAX_QUEUE=32, GAME_MAX_RATE=4;
 const STORAGE_PER_LANE=TRAFFIC_SPACING.maxPerLanePerTile, REROUTE_STEPS=5, SUBSTEPS=5;
-const JUNCTION_STOP=1-.25-TRAFFIC_SPACING.lengths.sedan/TRAFFIC_SPACING.worldPerTile/2, JUNCTION_CLEAR=1-JUNCTION_STOP;
+const JUNCTION_CLEAR=1-JUNCTION_STOP;
 export type GameDemand = {from:number;to:number;rate:number};
 export type TrafficGameSample = {map:RoadMap;demand:GameDemand[];clippedRate?:number};
 /** The existing visual morning commute starts at 06:30; the 17:00 cutoff is
@@ -257,12 +257,12 @@ export class TrafficGame {
   private actorLink(c:Actor):string {return linkKey(c.path[c.index],c.path[c.index+1]);}
   private laneCount(key:string):number {return this.network.links.get(key)?.lanes??1;}
   /** Free lane index, or -1 when every lane of the link is at the per-lane cap or bus load fills it. */
-  private pickLane(key:string):number {
+  private pickLane(key:string,withheld:ReadonlySet<string>):number {
     const link=this.network.links.get(key);if(!link)return -1;
     const here=this.cars.filter(c=>this.actorLink(c)===key);
     if(here.length+this.busLoad(key)+1>link.lanes*STORAGE_PER_LANE)return -1;
     let best=-1,n=Infinity;
-    for(let lane=0;lane<link.lanes;lane++){const count=here.filter(c=>c.lane===lane).length;if(count>=STORAGE_PER_LANE||!this.tailClear(key,lane))continue;if(count<n){best=lane;n=count;}}
+    for(let lane=0;lane<link.lanes;lane++){const count=here.filter(c=>c.lane===lane).length;if(withheld.has(key+":"+lane)||count>=STORAGE_PER_LANE||!this.tailClear(key,lane))continue;if(count<n){best=lane;n=count;}}
     return best;
   }
   private tailClear(key:string,lane:number):boolean {
@@ -449,19 +449,29 @@ export class TrafficGame {
   /** One departure per OD per substep, only into a bumper gap, so cars leave in a line instead of a burst. */
   private spawnWave(grant:ReadonlyMap<number,number>):void {
     const shift=this.ods.length?this.stepValue%this.ods.length:0;
-    const occupancy=new Map<string,number>();for(const c of this.cars){const k=this.actorLink(c);occupancy.set(k,(occupancy.get(k)??0)+1);}
+    const occupancy=new Map<string,number>(),withheld=new Set<string>();
+    for(const car of this.cars){
+      const current=this.actorLink(car);
+      occupancy.set(current,(occupancy.get(current)??0)+1);
+      const request=this.junctionRequests.get(car.id),node=car.path[car.index+1],next=car.path[car.index+2];
+      if(!request || request.node!==node || next===undefined || !this.network.links.has(current))continue;
+      if(this.junctionClock-request.since<SIGNAL_URGENT_WAIT)continue;
+      // A new departure must not take the next free slot from an overdue through car.
+      const exit=linkKey(node,next);
+      withheld.add(exit+":"+Math.min(car.lane,this.laneCount(exit)-1));
+    }
     let alternateTimes:Map<string,number>|undefined;
     for(const od of [...this.ods.slice(shift),...this.ods.slice(0,shift)]){
       if(od.waiting<1||this.cars.length>=GAME_MAX_CARS||grant.has(od.from))continue;
       let path=od.path;if(!path||path.length<2)continue;
-      let lane=this.pickLane(linkKey(path[0],path[1]));
+      let lane=this.pickLane(linkKey(path[0],path[1]),withheld);
       if(lane<0||!this.tailClear(linkKey(path[0],path[1]),lane)){
-        const starts=(this.network.out.get(od.from)??[]).filter(l=>{const key=linkKey(l.from,l.to),slot=this.pickLane(key);return slot>=0&&this.tailClear(key,slot);});
+        const starts=(this.network.out.get(od.from)??[]).filter(l=>{const key=linkKey(l.from,l.to),slot=this.pickLane(key,withheld);return slot>=0&&this.tailClear(key,slot);});
         if(!starts.length)continue;
         const graph={...this.network,out:new Map(this.network.out).set(od.from,starts)};
         alternateTimes??=new Map([...this.network.links].map(([k,l])=>[k,1+((occupancy.get(k)??0)+this.busLoad(k))/Math.max(1,l.lanes)*3]));
         const alt=shortestPath(graph,alternateTimes,od.from,od.to);if(!alt||alt.length<2)continue;
-        path=alt;lane=this.pickLane(linkKey(path[0],path[1]));if(lane<0)continue;
+        path=alt;lane=this.pickLane(linkKey(path[0],path[1]),withheld);if(lane<0)continue;
       }
       const first=linkKey(path[0],path[1]);if(!this.tailClear(first,lane))continue;
       const actor:Actor={id:this.nextId,destination:od.to,path:[...path],index:0,visits:0,blocked:false,progress:this.junctions.has(path[0])?JUNCTION_CLEAR:LANE_START,speed:0,lane,...(this.workMinute>=0?{workClaimPending:true}:{})};

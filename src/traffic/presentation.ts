@@ -1,5 +1,6 @@
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
-import {TRAFFIC_SPACING} from './spacing.ts';
+import {JUNCTION_STOP,TRAFFIC_SPACING} from './spacing.ts';
+import type {GameCar} from './game.ts';
 export type PresentationObstacle={id?:string;x:number;z:number;headingX:number;headingZ:number;length:number;width:number};
 export type PresentationAdmissionBox={minX:number;maxX:number;minZ:number;maxZ:number};
 type Box=PresentationAdmissionBox;
@@ -111,8 +112,22 @@ function incomingPredecessor(owner:CitizenVehiclePose,other:CitizenVehiclePose,g
   &&Math.abs(lateral(other)-lateral(owner))<.3-EPS
   &&along(other)>position+EPS&&along(other)<=EPS;
 }
+/** Request downstream geometry early, but take space only on the actual approach. */
+function atCornerApproach(pose:CitizenVehiclePose, plan:Pick<NodePlan,'gate'|'box'|'boxes'>):boolean {
+ const gate=plan.gate;
+ if(!gate)return true;
+ const dx=pose.x-gate.x,dz=pose.z-gate.z;
+ const forward=dx*gate.headingX+dz*gate.headingZ;
+ const lateral=dx*gate.headingZ-dz*gate.headingX;
+ const reach=TRAFFIC_SPACING.lengths.sedan+TRAFFIC_SPACING.standstillGap;
+ const aligned=pose.headingX*gate.headingX+pose.headingZ*gate.headingZ>.99;
+ if(aligned && forward>=-reach && forward<=EPS && Math.abs(lateral)<.3)return true;
+
+ const bounds=body(pose);
+ return intersects(bounds,plan.box,0) && plan.boxes.some(box=>intersects(bounds,box,0));
+}
 function nodePlans(e:Entry):NodePlan[]{
- const plans:{key:string;visit?:number;nodeX?:number;nodeZ?:number;exit?:{x:number;z:number;headingX:number;headingZ:number};gate?:{x:number;z:number;headingX:number;headingZ:number};box:Box;boxes:Box[]}[]=[],seen=new Set<string>();
+ const plans:NodePlan[]=[],seen=new Set<string>();
  for(const p of [e.pose,...e.path,e.last]){
   const h=p.upcomingTurn;if(!h||h.nodeX===undefined||h.nodeZ===undefined)continue;
   const hx=h.incomingHeadingX??p.headingX,hz=h.incomingHeadingZ??p.headingZ;
@@ -133,6 +148,7 @@ function nodePlans(e:Entry):NodePlan[]{
 /** Bounded visible-car lifecycle and bus movement reservations; worker actors remain unchanged. */
 export class TrafficPresentation {
  private entries=new Map<string,Entry>();private pending:CitizenVehiclePose[]=[];private live=new Set<string>();private shown:CitizenVehiclePose[]=[];
+ private workerHolds:Map<string,number>|undefined;
  private admitted=0;private removed=0;private busIntrusions=0;private lastRemoved:string[]=[];
  private busPositions=new Map<string,PresentationObstacle>();
  private corners=new Map<string,CornerReservation>();
@@ -233,6 +249,9 @@ export class TrafficPresentation {
   for(const r of [...corners].sort((a,b)=>a.order-b.order)){
    if(r.active)continue;
    const owner=this.entries.get(r.owner);
+   if(owner && this.workerHolds && r.visit!==undefined){
+    if(this.workerHolds.get(r.owner)===r.visit || !atCornerApproach(owner.pose,r))continue;
+   }
    if(owner&&entries.some(e=>e.id!==r.owner&&incomingPredecessor(owner.pose,e.pose,r.gate)))continue;
    if(corners.some(c=>c.owner===r.owner&&c.order<r.order&&!c.active))continue;
    if(entries.some(e=>e.id!==r.owner&&intersects(e.box,r.box)&&r.boxes.some(b=>intersects(e.box,b))))continue;
@@ -243,7 +262,18 @@ export class TrafficPresentation {
   }
  }
 
- update(raw:readonly CitizenVehiclePose[],preferred:readonly CitizenVehiclePose[]=raw,liveIds:readonly string[]=raw.map(p=>p.vehicleId)){
+ update(raw:readonly CitizenVehiclePose[],preferred:readonly CitizenVehiclePose[]=raw,liveIds:readonly string[]=raw.map(p=>p.vehicleId),cars?:readonly GameCar[]){
+  // Record only vehicles whose current visit has not cleared the worker stop line.
+  // A later visit (or a completed trip) must let the buffered crossing finish.
+  if(cars){
+   const holds=this.workerHolds??new Map<string,number>();
+   holds.clear();
+   for(const car of cars){
+    if(car.junction && car.progress!==undefined && car.progress<=JUNCTION_STOP && car.nextVisit!==undefined)
+     holds.set('game:'+car.id,car.nextVisit);
+   }
+   this.workerHolds=holds;
+  }else this.workerHolds=undefined;
   const byId=new Map(raw.map(p=>[p.vehicleId,presentationTarget(p)]));this.live=new Set(liveIds);
   for(const [id,e]of this.entries){
    if(!this.live.has(id)){
@@ -293,6 +323,7 @@ export class TrafficPresentation {
    if(corners.some(c=>c.active&&this.entries.has(c.owner)&&incomingPredecessor(this.entries.get(c.owner)!.pose,p,c.gate)))continue;
    const candidate:Entry={pose:{...p},last:{...p},path:[],speed:0,distance:0,motion:'waiting',retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()};
    const birthPlans=nodePlans(candidate);
+   if(birthPlans.some(plan=>plan.visit!==undefined && this.workerHolds?.get(p.vehicleId)===plan.visit))continue;
    if(birthPlans.some(n=>[...this.entries.values()].some(e=>incomingPredecessor(p,e.pose,n.gate))))continue;
    // Each union box encloses all of its exact boxes. A miss cannot intersect
    // any child box; a hit still runs the original exact collision checks.

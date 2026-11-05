@@ -7,7 +7,7 @@ const sample=():TrafficGameSample=>{const roads=new Set<number>();for(let y=3;y<
 for(const cadence of [{name:'normal',wall:25,dt:.025},{name:'low FPS',wall:435,dt:.1}])test(`dense worker cycle prevention drains actual stable presentation at ${cadence.name}`,()=>{
  const source=sample(),game=new TrafficGame(source),presenter=new TrafficPresentation();let now=0,anchor=0,stopAt:number|null=null,completedAt160=0;
  let prior=new Set<string>();const ever=new Set<string>();let sawCars=false,frame=game.frame;
- const accept=()=>presenter.update(gamePoses(frame.cars,frame.groups,24,2,128),gamePoses(frame.cars,frame.groups),frame.cars.map(c=>`game:${c.id}`));accept();
+ const accept=()=>presenter.update(gamePoses(frame.cars,frame.groups,24,2,128),gamePoses(frame.cars,frame.groups),frame.cars.map(c=>`game:${c.id}`),frame.cars);accept();
  // Production scheduling: no catch-up burst; worker wall clock and capped physical dt remain distinct.
  const loadFrames=Math.ceil(240*1000/cadence.wall)*2,drainFrames=Math.ceil(240/cadence.dt);
  for(let i=0;i<loadFrames+drainFrames;i++){
