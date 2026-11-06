@@ -22,7 +22,7 @@ const appPort = 4397, debugPort = 9497, upstream = `http://127.0.0.1:${appPort}/
 // capture. Budget the whole scope; individual CDP/predicate limits stay 30s.
 const suiteTimeoutMs = 20 * 60_000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const checks = [], screenshots = [], layouts = [], bursts = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
+const checks = [], screenshots = [], layouts = [], bursts = [], keyboardTraces = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
 const processLogs = { app: '', browser: '' };
 const startedAt = Date.now(), diagnostics = { phase: 'setup', stages: [], cdp: [], renderers: [] };
 let ws, sequence = 0, networkProbe, fixture, browser, app, touchInput = false;
@@ -34,7 +34,7 @@ function stage(phase) {
   console.log('Plant acceptance phase:', phase);
 }
 function resultReport(status, error) {
-  return { status, date: new Date().toISOString(), suiteTimeoutMs, elapsedMs: Date.now() - startedAt, ...(error ? { error: String(error.stack ?? error) } : {}), checks, screenshots, layouts, bursts, errors, interceptionErrors, externalRequests, providerRequests, processLogs, diagnostics, pendingCommands: [...pending.values()].map(item => ({ ...item.metadata, pendingMs: Date.now() - item.metadata.queuedAt })) };
+  return { status, date: new Date().toISOString(), suiteTimeoutMs, elapsedMs: Date.now() - startedAt, ...(error ? { error: String(error.stack ?? error) } : {}), checks, screenshots, layouts, bursts, keyboardTraces, errors, interceptionErrors, externalRequests, providerRequests, processLogs, diagnostics, pendingCommands: [...pending.values()].map(item => ({ ...item.metadata, pendingMs: Date.now() - item.metadata.queuedAt })) };
 }
 function writeFailure(error, write = writeFileSync) {
   // Emergency watchdog output must be durable BEFORE process.exit, which skips
@@ -96,9 +96,32 @@ if (process.argv.includes('--preflight')) {
     const missed = structuredClone(evidence); missed.events[3].onUpgrade = false; missed.events[3].target = { id: 'plant-upgrade-reserve' };
     assert.throws(() => assertRapidBurst(missed, touch), /Three actual native presses/, 'All-target evidence retains and rejects a missed press');
   }
-  const keys = ['Enter', ' '].flatMap(value => [...Array.from({ length: 3 }, () => keyCommand(value, { autoRepeat: true })), keyCommand(value, { type: 'keyUp' })]);
+  const keys = repeatKeyCommands();
   assert.equal(keys.length, 8);
   assert.deepEqual(keys.map(([, params]) => [params.key, params.type, params.autoRepeat]), [['Enter', 'keyDown', true], ['Enter', 'keyDown', true], ['Enter', 'keyDown', true], ['Enter', 'keyUp', false], [' ', 'keyDown', true], [' ', 'keyDown', true], [' ', 'keyDown', true], [' ', 'keyUp', false]]);
+  for (const [, params] of keys) {
+    assert.equal(params.nativeVirtualKeyCode, params.windowsVirtualKeyCode);
+    if (params.type === 'keyDown') {
+      assert.equal(params.text, params.key === 'Enter' ? '\r' : ' ');
+      assert.equal(params.unmodifiedText, params.text);
+    } else assert.ok(!Object.hasOwn(params, 'text') && !Object.hasOwn(params, 'unmodifiedText'), 'Key release emits no character');
+  }
+  const beforeKey = { focused: true, disabled: false, visible: true };
+  const repeatEvents = keys.map(([, params]) => ({ type: params.type === 'keyDown' ? 'keydown' : 'keyup', key: params.key, repeat: params.autoRepeat, trusted: true, defaultPrevented: params.type === 'keyDown', onUpgrade: true }));
+  assertKeyboardTrace({ before: beforeKey, events: repeatEvents });
+  assert.throws(() => assertKeyboardTrace({ before: beforeKey, events: repeatEvents.map(event => ({ ...event, defaultPrevented: false })) }), /Every held Enter\/Space/, 'Unprevented repeats are not accepted merely because the city happens to stay unchanged');
+  for (const key of ['Enter', ' ']) {
+    const events = [
+      { type: 'keydown', key, repeat: false, trusted: true, defaultPrevented: false, onUpgrade: true },
+      { type: 'keypress', key, repeat: false, trusted: true, defaultPrevented: false, onUpgrade: true },
+      { type: 'click', trusted: true, detail: 0, onUpgrade: true },
+      { type: 'keyup', key, trusted: true, onUpgrade: false },
+    ];
+    assertKeyboardTrace({ before: beforeKey, events }, key);
+    assert.throws(() => assertKeyboardTrace({ before: beforeKey, events: events.filter(event => event.type !== 'click') }, key), /exactly one upgrade activation/, 'ACKed native keys without a default click must fail');
+    assert.throws(() => assertKeyboardTrace({ before: { ...beforeKey, focused: false }, events }, key), /starts on the upgrade button/);
+    assert.throws(() => assertKeyboardTrace({ before: beforeKey, events: events.map(event => ({ ...event, trusted: false })) }, key), /Only trusted/);
+  }
   const observedKeys = [], keyAcks = [];
   const keysDone = queueNativeBurst(keys, (method, params) => { observedKeys.push([method, params]); return new Promise(resolve => keyAcks.push(resolve)); });
   assert.deepEqual(observedKeys, keys); for (const ack of keyAcks) ack(); await keysDone;
@@ -260,10 +283,54 @@ async function load(city) {
   await close(); return panelEntryCity(raw);
 }
 function keyCommand(key, { type = 'keyDown', autoRepeat = false } = {}) {
-  return ['Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: key === ' ' ? 32 : key === 'Enter' ? 13 : 27, autoRepeat }];
+  const virtual = key === ' ' ? 32 : key === 'Enter' ? 13 : 27;
+  const text = key === 'Enter' ? '\r' : key === ' ' ? ' ' : undefined;
+  // CDP keyDown needs character text to perform native default activation,
+  // not merely emit a keydown listener event. Never put text on keyUp.
+  return ['Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: virtual, nativeVirtualKeyCode: virtual, autoRepeat, ...(type === 'keyDown' && text !== undefined ? { text, unmodifiedText: text } : {}) }];
 }
-async function pressKey(value) {
-  await queueNativeBurst([keyCommand(value), keyCommand(value, { type: 'keyUp' })]);
+function pressKeyCommands(value) { return [keyCommand(value), keyCommand(value, { type: 'keyUp' })]; }
+function repeatKeyCommands() { return ['Enter', ' '].flatMap(value => [...Array.from({ length: 3 }, () => keyCommand(value, { autoRepeat: true })), keyCommand(value, { type: 'keyUp' })]); }
+async function pressKey(value) { await queueNativeBurst(pressKeyCommands(value)); }
+function assertKeyboardTrace(trace, activateKey) {
+  assert.equal(trace.before.focused, true, 'Native keyboard input starts on the upgrade button');
+  assert.equal(trace.before.disabled, false, 'Keyboard test exercises an enabled upgrade');
+  assert.equal(trace.before.visible, true, 'Keyboard target is visible');
+  const downs = trace.events.filter(event => event.type === 'keydown'), ups = trace.events.filter(event => event.type === 'keyup');
+  const clicks = trace.events.filter(event => event.type === 'click' && event.onUpgrade);
+  assert.ok(trace.events.every(event => event.trusted), 'Only trusted browser key/default-click events are observed');
+  if (activateKey !== undefined) {
+    assert.deepEqual(downs.map(event => [event.key, event.repeat, event.onUpgrade, event.defaultPrevented]), [[activateKey, false, true, false]], 'A fresh native key-down reaches the focused button without cancellation');
+    // Activating the button disables it and may blur focus before keyUp.
+    assert.deepEqual(ups.map(event => event.key), [activateKey]);
+    assert.equal(clicks.length, 1, 'Deliberate native keyboard input produces exactly one upgrade activation');
+    assert.equal(clicks[0].detail, 0, 'Activation is the browser keyboard default, not a pointer click');
+  } else {
+    assert.deepEqual(downs.map(event => event.key), ['Enter', 'Enter', 'Enter', ' ', ' ', ' ']);
+    assert.deepEqual(ups.map(event => event.key), ['Enter', ' ']);
+    assert.ok(downs.every(event => event.onUpgrade && event.repeat && event.defaultPrevented), 'Every held Enter/Space key-down reaches the button and is prevented');
+    assert.equal(clicks.length, 0, 'Prevented repeats produce no upgrade activation');
+  }
+}
+async function keyboardInput(name, activateKey) {
+  const before = await evaluate(`(()=>{
+    const button=document.querySelector('#upgrade-plant');button.focus();
+    const r=button.getBoundingClientRect(),before={focused:document.activeElement===button,disabled:button.disabled,visible:!!(r.width&&r.height)};
+    const events=[],types=['keydown','keypress','keyup','click'];
+    const record=event=>{
+      const entry={type:event.type,key:event.key??null,repeat:event.repeat??false,trusted:event.isTrusted,defaultPrevented:event.defaultPrevented,detail:event.detail??null,onUpgrade:!!event.target?.closest?.('#upgrade-plant'),target:{tag:event.target?.tagName,id:event.target?.id??null},activeId:document.activeElement?.id??null,timestamp:event.timeStamp};
+      events.push({entry,event});
+    };
+    for(const type of types)document.addEventListener(type,record,true);
+    window.__plantKeyboardTrace={events,stop(){for(const type of types)document.removeEventListener(type,record,true)}};return before;
+  })()`);
+  const trace = { name, mode: activateKey === undefined ? 'held-repeats' : 'deliberate-activation', key: activateKey ?? null, before, events: [] };
+  keyboardTraces.push(trace);
+  assert.equal(before.focused, true, 'Focus setup reaches the native upgrade button');
+  assert.equal(before.disabled, false, 'Native keyboard test starts with an enabled upgrade');
+  await queueNativeBurst(activateKey === undefined ? repeatKeyCommands() : pressKeyCommands(activateKey));
+  trace.events = await evaluate(`(()=>{const trace=window.__plantKeyboardTrace;trace.stop();delete window.__plantKeyboardTrace;return trace.events.map(({entry,event})=>({...entry,defaultPrevented:event.defaultPrevented}))})()`);
+  assertKeyboardTrace(trace, activateKey);
 }
 async function quote(city, plant) {
   const data = plantUpgradeStatus(city, plant.id), dom = await evaluate(`(()=>{const h=document.querySelector('#plant-actions'),b=document.querySelector('#upgrade-plant');return{title:h.querySelector('h3').textContent,quote:document.querySelector('#plant-upgrade-quote').textContent,reserve:document.querySelector('#plant-upgrade-reserve').textContent,button:b.textContent,disabled:b.disabled,reason:b.title}})()`);
@@ -314,11 +381,7 @@ async function upgradeFlow(metric) {
     stage(`${metric.name}-${kind}: held-key repeat guard`);
     // A held key remains a repeat even after the click cooldown expires. The
     // focus setup changes no game state; actual CDP key input tests the guard.
-    await evaluate('document.querySelector("#upgrade-plant").focus()');
-    await queueNativeBurst(['Enter', ' '].flatMap(value => [
-      ...Array.from({ length: 3 }, () => keyCommand(value, { autoRepeat: true })),
-      keyCommand(value, { type: 'keyUp' }),
-    ]));
+    await keyboardInput(`${metric.name}-${kind}-held-repeats`);
     assert.deepEqual(await state(), expected, 'Held-key repeats do not buy level 3');
     await screenshot(`${metric.name}-${kind}-level-2`);
     stage(`${metric.name}-${kind}: actionable close and selection guards`);
@@ -333,7 +396,7 @@ async function upgradeFlow(metric) {
     assert.equal(await evaluate('document.querySelector("#plant-feedback").textContent'), '', 'Selection change clears stale feedback');
     const secondTreasury = expected.accounts.treasury;
     stage(`${metric.name}-${kind}: deliberate level 3 upgrade`);
-    if (kind === 'water') { await evaluate('document.querySelector("#upgrade-plant").focus()'); await pressKey('Enter'); }
+    if (kind === 'water') await keyboardInput(`${metric.name}-water-level-3`, metric.mobile ? ' ' : 'Enter');
     else await button('#upgrade-plant');
     assert.equal(upgradePlant(expected, plant.id, 2).ok, true);
     await assertUpgrade(expected, plant, 2, secondTreasury);
