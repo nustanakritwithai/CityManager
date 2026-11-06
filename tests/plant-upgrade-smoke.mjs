@@ -87,10 +87,20 @@ if (process.argv.includes('--preflight')) {
     const rect = { x: 100, y: 200, width: 160, height: 44 }, events = [];
     for (let i = 0; i < 3; i++) {
       for (const type of touch ? ['touchstart', 'touchend'] : ['pointerdown', 'pointerup']) events.push({ type, onUpgrade: true, trusted: true, timestamp: events.length, disabled: i > 0, buttonRect: rect });
-      if (!i) events.push({ type: 'click', onUpgrade: true, trusted: true, timestamp: events.length, disabled: false, buttonRect: rect });
+      if (!i) events.push({ type: 'click', onUpgrade: true, trusted: true, timestamp: events.length, disabled: false, buttonRect: rect, afterHandler: { disabled: true } });
     }
     const evidence = { events, beforeRect: rect, afterRect: rect, point: { x: 180, y: 222 }, timestampSpanMs: 6 };
     assertRapidBurst(evidence, touch);
+    const enabledAfterClick = structuredClone(evidence); enabledAfterClick.events[3].disabled = false;
+    assert.throws(() => assertRapidBurst(enabledAfterClick, touch), /Every native event handled after activation/, 'An enabled post-activation repeat must fail');
+    const notDisabled = structuredClone(evidence); notDisabled.events.find(event => event.type === 'click').afterHandler.disabled = false;
+    assert.throws(() => assertRapidBurst(notDisabled, touch), /immediately disables/, 'The production handler must demonstrably enter cooldown');
+    assert.throws(() => assertRapidBurst({ ...evidence, events: [...events, { ...events[2] }] }, touch), /Only the first native activation/, 'A second native activation is never accepted');
+    if (touch) {
+      const delayedClick = { ...evidence, events: [...events.filter(event => event.type !== 'click').map(event => ({ ...event, disabled: false })), events[2]] };
+      assertRapidBurst(delayedClick, true); // Three touch pairs precede their first compatibility click.
+      assert.throws(() => assertRapidBurst({ ...delayedClick, events: [...delayedClick.events, events[2]] }, true), /Only the first native activation/);
+    }
     assert.throws(() => assertRapidBurst({ ...evidence, afterRect: { ...rect, y: rect.y + 23 } }, touch), /keeps the upgrade button in place/, 'The observed water-row regression must fail');
     assert.throws(() => assertRapidBurst({ ...evidence, events: events.slice(0, 3) }, touch), /Three actual native presses/, 'A single activation cannot substitute for three native presses');
     const missed = structuredClone(evidence); missed.events[3].onUpgrade = false; missed.events[3].target = { id: 'plant-upgrade-reserve' };
@@ -208,22 +218,32 @@ function assertRapidBurst(evidence, touch) {
   assert.ok(native.every(event => event.trusted && Number.isFinite(event.timestamp)), 'Browser records trusted native input timestamps');
   assert.ok(evidence.timestampSpanMs >= 0 && evidence.timestampSpanMs < 600, `Browser timestamps prove a rapid native burst: ${JSON.stringify(evidence)}`);
   assert.equal(presses[0].disabled, false, 'The initial native press can upgrade');
-  assert.ok(presses.slice(1).every(event => event.disabled), 'Repeated native presses arrive while the upgrade control is disabled');
-  assert.equal(events.filter(event => event.onUpgrade && event.type === 'click' && event.trusted).length, 1, 'Only the first native activation reaches the upgrade handler');
+  const clicks = events.filter(event => event.onUpgrade && event.type === 'click');
+  assert.equal(clicks.length, 1, 'Only the first native activation reaches the upgrade handler');
+  assert.equal(clicks[0].trusted, true, 'The activation is a trusted browser compatibility click');
+  assert.equal(clicks[0].afterHandler?.disabled, true, 'The real upgrade handler immediately disables its control');
+  // Touch compatibility clicks can follow the entire native tap cluster. Their
+  // timestamp refers to an earlier touchend, so use observed handler sequence.
+  const afterActivation = events.slice(events.indexOf(clicks[0]) + 1).filter(event => event.type === pressType || event.type === releaseType);
+  if (!touch) assert.equal(afterActivation.filter(event => event.type === pressType).length, 2, 'Desktop repeats exercise the live post-activation cooldown');
+  assert.ok(afterActivation.every(event => event.disabled), 'Every native event handled after activation reaches a disabled control');
 }
 async function rapidUpgradeBurst(p, name) {
   stage(`${name}: rapid native upgrade burst`);
   await evaluate(`(()=>{
-    const events=[], types=['pointerdown','pointerup','touchstart','touchend','click'];
+    const events=[], clicks=new Map(), types=['pointerdown','pointerup','touchstart','touchend','click'];
     const rect=()=>{const r=document.querySelector('#upgrade-plant').getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
     const beforeRect=rect();
     const record=event=>{
       const button=document.querySelector('#upgrade-plant'), target=event.target;
       const contact=event.changedTouches?.[0]??event;
-      events.push({type:event.type,trusted:event.isTrusted,pointerType:event.pointerType??null,timestamp:event.timeStamp,handledAt:performance.now(),onUpgrade:!!target?.closest?.('#upgrade-plant'),target:{tag:target?.tagName,id:target?.id??null},x:contact.clientX,y:contact.clientY,buttonRect:rect(),disabled:button.disabled,detail:event.detail});
+      const entry={type:event.type,trusted:event.isTrusted,pointerType:event.pointerType??null,timestamp:event.timeStamp,handledAt:performance.now(),onUpgrade:!!target?.closest?.('#upgrade-plant'),target:{tag:target?.tagName,id:target?.id??null},x:contact.clientX,y:contact.clientY,buttonRect:rect(),disabled:button.disabled,detail:event.detail};
+      events.push(entry);if(event.type==='click')clicks.set(event,entry);
     };
+    const afterClick=event=>{const entry=clicks.get(event);if(entry?.onUpgrade)entry.afterHandler={disabled:document.querySelector('#upgrade-plant').disabled,handledAt:performance.now(),buttonRect:rect()}};
     for(const type of types)document.addEventListener(type,record,true);
-    window.__plantBurstTrace={events,beforeRect,rect,stop(){for(const type of types)document.removeEventListener(type,record,true)}};
+    document.addEventListener('click',afterClick);
+    window.__plantBurstTrace={events,beforeRect,rect,stop(){for(const type of types)document.removeEventListener(type,record,true);document.removeEventListener('click',afterClick)}};
   })()`);
   await queueNativeBurst(nativeBurstCommands(p.x, p.y, touchInput));
   await paints();
@@ -231,8 +251,12 @@ async function rapidUpgradeBurst(p, name) {
   const pressType = touchInput ? 'touchstart' : 'pointerdown', releaseType = touchInput ? 'touchend' : 'pointerup';
   const native = trace.events.filter(event => event.type === pressType || event.type === releaseType);
   const evidence = { name, input: touchInput ? 'touch' : 'mouse', point: { x: p.x, y: p.y }, timestampSpanMs: native.at(-1)?.timestamp - native[0]?.timestamp, handlerSpanMs: native.at(-1)?.handledAt - native[0]?.handledAt, ...trace };
+  const activationIndex = trace.events.findIndex(event => event.type === 'click' && event.onUpgrade);
+  evidence.pressesAfterActivation = activationIndex < 0 ? 0 : trace.events.slice(activationIndex + 1).filter(event => event.type === pressType && event.onUpgrade).length;
+  evidence.repeatCoverage = touchInput && !evidence.pressesAfterActivation ? 'pre-activation native tap cluster' : `post-activation native ${touchInput ? 'tap' : 'click'} repeats`;
   bursts.push(evidence);
   assertRapidBurst(evidence, touchInput);
+  return evidence;
 }
 async function point(selector, allowHidden = false) {
   // Keep the same scroll, two painted frames, geometry and native hit test in
@@ -373,7 +397,7 @@ async function upgradeFlow(metric) {
     await selectPlant(plant); await quote(expected, plant); await layout(`${metric.name}-${kind}-L1`);
     await point('#upgrade-plant'); await screenshot(`${metric.name}-${kind}-level-1`);
     const p = await point('#upgrade-plant'), treasury = expected.accounts.treasury;
-    await rapidUpgradeBurst(p, `${metric.name}-${kind}`);
+    const burst = await rapidUpgradeBurst(p, `${metric.name}-${kind}`);
     assert.equal(upgradePlant(expected, plant.id, 1).ok, true);
     await assertUpgrade(expected, plant, 1, treasury);
     await until('!document.querySelector("#upgrade-plant").disabled');
@@ -410,7 +434,7 @@ async function upgradeFlow(metric) {
     await pressKey('Enter'); assert.deepEqual(await state(), expected);
     await cell(empty); assert.equal(await evaluate('document.querySelector("#plant-actions").hidden'), true);
     assert.deepEqual(await state(), expected);
-    checks.push(`${metric.name} ${kind}: L1 quote, native ${metric.mobile ? 'touch' : 'mouse'} L2, repeat-${metric.mobile ? 'tap' : 'click'}/key protection, deliberate L3, exact payment/capacity, max/close/selection guards`);
+    checks.push(`${metric.name} ${kind}: L1 quote, native ${metric.mobile ? 'touch' : 'mouse'} L2, ${burst.repeatCoverage}, held-key prevention, deliberate L3, exact payment/capacity, max/close/selection guards`);
   }
   stage(`${metric.name}: native Save and reload`);
   await close(); await button('#toggle-game-menu');
