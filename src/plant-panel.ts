@@ -38,10 +38,10 @@ export function installPlantPanel(host: HTMLElement, upgrade: (city: City, id: n
       reserve.textContent = `เงินคลังใช้จ่ายได้ ${money(data.available)} · หักเงินที่กันไว้แล้ว`;
       button.disabled = !!data.reasons.length || coolingDown;
       if (!data.next || !data.nextLevel) {
-        quote.textContent = `กำลังผลิต ${data.current.capacity} หน่วย · ค่าบำรุง ${money(data.current.upkeep)}/เดือน`;
+        quote.textContent = `กำลังผลิต ${data.current.capacity} หน่วย\nค่าบำรุง ${money(data.current.upkeep)}/เดือน\nใช้พื้นที่เดิม`;
         button.textContent = 'ถึงระดับสูงสุดแล้ว';
       } else {
-        quote.textContent = `กำลังผลิต ${data.current.capacity} → ${data.next.capacity} หน่วย · ค่าบำรุง ${money(data.current.upkeep)} → ${money(data.next.upkeep)}/เดือน · ใช้พื้นที่เดิม`;
+        quote.textContent = `กำลังผลิต ${data.current.capacity} → ${data.next.capacity} หน่วย\nค่าบำรุง ${money(data.current.upkeep)} → ${money(data.next.upkeep)}/เดือน\nใช้พื้นที่เดิม`;
         button.textContent = `อัปเกรดระดับ ${data.nextLevel} · ${money(data.next.upgradeCost)}`;
       }
       button.title = data.reasons.join(' · ');

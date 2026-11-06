@@ -1134,3 +1134,6 @@ dialog button {
 #save-recovery-details > button { display: block; width: 100%; margin: 8px 0; }
 #save-promotion-confirm { max-height: calc(100dvh - 32px); overflow-y: auto; }
 #save-promotion-confirm button { display: block; width: 100%; margin: 8px 0; }
+
+/* Keep utility prices in stable rows so an upgrade cannot move its button. */
+#plant-upgrade-quote { white-space: pre-line; line-height: 1.5; min-height: 4.5em; }

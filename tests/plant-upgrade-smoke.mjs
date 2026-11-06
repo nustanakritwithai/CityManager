@@ -17,6 +17,10 @@ import { isPanelProviderRequest, panelProviderDenials } from './panel-network-de
 
 const output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/plant-upgrades');
 const appPort = 4397, debugPort = 9497, upstream = `http://127.0.0.1:${appPort}/CityManager/`;
+// Four complete native upgrade flows, save/reload and eight blocked-plant checks.
+// Hosted software rendering measured ~192s for one flow, including ~68s in PNG
+// capture. Budget the whole scope; individual CDP/predicate limits stay 30s.
+const suiteTimeoutMs = 20 * 60_000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], screenshots = [], layouts = [], bursts = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
 const processLogs = { app: '', browser: '' };
@@ -30,7 +34,7 @@ function stage(phase) {
   console.log('Plant acceptance phase:', phase);
 }
 function resultReport(status, error) {
-  return { status, date: new Date().toISOString(), elapsedMs: Date.now() - startedAt, ...(error ? { error: String(error.stack ?? error) } : {}), checks, screenshots, layouts, bursts, errors, interceptionErrors, externalRequests, providerRequests, processLogs, diagnostics, pendingCommands: [...pending.values()].map(item => ({ ...item.metadata, pendingMs: Date.now() - item.metadata.queuedAt })) };
+  return { status, date: new Date().toISOString(), suiteTimeoutMs, elapsedMs: Date.now() - startedAt, ...(error ? { error: String(error.stack ?? error) } : {}), checks, screenshots, layouts, bursts, errors, interceptionErrors, externalRequests, providerRequests, processLogs, diagnostics, pendingCommands: [...pending.values()].map(item => ({ ...item.metadata, pendingMs: Date.now() - item.metadata.queuedAt })) };
 }
 function writeFailure(error, write = writeFileSync) {
   // Emergency watchdog output must be durable BEFORE process.exit, which skips
@@ -79,6 +83,25 @@ if (process.argv.includes('--preflight')) {
     for (const acknowledge of acknowledgements) acknowledge();
     await completed;
   }
+  for (const touch of [false, true]) {
+    const rect = { x: 100, y: 200, width: 160, height: 44 }, events = [];
+    for (let i = 0; i < 3; i++) {
+      for (const type of touch ? ['touchstart', 'touchend'] : ['pointerdown', 'pointerup']) events.push({ type, onUpgrade: true, trusted: true, timestamp: events.length, disabled: i > 0, buttonRect: rect });
+      if (!i) events.push({ type: 'click', onUpgrade: true, trusted: true, timestamp: events.length, disabled: false, buttonRect: rect });
+    }
+    const evidence = { events, beforeRect: rect, afterRect: rect, point: { x: 180, y: 222 }, timestampSpanMs: 6 };
+    assertRapidBurst(evidence, touch);
+    assert.throws(() => assertRapidBurst({ ...evidence, afterRect: { ...rect, y: rect.y + 23 } }, touch), /keeps the upgrade button in place/, 'The observed water-row regression must fail');
+    assert.throws(() => assertRapidBurst({ ...evidence, events: events.slice(0, 3) }, touch), /Three actual native presses/, 'A single activation cannot substitute for three native presses');
+    const missed = structuredClone(evidence); missed.events[3].onUpgrade = false; missed.events[3].target = { id: 'plant-upgrade-reserve' };
+    assert.throws(() => assertRapidBurst(missed, touch), /Three actual native presses/, 'All-target evidence retains and rejects a missed press');
+  }
+  const keys = ['Enter', ' '].flatMap(value => [...Array.from({ length: 3 }, () => keyCommand(value, { autoRepeat: true })), keyCommand(value, { type: 'keyUp' })]);
+  assert.equal(keys.length, 8);
+  assert.deepEqual(keys.map(([, params]) => [params.key, params.type, params.autoRepeat]), [['Enter', 'keyDown', true], ['Enter', 'keyDown', true], ['Enter', 'keyDown', true], ['Enter', 'keyUp', false], [' ', 'keyDown', true], [' ', 'keyDown', true], [' ', 'keyDown', true], [' ', 'keyUp', false]]);
+  const observedKeys = [], keyAcks = [];
+  const keysDone = queueNativeBurst(keys, (method, params) => { observedKeys.push([method, params]); return new Promise(resolve => keyAcks.push(resolve)); });
+  assert.deepEqual(observedKeys, keys); for (const ack of keyAcks) ack(); await keysDone;
   const log = []; for (let i = 0; i < 100; i++) boundedPush(log, { id: i });
   assert.equal(log.length, 80); assert.equal(log[0].id, 20);
   pending.set(-1, { metadata: { id: -1, method: 'Runtime.evaluate', phase: 'setup', queuedAt: Date.now() - 10 } });
@@ -142,33 +165,51 @@ function queueNativeBurst(commands, dispatch = send) {
   // the entire native burst before awaiting any browser acknowledgement.
   return Promise.all(commands.map(([method, params]) => dispatch(method, params)));
 }
+function assertStableRect(before, after, message) {
+  for (const edge of ['x', 'y', 'width', 'height']) assert.ok(Number.isFinite(after?.[edge]) && Math.abs(after[edge] - before[edge]) <= 1, `${message}: ${edge}; ${JSON.stringify({ before, after })}`);
+}
+function assertRapidBurst(evidence, touch) {
+  const { events, beforeRect, afterRect, point: p } = evidence;
+  const pressType = touch ? 'touchstart' : 'pointerdown', releaseType = touch ? 'touchend' : 'pointerup';
+  const native = events.filter(event => event.type === pressType || event.type === releaseType);
+  const presses = native.filter(event => event.type === pressType && event.onUpgrade), releases = native.filter(event => event.type === releaseType && event.onUpgrade);
+  // Observe every destination, including misses. Do not move the input to a
+  // specially chosen overlap: the original visible button center must remain safe.
+  assertStableRect(beforeRect, afterRect, 'L1→L2 keeps the upgrade button in place');
+  for (const event of native) {
+    assertStableRect(beforeRect, event.buttonRect, 'Upgrade button stays in place throughout the native burst');
+    assert.ok(p.x >= event.buttonRect.x && p.x < event.buttonRect.x + event.buttonRect.width && p.y >= event.buttonRect.y && p.y < event.buttonRect.y + event.buttonRect.height, 'The original button center remains a hit target');
+  }
+  assert.equal(presses.length, 3, 'Three actual native presses reach the upgrade control');
+  assert.equal(releases.length, 3, 'Three actual native releases reach the upgrade control');
+  assert.ok(native.every(event => event.trusted && Number.isFinite(event.timestamp)), 'Browser records trusted native input timestamps');
+  assert.ok(evidence.timestampSpanMs >= 0 && evidence.timestampSpanMs < 600, `Browser timestamps prove a rapid native burst: ${JSON.stringify(evidence)}`);
+  assert.equal(presses[0].disabled, false, 'The initial native press can upgrade');
+  assert.ok(presses.slice(1).every(event => event.disabled), 'Repeated native presses arrive while the upgrade control is disabled');
+  assert.equal(events.filter(event => event.onUpgrade && event.type === 'click' && event.trusted).length, 1, 'Only the first native activation reaches the upgrade handler');
+}
 async function rapidUpgradeBurst(p, name) {
   stage(`${name}: rapid native upgrade burst`);
   await evaluate(`(()=>{
     const events=[], types=['pointerdown','pointerup','touchstart','touchend','click'];
+    const rect=()=>{const r=document.querySelector('#upgrade-plant').getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
+    const beforeRect=rect();
     const record=event=>{
-      const button=event.target?.closest?.('#upgrade-plant'); if(!button)return;
-      events.push({type:event.type,trusted:event.isTrusted,pointerType:event.pointerType??null,timestamp:event.timeStamp,handledAt:performance.now(),disabled:button.disabled,detail:event.detail});
+      const button=document.querySelector('#upgrade-plant'), target=event.target;
+      const contact=event.changedTouches?.[0]??event;
+      events.push({type:event.type,trusted:event.isTrusted,pointerType:event.pointerType??null,timestamp:event.timeStamp,handledAt:performance.now(),onUpgrade:!!target?.closest?.('#upgrade-plant'),target:{tag:target?.tagName,id:target?.id??null},x:contact.clientX,y:contact.clientY,buttonRect:rect(),disabled:button.disabled,detail:event.detail});
     };
     for(const type of types)document.addEventListener(type,record,true);
-    window.__plantBurstTrace={events,stop(){for(const type of types)document.removeEventListener(type,record,true)}};
+    window.__plantBurstTrace={events,beforeRect,rect,stop(){for(const type of types)document.removeEventListener(type,record,true)}};
   })()`);
   await queueNativeBurst(nativeBurstCommands(p.x, p.y, touchInput));
   await paints();
-  const events = await evaluate(`(()=>{const trace=window.__plantBurstTrace;trace.stop();delete window.__plantBurstTrace;return trace.events})()`);
+  const trace = await evaluate(`(()=>{const trace=window.__plantBurstTrace;trace.stop();delete window.__plantBurstTrace;return{events:trace.events,beforeRect:trace.beforeRect,afterRect:trace.rect()}})()`);
   const pressType = touchInput ? 'touchstart' : 'pointerdown', releaseType = touchInput ? 'touchend' : 'pointerup';
-  const presses = events.filter(event => event.type === pressType), releases = events.filter(event => event.type === releaseType);
-  const native = events.filter(event => event.type === pressType || event.type === releaseType);
-  const timestampSpanMs = native.at(-1)?.timestamp - native[0]?.timestamp;
-  const evidence = { name, input: touchInput ? 'touch' : 'mouse', timestampSpanMs, handlerSpanMs: native.at(-1)?.handledAt - native[0]?.handledAt, events };
+  const native = trace.events.filter(event => event.type === pressType || event.type === releaseType);
+  const evidence = { name, input: touchInput ? 'touch' : 'mouse', point: { x: p.x, y: p.y }, timestampSpanMs: native.at(-1)?.timestamp - native[0]?.timestamp, handlerSpanMs: native.at(-1)?.handledAt - native[0]?.handledAt, ...trace };
   bursts.push(evidence);
-  assert.equal(presses.length, 3, 'Three actual native presses reach the upgrade control');
-  assert.equal(releases.length, 3, 'Three actual native releases reach the upgrade control');
-  assert.ok(native.every(event => event.trusted && Number.isFinite(event.timestamp)), 'Browser records trusted native input timestamps');
-  assert.ok(timestampSpanMs >= 0 && timestampSpanMs < 600, `Browser timestamps prove a rapid native burst: ${JSON.stringify(evidence)}`);
-  assert.equal(presses[0].disabled, false, 'The initial native press can upgrade');
-  assert.ok(presses.slice(1).every(event => event.disabled), 'Repeated native presses arrive while the upgrade control is disabled');
-  assert.equal(events.filter(event => event.type === 'click' && event.trusted).length, 1, 'Only the first native activation reaches the upgrade handler');
+  assertRapidBurst(evidence, touchInput);
 }
 async function point(selector, allowHidden = false) {
   // Keep the same scroll, two painted frames, geometry and native hit test in
@@ -193,9 +234,9 @@ async function close() {
   await paints();
 }
 async function cell(index) {
-  await close(); await button('[data-tool="select"]'); await paints();
-  const p = await evaluate(`window.cityManager.cellScreen(${index})`);
-  assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', `Canvas parcel ${index} is reachable`);
+  await close(); await button('[data-tool="select"]');
+  const p = await evaluate(`(async()=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const p=window.cityManager.cellScreen(${index});return{...p,hit:document.elementFromPoint(p.x,p.y)?.id}})()`);
+  assert.equal(p.hit, 'city-canvas', `Canvas parcel ${index} is reachable`);
   await click(p.x, p.y);
   await until('document.querySelector("#inspector").dataset.open==="true"');
   await paints();
@@ -218,8 +259,11 @@ async function load(city) {
   boundedPush(diagnostics.renderers, renderer, 16);
   await close(); return panelEntryCity(raw);
 }
-async function key(key, { type = 'keyDown', autoRepeat = false } = {}) {
-  await send('Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: key === ' ' ? 32 : key === 'Enter' ? 13 : 27, autoRepeat });
+function keyCommand(key, { type = 'keyDown', autoRepeat = false } = {}) {
+  return ['Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: key === ' ' ? 32 : key === 'Enter' ? 13 : 27, autoRepeat }];
+}
+async function pressKey(value) {
+  await queueNativeBurst([keyCommand(value), keyCommand(value, { type: 'keyUp' })]);
 }
 async function quote(city, plant) {
   const data = plantUpgradeStatus(city, plant.id), dom = await evaluate(`(()=>{const h=document.querySelector('#plant-actions'),b=document.querySelector('#upgrade-plant');return{title:h.querySelector('h3').textContent,quote:document.querySelector('#plant-upgrade-quote').textContent,reserve:document.querySelector('#plant-upgrade-reserve').textContent,button:b.textContent,disabled:b.disabled,reason:b.title}})()`);
@@ -271,36 +315,36 @@ async function upgradeFlow(metric) {
     // A held key remains a repeat even after the click cooldown expires. The
     // focus setup changes no game state; actual CDP key input tests the guard.
     await evaluate('document.querySelector("#upgrade-plant").focus()');
-    for (const value of ['Enter', ' ']) {
-      for (let i = 0; i < 3; i++) await key(value, { autoRepeat: true });
-      await key(value, { type: 'keyUp' });
-    }
+    await queueNativeBurst(['Enter', ' '].flatMap(value => [
+      ...Array.from({ length: 3 }, () => keyCommand(value, { autoRepeat: true })),
+      keyCommand(value, { type: 'keyUp' }),
+    ]));
     assert.deepEqual(await state(), expected, 'Held-key repeats do not buy level 3');
     await screenshot(`${metric.name}-${kind}-level-2`);
     stage(`${metric.name}-${kind}: actionable close and selection guards`);
     // Exercise dismissal while L3 is still affordable and actionable, not just
     // at the maximum where a stale control would already be harmless.
     await close(); assert.equal(await evaluate('document.querySelector("#plant-actions").hidden'), true);
-    await key('Enter'); await key('Enter', { type: 'keyUp' }); assert.deepEqual(await state(), expected);
+    await pressKey('Enter'); assert.deepEqual(await state(), expected);
     const empty = expected.cells.findIndex((parcel, index) => !parcel.road && !parcel.zone && parcel.building === null && !plantAt(expected, index) && access(expected, index));
     await cell(empty); assert.equal(await evaluate('document.querySelector("#plant-actions").hidden'), true);
-    await key('Enter'); await key('Enter', { type: 'keyUp' }); assert.deepEqual(await state(), expected);
+    await pressKey('Enter'); assert.deepEqual(await state(), expected);
     await selectPlant(plant); assert.equal((await quote(expected, plant)).disabled, false);
     assert.equal(await evaluate('document.querySelector("#plant-feedback").textContent'), '', 'Selection change clears stale feedback');
     const secondTreasury = expected.accounts.treasury;
     stage(`${metric.name}-${kind}: deliberate level 3 upgrade`);
-    if (kind === 'water') { await evaluate('document.querySelector("#upgrade-plant").focus()'); await key('Enter'); await key('Enter', { type: 'keyUp' }); }
+    if (kind === 'water') { await evaluate('document.querySelector("#upgrade-plant").focus()'); await pressKey('Enter'); }
     else await button('#upgrade-plant');
     assert.equal(upgradePlant(expected, plant.id, 2).ok, true);
     await assertUpgrade(expected, plant, 2, secondTreasury);
     assert.equal((await quote(expected, plant)).disabled, true, 'Maximum level disables upgrade');
     await screenshot(`${metric.name}-${kind}-level-3`);
     stage(`${metric.name}-${kind}: maximum-level and stale selection guards`);
-    const max = await point('#upgrade-plant'); await click(max.x, max.y); await key('Enter'); await key('Enter', { type: 'keyUp' });
+    const max = await point('#upgrade-plant'); await click(max.x, max.y); await pressKey('Enter');
     assert.deepEqual(await state(), expected, 'Disabled maximum level refuses input');
     // Closing and changing selection must not leave an actionable stale plant.
     await close(); assert.equal(await evaluate('document.querySelector("#plant-actions").hidden'), true);
-    await key('Enter'); await key('Enter', { type: 'keyUp' }); assert.deepEqual(await state(), expected);
+    await pressKey('Enter'); assert.deepEqual(await state(), expected);
     await cell(empty); assert.equal(await evaluate('document.querySelector("#plant-actions").hidden'), true);
     assert.deepEqual(await state(), expected);
     checks.push(`${metric.name} ${kind}: L1 quote, native ${metric.mobile ? 'touch' : 'mouse'} L2, repeat-${metric.mobile ? 'tap' : 'click'}/key protection, deliberate L3, exact payment/capacity, max/close/selection guards`);
@@ -316,7 +360,7 @@ async function upgradeFlow(metric) {
     for (const plant of expected.plants) {
       await selectPlant(plant); const dom = await quote(expected, plant);
       assert.equal(dom.disabled, true, name); assert.ok(dom.reason);
-      const p = await point('#upgrade-plant'); await click(p.x, p.y); await key('Enter'); await key('Enter', { type: 'keyUp' });
+      const p = await point('#upgrade-plant'); await click(p.x, p.y); await pressKey('Enter');
       assert.deepEqual(await state(), expected, `${name} cannot spend or upgrade`);
       await layout(`${metric.name}-${plant.kind}-${name}`);
       if (plant.kind === 'power') await screenshot(`${metric.name}-${name}`);
@@ -330,11 +374,11 @@ for (const port of [appPort, debugPort]) {
   assert.equal(occupied, false, `Dedicated QA port ${port} is occupied`);
 }
 const watchdog = setTimeout(() => {
-  const timeout = Error(`Plant browser acceptance timed out after 360000ms; phase=${diagnostics.phase}`);
+  const timeout = Error(`Plant browser acceptance timed out after ${suiteTimeoutMs}ms; phase=${diagnostics.phase}`);
   diagnostics.watchdog = { elapsedMs: Date.now() - startedAt, phase: diagnostics.phase };
   try { writeFailure(primaryFailure ?? timeout); } catch (error) { console.error('Could not preserve watchdog evidence:', error); }
   console.error(timeout.message); browser?.kill(); app?.kill(); process.exit(1);
-}, 360_000);
+}, suiteTimeoutMs);
 function logProcess(child, label) {
   const record = chunk => { processLogs[label] = (processLogs[label] + chunk.toString()).slice(-16_000); };
   child.stdout?.on('data', record); child.stderr?.on('data', record);

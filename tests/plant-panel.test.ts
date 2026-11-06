@@ -16,9 +16,10 @@ test('plant panel quotes real price and upkeep, guards repeated input, follows s
   const panel=installPlantPanel(host as unknown as HTMLElement,(city,id,level)=>{calls++;const result=upgradePlant(city,id,level);panel.update(city,p);panel.showResult(result);});
   const button=host.children.find(e=>e.id==='upgrade-plant')!,quote=host.children.find(e=>e.id==='plant-upgrade-quote')!;
   const original=serialize(c);panel.update(c,p);assert.equal(serialize(c),original);assert.equal(host.hidden,false);
-  assert.match(button.textContent,/ระดับ 2.*1,800/);assert.match(quote.textContent,/40 → 80.*60.*90/);
+  assert.match(button.textContent,/ระดับ 2.*1,800/);assert.match(quote.textContent,/40 → 80[\s\S]*60.*90/);
+  assert.equal(quote.textContent.split('\n').length,3);
   assert.match(button.attrs['aria-describedby'],/plant-upgrade-quote plant-upgrade-reserve plant-feedback/);
-  button.listeners.click({detail:0});button.listeners.click({detail:0});button.listeners.click({detail:2});assert.equal(calls,1);assert.equal(p.level,2);
+  button.listeners.click({detail:0});button.listeners.click({detail:0});button.listeners.click({detail:2});assert.equal(calls,1);assert.equal(p.level,2);assert.equal(quote.textContent.split('\n').length,3);
   let prevented=false;button.listeners.keydown({repeat:true,key:'Enter',preventDefault(){prevented=true;}});assert.equal(prevented,true);
   await sleep(630);assert.equal(button.disabled,false);button.listeners.click({detail:1});assert.equal(p.level,3);assert.equal(calls,2);
   await sleep(630);assert.equal(button.disabled,true);assert.equal(button.textContent,'ถึงระดับสูงสุดแล้ว');
