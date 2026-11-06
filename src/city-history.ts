@@ -51,7 +51,7 @@ export function compactCityHistory(c: City): boolean {
  const wallets=new Set([...c.firms.map(f=>f.wallet),...c.households.map(h=>h.wallet),...tailMoney.flatMap(e=>[e.from,e.to]),...tailGoods.flatMap(e=>[e.from,e.to]),...tailCrops.flatMap(e=>[e.from,e.to]),...Object.entries(c.accounts).filter(([,v])=>v!==0).map(([w])=>w)]);
  const ids=new Set([...c.firms.map(f=>f.id),...c.plants.map(p=>p.id),...c.parks.map(p=>p.id),...tailMoney.flatMap(e=>[...e.reason.matchAll(/#(\d+)/g)].map(m=>Number(m[1])))]);
  const structural=(e:Entry)=> e.reason==='Initial municipal grant'||e.reason==='New household arrival savings'&&wallets.has(e.to)||
-  /^(?:Build |Demolish park|Self-employed |Market to shop conversion|Business takeover refit|Industry expansion capital|Outside industry (?:bootstrap equity|equity)|Funded industry |Industry expansion residual return)/.test(e.reason)&&
+  /^(?:Build |Upgrade (?:power plant|water pump) |Demolish park|Self-employed |Market to shop conversion|Business takeover refit|Industry expansion capital|Outside industry (?:bootstrap equity|equity)|Funded industry |Industry expansion residual return)/.test(e.reason)&&
   (wallets.has(e.from)&&e.from.startsWith('firm:')||wallets.has(e.to)&&e.to.startsWith('firm:')||[...e.reason.matchAll(/#(\d+)/g)].some(m=>ids.has(Number(m[1]))));
  const allProofs=[...(prior?.structuralProofs??[]),...money];
  const fundedId=(e:Entry)=>/^(?:Industry expansion capital|Funded industry (?:demolition|takeover)|Industry expansion residual return) #([1-9]\d*)$/.exec(e.reason)?.[1];

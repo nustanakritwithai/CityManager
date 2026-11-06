@@ -41,7 +41,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -56,7 +56,7 @@ import { mapOverlay, buildingIssues, TOOL_OVERLAY } from './map-overlay.ts';
 import { MapMarkers } from './map-markers.ts';
 import { CityHud } from './city-hud.ts';
 import { thaiMessage } from './event-text.ts';
-import { PLANTS, PLANT_LABELS } from './utilities.ts';
+import { PLANTS, PLANT_LABELS, plantSpec } from './utilities.ts';
 import { parcelChecklist, roadFacts, type ParcelChecklist } from './place-checklist.ts';
 import { gatewayRoadDistance } from './road-network.ts';
 import { OverviewDashboard } from './overview-panels.ts';
@@ -92,6 +92,7 @@ import { parkRecreationResidentIds } from './park-recreation-activity.ts';
 import { renderParkRecreationPanel } from './park-recreation-panel.ts';
 import { SceneParkActivity } from './scene-park-activity.ts';
 import './park-runtime.css';
+import { installPlantPanel } from './plant-panel.ts';
 import { installEducationPanel } from './education-panel.ts';
 import { bulldozeGuarded, type BusRemovalImpact } from './bus/player.ts';
 import { confirmBusRemoval } from './bus/panel.ts';
@@ -141,6 +142,7 @@ let selectMenu: ReturnType<typeof installSelectMenu> | undefined;
 let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
+let plantPanel: ReturnType<typeof installPlantPanel> | undefined;
 let educationPanel: ReturnType<typeof installEducationPanel> | undefined;
 let busController: ReturnType<typeof createBusController> | undefined;
 let busLock = false;
@@ -475,7 +477,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       reasons.push('สร้างและดูแลได้โดยไม่ต้องติดถนนหรือต่อเครือข่ายน้ำไฟ', 'ประชาชนเดินมาพักผ่อนจริง · สวนที่มีเจ้าหน้าที่ให้ความพึงพอใจตามเวลาพักผ่อนและความแออัด · ดูคะแนนในภาพรวมเมือง', 'ไม่มีโบนัสภาษี ผลผลิต มูลค่าที่ดิน หรือการย้ายเข้า');
     }
     else if (plant) {
-      const u = utilityStatus(city), spec = PLANTS[plant.kind], on = utilities(city).online.has(plant.id), unit = plant.kind === 'power' ? 'ไฟ' : 'น้ำ';
+      const u = utilityStatus(city), spec = plantSpec(plant), on = utilities(city).online.has(plant.id), unit = plant.kind === 'power' ? 'ไฟ' : 'น้ำ';
       metrics.push(metric('กำลังผลิต', `${spec.capacity} หน่วย`, false, on ? 'จ่ายเข้าเครือข่ายอยู่' : 'ยังไม่จ่าย'), metric('ค่าบำรุงรายเดือน', money(spec.upkeep), true),
         metric(`ทั้งเมืองใช้${unit}`, `${u.used[plant.kind]}/${u.capacity[plant.kind]} หน่วย`, false, `สร้างวันที่ ${plant.tick}`));
       reasons.push(on ? `จ่าย${unit}ไปตามถนนที่ต่อกัน ถ้าทั้งเมืองไม่พอ อาคารที่ไกลจากประตูเมืองและโรงผลิตที่สุดจะขาดก่อน` : 'ไม่ติดถนนที่เชื่อมประตูเมือง จึงยังไม่จ่าย ต่อถนนข้างแปลงนี้');
@@ -498,6 +500,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
   const selectedCampus = cellIndex === null ? undefined : campusAt(city, cellIndex);
   $('#campus-actions').hidden = !selectedCampus;
   educationPanel?.update(city, selectedCampus);
+  plantPanel?.update(city, route?.page === 'place' && cellIndex !== null ? plantAt(city, cellIndex) : undefined);
   $('#explanation').replaceChildren(...(railCard ? [railCard] : []), ...(busCard ? [busCard] : []), ...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist && !railCard && !busCard;
   const selection = route?.page === 'household' ? {kind:'household' as const,id:route.id,sourceBuildingId:route.sourceBuildingId,sourceCell:route.sourceCell} : cellIndex !== null ? {kind:'place' as const,cell:cellIndex} : null;
   renderContext(city, selection, (id, sourceBuildingId, sourceCell) => openRoute({page:'household',id,sourceBuildingId,sourceCell}), ownerFinanceAction, farmCropAction, factoryRecipeAction);
@@ -791,6 +794,11 @@ async function boot() {
   document.querySelector('#city-stats .st-titlebar .st-close')?.before(mapEntry);
   installHudIcons(); installKeycaps(); installBuildToolbar(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); });
   educationPanel = installEducationPanel($('#campus-actions'));
+  const plantActions = document.createElement('section'); $('#campus-actions').after(plantActions);
+  plantPanel = installPlantPanel(plantActions, (quotedCity, id, level) => {
+    if (quotedCity !== city || route?.page !== 'place' || plantAt(city, route.cell)?.id !== id) return;
+    const result = upgradePlant(city, id, level); status(result.message); render(); plantPanel?.showResult(result);
+  });
   panelTime = installPanelTimeControls($('#inspector .inspector-heading'), $('#pause'));
   if (!STARTER && city.tick===0) { guide.offer(); view.focus(GATEWAY + 5); }
   goalPill = new GoalPill(() => { if (route?.page !== 'city') openRoute({page:'city'}); document.getElementById('dash-goals')?.scrollIntoView({ block: 'start' }); });

@@ -135,7 +135,7 @@ test('no-park cities keep accounting and owner distributions deterministic throu
       payouts.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Owner profit distribution').map(e => [e.tick, e.from, e.to, e.amount]));
       bills.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Monthly municipal services').map(e => e.amount));
       if (d === 119) {
-        assert.deepEqual(bills, [40000, 40000, 55000]);
+        assert.deepEqual(bills, [24000, 24000, 33000]);
         assert.deepEqual(payouts, expected.get(seed)!.amounts.map((amount, index) => [30 * (index + 1), 'firm:8', expected.get(seed)!.owner, amount]));
         const { ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
         const amount = bills.reduce((n, value) => n + value, 0);

@@ -22,7 +22,18 @@ class Element {
 
 test('building-card acceptance preserves genuine day29/day59 migration snapshots and commercial origins', () => {
   assert.equal(hash(replay.baseline), '17c7548e346e1646106c902e048866b19b9381cc3539c103f9ef20ddae8e01aa');
-  assert.equal(hash(serialize(replay.later)), '5e62befe3e6becad5fdd0fd651c59eaef174185288815c3d1941adc768efa8d4');
+  // Verified against unchanged main b368f6e: the day59 snapshot differs only in
+  // the day30 service bill (45000 -> 27000) and its two account balances.
+  // Preserve the independent old hash, normalizing only those explicit changes.
+  const oldRateReplay = structuredClone(replay.later);
+  const serviceBills = oldRateReplay.ledger.filter(e => e.reason === 'Monthly municipal services');
+  assert.equal(serviceBills.length, 1);
+  assert.equal(serviceBills[0].tick, 30);
+  assert.equal(serviceBills[0].amount, 27_000);
+  serviceBills[0].amount += 18_000;
+  oldRateReplay.accounts.treasury -= 18_000;
+  oldRateReplay.accounts.upkeep += 18_000;
+  assert.equal(hash(serialize(oldRateReplay)), '5e62befe3e6becad5fdd0fd651c59eaef174185288815c3d1941adc768efa8d4');
   assert.equal(deserialize(replay.legacyInput).tick, 29);
   for (const city of [replay.fixture, replay.later]) {
     assert.ok(city.firms.some(isMarket) && city.firms.some(isRetail));

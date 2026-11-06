@@ -181,6 +181,23 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Verify plant upgrades and easier-economy saves in installed Edge
+        run: |
+          node --experimental-strip-types tests/plant-upgrade-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Plant upgrade browser acceptance failed; not publishing.' }
+
+      - name: Preserve plant upgrade browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: plant-upgrade-browser-evidence
+          path: |
+            .test-output/plant-upgrades/*.png
+            .test-output/plant-upgrades/report.json
+            .test-output/plant-upgrades/processes.log
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Upload Pages market verification artifact
         if: github.event_name == 'pull_request' && steps.scope.outputs.kind != 'tower' && steps.scope.outputs.kind != 'factory' && steps.scope.outputs.kind != 'vehicle' && steps.scope.outputs.kind != 'visual-final' && steps.scope.outputs.kind != 'server-save' && steps.scope.outputs.kind != 'classic-toolbar' && steps.scope.outputs.kind != 'history' && steps.scope.outputs.kind != 'commercial' && steps.scope.outputs.kind != 'rail' && steps.scope.outputs.kind != 'hud-polish' && steps.scope.outputs.kind != 'panel-polish' && steps.scope.outputs.kind != 'rail-polish' && steps.scope.outputs.kind != 'rail-scene' && steps.scope.outputs.kind != 'rail-map' && steps.scope.outputs.kind != 'bus-polish' && steps.scope.outputs.kind != 'bus-scene' && steps.scope.outputs.kind != 'bus-map' && steps.scope.outputs.kind != 'save-cleanup' && steps.scope.outputs.kind != 'browser-storage' && steps.scope.outputs.kind != 'smoke-retry' && steps.scope.outputs.kind != 'map-declutter' && steps.scope.outputs.kind != 'traffic-gap' && steps.scope.outputs.kind != 'traffic-presenter' && steps.scope.outputs.kind != 'traffic-work-expiry' && steps.scope.outputs.kind != 'land-expansion'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

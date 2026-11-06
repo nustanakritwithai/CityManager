@@ -109,6 +109,8 @@ export function reasonLabel(reason: string): string {
   if (parkWage) return `ค่าจ้างเจ้าหน้าที่สวน #${parkWage[1]} ตามวันทำงานจริง`;
   const parkUpkeep = /^Monthly park upkeep #(\d+)$/.exec(reason);
   if (parkUpkeep) return `ค่าบำรุงสวนสาธารณะ #${parkUpkeep[1]} รายเดือน`;
+  const upgrade = /^Upgrade (power plant|water pump) #(\d+) to level ([23])$/.exec(reason);
+  if (upgrade) return `อัปเกรด${upgrade[1] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${upgrade[2]} เป็นระดับ ${upgrade[3]}`;
   const plant = /^(Build|Demolish) (power plant|water pump) #(\d+)$/.exec(reason);
   if (plant) return `${plant[1] === 'Build' ? 'สร้าง' : 'รื้อ'}${plant[2] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${plant[3]}`;
   const upkeep = /^Monthly (power plant|water pump) upkeep #(\d+)$/.exec(reason);

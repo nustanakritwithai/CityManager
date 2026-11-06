@@ -24,6 +24,9 @@ test('municipal services are charged only at settlement, itemized and preserve s
 
 test('a low treasury cannot go negative or create service debt', () => {
   const c = createCity(61025); for (let i = 0; i < 29; i++) step(c);
+  // Prematurely build both utility plants so their upkeep leaves a real shortfall
+  // even after the lower tariff and this month's incoming tax payments.
+  assert.equal(keepSupplied(c, 100), 2);
   // Spend all available cash through the existing ledger, preserving accounting identity.
   const cash = c.accounts.treasury; c.accounts.treasury = 0; c.accounts.upkeep += cash;
   c.ledger.push({ tick: c.tick, from: 'treasury', to: 'upkeep', amount: cash, reason: 'Test spending' });
@@ -34,13 +37,13 @@ test('a low treasury cannot go negative or create service debt', () => {
   assert.deepEqual(deserialize(serialize(c)), c);
 });
 
-test('seeded mature cities maintain positive, reduced operating surplus', { timeout: 120_000 }, () => {
+test('seeded mature cities maintain positive, more accessible operating surplus', { timeout: 120_000 }, () => {
   for (const seed of [61025, 2026, 42]) {
     const c = createCity(seed);
     for (let i = 0; i < 720; i++) { step(c); keepSupplied(c); }
     const budget = treasuryBudget(c), cost = budget.expense.find(e => e.key === 'municipal-services')?.amount ?? 0;
-    assert.equal(cost, 140_000);
-    assert.ok(budget.net > 0 && budget.net < 60_000, `seed ${seed}: ${budget.net} satang`);
+    assert.equal(cost, 84_000);
+    assert.ok(budget.net >= 90_000 && budget.net <= 110_000, `seed ${seed}: ${budget.net} satang`);
     assert.ok(c.accounts.treasury > 0);
   }
 });
@@ -52,5 +55,39 @@ test('an older saved city loads without a retroactive services charge', () => {
   assert.equal(c.accounts.treasury, old.accounts.treasury);
   assert.equal(c.tick, old.tick);
   assert.equal(c.ledger.filter(e => e.reason === bill).length, 0);
+  assert.deepEqual(deserialize(serialize(c)), c);
+});
+
+
+test('starter cities earn a small first-month surplus and can rebuild funds by month six', () => {
+  for (const seed of [61025, 2026, 42]) {
+    const c = createCity(seed);
+    for (let day = 1; day <= 180; day++) {
+      step(c); keepSupplied(c);
+      if (day === 30) assert.ok(treasuryBudget(c).net > 0, `seed ${seed}: first-month surplus`);
+    }
+    assert.ok(treasuryBudget(c).net >= 40_000, `seed ${seed}: month-six savings pace`);
+    assert.equal(c.firms.filter(f => c.accounts[f.wallet] === 0).length, 0);
+    assert.deepEqual(deserialize(serialize(c)), c);
+  }
+});
+
+test('a historical 50-baht service payment stays intact, with 30-baht charges only going forward', () => {
+  let c = createCity(61025);
+  for (let day = 0; day < 30; day++) step(c);
+  // Represent the old tariff in its settled journal and balanced accounts.
+  // Services are the final treasury charge; no household or firm balance changes.
+  const entry = c.ledger.find(e => e.reason === bill)!;
+  const oldAmount = c.households.reduce((n, h) => n + h.members, 0) * 5_000;
+  const difference = oldAmount - entry.amount;
+  c.accounts.treasury -= difference; c.accounts.upkeep += difference;
+  entry.amount = oldAmount;
+  const cash = c.accounts.treasury;
+  c = deserialize(serialize(c));
+  assert.equal(c.accounts.treasury, cash, 'no refund or repricing at load');
+  assert.equal(c.ledger.find(e => e.reason === bill && e.tick === 30)?.amount, oldAmount);
+  for (let day = 0; day < 30; day++) step(c);
+  assert.equal(c.ledger.find(e => e.reason === bill && e.tick === 60)?.amount,
+    c.households.reduce((n, h) => n + h.members, 0) * 3_000);
   assert.deepEqual(deserialize(serialize(c)), c);
 });
