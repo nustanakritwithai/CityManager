@@ -25,6 +25,7 @@ export function treasuryHistory(city: City, days = MONTH): TreasuryPoint[] {
 
 export type BudgetLine = { key: string; label: string; amount: number };
 const INCOME: readonly [RegExp, string, string][] = [
+  [/^Demolition refund /, 'demolition-refund', 'เงินคืนจากการรื้อ (80% ของส่วนที่เมืองจ่าย)'],
   [/^Taxi fares$/, 'legacy-taxi-fares', 'ค่าโดยสารแท็กซี่ (รายการเดิม)'],
   [/^Monthly household wage tax$/, 'wage-tax', 'ภาษีค่าจ้าง 10%'],
   [/firm profit tax$/i, 'profit-tax', 'ภาษีกำไรกิจการ 20%'],
@@ -33,7 +34,7 @@ const INCOME: readonly [RegExp, string, string][] = [
 const EXPENSE: readonly [RegExp, string, string][] = [
   [/^Monthly park wages #[1-9]\d*$/, 'park-wages', 'ค่าจ้างเจ้าหน้าที่สวน'],
   [/^Monthly park upkeep #[1-9]\d*$/, 'park-maintenance', 'ค่าบำรุงสวน (ไม่รวมค่าจ้าง)'],
-  [/^Build \d+ road cells$/, 'roads', 'สร้างถนน'],
+  [/^Build (?:\d+ road cells|road cell @\d+)$/, 'roads', 'สร้างถนน'],
   [/^Daily road upkeep$/, 'upkeep', 'บำรุงถนน'],
   [/^Monthly municipal services$/, 'municipal-services', 'บริการพื้นฐานเมือง (จ่ายจริง)'],
   [/demolition/i, 'demolition', 'รื้อถอน'],

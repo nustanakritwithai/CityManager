@@ -7,7 +7,7 @@ export function installSelectMenu(anchor: HTMLButtonElement, choose: (tool: stri
   menu.setAttribute('aria-label', 'เครื่องมือเลือก เลื่อน และรื้อถอน');
   const demolition = document.createElement('button'); demolition.type = 'button';
   demolition.className = 'tool tool-option'; demolition.dataset.tool = 'bulldoze';
-  demolition.title = 'รื้อถอน (B)'; demolition.setAttribute('aria-label', 'เปิดโหมดรื้อถอน (B)'); demolition.setAttribute('aria-pressed', 'false');
+  demolition.title = 'รื้อถอน (B) · คืน 80% ของส่วนที่เมืองจ่ายและมีหลักฐาน'; demolition.setAttribute('aria-label', 'เปิดโหมดรื้อถอน (B)'); demolition.setAttribute('aria-pressed', 'false');
   const label = document.createElement('span'); label.textContent = 'รื้อ';
   demolition.append(iconElement('bulldoze', 'tool-icon svg-glyph'), label); menu.append(demolition);
   const popup = installToolMenu(anchor, menu, true), anchorLabel = anchor.querySelector<HTMLElement>('span:last-child')!;
@@ -16,7 +16,7 @@ export function installSelectMenu(anchor: HTMLButtonElement, choose: (tool: stri
     const active = tool === 'bulldoze';
     anchor.dataset.demolitionActive = String(active);
     anchorLabel.textContent = active ? 'รื้ออยู่' : 'เลือก';
-    anchor.title = active ? 'โหมดรื้อถอนกำลังทำงาน · 0–20 เครดิต/ช่อง · แตะเพื่อกลับไปเลือก/เลื่อน (V)' : 'เลือก/เลื่อน · ไม่เสียค่าใช้จ่าย · เปิดเมนูรื้อถอน (V)';
+    anchor.title = active ? 'โหมดรื้อถอนกำลังทำงาน · คืน 80% ของส่วนที่เมืองจ่าย · ดูยอดคืน/ค่ารื้อที่การ์ดสถานที่ · แตะเพื่อกลับไปเลือก/เลื่อน (V)' : 'เลือก/เลื่อน · ไม่เสียค่าใช้จ่าย · เปิดเมนูรื้อถอน (V)';
     anchor.setAttribute('aria-label', anchor.title);
     demolition.classList.toggle('active', active); demolition.setAttribute('aria-pressed', String(active));
   };

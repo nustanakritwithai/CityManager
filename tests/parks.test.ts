@@ -69,8 +69,8 @@ test('calendar maintenance charges once per month, including after reload; demol
   c = deserialize(serialize(c)); observe(1); assert.equal(entries().length, 1);
   observe(MONTH - 1); assert.deepEqual(entries().map(e => e.tick), [30, 60]);
   const before = c.accounts.treasury; assert.equal(bulldoze(c, 0).ok, true);
-  assert.equal(c.accounts.treasury, before - 2000); assert.equal(c.parks.length, 0);
-  assert.equal(c.ledger.filter(e => e.reason === `Demolish park #${id}`).length, 1);
+  assert.equal(c.accounts.treasury, before + PARK.cost * .8); assert.equal(c.parks.length, 0);
+  assert.equal(c.ledger.filter(e => e.reason === `Demolition refund park #${id}`).length, 1);
   const after = c.accounts.treasury; assert.equal(bulldoze(c, 0).ok, true); assert.equal(c.accounts.treasury, after);
   observe(60); assert.equal(entries().length, 2); assert.equal(sum(c), 0);
   assert.deepEqual(deserialize(serialize(c)), c);

@@ -29,7 +29,12 @@ export function validateCityHistory(c:City):void {
  for(const [values,keys,signed] of [[h.ownerFinance,['contributed','withdrawn','taxPaid','cash','profit'],['profit']],[h.ownerProfit,['profit','tax','invested','retained'],['profit']]] as const)
   map(values,(k,v)=>wallet(k)&&object(v)&&Object.keys(v).sort().join()===[...keys].sort().join()&&Object.entries(v).every(([key,n])=>integer(n,(signed as readonly string[]).includes(key)?Number.MIN_SAFE_INTEGER:0)));
  for(const [wallet,seed] of Object.entries(h.ownerFinance))if(seed.cash!==(h.accounts[wallet]??0))fail();
- if(!Array.isArray(h.structuralProofs)||h.structuralProofs.length>Object.keys(c.accounts).length*12+c.plants.length*3+c.parks.length+10)fail();
+ // At most one unpaid road receipt per cell; municipal lifecycles remain while
+ // live or referenced by the retained tail (including a recent demolition).
+ const referencedAssets = new Set((Array.isArray(c.ledger) ? c.ledger : []).flatMap(e => [...String(e?.reason ?? '').matchAll(/#(\d+)/g)].map(m => m[1]))).size;
+ const proofLimit = Object.keys(c.accounts).length * 12 + c.plants.length * 4 + c.parks.length * 2
+  + (c.education?.campuses.length ?? 0) * 3 + c.cells.length + referencedAssets * 4 + 10;
+ if(!Array.isArray(h.structuralProofs)||h.structuralProofs.length>proofLimit)fail();
  for(const e of h.structuralProofs)if(!object(e)||Object.keys(e).sort().join()!=='amount,from,reason,tick,to'||!integer(e.tick)||e.tick>h.throughTick||!integer(e.amount,1)||typeof e.reason!=='string'||typeof e.from!=='string'||typeof e.to!=='string'||!wallet(e.from)||!wallet(e.to)||e.from===e.to)fail();
  if(!Array.isArray(h.treasuryMonthEnds)||h.treasuryMonthEnds.length>4||h.treasuryMonthEnds.some((p,i)=>!object(p)||Object.keys(p).sort().join()!=='balance,tick'||!integer(p.tick)||p.tick%30!==0||p.tick>h.throughTick||!integer(p.balance)||i>0&&p.tick<=h.treasuryMonthEnds[i-1].tick))fail();
  if(!Array.isArray(h.daily)||h.daily.length>90)fail();let previous=-1;

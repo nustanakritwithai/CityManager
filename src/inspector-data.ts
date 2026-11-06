@@ -115,6 +115,10 @@ export function reasonLabel(reason: string): string {
   if (plant) return `${plant[1] === 'Build' ? 'สร้าง' : 'รื้อ'}${plant[2] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${plant[3]}`;
   const upkeep = /^Monthly (power plant|water pump) upkeep #(\d+)$/.exec(reason);
   if (upkeep) return `ค่าบำรุง${upkeep[1] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${upkeep[2]} รายเดือน`;
+  const refund = /^Demolition refund (park|power plant|water pump|school|university|road cell) [#@](\d+)$/.exec(reason);
+  if (refund) return `เงินคืน 80% จากการรื้อ${({park:'สวนสาธารณะ','power plant':'โรงไฟฟ้า','water pump':'โรงสูบน้ำ',school:'โรงเรียน',university:'มหาวิทยาลัย','road cell':'ถนนช่อง'} as Record<string,string>)[refund[1]]} #${refund[2]} (เฉพาะส่วนที่เมืองจ่าย)`;
+  const roadCell = /^Build road cell @(\d+)$/.exec(reason);
+  if (roadCell) return `สร้างถนนช่อง ${roadCell[1]}`;
   const road = /^Build (\d+) road cells$/.exec(reason);
   if (road) return `สร้างถนน ${road[1]} ช่อง`;
   const purchase = /^Household #(\d+) purchase$/.exec(reason);
