@@ -3,6 +3,8 @@ import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceM
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
 import {isRailReserved,RAIL_PARCEL_MESSAGE} from './rail/reserved-parcels.ts';
 import { compactCityHistory, cropJournalLength, goodsJournalLength, moneyJournalLength, auditMoney } from './city-history.ts';
+import { demolitionQuote, municipalAsset, municipalRefundReason, validateMunicipalRefunds } from './municipal-refunds.ts';
+export { demolitionQuote } from './municipal-refunds.ts';
 import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
@@ -534,7 +536,7 @@ export function buildRoad(c: City, a: number, b: number): Result {
   const added = path.filter(i => !c.cells[i].road), cost = added.length * ROAD_COST;
   if (treasurySpendable(c) < cost) return { ok: false, message: `Need ${(cost / 100).toFixed(0)} credits for this road.` };
   if (!added.length) return { ok: true, message: 'Road already exists; no charge.' };
-  transfer(c, 'treasury', 'roadworks', cost, `Build ${added.length} road cells`);
+  for (const i of added) transfer(c, 'treasury', 'roadworks', ROAD_COST, `Build road cell @${i}`);
   for (const i of added) { c.cells[i].road = true; c.cells[i].zone = null; }
   reconcileBusStops(c, SIZE); // a new branch can turn a stop's cell into a junction
   const message = access(c, b) ? `Built ${added.length} road cells.` : 'Road built, but disconnected from the west outside gateway. Adjacent zones cannot grow.';
@@ -597,26 +599,34 @@ export function bulldoze(c: City, i: number): Result {
     const r = removeBusDepotFromState(c.bus, busDepot.id); if (r.ok) c.lastEvent = r.message; return r;
   }
   const cell = c.cells[i], b = c.buildings.find(v => v.id === cell.building), plant = plantAt(c, i), park = parkAt(c, i), campus = campusAt(c, i);
-  const cost = b || cell.road || plant || park || campus ? 2_000 : 0;
+  try { validateMunicipalRefunds(c); } catch { return { ok: false, message: 'Invalid city investment evidence; parcel and money retained.' }; }
+  const quote = demolitionQuote(c, i), cost = quote.fee;
+  const refundSource = cell.road ? 'roadworks' : 'construction';
+  if (balance(c, refundSource) < quote.refund) return { ok: false, message: 'Refund account cannot cover the recorded city investment; parcel retained.' };
+  const refund = () => {
+    const asset = municipalAsset(c, i);
+    if (quote.refund && transfer(c, refundSource, 'treasury', quote.refund, asset ? municipalRefundReason(asset.name, asset.id) : `Demolition refund road cell @${i}`) !== quote.refund) throw Error('Municipal refund invariant violated');
+  };
+  const refundMessage = `คืนเงินเข้าเมือง ${quote.refund / 100} เครดิต (80% ของเงินลงทุนที่เมืองจ่าย ${quote.paid / 100})${quote.unknown ? ' · ประวัติค่าใช้จ่ายเดิมไม่ครบ คืนเฉพาะส่วนที่มีหลักฐาน' : ''}`;
   if (treasurySpendable(c) < cost) return { ok: false, message: 'Need 20 credits for demolition.' };
   if (park) {
     payParkWages(c, park);
-    transfer(c, 'treasury', 'construction', cost, `Demolish park #${park.id}`);
+    refund();
     c.parks = c.parks.filter(p => p !== park);
-    c.lastEvent = `รื้อสวนสาธารณะ #${park.id} แล้ว · ค่ารื้อ 20 · หยุดค่าบำรุงของสวนนี้`;
+    c.lastEvent = `รื้อสวนสาธารณะ #${park.id} แล้ว · ${refundMessage} · หยุดค่าบำรุงของสวนนี้`;
     return { ok: true, message: c.lastEvent };
   }
   if (campus && c.education) {
-    payEducationWages(c, campus.id);
-    transfer(c, 'treasury', 'construction', cost, `Demolish campus #${campus.id}`);
+    if (!payEducationWages(c, campus.id)) return { ok: false, message: 'Need enough treasury cash to settle earned education wages before demolition; campus and money retained.' };
+    refund();
     withdrawCampus(c.education, campus.id);
-    c.lastEvent = `รื้อสถานศึกษา #${campus.id} แล้ว ผู้เรียนที่ยังไม่จบออกจากระบบ วุฒิที่ได้แล้วคงอยู่`;
+    c.lastEvent = `รื้อสถานศึกษา #${campus.id} แล้ว · ${refundMessage} · ผู้เรียนที่ยังไม่จบออกจากระบบ วุฒิที่ได้แล้วคงอยู่`;
     return { ok: true, message: c.lastEvent };
   }
   if (plant) {
-    transfer(c, 'treasury', 'construction', cost, `Demolish ${PLANT_NAMES[plant.kind]} #${plant.id}`);
+    refund();
     c.plants = c.plants.filter(p => p !== plant);
-    c.lastEvent = `${PLANT_NAMES[plant.kind]} #${plant.id} removed: the network loses ${plantSpec(plant).capacity} ${plant.kind} units; the farthest buildings go without first.`;
+    c.lastEvent = `${PLANT_NAMES[plant.kind]} #${plant.id} removed · ${refundMessage}: the network loses ${plantSpec(plant).capacity} ${plant.kind} units; the farthest buildings go without first.`;
     return { ok: true, message: c.lastEvent };
   }
   const closingFirms = b ? c.firms.filter(f => f.building === b.id) : [];
@@ -636,10 +646,13 @@ export function bulldoze(c: City, i: number): Result {
     for (const f of closing) closeFirm(c, f);
     c.buildings = c.buildings.filter(v => v.id !== b.id);
   }
+  const wasRoad = cell.road;
+  if (wasRoad) refund();
   forgetRoadTopology(c, i);
   cell.road = false; cell.zone = null; cell.building = null;
   const lostStops = reconcileBusStops(c, SIZE);
   c.lastEvent = lostStops.length ? `Parcel cleared. Bus stop #${lostStops.join(', #')} removed with the road.` : 'Parcel cleared. Disconnected buildings stop recruiting, trading and growing.';
+  if (wasRoad) c.lastEvent += ` · ${refundMessage}`;
   return { ok: true, message: c.lastEvent };
 }
 
@@ -1575,23 +1588,23 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       // A claim is settled once per wallet. Mid-month settlements only occur on
       // demolition; accepting one on a live park would leave already-paid days owed.
       const payment = `${id}:${e.tick}:${e.to}`;
-      if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !historicalLedger.some(row => row.tick === e.tick && row.reason === `Demolish park #${id}`)) fail();
+      if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !historicalLedger.some(row => row.tick === e.tick && (row.reason === `Demolish park #${id}` || row.reason === `Demolition refund park #${id}`))) fail();
       parkPayments.add(payment);
       const paid = (parkPaid.get(key) ?? 0) + e.amount;
       if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * PARK_STAFF.dailyWage) fail();
       parkPaid.set(key, paid);
       continue;
     }
-    const event = /^(Build|Demolish|Monthly park upkeep) (?:park )?#([1-9]\d*)$/.exec(e.reason);
+    const event = /^(Build|Demolish|Demolition refund|Monthly park upkeep) (?:park )?#([1-9]\d*)$/.exec(e.reason);
     if (!event) continue;
     const id = Number(event[2]);
-    if (!withParks || !int(id, 1) || id >= c.nextId || e.from !== 'treasury') fail();
+    if (!withParks || !int(id, 1) || id >= c.nextId || e.from !== (event[1] === 'Demolition refund' ? 'construction' : 'treasury')) fail();
     if (event[1] === 'Build') {
       if (parkBuilds.has(id) || e.to !== 'construction' || e.amount !== PARK.cost) fail();
       parkBuilds.set(id, e.tick);
     } else {
       if (!parkBuilds.has(id) || parkRemoved.has(id) || e.tick < parkBuilds.get(id)!) fail();
-      if (event[1] === 'Demolish') { if (e.to !== 'construction' || e.amount !== 2_000) fail(); parkRemoved.add(id); }
+      if (event[1] === 'Demolish' || event[1] === 'Demolition refund') { if (event[1] === 'Demolish' ? e.to !== 'construction' || e.amount !== 2_000 : e.to !== 'treasury' || e.amount !== PARK.cost * 4 / 5) fail(); parkRemoved.add(id); }
       else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > PARK.upkeep || parkBills.has(key)) fail(); parkBills.add(key); }
     }
   }
@@ -1710,6 +1723,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   const reconciled: Record<string, number> = Object.fromEntries(Object.keys(c.accounts).map(k => [k, c.history?.accounts[k]??0]));
   for (const e of c.ledger) { reconciled[e.from] -= e.amount; reconciled[e.to] += e.amount; }
   if (Object.entries(c.accounts).some(([key, value]) => reconciled[key] !== value)) fail();
+  validateMunicipalRefunds(c);
   validateAgriculture(c, extendedFactories, withFarmLevels);
   if (typed) validateTypes(c);
   return c;
@@ -1776,6 +1790,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
     const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap);
     assertEducationInvariants(education, city.households);
     city.education = education;
+    validateMunicipalRefunds(city);
     if (city.households.some(h => householdWorkerCount(city, h.id) > h.workforce)) trimWorkAssignments(city);
     if (city.households.some(h => householdWorkerCount(city, h.id) > h.workforce)) throw new Error('Education and jobs exceed household workforce');
     // Reuse the validated values while preserving the v22 envelope key order.

@@ -291,7 +291,7 @@ try {
   await button('[data-camera="zoom-out"]'); await button('[data-camera="zoom-out"]');
   await button('[data-tool="bulldoze"]'); await cell(parkCell);
   const removedPark = await state(); assert.equal(removedPark.parks.length, beforePark.parks.length);
-  assert.equal(removedPark.accounts.treasury, withPark.accounts.treasury - 2000);
+  assert.equal(removedPark.accounts.treasury, withPark.accounts.treasury + Math.floor(PARK.cost * .8), 'Municipal demolition refunds 80% without a fee');
   await cell(parkCell); assert.deepEqual((await state()).accounts, removedPark.accounts);
   await enterScenario(parkHead.raw); assert.deepEqual(await state(), withPark);
   await closeInspector(); await button('[data-tool="select"]');

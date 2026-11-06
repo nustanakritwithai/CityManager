@@ -52,7 +52,7 @@ export function dailySeries(city: City, days = 30): DailySeries {
     if (e.to === 'treasury') s.income[at(e.tick)] += e.amount;
     if (e.from === 'treasury') s.expense[at(e.tick)] += e.amount;
     net[at(e.tick)] += delta;
-    const road = e.reason.match(/^Build (\d+) road cells$/);
+    const road = e.reason.match(/^Build (\d+) road cells$/) ?? (/^Build road cell @\d+$/.test(e.reason) ? ['', '1'] : null);
     if (road) s.markers.push({ tick: e.tick, kind: 'road', icon: 'road', text: `ต่อถนน ${road[1]} ช่อง` });
     if (e.reason === 'Firm liquidation') s.markers.push({ tick: e.tick, kind: 'closure', icon: 'bulldoze', text: 'ปิดกิจการและรื้ออาคาร' });
   }

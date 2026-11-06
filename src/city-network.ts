@@ -176,7 +176,7 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
   const out: NetEvent[] = [], wages = new Map<number, number>(), taxes = new Map<number, number>();
   const add = (map: Map<number, number>, tick: number, amount: number) => map.set(tick, (map.get(tick) ?? 0) + amount);
   for (let i = Math.max(0,before.ledger-(city.history?.moneyCount??0)); i < city.ledger.length; i++) {
-    const e = city.ledger[i], road = /^Build (\d+) road cells$/.exec(e.reason);
+    const e = city.ledger[i], road = /^Build (\d+) road cells$/.exec(e.reason) ?? (/^Build road cell @\d+$/.test(e.reason) ? ['', '1'] : null);
     if (road) out.push({ node: 'roads', icon: 'road', text: `สร้างถนน ${road[1]} ช่อง · ${baht(e.amount)}`, tick: e.tick });
     else if (e.reason === 'New household arrival savings') out.push({ node: 'households', icon: 'people', text: 'ครัวเรือนใหม่ย้ายเข้า', tick: e.tick });
     else if ((e.reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(e.reason))) add(wages, e.tick, e.amount);

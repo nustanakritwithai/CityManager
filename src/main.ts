@@ -1,3 +1,4 @@
+import { demolitionQuote } from './sim.ts';
 import { formatCellCoordinate } from './expanded-map-geometry.ts';
 import {installRailManagement} from './rail/management.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
@@ -176,7 +177,7 @@ const help: Record<string, string> = {
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
-  bulldoze: 'โหมดรื้อถอน · แตะสวน สถานศึกษา ถนน อาคาร หรือโรงน้ำไฟเพื่อรื้อ ฿20 · ป้ายและอู่รถเมล์จะถามก่อนลบ · ประตูเชื่อมภายนอกรื้อไม่ได้ · ลูกศร/V/Esc เพื่อออก',
+  bulldoze: 'รื้อถอน · คืน 80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่ายและมีหลักฐาน · อาคารเอกชนไม่คืนเงินและค่ารื้อ ฿20 · ดูยอดที่การ์ดสถานที่ก่อนรื้อ · ป้ายและอู่รถเมล์จะถามก่อนลบ · V/Esc เพื่อออก',
   'bus-depot': 'อู่รถเมล์ · แตะแปลงว่างที่ติดถนนเชื่อมประตูเมือง · รอบแรกไม่มีค่าใช้จ่าย',
   'bus-stop': 'ป้ายรถเมล์ · แตะถนนตรงที่ไม่ใช่ทางแยกหรือหัวมุม · ห่างป้ายอื่นอย่างน้อย 2 ช่อง · เลือกฝั่งให้ตรงทิศรถ',
   'bus-line': 'สายรถเมล์ · แตะป้ายตามลำดับ · ป้ายแรกซ้ำเป็นป้ายสุดท้ายคือสายวงกลม · กดสร้างสาย',
@@ -429,6 +430,13 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
     if (rail) { $('#selection-title').textContent = `${rail.title} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = rail.subtitle; railCard = rail.card; }
     const bus = rail ? null : busController?.placeCard(cellIndex);
     if (bus) { $('#selection-title').textContent = `${bus.title} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = bus.subtitle; busCard = bus.card; }
+    if (cellIndex !== GATEWAY && (cell.road || building || plant || park || campus)) {
+      const demolition = demolitionQuote(city, cellIndex);
+      metrics.push(metric('เงินคืนเมื่อรื้อ', money(demolition.refund), true,
+        `80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่าย ${money(demolition.paid)} · ค่ารื้อ ${money(demolition.fee)}`, demolition.refund));
+      if (demolition.unknown) reasons.push('ประวัติเก่าระบุเงินที่เมืองจ่ายให้สิ่งนี้ไม่ครบ จึงคืนเฉพาะยอดที่มีหลักฐาน ไม่ใช้ราคาปัจจุบันแทน');
+      if (building) reasons.push('อาคารนี้เอกชนเป็นผู้จ่าย เมืองจึงไม่มีเงินก่อสร้างคืน เงินและภาระของกิจการสะสางตามเดิม');
+    }
     const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
