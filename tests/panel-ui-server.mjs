@@ -39,7 +39,9 @@ export async function saveAndReloadPanel(server,expected,{send,evaluate,button,u
  const before=server.active,cursor=server.writes.length;await button('#save');
  const end=Date.now()+30000;while(Date.now()<end&&!(server.active?.raw===raw&&server.active.revision>before.revision))await new Promise(r=>setTimeout(r,80));
  await server.settle();assertPanelSaveChain(before,server.active,server.writes.slice(cursor),raw,server.writes.slice(0,cursor));
- await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')");
+ // A queued clean-state verification can replace the manual-write label after
+ // its exact new-revision ACK above. Pending, failed or older bytes are not settled.
+ await until("(()=>{const text=document.querySelector('#autosave-status')?.textContent;return ['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน'].some(label=>text?.startsWith(label))&&!document.querySelector('#save-failure-banner:not([hidden])')})()");
  await server.assertNoCityWrites(evaluate);const acknowledged=server.active;
  server.allowNavigation();await send('Page.reload',{ignoreCache:true});await server.enter({send,evaluate,button,until});
  assert.equal(server.active.raw,raw);assert.equal(server.active.cityId,acknowledged.cityId);

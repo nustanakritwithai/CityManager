@@ -10,7 +10,7 @@ import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } fro
 import { commercialVisualPlan } from './commercial-visuals.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
-import { utilityService, type UtilityKind } from './utilities.ts';
+import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
 import { CityAssets, disconnectedBuildingMaterial } from './asset-models.ts';
@@ -432,7 +432,7 @@ export class CityView {
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
       const campus = city.education?.campuses.find(item => item.cell === i);
       const stand = this.taxiDepots.find(d => d.cell === i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -482,7 +482,7 @@ export class CityView {
       } else if (municipalPark) {
         this.municipalPark(tile);
       } else if (plant) {
-        this.plant(tile, plant.kind, plantOn);
+        this.plant(tile, plant.kind, plantOn, plantLevel(plant));
       } else if (stand) {
         this.taxiStand(tile, stand.level, stand.open);
       } else if (park) {
@@ -611,8 +611,10 @@ export class CityView {
   }
 
   /** A city water pump or power plant: simple massing in its utility colour; it glows while it supplies the network. */
-  private plant(tile: Entity, kind: UtilityKind, on: boolean) {
+  private plant(tile: Entity, kind: UtilityKind, on: boolean, level: number) {
     this.box(tile, 0, .06, 0, 1.78, .08, 1.78, '#9ea6a0', false);
+    // Additional utility modules stay inside this parcel; count shows levels 2/3.
+    for (let n = 1; n < level; n++) this.box(tile, -.65 + (n - 1) * .42, .3, -.72, .32, .4, .28, kind === 'power' ? '#d9b64b' : '#69acc7');
     if (kind === 'power') {
       this.box(tile, -.25, .42, .1, 1.05, .66, .95, '#c9ccc4');
       this.box(tile, -.25, .8, .1, 1.12, .1, 1.02, '#5b6470');

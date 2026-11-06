@@ -23,7 +23,7 @@ import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from
 import { EDUCATION_COST, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
-import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
+import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, plantLevel, plantLevelSpec, plantSpec, plantUpgradeReason, type PlantLevel, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
@@ -39,7 +39,7 @@ export const MONTH = 30;
 export const ROAD_COST = 5_000;
 /** Monthly contracted sanitation and general municipal services, per resident (satang).
  * These are abstract operating costs, not a simulated service-quality system. */
-export const MUNICIPAL_SERVICE_PER_RESIDENT = 5_000;
+export const MUNICIPAL_SERVICE_PER_RESIDENT = 3_000;
 export const WAGES = { I: 60_000, C: 42_000, F: 42_000 } as const;
 export type Zone = 'R' | 'C' | 'I' | 'F' | null;
 export type Cell = { road: boolean; zone: Zone; building: number | null };
@@ -616,7 +616,7 @@ export function bulldoze(c: City, i: number): Result {
   if (plant) {
     transfer(c, 'treasury', 'construction', cost, `Demolish ${PLANT_NAMES[plant.kind]} #${plant.id}`);
     c.plants = c.plants.filter(p => p !== plant);
-    c.lastEvent = `${PLANT_NAMES[plant.kind]} #${plant.id} removed: the network loses ${PLANTS[plant.kind].capacity} ${plant.kind} units; the farthest buildings go without first.`;
+    c.lastEvent = `${PLANT_NAMES[plant.kind]} #${plant.id} removed: the network loses ${plantSpec(plant).capacity} ${plant.kind} units; the farthest buildings go without first.`;
     return { ok: true, message: c.lastEvent };
   }
   const closingFirms = b ? c.firms.filter(f => f.building === b.id) : [];
@@ -659,6 +659,33 @@ export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
   transfer(c, 'treasury', 'construction', plant.cost, `Build ${PLANT_NAMES[kind]} #${id}`);
   cell.zone = null; c.plants.push({ id, cell: i, kind, tick: c.tick });
   c.lastEvent = `${PLANT_NAMES[kind]} #${id} built: +${plant.capacity} ${kind} units along connected roads; upkeep ${plant.upkeep / 100} credits/month.`;
+  return { ok: true, message: c.lastEvent };
+}
+
+/** Read-only quote and the action share the same treasury and road checks. */
+export function plantUpgradeStatus(c: City, id: number) {
+  const plant = c.plants.find(p => p.id === id);
+  if (!plant) return null;
+  const level = plantLevel(plant), nextLevel = level < 3 ? level + 1 as PlantLevel : null;
+  const current = plantSpec(plant), next = nextLevel ? plantLevelSpec(plant.kind, nextLevel) : null;
+  const available = treasurySpendable(c), online = access(c, plant.cell);
+  const reasons: string[] = [];
+  if (!next) reasons.push('ถึงระดับสูงสุดแล้ว');
+  else {
+    if (!online) reasons.push('ต่อถนนข้างโรงให้เชื่อมถึงประตูเมืองก่อนอัปเกรด');
+    if (available < next.upgradeCost) reasons.push(`เงินคลังใช้จ่ายได้ ${available / 100} ฿ ต้องใช้ ${next.upgradeCost / 100} ฿`);
+  }
+  return { level, nextLevel, current, next, available, online, reasons };
+}
+/** Expected level prevents a stale/repeated command from buying another level. */
+export function upgradePlant(c: City, id: number, expectedLevel: PlantLevel): Result {
+  const plant = c.plants.find(p => p.id === id), quote = plantUpgradeStatus(c, id);
+  if (!plant || !quote) return { ok: false, message: 'ไม่พบโรงน้ำหรือไฟแห่งนี้แล้ว' };
+  if (quote.level !== expectedLevel) return { ok: false, message: 'ระดับโรงเปลี่ยนไปแล้ว ตรวจสอบราคาใหม่ก่อนอัปเกรด' };
+  if (!quote.next || !quote.nextLevel || quote.reasons.length) return { ok: false, message: quote.reasons.join(' · ') };
+  transfer(c, 'treasury', 'construction', quote.next.upgradeCost, plantUpgradeReason(plant.kind, id, quote.nextLevel));
+  plant.level = quote.nextLevel as 2 | 3;
+  c.lastEvent = `${plant.kind === 'power' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${id} อัปเกรดเป็นระดับ ${plant.level} แล้ว · กำลังผลิต ${quote.next.capacity} หน่วย · ค่าบำรุง ${quote.next.upkeep / 100} ฿/เดือน`;
   return { ok: true, message: c.lastEvent };
 }
 
@@ -1048,7 +1075,7 @@ function settleMonth(c: City) {
   }
   // The city buys what the gateway delivered and keeps its plants running.
   for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
-  for (const p of c.plants) transfer(c, 'treasury', 'upkeep', PLANTS[p.kind].upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
+  for (const p of c.plants) transfer(c, 'treasury', 'upkeep', plantSpec(p).upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
   for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
   // Services scale with the people actually present at settlement, not empty housing.
   // As with other upkeep, only available (non-payroll-reserved) cash is paid; no debt
@@ -1340,8 +1367,8 @@ function reviewGrows(c: City, b: Building): boolean | null {
 /** Thai blocker naming each short utility with needed vs spare units and what to build. */
 export function spareShortfall(extra: Need, spare: Need): string | null {
   const parts: string[] = [];
-  if (spare.power < extra.power) parts.push(`ไฟฟ้าต้องเพิ่ม ${extra.power} หน่วย แต่สำรองเหลือ ${spare.power} — สร้างโรงไฟฟ้าเพิ่ม`);
-  if (spare.water < extra.water) parts.push(`น้ำต้องเพิ่ม ${extra.water} หน่วย แต่สำรองเหลือ ${spare.water} — สร้างปั๊มน้ำเพิ่ม`);
+  if (spare.power < extra.power) parts.push(`ไฟฟ้าต้องเพิ่ม ${extra.power} หน่วย แต่สำรองเหลือ ${spare.power} — สร้างโรงไฟฟ้าเพิ่ม หรืออัปเกรดโรงเดิม`);
+  if (spare.water < extra.water) parts.push(`น้ำต้องเพิ่ม ${extra.water} หน่วย แต่สำรองเหลือ ${spare.water} — สร้างปั๊มน้ำเพิ่ม หรืออัปเกรดโรงเดิม`);
   return parts.length ? parts.join(' · ') : null;
 }
 /** Buildings otherwise ready by age, road and service whose next level needs more spare water or power than the city has. */
@@ -1500,10 +1527,21 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     ids.add(f.id);
   }
   for (const p of version === 9 ? c.plants : []) {
-    if (!p || Object.keys(p).length !== 4 || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell, c) || !UTILITY_KINDS.includes(p.kind) || !int(p.tick) || p.tick > c.tick) fail();
+    if (!p || Object.keys(p).sort().join() !== (p.level === undefined ? 'cell,id,kind,tick' : 'cell,id,kind,level,tick') || (p.level !== undefined && p.level !== 2 && p.level !== 3) || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell, c) || !UTILITY_KINDS.includes(p.kind) || !int(p.tick) || p.tick > c.tick) fail();
     const cell = c.cells[p.cell], built = historicalLedger.filter(e => e.reason === `Build ${PLANT_NAMES[p.kind]} #${p.id}`);
     if (cell.road || cell.zone !== null || cell.building !== null || c.plants.some(q => q !== p && q.cell === p.cell)) fail();
     if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PLANTS[p.kind].cost || built[0].tick !== p.tick) fail();
+    let recordedLevel: PlantLevel = 1;
+    let builtSeen = false;
+    for (const e of historicalLedger) {
+      if (e === built[0]) builtSeen = true;
+      if (e.reason.startsWith(`Upgrade ${PLANT_NAMES[p.kind]} #${p.id} `)) {
+        const next = recordedLevel + 1 as PlantLevel;
+        if (!builtSeen || next > 3 || e.reason !== plantUpgradeReason(p.kind, p.id, next) || e.from !== 'treasury' || e.to !== 'construction' || e.amount !== plantLevelSpec(p.kind, next).upgradeCost || e.tick < p.tick) fail();
+        recordedLevel = next;
+      }
+    }
+    if (recordedLevel !== plantLevel(p) || historicalLedger.some(e => e.reason === `Demolish ${PLANT_NAMES[p.kind]} #${p.id}`)) fail();
     ids.add(p.id);
   }
   for (const p of c.parks) {

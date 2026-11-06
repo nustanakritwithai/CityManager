@@ -16,6 +16,8 @@ export const businessCapacityBackupKeys = () => Array.from({ length: 8 }, (_, i)
 export const EDUCATION_BACKUP_KEY = 'citymanager.backup.before-education';
 export const TAXI_BACKUP_KEY = 'citymanager.backup.before-taxi';
 export const taxiBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${TAXI_BACKUP_KEY}.${i}` : TAXI_BACKUP_KEY);
+export const PLANT_UPGRADE_BACKUP_KEY = 'citymanager.backup.before-plant-upgrades';
+export const plantUpgradeBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${PLANT_UPGRADE_BACKUP_KEY}.${i}` : PLANT_UPGRADE_BACKUP_KEY);
 export const BUS_BACKUP_KEY = 'citymanager.backup.before-bus';
 export const busBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${BUS_BACKUP_KEY}.${i}` : BUS_BACKUP_KEY);
 export const educationBackupKeys = () => Array.from({ length: 8 }, (_, i) => i ? `${EDUCATION_BACKUP_KEY}.${i}` : EDUCATION_BACKUP_KEY);
@@ -81,7 +83,7 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
   else if (source === 'household') keys = [HOUSEHOLD_SAVE_KEY];
   else if (source === 'legacy') keys = [LEGACY_SAVE_KEY];
   else {
-    keys = [PRE_AUTOSAVE_BACKUP,...saveConflictBackupKeys(storage),...businessCapacityBackupKeys(), ...educationBackupKeys(), ...taxiBackupKeys(), ...busBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
+    keys = [PRE_AUTOSAVE_BACKUP,...saveConflictBackupKeys(storage),...businessCapacityBackupKeys(), ...educationBackupKeys(), ...taxiBackupKeys(), ...busBackupKeys(), ...plantUpgradeBackupKeys(), ...populationBackupKeys(), ...roadTopologyBackupKeys(), ...backupKeys(6), ...backupKeys(5), ...backupKeys(4), ...backupKeys(3), ...backupKeys(2), ...backupKeys(1), CHAIN2_BACKUP_KEY, CHAIN3_BACKUP_KEY, FARM_CHOICE_BACKUP_KEY, ...foodBackupKeys(), ...factoryBackupKeys(), ...parksBackupKeys(), ...workforceBackupKeys(), ...housingBackupKeys(), ...factoryProgressBackupKeys(), ...retailBackupKeys(), ...farmLevelBackupKeys()];
     const latest = storage.getItem(LATEST_BACKUP_KEY);
     // Old installations have no pointer. Only accept our bounded backup keys;
     // never let a corrupt metadata value redirect recovery to another slot.
@@ -92,6 +94,8 @@ export function readStoredCity(storage: Reader, source: SaveSource = 'current'):
 }
 export function saveStoredCity(storage: Writer, raw: string, importedLegacy: string | null): { backup: string | null } {
   let parsed = JSON.parse(raw);
+  const hasPlantUpgrades = Array.isArray(parsed?.plants) && parsed.plants.some((p: {level?: number}) => p.level !== undefined);
+  if (hasPlantUpgrades) deserializeParkSession(raw);
   if (parsed?.version === 25) {
     deserializeParkSession(raw);
     const rules: Record<number,string> = {19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18',24:'chain-19'};
@@ -141,6 +145,19 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   const current = storage.getItem(SAVE_KEY);
   if (current !== null) {
     let version: unknown; try { version = JSON.parse(current)?.version; } catch { version = undefined; }
+    // Optional plant levels require the new runtime. Retain the last level-one bytes before replacing them.
+    let currentPlantUpgrades = false;
+    try { currentPlantUpgrades = JSON.parse(current)?.plants?.some((p: {level?: number}) => p.level !== undefined) ?? false; } catch { /* Preserve opaque original bytes too. */ }
+    if (hasPlantUpgrades && !currentPlantUpgrades) {
+      const keys = plantUpgradeBackupKeys();
+      let slot = keys.find(key => { try { return decodeSaveCopy(storage.getItem(key)) === current; } catch { return false; } });
+      if (!slot) {
+        slot = keys.find(key => storage.getItem(key) === null);
+        if (!slot) throw new Error('Plant upgrade backups full; original save preserved');
+        storage.setItem(slot, encodeSaveCopy(current));
+      }
+      storage.setItem(LATEST_BACKUP_KEY, slot);
+    }
     // First save that carries taxi data: keep the last taxi-free save once, untouched.
     let currentTaxi = false; try { currentTaxi = JSON.parse(current)?.taxi !== undefined; } catch { currentTaxi = false; }
     // Lossless LZ copy (readStoredCity decodes it): a raw full copy here exceeded localStorage quota on large cities (#153).

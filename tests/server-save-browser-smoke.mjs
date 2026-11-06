@@ -17,11 +17,23 @@ let landEvidence={status:'not-run'};
 let trafficGapEvidence={status:'not-run',reason:'Bumper-gap acceptance is opt-in for the exact traffic transition.'};
 let railEvidence={status:'not-run',reason:'Rail UI acceptance is opt-in for the exact rail transition.'};
 let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
-const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],saveNetwork:[],server:null};
+const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],saveNetwork:[],renderers:[],cdp:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
 const runLostAckNextSave=env=>env.CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE==='1';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Match the existing Windows native-input smokes: let Edge choose its graphics
+// backend instead of forcing the cross-platform SwiftShader implementation.
+// The fallback permission remains; Linux keeps its exact existing flags.
+const graphicsArgs=(platform=process.platform)=>platform==='win32'?['--enable-unsafe-swiftshader']:['--use-angle=swiftshader','--enable-unsafe-swiftshader'];
+function rendererMetadata(value){
+ const v=value&&typeof value==='object'?value:{};
+ const text=key=>typeof v[key]==='string'?v[key].slice(0,512):null;
+ const bool=key=>typeof v[key]==='boolean'?v[key]:null;
+ const number=key=>Number.isFinite(v[key])?v[key]:null;
+ return {renderer:text('renderer'),quality:text('quality'),requestedQuality:text('requestedQuality'),shadows:bool('shadows'),postProcessing:bool('postProcessing'),traffic:bool('traffic'),paused:bool('paused'),width:number('width'),height:number('height'),visibility:text('visibility'),contextLosses:number('contextLosses')};
+}
+function rememberCdp(log,event){log.push(event);if(log.length>80)log.splice(0,log.length-80);}
 // A queued automatic check can truthfully replace the manual-write label after
 // its ACK. Neither pending work nor acknowledgement of older bytes is settled.
 function acknowledgedSaveUi(text,failureVisible){
@@ -119,6 +131,15 @@ function fixtureService(){
  return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0,traceSave:false,postAudit:[]};
 }
 async function selfTest(){
+ assert.deepEqual(graphicsArgs('win32'),['--enable-unsafe-swiftshader'],'Windows uses the browser default backend, with the existing software fallback permission');
+ assert.deepEqual(graphicsArgs('linux'),['--use-angle=swiftshader','--enable-unsafe-swiftshader'],'Linux graphics arguments stay unchanged');
+ const renderer={renderer:'ANGLE test renderer',quality:'low',requestedQuality:'auto',shadows:false,postProcessing:false,traffic:true,paused:true,width:390,height:844,visibility:'visible',contextLosses:0};
+ assert.deepEqual(rendererMetadata({...renderer,raw:'must not be retained',cookies:'must not be retained'}),renderer,'Only renderer and viewport metadata is retained');
+ assert.equal(rendererMetadata({renderer:'x'.repeat(600)}).renderer.length,512,'Renderer text is bounded');
+ assert.ok(Object.values(rendererMetadata(null)).every(value=>value===null));
+ assert.equal(rendererMetadata({width:Infinity,paused:'false'}).width,null);assert.equal(rendererMetadata({width:Infinity,paused:'false'}).paused,null);
+ const telemetry=[];for(let i=0;i<100;i++)rememberCdp(telemetry,{id:i,method:'Runtime.evaluate',status:i===99?'timeout':'ok',durationMs:i});
+ assert.equal(telemetry.length,80);assert.equal(telemetry[0].id,20);assert.equal(telemetry.at(-1).status,'timeout','Bounded telemetry preserves the latest failure');
  for(const label of ['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน']){
   assert.equal(acknowledgedSaveUi(label+' 12:00:00',false),true);assert.equal(acknowledgedSaveUi(label,true),false);
  }
@@ -247,7 +268,8 @@ async function run(){
   const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/'+(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'?'?bus=1':'');
   profile=await mkdtemp(resolve(tmpdir(),'city-server-save-smoke-'));
   const browser=process.env.CITYMANAGER_BROWSER||(process.platform==='win32'?'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe':'google-chrome');
-  child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
+  const graphics=graphicsArgs();diagnostics.browserLaunch={platform:process.platform,graphicsArgs:graphics,backendSelection:process.platform==='win32'?'browser-default':'forced-swiftshader'};
+  child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling',...graphics,'--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
   let launchError;child.on('error',e=>{launchError=e;});let debugPort;
   for(let i=0;i<100&&!debugPort;i++){if(launchError)throw launchError;if(child.exitCode!==null)throw Error(`Browser exited ${child.exitCode}; no acceptance result`);try{debugPort=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);}catch{}await sleep(100);}
   assert.ok(debugPort,'Browser unavailable; acceptance NOT passed');
@@ -268,8 +290,17 @@ async function run(){
    }
    if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(Object.assign(Error(JSON.stringify(m.error)),{cdpError:m.error})):p?.resolve(m.result);}};
   await new Promise((ok,bad)=>{ws.onopen=ok;ws.onerror=bad;});
-  const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Object.assign(Error(`CDP timeout: ${method}; phase=${diagnostics.phase}; expression=${diagnostics.lastExpression}`),{cdpTimeoutMethod:method}));},30_000);pending.set(n,{resolve:v=>{clearTimeout(t);resolve(v);},reject:e=>{clearTimeout(t);reject(e);}});ws.send(JSON.stringify({id:n,method,params}));});
+  const send=(method,params={})=>new Promise((resolve,reject)=>{
+   const n=++id,started=performance.now(),phase=diagnostics.phase,expression=method==='Runtime.evaluate'?String(params.expression??'').slice(0,240):undefined;let finished=false;
+   const record=status=>{if(finished)return;finished=true;rememberCdp(diagnostics.cdp,{id:n,method,phase,...(expression===undefined?{}:{expression}),status,durationMs:Math.round(performance.now()-started)});};
+   const t=setTimeout(()=>{pending.delete(n);record('timeout');reject(Object.assign(Error(`CDP timeout: ${method}; phase=${phase}; expression=${expression??diagnostics.lastExpression}`),{cdpTimeoutMethod:method}));},30_000);
+   pending.set(n,{resolve:v=>{clearTimeout(t);record('ok');resolve(v);},reject:e=>{clearTimeout(t);record('error');reject(e);}});ws.send(JSON.stringify({id:n,method,params}));
+  });
   const evaluate=async expression=>{if(unexpectedDialog)throw unexpectedDialog;diagnostics.lastExpression=expression.slice(0,240);const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
+  const recordRenderer=async phase=>{
+   const value=await evaluate("(()=>{const a=window.cityManager?.atmosphere();return {renderer:a?.renderer,quality:a?.quality,requestedQuality:a?.settings.quality,shadows:a?.shadows,postProcessing:a?.postProcessing,traffic:a?.settings.traffic,paused:window.cityManager?.parks().paused,width:innerWidth,height:innerHeight,visibility:document.visibilityState,contextLosses:window.__contextLosses}})()");
+   const evidence={phase,...rendererMetadata(value)};diagnostics.renderers.push(evidence);if(diagnostics.renderers.length>16)diagnostics.renderers.shift();console.log('Renderer evidence',JSON.stringify(evidence));
+  };
   const until=async(fn,label,ms=90_000)=>{diagnostics.phase=label;console.log('Acceptance phase:',label);const start=Date.now();while(Date.now()-start<ms){if(await fn())return;await sleep(100);}throw Error(`Timeout: ${label}`);};
   await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Inspector.enable');diagnostics.browserVersion=await send('Browser.getVersion');
   await send('Network.setCookie',{name:'cm_session',value:COOKIE,url:origin,httpOnly:true,sameSite:'Strict'});await send('Network.setCookie',{name:'cm_csrf',value:CSRF,url:origin,sameSite:'Strict'});
@@ -286,7 +317,7 @@ async function run(){
   const click=selector=>{diagnostics.phase=`click ${selector}`;return evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
   const entryPredicate=()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
   const reloadEntryPredicate=()=>reloadEntryRead(entryPredicate,error=>{diagnostics.navigationRetries.push({phase:diagnostics.phase,...error});console.log('Post-reload entry context retry',JSON.stringify(error));});
-  const enter=async({afterReload=false}={})=>{await until(afterReload?reloadEntryPredicate:entryPredicate,'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');};
+  const enter=async({afterReload=false}={})=>{await until(afterReload?reloadEntryPredicate:entryPredicate,'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');await recordRenderer(afterReload?'reloaded server city':'initial server city');};
   const clean=async()=>assert.deepEqual(await evaluate('window.__cityWrites'),[],'browser city writes prohibited');
   const failed=()=>evaluate("!!document.querySelector('#save-failure-banner:not([hidden])')");
   const settled=(label='acknowledged save UI')=>until(async()=>{
@@ -384,11 +415,13 @@ async function run(){
   assert.equal(await evaluate(`!!document.querySelector('#save-failure-export,#export,#import,[download],input[type=file]')`),false,'no browser city export or import controls');
   for(const [name,width,height,mobile] of [['desktop',1280,800,false],['mobile',390,844,true]]){
    await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});await send('Emulation.setTouchEmulationEnabled',{enabled:mobile});
+   await recordRenderer('retry viewport '+name);
    f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure '+name);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
    if(process.env.CITYMANAGER_PR182_CHECKS==='1')await capture('pr182-banner-'+name);
    const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await pressRetry(mobile);await until(async()=>{diagnostics.retryBanner={name,initialRevision:rev,headRevision:f.state.active.revision,fixtureAudit:structuredClone(f.postAudit),clicks:await evaluate('window.__saveClickTrace')};return f.state.active.revision>rev;},'banner retry acknowledgement '+name);await settled();assert.deepEqual(f.posts[start+1],pendingCommand,'exact uncertain command retry');await clean();
   }
   await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Emulation.clearDeviceMetricsOverride');
+  await recordRenderer('restored desktop viewport');
   // Commit succeeded but its ACK was lost. The banner must replay the original
   // key/body before trackedSave writes the current state as a new revision.
   // Explicitly excluded from this release's acceptance by the owner; keep it

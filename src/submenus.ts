@@ -3,7 +3,7 @@ import { iconElement } from './ui-icons.ts';
 import { GAME_VERSION } from './version.ts';
 import './submenus.css';
 import { FARM_MAX_LEVEL } from './agriculture.ts';
-import { MONTH, SIZE, MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, ROAD_COST, utilityStatus, type City } from './sim.ts';
+import { MONTH, SIZE, MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, ROAD_COST, MUNICIPAL_SERVICE_PER_RESIDENT, utilityStatus, type City } from './sim.ts';
 import { flowRows, cropFlowRows, walletGroups, formatMoney, type FlowKind, type FlowRow, type CropFlowRow } from './inspector-data.ts';
 
 const BASE = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
@@ -227,7 +227,7 @@ function setupRules() {
   const content = element('div', 'sm-content sm-rules'), grid = element('div', 'sm-rule-grid');
   content.append(intro('limits', 'รู้ขอบเขตก่อนวางแผน', 'สิ่งที่จำลองแล้ว สมมติฐานที่ใช้ และระบบที่ยังอยู่ในระยะถัดไป'));
   grid.append(
-    ruleCard('municipal-services', 'ค่าบริการพื้นฐานเมือง', 'ทุกสิ้นเดือนเมืองจ่ายค่าบริการพื้นฐาน เช่น เก็บขยะและดูแลความสะอาด 50 บาทต่อประชากรที่อยู่ในเมือง จ่ายเท่าที่คลังมีหลังกันค่าจ้าง ไม่มีหนี้ค้าง ระบบนี้ยังไม่จำลองคุณภาพบริการแยกต่างหาก'),
+    ruleCard('municipal-services', 'ค่าบริการพื้นฐานเมือง', `ทุกสิ้นเดือนเมืองจ่ายค่าบริการพื้นฐาน เช่น เก็บขยะและดูแลความสะอาด ${MUNICIPAL_SERVICE_PER_RESIDENT / 100} บาทต่อประชากรที่อยู่ในเมือง จ่ายเท่าที่คลังมีหลังกันค่าจ้าง ไม่มีหนี้ค้าง ระบบนี้ยังไม่จำลองคุณภาพบริการแยกต่างหาก`),
     ruleCard('taxi-economy', 'แท็กซี่และค่าโดยสาร', 'อู่แท็กซี่และการจราจรเป็นการจำลอง การรับส่งในภาพยังไม่ใช่ข้อมูลค่าโดยสารจริง จึงยังไม่เก็บค่าโดยสารเข้าคลัง การโหลดเซฟจะไม่หักยอดหรือแก้รายการค่าโดยสารเดิม'),
     ruleCard('calendar', 'วันและเงินเป็นจำนวนแน่นอน', `1 tick เท่ากับ 1 วัน มี ${MONTH} วันต่อเดือน ค่าจ้างสะสมตามวันที่ทำงานและจ่ายรายเดือน เช่นเดียวกับค่าเช่าและภาษี เงินคำนวณเป็นสตางค์จำนวนเต็ม`),
     ruleCard('utilities', 'น้ำและไฟตามถนนและกำลังผลิต', 'ประตูเมืองจ่ายน้ำและไฟตามสัญญาจำกัด เมืองสร้างโรงไฟฟ้าและโรงสูบน้ำริมถนนเพื่อเพิ่มกำลังผลิต น้ำไฟวิ่งไปตามถนนที่ต่อกัน ถ้าไม่พอ อาคารที่ไกลจากแหล่งจ่ายที่สุดจะหยุดงาน ผลิต และเติบโตก่อน ครัวเรือนและกิจการจ่ายค่าน้ำค่าไฟให้เมืองทุกเดือน เมืองจ่ายค่าโรงงานและค่าซื้อจากภายนอก', 'utilities'),
