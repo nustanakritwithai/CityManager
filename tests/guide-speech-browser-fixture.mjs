@@ -36,7 +36,8 @@ export async function checkGuideSpeechUI({ evaluate, press, until, key, send }) 
     await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: point.x, y: point.y }] });
     await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   };
-  await tap('#atmosphere-toggle'); await until('!document.querySelector("#atmosphere-menu").hidden'); await tap('#open-city-advice');
+  await tap('#hud-more'); await until('document.querySelector(".top-hud").dataset.more === "true"');
+  await tap('.hud-more-sky'); await until('!document.querySelector("#atmosphere-menu").hidden'); await tap('#open-city-advice');
   await until('!document.querySelector("#guide-card").hidden');
   const rect = await evaluate('(()=>{const r=document.querySelector("#guide-card").getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight}})()');
   assert.ok(rect.left >= 0 && rect.right <= rect.width + 1 && rect.top >= 0 && rect.bottom <= rect.height, 'Advice stays inside mobile-emulated viewport');
