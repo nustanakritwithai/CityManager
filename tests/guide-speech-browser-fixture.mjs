@@ -29,10 +29,11 @@ export async function checkGuideSpeechUI({ evaluate, press, until, key, send }) 
   await press('#guide-dismiss'); assert.equal(await evaluate('document.querySelector("#guide-card").hidden'), true);
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, screenWidth: 390, screenHeight: 844, deviceScaleFactor: 1, mobile: true });
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
-  await until('innerWidth === 390');
+  await until('innerWidth === 390 && innerHeight === 844 && document.documentElement.dataset.touchUi === "true" && document.querySelector("#city-canvas").clientWidth === 390');
+  await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   const tap = async selector => {
-    const point = await evaluate(`(() => { const e=document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({block:'nearest'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,hit:!!document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(${JSON.stringify(selector)})}; })()`);
-    assert.ok(point.hit, `Native touch target ${selector}`);
+    const point = await evaluate(`(() => { const e=document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({block:'nearest'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,touch:document.documentElement.dataset.touchUi,actual:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.id,hit:!!document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(${JSON.stringify(selector)})}; })()`);
+    assert.ok(point.hit && point.width > 0 && point.height > 0, `Native touch target ${selector}: ${JSON.stringify(point)}`);
     await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: point.x, y: point.y }] });
     await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   };
