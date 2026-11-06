@@ -1,7 +1,7 @@
 /**
  * Touch line panel and the stop/line composer. Buttons are at least 44px.
- * Live figures are read from trafficLayer.bus when that engine exists.
- * Boarding text arrives through subscribeBusEvents (PR #134). Nothing here drains.
+ * Live figures appear only when a reader is installed. With none, routes still show.
+ * Boarding text arrives through subscribeBusEvents. Nothing here drains.
  */
 import { cachedPanelModel, type BusPanelModel } from './player.ts';
 import { subscribeBusLive } from './live.ts';

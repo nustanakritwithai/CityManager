@@ -1,8 +1,8 @@
 /**
- * Read-only door onto the engine PR #132 keeps on `trafficLayer.bus`.
- * That object is missing unless the traffic model and `?bus=1` are both on.
- * Board/alight batches come from `subscribeBusEvents` in src/bus/frame.ts (PR #134).
- * `presentBuses` is the only `drainEvents` caller. This module never drains.
+ * Optional live rows. The player tools do not require an engine: with no reader
+ * the panel uses busLineRoutes only. #126 replaced the old traffic host, so this
+ * module does not touch TrafficLayer. Board/alight batches, when a later frame
+ * drains them, arrive through subscribeBusEvents. This module never drains.
  */
 import type { BusEvent, BusSnapshot } from './types.ts';
 
