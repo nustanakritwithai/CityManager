@@ -69,6 +69,8 @@ async function cell(index) {
   assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', 'campus is reachable on the map');
   if (mobile) await tap(p.x, p.y);
   else for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x:p.x, y:p.y, button:'left', clickCount:1 });
+  await until('document.querySelector("#inspector").dataset.open==="true" || !document.querySelector("#selection-actions").hidden');
+  if (await evaluate('!document.querySelector("#selection-actions").hidden')) await button('#selection-actions button:nth-of-type(2)');
 }
 async function shot(name) { stage = `Screenshot ${name}`; const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 75, captureBeyondViewport: false }); await writeFile(resolve(output, name + '.jpg'), Buffer.from(r.data, 'base64')); console.log(stage); }
 async function game() { if (await evaluate("document.querySelector('#inspector').dataset.open==='true'")) await button('#close-inspector'); await button('#toggle-game-menu'); }
