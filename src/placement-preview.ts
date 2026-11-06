@@ -7,7 +7,6 @@ import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, r
 import { EDUCATION_COST, educationPayroll } from './education.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
 import { MAX_PARKS, PARK, parkPayroll } from './parks.ts';
-import { FERTILITY_THRESHOLD } from './agriculture.ts';
 import { taxiEnabled } from './taxi/buildings.ts';
 import { sharedTaxiSession, taxiPlayTraffic } from './taxi/session.ts';
 
@@ -43,7 +42,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     const reason = taxiHere ? 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อน' : parkAt(city, hover) || plantAt(city, hover) ? 'มีสวนหรือโรงน้ำไฟอยู่ ต้องรื้อก่อน' : cell.road ? 'ถนนวางโซนไม่ได้'
       : cell.building !== null && cell.zone !== tool ? 'มีอาคารอื่นอยู่ ต้องรื้อก่อน'
       : null;
-    const label = reason ?? (cell.zone === tool ? `เป็นโซน${ZONE_NAMES[tool]}อยู่แล้ว` : `วางโซน${ZONE_NAMES[tool]} · ไม่เสียเงิน${tool === 'F' ? ` · ดิน ${fertility}%` : ''}`);
+    const label = reason ?? (cell.zone === tool ? `เป็นโซน${ZONE_NAMES[tool]}อยู่แล้ว` : `วางโซน${ZONE_NAMES[tool]} · ไม่เสียเงิน${tool === 'F' ? ` · วางได้ทุกสี · ดิน ${fertility}%` : ''}`);
     return { ok: !reason, cost: 0, label, cells: [{ cell: hover, ok: !reason }] };
   }
   if (tool === 'power' || tool === 'water') {
