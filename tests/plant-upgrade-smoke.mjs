@@ -20,7 +20,7 @@ const output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/p
 const appPort = 4397, debugPort = 9497, upstream = `http://127.0.0.1:${appPort}/CityManager/`;
 // Four complete native upgrade flows, save/reload and eight blocked-plant checks.
 // Hosted software rendering measured ~192s for one flow, including ~68s in PNG
-// capture. Budget the whole scope; individual CDP/predicate limits stay 30s.
+// capture. Predicates and input stay at 30s; software PNG readback gets 90s.
 const suiteTimeoutMs = 20 * 60_000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], screenshots = [], layouts = [], bursts = [], keyboardTraces = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
@@ -143,6 +143,8 @@ if (process.argv.includes('--preflight')) {
  // Exact failed Edge backing geometry: 373920 pixels gray243 +240480 white255.
  assert.throws(()=>pngEvidence(samplePng(960,640,(x,y)=>x<760&&y<492?[243,243,243]:[255,255,255])),/Blank/);
  assert.throws(()=>pngEvidence(Buffer.from('not PNG')));
+ assert.equal(commandTimeoutMs('Page.captureScreenshot'),90_000);
+ for(const method of ['Runtime.evaluate','Input.dispatchMouseEvent','Input.dispatchTouchEvent','Input.dispatchKeyEvent','Page.reload']) assert.equal(commandTimeoutMs(method),30_000,'Only PNG readback receives extra time');
  const captureTimeout=Object.assign(Error('capture timeout'),{cdpTimeoutMethod:'Page.captureScreenshot'});let calls=[],probes=0;const captureRecord={};
  const health={ready:true,contextLosses:0,width:960,height:640};const shot=await screenshotReadback(async(method,params)=>{calls.push(params);if(calls.length===1)throw captureTimeout;return {data:'real-result'};},async()=>{probes++;return health;},captureRecord);
  assert.equal(shot.data,'real-result');assert.equal(probes,2);assert.deepEqual(calls.map(p=>p.fromSurface),[true,true]);assert.deepEqual(calls[1].clip,{x:0,y:0,width:960,height:640,scale:1});assert.equal(captureRecord.mode,'surface-viewport');
@@ -178,13 +180,17 @@ if (process.argv.includes('--preflight')) {
   process.exit(0);
 }
 
+// A timed-out CDP readback is not cancelled in Edge. Allow slow software PNG
+// capture to finish before queuing the existing single bounded fallback.
+function commandTimeoutMs(method) { return method === 'Page.captureScreenshot' ? 90_000 : 30_000; }
+
 async function send(method, params = {}) {
   const id = ++sequence, started = performance.now();
   const metadata = { id, method, phase: diagnostics.phase, queuedAt: Date.now(), ...(method === 'Runtime.evaluate' ? { expression: String(params.expression ?? '').slice(0, 200) } : {}), ...(params.type ? { inputType: params.type } : {}) };
   const response = new Promise((yes, no) => {
     let finished = false;
     const record = status => { if (finished) return; finished = true; boundedPush(diagnostics.cdp, { ...metadata, status, durationMs: Math.round(performance.now() - started) }); };
-    const timer = setTimeout(() => { pending.delete(id); record('timeout'); no(Object.assign(Error(`CDP timeout: ${method}; phase=${metadata.phase}; expression=${metadata.expression ?? ''}`), { cdpTimeoutMethod: method })); }, 30_000);
+    const timer = setTimeout(() => { pending.delete(id); record('timeout'); no(Object.assign(Error(`CDP timeout: ${method}; phase=${metadata.phase}; expression=${metadata.expression ?? ''}`), { cdpTimeoutMethod: method })); }, commandTimeoutMs(method));
     pending.set(id, { metadata, yes: value => { clearTimeout(timer); record('ok'); yes(value); }, no: error => { clearTimeout(timer); record('error'); no(error); } });
   });
   ws.send(JSON.stringify({ id, method, params }));
