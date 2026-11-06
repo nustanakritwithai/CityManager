@@ -17,7 +17,7 @@ import { isPanelProviderRequest, panelProviderDenials } from './panel-network-de
 const output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/plant-upgrades');
 const appPort = 4397, debugPort = 9497, upstream = `http://127.0.0.1:${appPort}/CityManager/`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const checks = [], screenshots = [], layouts = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
+const checks = [], screenshots = [], layouts = [], bursts = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
 const processLogs = { app: '', browser: '' };
 let ws, sequence = 0, networkProbe, fixture, browser, app, touchInput = false;
 const pending = new Map();
@@ -47,7 +47,19 @@ if (process.argv.includes('--preflight')) {
   assert.deepEqual(deserialize(serialize(city)), city);
   for (const plant of disconnected.plants) assert.equal(plantUpgradeStatus(disconnected, plant.id).online, false);
   for (const plant of poor.plants) assert.ok(plantUpgradeStatus(poor, plant.id).reasons.length);
-  console.log(JSON.stringify({ status: 'fixture-preflight-passed', browser: 'not-run', plants: city.plants.map(plant => ({ kind: plant.kind, level: plantLevel(plant), cell: plant.cell })), treasuryAfterUpgrades: city.accounts.treasury }));
+  for (const touch of [false, true]) {
+    const commands = nativeBurstCommands(100, 200, touch), observed = [], acknowledgements = [];
+    const completed = queueNativeBurst(commands, (method, params) => {
+      observed.push([method, params]);
+      return new Promise(resolve => acknowledgements.push(resolve));
+    });
+    assert.deepEqual(observed, commands, 'Every native command is queued before any acknowledgement');
+    assert.deepEqual(commands.map(([, params]) => params.type), touch ? ['touchStart', 'touchEnd', 'touchStart', 'touchEnd', 'touchStart', 'touchEnd'] : ['mouseMoved', 'mousePressed', 'mouseReleased', 'mousePressed', 'mouseReleased', 'mousePressed', 'mouseReleased']);
+    assert.ok(commands.every(([, params]) => !Object.hasOwn(params, 'timestamp')), 'Browser supplies genuine input timestamps');
+    for (const acknowledge of acknowledgements) acknowledge();
+    await completed;
+  }
+  console.log(JSON.stringify({ status: 'fixture-and-native-queue-preflight-passed', browser: 'not-run', plants: city.plants.map(plant => ({ kind: plant.kind, level: plantLevel(plant), cell: plant.cell })), treasuryAfterUpgrades: city.accounts.treasury }));
   process.exit(0);
 }
 
@@ -79,6 +91,48 @@ async function click(x, y, clickCount = 1) {
     return;
   }
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount });
+}
+function nativeBurstCommands(x, y, touch) {
+  if (touch) return [1, 2, 3].flatMap(() => [
+    ['Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1, radiusX: 1, radiusY: 1, force: 1 }] }],
+    ['Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }],
+  ]);
+  return [
+    ['Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' }],
+    ...[1, 1, 2].flatMap(clickCount => ['mousePressed', 'mouseReleased'].map(type => ['Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount }])),
+  ];
+}
+function queueNativeBurst(commands, dispatch = send) {
+  // send() writes synchronously before returning its response promise. Queue
+  // the entire native burst before awaiting any browser acknowledgement.
+  return Promise.all(commands.map(([method, params]) => dispatch(method, params)));
+}
+async function rapidUpgradeBurst(p, name) {
+  await evaluate(`(()=>{
+    const events=[], types=['pointerdown','pointerup','touchstart','touchend','click'];
+    const record=event=>{
+      const button=event.target?.closest?.('#upgrade-plant'); if(!button)return;
+      events.push({type:event.type,trusted:event.isTrusted,pointerType:event.pointerType??null,timestamp:event.timeStamp,handledAt:performance.now(),disabled:button.disabled,detail:event.detail});
+    };
+    for(const type of types)document.addEventListener(type,record,true);
+    window.__plantBurstTrace={events,stop(){for(const type of types)document.removeEventListener(type,record,true)}};
+  })()`);
+  await queueNativeBurst(nativeBurstCommands(p.x, p.y, touchInput));
+  await paints();
+  const events = await evaluate(`(()=>{const trace=window.__plantBurstTrace;trace.stop();delete window.__plantBurstTrace;return trace.events})()`);
+  const pressType = touchInput ? 'touchstart' : 'pointerdown', releaseType = touchInput ? 'touchend' : 'pointerup';
+  const presses = events.filter(event => event.type === pressType), releases = events.filter(event => event.type === releaseType);
+  const native = events.filter(event => event.type === pressType || event.type === releaseType);
+  const timestampSpanMs = native.at(-1)?.timestamp - native[0]?.timestamp;
+  const evidence = { name, input: touchInput ? 'touch' : 'mouse', timestampSpanMs, handlerSpanMs: native.at(-1)?.handledAt - native[0]?.handledAt, events };
+  bursts.push(evidence);
+  assert.equal(presses.length, 3, 'Three actual native presses reach the upgrade control');
+  assert.equal(releases.length, 3, 'Three actual native releases reach the upgrade control');
+  assert.ok(native.every(event => event.trusted && Number.isFinite(event.timestamp)), 'Browser records trusted native input timestamps');
+  assert.ok(timestampSpanMs >= 0 && timestampSpanMs < 600, `Browser timestamps prove a rapid native burst: ${JSON.stringify(evidence)}`);
+  assert.equal(presses[0].disabled, false, 'The initial native press can upgrade');
+  assert.ok(presses.slice(1).every(event => event.disabled), 'Repeated native presses arrive while the upgrade control is disabled');
+  assert.equal(events.filter(event => event.type === 'click' && event.trusted).length, 1, 'Only the first native activation reaches the upgrade handler');
 }
 async function point(selector) {
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`);
@@ -163,11 +217,7 @@ async function upgradeFlow(metric) {
     await selectPlant(plant); await quote(expected, plant); await layout(`${metric.name}-${kind}-L1`);
     await point('#upgrade-plant'); await screenshot(`${metric.name}-${kind}-level-1`);
     const p = await point('#upgrade-plant'), treasury = expected.accounts.treasury;
-    const clickedAt = Date.now(); await click(p.x, p.y);
-    // Desktop uses single clicks and the second click of a double click. Phone
-    // uses actual CDP touchStart/touchEnd taps, including successive rapid taps.
-    await click(p.x, p.y); await click(p.x, p.y, 2);
-    assert.ok(Date.now() - clickedAt < 600, 'Repeat clicks exercise the live cooldown');
+    await rapidUpgradeBurst(p, `${metric.name}-${kind}`);
     assert.equal(upgradePlant(expected, plant.id, 1).ok, true);
     await assertUpgrade(expected, plant, 1, treasury);
     await until('!document.querySelector("#upgrade-plant").disabled');
@@ -273,11 +323,11 @@ try {
   await fixture.fixture.assertNoCityWrites(evaluate);
   assert.deepEqual(errors, []); assert.deepEqual(interceptionErrors, []); assert.deepEqual(fixture.errors, []);
   assert.deepEqual(externalRequests, []); assert.deepEqual(providerRequests, []);
-  const report = { status: 'passed', date: new Date().toISOString(), browser: (await send('Browser.getVersion')).product, checks, layouts, screenshots, errors, externalRequests, providerRequests, note: 'Real full-app native CDP mouse, touchStart/touchEnd, and keyboard input with synthetic server service. Phone metrics/touch are emulated, not physical-device QA.' };
+  const report = { status: 'passed', date: new Date().toISOString(), browser: (await send('Browser.getVersion')).product, checks, layouts, bursts, screenshots, errors, externalRequests, providerRequests, note: 'Real full-app native CDP mouse, touchStart/touchEnd, and keyboard input with synthetic server service. Phone metrics/touch are emulated, not physical-device QA.' };
   await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
 } catch (error) {
   if (ws?.readyState === 1) { try { await screenshot('failure'); console.error('DOM:', await evaluate('document.querySelector("#plant-actions")?.outerHTML')); } catch {} }
-  await writeFile(resolve(output, 'report.json'), JSON.stringify({ status: 'failed', error: String(error.stack ?? error), checks, screenshots, layouts, errors, interceptionErrors, externalRequests, providerRequests, processLogs }, null, 2));
+  await writeFile(resolve(output, 'report.json'), JSON.stringify({ status: 'failed', error: String(error.stack ?? error), checks, screenshots, layouts, bursts, errors, interceptionErrors, externalRequests, providerRequests, processLogs }, null, 2));
   console.error('Browser errors:', errors); throw error;
 } finally {
   clearTimeout(watchdog);

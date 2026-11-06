@@ -12,13 +12,19 @@ export function installPlantPanel(host: HTMLElement, upgrade: (city: City, id: n
   feedback.id = 'plant-feedback'; feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite');
   button.setAttribute('aria-describedby', `${quote.id} ${reserve.id} ${feedback.id}`);
   let selectedCity: City | null = null, selectedId: number | null = null, displayedLevel: PlantLevel = 1;
-  let readyAt = 0;
+  let coolingDown = false;
   button.addEventListener('keydown', event => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); });
   button.addEventListener('click', event => {
-    if (button.disabled || event.detail > 1 || Date.now() < readyAt || !selectedCity || selectedId === null) return;
-    readyAt = Date.now() + 600; button.disabled = true;
-    setTimeout(() => { if (selectedCity) panel.update(selectedCity, selectedCity.plants.find(p => p.id === selectedId)); }, 610);
-    upgrade(selectedCity, selectedId, displayedLevel);
+    if (button.disabled || event.detail > 1 || coolingDown || !selectedCity || selectedId === null) return;
+    coolingDown = true; button.disabled = true;
+    try { upgrade(selectedCity, selectedId, displayedLevel); }
+    finally {
+      // Start the cooldown after the synchronous city render, even on a slow device.
+      setTimeout(() => {
+        coolingDown = false;
+        if (selectedCity) panel.update(selectedCity, selectedCity.plants.find(p => p.id === selectedId));
+      }, 600);
+    }
   });
   host.append(title, quote, reserve, button, feedback);
   const panel = {
@@ -30,7 +36,7 @@ export function installPlantPanel(host: HTMLElement, upgrade: (city: City, id: n
       const data = plantUpgradeStatus(city, plant.id)!; displayedLevel = data.level;
       title.textContent = `${PLANT_LABELS[plant.kind]} · ระดับ ${data.level}/3`;
       reserve.textContent = `เงินคลังใช้จ่ายได้ ${money(data.available)} · หักเงินที่กันไว้แล้ว`;
-      button.disabled = !!data.reasons.length || Date.now() < readyAt;
+      button.disabled = !!data.reasons.length || coolingDown;
       if (!data.next || !data.nextLevel) {
         quote.textContent = `กำลังผลิต ${data.current.capacity} หน่วย · ค่าบำรุง ${money(data.current.upkeep)}/เดือน`;
         button.textContent = 'ถึงระดับสูงสุดแล้ว';

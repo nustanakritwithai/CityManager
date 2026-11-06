@@ -35,3 +35,16 @@ test('poor and disconnected plant quotes expose disabled reason without mutation
   c.accounts.treasury=500000;for(const x of c.cells)x.road=false;panel.update(c,c.plants[0]);assert.equal(button.disabled,true);assert.match(button.title,/ถนน/);
  } finally {if(descriptor)Object.defineProperty(globalThis,'document',descriptor);else Reflect.deleteProperty(globalThis,'document');}
 });
+
+test('slow synchronous rendering cannot rearm the next level before the input burst ends',()=>{
+ const descriptor=Object.getOwnPropertyDescriptor(globalThis,'document'),now=Date.now;
+ Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement:()=>new Element()}});
+ let clock=1000;Date.now=()=>clock;
+ try {
+  const c=createCity(61025),cell=c.cells.findIndex((x,i)=>!x.road&&x.building===null&&access(c,i));buildPlant(c,cell,'power');const p=c.plants[0],host=new Element();let calls=0;
+  const panel=installPlantPanel(host as unknown as HTMLElement,(city,id,level)=>{calls++;upgradePlant(city,id,level);clock+=1000;panel.update(city,p);});
+  panel.update(c,p);const button=host.children.find(e=>e.id==='upgrade-plant')!;
+  button.listeners.click({detail:0});assert.equal(button.disabled,true,'a render lasting longer than600ms must not rearm');
+  button.listeners.click({detail:0});assert.equal(calls,1);assert.equal(p.level,2);
+ } finally {Date.now=now;if(descriptor)Object.defineProperty(globalThis,'document',descriptor);else Reflect.deleteProperty(globalThis,'document');}
+});
