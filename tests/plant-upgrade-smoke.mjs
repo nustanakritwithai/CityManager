@@ -309,12 +309,13 @@ async function close() {
   if (await evaluate('document.querySelector("#inspector")?.dataset.open==="true"')) await button('#close-inspector');
   await paints();
 }
-async function cell(index) {
+async function cell(index, information = true) {
   await close(); await button('[data-tool="select"]');
   const p = await evaluate(`(async()=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const p=window.cityManager.cellScreen(${index});return{...p,hit:document.elementFromPoint(p.x,p.y)?.id}})()`);
   assert.equal(p.hit, 'city-canvas', `Canvas parcel ${index} is reachable`);
   await click(p.x, p.y);
-  await until('document.querySelector("#inspector").dataset.open==="true"');
+  await until('document.querySelector("#inspector").dataset.open==="true" || !document.querySelector("#selection-actions").hidden');
+  if (information && await evaluate('!document.querySelector("#selection-actions").hidden')) await button('#selection-actions button:nth-of-type(2)');
   await paints();
 }
 async function selectPlant(plant) {
@@ -478,6 +479,33 @@ async function assertUpgrade(expected, plant, previous, beforeTreasury) {
   assert.equal(actualPlant.cell, plant.cell, 'No extra parcel');
   assert.equal(current.plants.length, 2, 'No duplicate plant');
 }
+async function quickSelectionFlow(metric) {
+  stage(`${metric.name}: contextual selection`);
+  const expected = await load(initial), plant = expected.plants[0];
+  await cell(plant.cell, false);
+  assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'), 'false');
+  assert.deepEqual(await state(), expected, 'Selection itself never charges');
+  const target = await point('#selection-upgrade');
+  const size = await evaluate('(()=>{const r=document.querySelector("#selection-upgrade").getBoundingClientRect();return {width:r.width,height:r.height}})()');
+  assert.ok(size.width >= 44 && size.height >= 44);
+  await screenshot(`${metric.name}-contextual-upgrade`);
+  const before = expected.accounts.treasury;
+  await queueNativeBurst(nativeBurstCommands(target.x, target.y, touchInput), send);
+  assert.ok(upgradePlant(expected, plant.id, 1).ok);
+  await assertUpgrade(expected, plant, 1, before);
+  await until('!document.querySelector("#selection-upgrade").disabled');
+  await button('#selection-actions button:nth-of-type(2)');
+  await until('document.querySelector("#inspector").dataset.open==="true"');
+  assert.deepEqual(await state(), expected, 'Information preserves state');
+  await close(); await cell(plant.cell, false); await button('#selection-upgrade');
+  assert.ok(upgradePlant(expected, plant.id, 2).ok);
+  await until('document.querySelector("#selection-upgrade").disabled');
+  assert.deepEqual(await state(), expected);
+  await button('#selection-actions button:nth-of-type(3)');
+  await until('document.querySelector("#selection-actions").hidden');
+  await pressKey('Enter'); assert.deepEqual(await state(), expected);
+  checks.push(`${metric.name}: native selection, 44px target, one-payment burst, info route, maximum and dismiss`);
+}
 async function upgradeFlow(metric) {
   stage(`${metric.name}: load plant fixture`);
   let expected = await load(initial);
@@ -596,7 +624,8 @@ try {
     await send('Emulation.setDeviceMetricsOverride', { width: metric.width, height: metric.height, screenWidth: metric.width, screenHeight: metric.height, deviceScaleFactor: 1, mobile: metric.mobile });
     await send('Emulation.setTouchEmulationEnabled', { enabled: metric.mobile, maxTouchPoints: 2 });
     touchInput = metric.mobile;
-    await upgradeFlow(metric);
+    await quickSelectionFlow(metric);
+    if (!process.argv.includes("--quick-selection")) await upgradeFlow(metric);
     console.log(`${metric.name} plant acceptance passed`);
   }
   await fixture.fixture.assertNoCityWrites(evaluate);
