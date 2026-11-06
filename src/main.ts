@@ -800,7 +800,7 @@ async function boot() {
   const mapEntry = document.createElement('button'); mapEntry.type = 'button'; mapEntry.className = 'st-network st-map'; mapEntry.setAttribute('aria-label', 'แผนที่เมือง'); mapEntry.append(iconElement('map'), document.createTextNode('แผนที่'));
   mapEntry.addEventListener('click', () => { cityStatsPanel!.toggle(false); minimap?.toggleMap(true); });
   document.querySelector('#city-stats .st-titlebar .st-close')?.before(mapEntry);
-  installHudIcons(); installKeycaps(); installBuildToolbar(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); });
+  installHudIcons(); installKeycaps(); installBuildToolbar(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); }, () => audio.settings.muted ? 0 : audio.settings.master);
   educationPanel = installEducationPanel($('#campus-actions'));
   const plantActions = document.createElement('section'); $('#campus-actions').after(plantActions);
   plantPanel = installPlantPanel(plantActions, (quotedCity, id, level) => {
@@ -974,6 +974,7 @@ async function boot() {
   updateMapInfo(null);
   const visual = atmosphere;
   audioPanel = installAudioPanel(audio, $('#atmosphere-menu'));
+  const adviceButton = document.createElement('button'); adviceButton.type = 'button'; adviceButton.id = 'open-city-advice'; adviceButton.textContent = 'คำแนะนำเมือง · ฟังเสียง'; adviceButton.addEventListener('click', () => { guide?.showAdvice(city); $('#atmosphere-toggle').click(); }); $('#atmosphere-menu').append(adviceButton);
   // Ambience follows what the screen shows; the city-wide levels only change once a day.
   let soundTick = -1, traffic = 0, factories = 0;
   view.app.on('update', (dt: number) => {

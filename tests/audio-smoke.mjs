@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { createCity, step, serialize, SIZE } from '../src/sim.ts';
 import { startTrafficHttpFixture, reachTrafficControl, loadedTrafficSession, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
 import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
+import { guideSpeechProbeScript, checkGuideSpeechUI } from './guide-speech-browser-fixture.mjs';
 import { audioProbeScript } from './audio-browser-fixture.mjs';
 
 const upstream = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -57,6 +58,8 @@ try {
   await installTrafficNetworkFence({ send, evaluate, protocol: await (await fetch(`http://127.0.0.1:${port}/json/protocol`)).json(), origin, additionalBlocked: [...panelProviderDenials(origin), origin + '/api/city-advisor/*', origin + '/*/api/city-advisor/*'], observeProbe: probe => (networkProbe = { url: probe }) });
   // Instrument construction/playback only; retain the real browser audio implementation.
   await send('Page.addScriptToEvaluateOnNewDocument', { source: audioProbeScript });
+  // Mock only native speech output: verify controls, no remote voice use, and city immutability.
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: guideSpeechProbeScript });
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   const initial = createCity(61025, { starter: true });
   const firstAck = await server.seed(serialize(initial));
@@ -121,6 +124,8 @@ try {
   assert.equal((await audio()).settings.music, 0); assert.equal((await audio()).musicPlaying, false, 'Music stops at zero volume');
   checks.push('The atmosphere menu holds mute, five volumes, the track with credits and next track; music stops at zero');
 
+  await checkGuideSpeechUI({ evaluate, press, until, key, send });
+  checks.push('Voice advice controls pass desktop/mobile-emulated open, explicit listen, replace, stop, mute, dismiss/reopen and remote-voice fallback with mocked local speech; city snapshot unchanged');
   await server.assertNoCityWrites(evaluate);
   assert.deepEqual(transport.errors, [], 'No loopback server errors');
   assert.deepEqual(externalRequests, [], 'No external browser requests');
