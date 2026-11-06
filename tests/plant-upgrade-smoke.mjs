@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { inflateSync, deflateSync } from 'node:zlib';
 import { access, buildPlant, bulldoze, createCity, deserialize, plantAt, plantUpgradeStatus, serialize, upgradePlant, utilities } from '../src/sim.ts';
 import { PLANT_LEVELS, plantLevel, plantUpgradeReason } from '../src/utilities.ts';
 import { roadNeighborsFor } from '../src/road-topology.ts';
@@ -24,7 +25,7 @@ const suiteTimeoutMs = 20 * 60_000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], screenshots = [], layouts = [], bursts = [], keyboardTraces = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
 const processLogs = { app: '', browser: '' };
-const startedAt = Date.now(), diagnostics = { phase: 'setup', stages: [], cdp: [], renderers: [] };
+const startedAt = Date.now(), diagnostics = { phase: 'setup', stages: [], cdp: [], renderers: [], captures: [] };
 let ws, sequence = 0, networkProbe, fixture, browser, app, touchInput = false;
 let primaryFailure;
 const pending = new Map();
@@ -135,6 +136,34 @@ if (process.argv.includes('--preflight')) {
   const observedKeys = [], keyAcks = [];
   const keysDone = queueNativeBurst(keys, (method, params) => { observedKeys.push([method, params]); return new Promise(resolve => keyAcks.push(resolve)); });
   assert.deepEqual(observedKeys, keys); for (const ack of keyAcks) ack(); await keysDone;
+ const samplePng=(width,height,pixel)=>{const chunk=(type,data)=>{const out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length);out.write(type,4);data.copy(out,8);return out;};const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(width);ihdr.writeUInt32BE(height,4);ihdr[8]=8;ihdr[9]=2;const raw=Buffer.alloc((width*3+1)*height);for(let y=0;y<height;y++)for(let x=0;x<width;x++)raw.set(pixel(x,y),y*(width*3+1)+1+x*3);return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr),chunk('IDAT',deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);};
+ const grayscale=pngEvidence(samplePng(16,16,x=>[x*17,x*17,x*17]));assert.equal(grayscale.nonblank,true);assert.equal(grayscale.quantizedColors,16,'Legitimate grayscale UI does not need game colors');
+ assert.throws(()=>pngEvidence(samplePng(2,1,x=>x?[255,255,255]:[0,0,0])),/Blank/);
+ assert.throws(()=>pngEvidence(samplePng(16,16,()=>[255,255,255])),/Blank/);
+ // Exact failed Edge backing geometry: 373920 pixels gray243 +240480 white255.
+ assert.throws(()=>pngEvidence(samplePng(960,640,(x,y)=>x<760&&y<492?[243,243,243]:[255,255,255])),/Blank/);
+ assert.throws(()=>pngEvidence(Buffer.from('not PNG')));
+ const captureTimeout=Object.assign(Error('capture timeout'),{cdpTimeoutMethod:'Page.captureScreenshot'});let calls=[],probes=0;const captureRecord={};
+ const health={ready:true,contextLosses:0,width:960,height:640};const shot=await screenshotReadback(async(method,params)=>{calls.push(params);if(calls.length===1)throw captureTimeout;return {data:'real-result'};},async()=>{probes++;return health;},captureRecord);
+ assert.equal(shot.data,'real-result');assert.equal(probes,2);assert.deepEqual(calls.map(p=>p.fromSurface),[true,true]);assert.deepEqual(calls[1].clip,{x:0,y:0,width:960,height:640,scale:1});assert.equal(captureRecord.mode,'surface-viewport');
+ const other=Error('actual failure');await assert.rejects(screenshotReadback(async()=>{throw other;},async()=>health,{}),error=>error===other);
+ let attempts=0;await assert.rejects(screenshotReadback(async()=>{attempts++;throw captureTimeout;},async()=>health,{}),error=>error===captureTimeout);assert.equal(attempts,2,'Exactly one bounded surface retry');
+ let fallbackCalled=false;await assert.rejects(screenshotReadback(async()=>{if(fallbackCalled)assert.fail('must not retry after unhealthy probe');fallbackCalled=true;throw captureTimeout;},async()=>{if(fallbackCalled)throw other;return health;},{}),error=>error===captureTimeout&&error.stack.includes('Secondary capture health failure'));
+
+  let successfulAttempts = 0; const successRecord = {};
+  assert.equal((await screenshotReadback(async () => { successfulAttempts++; return { data: 'first-result' }; }, async () => health, successRecord)).data, 'first-result');
+  assert.equal(successfulAttempts, 1); assert.equal(successRecord.mode, 'surface');
+  assert.equal(calls[0].clip, undefined); assert.equal(calls[0].optimizeForSpeed, true); assert.equal(calls[1].optimizeForSpeed, true);
+  assert.deepEqual(calls.map(params => params.captureBeyondViewport), [false, false], 'Neither readback may expand or crop beyond the live viewport');
+  let unhealthyDispatches = 0;
+  for (const bad of [{ ...health, ready: false }, { ...health, contextLosses: 1 }, { ...health, width: 0 }, { ...health, height: 1.5 }, { ...health, width: 16000001 }]) {
+    await assert.rejects(screenshotReadback(async () => { unhealthyDispatches++; }, async () => bad, {}));
+  }
+  assert.equal(unhealthyDispatches, 0, 'Unhealthy primary probes cannot reach readback');
+  let changedHealthAttempts = 0;
+  await assert.rejects(screenshotReadback(async () => { changedHealthAttempts++; throw captureTimeout; }, async () => changedHealthAttempts ? { ...health, contextLosses: 1 } : health, {}), error => error === captureTimeout);
+  assert.equal(changedHealthAttempts, 1, 'A context lost after timeout blocks the retry');
+
   const log = []; for (let i = 0; i < 100; i++) boundedPush(log, { id: i });
   assert.equal(log.length, 80); assert.equal(log[0].id, 20);
   pending.set(-1, { metadata: { id: -1, method: 'Runtime.evaluate', phase: 'setup', queuedAt: Date.now() - 10 } });
@@ -155,7 +184,7 @@ async function send(method, params = {}) {
   const response = new Promise((yes, no) => {
     let finished = false;
     const record = status => { if (finished) return; finished = true; boundedPush(diagnostics.cdp, { ...metadata, status, durationMs: Math.round(performance.now() - started) }); };
-    const timer = setTimeout(() => { pending.delete(id); record('timeout'); no(Error(`CDP timeout: ${method}; phase=${metadata.phase}; expression=${metadata.expression ?? ''}`)); }, 30_000);
+    const timer = setTimeout(() => { pending.delete(id); record('timeout'); no(Object.assign(Error(`CDP timeout: ${method}; phase=${metadata.phase}; expression=${metadata.expression ?? ''}`), { cdpTimeoutMethod: method })); }, 30_000);
     pending.set(id, { metadata, yes: value => { clearTimeout(timer); record('ok'); yes(value); }, no: error => { clearTimeout(timer); record('error'); no(error); } });
   });
   ws.send(JSON.stringify({ id, method, params }));
@@ -294,10 +323,71 @@ async function selectPlant(plant) {
   const expected = plant.kind === 'power' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ';
   assert.match(await evaluate('document.querySelector("#plant-actions h3").textContent'), new RegExp(expected));
 }
+// Same bounded PNG readback validation as the server-save browser acceptance.
+function pngEvidence(png){
+ assert.ok(png.length>24&&png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'Actual PNG evidence required');
+ const width=png.readUInt32BE(16),height=png.readUInt32BE(20),channels=png[25]===2?3:png[25]===6?4:0;
+ assert.ok(width>0&&height>0&&width*height<=16_000_000&&png[24]===8&&channels&&png[28]===0,'Supported bounded RGB/RGBA PNG required');
+ const chunks=[];for(let i=8;i+12<=png.length;){const n=png.readUInt32BE(i);assert.ok(i+12+n<=png.length);if(png.toString('ascii',i+4,i+8)==='IDAT')chunks.push(png.subarray(i+8,i+8+n));i+=n+12;}
+ const stride=width*channels,raw=inflateSync(Buffer.concat(chunks),{maxOutputLength:(stride+1)*height});assert.equal(raw.length,(stride+1)*height);
+ let previous=Buffer.alloc(stride),minLuma=255,maxLuma=0;const colors=new Set();
+ for(let y=0;y<height;y++){
+  const filter=raw[y*(stride+1)],row=Buffer.from(raw.subarray(y*(stride+1)+1,(y+1)*(stride+1)));assert.ok(filter<=4);
+  for(let x=0;x<stride;x++){const a=x>=channels?row[x-channels]:0,b=previous[x],c=x>=channels?previous[x-channels]:0,p=a+b-c;const predictor=filter===0?0:filter===1?a:filter===2?b:filter===3?Math.floor((a+b)/2):Math.abs(p-a)<=Math.abs(p-b)&&Math.abs(p-a)<=Math.abs(p-c)?a:Math.abs(p-b)<=Math.abs(p-c)?b:c;row[x]=(row[x]+predictor)&255;}
+  for(let x=0;x<stride;x+=channels){const r=row[x],g=row[x+1],b=row[x+2],luma=(54*r+183*g+19*b)>>8;minLuma=Math.min(minLuma,luma);maxLuma=Math.max(maxLuma,luma);if(colors.size<64)colors.add(((r>>4)<<8)|((g>>4)<<4)|(b>>4));}previous=row;
+ }
+ const evidence={width,height,quantizedColors:colors.size,luminanceRange:maxLuma-minLuma};
+ // Neutral compositor rectangles can contain two colors but no game or UI.
+ // Grayscale text/UI is valid: diversity and contrast, not color saturation, are required.
+ assert.ok(colors.size>=8&&evidence.luminanceRange>=32,'Blank or low-information screenshot is not visual proof: '+JSON.stringify(evidence));return {...evidence,nonblank:true};
+}
+function assertCaptureHealth(health) {
+  assert.equal(health.ready, true, 'Ready app required for screenshot evidence');
+  assert.equal(health.contextLosses, 0, 'WebGL context must remain live');
+  assert.ok(Number.isSafeInteger(health.width) && health.width > 0 && Number.isSafeInteger(health.height) && health.height > 0 && health.width * health.height <= 16_000_000, 'Bounded live viewport required for surface capture');
+}
+async function screenshotReadback(dispatch, probe, record) {
+  record.mode = 'surface'; record.health = await probe(); assertCaptureHealth(record.health);
+  const options = { format: 'png', fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true };
+  try { return await dispatch('Page.captureScreenshot', options); }
+  catch (error) {
+    record.primaryError = String(error);
+    // A tagged surface timeout permits one alternate readback, never a new
+    // game action or an unbounded retry. View readback can return blank backing.
+    if (error?.cdpTimeoutMethod !== 'Page.captureScreenshot') throw error;
+    let health;
+    try { health = await probe(); record.healthAfterTimeout = health; assertCaptureHealth(health); }
+    catch (probeError) {
+      record.healthProbeError = String(probeError);
+      if (error instanceof Error) error.stack += '\nSecondary capture health failure: ' + String(probeError?.stack ?? probeError);
+      throw error;
+    }
+    record.mode = 'surface-viewport';
+    return await dispatch('Page.captureScreenshot', { ...options, clip: { x: 0, y: 0, width: health.width, height: health.height, scale: 1 } });
+  }
+}
 async function screenshot(name) {
   stage(`capture ${name}`);
-  const result = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-  const path = resolve(output, `${name}.png`); await writeFile(path, Buffer.from(result.data, 'base64')); screenshots.push(path);
+  const record = { name, status: 'pending', startedAt: Date.now() }; boundedPush(diagnostics.captures, record, 32);
+  let png;
+  const probe = async () => {
+    assert.deepEqual(errors, [], 'No browser errors before surface readback');
+    return evaluate('({ready:window.cityManager?.visuals().ready,contextLosses:window.__plantContextLosses,width:innerWidth,height:innerHeight,visibility:document.visibilityState})');
+  };
+  try {
+    const result = await screenshotReadback(send, probe, record); png = Buffer.from(result.data, 'base64');
+    Object.assign(record, pngEvidence(png));
+    const health = record.healthAfterTimeout ?? record.health;
+    assert.deepEqual([record.width, record.height], [health.width, health.height], 'Screenshot contains the entire live viewport at device scale1');
+    const path = resolve(output, `${name}.png`); await writeFile(path, png); screenshots.push(path); record.status = 'saved';
+  } catch (error) {
+    record.status = 'failed'; record.error = String(error);
+    if (png) {
+      try { const path = resolve(output, `${name}-rejected.png`); await writeFile(path, png); record.rejectedEvidence = path; }
+      catch (preserveError) { record.preserveError = String(preserveError); }
+    }
+    throw error;
+  } finally { record.finishedAt = Date.now(); }
 }
 async function load(city) {
   const raw = serialize(city);
@@ -499,6 +589,7 @@ try {
     }
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__plantContextLosses=0;document.addEventListener("webglcontextlost",()=>window.__plantContextLosses++,true)' });
   await installTrafficNetworkFence({ send, evaluate, protocol: await (await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(), origin, additionalBlocked: panelProviderDenials(origin), observeProbe: url => (networkProbe = { url, active: false, requestId: null, failed: null }) });
   await fixture.fixture.install(send);
   for (const metric of [{ name: 'desktop', width: 1440, height: 1000, mobile: false }, { name: 'phone', width: 390, height: 844, mobile: true }]) {
