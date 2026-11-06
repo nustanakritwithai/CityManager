@@ -35,7 +35,7 @@ test('browser snapshot helpers validate saves while preserving their raw journal
     }
     checked++;
   }
-  assert.equal(checked, 14, 'all browser city snapshot helpers are covered');
+  assert.equal(checked, 15, 'all browser city snapshot helpers, including plant upgrades, are covered');
   const historicalState = browserSnapshotState(historicalRaw);
   assert.deepEqual(historicalState.ledger, historicCity.ledger, 'genuine old journals remain byte-for-byte represented');
   assert.deepEqual(historicalState.cropLedger, historicCity.cropLedger);
