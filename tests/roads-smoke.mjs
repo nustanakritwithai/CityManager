@@ -64,7 +64,16 @@ async function button(selector) {
   assert.ok(p.w && p.h && !p.disabled, `Visible enabled ${selector}`);
   assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actual hit ${selector}`); await click(p.x,p.y);
 }
-async function close() { if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector'); await paints(); }
+async function close() {
+ if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
+ // Clear the teaching overlay with a real player action before targeting land.
+ if (await evaluate('!!document.querySelector("#guide-card:not([hidden])")')) {
+   const before=await evaluate('window.cityManager.snapshot()');await button('#guide-dismiss');
+   await until('document.querySelector("#guide-card").hidden');
+   assert.equal(await evaluate('window.cityManager.snapshot()'),before,'Dismissing teaching advice preserves the road fixture');
+ }
+ await paints();
+}
 async function game() { await close(); await button('#toggle-game-menu'); await until('document.querySelector("#inspector").dataset.page==="game"'); }
 async function screenshot(name) { const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false}); await writeFile(resolve(output,name),Buffer.from(r.data,'base64')); }
 async function load(raw) {

@@ -1,0 +1,67 @@
+name: Voice advisor (local speech UI)
+
+on:
+  pull_request:
+    paths:
+      - 'src/guide*'
+      - 'src/growth-advice.ts'
+      - 'src/audio*'
+      - 'src/main.ts'
+      - 'tests/audio*'
+      - 'tests/guide*'
+      - 'tests/growth-advice.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/voice-advisor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Additional early feedback only. The existing full CityManager, traffic, save,
+# and other required checks remain unchanged and must also pass before release.
+jobs:
+  voice:
+    name: Verify voice controls on desktop and touch-emulated phone
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Verify deterministic advice and speech controls
+        run: node --experimental-strip-types --test tests/growth-advice.test.ts tests/guide.test.ts
+      - run: npm run build
+      - name: Verify built audio UI without remote speech or provider calls
+        run: |
+          New-Item -ItemType Directory -Force .test-output | Out-Null
+          $preview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/voice-preview.log -RedirectStandardError .test-output/voice-preview-error.log
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4173/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $ready = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) { throw 'Voice preview did not start.' }
+            npm run test:audio
+            if ($LASTEXITCODE -ne 0) { throw 'Voice/audio browser acceptance failed.' }
+          } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
+      - name: Preserve voice browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: voice-advisor-browser-evidence
+          path: |
+            .test-output/audio-report.json
+            .test-output/voice-preview*.log
+          if-no-files-found: warn
+          retention-days: 3
