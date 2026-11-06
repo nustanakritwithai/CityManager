@@ -3,6 +3,7 @@
 // --preflight validates synthetic economic fixtures without claiming browser QA.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { access, buildPlant, bulldoze, createCity, deserialize, plantAt, plantUpgradeStatus, serialize, upgradePlant, utilities } from '../src/sim.ts';
@@ -19,8 +20,24 @@ const appPort = 4397, debugPort = 9497, upstream = `http://127.0.0.1:${appPort}/
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], screenshots = [], layouts = [], bursts = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
 const processLogs = { app: '', browser: '' };
+const startedAt = Date.now(), diagnostics = { phase: 'setup', stages: [], cdp: [], renderers: [] };
 let ws, sequence = 0, networkProbe, fixture, browser, app, touchInput = false;
+let primaryFailure;
 const pending = new Map();
+function boundedPush(list, value, limit = 80) { list.push(value); if (list.length > limit) list.splice(0, list.length - limit); }
+function stage(phase) {
+  diagnostics.phase = phase; boundedPush(diagnostics.stages, { phase, elapsedMs: Date.now() - startedAt });
+  console.log('Plant acceptance phase:', phase);
+}
+function resultReport(status, error) {
+  return { status, date: new Date().toISOString(), elapsedMs: Date.now() - startedAt, ...(error ? { error: String(error.stack ?? error) } : {}), checks, screenshots, layouts, bursts, errors, interceptionErrors, externalRequests, providerRequests, processLogs, diagnostics, pendingCommands: [...pending.values()].map(item => ({ ...item.metadata, pendingMs: Date.now() - item.metadata.queuedAt })) };
+}
+function writeFailure(error, write = writeFileSync) {
+  // Emergency watchdog output must be durable BEFORE process.exit, which skips
+  // async catch/finally handlers. Also preserve an earlier assertion failure.
+  write(resolve(output, 'report.json'), JSON.stringify(resultReport('failed', error), null, 2));
+  write(resolve(output, 'processes.log'), JSON.stringify(processLogs, null, 2));
+}
 
 function fixtureCity() {
   const city = createCity(61025);
@@ -48,6 +65,9 @@ if (process.argv.includes('--preflight')) {
   for (const plant of disconnected.plants) assert.equal(plantUpgradeStatus(disconnected, plant.id).online, false);
   for (const plant of poor.plants) assert.ok(plantUpgradeStatus(poor, plant.id).reasons.length);
   for (const touch of [false, true]) {
+    const single = nativeClickCommands(100, 200, touch, 1);
+    assert.deepEqual(single.map(([, params]) => params.type), touch ? ['touchStart', 'touchEnd'] : ['mouseMoved', 'mousePressed', 'mouseReleased'], 'Ordinary native clicks retain their complete event sequence');
+    if (!touch) assert.ok(single.every(([, params]) => params.x === 100 && params.y === 200 && params.clickCount === 1));
     const commands = nativeBurstCommands(100, 200, touch), observed = [], acknowledgements = [];
     const completed = queueNativeBurst(commands, (method, params) => {
       observed.push([method, params]);
@@ -59,15 +79,28 @@ if (process.argv.includes('--preflight')) {
     for (const acknowledge of acknowledgements) acknowledge();
     await completed;
   }
+  const log = []; for (let i = 0; i < 100; i++) boundedPush(log, { id: i });
+  assert.equal(log.length, 80); assert.equal(log[0].id, 20);
+  pending.set(-1, { metadata: { id: -1, method: 'Runtime.evaluate', phase: 'setup', queuedAt: Date.now() - 10 } });
+  const emergency = new Map(); writeFailure(Error('synthetic watchdog'), (path, value) => emergency.set(path, value));
+  pending.delete(-1);
+  const failure = JSON.parse(emergency.get(resolve(output, 'report.json')));
+  assert.equal(failure.status, 'failed'); assert.match(failure.error, /synthetic watchdog/);
+  assert.equal(failure.diagnostics.phase, 'setup'); assert.equal(failure.pendingCommands[0].method, 'Runtime.evaluate');
+  assert.ok(failure.pendingCommands[0].pendingMs >= 10, 'A nonresponsive browser needs no response for durable timeout evidence');
+  assert.deepEqual(JSON.parse(emergency.get(resolve(output, 'processes.log'))), processLogs);
   console.log(JSON.stringify({ status: 'fixture-and-native-queue-preflight-passed', browser: 'not-run', plants: city.plants.map(plant => ({ kind: plant.kind, level: plantLevel(plant), cell: plant.cell })), treasuryAfterUpgrades: city.accounts.treasury }));
   process.exit(0);
 }
 
 async function send(method, params = {}) {
-  const id = ++sequence;
+  const id = ++sequence, started = performance.now();
+  const metadata = { id, method, phase: diagnostics.phase, queuedAt: Date.now(), ...(method === 'Runtime.evaluate' ? { expression: String(params.expression ?? '').slice(0, 200) } : {}), ...(params.type ? { inputType: params.type } : {}) };
   const response = new Promise((yes, no) => {
-    const timer = setTimeout(() => { pending.delete(id); no(Error(`CDP timeout: ${method}`)); }, 30_000);
-    pending.set(id, { yes: value => { clearTimeout(timer); yes(value); }, no: error => { clearTimeout(timer); no(error); } });
+    let finished = false;
+    const record = status => { if (finished) return; finished = true; boundedPush(diagnostics.cdp, { ...metadata, status, durationMs: Math.round(performance.now() - started) }); };
+    const timer = setTimeout(() => { pending.delete(id); record('timeout'); no(Error(`CDP timeout: ${method}; phase=${metadata.phase}; expression=${metadata.expression ?? ''}`)); }, 30_000);
+    pending.set(id, { metadata, yes: value => { clearTimeout(timer); record('ok'); yes(value); }, no: error => { clearTimeout(timer); record('error'); no(error); } });
   });
   ws.send(JSON.stringify({ id, method, params }));
   return response;
@@ -85,12 +118,14 @@ async function until(expression, timeout = 30_000) {
 const paints = () => evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
 const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 async function click(x, y, clickCount = 1) {
-  if (touchInput) {
-    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1, radiusX: 1, radiusY: 1, force: 1 }] });
-    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    return;
-  }
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount });
+  await queueNativeBurst(nativeClickCommands(x, y, touchInput, clickCount));
+}
+function nativeClickCommands(x, y, touch, clickCount = 1) {
+  if (touch) return [
+    ['Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1, radiusX: 1, radiusY: 1, force: 1 }] }],
+    ['Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }],
+  ];
+  return ['mouseMoved', 'mousePressed', 'mouseReleased'].map(type => ['Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount }]);
 }
 function nativeBurstCommands(x, y, touch) {
   if (touch) return [1, 2, 3].flatMap(() => [
@@ -108,6 +143,7 @@ function queueNativeBurst(commands, dispatch = send) {
   return Promise.all(commands.map(([method, params]) => dispatch(method, params)));
 }
 async function rapidUpgradeBurst(p, name) {
+  stage(`${name}: rapid native upgrade burst`);
   await evaluate(`(()=>{
     const events=[], types=['pointerdown','pointerup','touchstart','touchend','click'];
     const record=event=>{
@@ -134,17 +170,21 @@ async function rapidUpgradeBurst(p, name) {
   assert.ok(presses.slice(1).every(event => event.disabled), 'Repeated native presses arrive while the upgrade control is disabled');
   assert.equal(events.filter(event => event.type === 'click' && event.trusted).length, 1, 'Only the first native activation reaches the upgrade handler');
 }
-async function point(selector) {
-  await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`);
-  await paints();
-  const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,disabled:e.disabled}})()`);
+async function point(selector, allowHidden = false) {
+  // Keep the same scroll, two painted frames, geometry and native hit test in
+  // one browser task rather than four slow host/browser round trips.
+  const p = await evaluate(`(async()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing native target');if(!e.getBoundingClientRect().width||!e.getBoundingClientRect().height)return null;e.scrollIntoView({block:'nearest',inline:'nearest'});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return{x,y,width:r.width,height:r.height,disabled:e.disabled,hit:!!document.elementFromPoint(x,y)?.closest(${JSON.stringify(selector)})}})()`);
+  if (allowHidden && !p) return null;
+  assert.ok(p, `Visible ${selector}`);
   assert.ok(p.width && p.height, `Visible ${selector}`);
-  assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Native hit target ${selector}`);
+  assert.equal(p.hit, true, `Native hit target ${selector}`);
   return p;
 }
 async function button(selector) {
-  if (await reachTrafficControl(evaluate, button, selector)) return;
-  const p = await point(selector);
+  // These controls need discovery only when hidden (e.g. the phone HUD menu).
+  // Already visible buttons retain every geometry/disabled/hit assertion.
+  let p = await point(selector, true);
+  if (!p) { if (await reachTrafficControl(evaluate, button, selector)) return; p = await point(selector); }
   assert.equal(p.disabled, false, `Enabled ${selector}`);
   await click(p.x, p.y);
 }
@@ -167,12 +207,15 @@ async function selectPlant(plant) {
   assert.match(await evaluate('document.querySelector("#plant-actions h3").textContent'), new RegExp(expected));
 }
 async function screenshot(name) {
+  stage(`capture ${name}`);
   const result = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
   const path = resolve(output, `${name}.png`); await writeFile(path, Buffer.from(result.data, 'base64')); screenshots.push(path);
 }
 async function load(city) {
   const raw = serialize(city);
   await loadPanelCity(fixture.fixture, raw, { send, evaluate, button, until, url: fixture.url + '?starter=1' });
+  const renderer = await evaluate('(()=>{const a=window.cityManager.atmosphere();return{renderer:a.renderer,quality:a.quality,requestedQuality:a.settings.quality,shadows:a.shadows,postProcessing:a.postProcessing,width:innerWidth,height:innerHeight}})()');
+  boundedPush(diagnostics.renderers, renderer, 16);
   await close(); return panelEntryCity(raw);
 }
 async function key(key, { type = 'keyDown', autoRepeat = false } = {}) {
@@ -211,8 +254,10 @@ async function assertUpgrade(expected, plant, previous, beforeTreasury) {
   assert.equal(current.plants.length, 2, 'No duplicate plant');
 }
 async function upgradeFlow(metric) {
+  stage(`${metric.name}: load plant fixture`);
   let expected = await load(initial);
   for (const kind of ['power', 'water']) {
+    stage(`${metric.name}-${kind}: select level 1 and inspect quote`);
     const plant = expected.plants.find(p => p.kind === kind);
     await selectPlant(plant); await quote(expected, plant); await layout(`${metric.name}-${kind}-L1`);
     await point('#upgrade-plant'); await screenshot(`${metric.name}-${kind}-level-1`);
@@ -222,6 +267,7 @@ async function upgradeFlow(metric) {
     await assertUpgrade(expected, plant, 1, treasury);
     await until('!document.querySelector("#upgrade-plant").disabled');
     await quote(expected, plant); await layout(`${metric.name}-${kind}-L2`);
+    stage(`${metric.name}-${kind}: held-key repeat guard`);
     // A held key remains a repeat even after the click cooldown expires. The
     // focus setup changes no game state; actual CDP key input tests the guard.
     await evaluate('document.querySelector("#upgrade-plant").focus()');
@@ -231,6 +277,7 @@ async function upgradeFlow(metric) {
     }
     assert.deepEqual(await state(), expected, 'Held-key repeats do not buy level 3');
     await screenshot(`${metric.name}-${kind}-level-2`);
+    stage(`${metric.name}-${kind}: actionable close and selection guards`);
     // Exercise dismissal while L3 is still affordable and actionable, not just
     // at the maximum where a stale control would already be harmless.
     await close(); assert.equal(await evaluate('document.querySelector("#plant-actions").hidden'), true);
@@ -241,12 +288,14 @@ async function upgradeFlow(metric) {
     await selectPlant(plant); assert.equal((await quote(expected, plant)).disabled, false);
     assert.equal(await evaluate('document.querySelector("#plant-feedback").textContent'), '', 'Selection change clears stale feedback');
     const secondTreasury = expected.accounts.treasury;
+    stage(`${metric.name}-${kind}: deliberate level 3 upgrade`);
     if (kind === 'water') { await evaluate('document.querySelector("#upgrade-plant").focus()'); await key('Enter'); await key('Enter', { type: 'keyUp' }); }
     else await button('#upgrade-plant');
     assert.equal(upgradePlant(expected, plant.id, 2).ok, true);
     await assertUpgrade(expected, plant, 2, secondTreasury);
     assert.equal((await quote(expected, plant)).disabled, true, 'Maximum level disables upgrade');
     await screenshot(`${metric.name}-${kind}-level-3`);
+    stage(`${metric.name}-${kind}: maximum-level and stale selection guards`);
     const max = await point('#upgrade-plant'); await click(max.x, max.y); await key('Enter'); await key('Enter', { type: 'keyUp' });
     assert.deepEqual(await state(), expected, 'Disabled maximum level refuses input');
     // Closing and changing selection must not leave an actionable stale plant.
@@ -256,11 +305,13 @@ async function upgradeFlow(metric) {
     assert.deepEqual(await state(), expected);
     checks.push(`${metric.name} ${kind}: L1 quote, native ${metric.mobile ? 'touch' : 'mouse'} L2, repeat-${metric.mobile ? 'tap' : 'click'}/key protection, deliberate L3, exact payment/capacity, max/close/selection guards`);
   }
+  stage(`${metric.name}: native Save and reload`);
   await close(); await button('#toggle-game-menu');
   await saveAndReloadPanel(fixture.fixture, expected, { send, evaluate, button, until });
   for (const plant of expected.plants) { await selectPlant(plant); assert.equal((await quote(expected, plant)).disabled, true); }
   checks.push(`${metric.name}: both L3 plants survive native Save and full reload with exact server ACK and complete city equality`);
   for (const [name, source] of [['disconnected', disconnected], ['insufficient-cash', poor]]) {
+    stage(`${metric.name}: ${name} fixture`);
     expected = await load(source);
     for (const plant of expected.plants) {
       await selectPlant(plant); const dom = await quote(expected, plant);
@@ -278,7 +329,12 @@ for (const port of [appPort, debugPort]) {
   let occupied = false; try { occupied = (await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(500) })).status > 0; } catch {}
   assert.equal(occupied, false, `Dedicated QA port ${port} is occupied`);
 }
-const watchdog = setTimeout(() => { console.error('Plant browser acceptance timed out'); browser?.kill(); app?.kill(); process.exit(1); }, 360_000);
+const watchdog = setTimeout(() => {
+  const timeout = Error(`Plant browser acceptance timed out after 360000ms; phase=${diagnostics.phase}`);
+  diagnostics.watchdog = { elapsedMs: Date.now() - startedAt, phase: diagnostics.phase };
+  try { writeFailure(primaryFailure ?? timeout); } catch (error) { console.error('Could not preserve watchdog evidence:', error); }
+  console.error(timeout.message); browser?.kill(); app?.kill(); process.exit(1);
+}, 360_000);
 function logProcess(child, label) {
   const record = chunk => { processLogs[label] = (processLogs[label] + chunk.toString()).slice(-16_000); };
   child.stdout?.on('data', record); child.stderr?.on('data', record);
@@ -286,6 +342,7 @@ function logProcess(child, label) {
   return child;
 }
 try {
+  stage('launch built app and browser');
   app = logProcess(spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(appPort), '--strictPort'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }), 'app');
   let ready = false; for (let i = 0; i < 100; i++) { try { ready = (await fetch(upstream)).ok; } catch {} if (ready) break; await sleep(100); }
   assert.equal(ready, true, 'Built app preview starts: ' + processLogs.app);
@@ -323,11 +380,12 @@ try {
   await fixture.fixture.assertNoCityWrites(evaluate);
   assert.deepEqual(errors, []); assert.deepEqual(interceptionErrors, []); assert.deepEqual(fixture.errors, []);
   assert.deepEqual(externalRequests, []); assert.deepEqual(providerRequests, []);
-  const report = { status: 'passed', date: new Date().toISOString(), browser: (await send('Browser.getVersion')).product, checks, layouts, bursts, screenshots, errors, externalRequests, providerRequests, note: 'Real full-app native CDP mouse, touchStart/touchEnd, and keyboard input with synthetic server service. Phone metrics/touch are emulated, not physical-device QA.' };
+  const report = { ...resultReport('passed'), browser: (await send('Browser.getVersion')).product, note: 'Real full-app native CDP mouse, touchStart/touchEnd, and keyboard input with synthetic server service. Phone metrics/touch are emulated, not physical-device QA.' };
   await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
 } catch (error) {
+  primaryFailure = error; writeFailure(error);
   if (ws?.readyState === 1) { try { await screenshot('failure'); console.error('DOM:', await evaluate('document.querySelector("#plant-actions")?.outerHTML')); } catch {} }
-  await writeFile(resolve(output, 'report.json'), JSON.stringify({ status: 'failed', error: String(error.stack ?? error), checks, screenshots, layouts, bursts, errors, interceptionErrors, externalRequests, providerRequests, processLogs }, null, 2));
+  writeFailure(error);
   console.error('Browser errors:', errors); throw error;
 } finally {
   clearTimeout(watchdog);
