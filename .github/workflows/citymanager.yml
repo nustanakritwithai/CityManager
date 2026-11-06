@@ -182,6 +182,9 @@ jobs:
           retention-days: 3
 
       - name: Verify plant upgrades and easier-economy saves in installed Edge
+        # Collect independent utility evidence even if an earlier gate fails.
+        # Earlier failures still fail this job and block publication.
+        if: success() || failure()
         run: |
           node --experimental-strip-types tests/plant-upgrade-smoke.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Plant upgrade browser acceptance failed; not publishing.' }
