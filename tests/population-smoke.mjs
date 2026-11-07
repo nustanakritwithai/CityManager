@@ -17,6 +17,7 @@ import { adoptSavedEducation, firmWage, createCity, step, serialize, deserialize
 const upstream = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/population-preview');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
+const mobilityOnly = process.argv.includes('--housing-mobility');
 const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [];
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 const householdV2Raw = await readFile(new URL('./fixtures/legacy-v2-day180.json', import.meta.url), 'utf8');
@@ -81,10 +82,21 @@ adoptSavedEducation(fixture);
 const fixtureRaw = serialize(fixture); fixture=panelEntryCity(fixtureRaw);
 const sharedHome = fixture.buildings.find(b => b.zone === 'R' && homeOccupancy(fixture, b.id).households > 1);
 assert.ok(sharedHome, 'Natural fixture contains a shared home');
+// Isolated server fixture for the reported empty-new-homes case: preserve
+// every existing family/account/job, concentrate addresses in one taller home.
+const concentrated = panelEntryCity(fixtureRaw), moveHomes = concentrated.buildings.filter(b => b.zone === 'R').sort((a,b)=>a.cell-b.cell);
+const oldTower = moveHomes[0]; oldTower.level = 9; oldTower.housingType = 'condo';
+for (const resident of concentrated.households) resident.home = oldTower.id;
+concentrated.tick = 181; const concentratedRaw = serialize(concentrated); deserialize(concentratedRaw);
+const distributed = panelEntryCity(concentratedRaw); step(distributed); deserialize(serialize(distributed));
+const oldResidents = concentrated.households.map(h=>[h.id,h.members,h.wallet]);
+assert.ok(homeOccupancy(distributed,oldTower.id).households < concentrated.households.length);
+assert.deepEqual(distributed.households.map(h=>[h.id,h.members,h.wallet]),oldResidents);
+
 if(process.argv.includes('--preflight')){
  assert.deepEqual(browserSnapshotState(serialize(fixture)),fixture);
  for(const raw of [migratedRaw,serialize(householdV2Migrated),serialize(workerV3Migrated),vacantDay,upgradeDay])assert.deepEqual(browserSnapshotState(serialize(panelEntryCity(raw))),panelEntryCity(raw));
- console.log(JSON.stringify({legacyHashes:[hash(legacyRaw),hash(householdV2Raw),hash(workerV3Raw)],fixtureTick:fixture.tick,fixtureCells:fixture.cells.length,family:family.id,sharedHome:sharedHome.id,milestones}));process.exit(0);
+ console.log(JSON.stringify({legacyHashes:[hash(legacyRaw),hash(householdV2Raw),hash(workerV3Raw)],fixtureTick:fixture.tick,fixtureCells:fixture.cells.length,family:family.id,sharedHome:sharedHome.id,mobilityHouseholds:distributed.households.map(h=>[h.id,h.home]),milestones}));process.exit(0);
 }
 const httpFixture=await startTrafficHttpFixture(upstream),server=httpFixture.fixture,url=httpFixture.url,fault=installPopulationSaveFault(server);
 
@@ -178,6 +190,7 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
   await server.install(send);
   await installTrafficNetworkFence({send,evaluate,protocol:await (await fetch('http://127.0.0.1:9349/json/protocol')).json(),origin:new URL(url).origin,blockedModels:blocked,additionalBlocked:[...panelProviderDenials(new URL(url).origin),new URL(url).origin+'/api/city-advisor/*',new URL(url).origin+'/*/api/city-advisor/*'],observeProbe:probe=>(networkProbe={url:probe})});
+  if (!mobilityOnly) {
   // Repeated entry preserves the real legacy fixture, without a local city copy.
   await load(migratedRaw);assert.deepEqual(await state(),panelEntryCity(migratedRaw));
   await load(migratedRaw);assert.deepEqual(await state(),panelEntryCity(migratedRaw));
@@ -237,7 +250,23 @@ try {
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
   await page('game'); await savePopulation(expectedRehoused); assert.deepEqual(await state(),expectedRehoused);
   checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact server Save/reload preserves the complete session');
+  }
 
+  await load(concentratedRaw);
+  await home(concentrated, oldTower); await screenshot('housing-before-move.png');
+  await close(); await button('[data-speed="1"]');
+  await evaluate(`(()=>{const target=${distributed.tick};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);
+  await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${distributed.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`);
+  assert.deepEqual(await state(),distributed);
+  const movedResidents = distributed.households.filter(h => h.home !== oldTower.id);
+  assert.equal(movedResidents.length, 4, 'Exactly four existing families move in the weekly review');
+  for(const destination of moveHomes.slice(1)) await home(distributed,distributed.buildings.find(b=>b.id===destination.id));
+  for (const resident of movedResidents) await household(resident, distributed.buildings.find(b => b.id === resident.home), distributed);
+  await screenshot('housing-after-move.png');
+  await cityMetrics(distributed); await page('game'); await savePopulation(distributed); assert.deepEqual(await state(),distributed);
+  checks.push('Weekly redistribution moves existing whole families from an earlier tower into empty homes during a real browser tick; identities, exact deterministic state and the server ACK/reload remain intact');
+
+  if (!mobilityOnly) {
   await load(fixtureRaw);
   for (const metric of [{ width: 360, height: 740, screenWidth: 360, screenHeight: 780, mobile: true }, { width: 844, height: 390, screenWidth: 844, screenHeight: 390, mobile: true }, { width: 980, height: 2120, screenWidth: 390, screenHeight: 844, mobile: true }]) {
     await viewport(metric); await home(fixture, sharedHome); await layout(); await household(family, fixture.buildings.find(b => b.id === family.home)); await layout(); if (metric.width === 360) await screenshot('phone-family.png'); await cityMetrics(fixture); await layout(); await page('game'); await layout();
@@ -282,10 +311,12 @@ try {
   checks.push('Exactly 2000 real people / 668 households retain complete simulation state, balanced accounts and session bytes through authenticated entry, running at1x, Save and reload; job shortages remain explicit');
 
   // Restore the intended split-worker city after server persistence and layout exercises.
-  await load(fixtureRaw); assert.deepEqual(await state(), fixture);assert.deepEqual(httpFixture.errors,[]);assert.deepEqual(externalRequests,[]);assert.deepEqual(providerRequests,[],'Population QA never attempts advisor/provider requests');await server.assertNoCityWrites(evaluate); assert.deepEqual(errors, []);
-  modelAudit.assertComplete();const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
+  await load(fixtureRaw); assert.deepEqual(await state(), fixture);
   checks.push('360 phone, landscape and 980-layout/screen390 keep contexts and server-save controls contained with real 44px Back/close; no unexpected runtime errors');
-  const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, checks, errors, expectedModelErrors: expectedErrors.length, fixture: { seed: fixture.seed, tick: fixture.tick, hash: hash(fixtureRaw), legacySha256: hash(legacyRaw), naturalHash: hash(serialize(natural)), employmentScenario: 'Two real family workers split across existing I/C firms; no accounts/journals/people edited' }, milestones, layouts, screenshots, note: 'Installed headless Edge; touch/viewport and physical-screen ratio emulated. No real-phone QA or performance claim.' };
+  }
+  assert.deepEqual(httpFixture.errors,[]);assert.deepEqual(externalRequests,[]);assert.deepEqual(providerRequests,[],'Population QA never attempts advisor/provider requests');await server.assertNoCityWrites(evaluate); assert.deepEqual(errors, []);
+  modelAudit.assertComplete();const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
+  const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, mode: mobilityOnly ? 'housing-mobility-only' : 'full-population', checks, errors, expectedModelErrors: expectedErrors.length, mobility: { tick: distributed.tick, fixtureHash: hash(concentratedRaw), expectedHash: hash(serialize(distributed)), movedHouseholds: movedResidents.map(h => h.id), homes: distributed.households.map(h => [h.id, h.home]), verifiedServerReload: true }, fixture: { seed: fixture.seed, tick: fixture.tick, hash: hash(fixtureRaw), legacySha256: hash(legacyRaw), naturalHash: hash(serialize(natural)), employmentScenario: 'Two real family workers split across existing I/C firms; no accounts/journals/people edited' }, milestones, layouts, screenshots, note: 'Installed headless browser. Full-population mode also emulates touch/viewport and physical-screen ratio. No real-phone QA or performance claim.' };
   await writeFile(resolve(output, 'population-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
 } catch (error) { if (ws?.readyState === 1) try { await screenshot('population-failure.png'); console.error('Route:', await route()); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
 finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); await httpFixture.close(); }
