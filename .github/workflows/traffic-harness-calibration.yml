@@ -1,0 +1,51 @@
+name: Traffic harness lifecycle and clock calibration (not acceptance)
+on:
+  push:
+    branches: ['diagnostic/housing-harness-calibration']
+    paths:
+      - 'scripts/traffic-harness-calibration.mjs'
+      - 'scripts/diagnostic-owned-process.ps1'
+      - 'scripts/diagnostic-max-evidence.mjs'
+      - 'scripts/traffic-game-paired-diagnostic.mjs'
+      - 'tests/traffic-harness-calibration.test.mjs'
+      - 'tests/diagnostic-owned-process.test.mjs'
+      - 'tests/diagnostic-max-evidence.test.mjs'
+      - 'tests/traffic-game-paired-diagnostic.test.mjs'
+      - 'docs/diagnostics/housing-harness-calibration.md'
+      - 'docs/diagnostics/owned-process-protocol.md'
+      - '.github/workflows/traffic-harness-calibration.yml'
+permissions:
+  contents: read
+jobs:
+  calibrate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Retain immutable fixed plan before any checks or launches
+        run: >-
+          node --input-type=module -e "import {mkdirSync,writeFileSync} from 'node:fs';
+          import {CASES,PRIOR_RUNS,plannedCases} from './scripts/traffic-harness-calibration.mjs';
+          mkdirSync('.test-output',{recursive:true});
+          writeFileSync('.test-output/harness-calibration-preflight-plan.json',JSON.stringify({commit:process.env.GITHUB_SHA,plan:CASES,priorRuns:PRIOR_RUNS,initialResults:plannedCases().map(r=>({...r,reason:'Runtime not yet started; contract preflight has not succeeded'})),note:'Immutable plan before contracts. The runtime manifest holds final outcomes if present.'},null,2),{flag:'wx'});"
+      - name: Verify deterministic diagnostic contracts only
+        run: node --test tests/traffic-harness-calibration.test.mjs tests/diagnostic-owned-process.test.mjs tests/diagnostic-max-evidence.test.mjs tests/traffic-game-paired-diagnostic.test.mjs
+      - name: Run the fixed standalone cases once, stopping at any failure
+        run: node scripts/traffic-harness-calibration.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: traffic-harness-calibration-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .test-output/harness-calibration-preflight-plan.json
+            .test-output/harness-calibration/manifest.json
+            .test-output/harness-calibration/case-*/*.json
+            .test-output/harness-calibration/case-*/page.html
+          if-no-files-found: error
+          retention-days: 30
