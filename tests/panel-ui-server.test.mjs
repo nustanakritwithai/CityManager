@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {createTrafficServerFixture} from './traffic-server-entry-fixture.mjs';
-import {assertPanelSaveChain,loadPanelCity,panelEntryCity,saveAndReloadPanel} from './panel-ui-server.mjs';
+import {assertPanelSaveChain,loadPanelCity,panelEntryCity,saveAndReloadPanel,panelSaveEvidence} from './panel-ui-server.mjs';
 import {deserialize,serialize} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
 
@@ -12,7 +12,7 @@ const request=(method,body)=>({requestId:randomUUID(),request:{url:new URL('/cit
 const sink=async()=>{};
 const acknowledgedLabels=['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน'];
 for(const settledLabel of acknowledgedLabels)test(`historical native Save ACK and full reload remain exact when UI settles as ${settledLabel}`,async()=>{
- const server=createTrafficServerFixture(url), city=panelEntryCity(raw), session=serializeParkSession(city,createParkRuntime(city));let active=false;
+ const server=createTrafficServerFixture(url), city=panelEntryCity(raw), session=serializeParkSession(city,createParkRuntime(city));let active=false,manualSuccess=false;
  const evaluate=async expression=>{
   if(expression==='!!window.cityManager')return active;
   if(expression==='window.cityManager.snapshot()')return serialize(city);
@@ -20,6 +20,7 @@ for(const settledLabel of acknowledgedLabels)test(`historical native Save ACK an
   if(expression==='window.cityManager.parks().paused')return true;
   if(expression==='window.__panelCityWrites')return [];
   if(expression.startsWith('localStorage'))return null;
+  if(expression.includes('#inspector-status'))return manualSuccess;
   return true;
  };
  const send=async method=>{if(method==='Page.navigate'||method==='Page.reload')active=false;};
@@ -27,9 +28,11 @@ for(const settledLabel of acknowledgedLabels)test(`historical native Save ACK an
   if(selector==='.guest-entry-card button'){await server.intercept(request('GET'),sink);active=true;return;}
   assert.equal(selector,'#save');const head=server.active;
   await server.intercept(request('POST',{action:'save',cityId:head.cityId,expectedRevision:head.revision,raw:session,metadata:head.metadata}),sink);
+  manualSuccess=true;
  };
  let acknowledgedUiChecks=0;
  const until=async expression=>{
+  if(expression.includes('#inspector-status')){assert.equal(manualSuccess,true);return;}
   if(!expression.includes('#autosave-status'))return;
   acknowledgedUiChecks++;
   // Exercise the actual expression sent to the browser, not a parallel copy.
@@ -63,4 +66,28 @@ test('compact historical baseline and candidate paths remain distinct and cancel
  assert.match(compact,/mode === 'baseline' \? legacyRaw : serialize\(migrated\)/);assert.match(compact,/citymanager\.save\.v1/);assert.match(compact,/panelEntryCity\(fixture\)/);
  assert.equal(compact.includes("dialog button:first-of-type"),false);assert.ok(compact.includes("#save-management-cancel"));assert.ok(compact.includes('Cancel leaves the server head and revision unchanged'));
  for(const source of [compact,context]){assert.ok(source.includes('saveAndReloadPanel(server,'));assert.ok(source.includes('loadPanelCity(server,'));assert.ok(source.includes('installTrafficNetworkFence('));}
+});
+
+test('panel Save failure evidence is bounded and never exposes raw data, IDs or request keys',()=>{
+ const before={cityId:'private-city',revision:1,raw:'private-bytes'},event={requestKey:'private-key',status:200,command:{cityId:'private-city',expectedRevision:1,raw:'private-bytes'},response:{cityId:'private-city',revision:2,raw:'private-bytes'}};
+ const writes=Array.from({length:60},()=>event),evidence=panelSaveEvidence({active:{...before,revision:2},writes},before,1,'private-bytes');
+ assert.equal(evidence.writes.length,40);assert.equal(evidence.writes[0].index,20);assert.equal(evidence.writes[0].repeatedKey,true);assert.equal(evidence.beforeRawMatches,true);assert.equal(evidence.afterRawMatches,true);
+ assert.doesNotMatch(JSON.stringify(evidence),/private-(?:city|bytes|key)/);
+});
+
+test('panel Save rejects autosave-only acknowledgement and preserves primary failure diagnostics',async()=>{
+ const server=createTrafficServerFixture(url),city=panelEntryCity(raw),session=serializeParkSession(city,createParkRuntime(city));await server.seed(session);
+ let clicks=0,reloads=0;const primary=Error('Manual completion not observed');
+ const evaluate=async expression=>{
+  if(expression==='window.cityManager.parks().paused')return true;
+  if(expression==='window.cityManager.sessionSnapshot()')return session;
+  if(expression.startsWith('document.querySelector'))return false;
+  if(expression.includes('savePresent'))return {savePresent:true,disabled:false,visible:true,hit:true,pending:false,failed:false,manualSuccess:false};
+  throw Error('Unexpected observation: '+expression);
+ };
+ const button=async selector=>{assert.equal(selector,'#save');clicks++;const head=server.active;await server.intercept(request('POST',{action:'save',cityId:head.cityId,expectedRevision:head.revision,raw:session,metadata:head.metadata}),sink);};
+ await assert.rejects(saveAndReloadPanel(server,city,{evaluate,button,until:async()=>{throw primary;},send:async()=>{reloads++;}}),error=>{
+  assert.equal(error,primary);assert.equal(error.panelSaveEvidence.afterRevision,2);assert.equal(error.panelSaveEvidence.writes.length,1);assert.equal(error.panelSaveEvidence.ui.manualSuccess,false);assert.match(error.stack,/Manual completion not observed/);assert.match(error.stack,/Panel Save evidence/);assert.equal(error.stack.includes(session),false);return true;
+ });
+ assert.equal(clicks,1);assert.equal(reloads,0,'Autosave alone cannot authorize reload');
 });
