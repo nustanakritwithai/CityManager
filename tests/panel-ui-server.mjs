@@ -38,6 +38,22 @@ export function panelSaveEvidence(server,before,cursor,raw) {
  return {beforeRevision:before?.revision,afterRevision:after?.revision,sameCity:after?.cityId===before?.cityId,beforeRawMatches:before?.raw===raw,afterRawMatches:after?.raw===raw,cursor,totalWrites:writes.length,
   writes:writes.slice(-40).map((event,offset)=>{const index=Math.max(0,writes.length-40)+offset;return {index,status:event.status,expectedRevision:event.command?.expectedRevision,ackRevision:event.response?.revision,rawMatches:event.command?.raw===raw,ackRawMatches:event.response?.raw===raw,repeatedKey:!!event.requestKey&&writes.slice(0,index).some(previous=>previous.requestKey===event.requestKey)};})};
 }
+export async function completePanelManualSave(server,before,cursor,raw,{evaluate,button,now=Date.now,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))}) {
+ // completeTrafficManualSave calls this waiter immediately after its one native
+ // click returns. UI observation and exact ACK share the original 30s budget.
+ await completeTrafficManualSave(evaluate,button,async expression=>{
+  const deadline=now()+30000;
+  const withinDeadline=()=>assert.ok(now()<deadline,'Native Save manual completion and exact ACK required within 30000ms after click');
+  for(;;){
+   withinDeadline();const manualComplete=await evaluate(expression);withinDeadline();
+   if(manualComplete&&server.active?.raw===raw&&server.active.revision>before.revision){
+    await server.settle();withinDeadline();
+    assertPanelSaveChain(before,server.active,server.writes.slice(cursor),raw,server.writes.slice(0,cursor));withinDeadline();return;
+   }
+   await pause(80);
+  }
+ });
+}
 export async function saveAndReloadPanel(server,expected,{send,evaluate,button,until}) {
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
  const raw=await evaluate('window.cityManager.sessionSnapshot()'),actual=deserializeParkSession(raw).city;
@@ -46,9 +62,7 @@ export async function saveAndReloadPanel(server,expected,{send,evaluate,button,u
  try {
   // The shared badge can be completed by autosave. Require the real explicit
   // handler's fresh success too; neither signal substitutes for the ACK chain.
-  await completeTrafficManualSave(evaluate,button,until);
-  const end=Date.now()+30000;while(Date.now()<end&&!(server.active?.raw===raw&&server.active.revision>before.revision))await new Promise(r=>setTimeout(r,80));
-  await server.settle();assertPanelSaveChain(before,server.active,server.writes.slice(cursor),raw,server.writes.slice(0,cursor));
+  await completePanelManualSave(server,before,cursor,raw,{evaluate,button});
   // A queued clean-state verification can replace the manual-write label after
   // its exact new-revision ACK above. Pending, failed or older bytes are not settled.
   await until("(()=>{const text=document.querySelector('#autosave-status')?.textContent;return ['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน'].some(label=>text?.startsWith(label))&&!document.querySelector('#save-failure-banner:not([hidden])')})()");

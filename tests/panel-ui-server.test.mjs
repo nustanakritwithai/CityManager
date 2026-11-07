@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {createTrafficServerFixture} from './traffic-server-entry-fixture.mjs';
-import {assertPanelSaveChain,loadPanelCity,panelEntryCity,saveAndReloadPanel,panelSaveEvidence} from './panel-ui-server.mjs';
+import {assertPanelSaveChain,loadPanelCity,panelEntryCity,saveAndReloadPanel,panelSaveEvidence,completePanelManualSave} from './panel-ui-server.mjs';
 import {deserialize,serialize} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
 
@@ -32,7 +32,6 @@ for(const settledLabel of acknowledgedLabels)test(`historical native Save ACK an
  };
  let acknowledgedUiChecks=0;
  const until=async expression=>{
-  if(expression.includes('#inspector-status')){assert.equal(manualSuccess,true);return;}
   if(!expression.includes('#autosave-status'))return;
   acknowledgedUiChecks++;
   // Exercise the actual expression sent to the browser, not a parallel copy.
@@ -75,13 +74,13 @@ test('panel Save failure evidence is bounded and never exposes raw data, IDs or 
  assert.doesNotMatch(JSON.stringify(evidence),/private-(?:city|bytes|key)/);
 });
 
-test('panel Save rejects autosave-only acknowledgement and preserves primary failure diagnostics',async()=>{
+test('panel Save preserves manual-observation failure diagnostics and never reloads on autosave alone',async()=>{
  const server=createTrafficServerFixture(url),city=panelEntryCity(raw),session=serializeParkSession(city,createParkRuntime(city));await server.seed(session);
  let clicks=0,reloads=0;const primary=Error('Manual completion not observed');
  const evaluate=async expression=>{
   if(expression==='window.cityManager.parks().paused')return true;
   if(expression==='window.cityManager.sessionSnapshot()')return session;
-  if(expression.startsWith('document.querySelector'))return false;
+  if(expression.startsWith('document.querySelector')){if(clicks)throw primary;return false;}
   if(expression.includes('savePresent'))return {savePresent:true,disabled:false,visible:true,hit:true,pending:false,failed:false,manualSuccess:false};
   throw Error('Unexpected observation: '+expression);
  };
@@ -90,4 +89,58 @@ test('panel Save rejects autosave-only acknowledgement and preserves primary fai
   assert.equal(error,primary);assert.equal(error.panelSaveEvidence.afterRevision,2);assert.equal(error.panelSaveEvidence.writes.length,1);assert.equal(error.panelSaveEvidence.ui.manualSuccess,false);assert.match(error.stack,/Manual completion not observed/);assert.match(error.stack,/Panel Save evidence/);assert.equal(error.stack.includes(session),false);return true;
  });
  assert.equal(clicks,1);assert.equal(reloads,0,'Autosave alone cannot authorize reload');
+});
+
+// Controlled host clock: exercise the actual shared waiter without sleeping or
+// changing the production app, its CDP timeouts, or the real native-click path.
+function boundedSaveClock({manualAt=0,ackAt=0,evaluationDelay=0,settleDelay=0,preclickDelay=0,clickDelay=0,omitEvent=false}={}) {
+ let clock=0,clickedAt=null,clicks=0,evaluations=0,settles=0;
+ const before={cityId:'synthetic-city',revision:1,raw:'old'},server={active:before,writes:[],async settle(){settles++;clock+=settleDelay;publish();}};
+ const publish=()=>{if(clickedAt!==null&&clock-clickedAt>=ackAt&&server.active===before){
+  server.active={...before,revision:2,raw:'new'};
+  if(!omitEvent)server.writes.push({requestKey:'synthetic-key',status:200,command:{action:'save',cityId:before.cityId,expectedRevision:1,raw:'new'},response:server.active});
+ }};
+ const evaluate=async expression=>{
+  assert.match(expression,/#inspector-status/);
+  if(clickedAt===null){clock+=preclickDelay;return false;}
+  evaluations++;clock+=evaluationDelay;publish();return clock-clickedAt>=manualAt;
+ };
+ const button=async selector=>{assert.equal(selector,'#save');clicks++;clock+=clickDelay;clickedAt=clock;publish();};
+ return {server,before,run:()=>completePanelManualSave(server,before,0,'new',{evaluate,button,now:()=>clock,pause:async ms=>{assert.equal(ms,80);clock+=ms;publish();}}),
+  get elapsed(){return clock-clickedAt;},get clicks(){return clicks;},get evaluations(){return evaluations;},get settles(){return settles;}};
+}
+
+test('shared Save deadline starts after the single completed click, not its precheck or input work',async()=>{
+ const h=boundedSaveClock({preclickDelay:40000,clickDelay:10000,manualAt:160,ackAt:80});await h.run();
+ assert.equal(h.elapsed,160);assert.equal(h.clicks,1);assert.equal(h.settles,1);assert.equal(h.server.active.revision,2);
+});
+
+test('delayed manual UI and fresh ACK can complete within the original 30s budget',async()=>{
+ const h=boundedSaveClock({manualAt:29900,ackAt:29900});await h.run();
+ assert.equal(h.elapsed,29920);assert.equal(h.clicks,1);assert.equal(h.settles,1);
+});
+
+test('delayed manual UI never starts a second 30s budget for a late ACK',async()=>{
+ const h=boundedSaveClock({manualAt:29000,ackAt:31000});await assert.rejects(h.run(),/within 30000ms after click/);
+ assert.equal(h.elapsed,30000);assert.equal(h.clicks,1);assert.equal(h.settles,0);assert.equal(h.server.active.revision,1);
+});
+
+test('ACK and manual success at the deadline are late, even when both become visible',async()=>{
+ const h=boundedSaveClock({manualAt:30000,ackAt:30000});await assert.rejects(h.run(),/within 30000ms after click/);
+ assert.equal(h.elapsed,30000);assert.equal(h.clicks,1);assert.equal(h.settles,0);assert.equal(h.server.active.revision,2);
+});
+
+test('an awaited UI evaluation cannot return late success after overrunning the deadline',async()=>{
+ const h=boundedSaveClock({manualAt:30001,ackAt:30001,evaluationDelay:30001});await assert.rejects(h.run(),/within 30000ms after click/);
+ assert.equal(h.elapsed,30001);assert.equal(h.evaluations,1);assert.equal(h.clicks,1);assert.equal(h.settles,0);assert.equal(h.server.active.revision,2);
+});
+
+test('fresh autosave ACK without manual completion times out within the same budget',async()=>{
+ const h=boundedSaveClock({manualAt:Infinity});await assert.rejects(h.run(),/within 30000ms after click/);
+ assert.equal(h.elapsed,30000);assert.equal(h.clicks,1);assert.equal(h.settles,0);assert.equal(h.server.active.revision,2);
+});
+
+test('fixture settle cannot stretch the shared deadline or hide a missing ACK event',async()=>{
+ const slow=boundedSaveClock({settleDelay:30001});await assert.rejects(slow.run(),/within 30000ms after click/);assert.equal(slow.settles,1);assert.equal(slow.clicks,1);
+ const missing=boundedSaveClock({omitEvent:true});await assert.rejects(missing.run(),/Native Save produces a newly acknowledged revision/);assert.equal(missing.settles,1);assert.equal(missing.clicks,1);
 });
