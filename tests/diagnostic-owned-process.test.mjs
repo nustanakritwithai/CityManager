@@ -275,10 +275,18 @@ test('diagnostic redaction regex fixture: removes drive and UNC paths without dr
 });
 
 
-test('source contract: compiler diagnostics correction preserves the failing embedded C# bytes', () => {
+test('source contract: only two explicit StartNew<string> bindings change the failing C# source', () => {
   const normalized = source.replaceAll('\r\n', '\n');
   const literal = normalized.split("$source = @'\n")[1].split("\n'@")[0];
-  assert.equal(createHash('sha256').update(literal, 'utf8').digest('hex'), '92c9a8ea1af7078547545450def34c1c41c5d67f03994ab422a0a6bd7299773f');
+  const originalCall = 'Task.Factory.StartNew(ReadBoundedLine)';
+  const correctedCall = 'Task.Factory.StartNew<string>(ReadBoundedLine)';
+  assert.equal(literal.split(correctedCall).length - 1, 2);
+  assert.equal(literal.includes(originalCall), false);
+  assert.match(literal, /Task<string> pending = Task\.Factory\.StartNew<string>\(ReadBoundedLine\);/);
+  assert.match(literal, /pending = Task\.Factory\.StartNew<string>\(ReadBoundedLine\);/);
+  const restored = literal.replaceAll(correctedCall, originalCall);
+  assert.equal(createHash('sha256').update(restored, 'utf8').digest('hex'), '92c9a8ea1af7078547545450def34c1c41c5d67f03994ab422a0a6bd7299773f');
+  assert.equal(createHash('sha256').update(literal, 'utf8').digest('hex'), '0ede36a3cdf2bb167c97345199cd86e7a28bee7360d622fc69c74868776948ad');
 });
 
 

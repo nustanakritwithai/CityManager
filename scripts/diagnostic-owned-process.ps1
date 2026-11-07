@@ -322,7 +322,7 @@ public static class DiagnosticOwnedProcess
             return null;
         }
         void ProtocolLoop() {
-            Task<string> pending = Task.Factory.StartNew(ReadBoundedLine);
+            Task<string> pending = Task.Factory.StartNew<string>(ReadBoundedLine);
             for (int commands = 0; ; ) {
                 ReportRootExit();
                 if (!protocolWritable) throw new InvalidOperationException("protocol_output_unavailable");
@@ -342,7 +342,7 @@ public static class DiagnosticOwnedProcess
                 if (action == "terminate") { Teardown("command", requestId); return; }
                 if (action != "inspect") throw new InvalidOperationException("unknown_protocol_command");
                 stage = "inspect"; var inventory = Inventory(); inventory["requestId"] = requestId; Emit("inventory", inventory);
-                pending = Task.Factory.StartNew(ReadBoundedLine);
+                pending = Task.Factory.StartNew<string>(ReadBoundedLine);
             }
         }
         void Teardown(string reason, string requestId) {
