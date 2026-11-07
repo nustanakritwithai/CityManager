@@ -1,0 +1,32 @@
+# Housing timing harness calibration (not acceptance)
+
+This diagnostic-only change prepares one fixed lifecycle/clock calibration. It does not run the traffic paired benchmark, change the 8 ms gate, relax readiness/watchdogs, or authorize a production fix. The calibration has no production save endpoint and does not use player data.
+
+## Why this is required
+
+Preserved experiments:
+- [V1, 42363992254](https://github.com/nustanakritwithai/CityManager/actions/runs/42363992254): six pre-ON failures; no comparison.
+- [V2, 42366401765](https://github.com/nustanakritwithai/CityManager/actions/runs/42366401765): five passes and one candidate timing failure. Coarse traces cannot locate the exact inner spike.
+- [V3, 42368070109](https://github.com/nustanakritwithai/CityManager/actions/runs/42368070109): three passes, baseline and candidate timing failures, one baseline readiness failure. Failed timing trials never received a trace stream handle during the bounded drain. Their exact spike attribution remains unknown. Port closure did not establish complete browser/GPU descendant cleanup.
+
+Baseline failure does not exclude candidate regression. Neither trace loss nor cleanup uncertainty proves an instrumentation or process-leak cause. No production optimization is supported by those findings.
+
+## Boundary
+
+Only the new standalone calibration workflow may be launched after independent review. The existing paired workflow and its V3 pinned refs are retained historically, not updated or invoked by calibration. Local pure contracts can run on Linux; actual Windows Job Object behavior and Edge marker clocks require the single retained Windows calibration result. A failed case stops later cases, whose not-run entries remain explicit. No replacement trial or automatic benchmark follows.
+
+The owned launcher must assign the suspended root to a kill-on-close Job Object before resuming it. It must not permit breakaway or disable browser sandboxing to force success. Only verified owned processes may be enumerated or terminated. Uncertainty is a failed calibration, not permission to kill unrelated Edge processes.
+
+Clock interpretation is limited to actual marks' same-thread cumulative CPU delta across an enclosing bracket. This is a conservative bound including marker and intervening work, not exclusive CPU of a yielding task. Retrospective measure clocks do not represent historical thread CPU. Missing clock fields, identity conflicts or inconsistent brackets fail calibration.
+
+## Max evidence overlay
+
+`scripts/diagnostic-max-evidence.mjs` is an inert preparation helper for a future separately reviewed comparison. It wraps the original V3 diagnostic insertion, preserving the number/order of metric clocks and original max/counter math. Latest frame/projection maximum records contain original endpoints, counters, sequence, step, document time origin, layer instance and reset epoch. They are bounded to one record per kind and reset with the original timing epoch.
+
+The smoke overlay uses the existing `diag()` response to persist the pre/post snapshots immediately before the unchanged fallback assertion. No added CDP evaluation runs during the measured phase. This preserves received context if trace flush fails; it cannot recover a snapshot that a crashed browser never returned. Neither overlay is applied to production files or automatically invoked by this calibration.
+
+## Follow-up decision
+
+After a successful calibration, review the exact artifact, ownership/cleanup proof, interrupted-flush telemetry and clock audit. Only then may the coordinator approve one fixed three-pair comparison using the new baseline/candidate hashes, identical canonical bytes and identical source insertion. A calibration pass is not a traffic acceptance pass or release clearance.
+
+Proposed future comparison refs, not executed here: baseline `6d4052441313f0284398de1295b6fcd6629a0b00` (tree `782300694587f886d7820e7b8270e39dba8bbec9`); candidate `a8030c7f73e0868c88c034623227e1835557e99f` (tree `9509c8a15084af1148f00a4ea6af1d931e810c19`). Recheck canonical-reader and insertion identity for those exact refs before authorizing that comparison.
