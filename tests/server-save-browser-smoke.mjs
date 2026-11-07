@@ -371,7 +371,7 @@ async function run(){
   }
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
-  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,26,'actual built game saves expanded checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).mapBaseVersion,25);assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-21');await clean();await capture('server-save-acknowledged');
+  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,27,'actual built game saves expanded checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).mapBaseVersion,25);assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-22');await clean();await capture('server-save-acknowledged');
   if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){
    diagnostics.phase='actual bumper-gap traffic UI';trafficGapEvidence={status:'running'};
    const {trafficGapBrowserChecks}=await import('./traffic-gap-browser-checks.mjs');

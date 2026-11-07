@@ -175,7 +175,7 @@ const help: Record<string, string> = {
   R: 'โซนบ้านสร้างที่ว่างก่อน · ครัวเรือนย้ายเข้าเมื่อผ่านความจุ ถนน บริการ และงาน',
   C: 'วางโซนพาณิชย์ · ตลาด 1–3 → อาคาร 4–6 → Big Mall 7–9 · ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว',
   I: 'วางโรงงานข้างถนนเชื่อมเมือง · โรงงานเพิ่มต้องมีทุนกิจการจริงและพืชผล · ดูเงื่อนไขในภาพรวมเมือง',
-  F: 'วางฟาร์มข้างถนน · ปลูกได้ทุกแปลง ดินต่ำให้ผลผลิตเท่าดิน 50% · เลือกพืชหลังสร้าง · ต้องมีแรงงานและผู้ซื้อ',
+  F: 'วางฟาร์มบนแปลงว่างได้ทุกที่ · ดินไม่มีผลต่อการวางหรือผลผลิต · เก็บเกี่ยว 24 ล็อตต่อแรงงานต่อวัน · ยังต้องมีถนน น้ำ และผู้ซื้อ',
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
   water: 'โรงสูบน้ำ ฿3,000 · +40 หน่วย · บำรุง ฿60/เดือน · วางแปลงว่างริมถนน น้ำวิ่งตามถนน อาคารใกล้ได้ก่อน',
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
@@ -198,8 +198,7 @@ function status(message: string) {
 }
 function farmHint(index: number | null): string {
   if (index === null) return help.F;
-  const fertility = city.resources.fertility[index];
-  return `ฟาร์ม · ความอุดมสมบูรณ์ ${fertility}% · ${access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
+  return `ฟาร์ม · วางบนแปลงว่างได้ทุกที่ · ดินไม่มีผลต่อผลผลิต · ${access(city, index) ? 'ถนนเชื่อมเมือง' : 'ต้องต่อถนนข้างแปลง'} · ต้องมีแรงงานและผู้ซื้อจริง`;
 }
 function setTool(next: string) {
   quickSelection = null;
@@ -451,8 +450,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
     if (cell.zone === 'F') {
-      const fertility = city.resources.fertility[cellIndex];
-      if (!building) metrics.push(metric('ความอุดมสมบูรณ์', `${fertility}%`, false, 'พืชผลหมุนเวียน ไม่ใช่แหล่งที่หมดลง', fertility));
+      if (!building) metrics.push(metric('ผลผลิตต่อแรงงาน', '24 ล็อต/วัน', false, 'ดินไม่มีผลต่อผลผลิต · ต้องมีแรงงาน น้ำ และถนน', 24));
       tags.push(tag('เลือกชนิดพืชได้เอง', 'good'));
     }
     if (!cell.road && !park) {

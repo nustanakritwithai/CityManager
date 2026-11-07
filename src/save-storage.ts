@@ -96,6 +96,14 @@ export function saveStoredCity(storage: Writer, raw: string, importedLegacy: str
   let parsed = JSON.parse(raw);
   const hasPlantUpgrades = Array.isArray(parsed?.plants) && parsed.plants.some((p: {level?: number}) => p.level !== undefined);
   if (hasPlantUpgrades) deserializeParkSession(raw);
+  if (parsed?.version === 27) {
+    deserializeParkSession(raw);
+    parsed = {...parsed, version:parsed.farmBaseVersion, rulesVersion:parsed.farmBaseVersion === 26 ? 'chain-21' : 'chain-20'};
+  }
+  if (parsed?.version === 26) {
+    deserializeParkSession(raw);
+    parsed = {...parsed, version:25, rulesVersion:'chain-20'};
+  }
   if (parsed?.version === 25) {
     deserializeParkSession(raw);
     const rules: Record<number,string> = {19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18',24:'chain-19'};

@@ -106,7 +106,7 @@ async function card(city, kind, target) {
     assert.equal(await evaluate('document.querySelector("#entity-content").dataset.wallet'), f.wallet);
     assert.equal(await evaluate('Number(document.querySelector("#entity-content [data-context-metric=workers]").dataset.capacity)'), firmCapacity(target));
     await metrics({ 'crop-stock': f.cropInventory, 'crop-cost': f.cropCost });
-    if (f.zone === 'F') await metrics({ fertility: city.resources.fertility[target.cell], 'harvest-today': city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'harvest' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0) });
+    if (f.zone === 'F') await metrics({ 'yield-per-worker': 24, 'harvest-today': city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'harvest' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0) });
     if (f.zone === 'I') await metrics({ 'recipe-input': 2, 'recipe-output': 8 });
     if (f.owner) { assert.ok(dom.sections.includes('owner'), 'Owner-operated firm retains its owner section'); await metrics({ 'owner-household': f.owner.householdId, 'owner-capital-contributed': f.owner.capitalContributed, 'owner-withdrawn': f.owner.withdrawn, 'owner-tax': f.owner.taxPaid }); }
     if (f.zone === 'C') assertCommercialCardTrades(city, f.wallet, kind, dom.trades);

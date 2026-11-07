@@ -45,7 +45,7 @@ test('legacy state migrates intact; only the new envelope admits extended levels
   assert.equal(goodsJournalLength(loaded), raw.goodsLedger.length);
   assert.equal(moneyJournalLength(loaded), raw.ledger.length);
   const original = { ...raw, version: 9, rulesVersion: 'chain-4',
-    factoryProgressionStartTick: raw.tick, farmLevelStartTick: raw.tick,
+    farmSoilIndependentStartTick: raw.tick, factoryProgressionStartTick: raw.tick, farmLevelStartTick: raw.tick,
     commercialUnifiedStartTick: raw.tick,
     commercialUnifiedBaseline: { moneyEntries: raw.ledger.length, cropEntries: raw.cropLedger.length, goodsEntries: raw.goodsLedger.length },
     cropLedger: raw.cropLedger.slice(history.cropOffset), goodsLedger: raw.goodsLedger.slice(history.goodsOffset),

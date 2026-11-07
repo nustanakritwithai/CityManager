@@ -11,7 +11,7 @@ function oldCity(day = 179) {
   return legacy.deserializeV4(legacy.serialize(c));
 }
 function preserved(c: City | legacy.City, throughTick = -1) {
-  const { commercialUnifiedStartTick: _commercialTick, commercialUnifiedBaseline: _commercialBaseline, history: _history, version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, parks: _parks, ...state } = c as City;
+  const { farmSoilIndependentStartTick: _soil, commercialUnifiedStartTick: _commercialTick, commercialUnifiedBaseline: _commercialBaseline, history: _history, version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, parks: _parks, ...state } = c as City;
   // Water and power changed shape in chain-4 (an outside contract and plants); the facts below did not.
   return {...state,ledger:state.ledger.filter(e=>e.tick>throughTick),goodsLedger:state.goodsLedger.filter(e=>e.tick>throughTick),cropLedger:state.cropLedger.filter(e=>e.tick>throughTick)};
 }
@@ -68,7 +68,7 @@ test('legacy retailers retain exact jobs at mapped commercial levels 2-4; market
   const frozen = JSON.parse(serialize(city));
   frozen.version = frozen.commercialBaseVersion;
   frozen.rulesVersion = ({19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18',24:'chain-19'} as Record<number,string>)[frozen.version];
-  delete frozen.commercialBaseVersion; delete frozen.commercialUnifiedStartTick; delete frozen.commercialUnifiedBaseline;
+  delete frozen.commercialBaseVersion; delete frozen.farmBaseVersion; delete frozen.farmSoilIndependentStartTick; delete frozen.commercialUnifiedStartTick; delete frozen.commercialUnifiedBaseline;
   assert.doesNotThrow(() => deserialize(JSON.stringify(frozen)), 'the same legacy wrapper with the original L1 remains valid');
   frozen.buildings.find((b: {id:number}) => b.id === market.building).level = 2;
   assert.throws(() => deserialize(JSON.stringify(frozen)), /corrupt/, 'a legacy wrapper cannot admit the new higher-level crop provenance');

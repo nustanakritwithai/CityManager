@@ -134,7 +134,9 @@ for (const kind of ['school', 'university'] as const) {
 
 function assertEducationEnvelope(raw: string) {
   const save = JSON.parse(raw);
-  assert.equal(save.version, 25); assert.equal(save.rulesVersion, 'chain-20');
+  assert.equal(save.version, 27); assert.equal(save.rulesVersion, 'chain-22');
+  assert.equal(save.farmBaseVersion, 25);
+  assert.ok(Number.isSafeInteger(save.farmSoilIndependentStartTick) && save.farmSoilIndependentStartTick <= save.tick);
   assert.equal(save.commercialBaseVersion, save.history ? 24 : 22);
   if (save.history) assert.equal(save.historyBaseVersion, 22);
   assert.equal(save.education?.rules, 'education-1');
@@ -207,7 +209,7 @@ test('a v22-format expanded school loads without money changes and continues tea
   assert.equal(original.tick, 0);
   const old = JSON.parse(serialize(original));
   assert.equal(old.history, undefined, 'projection must not discard a checkpoint');
-  delete old.goalRulesVersion; delete old.commercialUnifiedStartTick; delete old.commercialUnifiedBaseline; delete old.commercialBaseVersion;
+  delete old.goalRulesVersion; delete old.commercialUnifiedStartTick; delete old.commercialUnifiedBaseline; delete old.commercialBaseVersion; delete old.farmBaseVersion; delete old.farmSoilIndependentStartTick;
   old.version = 22; old.rulesVersion = 'chain-17';
   const raw = JSON.stringify(old), city = deserialize(raw);
   assert.deepEqual(city.accounts, original.accounts); assert.deepEqual(city.education, original.education);

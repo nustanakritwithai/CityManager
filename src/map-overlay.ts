@@ -15,9 +15,9 @@ export { buildingIssues, ISSUE_TEXT } from './building-issues.ts';
 export type { Issue, IssueKind } from './building-issues.ts';
 
 /** Which layer each build tool shows by default; select/pan/bulldoze show none. */
-export const TOOL_OVERLAY: Readonly<Record<string, OverlayMode | undefined>> = Object.freeze({ road: 'roads', F: 'fertility', R: 'housing', C: 'growth', I: 'growth', power: 'utilities', water: 'utilities' });
+export const TOOL_OVERLAY: Readonly<Record<string, OverlayMode | undefined>> = Object.freeze({ road: 'roads', R: 'housing', C: 'growth', I: 'growth', power: 'utilities', water: 'utilities' });
 export const OVERLAY_LEGENDS: Readonly<Record<OverlayMode, [Tone, string][]>> = Object.freeze({
-  // The land decides the crop: a farm grows what its fertility band suits.
+  // Optional soil information only: farms can be placed on any empty parcel.
   fertility: [['good', 'ดินอุดมสมบูรณ์สูง'], ['warn', 'ดินอุดมสมบูรณ์ปานกลาง'], ['bad', 'ดินอุดมสมบูรณ์ต่ำ · ปลูกได้']],
   roads: [['good', 'เชื่อมประตูเมือง'], ['bad', 'ไม่เชื่อม · โซน/อาคารไม่โต']],
   growth: [['good', 'พร้อมเกิดอาคาร'], ['warn', 'มีอาคารแล้ว'], ['bad', 'ติดเงื่อนไข · แตะดูเหตุผล']],

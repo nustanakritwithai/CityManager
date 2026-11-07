@@ -7,7 +7,7 @@ import { buildingCardData } from '../src/building-card-data.ts';
 import { assertCommercialCardTrades, createBuildingCardsFixture, type CardTradeSection } from './building-cards-fixture.ts';
 
 const replay = createBuildingCardsFixture();
-const hash = (raw: string) => createHash('sha256').update(raw).digest('hex');
+const hash = (raw: string) => { const snapshot = JSON.parse(raw); snapshot.version = snapshot.farmBaseVersion; snapshot.rulesVersion = snapshot.version === 26 ? 'chain-21' : 'chain-20'; delete snapshot.farmBaseVersion; delete snapshot.farmSoilIndependentStartTick; return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'); };
 
 registerHooks({ load(url, context, nextLoad) { return url.endsWith('.css') ? { format: 'module', source: '', shortCircuit: true } : nextLoad(url, context); } });
 const { renderAgriculture } = await import('../src/context-panels.ts');
@@ -25,7 +25,9 @@ test('building-card acceptance preserves genuine day29/day59 migration snapshots
   // Verified against unchanged main b368f6e: the day59 snapshot differs only in
   // the day30 service bill (45000 -> 27000) and its two account balances.
   // Preserve the independent old hash, normalizing only those explicit changes.
-  const oldRateReplay = structuredClone(replay.later);
+  const oldRateReplay = deserialize(replay.baseline);
+  delete oldRateReplay.farmSoilIndependentStartTick; // Replay only the historical soil rule for the frozen hash witness.
+  for (let day = 0; day < 30; day++) step(oldRateReplay);
   const serviceBills = oldRateReplay.ledger.filter(e => e.reason === 'Monthly municipal services');
   assert.equal(serviceBills.length, 1);
   assert.equal(serviceBills[0].tick, 30);

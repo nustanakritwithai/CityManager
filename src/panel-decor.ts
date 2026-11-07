@@ -159,7 +159,7 @@ function decorateChecklists(root: ParentNode) {
 type FlowNode = [key: string, icon: string, label: string, unit: string];
 const FLOWS: Record<string, FlowNode[]> = {
   factory: [['crop-stock', 'crop', 'พืชผล', 'ล็อต'], ['available-batches', 'gear', 'แปรรูปได้', 'ชุด'], ['stock', 'box', 'สินค้า', 'หน่วย']],
-  farm: [['fertility', 'F', 'ดิน', ''], ['harvest-today', 'crop', 'เก็บวันนี้', 'ล็อต'], ['crop-stock', 'box', 'คลัง', 'ล็อต']],
+  farm: [['yield-per-worker', 'F', 'ต่อแรงงาน/วัน', 'ล็อต'], ['harvest-today', 'crop', 'เก็บวันนี้', 'ล็อต'], ['crop-stock', 'box', 'คลัง', 'ล็อต']],
   market: [['crop-stock', 'crop', 'พืชผล', 'ล็อต'], ['workers', 'worker', 'คนขาย', 'คน'], ['cash', 'coin', 'เงิน', '']],
   shop: [['stock', 'box', 'สินค้า', 'หน่วย'], ['workers', 'worker', 'คนขาย', 'คน'], ['cash', 'coin', 'เงิน', '']],
 };

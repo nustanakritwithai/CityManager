@@ -11,14 +11,15 @@ test('actual v18 retail session migrates to farm levels with populated park stat
   assert.equal(old.parkRuntime.activity.visitors.length, 6); assert.equal(Object.keys(old.parkRuntime.recreation.citizens).length, 6);
   const loaded = deserializeParkSession(raw), next = serializeParkSession(loaded.city, loaded.runtime);
   const { version: _oldVersion, rulesVersion: _oldRules, parkRuntime: _parkRuntime, ...expectedCity } = old;
-  const { version, rulesVersion, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, ...actualCity } = loaded.city;
+  const { version, rulesVersion, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, farmSoilIndependentStartTick, ...actualCity } = loaded.city;
   assert.deepEqual(actualCity, expectedCity);
   assert.equal(commercialUnifiedStartTick, old.tick);
+  assert.equal(farmSoilIndependentStartTick, old.tick);
   assert.deepEqual(commercialUnifiedBaseline, { moneyEntries: old.ledger.length, cropEntries: old.cropLedger.length, goodsEntries: old.goodsLedger.length }); assert.equal(version, 9); assert.equal(rulesVersion, 'chain-4');
   assert.equal(farmLevelStartTick, old.tick);
   assert.equal(loaded.city.factoryProgressionStartTick, old.factoryProgressionStartTick); assert.equal(loaded.city.farmLevelStartTick, old.tick);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.runtime)), old.parkRuntime);
-  assert.equal(JSON.parse(next).version, 25); assert.equal(JSON.parse(next).commercialBaseVersion, 19); assert.deepEqual(deserializeParkSession(next), loaded);
+  assert.equal(JSON.parse(next).version, 27); assert.equal(JSON.parse(next).commercialBaseVersion, 19); assert.deepEqual(deserializeParkSession(next), loaded);
   const values = new Map([[SAVE_KEY, raw]]), storage = { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => { values.set(k, v); } };
   saveStoredCity(storage, next, null); assert.equal(values.get(FARM_LEVEL_BACKUP_KEY), raw);
   const forged = JSON.parse(raw), farm = forged.buildings.find((b: { zone: string }) => b.zone === 'F');

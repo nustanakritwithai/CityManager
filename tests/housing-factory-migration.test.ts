@@ -13,15 +13,16 @@ test('actual v16 housing session preserves populated park state and backups on f
   assert.equal(Object.keys(old.parkRuntime.recreation.citizens).length, 6);
   const { version: _version, rulesVersion: _rules, parkRuntime, ...expectedCity } = old;
   const loaded = deserializeParkSession(raw);
-  const { factoryProgressionStartTick, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, version, rulesVersion, ...actualCity } = loaded.city;
+  const { factoryProgressionStartTick, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, farmSoilIndependentStartTick, version, rulesVersion, ...actualCity } = loaded.city;
   assert.deepEqual(actualCity, expectedCity);
   assert.equal(commercialUnifiedStartTick, old.tick);
+  assert.equal(farmSoilIndependentStartTick, old.tick);
   assert.deepEqual(commercialUnifiedBaseline, { moneyEntries: old.ledger.length, cropEntries: old.cropLedger.length, goodsEntries: old.goodsLedger.length });
   assert.equal(version, 9); assert.equal(rulesVersion, 'chain-4');
   assert.equal(factoryProgressionStartTick, old.tick); assert.equal(farmLevelStartTick, old.tick);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.runtime)), parkRuntime);
   const next = serializeParkSession(loaded.city, loaded.runtime);
-  assert.equal(JSON.parse(next).version, 25); assert.equal(JSON.parse(next).commercialBaseVersion, 19);
+  assert.equal(JSON.parse(next).version, 27); assert.equal(JSON.parse(next).commercialBaseVersion, 19);
   assert.deepEqual(deserializeParkSession(next), loaded);
   const values = new Map([[SAVE_KEY, raw]]);
   const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
