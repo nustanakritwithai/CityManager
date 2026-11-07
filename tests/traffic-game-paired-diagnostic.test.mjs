@@ -1,10 +1,11 @@
 import {test} from 'node:test';
+import {runInNewContext} from 'node:vm';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {instrument,PLAN,BASELINE,HEAD,plannedResults,executePlan} from '../scripts/traffic-game-paired-diagnostic.mjs';
+import {instrument,PLAN,BASELINE,HEAD,plannedResults,executePlan,diagnosticSucceeded} from '../scripts/traffic-game-paired-diagnostic.mjs';
 const source=readFileSync(new URL('./traffic-game-smoke.mjs',import.meta.url),'utf8');
 test('exactly three predeclared pairs, no replacement outcomes',()=>{
  assert.deepEqual(PLAN,['baseline','head','head','baseline','baseline','head']);
@@ -15,8 +16,10 @@ test('instrumentation preserves every assertion and starts tracing before naviga
  const generated=instrument(source,'C:/canonical.json','C:/evidence');
  // Every original assertion remains in exactly the original sequence.
  assert.deepEqual([...generated.matchAll(/assert\.(?:ok|equal|deepEqual|notEqual)\([^\n;]+/g)].map(x=>x[0]).filter(x=>!x.includes('Canonical fixture round trip')),[...source.matchAll(/assert\.(?:ok|equal|deepEqual|notEqual)\([^\n;]+/g)].map(x=>x[0]));
- assert.ok(generated.indexOf("await send('Tracing.start'")<generated.indexOf('let d;'));
- assert.ok(generated.includes("'trace.ndjson'"));assert.ok(generated.includes("'timing.ndjson'"));
+ assert.ok(generated.includes("setStage('mobile dense ON setup');await diagnosticStartTrace();d=await navigate"));
+ assert.ok(!generated.includes('Tracing.dataCollected'));assert.ok(!generated.includes('ReportEvents'));assert.ok(!generated.includes('cpu_profiler'));assert.ok(!generated.includes('appendFileSync'));
+ assert.ok(generated.includes("transferMode:'ReturnAsStream'"));assert.ok(generated.includes("categories:'devtools.timeline,blink.user_timing'"));
+ assert.ok(generated.includes("try{await diagnosticDrainTrace();await send('Browser.close');}"));
  const file=resolve(mkdtempSync(resolve(tmpdir(),'paired-contract-')),'generated.mjs');writeFileSync(file,generated);
  const checked=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});assert.equal(checked.status,0,checked.stderr);
 });
@@ -41,4 +44,40 @@ test('watchdog unchanged; best-effort flush is earlier and workflow is narrow pu
  assert.ok(generated.includes("'taskkill.exe',['/PID',String(child.pid),'/T','/F']"));
  const workflow=readFileSync(new URL('../.github/workflows/traffic-paired-diagnostic.yml',import.meta.url),'utf8');
  assert.ok(!workflow.includes('workflow_dispatch'));assert.ok(!workflow.includes('pull_request:'));assert.ok(workflow.includes("branches: ['diagnostic/housing-ci-timing']"));
+});
+
+test('stream reads occur only during explicit post-result drain, with EOF attestation',async()=>{
+ const generated=instrument(source,'fixture','output');const prefix=generated.slice(0,generated.indexOf('import {readFileSync as diagnosticRead')).replace(/^import .*;\n/,'');
+ const calls=[],writes=[];let context;
+ context={Buffer,Date,setTimeout,clearTimeout,ws:{readyState:1},sleep:async()=>{},diagnosticWrite:(path,data)=>writes.push([path,data]),diagnosticAppend:async(path,data)=>writes.push([path,String(data)]),send:async(method,params)=>{
+  calls.push(method);if(method==='Tracing.end')runInNewContext('diagnosticTraceEvent={stream:"owned-stream"};',context);
+  if(method==='IO.read')return {data:'{"traceEvents":[]}',eof:true};return {};
+ }};
+ await runInNewContext(prefix+'diagnosticStartTrace();',context);
+ assert.deepEqual(calls,['Tracing.start']);assert.equal(writes.length,0);
+ await runInNewContext('diagnosticDrainTrace();',context);
+ assert.deepEqual(calls,['Tracing.start','Tracing.end','IO.read','IO.close']);assert.ok(writes.some(([path])=>path.endsWith('trace-complete.json')));
+});
+test('no ON start means no trace commands or invented complete stream',async()=>{
+ const generated=instrument(source,'fixture','output');const prefix=generated.slice(0,generated.indexOf('import {readFileSync as diagnosticRead')).replace(/^import .*;\n/,'');
+ const writes=[];await runInNewContext(prefix+'diagnosticDrainTrace();',{Date,diagnosticWrite:(path,data)=>writes.push([path,data]),send:()=>{throw Error('No CDP expected');}});
+ assert.ok(!writes.some(([path])=>path.endsWith('trace-complete.json')));assert.ok(writes.some(([,data])=>data.includes('Traffic ON navigation was never reached')));
+});
+
+test('stream failure or browser data loss never receives complete attestation',async()=>{
+ for(const failure of ['read-error','data-loss']){
+  const generated=instrument(source,'fixture','output');const prefix=generated.slice(0,generated.indexOf('import {readFileSync as diagnosticRead')).replace(/^import .*;\n/,'');
+  const writes=[];let context;context={Buffer,Date,setTimeout,clearTimeout,ws:{readyState:1},sleep:async()=>{},diagnosticWrite:(path,data)=>writes.push([path,data]),diagnosticAppend:async()=>{},send:async method=>{
+   if(method==='Tracing.end')runInNewContext(`diagnosticTraceEvent={stream:'owned-stream'};diagnosticTraceState.dataLossOccurred=${failure==='data-loss'};`,context);
+   if(method==='IO.read'){if(failure==='read-error')throw Error('read failed');return {data:'{}',eof:true};}return {};
+  }};
+  await runInNewContext(prefix+'(async()=>{await diagnosticStartTrace();await diagnosticDrainTrace();})()',context);
+  assert.ok(!writes.some(([path])=>path.endsWith('trace-complete.json')));assert.ok(writes.some(([path,data])=>path.endsWith('trace-status.json')&&data.includes('incompleteReason')));
+ }
+});
+
+test('diagnostic success additionally requires six complete traces without replacing acceptance status',()=>{
+ const results=plannedResults().map(r=>({...r,status:0,outcome:'passed',traceComplete:true}));
+ assert.equal(diagnosticSucceeded(results),true);results[2].traceComplete=false;assert.equal(diagnosticSucceeded(results),false);assert.equal(results[2].status,0);
+ results[2].traceComplete=true;results[3].status=1;assert.equal(diagnosticSucceeded(results),false);assert.equal(diagnosticSucceeded(results.slice(0,5)),false);
 });
