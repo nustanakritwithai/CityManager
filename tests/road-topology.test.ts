@@ -35,10 +35,10 @@ test('invalid operations are side-effect free; explicit topology survives demoli
  assert.ok(buildRoad(c,at(3,13),at(3,13)).ok);assert.equal(c.roadTopology!.oneWay[at(3,13)],undefined);
 });
 test('road editing survives current education and legacy road envelopes',()=>{
- const c=fixture(),old=serialize(c),loaded=deserialize(old);assert.equal(JSON.parse(old).version,25);assert.equal(JSON.parse(old).commercialBaseVersion,22);assert.equal(serialize(loaded),old);
- buildParallelRoad(loaded,at(0,13),at(10,13),true);const raw=serialize(loaded);assert.equal(JSON.parse(raw).version,25);assert.equal(JSON.parse(raw).commercialBaseVersion,22);
+ const c=fixture(),old=serialize(c),loaded=deserialize(old);assert.equal(JSON.parse(old).version,27);assert.equal(JSON.parse(old).commercialBaseVersion,22);assert.equal(serialize(loaded),old);
+ buildParallelRoad(loaded,at(0,13),at(10,13),true);const raw=serialize(loaded);assert.equal(JSON.parse(raw).version,27);assert.equal(JSON.parse(raw).commercialBaseVersion,22);
  const restored=deserialize(raw);assert.equal(serialize(restored),raw);assert.deepEqual([...connectedRoads(restored)],[...connectedRoads(loaded)]);
- const legacy=JSON.parse(old); delete legacy.education; delete legacy.goalRulesVersion; delete legacy.commercialUnifiedStartTick; delete legacy.commercialUnifiedBaseline; delete legacy.commercialBaseVersion; legacy.version=19; legacy.rulesVersion='chain-14';
+ const legacy=JSON.parse(old); delete legacy.education; delete legacy.goalRulesVersion; delete legacy.commercialUnifiedStartTick; delete legacy.commercialUnifiedBaseline; delete legacy.commercialBaseVersion; delete legacy.farmBaseVersion; delete legacy.farmSoilIndependentStartTick; legacy.version=19; legacy.rulesVersion='chain-14';
  const legacyRaw=JSON.stringify(legacy),map=new Map([[SAVE_KEY,legacyRaw]]),s={getItem:(k:string)=>map.get(k)??null,setItem:(k:string,v:string)=>{map.set(k,v);}};
  saveStoredCity(s,raw,null);assert.equal(map.get(EDUCATION_BACKUP_KEY),legacyRaw);assert.deepEqual(readStoredCity(s,'backup'),{key:EDUCATION_BACKUP_KEY,raw:legacyRaw});
 });
@@ -57,7 +57,7 @@ test('park runtime and existing market identity survive the road envelope withou
  const pair=city.cells.flatMap((c,i)=>c.road&&i%SIZE<SIZE-1&&city.cells[i+1]?.road?[[i,i+1]]:[])[0];assert.ok(pair);
  editRoadJunction(city,pair[0],pair[1],false);
  const saved=serializeParkSession(city,runtime,market),loaded=deserializeParkSession(saved);
- assert.equal(JSON.parse(saved).version,25);assert.equal(JSON.parse(saved).commercialBaseVersion,20);assert.deepEqual(loaded.city.market,market);assert.deepEqual(loaded.runtime,runtime);
+ assert.equal(JSON.parse(saved).version,27);assert.equal(JSON.parse(saved).commercialBaseVersion,20);assert.deepEqual(loaded.city.market,market);assert.deepEqual(loaded.runtime,runtime);
  assert.equal(roadLinked(loaded.city,pair[0],pair[1]),false);
 });
 

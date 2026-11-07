@@ -14,7 +14,7 @@ test('validated populated legacy save expands without altering legacy state, the
   assert.equal(buildRoad(expanded,5,north).ok,true);
   assert.equal(zoneCell(expanded,parcel,'R').ok,true);
   const saved = serializeParkSession(expanded,createParkRuntime(expanded));
-  assert.equal(JSON.parse(saved).version,26);
+  assert.equal(JSON.parse(saved).version,27);
   const restored = deserializeParkSession(saved).city;
   assert.deepEqual(restored.cells,expanded.cells); assert.deepEqual(restored.resources,expanded.resources);
   assert.deepEqual(restored.accounts,expanded.accounts); assert.deepEqual(restored.buildings,expanded.buildings);
@@ -36,5 +36,5 @@ test('populated legacy bus, market and park fixture survives migration and expan
  const loaded=deserializeParkSession(raw),before=structuredClone({bus:loaded.city.bus,market:loaded.city.market,buildings:loaded.city.buildings,accounts:loaded.city.accounts,activity:loaded.runtime.activity});
  const expanded=expandValidatedParkSession(loaded),saved=serializeParkSession(expanded.city,expanded.runtime),restored=deserializeParkSession(saved);
  assert.deepEqual({bus:restored.city.bus,market:restored.city.market,buildings:restored.city.buildings,accounts:restored.city.accounts,activity:restored.runtime.activity},before);
- assert.deepEqual(restored.city.cells.slice(0,576),loaded.city.cells);assert.equal(JSON.parse(saved).version,26);
+ assert.deepEqual(restored.city.cells.slice(0,576),loaded.city.cells);assert.equal(JSON.parse(saved).version,27);
 });

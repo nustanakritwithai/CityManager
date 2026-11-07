@@ -88,7 +88,7 @@ test('park upkeep follows existing treasury clipping without negative funds or d
 });
 
 test('v15 validates one-tile level-1 park ownership and construction evidence; old v13 remains intact', () => {
-  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 25); assert.equal(raw.rulesVersion, 'chain-20'); assert.equal(raw.commercialBaseVersion, 22);
+  const c = city(); buildPark(c, 0); const raw = JSON.parse(serialize(c)); assert.equal(raw.version, 27); assert.equal(raw.rulesVersion, 'chain-22'); assert.equal(raw.commercialBaseVersion, 22);
   for (const change of [
     (x: any) => { x.parks[0].width = 2; }, (x: any) => { x.parks[0].cells = [0, 1]; },
     (x: any) => { x.parks[0].level = 0; }, (x: any) => { x.parks[0].level = 2; },
@@ -125,8 +125,11 @@ test('no-park cities keep accounting and owner distributions deterministic throu
     [61025, { owner: 'household:4', amounts: [36420, 72720, 99690], hash: '28c0c38b3cb1829d21672c31345681f4e53404abf02f4d4cd11060a9cee2bd87' }],
     [20261023, { owner: 'household:2', amounts: [29310, 72720, 99570], hash: '4f4406287f83d464ff646df8ccb2931f72e93e9a47f1ea3e7e1e18f3251fcd9a' }],
   ]);
-  for (const seed of [61025, 20261023]) {
-    const c = createCity(seed); run(c, 59); const loaded = deserialize(serialize(c));
+  for (const historicalSoil of [true, false]) for (const seed of [61025, 20261023]) {
+    const c = createCity(seed);
+    if (historicalSoil) delete c.farmSoilIndependentStartTick; // Frozen pre-change trajectory is checked separately from current uniform production.
+    run(c, 59); const loaded = deserialize(serialize(c));
+    if (historicalSoil) delete loaded.farmSoilIndependentStartTick;
     const payouts = c.ledger.filter(e => e.reason === 'Owner profit distribution').map(e => [e.tick, e.from, e.to, e.amount]);
     const bills = c.ledger.filter(e => e.reason === 'Monthly municipal services').map(e => e.amount);
     for (let d = 60; d <= 120; d++) {
@@ -134,10 +137,10 @@ test('no-park cities keep accounting and owner distributions deterministic throu
       assert.deepEqual(c, loaded, `seed ${seed}, day ${d}`);
       payouts.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Owner profit distribution').map(e => [e.tick, e.from, e.to, e.amount]));
       bills.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Monthly municipal services').map(e => e.amount));
-      if (d === 119) {
+      if (d === 119 && historicalSoil) {
         assert.deepEqual(bills, [24000, 24000, 33000]);
         assert.deepEqual(payouts, expected.get(seed)!.amounts.map((amount, index) => [30 * (index + 1), 'firm:8', expected.get(seed)!.owner, amount]));
-        const { ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
+        const { farmSoilIndependentStartTick: _soil, ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
         const amount = bills.reduce((n, value) => n + value, 0);
         const normalized = { ...state, accounts: { ...accounts, treasury: accounts.treasury + amount, upkeep: accounts.upkeep - amount } };
         assert.equal(createHash('sha256').update(JSON.stringify(normalized)).digest('hex'), expected.get(seed)!.hash, `seed ${seed} pre-PR main trajectory after accounting for service bills`);

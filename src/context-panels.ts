@@ -1,3 +1,4 @@
+import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { onExplicitActivation } from './explicit-activation.ts';
 import { housingLevel } from './housing.ts';
@@ -13,7 +14,7 @@ import { peopleOf } from './education.ts';
 import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, commercialGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
-import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity, harvestYield } from './agriculture.ts';
+import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
@@ -300,8 +301,8 @@ export function renderAgriculture(city: City, building: Building, firm: Firm, wo
   body.classList.add('cx-agriculture'); body.dataset.firmId = String(firm.id);
   const cards = [capacityMetric('crop-stock', 'พืชผลคงคลัง / เก็บได้', firm.cropInventory, cap, 'ล็อต'), metric('crop-cost', 'มูลค่าพืชผลตามบัญชี', cash(firm.cropCost), firm.cropCost, true), metric('production-tick', 'วันประมวลผลล่าสุด', String(firm.productionTick), firm.productionTick)];
   if (firm.zone === 'F') {
-    const fertility = city.resources.fertility[building.cell], actualHarvest = city.cropLedger.filter(entry => entry.tick === city.tick && entry.kind === 'harvest' && entry.to === firm.wallet).reduce((sum, entry) => sum + entry.quantity, 0);
-    cards.push(metric('fertility', 'ความอุดมสมบูรณ์', `${fertility}%`, fertility), metric('yield-per-worker', 'กำลังเก็บเกี่ยว / แรงงาน', `${harvestYield(Math.max(50, fertility), 1)} ล็อต/วัน`, harvestYield(Math.max(50, fertility), 1)), metric('harvest-today', 'เก็บเกี่ยวจริงวันนี้', `${actualHarvest} ล็อต`, actualHarvest));
+    const actualHarvest = city.cropLedger.filter(entry => entry.tick === city.tick && entry.kind === 'harvest' && entry.to === firm.wallet).reduce((sum, entry) => sum + entry.quantity, 0);
+    cards.push(metric('yield-per-worker', 'กำลังเก็บเกี่ยว / แรงงาน', `${farmYieldPerWorker(city, building.cell)} ล็อต/วัน`, farmYieldPerWorker(city, building.cell)), metric('harvest-today', 'เก็บเกี่ยวจริงวันนี้', `${actualHarvest} ล็อต`, actualHarvest));
   } else if (firm.zone === 'I') cards.push(metric('recipe-input', 'พืชผล / ชุด', `${CROP_RECIPE.crop} ล็อต`, CROP_RECIPE.crop), metric('recipe-output', 'สำเร็จรูป / ชุด', `${CROP_RECIPE.goods} หน่วย`, CROP_RECIPE.goods), metric('available-batches', 'ชุดที่แรงงานและสต็อกรองรับ', String(Math.min(workers, Math.floor((firm.recipe ? firm.crops[RECIPE[firm.recipe].crop] : 0) / CROP_RECIPE.crop))), Math.min(workers, Math.floor((firm.recipe ? firm.crops[RECIPE[firm.recipe].crop] : 0) / CROP_RECIPE.crop))));
   else cards.push(metric('crop-buy-price', 'ซื้อจากฟาร์ม / ล็อต', cash(CROP_PRICES.farmToTrader), CROP_PRICES.farmToTrader, true), metric('crop-factory-price', 'ขายให้โรงงาน / ล็อต', cash(CROP_PRICES.traderToFactory), CROP_PRICES.traderToFactory, true), metric('crop-household-price', 'ตะกร้าครัวเรือน / ล็อต', cash(CROP_PRICES.householdCrop), CROP_PRICES.householdCrop, true), metric('rent', 'ค่าเช่าพาณิชย์ / เดือน', cash(firmRent(firm)), firmRent(firm), true));
   body.append(metrics(cards), el('p', 'cx-detail-note', firm.zone === 'F' ? 'พืชผลเก็บเกี่ยวตั้งมูลค่าคงคลังเริ่มต้นเป็นศูนย์ ค่าจ้างและค่าเช่ายังเป็นค่าใช้จ่ายงวด ไม่ได้เป็นผลตอบแทนรับประกัน' : firm.zone === 'I' ? `แต่ละวันใช้ ${CROP_RECIPE.crop} ล็อตจริงต่อ ${CROP_RECIPE.goods} หน่วยสำเร็จรูป ขาดวัตถุดิบผลิตไม่ได้ และไม่ประมวลผลซ้ำวันเดิม` : 'กิจการพาณิชย์ไม่ผลิตหรือแปรรูป ซื้อพืชผลเข้าสต็อกก่อน ขายล็อตที่มีตั้งแต่ต้นวันเท่านั้น สต็อกที่โรงงานและครัวเรือนซื้อเป็นกองเดียวกัน'));
@@ -661,7 +662,7 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
       picker.append(el('p', 'cx-detail-note', `กำลังปลูก${CROP_LABELS[farmCrop(city, firm)]} · ${farmCropMode(firm) === 'auto' ? 'เลือกอัตโนมัติเมื่อฟาร์มเริ่มหรือเมื่อกดอัตโนมัติ' : 'ผู้เล่นเลือกเอง'}`), controls, el('p', 'cx-detail-note', `คงคลัง: ${CROPS.map(crop => `${CROP_LABELS[crop]} ${firm.crops[crop]}`).join(' · ')} ล็อต · พืชเดิมยังอยู่เมื่อเปลี่ยน`));
       output.push(cardSection(picker, 'crop-choice'));
     }
-    output.push(cardGroup('พื้นที่เพาะปลูก', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง'), ...takeCards(parts, ['fertility'])], 'bc-plot'));
+    output.push(cardGroup('พื้นที่เพาะปลูก', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง')], 'bc-plot'));
     output.push(cardGroup('การเก็บเกี่ยววันนี้', 'harvest', takeCards(parts, ['harvest-today', 'yield-per-worker', 'workers']), 'bc-yield'));
     output.push(cardGroup('พืชผลที่เก็บไว้', 'stock', takeCards(parts, ['crop-stock', 'crop-cost'])));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));

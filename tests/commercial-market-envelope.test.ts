@@ -11,7 +11,7 @@ function fixture(version:24|25){
   const journal=marketJournalForTest(null);journal.guestId=guest;journal.seq='4';
   journal.operations.push({opId:'00000000-0000-4000-8000-000000000002',guestId:guest,cityId:journal.cityId,kind:'buy',payload:{listing_id:'test',quantity:1},state:'pending',createdAt:'2026-10-31T00:00:00.000Z'});
   const envelope=JSON.parse(serialize(c,journal));
-  if(version===24){envelope.version=24;envelope.rulesVersion='chain-19';delete envelope.commercialBaseVersion;delete envelope.commercialUnifiedStartTick;delete envelope.commercialUnifiedBaseline;}
+  if(version===24){envelope.version=24;envelope.rulesVersion='chain-19';delete envelope.commercialBaseVersion; delete envelope.farmBaseVersion; delete envelope.farmSoilIndependentStartTick;delete envelope.commercialUnifiedStartTick;delete envelope.commercialUnifiedBaseline;}
   return{raw:JSON.stringify(envelope),journal};
 }
 

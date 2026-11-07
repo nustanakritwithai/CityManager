@@ -8,7 +8,9 @@ import { saveStoredCity } from '../src/save-storage.ts';
 
 function assertEducationEnvelope(raw: string) {
   const save = JSON.parse(raw);
-  assert.equal(save.version, 25); assert.equal(save.rulesVersion, 'chain-20');
+  assert.equal(save.version, 27); assert.equal(save.rulesVersion, 'chain-22');
+  assert.equal(save.farmBaseVersion, 25);
+  assert.ok(Number.isSafeInteger(save.farmSoilIndependentStartTick) && save.farmSoilIndependentStartTick <= save.tick);
   assert.equal(save.commercialBaseVersion, save.history ? 24 : 22);
   if (save.history) assert.equal(save.historyBaseVersion, 22);
   assert.equal(save.education?.rules, 'education-1');

@@ -1,3 +1,4 @@
+import { farmProductionFertility } from './farm-production.ts';
 import { cropJournalLength } from './city-history.ts';
 import { factoryCropCapacity } from './factory-levels.ts';
 /** Canonical crop operations. Proposals are checked before synchronous commits. */
@@ -108,7 +109,7 @@ function exchange(c: City, seller: Firm, buyer: Firm, crop: CropId, quantity: nu
 function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
   const building = c.buildings.find(b => b.id === f.building), count = workers(f, hooks);
   if (!building || count === null) return;
-  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: Math.max(50, c.resources.fertility[building.cell]), operational: operational(c, f, hooks), capacity: farmStockCapacity(building.level) });
+  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: farmProductionFertility(c, building.cell), operational: operational(c, f, hooks), capacity: farmStockCapacity(building.level) });
   if (!proposal.ok) return;
   if (!proposal.quantity) { f.productionTick = proposal.next.productionTick; return; }
   let event: CropEntry, harvested: number;
@@ -279,7 +280,7 @@ export function agricultureDiagnostic(c: City, f: Firm, hooks: AgricultureHooks)
   if (!hooks.served(b.id)) return result('agriculture.no-utilities');
   if (!workers(f, hooks) || !operational(c, f, hooks)) return result('agriculture.no-workers');
   if (f.zone === 'F') {
-    const fertility = Math.max(50, c.resources.fertility[b.cell]);
+    const fertility = farmProductionFertility(c, b.cell, c.tick + 1);
     if (!isViableFarmland(fertility)) return result('agriculture.unsuitable-fertility');
     const cap = farmStockCapacity(b.level);
     if (f.cropInventory >= cap) return result('agriculture.stock-cap');

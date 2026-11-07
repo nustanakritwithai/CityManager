@@ -1,0 +1,7 @@
+#selection-actions { position: fixed; z-index: 22; display: flex; gap: 6px; flex-wrap: wrap; width: max-content; max-width: min(330px, calc(100vw - 16px)); padding: 8px; border: 1px solid #e2c78b; border-radius: 14px; background: #182d35f5; color: #fff5dd; box-shadow: 0 5px 20px #0006; font-family: inherit; }
+#selection-actions[hidden] { display: none; }
+#selection-actions .selection-action-label { flex-basis: 100%; font-size: 12px; line-height: 1.5; }
+#selection-actions button { min-width: 44px; min-height: 48px; padding: 8px 10px; border: 1px solid #e2c78b77; border-radius: 9px; background: #2c4850; color: #fff5dd; font: inherit; font-size: 13px; touch-action: manipulation; }
+#selection-actions #selection-upgrade { background: #efd18a; color: #24383d; font-weight: 700; }
+#selection-actions button:disabled { opacity: .6; }
+#selection-actions button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }

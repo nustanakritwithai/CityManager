@@ -1,3 +1,4 @@
+import { farmProductionFertility, FARM_YIELD_PER_WORKER } from './farm-production.ts';
 import { isCanonicalExpandedResourceMap } from './expanded-map-migration.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
@@ -36,6 +37,7 @@ export function captureAgricultureHistory(c: City, throughTick: number): Agricul
 }
 function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: boolean, captureTick?: number): AgricultureSeed | undefined {
   const history = c.history;
+  if (c.farmSoilIndependentStartTick !== undefined) requireThat(isSafeCount(c.farmSoilIndependentStartTick) && c.farmSoilIndependentStartTick <= c.tick);
   // Missing boundary means this is an old snapshot and must use its old rules.
   const unified = c.commercialUnifiedStartTick !== undefined;
   if (unified) requireThat(isSafeCount(c.commercialUnifiedStartTick) && c.commercialUnifiedStartTick <= c.tick);
@@ -231,7 +233,8 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
         if (room < 0) continue;
         // Removed farms have no remaining cell; preserve historical v15 validation,
         // while new events must be possible at some actual effective fertility.
-        const matches = b ? e.quantity === Math.min(room, harvestYield(Math.max(50, c.resources.fertility[b.cell]), e.workers)) : oldRules
+        const independent = c.farmSoilIndependentStartTick !== undefined && e.tick > c.farmSoilIndependentStartTick;
+        const matches = independent ? e.quantity === Math.min(room, FARM_YIELD_PER_WORKER * e.workers) : b ? e.quantity === Math.min(room, harvestYield(farmProductionFertility(c, b.cell, e.tick), e.workers)) : oldRules
           ? e.quantity <= Math.min(room, 24 * e.workers)
           : Array.from({ length: 51 }, (_, i) => 50 + i).some(fertility => e.quantity === Math.min(room, harvestYield(fertility, e.workers)));
         if (matches) { feasible = level; break; }

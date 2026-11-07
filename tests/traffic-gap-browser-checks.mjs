@@ -159,7 +159,7 @@ export async function trafficGapBrowserChecks({send,evaluate,capture,acknowledge
  assert.ok(busyObserved.committed.some(({frame})=>frame.blocked>0&&frame.congestedLinks>0),'Real observed busy case has stopped traffic, not only synthetic inputs');
  partial.busy=busyProof;partial.pacing=pacing;partial.completed.push('congested-hold-resume');
  await capture('traffic-gap-busy-queue-paused');
- const saved=await acknowledge();assert.equal(saved.version,25);await reload();await until(async()=>!!(await traffic())?.ready,'ACK reload worker');
+ const saved=await acknowledge();assert.equal(saved.version,27);await reload();await until(async()=>!!(await traffic())?.ready,'ACK reload worker');
  const restored=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(restored,saved,'Complete paused city/session survives the real server ACK reload unchanged');assert.ok(!('trafficGame' in restored),'Ephemeral game is not a city-save payload');await capture('traffic-gap-server-restored');partial.completed.push('server-ACK-reload');
  checks.push('Native OFF/ON lifecycle and real server ACK/reload preserve city accounts/journal; no browser city backup is used');
  // Dense-grid rendering is a separate bounded sample, not a full-cycle browser claim.

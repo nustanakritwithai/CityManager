@@ -5,7 +5,7 @@ import { FOOD_BACKUP_KEY, SAVE_KEY, LATEST_BACKUP_KEY, readStoredCity, saveStore
 
 function oldCity(seed: number): string {
   const raw = JSON.parse(serialize(createCity(seed)));
-  delete raw.goalRulesVersion; delete raw.commercialUnifiedStartTick; delete raw.commercialUnifiedBaseline; delete raw.commercialBaseVersion;
+  delete raw.goalRulesVersion; delete raw.commercialUnifiedStartTick; delete raw.commercialUnifiedBaseline; delete raw.commercialBaseVersion; delete raw.farmBaseVersion; delete raw.farmSoilIndependentStartTick;
   delete raw.education; raw.version = 12; raw.rulesVersion = 'chain-7'; delete raw.foodDemandStartTick; delete raw.factoryProgressionStartTick; delete raw.farmLevelStartTick;
   return JSON.stringify(raw);
 }

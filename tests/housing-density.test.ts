@@ -93,10 +93,11 @@ function legacyParkSession() {
 test('v15 park session migrates without changing state, rejects new housing under old version and keeps backup', () => {
   const session = legacyParkSession(), old = JSON.stringify(session), restored = deserializeParkSession(old);
   const { version: _v, rulesVersion: _r, parkRuntime, ...original } = session;
-  const { version, rulesVersion, factoryProgressionStartTick, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, ...actual } = restored.city;
+  const { version, rulesVersion, factoryProgressionStartTick, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, farmSoilIndependentStartTick, ...actual } = restored.city;
   assert.deepEqual(actual, original); assert.equal(version, 9); assert.equal(rulesVersion, 'chain-4');
   assert.equal(factoryProgressionStartTick, session.tick); assert.equal(farmLevelStartTick, session.tick);
   assert.equal(commercialUnifiedStartTick, session.tick);
+  assert.equal(farmSoilIndependentStartTick, session.tick);
   assert.deepEqual(commercialUnifiedBaseline, { moneyEntries: session.ledger.length, cropEntries: session.cropLedger.length, goodsEntries: session.goodsLedger.length });
   assert.deepEqual(JSON.parse(JSON.stringify(restored.runtime)), parkRuntime);
   const saved = serializeParkSession(restored.city, restored.runtime);
