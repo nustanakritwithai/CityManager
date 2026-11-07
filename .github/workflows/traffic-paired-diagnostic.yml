@@ -1,0 +1,44 @@
+name: Traffic paired timing diagnosis (not acceptance)
+on:
+  push:
+    branches: ['diagnostic/housing-ci-timing']
+    paths:
+      - 'scripts/traffic-game-paired-diagnostic.mjs'
+      - 'tests/traffic-game-paired-diagnostic.test.mjs'
+      - '.github/workflows/traffic-paired-diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  paired:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: node --test tests/traffic-game-paired-diagnostic.test.mjs
+      - name: Run all three fixed pairs on this single runner
+        run: node scripts/traffic-game-paired-diagnostic.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: traffic-paired-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .test-output/paired-diagnostic/baseline/dist/assets/*.map
+            .test-output/paired-diagnostic/head/dist/assets/*.map
+            .test-output/paired-diagnostic/baseline/dist/assets/*.js
+            .test-output/paired-diagnostic/head/dist/assets/*.js
+            .test-output/paired-diagnostic/*.json
+            .test-output/paired-diagnostic/*.log
+            .test-output/paired-diagnostic/trial-*/*.json
+            .test-output/paired-diagnostic/trial-*/*.ndjson
+            .test-output/paired-diagnostic/trial-*/*.png
+            .test-output/paired-diagnostic/trial-*/*.log
+            .test-output/paired-diagnostic/trial-*/*.txt
+          if-no-files-found: error
+          retention-days: 7
