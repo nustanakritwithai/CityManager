@@ -55,6 +55,30 @@ for (let day = 1; day <= 180; day++) {
   // Education is on for every city. Hold only its credential counters so day 120
   // still measures the real full-house and paid upgrade.
   keepEducationGatesOpen(city);
+  if (day === 120) {
+    // Balanced admission intentionally leaves these cottages partially occupied.
+    // Fill one mature cottage with existing families to isolate its occupancy
+    // gate; the next real simulation step must still pay for the 3 -> 4 upgrade.
+    const beforeFixture = structuredClone(city);
+    const residence = city.buildings.find(b => b.zone === 'R' && b.level === 3);
+    assert.ok(residence, 'A mature cottage is available for the full-home gate');
+    const capacity = housingCapacity(residence);
+    for (const household of city.households) {
+      const occupied = homeOccupancy(city, residence.id);
+      if (occupied.households === capacity.households) break;
+      if (household.home !== residence.id && occupied.persons + household.members <= capacity.persons) household.home = residence.id;
+    }
+    assert.equal(homeOccupancy(city, residence.id).households, capacity.households);
+    for (const building of city.buildings.filter(b => b.zone === 'R')) {
+      const occupied = homeOccupancy(city, building.id), limit = housingCapacity(building);
+      assert.ok(occupied.households <= limit.households && occupied.persons <= limit.persons, 'Fixture preserves both housing limits');
+    }
+    const withoutHomes = value => ({ ...value, households: value.households.map(({ home: _home, ...household }) => household) });
+    assert.deepEqual(withoutHomes(city), withoutHomes(beforeFixture), 'Only existing household home assignments change during fixture preparation');
+    assert.ok(city.buildings.filter(b => b.zone === 'R' && homeOccupancy(city, b.id).households > 0).length >= 3, 'Three occupied homes remain for visual variants');
+    const raw = serialize(city);
+    assert.equal(serialize(deserialize(raw)), raw, 'Prepared full-home fixture round-trips without repair');
+  }
   if (day === 120 || day === 150) {
     const before = structuredClone(city), after = structuredClone(city); step(after);
     snapshots.set(day, { before, after });
@@ -64,7 +88,7 @@ for (let day = 1; day <= 180; day++) {
 const findUpgrade = (day, zone, predicate = () => true) => {
   const { before, after } = snapshots.get(day);
   const building = after.buildings.find(b => b.zone === zone && predicate(after.firms.find(f => f.building === b.id)) && b.level > (before.buildings.find(p => p.id === b.id)?.level ?? Infinity));
-  assert.ok(building, `Natural ${zone} upgrade on day ${day}`);
+  assert.ok(building, `Real ${zone} upgrade on day ${day}`);
   return { previous: before.buildings.find(b => b.id === building.id), building, firm: after.firms.find(f => f.building === building.id) };
 };
 const home = findUpgrade(120, 'R'), factory = findUpgrade(120, 'I'), farm = findUpgrade(120, 'F'), shop = findUpgrade(150, 'C', f => f && isRetail(f));
@@ -238,7 +262,7 @@ try {
   assert.match(await evaluate('document.querySelector("#entity-content .bc-type-label").textContent'), /อพาร์ตเมนต์ ระดับ 1/);
   assert.equal(await evaluate('!!document.querySelector("#entity-content [data-building-progression]").closest("details")'), false, 'Housing progression is not hidden in collapsed details');
   await screenshot('desktop-apartment-details.png');
-  checks.push('Natural day-120 home, factory and farm upgrades match replay, identity, paid costs and real capacity');
+  checks.push('Prepared full-home and natural factory/farm day-120 upgrades match real simulation replay, identity, paid costs and capacity');
   await runBoundary(150,[shop]);
   assert.equal(cityGoals(snapshots.get(150).after).won,false,'Expanded-map fixture has not reached the win dialog at this boundary');
   assert.equal(await evaluate('!!document.querySelector("dialog.win-dialog[open]")'),false);

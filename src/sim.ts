@@ -1171,18 +1171,70 @@ export function moveHousehold(c: City, householdId: number, destinationId: numbe
   const h = c.households.find(h => h.id === householdId), destination = c.buildings.find(b => b.id === destinationId && b.zone === 'R');
   if (!h || !destination) return { ok: false, message: 'Household or destination home does not exist.' };
   if (h.home === destinationId) return { ok: true, message: 'Household already lives here; no transfer or population change.' };
-  if (destination.age < 1 || !access(c, destination.cell) || !homeSupplied(c, destination)) return { ok: false, message: 'Destination needs a later daily tick, connected road, and a unit of spare power and water.' };
+  if (destination.age < 1 || !access(c, destination.cell)) return { ok: false, message: 'Destination needs a later daily tick and a connected road.' };
   if (!canAccommodate(housingCapacity(destination), homeOccupancy(c, destinationId), h.members)) return { ok: false, message: 'Destination lacks household slots or person capacity.' };
+  // Moving an existing resident releases the old home's utility demand. Evaluate
+  // the resulting network, without mutating live state or requiring spare supply
+  // twice. Never take either utility away from a building that has it now.
+  const roads = connectedRoads(c), before = utilityService(c, roads);
+  const after = utilityService({ ...c, households: c.households.map(value => value === h ? { ...value, home: destinationId } : value) }, roads);
+  if (!after.ok(destinationId) || [...before.served].some(([id, supplied]) => UTILITY_KINDS.some(kind => supplied[kind] && !after.served.get(id)?.[kind]))) {
+    return { ok: false, message: 'Destination needs power and water without interrupting existing service.' };
+  }
   h.home = destinationId;
   return { ok: true, message: 'Household moved with the same identity, wallet, members and earned wage claims.' };
 }
 function vacantHomes(c: City): Building[] {
-  return c.buildings.filter(b => b.zone === 'R' && b.age >= 1 && access(c, b.cell)).sort((a, b) => a.cell - b.cell || a.id - b.id);
+  const occupied = buildOccupancyIndex(c.households);
+  // Fill empty / less populated homes first instead of repeatedly filling the
+  // first parcel that grew taller. Stable ties keep replay/save reload identical.
+  return c.buildings.filter(b => b.zone === 'R' && b.age >= 1 && access(c, b.cell)).sort((a, b) =>
+    (occupied.get(a.id)?.households ?? 0) - (occupied.get(b.id)?.households ?? 0) ||
+    (occupied.get(a.id)?.persons ?? 0) - (occupied.get(b.id)?.persons ?? 0) || a.cell - b.cell || a.id - b.id);
 }
 function rehouse(c: City) {
   for (const h of [...c.households].filter(h => h.home === null).sort((a, b) => a.id - b.id)) {
-    for (const home of vacantHomes(c)) if (canAccommodate(housingCapacity(home), homeOccupancy(c, home.id), h.members)) { moveHousehold(c, h.id, home.id); break; }
+    const service = utilities(c);
+    if (!fits(service.spare, HOUSEHOLD_NEED)) return;
+    for (const home of vacantHomes(c)) if (homeSupplied(c, home, service) && canAccommodate(housingCapacity(home), homeOccupancy(c, home.id), h.members) && moveHousehold(c, h.id, home.id).ok) break;
   }
+}
+/** A bounded weekly review moves whole households, never synthetic residents. */
+export const HOUSING_RELOCATION_INTERVAL = 7;
+export const HOUSING_RELOCATION_LIMIT = 4;
+export const HOUSING_RELOCATION_ATTEMPTS = 32;
+export function rebalanceHousing(c: City): number {
+  // Displaced households have first claim on any usable housing and supply.
+  if (c.tick % HOUSING_RELOCATION_INTERVAL !== 0 || c.households.some(h => h.home === null)) return 0;
+  const homes = vacantHomes(c), occupied = buildOccupancyIndex(c.households);
+  const residents = new Map<number, Household[]>();
+  for (const h of [...c.households].sort((a, b) => a.id - b.id)) {
+    const at = residents.get(h.home!) ?? []; at.push(h); residents.set(h.home!, at);
+  }
+  const moved = new Set<number>();
+  const sources = [...homes].sort((a, b) => (occupied.get(b.id)?.households ?? 0) - (occupied.get(a.id)?.households ?? 0) || a.cell - b.cell || a.id - b.id);
+  const candidates = homes.flatMap(destination => sources.filter(source =>
+    (occupied.get(source.id)?.households ?? 0) >= (occupied.get(destination.id)?.households ?? 0) + 2,
+  ).map(source => ({ source, destination })));
+  // Bound failed checks as well as moves. Rotate through the entire candidate
+  // list so repeatedly unusable homes cannot starve a later feasible pair.
+  if (!candidates.length) return 0;
+  const offset = (Math.floor(c.tick / HOUSING_RELOCATION_INTERVAL) % candidates.length) * HOUSING_RELOCATION_ATTEMPTS % candidates.length;
+  for (let attempt = 0; attempt < Math.min(candidates.length, HOUSING_RELOCATION_ATTEMPTS) && moved.size < HOUSING_RELOCATION_LIMIT; attempt++) {
+    const { source, destination } = candidates[(offset + attempt) % candidates.length];
+    const used = occupied.get(destination.id) ?? { households: 0, persons: 0 }, sourceUsed = occupied.get(source.id)!;
+    // Recheck after every earlier move. The sum of squared household counts
+    // strictly decreases, so unchanged housing cannot oscillate.
+    if (sourceUsed.households < used.households + 2) continue;
+    const h = residents.get(source.id)?.find(h => !moved.has(h.id) && canAccommodate(housingCapacity(destination), used, h.members));
+    if (!h || !moveHousehold(c, h.id, destination.id).ok) continue;
+    occupied.set(source.id, { households: sourceUsed.households - 1, persons: sourceUsed.persons - h.members });
+    occupied.set(destination.id, { households: used.households + 1, persons: used.persons + h.members });
+    residents.set(source.id, residents.get(source.id)!.filter(value => value !== h));
+    residents.set(destination.id, [...residents.get(destination.id) ?? [], h]);
+    moved.add(h.id);
+  }
+  return moved.size;
 }
 function admissionFacts(c: City) {
   const vacanciesByZone = { I: 0, C: 0 }, svc = utilities(c);
@@ -1206,6 +1258,8 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (c.households.length >= MAX_CITY_HOUSEHOLDS) reasons.push('ถึงความจุสูงสุดตามจำนวนแปลงและระดับที่อยู่อาศัยของแผนที่แล้ว');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
+  reasons.push('บ้านที่ว่างหรือมีครัวเรือนน้อยกว่าได้รับการจัดบ้านก่อนอาคารที่มีคนมาก');
+  reasons.push(`ทุก ${HOUSING_RELOCATION_INTERVAL} วัน กระจายครัวเรือนเดิมได้ไม่เกิน ${HOUSING_RELOCATION_LIMIT} ครัวเรือน จากบ้านที่มีมากกว่าปลายทางอย่างน้อย 2 ครัวเรือน ต้องมีที่ว่าง ถนน น้ำไฟ และไม่ตัดบริการอาคารอื่น ไม่มีการเพิ่มคนหรือเงิน`);
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
   reasons.push(`สิ้นเดือน: แรงงานเฉพาะทางที่สายงานเดิมไม่มีตำแหน่งว่างแต่อีกสายมี จะเปลี่ยนเป็นแรงงานทั่วไป ครัวเรือนที่ไม่มีงานได้ค่าจ้างเลย ${DEPARTURE_MONTHS} เดือนจะย้ายออกพร้อมเงินออม (เจ้าของร้านและผู้มาใหม่ไม่ย้าย เมืองเหลืออย่างน้อย ${DEPARTURE_FLOOR} ครัวเรือน)`);
   return reasons;
@@ -1335,7 +1389,7 @@ function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
-  rehouse(c); employ(c); admitHousehold(c); trade(c);
+  rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
 }

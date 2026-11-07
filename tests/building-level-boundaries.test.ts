@@ -21,7 +21,9 @@ test('filled apartment and condo tiers upgrade once on the same tile, while abse
       if (source.cells.filter(item => item.zone === 'C').length === 4) break;
     }
   }
-  while (source.tick < 419) step(source);
+  // Use a month-end outside the weekly relocation day so this scenario
+  // isolates the credential/occupancy upgrade gate rather than moving out first.
+  while (source.tick < 449) step(source);
   for (let level = 4; level < 9; level++) {
     const city = structuredClone(source), [home, spareHome] = city.buildings.filter(b => b.zone === 'R');
     home.level = level; home.housingType = HOUSING_LEVELS[level - 1].type;

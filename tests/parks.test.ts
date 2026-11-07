@@ -107,13 +107,15 @@ test('v15 validates one-tile level-1 park ownership and construction evidence; o
 
 
 test('no-park cities keep accounting and owner distributions deterministic through saves and residential growth', () => {
-  // Independent hashes were produced by main 31389949527c8d0b3eee4bfec5326d62df839721.
+  // Financial expectations retain main 31389949527c8d0b3eee4bfec5326d62df839721.
+  // Updated hashes were independently compared against main 0e8df021: only
+  // household.home differs, as admissions now prefer less populated homes.
   // The only intended financial difference in this scenario is the three new service
   // bills; normalize their explicit amounts back out before comparing all state
   // except journals/checkpoint metadata, which have their own assertions below.
   const expected = new Map([
-    [61025, { owner: 'household:4', amounts: [36420, 72720, 99690], hash: '28c0c38b3cb1829d21672c31345681f4e53404abf02f4d4cd11060a9cee2bd87' }],
-    [20261023, { owner: 'household:2', amounts: [29310, 72720, 99570], hash: '4f4406287f83d464ff646df8ccb2931f72e93e9a47f1ea3e7e1e18f3251fcd9a' }],
+    [61025, { owner: 'household:4', amounts: [36420, 72720, 99690], hash: 'b3505b6cf2dea837b1a3dfa6387f1eaff28173e2e88094f39f5e7d02d0420c8b' }],
+    [20261023, { owner: 'household:2', amounts: [29310, 72720, 99570], hash: '1123995a145285345413c1a955f1a6872d10205324d25e46fa99faf28311cf4a' }],
   ]);
   for (const historicalSoil of [true, false]) for (const seed of [61025, 20261023]) {
     const c = createCity(seed);
@@ -133,7 +135,7 @@ test('no-park cities keep accounting and owner distributions deterministic throu
         const { farmSoilIndependentStartTick: _soil, ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
         const amount = bills.reduce((n, value) => n + value, 0);
         const normalized = { ...state, accounts: { ...accounts, treasury: accounts.treasury + amount, upkeep: accounts.upkeep - amount } };
-        assert.equal(createHash('sha256').update(JSON.stringify(normalized)).digest('hex'), expected.get(seed)!.hash, `seed ${seed} pre-PR main trajectory after accounting for service bills`);
+        assert.equal(createHash('sha256').update(JSON.stringify(normalized)).digest('hex'), expected.get(seed)!.hash, `seed ${seed} balanced-admission trajectory after accounting for service bills`);
       }
       assert.deepEqual(c.parks, []); assert.equal(sum(c), 0);
       assert.ok(!c.ledger.some(e => /^Monthly park (wages|upkeep)/.test(e.reason)));
