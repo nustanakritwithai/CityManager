@@ -58,3 +58,29 @@ test('expired Pages token reconnects only the same existing Guest and stays memo
  try{const auth=createCitySaveAuth();assert.equal(await auth.connect(),owner);assert.deepEqual(expectedGuests,[null]);token=null;assert.equal(await auth.connect(),owner);assert.deepEqual(expectedGuests,[null,owner]);const successFetch=globalThis.fetch;globalThis.fetch=async()=>new Response('{}',{status:401});await assert.rejects(auth.request('/v1/city-save'),(error:any)=>error.status===401);assert.equal(token,null);globalThis.fetch=successFetch;await auth.connect();assert.deepEqual(expectedGuests,[null,owner,owner]);}
  finally{Object.assign(pagesSession,methods);globalThis.fetch=originalFetch;delete (globalThis as any).location;delete (globalThis as any).localStorage;}
 });
+
+test('all source entries stay free of browser persistence APIs and retired save modules', async () => {
+ const {readdirSync,existsSync}=await import('node:fs');
+ const ts=(await import('typescript')).default;
+ const root=new URL('../src/',import.meta.url);
+ const retired=['save-storage.ts','save-copy-codec.ts','active-local-save.ts','auto-cleanup.ts','city-migration-inventory.ts','delete-old-saves.ts','local-city-save.ts','recovery-idb.ts','save-choice.ts','save-equivalence.ts','save-guard.ts','save-promotion.ts','save-recovery-info.ts','startup-save-feedback.ts','startup-save.ts'];
+ for(const name of retired)assert.equal(existsSync(new URL(name,root)),false,`${name} must remain retired`);
+ const forbidden=new Set(['localStorage','sessionStorage','indexedDB']);
+ function inspect(directory:URL){
+  for(const entry of readdirSync(directory,{withFileTypes:true})){
+   const url=new URL(entry.name+(entry.isDirectory()?'/':''),directory);
+   if(entry.isDirectory()){inspect(url);continue;}
+   if(!/\.[cm]?[jt]sx?$/.test(entry.name))continue;
+   const source=ts.createSourceFile(url.pathname,readFileSync(url,'utf8'),ts.ScriptTarget.Latest,true);
+   function visit(node:import('typescript').Node){
+    if(ts.isIdentifier(node))assert.ok(!forbidden.has(node.text),`${url.pathname}: browser persistence API ${node.text}`);
+    if(ts.isElementAccessExpression(node)&&node.argumentExpression&&ts.isStringLiteralLike(node.argumentExpression))assert.ok(!forbidden.has(node.argumentExpression.text),`${url.pathname}: browser persistence property ${node.argumentExpression.text}`);
+    ts.forEachChild(node,visit);
+   }
+   visit(source);
+  }
+ }
+ inspect(root);
+ const preview=readFileSync(new URL('../park-activity-preview.html',import.meta.url),'utf8');
+ assert.doesNotMatch(preview,/id=["'](?:save|load)["']/,'Preview must not expose retired persistence controls');
+});

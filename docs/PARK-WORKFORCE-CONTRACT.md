@@ -1,5 +1,7 @@
 # Park workforce integration contract
 
+> Current persistence: cities save only through the server. Browser-slot, backup and import instructions below describe historical releases and are no longer available. Legacy snapshot readers remain supported; existing browser data is left untouched.
+
 Base: park candidate `2431ba3`, incorporating upstream main `8723b447f521a59d3939b2aeeb6a851c61cc1fb1`. Separate checkout/branch `park-workforce`; the park author's checkout is read-only.
 
 - `parks[].staffing? = { allocations: {householdId, parkId, skill, workers}[], workDays: Record<householdWallet, workerDays> }`. Absent means no assignments/claims yet. No individual person agents are invented. Existing population consists of disjoint household skill counts.

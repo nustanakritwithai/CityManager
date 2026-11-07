@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs';
 import { createCity, deserialize, firmWorkerCount, isRetail, retailDemand, serialize, step, type City } from '../src/sim.ts';
 import { retailCapacity, staffedRetailCapacity } from '../src/retail-capacity.ts';
 import { keepSupplied } from './plants.ts';
-import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 import { holdEducationReady } from './education-ready.ts';
 
@@ -64,11 +63,6 @@ test('legacy state migrates intact; only the new envelope admits extended levels
   assert.deepEqual(deserializeParkSession(serializeParkSession(loaded, runtime)), { city: loaded, runtime });
   const oldSession = { ...JSON.parse(old), parkRuntime: createParkRuntime(original) };
   assert.deepEqual(deserializeParkSession(JSON.stringify(oldSession)).city, original);
-  const items = new Map<string, string>([[SAVE_KEY, old]]);
-  const storage = { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v); } };
-  saveStoredCity(storage, upgraded, null);
-  assert.equal(items.get(FARM_LEVEL_BACKUP_KEY), old);
-  assert.equal(readStoredCity(storage, 'backup')?.raw, old);
 });
 
 test('a real shop upgrades on the same cell and buys and sells its expanded stock', () => {

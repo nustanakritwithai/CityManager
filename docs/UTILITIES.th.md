@@ -1,5 +1,7 @@
 # น้ำและไฟ (รุ่น 2.1 · กติกา `chain-4` · เซฟ v9)
 
+> Current persistence: cities save only through the server. Browser-slot, backup and import instructions below describe historical releases and are no longer available. Legacy snapshot readers remain supported; existing browser data is left untouched.
+
 น้ำและไฟเข้าเมืองจากสองทาง: **ประตูเมือง** (สัญญาซื้อจากภายนอก) และ **โรงของเมือง** ที่ผู้เล่นสร้าง ทั้งสองจ่ายเข้าเครือข่ายเดียวกันที่วิ่งไปตามถนนที่ต่อกัน โค้ดอยู่ที่ `src/utilities.ts`
 
 ## แหล่งจ่าย

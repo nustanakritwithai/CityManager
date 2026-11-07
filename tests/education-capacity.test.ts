@@ -4,7 +4,6 @@ import { buildCampus, createCity, deserialize, householdWorkerCount, serialize, 
 import { assertEducationInvariants, createEducation, EDUCATION_COST, educationOccupied, initialCampusReport, stepEducation, withdrawCampus, type CampusKind, type EducationPeople, type EducationView } from '../src/education.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
-import { SAVE_KEY, readStoredCity } from '../src/save-storage.ts';
 
 const person = (householdId: number, values: Partial<EducationPeople> = {}): EducationPeople => ({ householdId, basic: 0, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0, ...values });
 function fixture(kind: CampusKind, localStaff: number, treasury: number) {
@@ -231,12 +230,8 @@ test('an already expanded school resumes saved progress without changing origina
   original.market = marketJournalForTest(null);
   original.market.guestId = '00000000-0000-4000-8000-000000000003';
   const raw = serializeParkSession(original, createParkRuntime(original));
-  const bytes = new Map([[SAVE_KEY, raw]]); let reads = 0, writes = 0;
-  const storage = { getItem: (key: string) => { reads++; return bytes.get(key) ?? null; }, setItem: (key: string, value: string) => { writes++; bytes.set(key, value); } };
   assertEducationEnvelope(raw);
-  // Exercise the legacy stored-snapshot reader and the actual session decoder.
-  const stored = readStoredCity(storage, 'current'); assert.equal(stored?.key, SAVE_KEY); assert.equal(stored?.raw, raw);
-  const restored = deserializeParkSession(stored!.raw);
+  const restored = deserializeParkSession(raw);
   const city = restored.city;
   for (const key of ['accounts', 'ledger', 'households', 'firms', 'goods', 'goodsLedger', 'crops', 'cropLedger', 'buildings', 'education', 'market'] as const) assert.deepEqual(city[key], original[key], key);
   assert.equal(toggleCampus(city, campus.id).ok, true);
@@ -259,6 +254,5 @@ test('an already expanded school resumes saved progress without changing origina
   assert.equal(city.education!.campuses[0].level, 2);
   assert.deepEqual(city.market, original.market);
   checkCity(city);
-  assert.ok(reads > 0); assert.equal(writes, 0, 'reading and simulation never write storage');
-  assert.deepEqual([...bytes], [[SAVE_KEY, raw]], 'the stored snapshot bytes are unchanged');
+  assert.deepEqual(JSON.parse(raw).education, original.education, 'the source snapshot is unchanged');
 });

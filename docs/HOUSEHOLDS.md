@@ -1,5 +1,7 @@
 # ครัวเรือนและสถานประกอบการ รุ่น 2
 
+> Current persistence: cities save only through the server. Browser-slot, backup and import instructions below describe historical releases and are no longer available. Legacy snapshot readers remain supported; existing browser data is left untouched.
+
 > กติกาปัจจุบัน v13: ความต้องการอาหารคิดวันละหนึ่งหน่วยต่อสมาชิก โดยใช้เงินร่วมครัวเรือน รายละเอียดของรุ่นก่อนด้านล่างเป็นประวัติ
 
 เอกสารนี้บันทึกกติกาและหลักฐานของรุ่น #7 ที่เผยแพร่แล้ว สำหรับการจัดสรรแรงงานตามทักษะและเซฟ v3 ของ branch ปัจจุบัน ดู [LABOR.md](LABOR.md) ข้อมูลสถานะ draft ด้านล่างเป็นบันทึกก่อนเผยแพร่รุ่น 2
@@ -50,7 +52,7 @@
 
 ## แหล่งโค้ดและสถานะตรวจ
 
-อ่านกฎจริงได้ที่ [housing.ts](../src/housing.ts), [labor.ts](../src/labor.ts), [save-storage.ts](../src/save-storage.ts) และ [simulation](../src/sim.ts) มี tests เฉพาะส่วนที่ [housing](../tests/housing.test.ts), [labor](../tests/labor.test.ts), [storage](../tests/save-storage.test.ts)
+อ่านกฎจริงได้ที่ [housing.ts](../src/housing.ts), [labor.ts](../src/labor.ts), [server-city-save.ts](../src/server-city-save.ts) และ [simulation](../src/sim.ts) มี tests เฉพาะส่วนที่ [housing](../tests/housing.test.ts), [labor](../tests/labor.test.ts), [storage](../tests/legacy-save-readers.test.ts)
 
 ผลชุดรวมก่อนส่ง browser: **61 unit tests ผ่าน**, ตรวจ asset และ build ผ่าน ชุด browser ใหม่ด้านประชากร/กู้เซฟ **9 กลุ่มผ่านในเครื่อง** และ native touch ที่เคยเปิดผิดแถวผ่านหลังแก้ guard แล้ว ส่วนการทวน browser ทั้งห้าชุด normal/fallback และ exact-head CI เป็นเงื่อนไขก่อนส่งงาน ไม่ใช้ unit tests แทนหลักฐาน browser การจำลอง viewport/touch ไม่ใช่ QA บน S22 จริง
 

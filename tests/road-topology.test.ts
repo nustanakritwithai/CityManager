@@ -4,7 +4,6 @@ import {createCity,buildRoad,buildParallelRoad,editRoadJunction,connectedRoads,a
 import {roadLinked,roadDriveAllowed,edgeKey,validateRoadTopology} from '../src/road-topology.ts';
 import {shortestRoadRoute} from '../src/road-network.ts';
 import {roadRoute} from '../src/traffic-plan.ts';
-import {saveStoredCity,SAVE_KEY,EDUCATION_BACKUP_KEY,readStoredCity} from '../src/save-storage.ts';
 const at=(x:number,y:number)=>y*SIZE+x;
 function fixture(){const c=createCity(61025,{starter:false});assert.ok(buildRoad(c,GATEWAY,at(10,12)).ok);return c;}
 test('parallel road stays separate until a chosen junction; old links elsewhere stay intact',()=>{
@@ -39,8 +38,9 @@ test('road editing survives current education and legacy road envelopes',()=>{
  buildParallelRoad(loaded,at(0,13),at(10,13),true);const raw=serialize(loaded);assert.equal(JSON.parse(raw).version,27);assert.equal(JSON.parse(raw).commercialBaseVersion,22);
  const restored=deserialize(raw);assert.equal(serialize(restored),raw);assert.deepEqual([...connectedRoads(restored)],[...connectedRoads(loaded)]);
  const legacy=JSON.parse(old); delete legacy.education; delete legacy.goalRulesVersion; delete legacy.commercialUnifiedStartTick; delete legacy.commercialUnifiedBaseline; delete legacy.commercialBaseVersion; delete legacy.farmBaseVersion; delete legacy.farmSoilIndependentStartTick; legacy.version=19; legacy.rulesVersion='chain-14';
- const legacyRaw=JSON.stringify(legacy),map=new Map([[SAVE_KEY,legacyRaw]]),s={getItem:(k:string)=>map.get(k)??null,setItem:(k:string,v:string)=>{map.set(k,v);}};
- saveStoredCity(s,raw,null);assert.equal(map.get(EDUCATION_BACKUP_KEY),legacyRaw);assert.deepEqual(readStoredCity(s,'backup'),{key:EDUCATION_BACKUP_KEY,raw:legacyRaw});
+ const legacyRaw=JSON.stringify(legacy),migrated=deserialize(legacyRaw);
+ assert.deepEqual(deserialize(serialize(migrated)),migrated);
+ assert.deepEqual([...connectedRoads(migrated)],[...connectedRoads(c)]);
 });
 test('malformed topology, hidden legacy topology, nonadjacent links and invalid arrows are rejected',()=>{
  const c=fixture();buildParallelRoad(c,at(0,13),at(5,13),true);const raw=serialize(c);

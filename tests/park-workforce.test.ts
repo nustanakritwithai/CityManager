@@ -6,7 +6,6 @@ import { PARK, PARK_STAFF, parkPayroll, parkWorkers } from '../src/parks.ts';
 import { householdLabor } from '../src/context-data.ts';
 import { householdCardData } from '../src/building-card-data.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
-import { SAVE_KEY, PARK_WORKFORCE_BACKUP_KEY, saveStoredCity, readStoredCity } from '../src/save-storage.ts';
 
 const run = (c: City, days: number) => { for (let i = 0; i < days; i++) step(c); };
 function isolated(): City {
@@ -119,8 +118,4 @@ test('v14 migration changes no money/jobs/history; v15 retains earned claims and
     (x: any) => { x.version = 14; x.rulesVersion = 'chain-9'; },
     (x: any) => { const spent = x.accounts.treasury; x.accounts.treasury = 0; x.accounts.construction += spent; x.ledger.push({ tick: x.tick, from: 'treasury', to: 'construction', amount: spent, reason: 'Spend reserved wages' }); },
   ]) { const bad = JSON.parse(raw); corrupt(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
-  const map = new Map([[SAVE_KEY, JSON.stringify(old)]]), storage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); } };
-  saveStoredCity(storage, raw, null); assert.equal(map.get(PARK_WORKFORCE_BACKUP_KEY), JSON.stringify(old)); assert.equal(readStoredCity(storage, 'backup')?.raw, JSON.stringify(old));
-  const failing = { getItem: (k: string) => k === SAVE_KEY ? JSON.stringify(old) : null, setItem: () => { throw Error('quota'); } };
-  assert.throws(() => saveStoredCity(failing, raw, null), /quota/); assert.equal(failing.getItem(SAVE_KEY), JSON.stringify(old));
 });

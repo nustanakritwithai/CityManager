@@ -95,26 +95,17 @@ test('historical fare entries and treasury survive loading without new taxi reve
   assert.deepEqual(deserialize(serialize(loaded)), loaded);
 });
 
-test('first taxi save keeps a compressed before-taxi backup that still restores losslessly', async () => {
-  const { SAVE_KEY, TAXI_BACKUP_KEY, saveStoredCity, readStoredCity } = await import('../src/save-storage.ts');
+test('large city session with a taxi depot round-trips losslessly', async () => {
   const { buildTaxiDepot } = await import('../src/taxi/placement.ts');
   const city = createCity(61025);
   for (let i = 0; i < 4000; i++) city.ledger.push({ ...city.ledger[0], amount: 1, from: 'outside', to: 'upkeep', reason: `padding ${i}` });
   city.accounts.outside -= 4000; city.accounts.upkeep += 4000;
   const plain = serialize(city); assert.ok(plain.length > 64000);
-  const mem = new Map<string, string>(), quota = plain.length * 1.3; // room for the new primary, not for a second raw copy
-  const used = () => [...mem].reduce((n, [k, v]) => n + k.length + v.length, 0);
-  const st = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { const prev = mem.get(k)?.length ?? 0; if (used() - prev + v.length > quota) throw Object.assign(new Error('quota'), { name: 'QuotaExceededError' }); mem.set(k, v); }, removeItem: (k: string) => void mem.delete(k), get length() { return mem.size; }, key: (n: number) => [...mem.keys()][n] ?? null, clear: () => mem.clear() };
-  mem.set(SAVE_KEY, plain);
   const site = city.cells.findIndex((_, i) => taxiSiteReason(city, i, true) === null);
   assert.equal(buildTaxiDepot(city, site, true).ok, true);
   const next = serialize(city);
-  mem.delete(SAVE_KEY); mem.set(SAVE_KEY, plain); // saveStoredCity replaces the primary itself
-  saveStoredCity(st as any, next, null);
-  const backup = mem.get(TAXI_BACKUP_KEY)!;
-  assert.ok(backup.length < plain.length / 2, `backup ${backup.length} vs raw ${plain.length}`);
-  assert.equal(readStoredCity({ getItem: (k: string) => k === SAVE_KEY ? null : mem.get(k) ?? null } as any, 'backup')?.raw, plain);
-  assert.equal(deserialize(mem.get(SAVE_KEY)!).taxi?.depots.length, 1);
-  // A second save does not add another backup copy.
-  saveStoredCity(st as any, serialize(city), null); assert.equal(mem.get(`${TAXI_BACKUP_KEY}.1`), undefined);
+  const loaded = deserialize(next);
+  assert.equal(loaded.taxi?.depots.length, 1);
+  assert.deepEqual(loaded, city);
+  assert.equal(serialize(loaded), next);
 });

@@ -68,15 +68,13 @@ test('a family with only enough cash for one unit records unmet need', () => {
   assert.ok(observed, 'the constrained household purchased one unit');
 });
 
-test('saving the food version first preserves the previous version 12 bytes', async () => {
-  const { SAVE_KEY, FOOD_BACKUP_KEY, saveStoredCity } = await import('../src/save-storage.ts');
+test('version 12 food migration round-trips through the current session format', async () => {
   const { serialize, deserialize } = await import('../src/sim.ts');
   // Build the legacy fixture from a city before any per-person purchases are recorded.
   const empty = createCity(61025); const old = JSON.parse(serialize(empty)); delete old.education; old.version = 12; old.rulesVersion = 'chain-7'; delete old.goalRulesVersion; delete old.commercialUnifiedStartTick; delete old.commercialUnifiedBaseline; delete old.commercialBaseVersion; delete old.farmBaseVersion; delete old.farmSoilIndependentStartTick; delete old.foodDemandStartTick; delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
   const raw = JSON.stringify(old), loaded = deserialize(raw); assert.equal(loaded.tick, empty.tick);
-  const values = new Map([[SAVE_KEY, raw]]);
-  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
-  saveStoredCity(storage, serialize(loaded), null);
-  assert.equal(values.get(FOOD_BACKUP_KEY), raw); assert.equal(JSON.parse(values.get(SAVE_KEY)!).version, 27);
-  assert.equal(deserialize(values.get(SAVE_KEY)!).tick, empty.tick);
+  const next = serialize(loaded);
+  assert.equal(JSON.parse(next).version, 27);
+  assert.equal(deserialize(next).tick, empty.tick);
+  assert.deepEqual(deserialize(next), loaded);
 });
