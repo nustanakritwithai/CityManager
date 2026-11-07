@@ -1,0 +1,97 @@
+name: Housing mobility acceptance
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/sim.ts'
+      - 'src/housing.ts'
+      - 'src/utilities.ts'
+      - 'src/main.ts'
+      - 'src/server-*.ts'
+      - 'server/city-saves/**'
+      - 'tests/housing-mobility*'
+      - 'tests/population-smoke.mjs'
+      - 'tests/building-progression-smoke.mjs'
+      - 'tests/panel-*.mjs'
+      - 'tests/traffic-server-entry-fixture.mjs'
+      - 'package*.json'
+      - '.github/workflows/housing-mobility.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/sim.ts'
+      - 'src/housing.ts'
+      - 'src/utilities.ts'
+      - 'src/main.ts'
+      - 'src/server-*.ts'
+      - 'server/city-saves/**'
+      - 'tests/housing-mobility*'
+      - 'tests/population-smoke.mjs'
+      - 'tests/building-progression-smoke.mjs'
+      - 'tests/panel-*.mjs'
+      - 'tests/traffic-server-entry-fixture.mjs'
+      - 'package*.json'
+      - '.github/workflows/housing-mobility.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: housing-mobility-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    name: Whole-family moves / ${{ matrix.mode }} / Chrome
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [models, fallback]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Verify mobility and strict simulation fixtures before browser startup
+        run: |
+          node --experimental-strip-types --test tests/housing-mobility.test.ts
+          node --experimental-strip-types tests/population-smoke.mjs --housing-mobility --preflight
+          node --experimental-strip-types tests/building-progression-smoke.mjs --preflight
+      - name: Build production bundle
+        env:
+          VITE_MARKET_URL: 'https://citymanager.157-85-96-139.sslip.io/citymanager-api'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
+        run: npm run build
+      - name: Verify actual relocation, household panels and native server save/reload
+        env:
+          CITYMANAGER_BROWSER: google-chrome
+          CITYMANAGER_BLOCK_MODELS: ${{ matrix.mode == 'fallback' && '1' || '' }}
+          CITYMANAGER_SCREENSHOT_DIR: .test-output/housing-mobility
+        run: |
+          mkdir -p .test-output
+          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173 --strictPort > .test-output/housing-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4173/CityManager/ > /dev/null; then ready=1; break; fi
+            sleep 0.5
+          done
+          test "$ready" = 1
+          node --experimental-strip-types tests/population-smoke.mjs --housing-mobility
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: housing-mobility-${{ matrix.mode }}-evidence
+          path: |
+            .test-output/housing-mobility/*.png
+            .test-output/population-report.json
+            .test-output/housing-preview.log
+          if-no-files-found: warn
+          retention-days: 5
