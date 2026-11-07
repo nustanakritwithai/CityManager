@@ -662,8 +662,8 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
       picker.append(el('p', 'cx-detail-note', `กำลังปลูก${CROP_LABELS[farmCrop(city, firm)]} · ${farmCropMode(firm) === 'auto' ? 'เลือกอัตโนมัติเมื่อฟาร์มเริ่มหรือเมื่อกดอัตโนมัติ' : 'ผู้เล่นเลือกเอง'}`), controls, el('p', 'cx-detail-note', `คงคลัง: ${CROPS.map(crop => `${CROP_LABELS[crop]} ${firm.crops[crop]}`).join(' · ')} ล็อต · พืชเดิมยังอยู่เมื่อเปลี่ยน`));
       output.push(cardSection(picker, 'crop-choice'));
     }
-    output.push(cardGroup('พื้นที่เพาะปลูก', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง')], 'bc-plot'));
-    output.push(cardGroup('การเก็บเกี่ยววันนี้', 'harvest', takeCards(parts, ['harvest-today', 'yield-per-worker', 'workers']), 'bc-yield'));
+    output.push(cardGroup('พื้นที่และกำลังผลิต', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง'), ...takeCards(parts, ['yield-per-worker'])], 'bc-plot'));
+    output.push(cardGroup('การเก็บเกี่ยววันนี้', 'harvest', takeCards(parts, ['harvest-today', 'workers']), 'bc-yield'));
     output.push(cardGroup('พืชผลที่เก็บไว้', 'stock', takeCards(parts, ['crop-stock', 'crop-cost'])));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
   }
