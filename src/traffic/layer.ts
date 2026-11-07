@@ -69,7 +69,7 @@ export class TrafficLayer {
   } catch(error){this.fail(error);}
  }
  private submit(city:City,advance:boolean,paused:boolean):void {
-  const start=performance.now();const input=captureTrafficGameInput(city,{taxiEnabled:this.taxiOn,...(this.workClock?{workClock:{...this.workClock,ack:this.workExpiryAck,...(this.crossedWorkDay===null?{}:{crossedWorkDay:this.crossedWorkDay})}}:{})});if(input.work){input.work.cancelIds=[...this.workCancel];input.work.retiredIds=[...this.workRetired];}if(this.bus)input.bus=this.bus.input();const prepared=performance.now();this.client?.submit(input,{advance,paused});
+  const start=performance.now(),bus=this.bus?.input();const input=captureTrafficGameInput(city,{taxiEnabled:this.taxiOn,busCommutes:!!bus?.lines.length,...(this.workClock?{workClock:{...this.workClock,ack:this.workExpiryAck,...(this.crossedWorkDay===null?{}:{crossedWorkDay:this.crossedWorkDay})}}:{})});if(input.work){input.work.cancelIds=[...this.workCancel];input.work.retiredIds=[...this.workRetired];}if(bus)input.bus=bus;const prepared=performance.now();this.client?.submit(input,{advance,paused});
   const end=performance.now(),ms=end-start,inputMs=prepared-start,postMs=end-prepared;this.timing.samples++;this.timing.lastCaptureSubmitMs=ms;this.timing.maxCaptureSubmitMs=Math.max(this.timing.maxCaptureSubmitMs,ms);this.timing.lastInputMs=inputMs;this.timing.maxInputMs=Math.max(this.timing.maxInputMs,inputMs);this.timing.lastPostMs=postMs;this.timing.maxPostMs=Math.max(this.timing.maxPostMs,postMs);
  }
  /** Every city replacement starts a fresh game epoch; nothing is read from or
