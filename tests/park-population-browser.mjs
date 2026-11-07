@@ -1,5 +1,5 @@
 // Run after npm run build and npm run preview -- --port 4196.
-// Real compiled Worker, isolated real-service fixture, native clocks and controls.
+// Real compiled app, isolated real-service fixture, native clocks and controls.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
@@ -10,7 +10,11 @@ import {createParkRuntime,advanceParkRuntime,serializeParkSession,deserializePar
 import {serialize,step,summary} from '../src/sim.ts';
 import {panelEntryCity,saveAndReloadPanel} from './panel-ui-server.mjs';
 import {startTrafficHttpFixture,installTrafficNetworkFence,reachTrafficControl} from './traffic-server-entry-fixture.mjs';
-const city=parkPopulationFixture(),runtime=createParkRuntime(city);advanceParkRuntime(city,runtime,610,()=>step(city));
+const city=parkPopulationFixture(),runtime=createParkRuntime(city);
+// Seek an actual eligible arrival, not a guessed travel time or injected score.
+advanceParkRuntime(city,runtime,600,()=>step(city));
+while(!Object.keys(runtime.recreation.citizens).length&&runtime.activity.minute<1200)advanceParkRuntime(city,runtime,1,()=>step(city));
+assert.ok(Object.keys(runtime.recreation.citizens).length,'Fixture must reach actual staffed recreation');
 const fixture={raw:serializeParkSession(city,runtime),population:summary(city).population,minute:runtime.recreation.minute};
 if(process.argv.includes('--preflight')){console.log(JSON.stringify({population:fixture.population,minute:fixture.minute,rawBytes:Buffer.byteLength(fixture.raw)}));process.exit(0);}
 const output='.test-output/park-population-browser';await mkdir(output,{recursive:true});
@@ -45,11 +49,13 @@ try{
  const initial=deserializeParkSession(await evaluate('window.cityManager.sessionSnapshot()'));
  assert.equal(summary(initial.city).population,4098);
  assert.equal(serialize(initial.city),serialize(panelEntryCity(fixture.raw)));
- await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');
- await button('#park-recreation button[data-speed]');await button('#close-inspector');await button('#pause');
+ assert.equal(initial.runtime.recreation.minute,fixture.minute);
+ // Native 1× retains the app's real pacing budget. Slow citizen mode is not a
+ // wall-clock guarantee on software-rendered CI (large frames clamp elapsed time).
+ await button('[data-speed="1"]');await button('#pause');
  await until(`window.cityManager.parks().recreation.minute>=${fixture.minute+5}`,30000);await button('#pause');
  const pausedRaw=await evaluate('window.cityManager.sessionSnapshot()'),paused=deserializeParkSession(pausedRaw);
- assert.equal(serialize(paused.city),serialize(initial.city),'Five real recreation minutes never step the economy');
+ assert.equal(serialize(paused.city),serialize(initial.city),'This within-day observation never steps the economy');
  assert.ok(paused.runtime.recreation.minute>=fixture.minute+5);
  const earned=Object.values(paused.runtime.recreation.citizens).reduce((n,c)=>n+c.earnedMinutes,0);
  const initialEarned=Object.values(initial.runtime.recreation.citizens).reduce((n,c)=>n+c.earnedMinutes,0);
