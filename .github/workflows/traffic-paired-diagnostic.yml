@@ -27,7 +27,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: traffic-paired-diagnostic-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          name: traffic-paired-diagnostic-v3-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .test-output/paired-diagnostic/baseline/dist/assets/*.map
             .test-output/paired-diagnostic/head/dist/assets/*.map
@@ -35,6 +35,7 @@ jobs:
             .test-output/paired-diagnostic/head/dist/assets/*.js
             .test-output/paired-diagnostic/*.json
             .test-output/paired-diagnostic/*.log
+            .test-output/paired-diagnostic/*-layer-instrumented.ts
             .test-output/paired-diagnostic/trial-*/*.json
             .test-output/paired-diagnostic/trial-*/*.png
             .test-output/paired-diagnostic/trial-*/*.log

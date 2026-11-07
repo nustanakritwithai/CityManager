@@ -5,7 +5,7 @@ import {readFileSync,writeFileSync,mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {instrument,PLAN,BASELINE,HEAD,plannedResults,executePlan,diagnosticSucceeded} from '../scripts/traffic-game-paired-diagnostic.mjs';
+import {instrument,PLAN,BASELINE,HEAD,plannedResults,executePlan,diagnosticSucceeded,instrumentTrafficLayer} from '../scripts/traffic-game-paired-diagnostic.mjs';
 const source=readFileSync(new URL('./traffic-game-smoke.mjs',import.meta.url),'utf8');
 test('exactly three predeclared pairs, no replacement outcomes',()=>{
  assert.deepEqual(PLAN,['baseline','head','head','baseline','baseline','head']);
@@ -80,4 +80,37 @@ test('diagnostic success additionally requires six complete traces without repla
  const results=plannedResults().map(r=>({...r,status:0,outcome:'passed',traceComplete:true}));
  assert.equal(diagnosticSucceeded(results),true);results[2].traceComplete=false;assert.equal(diagnosticSucceeded(results),false);assert.equal(results[2].status,0);
  results[2].traceComplete=true;results[3].status=1;assert.equal(diagnosticSucceeded(results),false);assert.equal(diagnosticSucceeded(results.slice(0,5)),false);
+});
+
+test('layer overlay keeps clock count, original max/counter math and fails closed on drift',()=>{
+ const layer=readFileSync(new URL('../src/traffic/layer.ts',import.meta.url),'utf8'),overlaid=instrumentTrafficLayer(layer);
+ assert.equal((overlaid.match(/performance.now\(\)/g)||[]).length,(layer.match(/performance.now\(\)/g)||[]).length);
+ for(const kind of ['Frame','Projection'])assert.ok(overlaid.includes(`this.timing.max${kind}Ms=Math.max(this.timing.max${kind}Ms,ms);`));
+ assert.throws(()=>instrumentTrafficLayer(layer.replace('const ms=performance.now()-frameStart;','const ms=0;')),/Unique diagnostic insertion/);
+ assert.equal((overlaid.match(/performance.measure\(/g)||[]).length,2);
+});
+test('retrospective marks exclude their own cost and do not change timing/counters',()=>{
+ const layer=instrumentTrafficLayer(readFileSync(new URL('../src/traffic/layer.ts',import.meta.url),'utf8'));
+ for(const kind of ['Frame','Projection']){
+  const count=kind==='Frame'?'frames':'projections';
+  const snippet=layer.match(new RegExp(`const diagnosticEnd=performance.now\\(\\),ms=diagnosticEnd-[^;]+;this.timing.${count}[^\n]+?performance.measure[^\n]+?;`))[0];
+  const state={timing:{frames:0,projections:0,[`max${kind}Ms`]:1},latest:{step:7},paused:true};let clocks=0,now=40;const marks=[];
+  const perf={now:()=>{clocks++;return now;},measure:(name,options)=>{marks.push({name,...options});now+=1000;}};
+  const invoke=Function('performance','start','frameStart','frame','diagnosticSequence',snippet);
+  invoke.call(state,perf,10,10,{step:7},1);
+  assert.equal(clocks,1);assert.equal(state.timing[`last${kind}Ms`],30);assert.equal(state.timing[`max${kind}Ms`],30);assert.equal(state.timing[count],1);
+  assert.equal(marks[0].start,10);assert.equal(marks[0].end,40);assert.equal(marks[0].detail.durationMs,30);assert.equal(marks[0].detail.workerStep,7);
+  now=40;invoke.call(state,perf,10,10,{step:8},2);assert.equal(marks.length,1,'Equal maximum is not marked again');assert.equal(state.timing[count],2);
+ }
+});
+
+test('sequence marks bracket original timed intervals without adding clock reads',()=>{
+ const layer=instrumentTrafficLayer(readFileSync(new URL('../src/traffic/layer.ts',import.meta.url),'utf8'));
+ assert.ok(layer.includes("performance.mark('citymanager.traffic.frame.begin',{detail:{sequence:diagnosticSequence}});const frameStart=performance.now();"));
+ assert.ok(layer.includes("performance.mark('citymanager.traffic.projection.begin',{detail:{sequence:diagnosticSequence}});const start=performance.now();"));
+ for(const kind of ['frame','projection']){
+  assert.ok(layer.includes(`performance.mark('citymanager.traffic.${kind}.end',{detail:{sequence:diagnosticSequence,durationMs:ms`));
+  assert.ok(layer.indexOf(`performance.measure('citymanager.traffic.${kind}.new-max'`)<layer.indexOf(`performance.mark('citymanager.traffic.${kind}.end'`));
+ }
+ assert.ok(layer.includes('++this.diagnosticFrameSequence'));assert.ok(layer.includes('++this.diagnosticProjectionSequence'));
 });

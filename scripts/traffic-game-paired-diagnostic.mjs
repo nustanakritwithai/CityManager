@@ -11,6 +11,19 @@ export const HEAD='56effd0114c25605ba105966fab7f290ded58148';
 export const PLAN=Object.freeze(['baseline','head','head','baseline','baseline','head']);
 const hash=s=>createHash('sha256').update(s).digest('hex');
 function replaceOnce(source,from,to){assert.equal(source.split(from).length,2,`Unique diagnostic insertion: ${from}`);return source.replace(from,to);}
+// Applied ONLY to disposable diagnostic worktrees before build; never published as runtime source.
+// Reuse the original endpoint clock read, then record a retrospective span AFTER counters/max update.
+export function instrumentTrafficLayer(source){
+ source=replaceOnce(source,' private timing={',' private diagnosticFrameSequence=0;private diagnosticProjectionSequence=0;\n private timing={');
+ source=replaceOnce(source,'  const frameStart=performance.now();',"  const diagnosticSequence=++this.diagnosticFrameSequence;performance.mark('citymanager.traffic.frame.begin',{detail:{sequence:diagnosticSequence}});const frameStart=performance.now();");
+ source=replaceOnce(source,'    const start=performance.now();this.latest=frame;',"    const diagnosticSequence=++this.diagnosticProjectionSequence;performance.mark('citymanager.traffic.projection.begin',{detail:{sequence:diagnosticSequence}});const start=performance.now();this.latest=frame;");
+ for(const [kind,start,count,step] of [['Projection','start','projections','frame.step'],['Frame','frameStart','frames','this.latest?.step??null']]){
+  const original=`const ms=performance.now()-${start};this.timing.${count}++;this.timing.last${kind}Ms=ms;this.timing.max${kind}Ms=Math.max(this.timing.max${kind}Ms,ms);`;
+  const replacement=`const diagnosticEnd=performance.now(),ms=diagnosticEnd-${start},diagnosticPreviousMax=this.timing.max${kind}Ms;this.timing.${count}++;this.timing.last${kind}Ms=ms;this.timing.max${kind}Ms=Math.max(this.timing.max${kind}Ms,ms);if(ms>diagnosticPreviousMax)performance.measure('citymanager.traffic.${kind.toLowerCase()}.new-max',{start:${start},end:diagnosticEnd,detail:{sequence:diagnosticSequence,durationMs:ms,previousMaxMs:diagnosticPreviousMax,frames:this.timing.frames,projections:this.timing.projections,workerStep:${step},paused:this.paused}});performance.mark('citymanager.traffic.${kind.toLowerCase()}.end',{detail:{sequence:diagnosticSequence,durationMs:ms,frames:this.timing.frames,projections:this.timing.projections,workerStep:${step}}});`;
+  source=replaceOnce(source,original,replacement);
+ }
+ return source;
+}
 // Experiment 1 (run42363992254) failed all six trials before ON; broad tracing
 // is an unproven confound. This revision does not assert disk-write causality.
 export function instrument(source,fixture,output){
@@ -89,14 +102,18 @@ async function main(){
  const root=resolve(dirname(fileURLToPath(import.meta.url)),'..'),out=resolve(root,'.test-output/paired-diagnostic');
  assert.ok(!existsSync(out),'Refuse to overwrite any previous experiment');mkdirSync(out,{recursive:true});
  const git=(args)=>{const r=spawnSync('git',args,{cwd:root,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
- const manifest={instrumentationRevision:2,priorExperiment:{run:42363992254,artifact:13571680688,outcome:'All six failed before ON; no comparative timing evidence'},baseline:BASELINE,head:HEAD,plan:PLAN.map((side,i)=>({trial:i+1,pair:Math.floor(i/2)+1,side})),runner:{platform:process.platform,node:process.version,host:process.env.COMPUTERNAME,image:process.env.ImageVersion},results:plannedResults(),note:'All six planned slots retained, including not-run/skipped. Revision2: initial run42363992254 had six pre-ON failures; broad tracing is an unproven confound, not proven disk-write starvation. Lightweight ReturnAsStream starts immediately before ON navigation and drains after acceptance. trace-complete.json confirms EOF, not whole-test coverage; best-effort stop225s/original failure watchdog240s. Tracing perturbs timing. Diagnostic is not a replacement acceptance gate.'};
+ const manifest={instrumentationRevision:3,priorMatchedExperiment:{run:42366401765,artifact:13572162138,outcomes:['baseline pass','head fail: warmup frame29.8ms','head pass','baseline pass','baseline pass','head pass'],conclusion:'No clearance; exact inner span unidentified'},priorExperiment:{run:42363992254,artifact:13571680688,outcome:'All six failed before ON; no comparative timing evidence'},baseline:BASELINE,head:HEAD,plan:PLAN.map((side,i)=>({trial:i+1,pair:Math.floor(i/2)+1,side})),runner:{platform:process.platform,node:process.version,host:process.env.COMPUTERNAME,image:process.env.ImageVersion},results:plannedResults(),note:'All six planned slots retained, including not-run/skipped. Revision3 adds retrospective new-max spans plus sequence-paired begin/end marks outside existing intervals. Existing clock reads unchanged. If present and validated, paired marker CPU timestamps give conservative bounds, not exact inner CPU; missing clocks give no CPU bound. Retrospective measure CPU timestamps must not be interpreted historically. Marker overhead excluded from recorded interval but can perturb subsequent work. Six fixed trials, no repeat-until-spike; a no-spike result is retained. Revision2: initial run42363992254 had six pre-ON failures; broad tracing is an unproven confound, not proven disk-write starvation. Lightweight ReturnAsStream starts immediately before ON navigation and drains after acceptance. trace-complete.json confirms EOF, not whole-test coverage; best-effort stop225s/original failure watchdog240s. Tracing perturbs timing. Diagnostic is not a replacement acceptance gate.'};
  const save=()=>writeFileSync(resolve(out,'manifest.json'),JSON.stringify(manifest,null,2));save();
  try{
  const dirs={};
  for(const [side,sha] of Object.entries({baseline:BASELINE,head:HEAD})){
   assert.equal(git(['rev-parse',sha]),sha);const dir=resolve(out,side);git(['worktree','add','--detach',dir,sha]);dirs[side]=dir;
   const source=readFileSync(resolve(dir,'tests/traffic-game-smoke.mjs'),'utf8');
-  manifest[side+'SmokeSha256']=hash(source);save();
+  manifest[side+'SmokeSha256']=hash(source);
+  const layerPath=resolve(dir,'src/traffic/layer.ts'),layerSource=readFileSync(layerPath,'utf8'),layerInstrumented=instrumentTrafficLayer(layerSource);
+  manifest[side+'LayerOriginalSha256']=hash(layerSource);manifest[side+'LayerInstrumentedSha256']=hash(layerInstrumented);
+  if(side==='head'){assert.equal(manifest.baselineLayerOriginalSha256,manifest.headLayerOriginalSha256,'Require identical original layer source');assert.equal(manifest.baselineLayerInstrumentedSha256,manifest.headLayerInstrumentedSha256,'Require identical instrumented layer source');}
+  writeFileSync(layerPath,layerInstrumented);writeFileSync(resolve(out,side+'-layer-instrumented.ts'),layerInstrumented);save();
   for(const [label,args] of [['install',['ci','--no-audit','--no-fund']],['build',['run','build','--','--sourcemap','hidden']]]){
    const result=run('cmd.exe',['/d','/s','/c',`npm ${args.join(' ')}`],dir,resolve(out,side+'-'+label+'.log'),{VITE_MARKET_URL:'',VITE_CITY_ADVISOR_ONLINE:'false',VITE_CITY_ENTITY_ADVISOR_ONLINE:'false',VITE_CITY_OWNER_ADVISOR_ONLINE:'false'});
    manifest.results.push({side,phase:label,...result});save();assert.equal(result.status,0,`${side} ${label} failed; see preserved log`);
