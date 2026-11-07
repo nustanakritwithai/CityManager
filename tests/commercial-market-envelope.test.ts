@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {deserialize,serialize} from '../src/sim.ts';
 import {embeddedMarketJournal,MarketClient,marketJournalForTest} from '../src/market-client.ts';
-import {SAVE_KEY} from '../src/save-storage.ts';
 import { useMarketStorage } from '../src/market-client.ts';
 const guest='00000000-0000-4000-8000-000000000003',other='00000000-0000-4000-8000-000000000006';
 function fixture(version:24|25){

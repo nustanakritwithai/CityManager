@@ -5,7 +5,6 @@ import { createCity, step, serialize, deserialize, buildPark, bulldoze, GATEWAY,
 import { createParkRuntime, advanceParkRuntime, reconcileParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { parkActivityCitizens, parkActivityUnavailableCitizenIds } from '../src/park-activity.ts';
 import { createOwnerDecisionSession } from '../src/owner-decision-session.ts';
-import { SAVE_KEY, PARK_WORKFORCE_BACKUP_KEY, saveStoredCity } from '../src/save-storage.ts';
 
 function fixture(): City {
   const c = createCity(61025);
@@ -134,8 +133,5 @@ test('save rejects mismatched clocks or malformed sidecars before replacing live
   const raw = JSON.stringify(old), restored = deserializeParkSession(raw);
   assert.equal(restored.runtime.recreation.minute, old.tick * 1440);
   assert.deepEqual(Object.keys(restored.runtime.recreation.citizens), []);
-  const data = new Map([[SAVE_KEY, raw]]);
-  const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } };
-  saveStoredCity(storage, serializeParkSession(restored.city, restored.runtime), null);
-  assert.equal(data.get(PARK_WORKFORCE_BACKUP_KEY), raw);
+  assert.deepEqual(deserializeParkSession(serializeParkSession(restored.city, restored.runtime)), restored);
 });

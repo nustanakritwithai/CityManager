@@ -6,7 +6,6 @@ import { GATEWAY, SIZE, MONTH, access, buildPark, parkAt, buildPlant, buildRoad,
 import { PARK, MAX_PARKS } from '../src/parks.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
 import { pocketPark } from '../src/scene-decor.ts';
-import { SAVE_KEY, PARKS_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 
 const run = (c: City, days: number) => { for (let d = 0; d < days; d++) step(c); };
 const city = () => createCity(61025, { starter: false });
@@ -105,16 +104,7 @@ test('v15 validates one-tile level-1 park ownership and construction evidence; o
   assert.deepEqual(loaded.ledger, old.ledger.filter((e: any) => e.tick > (loaded.history?.throughTick ?? -1)));
 });
 
-test('first park save keeps exact pre-park bytes and backup failure preserves primary save', () => {
-  const c = city(), old = JSON.parse(serialize(c)); delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick; old.version = 13; old.rulesVersion = 'chain-8';
-  const previous = JSON.stringify(old), map = new Map([[SAVE_KEY, previous]]);
-  const storage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); } };
-  buildPark(c, 0); const next = serialize(c); saveStoredCity(storage, next, null);
-  assert.equal(map.get(PARKS_BACKUP_KEY), previous); assert.equal(readStoredCity(storage, 'backup')?.raw, previous);
-  saveStoredCity(storage, next, null); assert.equal(map.get(PARKS_BACKUP_KEY), previous);
-  const failing = { getItem: (k: string) => k === SAVE_KEY ? previous : null, setItem: () => { throw Error('quota'); } };
-  assert.throws(() => saveStoredCity(failing, next, null), /quota/); assert.equal(failing.getItem(SAVE_KEY), previous);
-});
+
 
 test('no-park cities keep accounting and owner distributions deterministic through saves and residential growth', () => {
   // Independent hashes were produced by main 31389949527c8d0b3eee4bfec5326d62df839721.

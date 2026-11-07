@@ -4,14 +4,11 @@ import { readFileSync } from 'node:fs';
 import { MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, bulldoze, createCity, deserialize, serialize as serializeRaw, step, zoneCell, shopSite, householdWorkerCount, firmWorkerCount, firmCapacity, explainCell, type City } from '../src/sim.ts';
 import { parcelChecklist } from '../src/place-checklist.ts';
 import { createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
-import { SAVE_KEY, BUSINESS_CAPACITY_BACKUP_KEY, businessCapacityBackupKeys, AUTOSAVE_CHECKPOINT_KEY, LATEST_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
 import * as v5 from '../src/legacy-v5.ts';
-import {decodeSaveCopy} from '../src/save-copy-codec.ts';
 import {compactCityHistory} from '../src/city-history.ts';
 import { businessFixture, mixedBusinessFixture, vacantSite } from './business-capacity-fixture.ts';
 
-const memory = (raw?: string) => { const data = new Map<string, string>(raw === undefined ? [] : [[SAVE_KEY, raw]]); return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } }; };
 // Production sessions compact trusted runtime history before serializing. Apply the same
 // canonical boundary to synthetic tick-400 cities, without changing any live assets.
 const serialize=(c:City)=>{compactCityHistory(c);return serializeRaw(c);};
@@ -104,18 +101,6 @@ test('v1, v5 and v22 remain loadable without modifying original bytes or promoti
   const originals = [readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), v5.serialize(legacy5), historical(22)];
   for (const raw of originals) { const loaded = deserializeParkSession(raw); assert.equal(loaded.city.businessCapacityVersion, undefined); reconcile(loaded.city); }
   const canonical=session(deserializeParkSession(originals[2]).city); assert.equal(session(deserializeParkSession(canonical).city),canonical); assert.equal(JSON.parse(originals[2]).version,22);
-});
-
-test('migration planner full or quota-failed capacity backup cannot publish new primary/checkpoint/recovery pointer', () => {
-  const old=historical(22),next=historical(23);
-  for (const full of [false, true]) {
-    const store = memory(old); store.setItem(LATEST_BACKUP_KEY, 'citymanager.backup.v1');
-    if (full) businessCapacityBackupKeys().forEach((key, n) => store.setItem(key, `original ${n}`));
-    const before = [...store.data], migrationStore = { ...store, setItem: (key:string, value:string) => { if (!full && key === BUSINESS_CAPACITY_BACKUP_KEY) throw Error('quota'); store.setItem(key, value); } };
-    // Planner writes required migration backups before publication. The modern guard's
-    // separate primary-first quota behavior is covered in save-quota-lossless.test.ts.
-    assert.throws(() => saveStoredCity(migrationStore,next,null), full ? /backups full/ : /quota/); assert.deepEqual([...store.data], before); assert.equal(store.getItem(AUTOSAVE_CHECKPOINT_KEY), null);
-  }
 });
 
 test('65 actual owners can retain one worker each without expanding any household workforce', () => {

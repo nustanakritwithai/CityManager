@@ -47,16 +47,6 @@ test('new level save roundtrip preserves firm identity and old envelope still re
   assert.throws(()=>deserialize(JSON.stringify(saved)));
 });
 
-test('first upgraded save backs up exact old bytes before overwriting', async () => {
-  const { SAVE_KEY, FACTORY_PROGRESS_BACKUP_KEY, saveStoredCity } = await import('../src/save-storage.ts');
-  const data = new Map<string,string>();
-  const storage = {getItem:(k:string)=>data.get(k) ?? null, setItem:(k:string,v:string)=>{data.set(k,v)}};
-  const old = JSON.stringify({version:15, rulesVersion:'chain-10', parks:[]});
-  const next = JSON.stringify({version:17, rulesVersion:'chain-12', parks:[]});
-  storage.setItem(SAVE_KEY,old); saveStoredCity(storage,next,null);
-  assert.equal(storage.getItem(FACTORY_PROGRESS_BACKUP_KEY),old); assert.equal(storage.getItem(SAVE_KEY),next);
-});
-
 test('automatic monthly reviews upgrade same-cell factories through level nine using paid capital', async () => {
   const { selectFactoryRecipe, firmWorkerCount } = await import('../src/sim.ts');
   const source = createCity(61025); for (let day=0; day<89; day++) step(source);

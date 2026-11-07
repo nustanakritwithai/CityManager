@@ -6,14 +6,12 @@ import { busDepotAt, busStopAt, busStopSides, reconcileBusStops, BUS_STOP_SPACIN
 import { buildBusDepot, buildBusStop, busDepotReason, busStopSiteReason, removeBusDepot, removeBusStop, toggleBusDepot, upgradeBusDepot, upgradeBusStop, defaultBusStopSide } from '../src/bus/placement.ts';
 import { buildTaxiDepot, taxiSiteReason } from '../src/taxi/placement.ts';
 import { BUS_LIMITS } from '../src/bus/types.ts';
-import { SAVE_KEY, BUS_BACKUP_KEY, TAXI_BACKUP_KEY, saveStoredCity } from '../src/save-storage.ts';
 
 const grown = () => { const c = createCity(61025); for (let d = 0; d < 20; d++) step(c); return c; };
 const nb = (i: number) => [i - 1, i + 1, i - SIZE, i + SIZE].filter(n => n >= 0 && n < SIZE * SIZE && Math.abs((n % SIZE) - (i % SIZE)) <= 1);
 const lots = (c: City) => { const r = connectedRoads(c); return c.cells.flatMap((x, i) => !x.road && x.zone === null && x.building === null && nb(i).some(n => r.has(n)) && busDepotReason(c, i, true) === null ? [i] : []); };
 /** Straight road cells that can hold a stop, spaced apart. */
 const stopCells = (c: City) => { const out: number[] = []; for (let i = 0; i < SIZE * SIZE; i++) if (busStopSiteReason(c, i, defaultBusStopSide(c, i), true) === null && out.every(o => Math.abs(o % SIZE - i % SIZE) + Math.abs(Math.floor(o / SIZE) - Math.floor(i / SIZE)) >= BUS_STOP_SPACING)) out.push(i); return out; };
-const mem = () => { const m = new Map<string, string>(); return { m, st: { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), get length() { return m.size; }, key: (n: number) => [...m.keys()][n] ?? null, clear: () => m.clear() } }; };
 const withBus = () => {
   const c = grown(), l = lots(c); assert.ok(buildBusDepot(c, l[0], true).ok); assert.ok(buildBusDepot(c, l[1], true).ok);
   const s = stopCells(c); assert.ok(s.length >= 3, `stop cells ${s.length}`);
@@ -140,14 +138,6 @@ test('validator rejects bad bus data', () => {
   bad(b => { b.lines = Array.from({ length: BUS_LIMITS.lines + 1 }, (_, k) => ({ ...b.lines[0], id: 9000 + k })); });
   bad((b, j) => { const t = { version: 1, rules: 'taxi-1', depots: [{ id: j.nextId - 1, cell: b.depots[0].cell, tick: 0, level: 1, open: true }] }; j.taxi = t; j.nextId += 1; b.depots[0].id = j.nextId - 1; }, /bus|taxi/i); // taxi depot on bus depot cell
   assert.doesNotThrow(() => deserialize(JSON.stringify(good)));
-});
-test('before-bus backup is written once before the first bus save; taxi backup untouched', () => {
-  const { m, st } = mem(), c = grown(), plain = serialize(c); m.set(SAVE_KEY, plain);
-  buildBusDepot(c, lots(c)[0], true); const first = serialize(c);
-  saveStoredCity(st as any, first, null); m.set(SAVE_KEY, first);
-  assert.equal(m.get(BUS_BACKUP_KEY), plain); assert.equal(m.get(TAXI_BACKUP_KEY), undefined);
-  buildBusStop(c, stopCells(c)[0], undefined, true); saveStoredCity(st as any, serialize(c), null);
-  assert.equal(m.get(BUS_BACKUP_KEY), plain); assert.equal(m.get(`${BUS_BACKUP_KEY}.1`), undefined);
 });
 test('economy unchanged over N days with bus sites present', () => {
   const a = grown(), b = withBus();

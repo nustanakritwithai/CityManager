@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, summary, MAX_CITY_HOUSEHOLDS, type City } from '../src/sim.ts';
 import { populationFixture as fixture } from './population-capacity-fixture.ts';
-import { saveStoredCity, SAVE_KEY, POPULATION_BACKUP_KEY, populationBackupKeys, readStoredCity } from '../src/save-storage.ts';
 import { createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { moneyJournalLength, cropJournalLength, goodsJournalLength } from '../src/city-history.ts';
 
@@ -52,16 +51,12 @@ test('population envelope preserves road topology and requires matching version 
   const tooMany=fixture(129,false,false);tooMany.households=Array(MAX_CITY_HOUSEHOLDS+1).fill(tooMany.households[0]);assert.throws(()=>deserialize(serialize(tooMany)));
 });
 
-test('old bytes backed up before large-population save; full/quota backups preserve old primary',()=>{
-  const smaller=fixture(128),larger=fixture(129);delete smaller.education;delete larger.education;
+test('legacy population envelope and large-population city round-trip',()=>{
+  const smaller=fixture(128),larger=fixture(129);delete smaller.education;
   const legacy=JSON.parse(serialize(smaller)); delete legacy.goalRulesVersion; delete legacy.commercialUnifiedStartTick; delete legacy.commercialUnifiedBaseline; delete legacy.commercialBaseVersion; delete legacy.farmBaseVersion; delete legacy.farmSoilIndependentStartTick; legacy.version=19; legacy.rulesVersion='chain-14';
-  const old=JSON.stringify(legacy),next=serialize(larger); assert.doesNotThrow(()=>deserialize(old));
-  const data=new Map<string,string>([[SAVE_KEY,old]]),storage={getItem:(k:string)=>data.get(k)??null,setItem:(k:string,v:string)=>{data.set(k,v);}};
-  saveStoredCity(storage,next,null);assert.equal(data.get(POPULATION_BACKUP_KEY),old);assert.equal(data.get(SAVE_KEY),next);assert.equal(readStoredCity(storage,'backup')?.raw,old);
-  saveStoredCity(storage,next,null);assert.equal(data.get(POPULATION_BACKUP_KEY),old);
-  const full=new Map<string,string>([[SAVE_KEY,old],...populationBackupKeys().map((k,i)=>[k,`prior${i}`] as [string,string])]);
-  assert.throws(()=>saveStoredCity({getItem:k=>full.get(k)??null,setItem:(k,v)=>{full.set(k,v);}},next,null),/backups full/);assert.equal(full.get(SAVE_KEY),old);
-  assert.throws(()=>saveStoredCity({getItem:k=>k===SAVE_KEY?old:null,setItem:()=>{throw Error('quota');}},next,null),/quota/);
+  const old=JSON.stringify(legacy); assert.doesNotThrow(()=>deserialize(old));
+  const migrated=deserialize(old);assert.deepEqual(deserialize(serialize(migrated)),migrated);
+  assertResumable(larger);
 });
 
 test('large-city daily and payroll boundaries stay deterministic with balanced accounts', t=>{

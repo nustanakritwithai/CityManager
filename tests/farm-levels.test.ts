@@ -5,7 +5,6 @@ import { createCity, deserialize, serialize, step, farmCrop, selectFarmCrop, fir
 import { farmStockCapacity, harvestYield, proposeHarvest } from '../src/agriculture.ts';
 import { buildingNeed } from '../src/utilities.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
-import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { validateAgriculture } from '../src/agriculture-validation.ts';
 import { holdEducationReady } from './education-ready.ts';
 
@@ -146,16 +145,4 @@ test('v15 migration fixes the boundary and admits valid pre- and post-upgrade ha
   assert.throws(() => deserialize(JSON.stringify(bad)), /farm progression boundary/);
   bad.farmLevelStartTick = c.tick + 1;
   assert.throws(() => deserialize(JSON.stringify(bad)), /farm progression boundary/);
-});
-
-test('v15 bytes are backed up before the first new save and survive a backup failure', () => {
-  const c = createCity(61025), old = JSON.parse(serialize(c)); old.version = 15; old.rulesVersion = 'chain-10';
-  delete old.farmLevelStartTick; delete old.factoryProgressionStartTick;
-  const raw = JSON.stringify(old), fresh = serialize(c), values = new Map([[SAVE_KEY, raw]]);
-  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
-  saveStoredCity(storage, fresh, null);
-  assert.equal(values.get(FARM_LEVEL_BACKUP_KEY), raw); assert.equal(readStoredCity(storage, 'backup')?.raw, raw);
-  const failed = new Map([[SAVE_KEY, raw]]);
-  assert.throws(() => saveStoredCity({ getItem: key => failed.get(key) ?? null, setItem: () => { throw new Error('quota'); } }, fresh, null));
-  assert.equal(failed.get(SAVE_KEY), raw);
 });

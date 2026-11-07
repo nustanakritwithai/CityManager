@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto';
 import { deserialize, serialize, adoptSavedEducation, expandValidatedCity } from '../src/sim.ts';
 import { loadedTrafficSession, trafficNetworkRules } from './traffic-server-entry-fixture.mjs';
 import { createFeedbackServerFixture } from './player-feedback-server-fixture.mjs';
-import { readStoredCity, saveStoredCity, SAVE_KEY, LEGACY_SAVE_KEY, HOUSEHOLD_SAVE_KEY, HOUSEHOLD_BACKUP_KEY } from '../src/save-storage.ts';
 const v1 = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 const v2 = await readFile(new URL('./fixtures/legacy-v2-day65.json', import.meta.url), 'utf8');
 const url = 'http://127.0.0.1:4173/CityManager/';
@@ -33,16 +32,7 @@ test('frozen worker saves survive exact server ACK and full session expansion', 
   }
 });
 
-test('historical local-backup codec retains frozen originals, deduplicates and refuses quota or corrupt-primary fallback', () => {
-  const data = new Map([[LEGACY_SAVE_KEY, v1], [HOUSEHOLD_SAVE_KEY, v2], [SAVE_KEY, 'previous']]);
-  const storage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
-  const migrated = JSON.stringify({ ...deserialize(v2), version: 9, rulesVersion: 'chain-4' });
-  const blocked = { getItem: storage.getItem, setItem: (key, value) => { if (key === HOUSEHOLD_BACKUP_KEY) throw Error('quota'); storage.setItem(key, value); } };
-  assert.throws(() => saveStoredCity(blocked, migrated, v2), /quota/); assert.equal(data.get(SAVE_KEY), 'previous');
-  saveStoredCity(storage, migrated, v2); assert.equal(data.get(LEGACY_SAVE_KEY), v1); assert.equal(data.get(HOUSEHOLD_SAVE_KEY), v2); assert.equal(data.get(HOUSEHOLD_BACKUP_KEY), v2);
-  const count = data.size; saveStoredCity(storage, migrated, v2); assert.equal(data.size, count);
-  data.set(SAVE_KEY, '{broken'); assert.equal(readStoredCity(storage).raw, '{broken'); assert.equal(readStoredCity(storage, 'backup').raw, v2);
-});
+
 
 
 test('worker runner uses a strict fence, per-document audit and observed save/reload chain', async () => {

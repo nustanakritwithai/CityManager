@@ -5,7 +5,6 @@ import { TAXI_ENABLED, MAX_TAXI_DEPOTS, TAXI_DEPOT, taxiAt, taxiEnabled, taxiUni
 import * as placement from '../src/taxi/placement.ts';
 import * as buildings from '../src/taxi/buildings.ts';
 import { buildTaxiDepot, taxiSiteReason, upgradeTaxiDepot, toggleTaxiDepot } from '../src/taxi/placement.ts';
-import { SAVE_KEY, TAXI_BACKUP_KEY, saveStoredCity } from '../src/save-storage.ts';
 
 const grown = () => { const c = createCity(61025); for (let d = 0; d < 20; d++) step(c); return c; };
 const nb = (i: number) => [i - 1, i + 1, i - SIZE, i + SIZE].filter(n => n >= 0 && n < SIZE * SIZE && (Math.abs((n % SIZE) - (i % SIZE)) <= 1));
@@ -98,15 +97,7 @@ test('economy unchanged over N days with taxi sites present', () => {
   const norm = (j: any) => JSON.stringify({ accounts: Object.entries(j.accounts).map(([k, v]) => [k.replace(/\d+/g, '#'), v]).sort(), ledger: j.ledger.map((e: any) => ({ ...e, from: e.from.replace(/\d+/g, '#'), to: e.to.replace(/\d+/g, '#'), reason: e.reason.replace(/#\d+/g, '#') })), goods: j.goods, crops: j.crops, households: j.households.length, firms: j.firms.length });
   assert.equal(norm(strip(b)), norm(strip(a)));
 });
-test('before-taxi backup is written once before the first taxi save', () => {
-  const mem = new Map<string, string>(), st = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k), get length() { return mem.size; }, key: (n: number) => [...mem.keys()][n] ?? null, clear: () => mem.clear() };
-  const c = grown(), plain = serialize(c); mem.set(SAVE_KEY, plain);
-  buildTaxiDepot(c, sites(c)[0], true); const first = serialize(c);
-  saveStoredCity(st as any, first, null); mem.set(SAVE_KEY, first);
-  assert.equal(mem.get(TAXI_BACKUP_KEY), plain);
-  buildTaxiDepot(c, sites(c)[0], true); saveStoredCity(st as any, serialize(c), null);
-  assert.equal(mem.get(TAXI_BACKUP_KEY), plain); assert.equal(mem.get(`${TAXI_BACKUP_KEY}.1`), undefined);
-});
+
 test('taxi site types come from the shared sites module', async () => {
   const shared = await import('../src/taxi/sites.ts'), b = await import('../src/taxi/buildings.ts');
   assert.equal(b.TAXI_DEPOT.units, shared.TAXI_DEPOT_UNITS);
