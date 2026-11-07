@@ -12,6 +12,8 @@ param(
     [switch]$OwnedChildSelfTest,
     [Parameter(Mandatory = $true, ParameterSetName = 'CompileOnly')]
     [switch]$CompileOnly,
+    [Parameter(Mandatory = $true, ParameterSetName = 'DiagnosticsFixtureOnly')]
+    [switch]$DiagnosticsFixtureOnly,
     [ValidateRange(5, 300)][int]$LifetimeSeconds = 180,
     [ValidateRange(1, 30)][int]$TeardownSeconds = 10
 )
@@ -20,6 +22,10 @@ $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or [IntPtr]::Size -ne 8 -or $PSVersionTable.PSEdition -ne 'Desktop') {
     [Console]::Error.WriteLine('Requires 64-bit Windows PowerShell 5.1; no process was launched.')
     exit 2
+}
+if ($DiagnosticsFixtureOnly) {
+    & (Join-Path $PSScriptRoot '../tests/diagnostic-compiler-diagnostics.fixture.ps1')
+    exit $LASTEXITCODE
 }
 [string[]]$launchArguments = @()
 if (-not $CompileOnly) {
@@ -441,67 +447,7 @@ public static class DiagnosticOwnedProcess
 '@
 # Preserve the original Add-Type provider, default options, references and strict warning
 # behavior. Capture errors instead of discarding them; any captured error forbids Run.
-function ConvertTo-SafeCompilerText {
-    param([string]$Text)
-    $Text = [regex]::Replace($Text, '(?i)(?:[a-z]:[\\/]|\\\\)[^\s''"<>]*', '<path>')
-    $Text = [regex]::Replace($Text, '[\x00-\x1f\x7f]', ' ')
-    if ($Text.Length -gt 512) { $Text = $Text.Substring(0, 512) }
-    return $Text
-}
-function Get-BoundedCompilerDiagnostics {
-    param([object[]]$Records)
-    $diagnostics = New-Object 'System.Collections.Generic.List[object]'
-    $seen = New-Object 'System.Collections.Generic.HashSet[string]'
-    # Error text comes only from compilation of the fixed literal source. Never include
-    # ErrorRecord.InvocationInfo, target source excerpts, file names, argv or environment.
-    foreach ($record in $Records) {
-        if ($diagnostics.Count -ge 8) { break }
-        if ($record -isnot [Management.Automation.ErrorRecord]) { continue }
-        $target = $record.TargetObject
-        if ($target -is [System.CodeDom.Compiler.CompilerError]) {
-            $code = [string]$target.ErrorNumber
-            if ($code -notmatch '^CS\d{4,5}$') { $code = 'COMPILER_ERROR' }
-            $item = [ordered]@{
-                errorNumber = $code
-                sourceLine = $(if ($target.Line -gt 0) { [int]$target.Line } else { $null })
-                column = $(if ($target.Column -gt 0) { [int]$target.Column } else { $null })
-                isWarning = [bool]$target.IsWarning
-                errorText = ConvertTo-SafeCompilerText ([string]$target.ErrorText)
-            }
-            $key = $item | ConvertTo-Json -Compress
-            if ($seen.Add($key)) { $diagnostics.Add($item) }
-            continue
-        }
-        $message = [string]$record.Exception.Message
-        if ($null -ne $record.ErrorDetails) { $message += "`n" + [string]$record.ErrorDetails.Message }
-        # Add-Type may wrap CompilerError as text. Capture only the diagnostic line,
-        # not its temporary filename or the following annotated source excerpt.
-        $matches = [regex]::Matches($message, '(?im)^(?:[^\r\n]*?\((?<line>\d+)(?:,(?<column>\d+))?\)\s*:\s*)?\s*(?<severity>error|warning)\s+(?<code>CS\d{4,5})\s*:\s*(?<text>[^\r\n]*)')
-        foreach ($match in $matches) {
-            if ($diagnostics.Count -ge 8) { break }
-            $line = 0; $column = 0
-            [void][int]::TryParse($match.Groups['line'].Value, [ref]$line)
-            [void][int]::TryParse($match.Groups['column'].Value, [ref]$column)
-            $item = [ordered]@{
-                errorNumber = $match.Groups['code'].Value
-                sourceLine = $(if ($line -gt 0) { $line } else { $null })
-                column = $(if ($column -gt 0) { $column } else { $null })
-                isWarning = $match.Groups['severity'].Value -ieq 'warning'
-                errorText = ConvertTo-SafeCompilerText $match.Groups['text'].Value
-            }
-            $key = $item | ConvertTo-Json -Compress
-            if ($seen.Add($key)) { $diagnostics.Add($item) }
-        }
-    }
-    if ($Records.Count -gt 0 -and $diagnostics.Count -eq 0) {
-        # Fail explicitly if this host's Add-Type exposes a different diagnostic shape.
-        $diagnostics.Add([ordered]@{
-            errorNumber = 'ADD_TYPE_FAILURE'; sourceLine = $null; column = $null; isWarning = $null
-            errorText = 'Compiler diagnostic was not available in a supported structured or formatted shape.'
-        })
-    }
-    return $diagnostics.ToArray()
-}
+. (Join-Path $PSScriptRoot 'diagnostic-compiler-diagnostics.ps1')
 $compilerReferences = @('System.dll', 'System.Web.Extensions.dll', 'System.Core.dll')
 $compilerErrors = @()
 $compiledTypes = @()
@@ -515,7 +461,8 @@ try {
 }
 $compileSucceeded = $compilerErrors.Count -eq 0 -and $compiledTypes.Count -gt 0
 if ($CompileOnly -or -not $compileSucceeded) {
-    $diagnostics = @(Get-BoundedCompilerDiagnostics -Records $compilerErrors)
+    $extraction = Get-BoundedCompilerDiagnostics -Records $compilerErrors -KnownSourceLines ($source -split '\r?\n')
+    $diagnostics = @($extraction.diagnostics)
     if (-not $compileSucceeded -and $diagnostics.Count -eq 0) {
         $diagnostics = @([ordered]@{ errorNumber = 'NO_COMPILED_TYPE'; sourceLine = $null; column = $null; isWarning = $null; errorText = 'Add-Type did not return a compiled type.' })
     }
@@ -535,7 +482,13 @@ if ($CompileOnly -or -not $compileSucceeded) {
         strictWarnings = $true
         diagnosticLimit = 8; diagnosticTextLimit = 512
         diagnosticInputRecordCount = $compilerErrors.Count
-        diagnosticsMayBeTruncated = $compilerErrors.Count -gt 8 -or $diagnostics.Count -ge 8
+        diagnosticsMayBeTruncated = $extraction.truncated
+        diagnosticTraversal = [ordered]@{
+            nodesVisited = $extraction.nodesVisited; nodeLimit = $extraction.nodeLimit; depthLimit = $extraction.depthLimit
+            messageScanLimit = $extraction.messageScanLimit; truncation = $extraction.truncation
+            observedClrTypes = $extraction.observedClrTypes; unknownClrTypes = $extraction.unknownClrTypes
+            targetClrTypes = $extraction.targetClrTypes
+        }
         diagnostics = $diagnostics
     }
     [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)

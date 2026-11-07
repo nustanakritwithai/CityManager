@@ -13,3 +13,10 @@ test('compiler workflow cannot launch calibration or paired trials',()=>{
  assert.ok(workflow.indexOf('name: Preserve compile-only plan')<workflow.indexOf('name: Verify compiler-only boundary'));
  assert.match(workflow,/if: always\(\)/);assert.ok(workflow.includes('42380138115'));
 });
+
+test('native diagnostic fixtures precede compilation with retained output',()=>{
+ assert.ok(workflow.includes('scripts/diagnostic-compiler-diagnostics.ps1'));
+ assert.ok(workflow.includes('tests/diagnostic-compiler-diagnostics.fixture.ps1'));
+ assert.ok(workflow.indexOf('-DiagnosticsFixtureOnly')<workflow.indexOf('-CompileOnly'));
+ assert.ok(workflow.includes('extractor-fixtures.log'));
+});

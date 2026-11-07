@@ -8,6 +8,8 @@ import { createHash } from 'node:crypto';
 
 const helperPath = fileURLToPath(new URL('../scripts/diagnostic-owned-process.ps1', import.meta.url));
 const source = readFileSync(helperPath, 'utf8');
+const extractor = readFileSync(new URL('../scripts/diagnostic-compiler-diagnostics.ps1', import.meta.url), 'utf8');
+const nativeFixtures = readFileSync(new URL('./diagnostic-compiler-diagnostics.fixture.ps1', import.meta.url), 'utf8');
 
 // These are source contracts, deliberately not claims that native Windows calls ran.
 test('source contract: root cannot execute before assignment and identity verification', () => {
@@ -217,23 +219,24 @@ test('source contract: compiler observability preserves references and strict wa
   assert.match(wrapper, /\$compilerReferences = @\('System.dll', 'System.Web.Extensions.dll', 'System.Core.dll'\)/);
   assert.match(wrapper, /Add-Type -TypeDefinition \$source -ReferencedAssemblies \$compilerReferences -PassThru -ErrorAction SilentlyContinue -ErrorVariable \+compilerErrors/);
   assert.doesNotMatch(wrapper, /-IgnoreWarnings\b|TreatWarningsAsErrors\s*=\s*\$false|-CompilerOptions\b/);
-  assert.match(wrapper, /if \(\$diagnostics.Count -ge 8\) \{ break \}/);
-  assert.match(wrapper, /if \(\$Text.Length -gt 512\) \{ \$Text = \$Text.Substring\(0, 512\) \}/);
+  assert.match(extractor, /if \(\$State.diagnostics.Count -ge 8\)/);
+  assert.match(extractor, /if \(\$Text.Length -gt 512\) \{ \$Text = \$Text.Substring\(0, 512\) \}/);
   assert.match(wrapper, /sourceSha256 = \$sourceHash/);
   assert.match(wrapper, /if \(\$CompileOnly\) \{[\s\S]*?Write-Output -InputObject \$serializedCompileRecord[\s\S]*?else \{\s*\[Console\]::Error.WriteLine\(\$serializedCompileRecord\)/);
   assert.doesNotMatch(wrapper, /\[Console\]::Out.WriteLine/);
-  assert.match(wrapper, /errorNumber = 'ADD_TYPE_FAILURE'; sourceLine = \$null; column = \$null; isWarning = \$null/);
+  assert.match(extractor, /format = 'unknown-shape'/);
+  assert.match(extractor, /errorNumber = \$null; sourceLine = \$null; column = \$null; isWarning = \$null/);
 });
 
 // Execute the exact, portable subset of the diagnostic regex using JavaScript.
 // These cases validate extraction patterns only, NOT PowerShell/ErrorRecord runtime behavior.
 function compilerDiagnosticPattern() {
-  const marker = "[regex]::Matches($message, '";
-  const start = source.indexOf(marker) + marker.length;
+  const marker = "[regex]::Match($diagnosticLine, '";
+  const start = extractor.indexOf(marker) + marker.length;
   assert.ok(start >= marker.length);
-  const expression = source.slice(start, source.indexOf("')", start));
-  assert.ok(expression.startsWith('(?im)'));
-  return new RegExp(expression.slice(5), 'gim');
+  const expression = extractor.slice(start, extractor.indexOf("')", start));
+  assert.ok(expression.startsWith('(?i)'));
+  return new RegExp(expression.slice(4), 'gim');
 }
 function diagnosticMatches(text) {
   return [...text.matchAll(compilerDiagnosticPattern())].map(({ groups }) => ({
@@ -263,8 +266,8 @@ test('diagnostic regex fixture: warning code and absent coordinates remain expli
 
 test('diagnostic redaction regex fixture: removes drive and UNC paths without dropping error meaning', () => {
   const marker = "[regex]::Replace($Text, '";
-  const start = source.indexOf(marker) + marker.length;
-  const expression = source.slice(start, source.indexOf(", '<path>')", start) - 1).replaceAll("''", "'");
+  const start = extractor.indexOf(marker) + marker.length;
+  const expression = extractor.slice(start, extractor.indexOf(", '<path>')", start) - 1).replaceAll("''", "'");
   assert.ok(expression.startsWith('(?i)'));
   const pattern = new RegExp(expression.slice(4), 'gi');
   const redacted = "Metadata file 'C:\\private\\file.dll' or '\\\\host\\secret\\file.dll' missing".replace(pattern, '<path>');
@@ -276,4 +279,79 @@ test('source contract: compiler diagnostics correction preserves the failing emb
   const normalized = source.replaceAll('\r\n', '\n');
   const literal = normalized.split("$source = @'\n")[1].split("\n'@")[0];
   assert.equal(createHash('sha256').update(literal, 'utf8').digest('hex'), '92c9a8ea1af7078547545450def34c1c41c5d67f03994ab422a0a6bd7299773f');
+});
+
+
+test('source contract: fixture-only exits before compilation and exercises native approved object shapes', () => {
+  const branch = source.indexOf('if ($DiagnosticsFixtureOnly) {');
+  const fixtureCall = source.indexOf("'../tests/diagnostic-compiler-diagnostics.fixture.ps1'", branch);
+  const exit = source.indexOf('exit $LASTEXITCODE', fixtureCall);
+  const embedded = source.indexOf("$source = @'");
+  const compile = source.indexOf('Add-Type -TypeDefinition $source');
+  assert.ok(branch >= 0 && branch < fixtureCall && fixtureCall < exit && exit < embedded && embedded < compile);
+  assert.match(source, /ParameterSetName = 'DiagnosticsFixtureOnly'\)\]\s*\[switch\]\$DiagnosticsFixtureOnly/);
+  assert.doesNotMatch(nativeFixtures, /Add-Type|Start-Process|CreateProcess|CreateJobObject|DiagnosticOwnedProcess/);
+  assert.match(nativeFixtures, /exceptionType = \$type; message = \$text/);
+  assert.doesNotMatch(nativeFixtures, /\.(?:StackTrace|InvocationInfo)\b/);
+  for (const name of ['nested-collections-and-structured-compiler-error', 'plain-exception-first-line-and-inner-chain', 'error-details-formatted-text-and-error-id', 'location-prefix-without-compiler-code-retains-reason', 'unformatted-details-null-positions', 'unknown-shape-has-type-without-object-inspection', 'fixed-source-line-is-not-a-diagnostic', 'redaction-length-and-control-characters', 'node-and-diagnostic-caps', 'depth-cap-and-reference-cycle', 'runtime-exception-approved-wrapper']) {
+    assert.ok(nativeFixtures.includes(`Invoke-Fixture '${name}'`), name);
+  }
+});
+
+test('source contract: traversal is allowlisted, bounded, and never serializes arbitrary objects', () => {
+  for (const type of ['[object[]]', '[Collections.ArrayList]', '[System.CodeDom.Compiler.CompilerErrorCollection]', '[System.CodeDom.Compiler.CompilerError]', '[Management.Automation.ErrorRecord]', '[Management.Automation.ErrorDetails]', '[Exception]', '[Management.Automation.RuntimeException]']) {
+    assert.ok(extractor.includes(`-is ${type}`), type);
+  }
+  assert.match(extractor, /\$Depth -gt 4/);
+  assert.match(extractor, /\$State.nodesQueued -ge 32/);
+  assert.match(extractor, /\$State.diagnostics.Count -ge 8/);
+  assert.match(extractor, /\[object\]::ReferenceEquals/);
+  assert.match(extractor, /messageScanLimit = 4096/);
+  assert.doesNotMatch(extractor, /\.(?:InvocationInfo|StackTrace|Data|ToString|GetProperties|GetEnumerator)\b|IEnumerable/);
+  assert.match(extractor, /\$node.TargetObject -is \[System.CodeDom.Compiler.CompilerError\]/);
+  assert.match(extractor, /if \(\$node -is \[Management.Automation.RuntimeException\]\)/);
+  assert.match(extractor, /format = 'unparsed-first-line'/);
+  assert.match(extractor, /diagnostics = @\(\$state.diagnostics.ToArray\(\)\)/);
+  assert.match(nativeFixtures, /\$result.diagnostics -is \[object\[\]\]/);
+  assert.match(nativeFixtures, /passed = @\(\$passed.ToArray\(\)\); failed = @\(\$failed.ToArray\(\)\)/);
+  assert.match(extractor, /observedClrTypes =/);
+  assert.match(extractor, /unknownClrTypes =/);
+  assert.match(extractor, /targetClrTypes =/);
+  assert.match(extractor, /\$node.TargetObject.GetType\(\).FullName/);
+  assert.match(extractor, /\$State.sourceLines.Contains\(\$diagnosticLine.Trim\(\)\)/);
+  assert.match(source, /-KnownSourceLines \(\$source -split '\\r\?\\n'\)/);
+});
+
+test('Windows native PowerShell fixture-only extractor tests', { skip: process.platform !== 'win32' || process.env.DIAGNOSTIC_COMPILER_FIXTURE_WINDOWS_TEST !== '1', timeout: 30_000 }, async () => {
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', helperPath, '-DiagnosticsFixtureOnly'], { stdio: ['ignore', 'pipe', 'pipe'], shell: false, windowsHide: true });
+  let stdout = '', stderr = '';
+  child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+  assert.equal(code, 0, stderr.slice(0, 512));
+  const result = JSON.parse(stdout.trim());
+  assert.equal(result.type, 'compiler-diagnostics-fixtures');
+  assert.equal(result.success, true);
+  assert.equal(result.compilerInvoked, false);
+  assert.equal(result.brokerInvoked, false);
+  assert.equal(result.targetLaunched, false);
+  assert.equal(result.jobCreated, false);
+  assert.equal(result.passed.length, 11);
+  assert.deepEqual(result.failed, []);
+});
+
+
+test('diagnostic location regex fixture: no-code messages retain their reason and supplied positions', () => {
+  const marker = "[regex]::Match($firstLine, '";
+  const start = extractor.indexOf(marker) + marker.length;
+  const expression = extractor.slice(start, extractor.indexOf("')", start));
+  assert.ok(expression.startsWith('(?i)'));
+  const pattern = new RegExp(expression.slice(4), 'i');
+  const drive = pattern.exec('C:\\private temp\\sample.cs(42) : The type or namespace name could not be found');
+  assert.deepEqual({ ...drive.groups }, { line: '42', column: undefined, text: 'The type or namespace name could not be found' });
+  const unc = pattern.exec('\\\\server\\private share\\sample.cs(9,4): Unformatted compiler reason');
+  assert.deepEqual({ ...unc.groups }, { line: '9', column: '4', text: 'Unformatted compiler reason' });
+  assert.doesNotMatch(JSON.stringify(drive.groups), /private temp|sample.cs/);
+  assert.equal(pattern.exec('Ordinary message (42): keep it intact'), null);
 });

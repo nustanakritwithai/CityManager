@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/traffic-harness-compile.yml'
       - 'scripts/diagnostic-owned-process.ps1'
+      - 'scripts/diagnostic-compiler-diagnostics.ps1'
+      - 'tests/diagnostic-compiler-diagnostics.fixture.ps1'
       - 'tests/diagnostic-owned-process.test.mjs'
       - 'tests/traffic-harness-compile.test.mjs'
 permissions:
@@ -28,6 +30,11 @@ jobs:
           @{ commit='${{ github.sha }}'; purpose='Compile fixed embedded source only; no broker Run, job or browser launch'; priorRun='https://github.com/nustanakritwithai/CityManager/actions/runs/42380138115'; status='not-started' } | ConvertTo-Json | Set-Content -Encoding UTF8 .test-output/harness-compile/plan.json
       - name: Verify compiler-only boundary contracts
         run: node --test tests/diagnostic-owned-process.test.mjs tests/traffic-harness-compile.test.mjs
+      - name: Verify native diagnostic fixtures without compiling or launching broker
+        shell: powershell
+        run: |
+          & ./scripts/diagnostic-owned-process.ps1 -DiagnosticsFixtureOnly 2>&1 | Tee-Object -FilePath .test-output/harness-compile/extractor-fixtures.log
+          exit $LASTEXITCODE
       - name: Compile once without invoking native broker
         shell: powershell
         run: |
