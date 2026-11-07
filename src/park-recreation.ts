@@ -1,7 +1,6 @@
 /** Observational recreation only: this module never reads or changes city finances. */
 export const PARK_RECREATION_UNITS_PER_POINT = 1000;
 export const PARK_RECREATION_MAX_SCORE_UNITS = 100 * PARK_RECREATION_UNITS_PER_POINT;
-export const PARK_RECREATION_MAX_RESIDENTS = 2048;
 const MINUTES_PER_DAY = 1440;
 
 export interface ParkRecreationTuning {
@@ -73,7 +72,6 @@ function validateState(value: unknown): asserts value is ParkRecreationState {
   validateTuning(value.tuning);
   if (!value.citizens || typeof value.citizens !== 'object' || Array.isArray(value.citizens)) fail('invalid citizens');
   const entries = Object.entries(value.citizens);
-  if (entries.length > PARK_RECREATION_MAX_RESIDENTS) fail('too many citizen records');
   for (const [citizenId, citizen] of entries) {
     id(citizenId, 'citizenId');
     shape(citizen, CITIZEN_KEYS, 'citizen');
@@ -117,24 +115,24 @@ export function advanceParkRecreation(state: ParkRecreationState, frame: ParkRec
   integer(frame.minute, 0, Number.MAX_SAFE_INTEGER, 'frame minute');
   if (frame.minute === state.minute) return state;
   if (frame.minute !== state.minute + 1) fail('frames must advance exactly one game minute');
-  if (!Array.isArray(frame.residentIds) || frame.residentIds.length > PARK_RECREATION_MAX_RESIDENTS) fail('invalid resident roster');
+  if (!Array.isArray(frame.residentIds)) fail('invalid resident roster');
   const residents = new Set<string>();
   for (const citizenId of frame.residentIds) {
     id(citizenId, 'residentId');
     if (residents.has(citizenId)) fail('duplicate resident');
     residents.add(citizenId);
   }
-  if (!Array.isArray(frame.parks) || frame.parks.length > PARK_RECREATION_MAX_RESIDENTS) fail('invalid parks');
+  if (!Array.isArray(frame.parks)) fail('invalid parks');
   const parks = new Map<number, ParkRecreationFrame['parks'][number]>();
   for (const park of frame.parks) {
     shape(park, ['parkId', 'qualityPermille', 'comfortableCapacity'], 'park');
     integer(park.parkId, 1, Number.MAX_SAFE_INTEGER, 'parkId');
     integer(park.qualityPermille, 0, 1000, 'qualityPermille');
-    integer(park.comfortableCapacity, 0, PARK_RECREATION_MAX_RESIDENTS, 'comfortableCapacity');
+    integer(park.comfortableCapacity, 0, Number.MAX_SAFE_INTEGER, 'comfortableCapacity');
     if (parks.has(park.parkId)) fail('duplicate park');
     parks.set(park.parkId, { parkId: park.parkId, qualityPermille: park.qualityPermille, comfortableCapacity: park.comfortableCapacity });
   }
-  if (!Array.isArray(frame.visits) || frame.visits.length > PARK_RECREATION_MAX_RESIDENTS * 4) fail('invalid visits');
+  if (!Array.isArray(frame.visits)) fail('invalid visits');
   const visits = new Map<string, ParkRecreationFrame['visits'][number]>();
   const occupancy = new Map<number, number>();
   for (const visit of frame.visits) {
@@ -153,7 +151,12 @@ export function advanceParkRecreation(state: ParkRecreationState, frame: ParkRec
   // Validation has completed before any work on the next state begins.
   const citizens: Record<string, ParkRecreationCitizen> = Object.create(null);
   const day = dayAt(frame.minute);
-  for (const citizenId of [...residents].sort()) {
+  // The city owns population capacity. Keep all real residents in validation,
+  // but only sort/process people with earned history or an observed visit.
+  // Never-visited residents have implicit zero and need no stored record.
+  const observed = new Set([...Object.keys(state.citizens), ...visits.keys()]);
+  for (const citizenId of [...observed].sort()) {
+    if (!residents.has(citizenId)) continue;
     const previous = Object.hasOwn(state.citizens, citizenId) ? state.citizens[citizenId] : undefined;
     let citizen = previous ? { ...previous, day, dailyGainedUnits: previous.day === day ? previous.dailyGainedUnits : 0 } : undefined;
     if (citizen) {
@@ -164,7 +167,10 @@ export function advanceParkRecreation(state: ParkRecreationState, frame: ParkRec
     const visit = visits.get(citizenId);
     if (visit?.eligible) {
       const park = parks.get(visit.parkId)!;
-      const crowding = Math.min(1000, Math.floor(park.comfortableCapacity * 1000 / occupancy.get(park.parkId)!));
+      const present = occupancy.get(park.parkId)!;
+      // Avoid multiplying a large safe capacity when everybody already fits.
+      // In the crowded branch capacity is below an array-backed visitor count.
+      const crowding = park.comfortableCapacity >= present ? 1000 : Math.floor(park.comfortableCapacity * 1000 / present);
       // Bounded operands: the largest intermediate is 100000 * 1000 * 1000.
       const potentialGain = Math.floor(state.tuning.gainUnitsPerMinute * park.qualityPermille * crowding / 1_000_000);
       const gain = Math.min(potentialGain, state.tuning.dailyCapUnits - (citizen?.dailyGainedUnits ?? 0), PARK_RECREATION_MAX_SCORE_UNITS - (citizen?.scoreUnits ?? 0));
