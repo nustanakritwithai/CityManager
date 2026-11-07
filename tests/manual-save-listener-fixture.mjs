@@ -22,6 +22,9 @@ export const manualSuccess='บันทึกเมืองบนเซิร�
 export const turn=()=>new Promise(resolve=>setImmediate(resolve));
 export function deferred(){let release;const promise=new Promise(resolve=>release=resolve);return{promise,release};}
 export async function manualSaveFixture(source=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8')){
+ // Windows checkouts may use CRLF. Normalize only line endings before slicing
+ // and matching; the production listener and guard expressions stay unchanged.
+ source=source.replaceAll('\r\n','\n');
  const start=source.indexOf('  const enqueueSave=createSaveAttemptQueue();'),end=source.indexOf('  const campusAction =',start);
  assert.ok(start>=0&&end>start,'Actual production save block must be found');
  const declaration=source.match(/  let cityGeneration=0,[^\n]+;/)?.[0];assert.ok(declaration);

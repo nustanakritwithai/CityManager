@@ -1,10 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { manualSaveFixture, manualSuccess, deferred, turn } from './manual-save-listener-fixture.mjs';
 import { assertPanelSaveChain } from './panel-ui-server.mjs';
 
 // These tests invoke the real production listener with synthetic gestures. They
 // prove listener/queue behavior, not native mouse/touch or full browser QA.
+for(const newline of ['LF','CRLF','mixed'])test(`production Save extraction preserves behavior with ${newline} line endings`,async()=>{
+ const lf=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8').replaceAll('\r\n','\n');
+ const source=newline==='LF'?lf:newline==='CRLF'?lf.replaceAll('\n','\r\n'):lf.split('\n').map((line,index)=>line+(line.includes('    canOpen:')||index%2===0?'\r\n':'\n')).join('');
+ if(newline!=='LF')assert.ok(source.includes('\r\n'));
+ if(newline==='mixed')assert.ok(/[^\r]\n/.test(source),'Mixed source retains LF as well as CRLF');
+ const h=await manualSaveFixture(source),gate=h.holdNextPost();h.edit();
+ const saving=h.actual.autosave.run();await gate.started;
+ const before=h.fixture.active,cursor=h.fixture.writes.length,manual=h.click();
+ assert.equal(h.actual.manualPending,true);assert.equal(h.actual.canOpen(),false);await h.click();assert.equal(h.authCalls,1);
+ gate.release();await saving;await manual;
+ assert.deepEqual(assertPanelSaveChain(before,h.fixture.active,h.fixture.writes.slice(cursor),h.raw,h.fixture.writes.slice(0,cursor)),{beforeRevision:2,afterRevision:3,saves:1});
+ assert.deepEqual(h.notices,[manualSuccess]);assert.equal(h.actual.manualPending,false);assert.equal(h.actual.canOpen(),true);
+});
 test('Save during a committed but unacknowledged autosave queues a fresh exact revision',async()=>{
  const h=await manualSaveFixture(),gate=h.holdNextPost();h.edit();
  const saving=h.actual.autosave.run();await gate.started;
