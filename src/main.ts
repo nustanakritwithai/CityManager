@@ -629,7 +629,7 @@ async function boot() {
   city=restored.city;parkRuntime=restored.runtime;taxiSession.bind(city);
   if(!city.education)adoptSavedEducation(city);
   syncEducationTools();paused=true;
-  let cityGeneration=0,saveBusy=false,resolvingConflict=false,managingSave=false;
+  let cityGeneration=0,saveBusy=false,manualSavePending=false,resolvingConflict=false,managingSave=false;
   const previewOnly=false,recoveryOnly=false;
   ownerDecisionSession = createOwnerDecisionSession(city);
   setupSubmenus(); setupSubmenuNavigation(cancel);
@@ -852,6 +852,8 @@ async function boot() {
       const attempt=saveFeedback.begin();saveBusy=true;
       try{
         await authenticated;
+        if(managingSave)throw Error('กำลังจัดการเซฟ หยุดการบันทึกอัตโนมัติไว้');
+        if(captured!==city||generation!==cityGeneration)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');
         const {acknowledged,operation}=await persistServerCity(serverSave,()=>{if(captured!==city||generation!==cityGeneration)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');const raw=serializeParkSession(captured,parkRuntime,captured.market);return {raw,metadata:citySaveMetadata(raw)};},explicit);
         if(captured!==city||generation!==cityGeneration){saveFeedback.cancel(attempt);throw Error('เมืองเปลี่ยนระหว่างบันทึก');}
         const feedback=describeServerAcknowledgement(operation,acknowledged.raw,serializeParkSession(city,parkRuntime,city.market));saveSuccessLabel=feedback.label;
@@ -863,17 +865,22 @@ async function boot() {
   };
   const autosave=createAutosave({needsRetry:()=>serverSave.pending,canSave:()=>!managingSave&&!resolvingConflict&&!serverSave.conflict&&!serverSave.deleted,save:onStart=>trackedSave(false,onStart),tick:()=>city.tick,revision:()=>serializeParkSession(city,parkRuntime,city.market),onResult:r=>{if(!r.ok){sound('ui-error');status(describeAutosave(r));}}});
   autosave.adoptLoaded();installAutosave(document,window,autosave,()=>document.hidden);
-  window.addEventListener('beforeunload',event=>{if(shouldWarnBeforeUnload({running:autosave.running,failed:autosave.last?.ok===false,busy:saveBusy,pending:serverSave.pending,conflict:serverSave.conflict,raw:serializeParkSession(city,parkRuntime,city.market),confirmedRaw:serverSave.confirmed?.raw})){event.preventDefault();event.returnValue='';}});
+  window.addEventListener('beforeunload',event=>{if(shouldWarnBeforeUnload({running:autosave.running,failed:autosave.last?.ok===false,busy:saveBusy||manualSavePending,pending:serverSave.pending,conflict:serverSave.conflict,raw:serializeParkSession(city,parkRuntime,city.market),confirmedRaw:serverSave.confirmed?.raw})){event.preventDefault();event.returnValue='';}});
   $('#save').addEventListener('click',async()=>{
-    if(saveBusy||managingSave)return;
+    // One explicit gesture may wait behind autosave. Coalesce further manual
+    // clicks synchronously, including the gap before queued work starts.
+    if(manualSavePending||managingSave)return;
+    manualSavePending=true;
     try{
       if(serverSave.conflict||resolvingConflict){
         paused=true;
         if(!window.confirm('คำขอเซฟล่าสุดยังใช้ต่อไม่ได้ ต้องตรวจสถานะบนเซิร์ฟเวอร์ เก็บเมืองที่กำลังเล่นเป็นสำเนาบนเซิร์ฟเวอร์ แล้วเปิดเมืองหลักล่าสุดหรือไม่?'))return;
+        const captured=city,generation=cityGeneration;
         const authenticated=serverEntry.auth.connect();void authenticated.catch(()=>{});
         await enqueueSave(async()=>{
           saveBusy=true;try{
             await authenticated;
+            if(managingSave||captured!==city||generation!==cityGeneration)throw Error('เมืองเปลี่ยนระหว่างรอบันทึก');
             const raw=serializeParkSession(city,parkRuntime,city.market);
             await serverSave.archive({source:'conflict-session',raw});
             resolvingConflict=true;if(serverSave.conflict)serverSave.discardConflictedAttempt();
@@ -887,6 +894,7 @@ async function boot() {
       }
       const saved=await trackedSave(true);sound('ui-save');status(saved.current?'บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่':'ยืนยันเซฟก่อนหน้าแล้ว · การเปลี่ยนแปลงใหม่ยังไม่บันทึก กรุณาบันทึกอีกครั้ง');
     }catch(error){sound('ui-error');status(`ยังบันทึกไม่ได้: ${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · อย่าปิดหน้านี้`);}
+    finally{manualSavePending=false;}
   });
   const campusAction = (action: typeof toggleCampus) => {
     const campus = route?.page === 'place' ? campusAt(city, route.cell) : undefined;
@@ -899,7 +907,7 @@ async function boot() {
   let deletedAcknowledgement:{cityId:string;revision:number}|null=null;
   let freshRaw:string|null=null,createdAcknowledgement:{cityId:string;revision:number;rawHash:string}|null=null;
   installSaveManagement($('#new-city'),{
-    canOpen:()=>!saveBusy&&!managingSave&&!resolvingConflict&&!serverSave.pending&&!serverSave.conflict&&!!serverSave.confirmed,
+    canOpen:()=>!manualSavePending&&!saveBusy&&!managingSave&&!resolvingConflict&&!serverSave.pending&&!serverSave.conflict&&!!serverSave.confirmed,
     begin:()=>{
       const confirmed=serverSave.confirmed!;managingSave=true;
       managementSelection={cityId:confirmed.cityId,revision:confirmed.revision,raw:serializeParkSession(city,parkRuntime,city.market),wasPaused:paused};

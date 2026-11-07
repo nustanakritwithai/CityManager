@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { adoptSavedEducation, serialize } from '../src/sim.ts';
 import { deserializeParkSession } from '../src/park-runtime.ts';
 import { browserSnapshotState } from './browser-snapshot.ts';
-import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
+import { completeTrafficManualSave, loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
 export function panelEntryCity(raw) {
  const city=loadedTrafficSession(raw).city;
@@ -32,16 +32,47 @@ export async function loadPanelCity(server,raw,{send,evaluate,button,until,url})
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);await server.assertNoCityWrites(evaluate);
  return ack;
 }
+// Bounded synthetic metadata only: no city IDs, raw bytes, keys or response text.
+export function panelSaveEvidence(server,before,cursor,raw) {
+ const after=server.active,writes=server.writes;
+ return {beforeRevision:before?.revision,afterRevision:after?.revision,sameCity:after?.cityId===before?.cityId,beforeRawMatches:before?.raw===raw,afterRawMatches:after?.raw===raw,cursor,totalWrites:writes.length,
+  writes:writes.slice(-40).map((event,offset)=>{const index=Math.max(0,writes.length-40)+offset;return {index,status:event.status,expectedRevision:event.command?.expectedRevision,ackRevision:event.response?.revision,rawMatches:event.command?.raw===raw,ackRawMatches:event.response?.raw===raw,repeatedKey:!!event.requestKey&&writes.slice(0,index).some(previous=>previous.requestKey===event.requestKey)};})};
+}
+export async function completePanelManualSave(server,before,cursor,raw,{evaluate,button,now=Date.now,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))}) {
+ // completeTrafficManualSave calls this waiter immediately after its one native
+ // click returns. UI observation and exact ACK share the original 30s budget.
+ await completeTrafficManualSave(evaluate,button,async expression=>{
+  const deadline=now()+30000;
+  const withinDeadline=()=>assert.ok(now()<deadline,'Native Save manual completion and exact ACK required within 30000ms after click');
+  for(;;){
+   withinDeadline();const manualComplete=await evaluate(expression);withinDeadline();
+   if(manualComplete&&server.active?.raw===raw&&server.active.revision>before.revision){
+    await server.settle();withinDeadline();
+    assertPanelSaveChain(before,server.active,server.writes.slice(cursor),raw,server.writes.slice(0,cursor));withinDeadline();return;
+   }
+   await pause(80);
+  }
+ });
+}
 export async function saveAndReloadPanel(server,expected,{send,evaluate,button,until}) {
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
  const raw=await evaluate('window.cityManager.sessionSnapshot()'),actual=deserializeParkSession(raw).city;
  assert.equal(serialize(actual),serialize(expected),'Save captures the exact expected economic city');assert.deepEqual(actual,expected);
- const before=server.active,cursor=server.writes.length;await button('#save');
- const end=Date.now()+30000;while(Date.now()<end&&!(server.active?.raw===raw&&server.active.revision>before.revision))await new Promise(r=>setTimeout(r,80));
- await server.settle();assertPanelSaveChain(before,server.active,server.writes.slice(cursor),raw,server.writes.slice(0,cursor));
- // A queued clean-state verification can replace the manual-write label after
- // its exact new-revision ACK above. Pending, failed or older bytes are not settled.
- await until("(()=>{const text=document.querySelector('#autosave-status')?.textContent;return ['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน'].some(label=>text?.startsWith(label))&&!document.querySelector('#save-failure-banner:not([hidden])')})()");
+ const before=server.active,cursor=server.writes.length;
+ try {
+  // The shared badge can be completed by autosave. Require the real explicit
+  // handler's fresh success too; neither signal substitutes for the ACK chain.
+  await completePanelManualSave(server,before,cursor,raw,{evaluate,button});
+  // A queued clean-state verification can replace the manual-write label after
+  // its exact new-revision ACK above. Pending, failed or older bytes are not settled.
+  await until("(()=>{const text=document.querySelector('#autosave-status')?.textContent;return ['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน'].some(label=>text?.startsWith(label))&&!document.querySelector('#save-failure-banner:not([hidden])')})()");
+ } catch(error) {
+  const evidence=panelSaveEvidence(server,before,cursor,raw);
+  try { evidence.ui=await evaluate("(()=>{const e=document.querySelector('#save'),badge=document.querySelector('#autosave-status'),r=e?.getBoundingClientRect();return {savePresent:!!e,disabled:e?.disabled??null,visible:!!(r?.width&&r?.height),hit:!!(r&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('#save')),pending:!!badge?.textContent?.startsWith('กำลังบันทึก'),failed:!!document.querySelector('#save-failure-banner:not([hidden])'),manualSuccess:document.querySelector('#inspector-status')?.textContent==='บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่'}})()"); }
+  catch { evidence.uiUnavailable=true; }
+  // Appending to the existing stack preserves the primary failure in reports.
+  error.panelSaveEvidence=evidence;error.stack+='\nPanel Save evidence: '+JSON.stringify(evidence);throw error;
+ }
  await server.assertNoCityWrites(evaluate);const acknowledged=server.active;
  server.allowNavigation();await send('Page.reload',{ignoreCache:true});await server.enter({send,evaluate,button,until});
  assert.equal(server.active.raw,raw);assert.equal(server.active.cityId,acknowledged.cityId);
