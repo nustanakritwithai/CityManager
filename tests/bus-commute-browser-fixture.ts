@@ -18,7 +18,9 @@ export function busCommuteBrowserFixture(){
  for(const [i,b] of firms.entries())b.cell=at([6,9,19][i],11);
  for(const b of c.buildings)c.cells[b.cell]={road:false,zone:b.zone,building:b.id};
  c.employment=c.households.map(h=>({householdId:h.id,firmId:f.id,workers:1,skill:'general' as const,rank:'entry' as const,occupation:'manufacturing' as const}));
- c.bus=createBus();c.bus.depots.push({id:c.nextId++,cell:at(3,13),level:1,open:true,tick:0});
+ // Two real approach links delay the first stop arrival until demand has
+ // accumulated whole riders. A depot at the stop boards an empty bus at t=0.
+ c.bus=createBus();c.bus.depots.push({id:c.nextId++,cell:at(1,13),level:1,open:true,tick:0});
  c.bus.stops.push({id:c.nextId++,cell:at(3,12),side:'n',level:1},{id:c.nextId++,cell:at(19,12),side:'n',level:1});
  assert.ok(createBusLine(c,{depotId:c.bus.depots[0].id,stopIds:c.bus.stops.map(s=>s.id),busCount:3,busLevel:1}).ok);
  const restored=deserialize(serialize(c));assert.deepEqual(deserialize(serialize(restored)),restored);assert.equal(busLineRoutes(restored)[0].status,'running');

@@ -23,3 +23,35 @@ test('browser bus fixture roundtrips and employer lies beyond nearest-two demand
  assert.ok(waitingAt!==null&&waitingAt<=60,`waiting begins in ${waitingAt} steps`);
  assert.ok(boardedAt!==null&&boardedAt<=200,`boarding begins in ${boardedAt} steps`);
 });
+
+// Keep worker demand on its one-second wall cadence and physical bus movement
+// on a distinct render clock. No inserted riders, clock jumps or frame facts.
+// The low-FPS case models the CI artifact's capped dt, not accelerated playback.
+for(const timing of [{name:'60fps',wallDt:1/60,physicalDt:1/60},{name:'software-renderer capped dt',wallDt:.4,physicalDt:.1}]){
+ test(`first bus boards on its first stop arrival within 20 physical seconds (${timing.name})`,()=>{
+  const f=busCommuteBrowserFixture(),{city}=deserializeParkSession(f.raw),bridge=new BusGameBridge(city,420),worker=createTrafficGameWorkerEngine();
+  let seq=0,physicalSeconds=0,wallSeconds=0,lastWorkerSecond=0,waitingSeconds:number|null=null;
+  let boarding:{physicalSeconds:number;wallSeconds:number;busId:string;persons:number}|null=null;
+  while(wallSeconds<100&&!boarding){
+   wallSeconds+=timing.wallDt;physicalSeconds+=timing.physicalDt;
+   const minute=420+physicalSeconds/60;
+   bridge.tick(minute);
+   if(Math.floor(wallSeconds+1e-8)>lastWorkerSecond){
+    lastWorkerSecond=Math.floor(wallSeconds+1e-8);
+    const sample=captureTrafficGameInput(city,{busCommutes:true});sample.bus=bridge.input();
+    const out=worker({kind:'compute',epoch:timing.name,seq:++seq,commitPrevious:seq>1,advance:true,paused:false,sample});
+    assert.equal(out.kind,'frame');if(out.kind!=='frame')throw Error(out.message);
+    bridge.onFrame(out.frame.bus,minute);
+   }
+   const ledger=bridge.ledger();if(ledger.engine.waiting>0)waitingSeconds??=physicalSeconds;
+   assert.equal(ledger.engineError,0);assert.ok(Math.abs(ledger.splitError)<1e-8);
+   const event=bridge.engine.drainEvents().find(e=>e.kind==='board');
+   if(event)boarding={physicalSeconds,wallSeconds,busId:event.busId,persons:event.persons};
+  }
+  assert.ok(boarding,'Natural first-arrival boarding must occur inside 100 wall seconds');
+  assert.ok(waitingSeconds!==null&&waitingSeconds<boarding.physicalSeconds);
+  assert.ok(boarding.physicalSeconds>=18-1e-6&&boarding.physicalSeconds<=20);
+  assert.equal(boarding.busId,bridge.engine.snapshot()[0].id,'First bus serves waiting riders, without awaiting a later headway');
+  assert.ok(boarding.persons>=1);
+ });
+}
