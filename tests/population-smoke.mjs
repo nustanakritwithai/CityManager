@@ -81,10 +81,21 @@ adoptSavedEducation(fixture);
 const fixtureRaw = serialize(fixture); fixture=panelEntryCity(fixtureRaw);
 const sharedHome = fixture.buildings.find(b => b.zone === 'R' && homeOccupancy(fixture, b.id).households > 1);
 assert.ok(sharedHome, 'Natural fixture contains a shared home');
+// Isolated server fixture for the reported empty-new-homes case: preserve
+// every existing family/account/job, concentrate addresses in one taller home.
+const concentrated = panelEntryCity(fixtureRaw), moveHomes = concentrated.buildings.filter(b => b.zone === 'R').sort((a,b)=>a.cell-b.cell);
+const oldTower = moveHomes[0]; oldTower.level = 9; oldTower.housingType = 'condo';
+for (const resident of concentrated.households) resident.home = oldTower.id;
+concentrated.tick = 181; const concentratedRaw = serialize(concentrated); deserialize(concentratedRaw);
+const distributed = panelEntryCity(concentratedRaw); step(distributed); deserialize(serialize(distributed));
+const oldResidents = concentrated.households.map(h=>[h.id,h.members,h.wallet]);
+assert.ok(homeOccupancy(distributed,oldTower.id).households < concentrated.households.length);
+assert.deepEqual(distributed.households.map(h=>[h.id,h.members,h.wallet]),oldResidents);
+
 if(process.argv.includes('--preflight')){
  assert.deepEqual(browserSnapshotState(serialize(fixture)),fixture);
  for(const raw of [migratedRaw,serialize(householdV2Migrated),serialize(workerV3Migrated),vacantDay,upgradeDay])assert.deepEqual(browserSnapshotState(serialize(panelEntryCity(raw))),panelEntryCity(raw));
- console.log(JSON.stringify({legacyHashes:[hash(legacyRaw),hash(householdV2Raw),hash(workerV3Raw)],fixtureTick:fixture.tick,fixtureCells:fixture.cells.length,family:family.id,sharedHome:sharedHome.id,milestones}));process.exit(0);
+ console.log(JSON.stringify({legacyHashes:[hash(legacyRaw),hash(householdV2Raw),hash(workerV3Raw)],fixtureTick:fixture.tick,fixtureCells:fixture.cells.length,family:family.id,sharedHome:sharedHome.id,mobilityHouseholds:distributed.households.map(h=>[h.id,h.home]),milestones}));process.exit(0);
 }
 const httpFixture=await startTrafficHttpFixture(upstream),server=httpFixture.fixture,url=httpFixture.url,fault=installPopulationSaveFault(server);
 
@@ -237,6 +248,15 @@ try {
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
   await page('game'); await savePopulation(expectedRehoused); assert.deepEqual(await state(),expectedRehoused);
   checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact server Save/reload preserves the complete session');
+
+  await load(concentratedRaw);
+  await close(); await button('[data-speed="1"]');
+  await evaluate(`(()=>{const target=${distributed.tick};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);
+  await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${distributed.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`);
+  assert.deepEqual(await state(),distributed);
+  for(const destination of moveHomes.slice(1)) await home(distributed,distributed.buildings.find(b=>b.id===destination.id));
+  await cityMetrics(distributed); await page('game'); await savePopulation(distributed); assert.deepEqual(await state(),distributed);
+  checks.push('Weekly redistribution moves existing whole families from an earlier tower into empty homes during a real browser tick; identities, exact deterministic state and the server ACK/reload remain intact');
 
   await load(fixtureRaw);
   for (const metric of [{ width: 360, height: 740, screenWidth: 360, screenHeight: 780, mobile: true }, { width: 844, height: 390, screenWidth: 844, screenHeight: 390, mobile: true }, { width: 980, height: 2120, screenWidth: 390, screenHeight: 844, mobile: true }]) {
