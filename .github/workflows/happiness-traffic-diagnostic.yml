@@ -1,0 +1,80 @@
+# Temporary, evidence-only comparison for PR #216. Existing acceptance jobs and
+# their thresholds remain mandatory. Remove after diagnosis.
+name: Happiness traffic startup diagnostic
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/happiness-traffic-diagnostic.yml'
+      - 'tests/traffic-game-smoke.mjs'
+permissions:
+  contents: read
+jobs:
+  compare:
+    if: github.event.pull_request.number == 216
+    name: Startup diagnostic / ${{ matrix.revision }} / ${{ matrix.sample }}
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [bus-only, happiness]
+        sample: [1, 2]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # Stage one identical instrumented harness before checking out either
+      # application version; the baseline remains the actual merged bus tree.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Stage diagnostic-only harness
+        run: Copy-Item tests/traffic-game-smoke.mjs "$env:RUNNER_TEMP/traffic-startup-probe.mjs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ matrix.revision == 'bus-only' && '83467f20f04863fc7b1ba940dedf735157cb93b3' || github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install identical harness
+        run: Copy-Item "$env:RUNNER_TEMP/traffic-startup-probe.mjs" tests/traffic-game-smoke.mjs -Force
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+        env:
+          VITE_MARKET_URL: ''
+          VITE_CITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'false'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'false'
+      - name: Run unchanged fallback bypass acceptance
+        env:
+          TRAFFIC_GAME_CASE: bypass
+          TRAFFIC_GAME_EXPECT_DEFAULT: '1'
+          CITYMANAGER_BLOCK_MODELS: '1'
+          CITYMANAGER_SOFTWARE_WEBGL: '1'
+          CITYMANAGER_STARTUP_DIAGNOSTIC: '1'
+        run: |
+          New-Item -ItemType Directory -Force .test-output | Out-Null
+          $preview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4195', '--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput .test-output/traffic-preview.log -RedirectStandardError .test-output/traffic-preview-error.log
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri 'http://127.0.0.1:4195/CityManager/' -TimeoutSec 2).StatusCode -eq 200) { $ready = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) { throw 'Traffic preview did not start.' }
+            node --experimental-strip-types tests/traffic-game-smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Fallback bypass diagnostic failed; original acceptance remains required.' }
+          } finally { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: happiness-startup-${{ matrix.revision }}-${{ matrix.sample }}
+          path: |
+            .test-output/traffic-game/*/*.json
+            .test-output/traffic-game/*/*.png
+            .test-output/traffic-preview*.log
+          if-no-files-found: warn
+          retention-days: 3
