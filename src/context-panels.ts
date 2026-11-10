@@ -1,3 +1,4 @@
+import { happinessTargets, HAPPINESS_DEPARTURE_DAYS } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { onExplicitActivation } from './explicit-activation.ts';
@@ -373,6 +374,17 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     metric('food-today', 'อาหารที่ซื้อวันนี้', `${food.purchased} / ${food.required} หน่วย`, food.purchased), metric('food-missing', 'อาหารที่ยังขาดวันนี้', `${food.missing} หน่วย`, food.missing),
     metric('needs', 'วันต่อเนื่องที่อาหารไม่ครบ', `${household.needs} วัน`, household.needs), metric('last-purchase', 'ซื้อครั้งล่าสุด', purchaseText(city, household), household.lastPurchaseTick)
   ]));
+  const happiness = city.happiness?.rows.find(row => row.householdId === household.id);
+  if (happiness) {
+    const facts = happinessTargets(city).get(household.id)!;
+    const detail = section('ความสุขในพื้นที่', `${happiness.score} / 100`); detail.classList.add('bc-happiness-source');
+    detail.append(el('p', 'happiness-summary', `เป้าหมายปัจจุบัน ${facts.target} / 100 · ต่ำกว่า 30 มาแล้ว ${happiness.distressDays} / ${HAPPINESS_DEPARTURE_DAYS} วัน · คะแนนลดวันละไม่เกิน 1 และฟื้นวันละไม่เกิน 2`));
+    detail.append(el('p', 'happiness-summary', `สวนใกล้บ้าน: ${facts.parkNearby ? 'มี' : 'ไม่มี'} · โรงเรียนที่เปิดใกล้บ้าน: ${facts.schoolNearby ? 'มี' : 'ไม่มี'} (ระยะแมนฮัตตันไม่เกิน 6 ช่องสำหรับสวน และ 8 ช่องสำหรับโรงเรียนที่มีที่เรียนเปิดจริง ไม่ใช่การนับครั้งที่เข้าใช้)`));
+    detail.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน: ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · สมมติแรงงานที่มีงาน 75% ใช้รถหนึ่งคันต่อคนในชั่วโมงเร่งด่วน ยังไม่หักรถโดยสารหรือรถไฟ ไม่ใช่ประวัติการเดินทางล้มเหลวจริง` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
+    detail.append(el('p', 'cx-detail-note', 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
+    detail.append(el('p', 'cx-detail-note', household.origin === 'legacy-v1' ? 'ครัวเรือนจากเมืองรุ่นเดิมได้รับการคุ้มครองจากการย้ายออก' : city.firms.some(f => f.owner?.householdId === household.id) ? 'เจ้าของกิจการได้รับการคุ้มครองจากการย้ายออก' : 'ถ้าคะแนนต่ำกว่า 30 ต่อเนื่องครบ 30 วัน อาจย้ายออกเมื่อสิ้นเดือน โดยมีเพดานจำนวนย้ายออกและจำนวนครัวเรือนขั้นต่ำ'));
+    output.push(detail);
+  } else { const detail=section('ความสุขในพื้นที่'); detail.classList.add('bc-happiness-source'); detail.append(el('p', 'happiness-summary', 'ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง')); output.push(detail); }
   if (city.education) { const person = peopleOf(city.education, household.id); const studying = person.school + person.university; const reserved = studying + person.teacher + person.professor; output.push(el('p', 'cx-detail-note', `ผู้เรียน ${studying} คน · วุฒิพื้นฐาน ${person.basic} · วุฒิขั้นสูง ${person.higher} · แรงงานที่ถูกกันไว้เรียนหรือสอน ${reserved} คน · เป็นจำนวนรวม ไม่มีรายชื่อรายบุคคล และไม่นับผู้พึ่งพิงเป็นนักเรียน`)); }
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
   const leaves = departureDay(city, household.id);
@@ -398,7 +410,7 @@ type CardKind = CardData['kind'];
 type CardParts = {
   values: Map<string, HTMLElement>; statuses: HTMLElement[]; assumptions: HTMLElement[];
   journals: HTMLElement[]; notes: HTMLElement[]; progression: HTMLElement[]; residents: HTMLElement | null;
-  employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null; funding: HTMLElement | null;
+  employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null; funding: HTMLElement | null; happiness: HTMLElement | null;
 };
 function cardIcon(kind: CardKind): SVGElement {
   const paths: Record<CardKind, string> = {
@@ -436,7 +448,7 @@ function cardHero(data: CardData, city: City): HTMLElement {
 }
 /** Move existing metric nodes, retaining each raw key once and every live handler. */
 function cardParts(nodes: HTMLElement[]): CardParts {
-  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], progression: [], residents: null, employment: null, skills: null, owner: null, funding: null };
+  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], progression: [], residents: null, employment: null, skills: null, owner: null, funding: null, happiness: null };
   for (const node of nodes) {
     const cards = [...(node.matches('[data-context-metric]') ? [node] : []), ...node.querySelectorAll<HTMLElement>('[data-context-metric]')];
     for (const card of cards) { parts.values.set(card.dataset.contextMetric!, card); card.remove(); }
@@ -448,6 +460,7 @@ function cardParts(nodes: HTMLElement[]): CardParts {
     else if (node.dataset.buildingProgression) parts.progression.push(node);
     else if (node.classList.contains('bc-residents-source')) parts.residents = node;
     else if (node.classList.contains('bc-employment-source')) parts.employment = node;
+    else if (node.classList.contains('bc-happiness-source')) parts.happiness = node;
     else if (node.classList.contains('bc-skills-source')) parts.skills = node;
     else if (node.classList.contains('bc-owner-source')) parts.owner = node;
     else if (node.classList.contains('cx-industry-funding')) parts.funding = node;
@@ -610,6 +623,7 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     output.push(cardGroup('พักอยู่จริง / ความจุ', 'occupancy', takeCards(parts, ['households', 'persons', 'vacant-households', 'vacant-persons']), 'bc-occupancy'));
     if (parts.residents) output.push(cardSection(parts.residents, 'residents'));
   } else if (data.kind === 'household') {
+    if (parts.happiness) output.push(cardSection(parts.happiness, 'happiness'));
     output.push(cardGroup('สมาชิกและกำลังแรงงาน', 'members', takeCards(parts, ['members', 'workforce', 'dependents', 'employed', 'unemployed'])), cardCash(data, parts));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); if (parts.skills) output.push(cardSection(parts.skills, 'skills'));
   } else if (data.kind === 'shop' || data.kind === 'market') {
