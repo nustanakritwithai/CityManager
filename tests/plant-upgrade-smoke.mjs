@@ -24,6 +24,12 @@ const appPort = 4397, debugPort = 9497, upstream = `http://127.0.0.1:${appPort}/
 const suiteTimeoutMs = 20 * 60_000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], screenshots = [], layouts = [], bursts = [], keyboardTraces = [], errors = [], externalRequests = [], providerRequests = [], interceptionErrors = [];
+const plantDiagnostic = process.env.CITYMANAGER_PLANT_DIAGNOSTIC === '1';
+function installPlantDiagnostic() {
+  const probe = window.__plantDiagnostic = { startedAt: performance.now(), frames: 0, lastFrame: null, maxFrameGap: 0, longTasks: [] };
+  try { const observer = new PerformanceObserver(list => { for (const item of list.getEntries()) { probe.longTasks.push({ start: item.startTime, duration: item.duration }); if (probe.longTasks.length > 200) probe.longTasks.shift(); } }); observer.observe({ type: 'longtask', buffered: true }); } catch {}
+  const frame = now => { if (probe.lastFrame !== null) probe.maxFrameGap = Math.max(probe.maxFrameGap, now - probe.lastFrame); probe.lastFrame = now; probe.frames++; requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+}
 const processLogs = { app: '', browser: '' };
 const startedAt = Date.now(), diagnostics = { phase: 'setup', stages: [], cdp: [], renderers: [], captures: [] };
 let ws, sequence = 0, networkProbe, fixture, browser, app, touchInput = false;
@@ -274,8 +280,10 @@ async function rapidUpgradeBurst(p, name) {
     document.addEventListener('click',afterClick);
     window.__plantBurstTrace={events,beforeRect,rect,stop(){for(const type of types)document.removeEventListener(type,record,true);document.removeEventListener('click',afterClick)}};
   })()`);
+  const beforeMetrics = plantDiagnostic ? await send('Performance.getMetrics') : null;
   await queueNativeBurst(nativeBurstCommands(p.x, p.y, touchInput));
   await paints();
+  const afterMetrics = plantDiagnostic ? await send('Performance.getMetrics') : null;
   const trace = await evaluate(`(()=>{const trace=window.__plantBurstTrace;trace.stop();delete window.__plantBurstTrace;return{events:trace.events,beforeRect:trace.beforeRect,afterRect:trace.rect()}})()`);
   const pressType = touchInput ? 'touchstart' : 'pointerdown', releaseType = touchInput ? 'touchend' : 'pointerup';
   const native = trace.events.filter(event => event.type === pressType || event.type === releaseType);
@@ -283,6 +291,7 @@ async function rapidUpgradeBurst(p, name) {
   const activationIndex = trace.events.findIndex(event => event.type === 'click' && event.onUpgrade);
   evidence.pressesAfterActivation = activationIndex < 0 ? 0 : trace.events.slice(activationIndex + 1).filter(event => event.type === pressType && event.onUpgrade).length;
   evidence.repeatCoverage = touchInput && !evidence.pressesAfterActivation ? 'pre-activation native tap cluster' : `post-activation native ${touchInput ? 'tap' : 'click'} repeats`;
+  if (plantDiagnostic) evidence.diagnostic = { beforeMetrics, afterMetrics, probe: await evaluate('window.__plantDiagnostic??null') };
   bursts.push(evidence);
   assertRapidBurst(evidence, touchInput);
   return evidence;
@@ -617,7 +626,8 @@ try {
     }
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
-  await send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__plantContextLosses=0;document.addEventListener("webglcontextlost",()=>window.__plantContextLosses++,true)' });
+  if (plantDiagnostic) await send('Performance.enable');
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__plantContextLosses=0;document.addEventListener("webglcontextlost",()=>window.__plantContextLosses++,true)' + (plantDiagnostic ? `;(${installPlantDiagnostic.toString()})();` : '') });
   await installTrafficNetworkFence({ send, evaluate, protocol: await (await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(), origin, additionalBlocked: panelProviderDenials(origin), observeProbe: url => (networkProbe = { url, active: false, requestId: null, failed: null }) });
   await fixture.fixture.install(send);
   for (const metric of [{ name: 'desktop', width: 1440, height: 1000, mobile: false }, { name: 'phone', width: 390, height: 844, mobile: true }]) {

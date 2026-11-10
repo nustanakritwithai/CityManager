@@ -1,0 +1,65 @@
+# Temporary matched comparison; the regular uninstrumented CityManager gate
+# and all native-input assertions remain required. Remove after diagnosis.
+name: Happiness plant input diagnostic
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/happiness-plant-diagnostic.yml'
+      - 'tests/plant-upgrade-smoke.mjs'
+permissions:
+  contents: read
+jobs:
+  compare:
+    if: github.event.pull_request.number == 216
+    name: Plant diagnostic / ${{ matrix.revision }} / ${{ matrix.sample }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [bus-only, happiness]
+        sample: [1, 2]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Stage identical diagnostic harness
+        run: Copy-Item tests/plant-upgrade-smoke.mjs "$env:RUNNER_TEMP/plant-probe.mjs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ matrix.revision == 'bus-only' && '83467f20f04863fc7b1ba940dedf735157cb93b3' || github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install identical diagnostic harness
+        run: Copy-Item "$env:RUNNER_TEMP/plant-probe.mjs" tests/plant-upgrade-smoke.mjs -Force
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build as in main acceptance
+        env:
+          VITE_MARKET_URL: 'https://citymanager.157-85-96-139.sslip.io/citymanager-api'
+          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
+          VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
+        run: npm run build
+      - name: Run unchanged plant acceptance with evidence
+        env:
+          CITYMANAGER_PLANT_DIAGNOSTIC: '1'
+        run: |
+          node --experimental-strip-types tests/plant-upgrade-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Plant diagnostic failed; original acceptance remains required.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: happiness-plant-${{ matrix.revision }}-${{ matrix.sample }}
+          path: |
+            .test-output/plant-upgrades/report.json
+            .test-output/plant-upgrades/processes.log
+            .test-output/plant-upgrades/failure.png
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 3
