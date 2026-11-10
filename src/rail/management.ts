@@ -72,7 +72,7 @@ export function installRailManagement(options:RailManagementOptions){
   function close(){popup.close();clearConfirmation();closePanel();clearMode();}
   function run(change:()=>void){try{change();options.changed();sync();}catch(error){
     const message=error instanceof Error?error.message:'';
-    const labels:Record<string,string>={'Initial rail line needs a legal round trip':'เชื่อมรางให้ถึงสถานีทั้งสองก่อนเปิดสาย','V1 rail supports at most 96 track segments':'รางครบขีดจำกัดของระบบรอบนี้แล้ว','Choose two different cells in one straight row or column':'เลือกต้นทางและปลายทางในแถวหรือแนวเดียวกัน','Rail corridor is occupied':'ยังถอดรางไม่ได้ มีรถกำลังวิ่งหรือผู้โดยสารอยู่บนรถ','Rail needs an empty reserved parcel; crossings are not configured':'เลือกช่องว่างที่ไม่มีถนนหรืออาคาร ยังไม่รองรับทางตัด','This shuttle supports two distinct stations':'แผนนี้รับสถานีสองแห่งที่ไม่ซ้ำกัน','Remove the idle line before removing a station':'ถอดสายที่ว่างก่อนถอนแผนสถานี','Retained journeys require an authoritative retirement receipt':'ยังถอดสายไม่ได้ มีรายการเดินทางที่ต้องเก็บรักษาไว้','Unknown station':'ไม่พบสถานีนี้แล้ว','No shuttle line':'ยังไม่มีสายรถไฟ','Track segment not found':'ไม่พบช่วงรางนี้แล้ว'};
+    const labels:Record<string,string>={'Initial rail line needs a legal round trip':'เชื่อมรางให้ถึงสถานีทั้งสองก่อนเปิดสาย','V1 rail supports at most 96 track segments':'รางครบขีดจำกัดของระบบรอบนี้แล้ว','Choose two different cells in one straight row or column':'เลือกต้นทางและปลายทางในแถวหรือแนวเดียวกัน','Rail corridor is occupied':'ยังถอดรางไม่ได้ มีรถกำลังวิ่งหรือผู้โดยสารบนรถ · ไปที่จัดการรถไฟ หยุดรับผู้โดยสารใหม่ เปิดสถานีทั้งสองแห่ง แล้วเปิดบริการและกดเล่นให้ส่งผู้โดยสารจนหมดก่อนถอดราง','Rail needs an empty reserved parcel; crossings are not configured':'เลือกช่องว่างที่ไม่มีถนนหรืออาคาร ยังไม่รองรับทางตัด','This shuttle supports two distinct stations':'แผนนี้รับสถานีสองแห่งที่ไม่ซ้ำกัน','Remove the idle line before removing a station':'ถอดสายที่ว่างก่อนถอนแผนสถานี','Retained journeys require an authoritative retirement receipt':'ยังถอดสายไม่ได้ มีรายการเดินทางที่ต้องเก็บรักษาไว้','Unknown station':'ไม่พบสถานีนี้แล้ว','No shuttle line':'ยังไม่มีสายรถไฟ','Track segment not found':'ไม่พบช่วงรางนี้แล้ว'};
     report(labels[message]??'ยังแก้ไขรถไฟไม่ได้ กรุณาตรวจสถานะเมืองแล้วลองใหม่');
   }}
   function ask(message:string,change:()=>void,look:Ask={title:'ยืนยันแผนรถไฟ',icon:'train'}){
@@ -92,7 +92,7 @@ export function installRailManagement(options:RailManagementOptions){
   });
   const clearArmed=(event:PointerEvent)=>{if(event.target!==armed)armed=null;};document.addEventListener('pointerdown',clearArmed,true);
   function choose(next:Mode){close();options.selectTool();mode=next;anchor.classList.toggle('active',next!=='select');anchor.setAttribute('aria-pressed',String(next!=='select'));
-    report(next==='station'?'แตะช่องว่างเพื่อวางสถานี · ต้องมีถนนใกล้สถานีเพื่อรับผู้โดยสาร · ไม่มีค่าก่อสร้าง':next==='add-track'?'แตะต้นทาง แล้วแตะปลายทางแนวตรงเพื่อเชื่อมราง · ไม่ข้ามถนนหรืออาคาร':next==='remove-station'?'แตะสถานีที่ต้องการถอนแผน':next==='remove-track'?'แตะปลายรางสองช่องที่ติดกัน แล้วตรวจและยืนยัน':'เลือกเครื่องมือรถไฟ');
+    report(next==='station'?'แตะช่องว่างเพื่อวางสถานี · ต้องมีถนนใกล้สถานีเพื่อรับผู้โดยสาร · ไม่มีค่าก่อสร้าง':next==='add-track'?'แตะต้นทาง แล้วแตะปลายทางแนวตรงเพื่อเชื่อมราง · ไม่ข้ามถนนหรืออาคาร':next==='remove-station'?'แตะสถานีที่ต้องการถอนแผน':next==='remove-track'?'แตะต้นทางและปลายทางของรางแนวตรงที่จะถอด แล้วตรวจและยืนยัน':'เลือกเครื่องมือรถไฟ');
   }
   function openPanel(){close();options.selectTool();sync();holdCamera();panel.showModal();closeButton.focus();}
   // One short word under an icon, like the build and service menus; the full name stays in the title and aria-label.
@@ -155,11 +155,24 @@ export function installRailManagement(options:RailManagementOptions){
     }
     if(!rail){clearMode();return true;}
     if(mode==='remove-station'){const station=rail.snapshot.stations.find(s=>s.cell===cell);if(!station){report('แตะสถานีที่ต้องการถอนแผน');return true;}ask('ถอนแผนสถานีนี้?',()=>{rail.removeStation(station.id);report('ถอนแผนสถานีแล้ว');},{title:'ถอนแผนสถานี',icon:'rail-unplan',detail:`ตำแหน่ง ${cellLabel(cell)}`,cells:[cell],tone:'danger'});return true;}
-    if(start===null){start=cell;report(mode==='add-track'?'เลือกต้นทางแล้ว · แตะปลายทางในแถวหรือแนวเดียวกัน':'เลือกต้นทางแล้ว · แตะปลายรางอีกด้านที่ติดกัน');return true;}
+    if(start===null){start=cell;report(mode==='add-track'?'เลือกต้นทางแล้ว · แตะปลายทางในแถวหรือแนวเดียวกัน':'เลือกต้นทางแล้ว · แตะปลายรางในแถวหรือแนวเดียวกัน');return true;}
     const from=start;start=null;
     if(mode==='add-track'){const cells=straight(from,cell);ask('เชื่อมรางแนวตรงระหว่างสองจุดนี้? ทุกช่องต้องว่าง ไม่มีถนนหรืออาคาร · ไม่มีค่าใช้จ่าย',()=>{rail.addTrackPath(from,cell);report('เชื่อมรางแล้ว · เชื่อมต่อจนถึงสถานีอีกแห่ง แล้วเปิดสายจากจัดการรถไฟ');},{title:'เชื่อมราง',icon:'rail-track',detail:cells.length>1?`ราง ${cells.length-1} ช่วง · ${cellLabel(from)} → ${cellLabel(cell)}`:`${cellLabel(from)} → ${cellLabel(cell)} · ต้องอยู่แถวหรือแนวเดียวกัน`,cells:cells.length>1?cells:[from,cell]});return true;}
-    if(!rail.snapshot.graph.links.some(link=>link.from===from&&link.to===cell)){report('เลือกสองช่องที่มีช่วงรางเชื่อมถึงกัน');return true;}
-    ask('ถอดช่วงรางนี้? ถ้ามีรถกำลังวิ่งหรือผู้โดยสารบนรถ จะยังถอดไม่ได้',()=>{rail.editTrack(from,cell,true);report('ถอดช่วงรางแล้ว ผู้โดยสารที่รอยังอยู่ในระบบ');},{title:'ถอดช่วงราง',icon:'rail-cut',detail:`${cellLabel(from)} → ${cellLabel(cell)}`,cells:[from,cell],tone:'danger'});return true;
+    const cells=straight(from,cell),a=expandedCellCoordinate(from),b=expandedCellCoordinate(cell),links=rail.snapshot.graph.links;
+    if(from===cell||a.x!==b.x&&a.z!==b.z||!cells.slice(1).every((to,i)=>links.some(link=>link.from===cells[i]&&link.to===to||link.from===to&&link.to===cells[i]))){report('เลือกต้นทางและปลายทางที่มีรางต่อเนื่องในแถวหรือแนวเดียวกัน');return true;}
+    ask('ถอดรางที่เลือก? สถานีจะยังอยู่ ถ้ามีรถกำลังวิ่งหรือผู้โดยสารบนรถ จะยังถอดไม่ได้',()=>{rail.removeTrackPath(from,cell);report('ถอดรางที่เลือกแล้ว ผู้โดยสารที่รอยังอยู่ในระบบ');},{title:'ถอดช่วงราง',icon:'rail-cut',detail:`ราง ${cells.length-1} ช่วง · ${cellLabel(from)} → ${cellLabel(cell)}`,cells,tone:'danger'});return true;
+  }
+  /** Route the ordinary demolition gesture to the same confirmed rail commands. */
+  function demolish(cell:number):boolean{
+    const rail=options.runtime().rail;if(!rail?.isReserved(cell))return false;
+    const state=rail.snapshot,station=state.stations.find(s=>s.cell===cell);
+    close();
+    if(station){
+      if(state.service){openPanel();report('หยุดรับผู้โดยสารใหม่ เปิดสถานีทั้งสองแห่ง เปิดบริการและกดเล่นให้ส่งผู้โดยสารจนหมด แล้วถอดสายที่ว่างก่อนถอนสถานี');return true;}
+      ask('ถอนแผนสถานีนี้? รางที่เชื่อมอยู่จะยังอยู่',()=>{rail.removeStation(station.id);report('ถอนแผนสถานีแล้ว');},{title:'ถอนแผนสถานี',icon:'rail-unplan',detail:`ตำแหน่ง ${cellLabel(cell)}`,cells:[cell],tone:'danger'});return true;
+    }
+    const cells=[...new Set(state.graph.links.filter(l=>l.from===cell||l.to===cell).flatMap(l=>[l.from,l.to]))];
+    ask('ถอดรางทุกช่วงที่ติดกับช่องนี้? สถานีจะยังอยู่ ถ้ามีรถกำลังวิ่งหรือผู้โดยสารบนรถ จะยังถอดไม่ได้',()=>{rail.removeTracksAt(cell);report('ถอดรางในช่องที่เลือกแล้ว ผู้โดยสารที่รอยังอยู่ในระบบ');},{title:'ถอดรางในช่องนี้',icon:'rail-cut',detail:`ตำแหน่ง ${cellLabel(cell)} · ราง ${cells.length-1} ช่วง`,cells,tone:'danger'});return true;
   }
   function cancel():boolean{if(popup.isOpen()){popup.close(true);return true;}if(pending){clearConfirmation();return true;}if(panel.open){closePanel();return true;}if(mode!=='select'||start!==null){clearMode();view.abortGesture();report('กลับสู่เครื่องมือเลือก');return true;}return false;}
   anchor.onclick=()=>{if(popup.isOpen())popup.close();else{options.selectTool();sync();popup.open();}};closeButton.onclick=closePanel;
@@ -193,9 +206,10 @@ export function installRailManagement(options:RailManagementOptions){
     else fact(service?(service.snapshot.enabled?'เปิด':'พัก'):'ยังไม่เปิด','สายรถไฟ');
     const open=element('button','จัดการรถไฟ');open.type='button';open.className='rail-primary';open.dataset.railOpen='manage';open.onclick=openPanel;
     card.append(facts,open);
+    if(index<0){const remove=element('button','ถอดรางในช่องนี้');remove.type='button';remove.className='rail-danger';remove.dataset.railRemove=String(cell);remove.onclick=()=>{options.selectTool();demolish(cell);};card.append(remove);}
     const title=index>=0?`สถานีรถไฟ ${index+1}`:'รางรถไฟ';
     const subtitle=index>=0?(service?(row?.open?'เปิดรับผู้โดยสาร':'ปิดรับผู้โดยสาร'):'แผนสถานี · ยังไม่เปิดบริการ'):(service?'เส้นทางของสายที่เปิดอยู่':'แผนราง · ยังไม่เปิดบริการ');
     return {title,subtitle,card};
   }
-  return {activate,cancel,sync,close,preview,placeCard,isReserved:(cell:number)=>options.runtime().rail?.isReserved(cell)??false,diagnostics:()=>({...scene.diagnostics,mode,pending:!!pending,start,panelOpen:panel.open}),destroy:()=>{close();scene.destroy();anchor.remove();menu.remove();panel.remove();confirm.remove();document.removeEventListener('pointerdown',clearArmed,true);canvas?.removeEventListener('pointerdown',pointerDown);canvas?.removeEventListener('pointermove',pointerMove);canvas?.removeEventListener('pointerup',pointerUp);canvas?.removeEventListener('pointercancel',interrupted);window.removeEventListener('blur',interrupted);window.removeEventListener('resize',interrupted);}};
+  return {activate,demolish,cancel,sync,close,preview,placeCard,isReserved:(cell:number)=>options.runtime().rail?.isReserved(cell)??false,diagnostics:()=>({...scene.diagnostics,mode,pending:!!pending,start,panelOpen:panel.open}),destroy:()=>{close();scene.destroy();anchor.remove();menu.remove();panel.remove();confirm.remove();document.removeEventListener('pointerdown',clearArmed,true);canvas?.removeEventListener('pointerdown',pointerDown);canvas?.removeEventListener('pointermove',pointerMove);canvas?.removeEventListener('pointerup',pointerUp);canvas?.removeEventListener('pointercancel',interrupted);window.removeEventListener('blur',interrupted);window.removeEventListener('resize',interrupted);}};
 }

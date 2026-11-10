@@ -102,6 +102,27 @@ export class RailNetworkRuntime {
     if(links.length>GAME_RAIL_MAX_TRACK_SEGMENTS*2)throw Error('V1 rail supports at most 96 track segments');
     const graph=createRailGraph(this.state.graph.revision+1,links);this.rail?.replaceGraph(graph);this.state.graph=graph;this.sync();this.changed();
   }
+  /** Remove the complete selection atomically, retaining stations and every passenger. */
+  removeTrackPath(from:number,to:number){
+    if(!safeCount(from)||!safeCount(to)||from>=this.city.cells.length||to>=this.city.cells.length||from===to)throw Error('Choose two different cells in one straight row or column');
+    const a=expandedCellCoordinate(from),b=expandedCellCoordinate(to);if(a.x!==b.x&&a.z!==b.z)throw Error('Choose two different cells in one straight row or column');
+    const cells=expandedCellPath(from,to),segments=cells.slice(1).map((to,i)=>({from:cells[i],to}));
+    for(const {from,to} of segments)if(!this.state.graph.links.some(l=>l.from===from&&l.to===to||l.from===to&&l.to===from))throw Error('Track segment not found');
+    this.removeTrackSegments(segments);
+  }
+  /** The ordinary demolition tool removes only links touching the selected parcel. */
+  removeTracksAt(cell:number){
+    const segments=this.state.graph.links.filter(l=>l.from===cell||l.to===cell);
+    if(!segments.length)throw Error('Track segment not found');
+    this.removeTrackSegments(segments);
+  }
+  private removeTrackSegments(segments:readonly {from:number;to:number}[]){
+    this.assertWritable();
+    const removed=new Set(segments.flatMap(({from,to})=>[`${from}:${to}`,`${to}:${from}`]));
+    const graph=createRailGraph(this.state.graph.revision+1,this.state.graph.links.filter(l=>!removed.has(`${l.from}:${l.to}`)));
+    // replaceGraph rejects an occupied corridor before either runtime or reservations change.
+    this.rail?.replaceGraph(graph);this.state.graph=graph;this.sync();this.changed();
+  }
   configureGameService(){this.configureService(GAME_RAIL_POLICY);this.state.model??={version:1,accepting:true,nextSequence:0,nextOfferMinute:this.state.minute+60,offeredPersons:0,retiredPersons:0};this.state.model.nextOfferMinute=this.state.minute+60;this.state.model.accepting=true;}
   setModelAccepting(accepting:boolean){this.assertWritable();if(!this.state.model||!this.state.service||typeof accepting!=='boolean')throw Error('No modeled rail service');this.state.model.accepting=accepting;this.changed();}
   /** No road-demand subtraction: these are independent illustrative passenger queues. */

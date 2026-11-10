@@ -1,11 +1,12 @@
 // Actual production UI and server-acknowledged session only; no synthetic rail state injection.
 import assert from 'node:assert/strict';
 export async function railBrowserChecks({send,evaluate,capture,acknowledge,reload}){
- const checks=[],sleep=ms=>new Promise(r=>setTimeout(r,ms));
+ const checks=[],sleep=ms=>new Promise(r=>setTimeout(r,ms));let touchMode=false;
+ const paints=()=>evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
  const until=async(fn,label)=>{const start=Date.now();while(Date.now()-start<15000){if(await fn())return;await sleep(80);}throw Error(`Rail UI timeout: ${label}`);};
- const tapPoint=async({x,y})=>{assert(Number.isFinite(x)&&Number.isFinite(y));await send('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1});};
+ const tapPoint=async({x,y})=>{assert(Number.isFinite(x)&&Number.isFinite(y));if(touchMode){await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});return;}await send('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1});};
  const tap=async selector=>{const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled||!e.getClientRects().length)throw Error('Rail control unavailable');const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await tapPoint(p);};
- const cell=async i=>{const p=await evaluate(`(()=>{const p=window.cityManager.cellScreen(${i}),r=document.querySelector('#city-canvas').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top}})()`);await tapPoint(p);};
+ const cell=async i=>{await paints();const p=await evaluate(`(()=>{const p=window.cityManager.cellScreen(${i}),r=document.querySelector('#city-canvas').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top}})()`);assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`),'city-canvas','Rail target must be visible on the actual canvas');await tapPoint(p);};
  const menu=async action=>{await tap('#rail-tool');await tap(`[data-rail-action="${action}"]`);};
  const confirm=async()=>{await until(()=>evaluate("!!document.querySelector('#rail-management-confirm[open]')"),'confirmation');await tap('#rail-confirm-accept');await until(()=>evaluate("!document.querySelector('#rail-management-confirm[open]')"),'confirmation close');};
  const rail=()=>evaluate('window.cityManager.rail()');
@@ -19,6 +20,33 @@ export async function railBrowserChecks({send,evaluate,capture,acknowledge,reloa
  for(const i of[315,312]){await menu('station');await cell(i);await confirm();}
  assert.deepEqual((await rail()).snapshot.stations.map(s=>s.cell),[315,312]);
  for(const[a,b]of[[315,339],[339,336],[336,312]]){await menu('add-track');await cell(a);await cell(b);await confirm();}
+
+ const built=(await rail()).snapshot;
+ await menu('remove-track');await cell(339);await cell(336);
+ await until(()=>evaluate("!!document.querySelector('#rail-management-confirm[open]')"),'multi-cell removal confirmation');
+ assert.match(await evaluate("document.querySelector('.rail-confirm-detail').textContent"),/3 ช่วง/);
+ await capture('rail-remove-desktop-confirm');await tap('#rail-confirm-cancel');assert.deepEqual((await rail()).snapshot,built,'Cancelled removal changes nothing');
+ await cell(339);await cell(336);await confirm();
+ assert.equal((await rail()).snapshot.graph.links.length,4,'Whole straight run is removed in both directions');assert.deepEqual((await rail()).snapshot.stations,built.stations,'Removal retains both stations');
+ const removedSave=await acknowledge();await reload();assert.deepEqual((await rail()).snapshot,removedSave.parkRuntime.rail.network,'Removed run stays removed after authoritative server ACK/reload');
+ await capture('rail-remove-desktop-reloaded');
+ await menu('add-track');await cell(339);await cell(336);await confirm();
+ await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:1,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});touchMode=true;await paints();
+ // Ordinary demolition is discoverable from the select tool on a touch-sized viewport.
+ await tap('[data-tool="select"]');await tap('[data-tool="bulldoze"]');
+ const mobileBefore=(await rail()).snapshot;await cell(337);await until(()=>evaluate("!!document.querySelector('#rail-management-confirm[open]')"),'touch demolition confirmation');
+ await capture('rail-remove-mobile-confirm');await tap('#rail-confirm-cancel');assert.deepEqual((await rail()).snapshot,mobileBefore);
+ await cell(337);await confirm();let removed=(await rail()).snapshot;
+ assert.equal(removed.graph.links.length,6);assert.equal(removed.graph.links.some(l=>l.from===337||l.to===337),false);assert.deepEqual(removed.stations,built.stations);
+ const touchSave=await acknowledge();await reload();assert.deepEqual((await rail()).snapshot,touchSave.parkRuntime.rail.network);await capture('rail-remove-mobile-reloaded');
+ await menu('add-track');await cell(336);await cell(339);await confirm();
+ // Selecting a track also exposes a direct, confirmed removal action.
+ await tap('[data-tool="select"]');await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape'});
+ await cell(338);await tap('[data-rail-remove="338"]');await confirm();assert.equal((await rail()).snapshot.graph.links.some(l=>l.from===338||l.to===338),false);
+ await menu('add-track');await cell(336);await cell(339);await confirm();
+ assert.deepEqual((await rail()).snapshot.graph.links,built.graph.links);
+ await send('Emulation.setTouchEmulationEnabled',{enabled:false});touchMode=false;await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,screenWidth:1440,screenHeight:1000,deviceScaleFactor:1,mobile:false});await paints();
+ checks.push('Desktop multi-cell cancellation/removal and touch demolition/place-card removal retain stations, untouched tracks and exact server ACK/reload state');
  await menu('manage');await tap('#rail-configure-service');await confirm();
  let state=await rail();assert.ok(state.snapshot.service);assert.equal(state.snapshot.service.config.seats,32);assert.equal(state.trains,1);assert.equal(state.trackMeshInstances,3);
  const after=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(after.accounts,before.accounts,'Rail construction/configuration introduces no fare, charge or money');assert.deepEqual(after.cells,before.cells,'Rail does not rewrite road/building allocation');
@@ -32,9 +60,13 @@ export async function railBrowserChecks({send,evaluate,capture,acknowledge,reloa
  assert.ok(state.snapshot.model.offeredPersons>0);assert.ok(state.snapshot.service.snapshot.batches.length<=32);
  checks.push('Normal game clock creates bounded modeled riders and moves actual mesh; pause freezes both without manual clock advancement');
  await capture('rail-moving-paused');
+ const occupied=(await rail()).snapshot;await menu('remove-track');await cell(339);await cell(336);await confirm();
+ assert.deepEqual((await rail()).snapshot,occupied,'Occupied removal preserves every passenger and link');
+ assert.match(await evaluate("document.querySelector('#status').textContent"),/หยุดรับผู้โดยสารใหม่/,'Blocked removal explains how to drain safely');
+
  await menu('manage');await tap('#rail-service-toggle');assert.equal((await rail()).snapshot.service.snapshot.enabled,false);await tap('#rail-management [aria-label="ปิดหน้าจัดการรถไฟ"]');
- const saved=await acknowledge();const savedRail=saved.parkRuntime.rail;assert.ok(savedRail);assert.equal(saved.version,27);
+ const saved=await acknowledge();const savedRail=saved.parkRuntime.rail;assert.ok(savedRail);assert.equal(saved.version,27);assert.equal(saved.version,before.version);assert.equal(saved.mapBaseVersion,before.mapBaseVersion);
  await reload();const restored=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(restored.parkRuntime.rail,savedRail,'Actual server ACK restores rail service, train, queues and modeled counters exactly');assert.equal((await rail()).trains,1);
- await capture('rail-restored');checks.push('Service paused through UI, complete v25 rail session ACKed and reloaded exactly from isolated server');
+ await capture('rail-restored');checks.push('Service paused through UI, complete rail session ACKed and reloaded exactly from isolated server');
  return{status:'passed',checks,stations:savedRail.network.stations,offeredPersons:savedRail.network.model.offeredPersons};
 }
