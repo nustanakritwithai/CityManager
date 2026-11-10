@@ -715,7 +715,7 @@ async function boot() {
   trafficControl.append(trafficControlTitle,trafficButton,trafficControlNote);$('#game-content .game-menu').prepend(trafficControl);
   const setTrafficEnabled=(enabled:boolean,persist=false)=>{
     trafficEnabled=enabled;trafficOn=enabled;trafficLayer?.destroy();trafficLayer=null;view.traffic.setCarsEnabled(!enabled);
-    if(enabled){try{const canvas=$('#city-canvas') as HTMLCanvasElement;trafficLayer=new TrafficLayer(view.app,screenCull(i=>view.project(i),()=>({width:canvas.clientWidth,height:canvas.clientHeight})),()=>{view.traffic.setCarsEnabled(true);status('แบบจำลองจราจรไม่พร้อม · กลับไปใช้รถตกแต่ง โดยไม่กระทบเซฟ');});}catch{view.traffic.setCarsEnabled(true);trafficInfo.textContent='แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน';}}
+    if(enabled){try{const canvas=$('#city-canvas') as HTMLCanvasElement;trafficLayer=new TrafficLayer(view.app,screenCull(i=>view.project(i),()=>({width:canvas.clientWidth,height:canvas.clientHeight})),()=>{view.traffic.setCarsEnabled(true);status('แบบจำลองจราจรไม่พร้อม · กลับไปใช้รถตกแต่ง โดยไม่กระทบเซฟ');});trafficLayer.setRailRuntimeReader(()=>parkRuntime.rail);}catch{view.traffic.setCarsEnabled(true);trafficInfo.textContent='แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน';}}
     trafficState.textContent=enabled?'เปิด':'ปิด';trafficButton.setAttribute('aria-label',enabled?'ปิดการจราจรจำลอง':'เปิดการจราจรจำลอง');trafficButton.setAttribute('aria-pressed',String(enabled));
     trafficSection.hidden=!enabled;
     if(persist){const saved=storeTrafficModel(enabled);try{const u=new URL(location.href);u.searchParams.delete('traffic');history.replaceState(history.state,'',u);}catch{/* preference still applies */}

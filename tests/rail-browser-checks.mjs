@@ -9,32 +9,35 @@ export async function railBrowserChecks({send,evaluate,capture,acknowledge,reloa
  const menu=async action=>{await tap('#rail-tool');await tap(`[data-rail-action="${action}"]`);};
  const confirm=async()=>{await until(()=>evaluate("!!document.querySelector('#rail-management-confirm[open]')"),'confirmation');await tap('#rail-confirm-accept');await until(()=>evaluate("!document.querySelector('#rail-management-confirm[open]')"),'confirmation close');};
  const rail=()=>evaluate('window.cityManager.rail()');
+ assert.ok(await evaluate('window.cityManager.traffic()'),'Rail intake requires the traffic model to be enabled');
  await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
  if(!await evaluate('window.cityManager.parks().paused'))await tap('#pause');
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
  const before=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));
  assert.equal((await rail()).snapshot,null,'Seed does not prebuild rail');
- for(const i of[315,312,339,336])assert.deepEqual(before.cells[i],{road:false,zone:null,building:null},'Recorded synthetic fixture route is actually empty');
+ for(const i of[315,317,339,341])assert.deepEqual(before.cells[i],{road:false,zone:null,building:null},'Recorded synthetic fixture route is actually empty');
  // Use real confirmation gestures and the current camera projection, not dispatching application callbacks.
- for(const i of[315,312]){await menu('station');await cell(i);await confirm();}
- assert.deepEqual((await rail()).snapshot.stations.map(s=>s.cell),[315,312]);
- for(const[a,b]of[[315,339],[339,336],[336,312]]){await menu('add-track');await cell(a);await cell(b);await confirm();}
+ for(const i of[315,317]){await menu('station');await cell(i);await confirm();}
+ assert.deepEqual((await rail()).snapshot.stations.map(s=>s.cell),[315,317]);
+ for(const[a,b]of[[315,339],[339,341],[341,317]]){await menu('add-track');await cell(a);await cell(b);await confirm();}
  await menu('manage');await tap('#rail-configure-service');await confirm();
+ const note=await evaluate('document.querySelector(".rail-management-note").textContent');
+ assert.match(note,/ความต้องการเดินทางในแบบจำลองจราจร/);assert.match(note,/ไม่ใช่ประชาชนรายบุคคล/);assert.match(note,/ต้องเปิดแบบจำลองจราจร/);
  let state=await rail();assert.ok(state.snapshot.service);assert.equal(state.snapshot.service.config.seats,32);assert.equal(state.trains,1);assert.equal(state.trackMeshInstances,3);
  const after=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(after.accounts,before.accounts,'Rail construction/configuration introduces no fare, charge or money');assert.deepEqual(after.cells,before.cells,'Rail does not rewrite road/building allocation');
  checks.push('Native station, atomic track and service confirmation; real scene with three batched track meshes; no cash or road mutation');
  await capture('rail-built');
  const pose=state.trainPosition;assert.ok(pose&&['x','y','z'].every(k=>Number.isFinite(pose[k])),'Actual rendered train pose is exposed read-only');
  await tap('[data-speed="1"]');await tap('#pause');
- await until(async()=>{const s=await rail();return s.snapshot.model.offeredPersons>0&&s.snapshot.service.snapshot.train.destination!==null&&JSON.stringify(s.trainPosition)!==JSON.stringify(pose);},'actual train movement with modeled riders');
+ await until(async()=>{const s=await rail();return s.snapshot.model.offeredPersons>0&&s.snapshot.service.snapshot.train.destination!==null&&JSON.stringify(s.trainPosition)!==JSON.stringify(pose);},'actual train movement with accepted traffic-model demand');
  await tap('#pause');assert.equal(await evaluate('window.cityManager.parks().paused'),true);
  state=await rail();const paused=structuredClone(state);await sleep(250);const stable=await rail();assert.deepEqual(stable.snapshot,paused.snapshot,'Game pause freezes authoritative rail minute and passengers');assert.deepEqual(stable.trainPosition,paused.trainPosition,'Game pause freezes rendered train');
  assert.ok(state.snapshot.model.offeredPersons>0);assert.ok(state.snapshot.service.snapshot.batches.length<=32);
- checks.push('Normal game clock creates bounded modeled riders and moves actual mesh; pause freezes both without manual clock advancement');
+ checks.push('Enabled traffic model supplies bounded accepted rider queues, not individual citizen journeys; normal game clock moves the train, and pause freezes both');
  await capture('rail-moving-paused');
  await menu('manage');await tap('#rail-service-toggle');assert.equal((await rail()).snapshot.service.snapshot.enabled,false);await tap('#rail-management [aria-label="ปิดหน้าจัดการรถไฟ"]');
  const saved=await acknowledge();const savedRail=saved.parkRuntime.rail;assert.ok(savedRail);assert.equal(saved.version,27);
  await reload();const restored=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(restored.parkRuntime.rail,savedRail,'Actual server ACK restores rail service, train, queues and modeled counters exactly');assert.equal((await rail()).trains,1);
- await capture('rail-restored');checks.push('Service paused through UI, complete v25 rail session ACKed and reloaded exactly from isolated server');
+ await capture('rail-restored');checks.push('Service paused through UI, complete v27 rail session ACKed and reloaded exactly from isolated server');
  return{status:'passed',checks,stations:savedRail.network.stations,offeredPersons:savedRail.network.model.offeredPersons};
 }

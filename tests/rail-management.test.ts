@@ -25,6 +25,10 @@ test('explicit stations, atomic track confirmation, service, cancellation and st
  const action=(key:string)=>{const button=find(body,e=>e.dataset.railAction===key);assert.ok(button,key);button.click();};
  const click=(id:string)=>{const button=find(body,e=>e.id===id);assert.ok(button,id);button.click();};
  try{
+  const note=find(body,e=>e.className==='rail-management-note')!.textContent;
+  assert.match(note,/ความต้องการเดินทางในแบบจำลองจราจร/);assert.match(note,/ไม่ใช่ประชาชนรายบุคคล/);
+  assert.match(note,/ต้องเปิดแบบจำลองจราจรจึงรับผู้โดยสารใหม่/);assert.match(note,/ลดความต้องการรถเฉพาะส่วนที่รถไฟรับไว้/);
+  assert.doesNotMatch(note,/ตามความหนาแน่น|ยังไม่ลดรถบนถนน/);
   action('station');ui.activate(288);click('rail-confirm-accept');assert.equal(runtime.rail,undefined,'Occupied road cannot become a station');assert.match(messages.at(-1)!,/ไม่มีถนนหรืออาคาร/);
   action('station');assert.equal(ui.activate(289),true);click('rail-confirm-cancel');assert.equal(runtime.rail,undefined);assert.equal(changes,0);
   action('station');ui.activate(289);click('rail-confirm-accept');assert.equal(runtime.rail!.snapshot.stations.length,1);
