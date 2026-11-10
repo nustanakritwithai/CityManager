@@ -50,6 +50,7 @@ try{
  await button('#toggle-game-menu');await button('#traffic-game-toggle');
  await until(`(()=>{const b=window.cityManager.bus();return window.cityManager.traffic()===null&&b&&b.poles+b.shelters===${expectedStops}&&b.depots===${expectedDepots}&&b.buses===0})()`);
  assert.equal(await evaluate('window.cityManager.snapshot()'),baseline,'Traffic off does not change the city');
+ await button('#close-inspector');
  const offShot=await send('Page.captureScreenshot',{format:'png'});await writeFile(output+'/traffic-off-stops.png',Buffer.from(offShot.data,'base64'));
  // Reload the synthetic server-backed city with traffic explicitly disabled.
  await http.fixture.assertNoCityWrites(evaluate);const outgoing=await evaluate('window.cityManager.sessionSnapshot()');
