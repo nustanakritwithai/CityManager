@@ -5,7 +5,12 @@ export async function railBrowserChecks({send,evaluate,capture,acknowledge,reloa
  const paints=()=>evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
  const until=async(fn,label)=>{const start=Date.now();while(Date.now()-start<15000){if(await fn())return;await sleep(80);}throw Error(`Rail UI timeout: ${label}`);};
  const tapPoint=async({x,y})=>{assert(Number.isFinite(x)&&Number.isFinite(y));if(touchMode){await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});return;}await send('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1});};
- const tap=async selector=>{const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled||!e.getClientRects().length)throw Error('Rail control unavailable');const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await tapPoint(p);};
+ const tap=async selector=>{
+  // Phone tools live in the real horizontally scrolling dock. Bring the chosen
+  // control into view, then require a real hit target before native input.
+  await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled||!e.getClientRects().length)throw Error('Rail control unavailable');e.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});})()`);await paints();
+  const p=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return{x,y,hit:e.contains(document.elementFromPoint(x,y))}})()`);assert.ok(p.hit,`Rail control must be visible and hit-testable: ${selector}`);await tapPoint(p);
+ };
  const cell=async i=>{await paints();const p=await evaluate(`(()=>{const p=window.cityManager.cellScreen(${i}),r=document.querySelector('#city-canvas').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top}})()`);assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`),'city-canvas','Rail target must be visible on the actual canvas');await tapPoint(p);};
  const menu=async action=>{await tap('#rail-tool');await tap(`[data-rail-action="${action}"]`);};
  const confirm=async()=>{await until(()=>evaluate("!!document.querySelector('#rail-management-confirm[open]')"),'confirmation');await tap('#rail-confirm-accept');await until(()=>evaluate("!document.querySelector('#rail-management-confirm[open]')"),'confirmation close');};
