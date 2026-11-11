@@ -1,0 +1,38 @@
+name: Isolated CDP stream canary
+on:
+  push:
+    branches: [diagnostic/cdp-stream-canary-20261111]
+    paths: ['.github/workflows/cdp-stream-canary.yml']
+permissions:
+  contents: read
+concurrency:
+  group: isolated-cdp-stream-canary
+  cancel-in-progress: false
+jobs:
+  canary:
+    if: github.ref == 'refs/heads/diagnostic/cdp-stream-canary-20261111'
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Run fixed synthetic transport cases, no application
+        run: node scripts/cdp-stream-canary.mjs
+      - name: Retain partial results and protocol events
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cdp-stream-canary-${{ github.run_id }}
+          path: |
+            evidence/results.json
+            evidence/*/result.json
+            evidence/*/protocol.jsonl
+            evidence/*/trace.json
+            evidence/*/*.log
+          if-no-files-found: error
+          retention-days: 7
