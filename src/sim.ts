@@ -14,6 +14,8 @@ import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, val
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
+import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
+export { MONTH } from './city-tax-policy.ts';
 export { OWNER_DEVELOPMENT_SHARE_DENOMINATOR } from './owner-profit.ts';
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
@@ -40,7 +42,6 @@ const LEGACY_MAX_FIRMS = 64;
 /** Structural save bound: 192 residential parcels at the largest 32-household tier. */
 export const MAX_CITY_HOUSEHOLDS = MAX_CITY_BUILDINGS * Math.max(...HOUSING_LEVELS.map(level => level.households));
 export const GATEWAY = 12 * SIZE;
-export const MONTH = 30;
 export const ROAD_COST = 5_000;
 /** Monthly contracted sanitation and general municipal services, per resident (satang).
  * These are abstract operating costs, not a simulated service-quality system. */
@@ -64,6 +65,7 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; commercialUnifiedBaseline?: {moneyEntries:number;cropEntries:number;goodsEntries:number};
   history?: CityHistory;
+  taxPolicy?: TaxChange[];
   /** Versioned daily household wellbeing; older saves start neutrally on their next simulated day. */
   happiness?: HappinessState;
   populationCapacityVersion?: 1;
@@ -289,9 +291,10 @@ export function industryGrowthStatus(c: City) {
   const industries = c.firms.filter(f => f.zone === 'I').sort((a, b) => a.id - b.id);
   const fundedVacancies = admissionFacts(c).vacancies;
   const cropAvailable = c.firms.filter(f => (f.zone === 'F' || isCommercial(f)) && access(c, building(c, f.building).cell) && firmWorkerCount(c, f.id) > 0).reduce((n, f) => n + f.cropInventory, 0);
+  const profitRate = taxRatesAt(c.taxPolicy, c.tick).profit;
   const facts = (f?: Firm) => {
     const cash = f ? balance(c, f.wallet) : 0, payrollReserve = f ? payroll(f) : 0;
-    const taxReserve = f ? Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense - payrollReserve) / 5) : 0;
+    const taxReserve = f ? taxSatang(f.monthlyRevenue - f.monthlyExpense - payrollReserve, profitRate) : 0;
     const rentReserve = 10_000, workingReserve = INDUSTRY_WORKING_RESERVE;
     return { sponsorFirmId: f?.id ?? null, cash, payrollReserve, taxReserve, rentReserve, workingReserve,
       requiredCapital: INDUSTRY_STARTUP_CAPITAL, availableCapital: Math.max(0, cash - payrollReserve - taxReserve - rentReserve - workingReserve) };
@@ -325,7 +328,7 @@ export function ownerFinance(c: City, firmId: number) {
   if (!f || !isCommercial(f) || !owner || !h) return null;
   // Paid wages are already in monthlyExpense; only still-unpaid claims accrue here.
   const earnedWages = payroll(f), currentProfit = BigInt(f.monthlyRevenue) - BigInt(f.monthlyExpense) - BigInt(earnedWages);
-  const tax = currentProfit > 0n ? currentProfit / 5n : 0n, taxReserve = Number(tax);
+  const tax = taxAmount(currentProfit, taxRatesAt(c.taxPolicy, c.tick).profit), taxReserve = Number(tax);
   const history = ownerProfitHistory(c, f, currentProfit - tax);
   // Spending retained earnings must not make that same profit available again.
   const profit = BigInt(f.profit) + currentProfit - BigInt(owner.taxPaid) - BigInt(owner.withdrawn) - tax - history.invested - history.retained;
@@ -637,7 +640,7 @@ export function bulldoze(c: City, i: number): Result {
   }
   const closingFirms = b ? c.firms.filter(f => f.building === b.id) : [];
   for (const f of closingFirms) {
-    const tax = Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense - payroll(f) - f.cropCost) / 5);
+    const tax = taxSatang(f.monthlyRevenue - f.monthlyExpense - payroll(f) - f.cropCost, taxRatesAt(c.taxPolicy, c.tick).profit);
     if (spendable(c, f) < tax) return { ok: false, message: 'Closure needs enough cash to settle earned wages and current profit tax; no demolition was charged.' };
     if (!writeOffCrops(c, f, agricultureHooks(c))) return { ok: false, message: 'Crop disposal could not be journaled; business and city retained.' };
   }
@@ -726,7 +729,7 @@ export function buildPark(c: City, i: number): Result {
 /** Settle and remove one firm (its crops are already written off): wages, current tax, owner or sponsor capital, stock to outside. */
 function closeFirm(c: City, f: Firm) {
   payWages(c, f);
-  const paidTax = transfer(c, f.wallet, 'treasury', Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense) / 5), 'Closing firm profit tax');
+  const paidTax = transfer(c, f.wallet, 'treasury', taxSatang(f.monthlyRevenue - f.monthlyExpense, taxRatesAt(c.taxPolicy, c.tick).profit), 'Closing firm profit tax');
   if (f.owner) {
     f.owner.taxPaid += paidTax;
     const h = c.households.find(h => h.id === f.owner!.householdId)!;
@@ -875,7 +878,7 @@ export function explainCell(c: City, i: number): string[] {
     isCommercial(f) ? 'One commercial business stocks crops and finished goods. Crop opening stock can supply factories or household baskets; new crop purchases cannot resell this tick. Unsold stock never creates profit.' :
     f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale and outside export 3.50 credits.` : 'Buys goods locally at 3.50 credits or imports at 4.50; competes with crop markets for food at 8 credits per unit.',
     f.owner ? 'The owner works one unpaid post; hired employees accrue wages. Owner distributions use realised profit after tax, wage and working-cash reserves.' : 'Wages accrue per allocated worker-day and are paid each 30-day month. Reserved wages cannot fund stock or expansion.',
-    `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax 20%. Commercial businesses share levels 1–9; farms grow to level 6 from their own profit.`);
+    `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax ${taxRatesAt(c.taxPolicy, c.tick).profit}%. Commercial businesses share levels 1–9; farms grow to level 6 from their own profit.`);
   if (f && isCommercial(f)) {
     const s = retailGrowthStatus(c, f);
     output.push(`Retail level ${s.level}: ${s.workers}/${s.current.workers} workers; shelf ${f.inventory}/${s.current.stock}, staffed refill limit ${s.staffed.stock}; sales have no fixed daily customer cap.`,
@@ -1015,6 +1018,10 @@ function trade(c: City) {
     }
   }
 }
+function withholdWageTax(c: City, wallet: string, wage: number): void {
+  const tax = taxSatang(wage, taxRatesAt(c.taxPolicy, c.tick).wage);
+  if (transfer(c, wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Wage tax invariant violated.');
+}
 function payWages(c: City, f: Firm, onlyWallet?: string) {
   for (const [wallet, days] of Object.entries(f.workDays)) {
     if (onlyWallet && wallet !== onlyWallet) continue;
@@ -1023,7 +1030,7 @@ function payWages(c: City, f: Firm, onlyWallet?: string) {
     delete f.workDays[wallet];
     const wage = transfer(c, f.wallet, wallet, owed, 'Monthly wages', true);
     if (wage !== owed) throw new Error('Payroll reserve invariant violated.');
-    transfer(c, wallet, 'treasury', Math.floor(wage / 10), 'Monthly household wage tax');
+    withholdWageTax(c, wallet, wage);
   }
 }
 function payParkWages(c: City, p: Park, onlyWallet?: string): void {
@@ -1034,7 +1041,7 @@ function payParkWages(c: City, p: Park, onlyWallet?: string): void {
     // Park claims are already cash-backed. Legacy education arrears must not
     // block their reserved payment or leave park claims across a month boundary.
     if (transfer(c, 'treasury', wallet, owed, `Monthly park wages #${p.id}`, false, owed) !== owed) throw new Error('Park payroll reserve invariant violated.');
-    transfer(c, wallet, 'treasury', Math.floor(owed / 10), 'Monthly household wage tax');
+    withholdWageTax(c, wallet, owed);
   }
 }
 const isWage = (reason: string): boolean => reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
@@ -1052,8 +1059,7 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
       delete claim.campus.workDays[claim.wallet];
       const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
       if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
-      const tax = Math.floor(claim.amount / 10);
-      if (transfer(c, claim.wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Education wage tax invariant violated.');
+      withholdWageTax(c, claim.wallet, claim.amount);
     }
     return true;
   } catch (error) {
@@ -1064,13 +1070,14 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
 }
 function settleMonth(c: City) {
   const svc = utilities(c);
+  const profitRate = taxRatesAt(c.taxPolicy, c.tick).profit;
   for (const f of c.firms) {
     payWages(c, f);
     transfer(c, f.wallet, 'landlord', firmRent(f), 'Monthly firm rent', true);
     transfer(c, f.wallet, 'treasury', buildingBill(svc, f.building), 'Monthly water and power bill', true);
     f.lastMonthProfit = f.monthlyRevenue - f.monthlyExpense;
     f.profit += f.lastMonthProfit;
-    const taxPaid = transfer(c, f.wallet, 'treasury', Math.max(0, Math.floor(f.lastMonthProfit * .2)), 'Monthly firm profit tax');
+    const taxPaid = transfer(c, f.wallet, 'treasury', taxSatang(f.lastMonthProfit, profitRate), 'Monthly firm profit tax');
     if (f.owner) f.owner.taxPaid += taxPaid;
     f.monthlyRevenue = 0; f.monthlyExpense = 0;
     // Income is a distribution, not a new wage or expense. Pay after taxes and
@@ -1550,10 +1557,12 @@ export function serialize(c: City, market?: City['market']): string {
   const mapped = c.cells.length === EXPANDED_MAP_CELLS ? {...commercial, mapBaseVersion:25, mapLayout:'north-24x28', version:26, rulesVersion:'chain-21'} : commercial;
   const boundary = c.farmSoilIndependentStartTick ?? c.tick;
   if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary > c.tick) throw Error('Invalid soil-independent farm boundary');
-  const { happiness, ...cityFields } = mapped;
+  const { happiness, taxPolicy, ...cityFields } = mapped;
   const farm = {...cityFields, farmSoilIndependentStartTick: boundary, farmBaseVersion: mapped.version, version:27, rulesVersion:'chain-22'};
   if (happiness) validateHappiness(c, happiness);
-  const json = JSON.stringify(happiness ? {...farm, happiness, version:28, rulesVersion:'chain-23'} : farm);
+  const base = happiness ? {...farm, happiness, version:28, rulesVersion:'chain-23'} : farm;
+  if (taxPolicy !== undefined) validateTaxPolicy(taxPolicy, c.tick);
+  const json = JSON.stringify(taxPolicy ? {...base, taxPolicy, taxBaseVersion:base.version, version:29, rulesVersion:'chain-24'} : base);
   if (json.length > 12_000_000) throw new Error('City save exceeds the processing limit. Server save is unconfirmed; keep this page open.');
   return json;
 }
@@ -1997,8 +2006,18 @@ export function busValidationView(c: City): BusValidationView {
 export function deserialize(json: string): City {
   const header=JSON.parse(json);
   if (header?.goalRulesVersion !== undefined && header.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
-  if(header?.history&&header.version!==24&&header.version!==25&&header.version!==26&&header.version!==27&&header.version!==28)throw Error('Unsupported or corrupt history checkpoint: requires save v24');
-  const city = deserializeVersioned(json);
+  if (header?.history && ![24, 25, 26, 27, 28, 29].includes(header.version)) throw Error('Unsupported or corrupt history checkpoint: requires save v24');
+  let baseJson = json;
+  if (header?.version === 29) {
+    if (json.length > 12_000_000 || header.rulesVersion !== 'chain-24' || (header.taxBaseVersion !== 27 && header.taxBaseVersion !== 28)) throw Error('Invalid tax policy save version.');
+    validateTaxPolicy(header.taxPolicy, header.tick);
+    // Owner withdrawal validation needs the policy during ledger replay.
+    const { taxBaseVersion, ...base } = header;
+    baseJson = JSON.stringify({...base, version: taxBaseVersion, rulesVersion: taxBaseVersion === 28 ? 'chain-23' : 'chain-22'});
+  } else if (header && typeof header === 'object' && ('taxPolicy' in header || 'taxBaseVersion' in header)) {
+    throw Error('Tax policy requires save v29.');
+  }
+  const city = deserializeVersioned(baseJson);
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.

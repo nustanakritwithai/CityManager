@@ -109,8 +109,8 @@ export const EDGES: readonly NetEdge[] = Object.freeze([
   { from: 'eaten', to: 'firmCash', sign: 1, why: 'ยอดขายพืชผลเป็นรายได้ของตลาด', stream: 'eaten' },
   { from: 'exported', to: 'firmCash', sign: 1, why: 'ขายสินค้าออกนอกเมืองได้เงินเข้ากิจการ', stream: 'exported' },
   { from: 'firmCash', to: 'factories', sign: 1, why: 'โรงงานที่มีทุนพอออกทุนเปิดโรงงานใหม่' },
-  { from: 'employed', to: 'taxes', sign: 1, why: 'ค่าจ้างเสียภาษี 10% ทุกสิ้นเดือน' },
-  { from: 'firmCash', to: 'taxes', sign: 1, why: 'กิจการที่มีกำไรเสียภาษี 20% ของกำไรเดือนก่อน' },
+  { from: 'employed', to: 'taxes', sign: 1, why: 'หักภาษีตามอัตราเมืองเมื่อจ่ายค่าจ้าง' },
+  { from: 'firmCash', to: 'taxes', sign: 1, why: 'กิจการที่มีกำไรเสียภาษีตามอัตราเมืองเมื่อปิดบัญชี' },
   { from: 'taxes', to: 'treasury', sign: 1, why: 'ภาษีเข้าคลังเมืองทุกสิ้นเดือน', stream: 'taxes' },
 ]);
 

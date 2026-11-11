@@ -95,15 +95,19 @@ test('agriculture correlation observes events without adding a navigation barrie
  assert.doesNotMatch(source,/waitForSave|waitForNavigationSave/);
 });
 
-test('v28 wellbeing session survives acknowledged server save and reload',async()=>{
+test('v28 wellbeing and v29 tax policy sessions survive acknowledged server save and reload',async()=>{
  const upstream=createServer((_req,res)=>res.end('fixture'));await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
  const f=await startPersistenceFixture(`http://127.0.0.1:${upstream.address().port}/CityManager/`);
  try{
   const {createCity,step}=await import('../src/sim.ts');
+  const {scheduleCityTaxes}=await import('../src/city-tax-policy.ts');
   const {createParkRuntime,serializeParkSession,deserializeParkSession}=await import('../src/park-runtime.ts');
   const city=createCity(61025);for(let day=0;day<12;day++)step(city);
-  const raw=serializeParkSession(city,createParkRuntime(city));assert.equal(JSON.parse(raw).version,28);
-  const ack=await f.fixture.seed(raw);
+  const runtime=createParkRuntime(city), old=serializeParkSession(city,runtime);assert.equal(JSON.parse(old).version,28);
+  const ack=await f.fixture.seed(old);
+  assert.deepEqual(deserializeParkSession(ack.raw).city,city);
+  scheduleCityTaxes(city,{wage:0,profit:33});
+  const raw=serializeParkSession(city,runtime);assert.equal(JSON.parse(raw).version,29);
   const command={action:'save',cityId:ack.cityId,expectedRevision:ack.revision,raw,metadata:ack.metadata};
   const response=await fetch(new URL('/citymanager-api/v1/city-save',f.url),{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify(command)});
   assert.equal(response.status,200);const saved=await response.json();assert.equal(saved.raw,raw);assert.equal(saved.revision,ack.revision+1);

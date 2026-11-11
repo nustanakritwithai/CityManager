@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCampus, buildPark, buildPlant, bulldoze, createCity, deserialize, serialize, step, toggleCampus, type City } from '../src/sim.ts';
 import { createEducation, educationPayroll, initialCampusReport, stepEducation, takeEducationWages, type CampusKind, type EducationView } from '../src/education.ts';
+import { scheduleCityTaxes } from '../src/city-tax-policy.ts';
 
 function staff(kind: CampusKind) {
   const state = createEducation('new-city'), role = kind === 'school' ? 'teacher' : 'professor';
@@ -169,6 +170,26 @@ test('a late settlement exception rolls back every wallet, journal entry and ear
   assert.equal(serialize(c), before); reconcile(c);
   assert.equal(bulldoze(c, campus.cell).ok, true); assert.deepEqual(payments(c).map(e => e.amount), [1400, 2800]);
   deserialize(serialize(c)); reconcile(c);
+});
+
+test('a school that pays accrued wages after a rate change withholds the new rate', () => {
+  const c = fixture(), campus = c.education!.campuses[0];
+  scheduleCityTaxes(c, { wage: 17, profit: 20 });
+  cash(c, 2_000_000);
+  while (c.tick < 91) step(c);
+  assert.ok(educationPayroll(c.education) > 0);
+  const start = c.ledger.length;
+  assert.ok(bulldoze(c, campus.cell).ok);
+  const rows = c.ledger.slice(start);
+  const wages = rows.filter(entry => entry.reason === `Monthly school wages #${campus.id}`);
+  assert.ok(wages.length);
+  for (const entry of wages) {
+    assert.deepEqual(rows[rows.indexOf(entry) + 1], {
+      tick: 91, from: entry.to, to: 'treasury', amount: Math.floor(entry.amount * 17 / 100), reason: 'Monthly household wage tax',
+    });
+  }
+  reconcile(c);
+  assert.equal(serialize(deserialize(serialize(c))), serialize(c));
 });
 
 test('legacy education arrears preserve already reserved park pay and a loadable month-end', () => {

@@ -58,6 +58,7 @@ jobs:
             tests/city-goals.test.ts tests/resident-happiness.test.ts tests/resident-commute.test.ts \
             tests/migration-balance.test.ts tests/housing-mobility.test.ts tests/housing.test.ts \
             tests/city-history.test.ts tests/city-series.test.ts tests/goods.test.ts tests/utilities.test.ts \
+            tests/city-tax-policy.test.ts tests/education-payroll.test.ts \
             tests/demolition-refunds.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts \
             tests/server-city-save.test.ts tests/server-save-lifecycle.test.ts tests/persistence-server-fixture.test.mjs
           npm run assets:verify
