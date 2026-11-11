@@ -5,7 +5,7 @@ function keys(value: unknown, expected: string): void {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== expected.split(',').sort().join(',')) throw Error('Invalid rail snapshot fields');
 }
 /** Restore rejects the entire snapshot. It never repairs counts or discards passengers. */
-export function validateRailSnapshot(config: PassengerRailConfig, graph: RailGraph, value: unknown): asserts value is PassengerRailSnapshot {
+export function validateRailSnapshot(config: PassengerRailConfig, graph: RailGraph, value: unknown, scheduled = false): asserts value is PassengerRailSnapshot {
   keys(value,'version,minute,enabled,openStations,graphRevision,train,batches');
   const s=value as PassengerRailSnapshot;
   if(s.version!==1 || !safeCount(s.minute) || typeof s.enabled!=='boolean' || s.graphRevision!==graph.revision || !Array.isArray(s.batches) || s.batches.length>config.maxBatches)throw Error('Invalid rail snapshot');
@@ -35,6 +35,6 @@ export function validateRailSnapshot(config: PassengerRailConfig, graph: RailGra
     waiting.set(b.fromStation,waiting.get(b.fromStation)!+b.waiting);offered+=b.persons;onboard+=b.onboard;
   }
   if(!safeCount(offered)||onboard>config.seats||onboardDestinations.size>1||config.stations.some(station=>waiting.get(station.id)!>station.queueCapacity))throw Error('Rail capacity exceeded');
-  if(t.destination!==null&&!onboard&&!s.batches.some(b=>b.fromStation===t.destination&&b.outside+b.waiting>0))throw Error('Moving train has no service demand');
+  if(!scheduled&&t.destination!==null&&!onboard&&!s.batches.some(b=>b.fromStation===t.destination&&b.outside+b.waiting>0))throw Error('Moving train has no service demand');
   for(let i=1;i<s.batches.length;i++){const a=s.batches[i-1],b=s.batches[i];if(a.readyAtMinute>b.readyAtMinute||a.readyAtMinute===b.readyAtMinute&&a.id.localeCompare(b.id)>0)throw Error('Invalid queue order');}
 }

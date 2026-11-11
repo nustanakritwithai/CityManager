@@ -16,6 +16,10 @@ not rendering; global pause and unprocessed frame-budget time create no travel.
 
 The one train has 32 seats, platforms hold 64, boarding/alighting is 8 per game
 minute, dwell is 30 minutes and minimum departure interval is 60 minutes.
+While service and both stations are open, the shuttle makes scheduled runs even
+when no passengers are waiting. Pausing service or stopping new intake lets a
+moving train finish its trip and stops routine empty runs. The train can still
+reposition to collect retained riders while service remains enabled.
 A track cell takes 120 **game** minutes (not 120 real minutes). At nominal 1x,
 1440 game minutes request one second, subject to normal frame pacing. New tracks
 are capped at 96 undirected segments. These are prototype game values, not
