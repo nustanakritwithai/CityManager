@@ -36,8 +36,8 @@ export async function railBrowserChecks({send,evaluate,capture,acknowledge,reloa
  checks.push('Enabled traffic model supplies bounded accepted rider queues, not individual citizen journeys; normal game clock moves the train, and pause freezes both');
  await capture('rail-moving-paused');
  await menu('manage');await tap('#rail-service-toggle');assert.equal((await rail()).snapshot.service.snapshot.enabled,false);await tap('#rail-management [aria-label="ปิดหน้าจัดการรถไฟ"]');
- const saved=await acknowledge();const savedRail=saved.parkRuntime.rail;assert.ok(savedRail);assert.equal(saved.version,27);
+ const saved=await acknowledge();const savedRail=saved.parkRuntime.rail;assert.ok(savedRail);assert.equal(saved.version,28);
  await reload();const restored=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(restored.parkRuntime.rail,savedRail,'Actual server ACK restores rail service, train, queues and modeled counters exactly');assert.equal((await rail()).trains,1);
- await capture('rail-restored');checks.push('Service paused through UI, complete v27 rail session ACKed and reloaded exactly from isolated server');
+ await capture('rail-restored');checks.push('Service paused through UI, complete v28 rail session ACKed and reloaded exactly from isolated server');
  return{status:'passed',checks,stations:savedRail.network.stations,offeredPersons:savedRail.network.model.offeredPersons};
 }
