@@ -896,6 +896,18 @@ async function boot() {
     }catch(error){sound('ui-error');status(`ยังบันทึกไม่ได้: ${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · อย่าปิดหน้านี้`);}
     finally{manualSavePending=false;}
   });
+
+  if(serverEntry.slot!==null){
+    const switchCity=document.createElement('button');switchCity.type='button';switchCity.textContent=`เลือกเมืองอื่น · ช่อง ${serverEntry.slot}`;
+    $('#save').after(switchCity);
+    switchCity.addEventListener('click',()=>{
+      const raw=serializeParkSession(city,parkRuntime,city.market);
+      if(managingSave||resolvingConflict||shouldWarnBeforeUnload({running:autosave.running,failed:autosave.last?.ok===false,busy:saveBusy||manualSavePending,pending:serverSave.pending,conflict:serverSave.conflict,raw,confirmedRaw:serverSave.confirmed?.raw})){
+        status('บันทึกเมืองนี้และรอให้เซิร์ฟเวอร์ยืนยันก่อนเปลี่ยนช่องเซฟ');return;
+      }
+      paused=true;location.reload();
+    });
+  }
   const campusAction = (action: typeof toggleCampus) => {
     const campus = route?.page === 'place' ? campusAt(city, route.cell) : undefined;
     if (!campus) return;
