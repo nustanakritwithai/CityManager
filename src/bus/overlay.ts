@@ -47,11 +47,16 @@ const EMPTY: BusOverlay = { lines: [], stops: [], depots: [] };
 export function busOverlay(city: BusHost): BusOverlay {
   const bus = city.bus; if (!bus) return EMPTY;
   const routes = cache.get(city);
-  return {
-    lines: routes.map((route, index) => lineVisual(route, index, routes.length)),
-    stops: [...bus.stops].sort((a, b) => a.id - b.id).flatMap(stop => stopVisual(stop)),
-    depots: [...bus.depots].sort((a, b) => a.id - b.id).map(depot => depotVisual(depot, city)),
-  };
+  return { lines: routes.map((route, index) => lineVisual(route, index, routes.length)), ...busInfrastructure(city) };
+}
+
+/** Physical sites do not depend on routes, fleet activity or the traffic model. */
+export function busInfrastructure(city: BusHost): Pick<BusOverlay, 'stops' | 'depots'> {
+  const bus=city.bus;
+  return bus ? {
+    stops: [...bus.stops].sort((a,b)=>a.id-b.id).flatMap(stop=>stopVisual(stop)),
+    depots: [...bus.depots].sort((a,b)=>a.id-b.id).map(depot=>depotVisual(depot,city)),
+  } : { stops: [], depots: [] };
 }
 
 function lineVisual(route: BusLineRoute, index: number, count: number): BusLineVisual {
