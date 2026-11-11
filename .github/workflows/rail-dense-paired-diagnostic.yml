@@ -1,0 +1,136 @@
+name: Isolated rail dense paired diagnostic
+on:
+  push:
+    branches: [diagnostic/rail-dense-paired-20261111]
+    paths: ['.github/workflows/rail-dense-paired-diagnostic.yml']
+permissions:
+  contents: read
+concurrency:
+  group: rail-dense-paired-diagnostic
+  cancel-in-progress: false
+jobs:
+  paired:
+    if: github.ref == 'refs/heads/diagnostic/rail-dense-paired-20261111'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TRAFFIC_GAME_EXPECT_DEFAULT: '1'
+      TRAFFIC_GAME_CASE: dense
+      CITYMANAGER_BLOCK_MODELS: '1'
+      CITYMANAGER_SOFTWARE_WEBGL: '1'
+      CITYMANAGER_URL: http://127.0.0.1:4195/CityManager/
+    steps:
+      - name: Checkout exact base
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 8c935c3fba8deb843b12e221bc2c0b1c32789eea
+          path: base
+          persist-credentials: false
+      - name: Checkout exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 2b26b778347242f1710ab655f7411be6a3bd590f
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Verify immutable sources and build both before measurement
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $expected = @{
+            base = @('8c935c3fba8deb843b12e221bc2c0b1c32789eea', 'a6b8ec178811f691bb5c58420af21213a7bd07f7')
+            candidate = @('2b26b778347242f1710ab655f7411be6a3bd590f', '22b0a33e77ead8ca16a8f611a28bdd78fe005b6f')
+          }
+          foreach ($version in @('base', 'candidate')) {
+            $sha = git -C $version rev-parse HEAD
+            $tree = git -C $version rev-parse 'HEAD^{tree}'
+            if ($sha -ne $expected[$version][0] -or $tree -ne $expected[$version][1]) { throw 'Source identity mismatch' }
+            "$version $sha $tree" | Add-Content evidence/sources.txt
+            Push-Location $version
+            try {
+              npm ci --no-audit --no-fund
+              if ($LASTEXITCODE -ne 0) { throw 'Install failed' }
+              npm run build
+              if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+              node --experimental-strip-types tests/traffic-game-smoke.mjs --preflight
+              if ($LASTEXITCODE -ne 0) { throw 'Fixture preflight failed' }
+            } finally { Pop-Location }
+          }
+          foreach ($file in @('package-lock.json','tests/traffic-game-smoke.mjs','tests/population-capacity-fixture.ts','tests/traffic-game-fallback-metrics.mjs','tests/traffic-server-entry-fixture.mjs','tests/traffic-game-cases.mjs')) {
+            $a = (Get-FileHash "base/$file" -Algorithm SHA256).Hash
+            $b = (Get-FileHash "candidate/$file" -Algorithm SHA256).Hash
+            if ($a -ne $b) { throw "Unmatched protocol: $file" }
+            "$file $a" | Add-Content evidence/protocol-hashes.txt
+          }
+      - name: Fixed three pairs AB BA AB with unchanged acceptance gates
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $root = (Get-Location).Path
+          $evidence = Join-Path $root 'evidence'
+          $edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
+          $browserVersion = (Get-Item $edge).VersionInfo.FileVersion
+          @{browser=$browserVersion; node=(node --version); image=$env:ImageVersion; order=@('base','candidate','candidate','base','base','candidate'); instrumented=$false; startupIncluded=$true; retries=0} | ConvertTo-Json | Set-Content "$evidence/protocol.json"
+          $results = @()
+          $index = 0
+          foreach ($version in @('base','candidate','candidate','base','base','candidate')) {
+            $index++
+            $out = Join-Path $evidence "$index-$version"
+            New-Item -ItemType Directory -Force $out | Out-Null
+            $record = @{index=$index; version=$version; status='not-started'; browser=(Get-Item $edge).VersionInfo.FileVersion; started=(Get-Date).ToUniversalTime().ToString('o')}
+            $preview = $null
+            Push-Location (Join-Path $root $version)
+            try {
+              if ($record.browser -ne $browserVersion) { throw 'Browser version changed during paired run' }
+              if ((git status --porcelain --untracked-files=no)) { throw 'Tracked source changed' }
+              if (Test-Path '.test-output/traffic-game') { throw 'Previous evidence was not moved' }
+              $preview = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('node_modules/vite/bin/vite.js','preview','--host','127.0.0.1','--port','4195','--strictPort') -WindowStyle Hidden -PassThru -RedirectStandardOutput "$out/preview.log" -RedirectStandardError "$out/preview-error.log"
+              $ready = $false
+              for ($attempt=0; $attempt -lt 40; $attempt++) {
+                try { if ((Invoke-WebRequest -Uri $env:CITYMANAGER_URL -TimeoutSec 2).StatusCode -eq 200) { $ready=$true; break } } catch {}
+                Start-Sleep -Milliseconds 500
+              }
+              if (-not $ready -or $preview.HasExited) { throw 'Preview unavailable' }
+              $record.status = 'running'
+              $record | ConvertTo-Json | Set-Content "$out/result.json"
+              node --experimental-strip-types tests/traffic-game-smoke.mjs 2>&1 | Tee-Object -FilePath "$out/acceptance.log"
+              $record.exitCode = $LASTEXITCODE
+              $record.status = if ($LASTEXITCODE -eq 0) { 'passed' } else { 'failed' }
+            } catch {
+              $record.status='infrastructure-error'
+              $record.error=$_.ToString()
+            } finally {
+              if ($preview) { Stop-Process -Id $preview.Id -ErrorAction SilentlyContinue }
+              # Stop only Edge instances belonging to the current isolated test profile.
+              $profileRoot = [regex]::Escape((Join-Path (Get-Location).Path '.test-output/traffic-game'))
+              Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" | Where-Object { $_.CommandLine -match $profileRoot } | ForEach-Object { Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+              if (Test-Path '.test-output/traffic-game') { Move-Item '.test-output/traffic-game' "$out/traffic-game" }
+              $record.finished=(Get-Date).ToUniversalTime().ToString('o')
+              $record | ConvertTo-Json -Depth 8 | Set-Content "$out/result.json"
+              $results += $record
+              $results | ConvertTo-Json -Depth 8 | Set-Content "$evidence/results.json"
+              Pop-Location
+              Start-Sleep -Seconds 5
+            }
+          }
+          if ($results.Count -ne 6 -or @($results | Where-Object { $_.status -ne 'passed' }).Count -gt 0) { throw 'Diagnostic recorded failures; no acceptance gate is waived.' }
+      - name: Retain every paired result including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rail-dense-fixed-pairs-${{ github.run_id }}
+          path: |
+            evidence/*.json
+            evidence/*.txt
+            evidence/*/result.json
+            evidence/*/*.log
+            evidence/*/traffic-game/*/report.json
+            evidence/*/traffic-game/*/failure.json
+            evidence/*/traffic-game/*/*.png
+          if-no-files-found: error
+          retention-days: 7
