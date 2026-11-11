@@ -1,6 +1,15 @@
-name: Publish verified CityManager save slots
+name: Publish verified CityManager calculation fixes
 on:
   workflow_dispatch:
+    inputs:
+      feature_sha:
+        description: Exact calculation audit commit that passed the Node and HTTP checks
+        required: true
+        type: string
+      verification_run:
+        description: Successful Save smoke calculation-contract run ID for the same commit
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -19,9 +28,8 @@ jobs:
       asset: ${{ steps.bundle.outputs.asset }}
       sha256: ${{ steps.bundle.outputs.sha256 }}
     env:
-      FEATURE_SHA: '1fa45c01cc0355bbfed9fa2ee702bab18ea8269e'
-      FEATURE_TREE: '8225904ce6cfcc81b2e4b163968709a65bc54c0e'
-      SAVE_SMOKE_RUN: '43016511005'
+      FEATURE_SHA: ${{ inputs.feature_sha }}
+      SAVE_SMOKE_RUN: ${{ inputs.verification_run }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -31,33 +39,46 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
-          cache: npm
-      - name: Require the PR tree and its existing Save smoke result
+      - name: Require the merged source and retrieve its verified static build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse "$FEATURE_SHA^{tree}")" = "$FEATURE_TREE"
+          [[ "$FEATURE_SHA" =~ ^[a-f0-9]{40}$ && "$SAVE_SMOKE_RUN" =~ ^[0-9]+$ ]]
           git merge-base --is-ancestor "$FEATURE_SHA" "$GITHUB_SHA"
-          git diff --exit-code "$FEATURE_SHA" "$GITHUB_SHA" -- . ':(exclude).github/workflows/publish-verified-save-slots.yml'
-          result=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SAVE_SMOKE_RUN" --jq '[.name,.head_sha,.event,.conclusion] | join(" ")')
-          test "$result" = "Save smoke $FEATURE_SHA pull_request success"
-      - run: npm ci --no-audit --no-fund
-      - name: Test Guest entry, numbered slots and durable save contracts
-        run: |
-          node --experimental-strip-types --test \
-            tests/server-city-entry.test.ts \
-            tests/server-city-entry-flow.test.ts \
-            tests/server-city-save.test.ts \
-            tests/server-save-lifecycle.test.ts \
-            tests/server-save-manual-listener.test.ts
-          npm run assets:verify
-      - name: Build with the public Pages settings
-        env:
-          VITE_MARKET_URL: 'https://citymanager.157-85-96-139.sslip.io/citymanager-api'
-          VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
-          VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
-        run: npm run build
+          git diff --exit-code "$FEATURE_SHA" "$GITHUB_SHA" -- .
+          endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$SAVE_SMOKE_RUN"
+          gh api "$endpoint" > verified-run.json
+          gh api "$endpoint/jobs?filter=latest&per_page=100" > verified-jobs.json
+          gh api "$endpoint/artifacts?per_page=100" > verified-artifacts.json
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const read = name => JSON.parse(readFileSync(name, 'utf8'));
+          const run = read('verified-run.json');
+          assert.equal(run.id, Number(process.env.SAVE_SMOKE_RUN));
+          assert.equal(run.head_sha, process.env.FEATURE_SHA);
+          assert.equal(run.head_branch, 'codex/fix-city-calculation-audit');
+          assert.equal(run.path, '.github/workflows/save-smoke.yml');
+          assert.equal(run.event, 'workflow_dispatch');
+          assert.equal(run.conclusion, 'success');
+          const job = read('verified-jobs.json').jobs.find(row => row.name === 'Save smoke');
+          assert.equal(job?.conclusion, 'success');
+          const result = name => job.steps.find(step => step.name === name)?.conclusion;
+          assert.equal(result('Build exactly like the Pages deploy'), 'success');
+          assert.equal(result('Calculation regressions and loopback save contracts'), 'success');
+          assert.equal(result('Save smoke on built bundle'), 'skipped');
+          const artifacts = read('verified-artifacts.json').artifacts.filter(item => item.name === 'citymanager-calculation-dist' && !item.expired);
+          assert.equal(artifacts.length, 1);
+          const artifact = artifacts[0];
+          assert.match(artifact.digest, /^sha256:[a-f0-9]{64}$/);
+          assert.equal(artifact.workflow_run.head_sha, process.env.FEATURE_SHA);
+          writeFileSync('verified-artifact.txt', artifact.id + '\n' + artifact.digest.slice(7) + '\n');
+          NODE
+          mapfile -t artifact < verified-artifact.txt
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/${artifact[0]}/zip" > verified-build.zip
+          printf "%s  verified-build.zip\n" "${artifact[1]}" | sha256sum --check
+          unzip -q verified-build.zip -d dist
       - name: Confirm the static build and live API are ready
         id: bundle
         run: |
@@ -71,6 +92,7 @@ jobs:
           const bytes = readFileSync(asset.replace('/CityManager/', 'dist/'));
           const code = bytes.toString();
           assert.ok(code.includes('/v1/city-save') && code.includes('/slots') && code.includes('เลือกเมืองอื่น'));
+          assert.ok(code.includes('อาจย้ายออกเร็วสุดอีก') && code.includes('ความสุขต่ำ'));
           const base = 'https://citymanager.157-85-96-139.sslip.io/citymanager-api';
           const origin = 'https://nustanakritwithai.github.io';
           async function check(path, status, init = {}) {

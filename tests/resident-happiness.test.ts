@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, deserialize, serialize, step, rebalanceHousing, SIZE, type City } from '../src/sim.ts';
-import { happinessTargets } from '../src/resident-happiness.ts';
+import { createCity, departureDay, departureForecast, deserialize, householdWorkerCount, serialize, step, rebalanceHousing, SIZE, type City } from '../src/sim.ts';
+import { HAPPINESS_DEPARTURE_DAYS, happinessTargets } from '../src/resident-happiness.ts';
+
+import { keepSupplied } from './plants.ts';
 
 const advance=(c:City,n:number)=>{for(let i=0;i<n;i++)step(c);};
 const oneWay=(c:City)=>{c.roadTopology={version:1,blocked:[],oneWay:Object.fromEntries(c.cells.flatMap((v,i)=>v.road?[[i,1]]:[]))};};
@@ -57,4 +59,23 @@ test('save validation rejects a distress streak longer than elapsed city time',(
  const city=createCity(61025);advance(city,12);assert.ok(city.households.length>0);assert.ok(city.tick<30);
  const raw=JSON.parse(serialize(city));raw.happiness.rows[0].score=0;raw.happiness.rows[0].distressDays=city.tick+1;
  assert.throws(()=>deserialize(JSON.stringify(raw)),/Invalid happiness row/);
+});
+
+test('a working household with sustained low happiness gets a conditional month-end forecast', () => {
+  const city = createCity(61025);
+  for (let day = 0; day < 179; day++) { step(city); keepSupplied(city); }
+  const household = city.households.find(h => h.origin === 'arrival'
+    && householdWorkerCount(city, h.id) > 0 && !city.firms.some(f => f.owner?.householdId === h.id));
+  assert.ok(household);
+  const row = city.happiness!.rows.find(h => h.householdId === household.id)!;
+  row.score = 0;
+  row.distressDays = HAPPINESS_DEPARTURE_DAYS - 2;
+  assert.equal(departureDay(city, household.id), 210, 'missing the first settlement moves eligibility to the next one');
+
+  row.distressDays++;
+  const restored = deserialize(serialize(city));
+  assert.equal(departureDay(restored, household.id), 180);
+  assert.deepEqual(departureForecast(restored, household.id), { day: 180, reason: 'happiness' });
+  step(restored);
+  assert.equal(restored.households.some(h => h.id === household.id), false);
 });
