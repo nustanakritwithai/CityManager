@@ -4,6 +4,7 @@ name: Save smoke
 on:
   pull_request:
     branches: [main]
+  deployment:
   workflow_dispatch:
     inputs:
       live:
@@ -22,11 +23,14 @@ concurrency:
 jobs:
   save-smoke:
     name: Save smoke
+    if: github.event_name != 'deployment' || (github.event.deployment.environment == 'citymanager-calculation-verification' && github.ref == 'refs/heads/codex/fix-city-calculation-audit')
+    env:
+      CALCULATION_CONTRACTS: ${{ inputs.calculation_contracts || github.event_name == 'deployment' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
       - name: Restrict calculation contracts to the audit branch
-        if: ${{ inputs.calculation_contracts }}
+        if: env.CALCULATION_CONTRACTS == 'true'
         run: test "$GITHUB_REF" = 'refs/heads/codex/fix-city-calculation-audit'
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -38,17 +42,17 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Build exactly like the Pages deploy
-        if: ${{ !inputs.live || inputs.calculation_contracts }}
+        if: ${{ !inputs.live || env.CALCULATION_CONTRACTS == 'true' }}
         env:
           VITE_MARKET_URL: 'https://citymanager.157-85-96-139.sslip.io/citymanager-api'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
         run: npm run build
       - name: Save smoke on built bundle
-        if: ${{ !inputs.live && !inputs.calculation_contracts }}
+        if: ${{ !inputs.live && env.CALCULATION_CONTRACTS != 'true' }}
         run: CITYMANAGER_BROWSER=google-chrome node tests/server-save-browser-smoke.mjs
       - name: Calculation regressions and loopback save contracts
-        if: ${{ inputs.calculation_contracts }}
+        if: env.CALCULATION_CONTRACTS == 'true'
         run: |
           node --experimental-strip-types --test --test-concurrency=3 \
             tests/city-goals.test.ts tests/resident-happiness.test.ts tests/resident-commute.test.ts \
@@ -58,7 +62,7 @@ jobs:
             tests/server-city-save.test.ts tests/server-save-lifecycle.test.ts tests/persistence-server-fixture.test.mjs
           npm run assets:verify
       - name: Retain the verified calculation build
-        if: ${{ inputs.calculation_contracts }}
+        if: env.CALCULATION_CONTRACTS == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: citymanager-calculation-dist

@@ -60,7 +60,7 @@ jobs:
           assert.equal(run.head_sha, process.env.FEATURE_SHA);
           assert.equal(run.head_branch, 'codex/fix-city-calculation-audit');
           assert.equal(run.path, '.github/workflows/save-smoke.yml');
-          assert.equal(run.event, 'workflow_dispatch');
+          assert.equal(run.event, 'deployment');
           assert.equal(run.conclusion, 'success');
           const job = read('verified-jobs.json').jobs.find(row => row.name === 'Save smoke');
           assert.equal(job?.conclusion, 'success');
