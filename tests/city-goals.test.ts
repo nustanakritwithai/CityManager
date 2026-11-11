@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MONTH, createCity, deserialize, serialize, step } from '../src/sim.ts';
+import { MONTH, bulldoze, createCity, deserialize, serialize, step, summary } from '../src/sim.ts';
 import { cityGoals, cityRecord, treasuryAtMonthEnds, GOAL_GROWTH_MONTHS } from '../src/city-goals.ts';
 import { keepSupplied } from './plants.ts';
 
@@ -46,4 +46,36 @@ test('the in-game version matches package.json', async () => {
   const { GAME_VERSION } = await import('../src/version.ts');
   const { readFileSync } = await import('node:fs');
   assert.equal(GAME_VERSION, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+});
+
+test('demolition preserves completed shop sales in both 30-day goal checks', () => {
+  const city = createCity(61025);
+  for (let day = 0; day < 180; day++) { step(city); keepSupplied(city); }
+  const recent = city.goodsLedger.filter(entry => entry.reason === 'Household final consumption' && entry.tick > city.tick - MONTH);
+  const store = city.firms.find(firm => firm.zone === 'C' && recent.some(entry => entry.from === firm.wallet));
+  assert.ok(store);
+  const site = city.buildings.find(building => building.id === store.building);
+  assert.ok(site);
+  const goalChecks = (value: typeof city) => {
+    const { stages } = cityGoals(value);
+    return [stages[2].checks[1], stages[4].checks.at(-2)];
+  };
+  const before = goalChecks(city);
+  assert.ok(before[0]?.done);
+  assert.equal(bulldoze(city, site.cell).ok, true);
+  assert.equal(city.tick, 180);
+  assert.deepEqual(goalChecks(city), before);
+  assert.deepEqual(goalChecks(deserialize(serialize(city))), before);
+});
+
+test('the employment display does not reach 80% before the exact eligibility threshold', () => {
+  const city = createCity(61025), totals = summary(city);
+  const check = (employed: number, workforce: number) => cityGoals(city, { ...totals, employed, workforce }).stages[3].checks[1];
+  assert.deepEqual({ value: check(39, 49).value, done: check(39, 49).done }, { value: '79.59%', done: false });
+  assert.equal(check(4803, 6004).value, '79.99%');
+  assert.equal(check(4803, 6004).done, false);
+  assert.equal(check(40, 50).value, '80%');
+  assert.equal(check(40, 50).done, true);
+  assert.equal(check(0, 0).value, '0%');
+  assert.equal(check(0, 0).done, false);
 });

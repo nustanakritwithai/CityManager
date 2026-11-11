@@ -1,5 +1,5 @@
 import { prepareCommuteEstimates } from './resident-commute.ts';
-import { advanceHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, type HappinessState } from './resident-happiness.ts';
+import { advanceHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
@@ -1107,20 +1107,31 @@ function settleMonth(c: City) {
     + (departed ? ` ${departed} household(s) left after prolonged unemployment or severe unhappiness; their savings left with them.` : '');
 }
 
-/**
- * The month-end on which this household would leave if it still has no paid work, or null when it
- * stays (it has work, owns a firm, or came from a v1 import). The floor and the monthly cap can
- * only delay it.
- */
-export function departureDay(c: City, householdId: number): number | null {
+type DepartureForecast = { day: number; reason: 'unemployment' | 'happiness' };
+
+/** Earliest eligible settlement if current conditions persist. The monthly cap and floor can delay it. */
+export function departureForecast(c: City, householdId: number): DepartureForecast | null {
   const h = c.households.find(h => h.id === householdId);
-  if (!h || h.origin !== 'arrival' || householdWorkerCount(c, h.id) > 0 || c.firms.some(f => f.owner?.householdId === h.id)) return null;
+  if (!h || h.origin !== 'arrival' || c.firms.some(f => f.owner?.householdId === h.id)) return null;
+  const nextMonth = c.tick - c.tick % MONTH + MONTH;
+  const settlement = (eligibleDay: number) => Math.max(nextMonth, Math.ceil(eligibleDay / MONTH) * MONTH);
+  const happiness = c.happiness?.rows.find(row => row.householdId === h.id);
+  const happinessDay = happiness && happiness.score < HAPPINESS_DISTRESS
+    ? settlement(c.tick + HAPPINESS_DEPARTURE_DAYS - happiness.distressDays) : null;
+  if (householdWorkerCount(c, h.id) > 0) return happinessDay === null ? null : { day: happinessDay, reason: 'happiness' };
+
   let last = c.history?.lastIncome[h.wallet] ?? 0;
   for (let i = c.ledger.length - 1; i >= 0; i--) {
     const e = c.ledger[i];
     if (e.to === h.wallet && (isWage(e.reason) || e.reason === 'New household arrival savings')) { last = e.tick; break; }
   }
-  return Math.max(c.tick % MONTH ? c.tick - c.tick % MONTH + MONTH : c.tick + MONTH, Math.ceil((last + DEPARTURE_MONTHS * MONTH) / MONTH) * MONTH);
+  const unemploymentDay = settlement(last + DEPARTURE_MONTHS * MONTH);
+  return happinessDay !== null && happinessDay <= unemploymentDay
+    ? { day: happinessDay, reason: 'happiness' } : { day: unemploymentDay, reason: 'unemployment' };
+}
+
+export function departureDay(c: City, householdId: number): number | null {
+  return departureForecast(c, householdId)?.day ?? null;
 }
 
 /** Households never leave below this many, so a quiet city keeps a seed population. */

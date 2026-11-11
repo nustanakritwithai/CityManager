@@ -1,4 +1,4 @@
-import { happinessTargets, HAPPINESS_DEPARTURE_DAYS } from './resident-happiness.ts';
+import { happinessTargets, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { onExplicitActivation } from './explicit-activation.ts';
@@ -12,7 +12,7 @@ import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
 import { peopleOf } from './education.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, commercialGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureForecast, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, commercialGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity } from './agriculture.ts';
@@ -387,13 +387,25 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
   } else { const detail=section('ความสุขในพื้นที่'); detail.classList.add('bc-happiness-source'); detail.append(el('p', 'happiness-summary', 'ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง')); output.push(detail); }
   if (city.education) { const person = peopleOf(city.education, household.id); const studying = person.school + person.university; const reserved = studying + person.teacher + person.professor; output.push(el('p', 'cx-detail-note', `ผู้เรียน ${studying} คน · วุฒิพื้นฐาน ${person.basic} · วุฒิขั้นสูง ${person.higher} · แรงงานที่ถูกกันไว้เรียนหรือสอน ${reserved} คน · เป็นจำนวนรวม ไม่มีรายชื่อรายบุคคล และไม่นับผู้พึ่งพิงเป็นนักเรียน`)); }
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
-  const leaves = departureDay(city, household.id);
-  if (leaves !== null) { const row = el('div', 'cx-status cx-departure-status'); row.dataset.departureDay = String(leaves); row.append(chip(`ไม่มีงาน · ย้ายออกในอีก ${leaves - city.tick} วัน`, false)); output.push(row); }
+  const departure = departureForecast(city, household.id);
+  if (departure) {
+    const row = el('div', 'cx-status cx-departure-status');
+    row.dataset.departureDay = String(departure.day);
+    const reason = departure.reason === 'happiness' ? 'ความสุขต่ำ' : 'ไม่มีงาน';
+    row.append(chip(`${reason} · อาจย้ายออกเร็วสุดอีก ${departure.day - city.tick} วัน`, false));
+    output.push(row);
+  }
   const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
   jobs.classList.add('bc-employment-source');
   rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow), ...labor.parkAllocations.map(a => { const row = el('div', 'cx-employment-row', `สวนสาธารณะ #${a.parkId} · ดูแลสวน ${a.workers} คน · ค่าจ้าง ${PARK_STAFF.monthlyWage / 100}/คน/เดือน`); Object.assign(row.dataset, { parkId: String(a.parkId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }));
   if (!employed) rows.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง หรือทำกิจการของตนเอง'));
-  if (leaves !== null) { const note = el('p', 'cx-detail-note cx-departure', `ถ้ายังไม่มีงานที่ได้ค่าจ้าง ครัวเรือนนี้จะย้ายออกพร้อมเงินออมตอนชำระสิ้นเดือนวันที่ ${leaves} (อีก ${leaves - city.tick} วัน)`); note.dataset.departureDay = String(leaves); rows.append(note); }
+  if (departure) {
+    const condition = departure.reason === 'happiness'
+      ? `ถ้าความสุขยังต่ำกว่า ${HAPPINESS_DISTRESS} ต่อเนื่อง` : 'ถ้ายังไม่มีงานที่ได้ค่าจ้าง';
+    const note = el('p', 'cx-detail-note cx-departure', `${condition} ครัวเรือนนี้อาจย้ายออกพร้อมเงินออมเร็วสุดเมื่อชำระสิ้นเดือนวันที่ ${departure.day} (อีก ${departure.day - city.tick} วัน) ตามเพดานการย้ายออกของเมือง`);
+    note.dataset.departureDay = String(departure.day);
+    rows.append(note);
+  }
   jobs.append(rows); output.push(jobs, renderWorkerSkills(city, household));
   const consumed = householdConsumption(city, household.id), basket = el('p', 'cx-detail-note cx-last-commodity', consumed ? `บัญชีบริโภคล่าสุด: ${consumed.commodity === 'crops' ? 'พืชผล' : 'สินค้าสำเร็จรูป'} ${consumed.quantity} ${consumed.commodity === 'crops' ? 'ล็อต' : 'หน่วย'} · วัน ${consumed.tick}` : 'ยังไม่มีรายการบริโภคในบัญชีของครัวเรือนนี้');
   if (consumed) Object.assign(basket.dataset, { commodity: consumed.commodity, tick: String(consumed.tick), quantity: String(consumed.quantity) }); output.push(basket);

@@ -3,7 +3,7 @@
  * canonical state and ledgers. Progress is not saved; a rules-version marker selects old or new goals.
  */
 import { CROPS, PRODUCTS, RECIPES } from './goods.ts';
-import { MONTH, farmCrop, isCommercial, summary, type City } from './sim.ts';
+import { MONTH, farmCrop, summary, type City } from './sim.ts';
 import { mainGoalNetwork, GOAL_SERVED_ROADS, GOAL_SERVED_ROADS_PER_AXIS, GOAL_LARGE_CITY_POPULATION, GOAL_LARGE_CITY_SALES } from './main-goal-network.ts';
 
 export type GoalCheck = { label: string; done: boolean; value?: string };
@@ -34,16 +34,16 @@ export function treasuryAtMonthEnds(c: City, months: number): number[] | null {
 export function cityGoals(c: City, s = summary(c)): CityGoals {
   const since = c.tick - MONTH;
   const recentCrops = c.cropLedger.filter(e => e.tick > since);
-  const shops = new Set(c.firms.filter(isCommercial).map(f => f.wallet));
   let wholesale = 0, sold = 0, imported = 0;
   for (let i = c.goodsLedger.length - 1; i >= 0 && c.goodsLedger[i].tick > since; i--) {
     const e = c.goodsLedger[i];
     if (e.reason === 'Wholesale stock delivery') wholesale += e.quantity;
-    else if (e.reason === 'Household final consumption' && shops.has(e.from)) sold += e.quantity;
+    else if (e.reason === 'Household final consumption') sold += e.quantity;
     else if (e.reason === 'Imported shop stock') imported += e.quantity;
   }
   const housed = c.households.filter(h => h.home !== null).length;
   const employment = s.workforce ? s.employed / s.workforce : 0;
+  const employmentPercent = s.workforce ? Math.floor(s.employed * 10_000 / s.workforce) / 100 : 0;
   const treasury = treasuryAtMonthEnds(c, GOAL_GROWTH_MONTHS);
   const growing = treasury ? treasury.slice(1).filter((v, i) => v > treasury[i]).length : 0;
   const fullMonth = c.tick >= MONTH;
@@ -65,7 +65,7 @@ export function cityGoals(c: City, s = summary(c)): CityGoals {
     { level: 4, id: 'city', name: 'เมือง', hint: 'เพิ่มบ้านและที่ทำงานให้สมดุล คนว่างงานไม่ย้ายเข้า งานว่างดึงคนเข้าเมือง',
       checks: [
         { label: `ประชากรอย่างน้อย ${count(GOAL_POPULATION)} คน`, done: s.population >= GOAL_POPULATION, value: `${count(s.population)}/${count(GOAL_POPULATION)} คน` },
-        { label: `แรงงานมีงานอย่างน้อย ${Math.round(GOAL_EMPLOYMENT * 100)}%`, done: s.workforce > 0 && employment >= GOAL_EMPLOYMENT, value: `${Math.round(employment * 100)}%` },
+        { label: `แรงงานมีงานอย่างน้อย ${Math.round(GOAL_EMPLOYMENT * 100)}%`, done: s.workforce > 0 && employment >= GOAL_EMPLOYMENT, value: `${employmentPercent}%` },
       ] },
     { level: 5, id: 'self-reliant', name: 'เมืองพึ่งพาตนเองได้', hint: expandedGoals ? 'ขยายถนนที่เชื่อมประตูเมืองให้มีบ้านที่มีคนอยู่หรือกิจการที่มีคนทำงาน ทั้งสองต้องมีน้ำไฟ และกระจายทั้งแนวนอนและแนวตั้ง ทางแยกแต่ละช่องนับได้หนึ่งทิศเท่านั้น เพิ่มประชากรและยอดขาย พร้อมรักษาคลังให้เติบโต' : 'ให้โรงงานผลิตพอขาย ไม่ต้องนำเข้า และใช้เงินคลังไม่เกินภาษีที่เก็บได้',
       checks: [
