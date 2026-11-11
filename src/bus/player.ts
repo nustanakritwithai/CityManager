@@ -1,3 +1,4 @@
+import { BUS_LIVE_DRIVE_SECONDS_PER_TILE } from './types.ts';
 import { formatCellCoordinate } from '../expanded-map-geometry.ts';
 /**
  * Player-facing bus actions (PR B6). Placement, line drafts and the panel read model.
@@ -230,7 +231,7 @@ function liveOf(read: BusLiveRead, lineId: number): BusLiveCard {
   };
 }
 
-export function busPanelModel(host: BusHost, enabled = busEnabled(), read: BusLiveRead | null = enabled ? getBusLiveSource() : null, notes = enabled ? lastBusBoardNotes() : [], routes: readonly BusLineRoute[] = enabled ? busLineRoutes(host) : []): BusPanelModel {
+export function busPanelModel(host: BusHost, enabled = busEnabled(), read: BusLiveRead | null = enabled ? getBusLiveSource() : null, notes = enabled ? lastBusBoardNotes() : [], routes: readonly BusLineRoute[] = enabled ? busLineRoutes(host, {driveSecondsPerTile:BUS_LIVE_DRIVE_SECONDS_PER_TILE}) : []): BusPanelModel {
   if (!enabled) return { enabled: false, depots: [], stops: [], lines: [], totals: null, waiting: null, boardNote: null };
   const routeById = new Map<number, BusLineRoute>(routes.map(route => [route.lineId, route]));
   const load = busDepotLoad(host);
@@ -273,5 +274,5 @@ export function busPanelModel(host: BusHost, enabled = busEnabled(), read: BusLi
 /** Same model, but routes come from the caller's cache so a refresh does not rebuild the graph twice. */
 export function cachedPanelModel(host: BusHost, cache: BusRouteCache, enabled = busEnabled(), read: BusLiveRead | null = enabled ? getBusLiveSource() : null, notes = enabled ? lastBusBoardNotes() : []): BusPanelModel {
   if (!enabled) return busPanelModel(host, false);
-  return busPanelModel(host, true, read, notes, cache.get(host));
+  return busPanelModel(host, true, read, notes, cache.get(host,{driveSecondsPerTile:BUS_LIVE_DRIVE_SECONDS_PER_TILE}));
 }

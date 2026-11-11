@@ -79,7 +79,7 @@ export type BusLineRoute = Readonly<{
   /** Full cell polyline for overlays (legs concatenated, shared joints not repeated). */
   polyline: readonly number[];
 }>;
-export type BusRouteOptions = { net?: LinkNetwork; times?: ReadonlyMap<string, number> };
+export type BusRouteOptions = { net?: LinkNetwork; times?: ReadonlyMap<string, number>; driveSecondsPerTile?: number };
 
 /** Stop call sequence for one cycle. */
 export function busServiceOrder(stopIds: readonly number[]): number[] {
@@ -94,7 +94,7 @@ export function busLineRoutes(c: BusHost, o: BusRouteOptions = {}): readonly Bus
   const b = c.bus; if (!b) return Object.freeze([]);
   const net = o.net ?? buildNetwork(c), times = o.times ?? linkTimes(net, new Map());
   const stopById = new Map(b.stops.map(s => [s.id, s])), left = new Map(b.depots.map(d => [d.id, BUS_DEPOT_BUSES[d.level]]));
-  const legSeconds = (p: number[]) => p.slice(1).reduce((s, x, i) => s + (times.get(linkKey(p[i], x)) ?? Infinity), 0);
+  const legSeconds = (p: number[]) => p.slice(1).reduce((s, x, i) => s + (o.driveSecondsPerTile ?? times.get(linkKey(p[i], x)) ?? Infinity), 0);
   const cache = new Map<string, number[] | null>(), route = (a: number, z: number) => { const k = `${a}>${z}`; if (!cache.has(k)) cache.set(k, a === z ? [a] : shortestPath(net, times, a, z)); return cache.get(k)!; };
   const out: BusLineRoute[] = [];
   for (const l of [...b.lines].sort((x, y) => x.id - y.id)) {
@@ -137,7 +137,7 @@ export class BusRouteCache {
   private key = ''; private value: readonly BusLineRoute[] = Object.freeze([]);
   get(c: BusHost, o: BusRouteOptions = {}): readonly BusLineRoute[] {
     const roads = c.cells.reduce((s, x, i) => (x.road ? s + i + ',' : s), '');
-    const key = `${roads}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.bus ?? null)}|${o.times ? 'T' : ''}`;
+    const key = `${roads}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.bus ?? null)}|${o.times ? 'T' : ''}|${o.driveSecondsPerTile ?? ''}`;
     if (o.times || key !== this.key) { this.value = busLineRoutes(c, o); this.key = o.times ? '' : key; }
     return this.value;
   }
