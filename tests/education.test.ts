@@ -7,7 +7,7 @@ import { createEducation, EDUCATION_COST } from '../src/education.ts';
 
 function assertEducationEnvelope(raw: string) {
   const save = JSON.parse(raw);
-  assert.equal(save.version, 27); assert.equal(save.rulesVersion, 'chain-22');
+  assert.equal(save.version, save.happiness ? 28 : 27); assert.equal(save.rulesVersion, save.happiness ? 'chain-23' : 'chain-22');
   assert.equal(save.farmBaseVersion, 25);
   assert.ok(Number.isSafeInteger(save.farmSoilIndependentStartTick) && save.farmSoilIndependentStartTick <= save.tick);
   assert.equal(save.commercialBaseVersion, save.history ? 24 : 22);

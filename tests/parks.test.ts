@@ -132,7 +132,7 @@ test('no-park cities keep accounting and owner distributions deterministic throu
       if (d === 119 && historicalSoil) {
         assert.deepEqual(bills, [24000, 24000, 33000]);
         assert.deepEqual(payouts, expected.get(seed)!.amounts.map((amount, index) => [30 * (index + 1), 'firm:8', expected.get(seed)!.owner, amount]));
-        const { farmSoilIndependentStartTick: _soil, ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
+        const { farmSoilIndependentStartTick: _soil, happiness: _happiness, ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
         const amount = bills.reduce((n, value) => n + value, 0);
         const normalized = { ...state, accounts: { ...accounts, treasury: accounts.treasury + amount, upkeep: accounts.upkeep - amount } };
         assert.equal(createHash('sha256').update(JSON.stringify(normalized)).digest('hex'), expected.get(seed)!.hash, `seed ${seed} balanced-admission trajectory after accounting for service bills`);

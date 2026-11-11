@@ -7,7 +7,7 @@ import { buildingCardData } from '../src/building-card-data.ts';
 import { assertCommercialCardTrades, createBuildingCardsFixture, type CardTradeSection } from './building-cards-fixture.ts';
 
 const replay = createBuildingCardsFixture();
-const hash = (raw: string) => { const snapshot = JSON.parse(raw); snapshot.version = snapshot.farmBaseVersion; snapshot.rulesVersion = snapshot.version === 26 ? 'chain-21' : 'chain-20'; delete snapshot.farmBaseVersion; delete snapshot.farmSoilIndependentStartTick; return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'); };
+const hash = (raw: string) => { const snapshot = JSON.parse(raw); snapshot.version = snapshot.farmBaseVersion; snapshot.rulesVersion = snapshot.version === 26 ? 'chain-21' : 'chain-20'; delete snapshot.happiness; delete snapshot.farmBaseVersion; delete snapshot.farmSoilIndependentStartTick; return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'); };
 
 registerHooks({ load(url, context, nextLoad) { return url.endsWith('.css') ? { format: 'module', source: '', shortCircuit: true } : nextLoad(url, context); } });
 const { renderAgriculture } = await import('../src/context-panels.ts');

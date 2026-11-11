@@ -157,6 +157,11 @@ async function household(h, source, city = fixture) {
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-employment-row")].map(e=>({householdId:Number(e.dataset.householdId),firmId:Number(e.dataset.firmId),workers:Number(e.dataset.workers),occupation:e.dataset.occupation,rank:e.dataset.rank,skill:e.dataset.skill}))'), rows);
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-skill-row")].map(e=>({skill:e.dataset.skill,total:Number(e.dataset.total),employed:Number(e.dataset.employed),unemployed:Number(e.dataset.unemployed)}))'), ['general', 'manufacturing', 'retail'].map(skill => { const employed = rows.filter(a => a.skill === skill).reduce((n, a) => n + a.workers, 0); return { skill, total: h.workerSkills[skill], employed, unemployed: h.workerSkills[skill] - employed }; }));
   assert.equal(await evaluate('!!document.querySelector("#entity-content .cx-legacy-assumption")'), h.origin === 'legacy-v1');
+  const happiness = await evaluate(`(()=>{const host=document.querySelector('#entity-content'),section=host.querySelector('[data-card-section="happiness"]');return {exists:!!section,direct:section?.parentElement===host,inDetails:!!section?.closest('details'),text:section?.innerText??''};})()`);
+  assert.equal(happiness.exists,true); assert.equal(happiness.direct,true); assert.equal(happiness.inDetails,false);
+  assert.ok(happiness.text.includes('ความสุขในพื้นที่'));
+  if (city.happiness) { const row = city.happiness.rows.find(r => r.householdId === h.id); assert.ok(happiness.text.includes(`${row.score} / 100`)); assert.ok(happiness.text.includes('เป้าหมายปัจจุบัน')); assert.ok(happiness.text.includes('สวนใกล้บ้าน:')); assert.ok(happiness.text.includes('โรงเรียนที่เปิดใกล้บ้าน:')); assert.ok(happiness.text.includes('ไม่ใช่ประวัติการเดินทางล้มเหลวจริง') && happiness.text.includes('ยังไม่หักรถโดยสารหรือรถไฟ') || happiness.text.includes('ยังไม่มีงานที่ได้รับมอบหมาย')); }
+  else assert.ok(happiness.text.includes('ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง'));
 }
 async function home(city, b) {
   await place(b); const used = homeOccupancy(city, b.id), cap = housingCapacity(b);
@@ -253,6 +258,7 @@ try {
   }
 
   await load(concentratedRaw);
+  await household(concentrated.households[0], oldTower, concentrated); // Older saves have no history until the next day.
   await home(concentrated, oldTower); await screenshot('housing-before-move.png');
   await close(); await button('[data-speed="1"]');
   await evaluate(`(()=>{const target=${distributed.tick};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);

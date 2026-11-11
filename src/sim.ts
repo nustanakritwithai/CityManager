@@ -1,3 +1,5 @@
+import { prepareCommuteEstimates } from './resident-commute.ts';
+import { advanceHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
@@ -62,6 +64,8 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
 export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; commercialUnifiedBaseline?: {moneyEntries:number;cropEntries:number;goodsEntries:number};
   history?: CityHistory;
+  /** Versioned daily household wellbeing; older saves start neutrally on their next simulated day. */
+  happiness?: HappinessState;
   populationCapacityVersion?: 1;
   businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
@@ -1100,7 +1104,7 @@ function settleMonth(c: City) {
   const { retrained, departed } = reviewLabour(c);
   c.lastEvent = 'Month settled: actual firm wages, household rent, water/power bills and taxes are in the money ledger.'
     + (retrained ? ` ${retrained} idle specialist worker(s) retrained as general workers for open jobs in the other trade.` : '')
-    + (departed ? ` ${departed} household(s) left the city after two months without paid work; their savings left with them.` : '');
+    + (departed ? ` ${departed} household(s) left after prolonged unemployment or severe unhappiness; their savings left with them.` : '');
 }
 
 /**
@@ -1131,8 +1135,8 @@ export const DEPARTURE_SHARE = .2;
  * their trade while the other trade has funded openings retrains as a general worker (career
  * change). A household with no worker in any job, no wage in the last two settlements and in
  * the city for at least that long leaves with its savings (to outside), freeing its home. Shop
- * owners and households that arrived recently stay; at most a fifth leave in one month, and the
- * city never drops below the floor.
+ * owners and legacy households stay; arrivals can also leave after sustained
+ * severe unhappiness. At most a fifth leave per month, subject to the floor.
  */
 function reviewLabour(c: City): { retrained: number; departed: number } {
   const open = { ...admissionFacts(c).vacanciesByZone };
@@ -1151,7 +1155,8 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   }
   for (const [wallet,tick] of Object.entries(c.history?.lastIncome??{})) if(tick>since) paid.add(wallet);
   const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
-  const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet))
+  const distressed = new Set(c.happiness?.rows.filter(row => row.distressDays >= HAPPINESS_DEPARTURE_DAYS).map(row => row.householdId) ?? []);
+  const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && (distressed.has(h.id) || householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet)))
     .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
   let departed = 0;
   for (const h of leaving) {
@@ -1160,7 +1165,11 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
     if (c.education) { if (!payEducationWages(c, undefined, h.wallet)) continue; forgetHouseholdEducation(c.education, h.id); }
     for (const f of c.firms) payWages(c, f, h.wallet); // no claim should remain after settlement; pay any that does
     transfer(c, h.wallet, 'outside', balance(c, h.wallet), 'Emigration savings');
+    c.employment = c.employment.filter(a => a.householdId !== h.id);
+    c.ownerLabor = c.ownerLabor.filter(a => a.householdId !== h.id);
+    for (const p of c.parks) if (p.staffing) p.staffing.allocations = p.staffing.allocations.filter(a => a.householdId !== h.id);
     c.households = c.households.filter(x => x.id !== h.id);
+    if (c.happiness) c.happiness.rows = c.happiness.rows.filter(row => row.householdId !== h.id);
     c.migration.departures = (c.migration.departures ?? 0) + 1;
     departed++;
   }
@@ -1212,9 +1221,14 @@ export function rebalanceHousing(c: City): number {
     const at = residents.get(h.home!) ?? []; at.push(h); residents.set(h.home!, at);
   }
   const moved = new Set<number>();
+  let commute: ReturnType<typeof prepareCommuteEstimates> | undefined;
+  // Strictly better nearby amenities permit a single household to move; the
+  // older occupancy rule may only move to an equally good or better location.
+  const quality = new Map(homes.map(home => [home.id, homeAmenities(c, home.cell).points]));
   const sources = [...homes].sort((a, b) => (occupied.get(b.id)?.households ?? 0) - (occupied.get(a.id)?.households ?? 0) || a.cell - b.cell || a.id - b.id);
   const candidates = homes.flatMap(destination => sources.filter(source =>
-    (occupied.get(source.id)?.households ?? 0) >= (occupied.get(destination.id)?.households ?? 0) + 2,
+    source.id !== destination.id && ((quality.get(destination.id)! >= quality.get(source.id)! + 10) ||
+      (quality.get(destination.id)! >= quality.get(source.id)! && (occupied.get(source.id)?.households ?? 0) >= (occupied.get(destination.id)?.households ?? 0) + 2)),
   ).map(source => ({ source, destination })));
   // Bound failed checks as well as moves. Rotate through the entire candidate
   // list so repeatedly unusable homes cannot starve a later feasible pair.
@@ -1223,11 +1237,20 @@ export function rebalanceHousing(c: City): number {
   for (let attempt = 0; attempt < Math.min(candidates.length, HOUSING_RELOCATION_ATTEMPTS) && moved.size < HOUSING_RELOCATION_LIMIT; attempt++) {
     const { source, destination } = candidates[(offset + attempt) % candidates.length];
     const used = occupied.get(destination.id) ?? { households: 0, persons: 0 }, sourceUsed = occupied.get(source.id)!;
-    // Recheck after every earlier move. The sum of squared household counts
-    // strictly decreases, so unchanged housing cannot oscillate.
-    if (sourceUsed.households < used.households + 2) continue;
-    const h = residents.get(source.id)?.find(h => !moved.has(h.id) && canAccommodate(housingCapacity(destination), used, h.members));
-    if (!h || !moveHousehold(c, h.id, destination.id).ok) continue;
+    // Recheck after every earlier move. Quality strictly improves, or equal
+    // quality reduces the sum of squared occupancies, preventing oscillation.
+    const improvement = quality.get(destination.id)! - quality.get(source.id)!;
+    if (improvement < 10 && (improvement < 0 || sourceUsed.households < used.households + 2)) continue;
+    const eligible = residents.get(source.id)?.filter(h => !moved.has(h.id) && canAccommodate(housingCapacity(destination), used, h.members)) ?? [];
+    // Rotate who gets evaluated so an unsuitable first household cannot starve others.
+    const h = eligible[(Math.floor(c.tick / HOUSING_RELOCATION_INTERVAL) + attempt) % eligible.length];
+    if (!h) continue;
+    commute ??= prepareCommuteEstimates(c);
+    const current = happinessTarget(homeAmenities(c, source.cell), commute.estimates.get(h.id));
+    const proposed = happinessTarget(homeAmenities(c, destination.cell), commute.atHome(h.id, destination.cell));
+    if (proposed < current || !moveHousehold(c, h.id, destination.id).ok) continue;
+    // Earlier moves change modeled link loads. Update the reusable graph before the next decision.
+    commute.moved(h.id, destination.cell);
     occupied.set(source.id, { households: sourceUsed.households - 1, persons: sourceUsed.persons - h.members });
     occupied.set(destination.id, { households: used.households + 1, persons: used.persons + h.members });
     residents.set(source.id, residents.get(source.id)!.filter(value => value !== h));
@@ -1256,16 +1279,21 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (used.households >= room.households || used.persons >= room.persons) reasons.push('ความจุครัวเรือนหรือจำนวนคนเต็มแล้ว การเพิ่มระดับเพิ่มเฉพาะความจุ');
   if (c.households.some(h => h.home === null)) reasons.push('ครัวเรือนที่ไร้บ้านจะได้รับการจัดบ้านก่อนรับครัวเรือนใหม่');
   if (c.households.length >= MAX_CITY_HOUSEHOLDS) reasons.push('ถึงความจุสูงสุดตามจำนวนแปลงและระดับที่อยู่อาศัยของแผนที่แล้ว');
+  if (c.happiness?.rows.length && c.happiness.rows.reduce((sum,row)=>sum+row.score,0) / c.happiness.rows.length < 35) reasons.push('ยังไม่รับครัวเรือนใหม่เพราะความสุขเฉลี่ยต่ำกว่า 35 / 100 เมื่อเมืองดีขึ้นจึงรับได้อีก');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
   reasons.push('บ้านที่ว่างหรือมีครัวเรือนน้อยกว่าได้รับการจัดบ้านก่อนอาคารที่มีคนมาก');
-  reasons.push(`ทุก ${HOUSING_RELOCATION_INTERVAL} วัน กระจายครัวเรือนเดิมได้ไม่เกิน ${HOUSING_RELOCATION_LIMIT} ครัวเรือน จากบ้านที่มีมากกว่าปลายทางอย่างน้อย 2 ครัวเรือน ต้องมีที่ว่าง ถนน น้ำไฟ และไม่ตัดบริการอาคารอื่น ไม่มีการเพิ่มคนหรือเงิน`);
+  reasons.push(`ทุก ${HOUSING_RELOCATION_INTERVAL} วัน ย้ายครัวเรือนได้ไม่เกิน ${HOUSING_RELOCATION_LIMIT} ครัวเรือน ไปบ้านที่ใกล้สวนหรือโรงเรียนที่เปิดดีกว่า หรือกระจายจากบ้านที่มีมากกว่าปลายทางอย่างน้อย 2 ครัวเรือนโดยไม่ลดความใกล้สิ่งอำนวยความสะดวก ต้องมีที่ว่าง ถนน น้ำไฟ และไม่ตัดบริการอาคารอื่น`);
+  reasons.push('ความสุขลดหรือฟื้นช้า ตามความใกล้สวนและโรงเรียน รวมถึงเวลาและเส้นทางไปทำงานที่แบบจำลองประมาณจากถนน ไม่ใช่การบันทึกการเดินทางล้มเหลวจริง');
+  reasons.push(`สิ้นเดือน ครัวเรือนที่ย้ายเข้ามาและไม่มีธุรกิจของตนอาจย้ายออกเมื่อความสุขต่ำกว่า 30 ติดต่อกัน ${HAPPINESS_DEPARTURE_DAYS} วัน โดยยังจำกัดจำนวนย้ายออกต่อเดือนและรักษาจำนวนครัวเรือนขั้นต่ำ`);
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
   reasons.push(`สิ้นเดือน: แรงงานเฉพาะทางที่สายงานเดิมไม่มีตำแหน่งว่างแต่อีกสายมี จะเปลี่ยนเป็นแรงงานทั่วไป ครัวเรือนที่ไม่มีงานได้ค่าจ้างเลย ${DEPARTURE_MONTHS} เดือนจะย้ายออกพร้อมเงินออม (เจ้าของร้านและผู้มาใหม่ไม่ย้าย เมืองเหลืออย่างน้อย ${DEPARTURE_FLOOR} ครัวเรือน)`);
   return reasons;
 }
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
+  // A severely unhappy city does not immediately replace every departure.
+  if (c.happiness?.rows.length && c.happiness.rows.reduce((sum,row)=>sum+row.score,0) / c.happiness.rows.length < 35) return;
   if (c.households.length >= MAX_CITY_HOUSEHOLDS || c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
   const facts = admissionFacts(c);
   if (!facts.bootstrap && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
@@ -1390,6 +1418,7 @@ function advanceToReview(c: City): void {
   c.tick++; for (const b of c.buildings) b.age++;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
   rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c);
+  c.happiness = advanceHappiness(c, c.happiness);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
 }
@@ -1510,7 +1539,10 @@ export function serialize(c: City, market?: City['market']): string {
   const mapped = c.cells.length === EXPANDED_MAP_CELLS ? {...commercial, mapBaseVersion:25, mapLayout:'north-24x28', version:26, rulesVersion:'chain-21'} : commercial;
   const boundary = c.farmSoilIndependentStartTick ?? c.tick;
   if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary > c.tick) throw Error('Invalid soil-independent farm boundary');
-  const json = JSON.stringify({...mapped, farmSoilIndependentStartTick: boundary, farmBaseVersion: mapped.version, version:27, rulesVersion:'chain-22'});
+  const { happiness, ...cityFields } = mapped;
+  const farm = {...cityFields, farmSoilIndependentStartTick: boundary, farmBaseVersion: mapped.version, version:27, rulesVersion:'chain-22'};
+  if (happiness) validateHappiness(c, happiness);
+  const json = JSON.stringify(happiness ? {...farm, happiness, version:28, rulesVersion:'chain-23'} : farm);
   if (json.length > 12_000_000) throw new Error('City save exceeds the processing limit. Server save is unconfirmed; keep this page open.');
   return json;
 }
@@ -1796,6 +1828,14 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 28) {
+    const envelope = parsed as Record<string, unknown>;
+    if (envelope.rulesVersion !== 'chain-23' || !envelope.happiness) throw Error('Invalid happiness save version');
+    const { happiness, ...rest } = envelope;
+    const city = deserializeVersioned(JSON.stringify({...rest, version:27, rulesVersion:'chain-22'}), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap, soilIndependent);
+    validateHappiness(city, happiness); city.happiness = happiness; return city;
+  }
+  if (parsed && typeof parsed === 'object' && 'happiness' in parsed) throw Error('Happiness requires save v28');
   if (version === 27) {
     const envelope = parsed as Record<string, unknown>;
     const boundary = envelope.farmSoilIndependentStartTick;
@@ -1946,7 +1986,7 @@ export function busValidationView(c: City): BusValidationView {
 export function deserialize(json: string): City {
   const header=JSON.parse(json);
   if (header?.goalRulesVersion !== undefined && header.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
-  if(header?.history&&header.version!==24&&header.version!==25&&header.version!==26&&header.version!==27)throw Error('Unsupported or corrupt history checkpoint: requires save v24');
+  if(header?.history&&header.version!==24&&header.version!==25&&header.version!==26&&header.version!==27&&header.version!==28)throw Error('Unsupported or corrupt history checkpoint: requires save v24');
   const city = deserializeVersioned(json);
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
