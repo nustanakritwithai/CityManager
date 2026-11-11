@@ -38,6 +38,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const heldPointers = new Map<number, HTMLElement>(), heldKeys = new Map<string, HTMLElement>();
 const cash = (value: number, signed = false) => `${formatMoney(value, signed)} ฿`;
 const count = (value: number) => value.toLocaleString('th-TH');
+const happinessPoints = new Intl.NumberFormat('th-TH', { signDisplay: 'exceptZero' });
 
 /** UI-only feedback survives a native click's deferred same-context refresh. */
 export function showOwnerFinanceResult(firmId: number, message: string): void {
@@ -382,6 +383,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     detail.append(el('p', 'happiness-summary', `สวนใกล้บ้าน: ${facts.parkNearby ? 'มี' : 'ไม่มี'} · โรงเรียนที่เปิดใกล้บ้าน: ${facts.schoolNearby ? 'มี' : 'ไม่มี'} (ระยะแมนฮัตตันไม่เกิน 6 ช่องสำหรับสวน และ 8 ช่องสำหรับโรงเรียนที่มีที่เรียนเปิดจริง ไม่ใช่การนับครั้งที่เข้าใช้)`));
     detail.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน: ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · สมมติแรงงานที่มีงาน 75% ใช้รถหนึ่งคันต่อคนในชั่วโมงเร่งด่วน ยังไม่หักรถโดยสารหรือรถไฟ ไม่ใช่ประวัติการเดินทางล้มเหลวจริง` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
     detail.append(el('p', 'cx-detail-note', 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
+    detail.append(el('p', 'happiness-summary', `ผลต่อเป้าหมายจากภาษีค่าจ้าง ${happinessPoints.format(facts.wageTaxPoints)} คะแนน · ภาษีกำไรกิจการ ${happinessPoints.format(facts.profitTaxPoints)} คะแนน`));
     detail.append(el('p', 'cx-detail-note', household.origin === 'legacy-v1' ? 'ครัวเรือนจากเมืองรุ่นเดิมได้รับการคุ้มครองจากการย้ายออก' : city.firms.some(f => f.owner?.householdId === household.id) ? 'เจ้าของกิจการได้รับการคุ้มครองจากการย้ายออก' : 'ถ้าคะแนนต่ำกว่า 30 ต่อเนื่องครบ 30 วัน อาจย้ายออกเมื่อสิ้นเดือน โดยมีเพดานจำนวนย้ายออกและจำนวนครัวเรือนขั้นต่ำ'));
     output.push(detail);
   } else { const detail=section('ความสุขในพื้นที่'); detail.classList.add('bc-happiness-source'); detail.append(el('p', 'happiness-summary', 'ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง')); output.push(detail); }

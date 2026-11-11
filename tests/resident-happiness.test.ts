@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, departureDay, departureForecast, deserialize, householdWorkerCount, serialize, step, rebalanceHousing, SIZE, type City } from '../src/sim.ts';
-import { HAPPINESS_DEPARTURE_DAYS, happinessTargets } from '../src/resident-happiness.ts';
+import { buildCampus, buildPark, createCity, departureDay, departureForecast, deserialize, householdWorkerCount, serialize, step, rebalanceHousing, SIZE, type City } from '../src/sim.ts';
+import { HAPPINESS_DEPARTURE_DAYS, happinessTarget, happinessTargets } from '../src/resident-happiness.ts';
+import { scheduleCityTaxes } from '../src/city-tax-policy.ts';
+import { peopleOf } from '../src/education.ts';
 
 import { keepSupplied } from './plants.ts';
 
@@ -27,6 +29,69 @@ test('wellbeing starts only when old saves advance and rejects corrupt or mismat
  const c=createCity(12), old=serialize(c); assert.equal(JSON.parse(old).version,27); assert.equal(deserialize(old).happiness,undefined);
  step(c); const raw=serialize(c); assert.equal(JSON.parse(raw).version,28); assert.deepEqual(deserialize(raw),c);
  for(const mutate of [(x:any)=>x.happiness.day++, (x:any)=>x.happiness.rows.push({householdId:999,score:50,distressDays:0}), (x:any)=>x.happiness.version=2]) {const x=JSON.parse(raw);mutate(x);assert.throws(()=>deserialize(JSON.stringify(x)));}
+});
+
+test('new rates move wage earners and business owners gradually from the effective day, including after reload', () => {
+  const neutral = createCity(42);
+  advance(neutral, 89);
+  const higher = deserialize(serialize(neutral)), lower = deserialize(serialize(neutral));
+  const owner = neutral.firms.find(firm => firm.owner)!.owner!.householdId;
+  const employee = neutral.employment.find(job => job.householdId !== owner)!.householdId;
+  const score = (city: City, id: number) => city.happiness!.rows.find(row => row.householdId === id)!.score;
+  scheduleCityTaxes(higher, { wage: 30, profit: 40 });
+  scheduleCityTaxes(lower, { wage: 0, profit: 0 });
+  assert.deepEqual(happinessTargets(higher), happinessTargets(neutral));
+  assert.deepEqual(happinessTargets(lower), happinessTargets(neutral));
+  step(neutral); step(higher); step(lower);
+  assert.deepEqual(higher.happiness, neutral.happiness);
+  assert.deepEqual(lower.happiness, neutral.happiness);
+  const reloaded = deserialize(serialize(higher));
+  assert.deepEqual(reloaded.happiness, higher.happiness);
+
+  step(neutral); step(higher); step(lower); step(reloaded);
+  assert.equal(serialize(reloaded), serialize(higher));
+  const high = happinessTargets(higher), low = happinessTargets(lower), baseline = happinessTargets(neutral);
+  for (const id of [owner, employee]) {
+    assert.equal(high.get(id)!.target, baseline.get(id)!.target - 20);
+    assert.equal(low.get(id)!.target, baseline.get(id)!.target + (id === owner ? 20 : 10));
+    assert.equal(score(higher, id), score(neutral, id) - 1);
+    assert.equal(score(lower, id), score(neutral, id) + 2);
+  }
+  assert.equal(high.get(owner)!.wageTaxPoints, 0, 'an unpaid owner post is not a wage job');
+  assert.equal(high.get(employee)!.profitTaxPoints, 0);
+  const arrival = neutral.households.find(h => !neutral.employment.some(job => job.householdId === h.id) && h.id !== owner)!;
+  assert.equal(high.get(arrival.id)!.target, baseline.get(arrival.id)!.target);
+});
+
+test('park and campus jobs qualify for wage tax effects, study alone is exempt, and targets are bounded', () => {
+  const city = createCity(42);
+  scheduleCityTaxes(city, { wage: 11, profit: 21 });
+  advance(city, 91);
+  const owner = city.firms.find(firm => firm.owner)!.owner!.householdId;
+  const [parkWorker, teacher, student] = city.households.filter(h => h.id !== owner);
+  assert.ok(buildPark(city, 0).ok);
+  const park = city.parks[0];
+  const schoolSite = city.cells.findIndex((cell, index) => !cell.road && cell.zone === null
+    && [index - 1, index + 1, index - SIZE, index + SIZE].some(adjacent => city.cells[adjacent]?.road));
+  assert.ok(buildCampus(city, schoolSite, 'school').ok);
+  const campus = city.education!.campuses[0];
+  // Isolate the household roles used by the happiness projection.
+  city.employment = [];
+  park.staffing = { workDays: {}, allocations: [{ householdId: parkWorker.id, parkId: park.id, skill: 'general', workers: 1 }] };
+  city.education!.people = [
+    { ...peopleOf(city.education!, teacher.id), campusId: campus.id, teacher: 1 },
+    { ...peopleOf(city.education!, student.id), campusId: campus.id, school: 1 },
+    { ...peopleOf(city.education!, owner), campusId: campus.id, teacher: 1 },
+  ];
+  const targets = happinessTargets(city);
+  assert.equal(targets.get(parkWorker.id)!.wageTaxPoints, -1);
+  assert.equal(targets.get(teacher.id)!.wageTaxPoints, -1);
+  assert.equal(targets.get(student.id)!.wageTaxPoints, 0);
+  assert.equal(targets.get(owner)!.wageTaxPoints, -1);
+  assert.equal(targets.get(owner)!.profitTaxPoints, -1);
+  assert.equal(happinessTarget({ parkNearby: true, schoolNearby: true, points: 20 }, undefined, 30), 100);
+  const inaccessible = { householdId: owner, workers: 1, reachableWorkers: 0, unreachableWorkers: 1, averageSeconds: null, freeFlowSeconds: null };
+  assert.equal(happinessTarget({ parkNearby: false, schoolNearby: false, points: 0 }, inaccessible, -40), 0);
 });
 test('a single household can move to an empty home near a park without later oscillation',()=>{
  const c=createCity(17,{starter:false}); for(let x=0;x<=10;x++)c.cells[12*SIZE+x].road=true;

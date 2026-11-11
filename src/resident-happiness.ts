@@ -3,11 +3,23 @@
 import type { City } from './sim.ts';
 import { expandedCellCoordinate } from './expanded-map-grid.ts';
 import { estimateHouseholdCommutes, type CommuteEstimate } from './resident-commute.ts';
+import { DEFAULT_TAX_RATES, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 
 export const HAPPINESS_BASE = 80, HAPPINESS_DISTRESS = 30, HAPPINESS_DEPARTURE_DAYS = 30;
 export type HappinessRow = { householdId:number; score:number; distressDays:number };
 export type HappinessState = { version:1; day:number; rows:HappinessRow[] };
 export type HomeAmenity = { parkNearby:boolean; schoolNearby:boolean; points:number };
+type HappinessTarget = {
+  target: number;
+  parkNearby: boolean;
+  schoolNearby: boolean;
+  workers: number;
+  unreachableWorkers: number;
+  commuteSeconds: number | null;
+  delaySeconds: number | null;
+  wageTaxPoints: number;
+  profitTaxPoints: number;
+};
 const distance = (a:number,b:number) => {const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b); return Math.abs(x.x-y.x)+Math.abs(x.z-y.z);};
 /** Provisional walking-distance proxy: nearby facilities, not measured use. */
 export function homeAmenities(city:City, cell:number):HomeAmenity {
@@ -15,23 +27,58 @@ export function homeAmenities(city:City, cell:number):HomeAmenity {
   const schoolNearby=!!city.education?.campuses.some(c=>c.kind==='school' && c.open && c.report.operatingSeats>0 && distance(cell,c.cell)<=8);
   return {parkNearby,schoolNearby,points:(parkNearby?10:0)+(schoolNearby?10:0)};
 }
-export function happinessTarget(amenities:HomeAmenity, commute?:CommuteEstimate) {
+/** Tax points apply once per household and use the original rates as neutral. */
+export function taxHappinessPoints(rates: TaxRates) {
+  return {
+    wage: DEFAULT_TAX_RATES.wage - rates.wage,
+    profit: DEFAULT_TAX_RATES.profit - rates.profit,
+  };
+}
+export function happinessTarget(amenities:HomeAmenity, commute?:CommuteEstimate, taxPoints = 0) {
   const inaccessible=commute?.workers ? Math.round(60*commute.unreachableWorkers/commute.workers):0;
   // Link costs assume 100 m tiles and 40 km/h. Long trips and congestion use
   // the same estimated seconds; no unsupported claim of actual failure.
   const long=(commute?.averageSeconds??0)>300?10:0;
   const delay=commute?.averageSeconds != null && commute.freeFlowSeconds != null && commute.averageSeconds - commute.freeFlowSeconds >= 10 && commute.averageSeconds >= commute.freeFlowSeconds * 1.02 ? 10 : 0;
-  return Math.max(0,Math.min(100,60+amenities.points-inaccessible-long-delay));
+  return Math.max(0,Math.min(100,60+amenities.points-inaccessible-long-delay+taxPoints));
 }
-export function happinessTargets(city:City): Map<number,{target:number;parkNearby:boolean;schoolNearby:boolean;workers:number;unreachableWorkers:number;commuteSeconds:number|null;delaySeconds:number|null}> {
- const commutes=new Map(estimateHouseholdCommutes(city).map(row=>[row.householdId,row]));
- const homes=new Map(city.buildings.map(b=>[b.id,b.cell]));
- const result=new Map<number,{target:number;parkNearby:boolean;schoolNearby:boolean;workers:number;unreachableWorkers:number;commuteSeconds:number|null;delaySeconds:number|null}>();
- for(const h of city.households){
-  const cell=h.home===null?undefined:homes.get(h.home), amenities=cell===undefined?{parkNearby:false,schoolNearby:false,points:0}:homeAmenities(city,cell), commute=commutes.get(h.id);
-  result.set(h.id,{target:happinessTarget(amenities,commute),parkNearby:amenities.parkNearby,schoolNearby:amenities.schoolNearby,workers:commute?.workers??0,unreachableWorkers:commute?.unreachableWorkers??0,commuteSeconds:commute?.averageSeconds??null,delaySeconds:commute?.averageSeconds != null && commute.freeFlowSeconds != null ? Math.max(0,commute.averageSeconds-commute.freeFlowSeconds) : null});
- }
- return result;
+export function happinessTargets(city: City): Map<number, HappinessTarget> {
+  const commutes = new Map(estimateHouseholdCommutes(city).map(row => [row.householdId, row]));
+  const homes = new Map(city.buildings.map(b => [b.id, b.cell]));
+  const tax = taxHappinessPoints(taxRatesAt(city.taxPolicy, city.tick));
+  const earnWages = new Set<number>();
+  const ownBusinesses = new Set<number>();
+  if (tax.wage) {
+    for (const job of city.employment) if (job.workers > 0) earnWages.add(job.householdId);
+    for (const park of city.parks) {
+      for (const job of park.staffing?.allocations ?? []) if (job.workers > 0) earnWages.add(job.householdId);
+    }
+    for (const person of city.education?.people ?? []) if (person.teacher + person.professor > 0) earnWages.add(person.householdId);
+  }
+  if (tax.profit) {
+    for (const firm of city.firms) if (firm.owner) ownBusinesses.add(firm.owner.householdId);
+  }
+  const result = new Map<number, HappinessTarget>();
+  for (const h of city.households) {
+    const cell = h.home === null ? undefined : homes.get(h.home);
+    const amenities = cell === undefined ? { parkNearby: false, schoolNearby: false, points: 0 } : homeAmenities(city, cell);
+    const commute = commutes.get(h.id);
+    const wageTaxPoints = earnWages.has(h.id) ? tax.wage : 0;
+    const profitTaxPoints = ownBusinesses.has(h.id) ? tax.profit : 0;
+    result.set(h.id, {
+      target: happinessTarget(amenities, commute, wageTaxPoints + profitTaxPoints),
+      parkNearby: amenities.parkNearby,
+      schoolNearby: amenities.schoolNearby,
+      workers: commute?.workers ?? 0,
+      unreachableWorkers: commute?.unreachableWorkers ?? 0,
+      commuteSeconds: commute?.averageSeconds ?? null,
+      delaySeconds: commute?.averageSeconds != null && commute.freeFlowSeconds != null
+        ? Math.max(0, commute.averageSeconds - commute.freeFlowSeconds) : null,
+      wageTaxPoints,
+      profitTaxPoints,
+    });
+  }
+  return result;
 }
 /** One update per economic day. Recovery is faster than deterioration. */
 export function advanceHappiness(city:City, previous?:HappinessState):HappinessState {
