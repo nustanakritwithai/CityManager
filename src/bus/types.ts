@@ -25,6 +25,8 @@ export function busEnabled(search = globalThis.location?.search ?? '', storage?:
 export const BUS_WALK_RADIUS = 4, BUS_WALK_MIN_PER_CELL = 1.25;
 /** Live buses cruise at 80% of the road-car free-flow speed. */
 export const BUS_LIVE_DRIVE_SECONDS_PER_TILE = 1 / (TRAFFIC_SPACING.maxSpeedTiles * 0.8);
+/** The visible fleet uses a real-time clock where one minute is 60 played seconds. */
+export const BUS_LIVE_TIMING = Object.freeze({ driveSecondsPerTile: BUS_LIVE_DRIVE_SECONDS_PER_TILE, dwellMinutes: 5 / 60 });
 /** Minimum kerb dwell per stop call, game minutes. */
 export const BUS_DWELL_MIN = 1;
 /** Service window, minute of day [from, to). Outside it buses return to their depot. */

@@ -111,7 +111,7 @@ test('line overlay: polyline, headway, pole vs shelter, paused reason is dashed'
   const running = busOverlay(city).lines[0]!;
   assert.equal(running.paused, false); assert.equal(running.status, 'running'); assert.equal(running.reason, undefined);
   assert.equal(typeof running.headwayMinutes, 'number'); assert.ok(running.headwayMinutes! > 0);
-  assert.match(running.caption, /ทุก .* นาที/);
+  assert.match(running.caption, /ทุก [1-9]\d* วินาที/);
   assert.equal(busLineCaption(running), running.caption);
   for (let i = 1; i < running.polyline.length; i++) {
     const a = running.polyline[i - 1]!, b = running.polyline[i]!;

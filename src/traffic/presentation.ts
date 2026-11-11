@@ -182,9 +182,12 @@ export class TrafficPresentation {
  allowBusMovement(id:string,from:PresentationObstacle,to:PresentationObstacle,others:readonly PresentationObstacle[]=[],samples:readonly PresentationObstacle[]=[],turns:readonly {id:string;samples:readonly PresentationObstacle[]}[]=[]):boolean {
   if(turns.length>3||turns.some(t=>t.samples.length<2||t.samples.length>1154)||new Set(turns.map(t=>t.id)).size!==turns.length)throw Error('Invalid bounded bus turn intents');
   this.busPositions.set(id,from);this.peersForSelection=[{...from,id},...others];
-  const wasSelected=this.selectedOwner===id;let pendingChanged=false;
+  const wasSelected=this.selectedOwner===id;let pendingChanged=false,releasedGrant=false;
   const keep=new Set([id,...turns.map(t=>`${id}:turn:${t.id}`)]);
-  for(const [key,r]of this.reservations)if(r.owner===id&&!keep.has(key)){if(!this.granted(r))pendingChanged=true;this.reservations.delete(key);}
+  for(const [key,r]of this.reservations)if(r.owner===id&&!keep.has(key)){
+   if(this.granted(r))releasedGrant=true;else pendingChanged=true;
+   this.reservations.delete(key);
+  }
   const sweep=(points:readonly PresentationObstacle[])=>points.slice(1).map((p,i)=>presentationSweep(points[i],p));
   const immediate=sweep([from,...samples,to]);
   const plans=turns.length?turns.map(t=>{const key=`${id}:turn:${t.id}`;return {key,boxes:this.reservations.get(key)?.boxes??sweep(t.samples),turnId:t.id};}):[{key:id,boxes:immediate,turnId:undefined}];
@@ -197,6 +200,9 @@ export class TrafficPresentation {
    const domain=[...this.reservations.values()].filter(r=>r.owner===this.selectedOwner).flatMap(r=>r.boxes),current=footprint(from);
    const stillInside=domain.some(b=>intersects(current,b));
    if(!stillInside)this.selectedBusEpoch.delete(id);
+   // A granted bus can enter while this request is draining. Keep its escape
+   // rights when the old token ends but its body still occupies the new corridor.
+   else if(releasedGrant)this.selectedBusEpoch.add(id);
    if(stillInside&&!this.selectedBusEpoch.has(id)){const known=this.selectedPeerBodies.findIndex(b=>Math.abs(b.minX-current.minX)+Math.abs(b.maxX-current.maxX)+Math.abs(b.minZ-current.minZ)+Math.abs(b.maxZ-current.maxZ)<EPS);if(known>=0){this.selectedPeerBodies.splice(known,1);this.selectedBusEpoch.add(id);}}
    evacuating=this.selectedBusEpoch.has(id);
   }
