@@ -140,6 +140,8 @@ async function cell(index) {
   const p = await evaluate(`(async()=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const p=window.cityManager.cellScreen(${index});return{...p,hit:document.elementFromPoint(p.x,p.y)?.id}})()`);
   assert.equal(p.hit, 'city-canvas', `Canvas parcel ${index} is reachable`);
   await click(p.x, p.y);
+  await until('document.querySelector("#inspector").dataset.open==="true" || !document.querySelector("#selection-actions").hidden');
+  if (await evaluate('!document.querySelector("#selection-actions").hidden')) await button('#selection-actions button:nth-of-type(2)');
   await until('document.querySelector("#inspector").dataset.open==="true"');
   await paints();
 }

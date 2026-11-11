@@ -1,5 +1,7 @@
 # Factory progression proposal
 
+> Current persistence: cities save only through the server. Browser-slot, backup and import instructions below describe historical releases and are no longer available. Legacy snapshot readers remain supported; existing browser data is left untouched.
+
 Source reviewed: `cc5c13a683e73cd8d275d22d5413432581f13bbf` (main, after parks PR #71). The proposed balance is not yet validated for release.
 
 The accompanying branch is a candidate for integration review, not release-ready. Its v17 / chain-12 stamp is a local placeholder only: the serial integrator assigns the actual combined schema. It does not yet read housing's provisional v16. The serial integrator must reconcile all shared files and verify exact-head behavior before merge.

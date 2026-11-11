@@ -18,7 +18,7 @@ const expectBad = (c: City, mutate: (x: City) => void) => {
 test('old city migrates only after validation, preserving firms, ledgers and funds across v25 and session roundtrips', () => {
   const c = old(), before = JSON.stringify(c), raw = serialize(c);
   assert.equal(c.commercialUnifiedStartTick, c.tick);
-  assert.equal(JSON.parse(raw).version, 25);
+  assert.equal(JSON.parse(raw).version, 27);
   assert.equal(serialize(deserialize(raw)), raw);
   const restored = deserializeParkSession(serializeParkSession(c, createParkRuntime(c)));
   assert.equal(JSON.stringify(restored.city), before);

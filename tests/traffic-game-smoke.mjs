@@ -196,7 +196,15 @@ try{
  assert.equal(await runThreeDays('?traffic=1'),await runThreeDays('?traffic=0'));checks.push('Query OFF lasts for this visit, reload restores default, and ON/OFF play identical three-day city/economy replay');
  // Paused road construction must update the actual model snapshot without
  // advancing its game clock or changing anything beyond ordinary road costs.
- setStage('paused road construction');d=await navigate(roadRaw,'?traffic=1');await waitModel();const beforeRoad=(await diag()).traffic;assert.equal(beforeRoad.roads,road.cells.filter(c=>c.road).length);await button('[data-tool="road"]');await tapCell(cell(5,13));await tapCell(cell(10,13));await until(`window.cityManager.traffic()?.roads===${roadExpected.cells.filter(c=>c.road).length}`);await waitPausedModel();d=await diag();assert.equal(d.traffic.step,beforeRoad.step);assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(roadExpected));checks.push('Real road tool updates paused game topology while preserving ordinary construction accounting');
+ setStage('paused road construction');d=await navigate(roadRaw,'?traffic=1');await waitModel();
+ // This empty-city fixture intentionally opens the teaching card. Dismiss it
+ // through the same native control a player uses before targeting covered land.
+ if(await evaluate('!!document.querySelector("#guide-card:not([hidden])")')){
+   const beforeDismiss=await evaluate('window.cityManager.snapshot()');await button('#guide-dismiss');
+   assert.equal(await evaluate('document.querySelector("#guide-card").hidden'),true);
+   assert.equal(await evaluate('window.cityManager.snapshot()'),beforeDismiss,'Dismissing advice does not alter the road fixture');
+ }
+ const beforeRoad=(await diag()).traffic;assert.equal(beforeRoad.roads,road.cells.filter(c=>c.road).length);await button('[data-tool="road"]');await tapCell(cell(5,13));await tapCell(cell(10,13));await until(`window.cityManager.traffic()?.roads===${roadExpected.cells.filter(c=>c.road).length}`);await waitPausedModel();d=await diag();assert.equal(d.traffic.step,beforeRoad.step);assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(roadExpected));checks.push('Real road tool updates paused game topology while preserving ordinary construction accounting');
  }
  if(testPlan.bypass){
  // Real player input builds a connected bypass. One game minute/second keeps

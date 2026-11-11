@@ -15,10 +15,10 @@ test('old commercial migration preserves the approved baseline compaction projec
   const old=JSON.parse(oldRaw),c=fresh();
   assert.equal(c.commercialUnifiedStartTick,old.tick);
   // Snapshot of the approved main64a1763 loader, INCLUDING its bounded history compaction.
-  const {commercialUnifiedStartTick,commercialUnifiedBaseline,...priorProjection}=c;
+  const {farmSoilIndependentStartTick,commercialUnifiedStartTick,commercialUnifiedBaseline,...priorProjection}=c;
   assert.equal(createHash('sha256').update(JSON.stringify(priorProjection)).digest('hex'),'72f0e5ba0e51c557d9aca8e47f767f550f0f0435724750b097eff306d268bf06');
   for(const key of ['accounts','firms','buildings','households','ownerLabor','employment','goods','crops','rng','nextId'] as const)assert.deepEqual(c[key],old[key]);
-  const before=JSON.stringify(c),raw=serialize(c);assert.equal(JSON.parse(raw).version,25);
+  const before=JSON.stringify(c),raw=serialize(c);assert.equal(JSON.parse(raw).version,27);
   assert.equal(JSON.stringify(deserialize(raw)),before);
   const runtime=createParkRuntime(c);assert.deepEqual(deserializeParkSession(serializeParkSession(c,runtime)),{city:c,runtime});
 });
@@ -70,7 +70,7 @@ test('same level and business facts produce same growth/capacity independent of 
 test('v25 alone admits new commercial levels and the boundary cannot be hidden in a legacy envelope',()=>{
   for(const kind of ['market','retail'] as const){const c=fresh(),f=c.firms.find(f=>f.commercialKind===kind)!;premise(c,f.building).level=9;
     const raw=serialize(c),envelope=JSON.parse(raw);assert.equal(premise(deserialize(raw),f.building).level,9);
-    const {commercialBaseVersion,commercialUnifiedStartTick,commercialUnifiedBaseline,...old}=envelope;old.version=commercialBaseVersion;old.rulesVersion=old.version===24?'chain-19':'chain-14';
+    const {farmBaseVersion,farmSoilIndependentStartTick,commercialBaseVersion,commercialUnifiedStartTick,commercialUnifiedBaseline,...old}=envelope;old.version=commercialBaseVersion;old.rulesVersion=old.version===24?'chain-19':'chain-14';
     assert.throws(()=>deserialize(JSON.stringify(old)),/corrupt|version/);
     envelope.commercialBaseVersion=19;assert.throws(()=>deserialize(JSON.stringify(envelope)),/history/);
     premise(c,f.building).level=10;assert.throws(()=>deserialize(serialize(c)),/corrupt/);

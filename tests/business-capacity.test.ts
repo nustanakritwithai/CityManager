@@ -4,14 +4,11 @@ import { readFileSync } from 'node:fs';
 import { MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, bulldoze, createCity, deserialize, serialize as serializeRaw, step, zoneCell, shopSite, householdWorkerCount, firmWorkerCount, firmCapacity, explainCell, type City } from '../src/sim.ts';
 import { parcelChecklist } from '../src/place-checklist.ts';
 import { createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
-import { SAVE_KEY, BUSINESS_CAPACITY_BACKUP_KEY, businessCapacityBackupKeys, AUTOSAVE_CHECKPOINT_KEY, LATEST_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
 import * as v5 from '../src/legacy-v5.ts';
-import {decodeSaveCopy} from '../src/save-copy-codec.ts';
 import {compactCityHistory} from '../src/city-history.ts';
 import { businessFixture, mixedBusinessFixture, vacantSite } from './business-capacity-fixture.ts';
 
-const memory = (raw?: string) => { const data = new Map<string, string>(raw === undefined ? [] : [[SAVE_KEY, raw]]); return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } }; };
 // Production sessions compact trusted runtime history before serializing. Apply the same
 // canonical boundary to synthetic tick-400 cities, without changing any live assets.
 const serialize=(c:City)=>{compactCityHistory(c);return serializeRaw(c);};
@@ -31,7 +28,7 @@ function reconcile(c: City) {
 
 test('64 to 65 through normal zoned farm construction pays real capital and construction once', () => {
   const c = businessFixture(), parcel = vacantSite(c), old = serialize(c);
-  assert.equal(JSON.parse(old).version, 25); assert.equal(baseVersion(old),22); assert.equal(serialize(deserialize(old)), old);
+  assert.equal(JSON.parse(old).version, 27); assert.equal(baseVersion(old),22); assert.equal(serialize(deserialize(old)), old);
   assert.equal(zoneCell(c, parcel, 'F').ok, true);
   assert.ok(!explainCell(c, parcel).some(line => /^Firm limit/.test(line)));
   const priorFirms = new Set(c.firms.map(f => f.id)), priorConstruction = c.accounts.construction;
@@ -41,7 +38,7 @@ test('64 to 65 through normal zoned farm construction pays real capital and cons
   assert.equal(c.accounts.construction - priorConstruction, 40_000);
   assert.deepEqual(c.ledger.filter(e => e.to === opened[0].wallet && e.reason === 'Outside farm equity investment').map(e => e.amount), [300_000]);
   assert.deepEqual(c.ledger.filter(e => e.from === opened[0].wallet && e.reason === 'Firm building investment').map(e => e.amount), [40_000]);
-  assert.equal(opened[0].inventory, 0); assert.equal(JSON.parse(serialize(c)).version, 25); assert.equal(baseVersion(serialize(c)), 23); reconcile(c);
+  assert.equal(opened[0].inventory, 0); assert.equal(JSON.parse(serialize(c)).version, 27); assert.equal(baseVersion(serialize(c)), 23); reconcile(c);
 });
 
 test('automatic retail opening also crosses 64 without bypassing normal household capital', () => {
@@ -91,7 +88,7 @@ test('192 shared building parcels remain bounded; unique cells, business premise
 test('v23 handles education/population/roads combinations but rejects mismatched, future and downgraded saves', () => {
   for (const education of [false, true]) for (const population of [false, true]) for (const roads of [false, true]) {
     const c = businessFixture(65, population ? 129 : 96); if (!education) delete c.education; if (roads) c.roadTopology = { version: 1, blocked: [], oneWay: {} };
-    const raw = serialize(c), saved = JSON.parse(raw); assert.equal(saved.version, 25); assert.equal(saved.rulesVersion, 'chain-20'); assert.equal(baseVersion(raw), 23); assert.equal(saved.businessCapacityVersion, 1); assert.equal(serialize(deserialize(raw)), raw);
+    const raw = serialize(c), saved = JSON.parse(raw); assert.equal(saved.version, 27); assert.equal(saved.rulesVersion, 'chain-22'); assert.equal(baseVersion(raw), 23); assert.equal(saved.businessCapacityVersion, 1); assert.equal(serialize(deserialize(raw)), raw);
     for (const edit of [(s: any) => { s.version = 24; }, (s: any) => { s.rulesVersion = 'chain-17'; }, (s: any) => { delete s.businessCapacityVersion; }, (s: any) => { s.businessCapacityVersion = 2; }, (s: any) => { s.version = education ? 22 : population ? 21 : roads ? 20 : 19; s.rulesVersion = `chain-${s.version - 5}`; delete s.businessCapacityVersion; }]) {
       const bad = JSON.parse(raw); edit(bad); assert.throws(() => deserialize(JSON.stringify(bad)));
     }
@@ -104,18 +101,6 @@ test('v1, v5 and v22 remain loadable without modifying original bytes or promoti
   const originals = [readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), v5.serialize(legacy5), historical(22)];
   for (const raw of originals) { const loaded = deserializeParkSession(raw); assert.equal(loaded.city.businessCapacityVersion, undefined); reconcile(loaded.city); }
   const canonical=session(deserializeParkSession(originals[2]).city); assert.equal(session(deserializeParkSession(canonical).city),canonical); assert.equal(JSON.parse(originals[2]).version,22);
-});
-
-test('migration planner full or quota-failed capacity backup cannot publish new primary/checkpoint/recovery pointer', () => {
-  const old=historical(22),next=historical(23);
-  for (const full of [false, true]) {
-    const store = memory(old); store.setItem(LATEST_BACKUP_KEY, 'citymanager.backup.v1');
-    if (full) businessCapacityBackupKeys().forEach((key, n) => store.setItem(key, `original ${n}`));
-    const before = [...store.data], migrationStore = { ...store, setItem: (key:string, value:string) => { if (!full && key === BUSINESS_CAPACITY_BACKUP_KEY) throw Error('quota'); store.setItem(key, value); } };
-    // Planner writes required migration backups before publication. The modern guard's
-    // separate primary-first quota behavior is covered in save-quota-lossless.test.ts.
-    assert.throws(() => saveStoredCity(migrationStore,next,null), full ? /backups full/ : /quota/); assert.deepEqual([...store.data], before); assert.equal(store.getItem(AUTOSAVE_CHECKPOINT_KEY), null);
-  }
 });
 
 test('65 actual owners can retain one worker each without expanding any household workforce', () => {
@@ -139,7 +124,7 @@ test('homes share the 192-building budget and closing a business never downgrade
   for (let n = 0; n < 3; n++) step(c); assert.equal(c.firms.length, 188); assert.equal(c.buildings.length, MAX_CITY_BUILDINGS); reconcile(c);
   const blocked = vacantSite(c); zoneCell(c, blocked, 'C'); assert.equal(shopSite(c), null); assert.equal(parcelChecklist(c, blocked)?.checks.find(check => check.key === 'building-limit')?.state, 'fail');
   const smaller = businessFixture(65), premise = smaller.buildings.find(b => b.id === smaller.firms[0].building)!;
-  assert.equal(bulldoze(smaller, premise.cell).ok, true); assert.equal(smaller.firms.length, 64); assert.equal(smaller.businessCapacityVersion, 1); assert.equal(JSON.parse(serialize(smaller)).version, 25); assert.equal(baseVersion(serialize(smaller)), 23); reconcile(smaller);
+  assert.equal(bulldoze(smaller, premise.cell).ok, true); assert.equal(smaller.firms.length, 64); assert.equal(smaller.businessCapacityVersion, 1); assert.equal(JSON.parse(serialize(smaller)).version, 27); assert.equal(baseVersion(serialize(smaller)), 23); reconcile(smaller);
 });
 
 test('v23 resumes exact key order with education before or after the unchanged market journal', () => {

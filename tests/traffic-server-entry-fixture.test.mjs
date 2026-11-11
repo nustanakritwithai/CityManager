@@ -8,7 +8,7 @@ const request=(method,body)=>({requestId:randomUUID(),request:{url:'http://127.0
 test('traffic fixture uses real ACK/revision/conflict contracts and preserves its head across reload entry',async()=>{
  const f=createTrafficServerFixture(url),ack=await f.seed(raw),messages=[];
  const send=async(method,params)=>{messages.push({method,params});};
- assert.equal(JSON.parse(raw).version,25);assert.equal(ack.metadata.tick,city.tick);assert.equal(ack.metadata.population,city.households.reduce((n,h)=>n+h.members,0));assert.equal(ack.revision,1);f.assertDurable(raw,1);
+ assert.equal(JSON.parse(raw).version,27);assert.equal(ack.metadata.tick,city.tick);assert.equal(ack.metadata.population,city.households.reduce((n,h)=>n+h.members,0));assert.equal(ack.revision,1);f.assertDurable(raw,1);
  const enter=async()=>{const predicates=[],buttons=[];await f.enter({button:async s=>{buttons.push(s);await f.intercept(request('GET'),send);},evaluate:async e=>{if(e==='window.__panelCityWrites')return [];if(e.startsWith('localStorage'))return null;predicates.push(e);return true;}});assert.deepEqual(buttons,['.guest-entry-card button']);assert.ok(predicates[1].includes('visuals().ready'));};
  await enter();await enter();f.assertDurable(raw,1); // Real reload does not call seed.
  const next=createCity(42);step(next);const changed=serializeParkSession(next,createParkRuntime(next));
@@ -200,7 +200,7 @@ test('network fence is ordered exact-origin only, requires protocol support and 
 
 test('expected live session applies the real map migration without rewriting server bytes or advancing time', async () => {
  const f=createTrafficServerFixture(url),ack=await f.seed(raw), loaded=loadedTrafficSession(ack.raw);
- assert.equal(JSON.parse(ack.raw).version,25); assert.equal(loaded.city.cells.length,672);
+ assert.equal(JSON.parse(ack.raw).version,27); assert.equal(loaded.city.cells.length,672);
  assert.deepEqual(loaded.city.cells.slice(0,576),city.cells);
  assert.deepEqual(loaded.city.accounts,city.accounts); assert.deepEqual(loaded.city.ledger,city.ledger);
  assert.equal(loaded.city.tick,city.tick); assert.equal(loaded.runtime.activity.minute,0);

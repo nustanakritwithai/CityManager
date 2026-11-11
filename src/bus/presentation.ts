@@ -2,8 +2,8 @@
  * On-map bus renderer.
  *
  * The engine is not created here. PR 5 owns it on `trafficLayer.bus` and ticks it. That field is
- * null/undefined unless both the traffic model and `busEnabled()` (`?bus=1`) are on. Every frame
- * this null-checks it and, when it is missing, draws nothing and does not call `drainEvents`.
+ * null/undefined unless both the traffic model and `busEnabled()` (`?bus=1`) are on. When the
+ * engine is missing, the scene still displays saved stops and depots without live vehicles.
  *
  * `presentBuses` is the only `drainEvents` call. Board/alight events are forwarded through
  * `subscribeBusEvents` so PR 6's UI can consume them without draining. A reloaded save makes the

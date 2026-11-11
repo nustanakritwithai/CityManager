@@ -1,5 +1,7 @@
 # แรงงานตามความสามารถของสมาชิกครัวเรือน
 
+> Current persistence: cities save only through the server. Browser-slot, backup and import instructions below describe historical releases and are no longer available. Legacy snapshot readers remain supported; existing browser data is left untouched.
+
 > ส่วนแรกบันทึกกติกาต้นทางรุ่น `worker-1`; สัญญาการสรุปสถานะที่รวมการศึกษาและงานสวนอยู่ใน [สรุปสถานะระยะ A](#สรุปสถานะระยะ-a-อ่านอย่างเดียว) ด้านล่าง ระยะ A ยังไม่เปลี่ยน UI หรือตัวจัดสรรงานเดิม
 
 เอกสารนี้อธิบายกติกาเกมที่เสนอและนำมาใช้ในข้อมูลรุ่น `3 / worker-1` ไม่ใช่สูตรหรือข้อมูลสมดุลจาก Cities: Skylines II การจำลองยังใช้ครัวเรือนและสถานประกอบการแต่ละแห่ง ไม่มีตัวละครหรือการตัดสินใจรายบุคคล
@@ -65,7 +67,7 @@
 ชุดตรวจต้องครอบคลุมการกระจายสองนายจ้าง/สองบทบาท การใช้กลุ่มทักษะไม่ซ้ำ ความจุและงบจำกัด การว่างงาน/เลิกจ้าง สิทธิค่าจ้างเดิมและเงินเดือนรวมกระเป๋าเดียว การนำเข้า v1/v2 ซ้ำโดยไม่เปลี่ยนยอดเงิน/สินค้า/เวลา และ quota/full-backup ที่รักษาเซฟเดิม รวมถึง UI มือถือและการแยกข้อมูลแต่ละ entity
 
 ```sh
-node --test tests/labor.test.ts tests/save-storage.test.ts
+node --test tests/labor.test.ts tests/legacy-save-readers.test.ts
 npm test
 npm run assets:verify
 npm run build

@@ -35,29 +35,24 @@ const req = (id: string, from: number, to: number, persons: number): BusSubmissi
 });
 const bare = (): BusHost => ({ cells: Array.from({ length: W * W }, () => ({ road: false })), nextId: 1 });
 
-test('trafficLayer.bus null or undefined draws nothing and does not drain', () => {
-  const fan = new BusEventFanout();
-  let calls = 0;
-  fan.subscribe(() => { calls++; });
-  const broken = undefined as never;
-  const sources: BusLayerLike[] = [undefined, null, {}, { bus: null }, { bus: undefined }, { bus: { engine: null } }, { bus: { engine: undefined } }];
+test('saved stop and depot visuals survive a disabled or unavailable traffic engine', () => {
+  const fan = new BusEventFanout(); let calls = 0; fan.subscribe(() => { calls++; });
+  const city = host(), before = JSON.stringify(city), sources: BusLayerLike[] = [undefined, null, {}, {bus:null}, {bus:{engine:null}}];
+  const engine = new BusEngine(city, 300);
+  const active = presentBuses({bus:{engine}}, city, fan);
   for (const source of sources) {
-    const frame = presentBuses(source, broken, fan);
-    assert.equal(frame.drew, false);
-    assert.deepEqual(frame.events, []);
-    assert.equal(frame.draw, EMPTY_BUS_DRAW);
-    assert.equal(busEngineFrom(source), null);
+    const frame = presentBuses(source, city, fan);
+    assert.equal(frame.drew, true); assert.deepEqual(frame.events, []); assert.equal(busEngineFrom(source), null);
+    assert.deepEqual(frame.draw.stops.map(s=>s.id),active.draw.stops.map(s=>s.id));
+    assert.deepEqual(frame.draw.depots.map(s=>s.id),active.draw.depots.map(s=>s.id));
+    assert.deepEqual(frame.draw.buses, []); assert.deepEqual(frame.draw.crowds, []);
+    assert.equal(JSON.stringify(city),before,'presentation never changes saved stops');
   }
-  assert.equal(calls, 0, 'subscribers are not called when there is no engine');
-  // A city that does have lines still contributes nothing while bus is undefined.
-  const city = host();
-  assert.ok(busOverlay(city).lines[0]!.segments.length > 0);
-  const hidden = presentBuses({ bus: undefined }, city, fan);
-  assert.equal(hidden.drew, false);
-  assert.equal(hidden.draw.lines.length, 0);
-  assert.equal(hidden.draw.stops.length, 0);
-  assert.equal(hidden.draw.buses.length, 0);
-  assert.equal(busInstanceCounts(hidden.draw).total, 0);
+  assert.equal(calls,1,'no event drain or fanout without an engine');
+  const restored=presentBuses({bus:{engine}},city,fan);
+  assert.deepEqual(restored.draw.stops,active.draw.stops,'turning traffic back on keeps the same stops');
+  assert.equal(JSON.stringify(city),before);
+  const empty=presentBuses(null,bare(),fan);assert.equal(empty.drew,false);assert.equal(empty.draw,EMPTY_BUS_DRAW);
 });
 
 test('fixture poses: interpolate, face next, levels 40/60/80, load, dwell kerb, parked spread', () => {

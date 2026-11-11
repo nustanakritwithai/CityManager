@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 import { HOUSING_LEVELS, getHousingCapacity } from '../src/housing.ts';
 import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount } from '../src/sim.ts';
 import { advanceParkRuntime, createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
-import { SAVE_KEY, FARM_LEVEL_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { holdEducationReady } from './education-ready.ts';
 
 function fixture() {
@@ -90,21 +89,20 @@ function legacyParkSession() {
   return session;
 }
 
-test('v15 park session migrates without changing state, rejects new housing under old version and keeps backup', () => {
+test('v15 park session migrates without changing state, rejects new housing under old version', () => {
   const session = legacyParkSession(), old = JSON.stringify(session), restored = deserializeParkSession(old);
   const { version: _v, rulesVersion: _r, parkRuntime, ...original } = session;
-  const { version, rulesVersion, factoryProgressionStartTick, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, ...actual } = restored.city;
+  const { version, rulesVersion, factoryProgressionStartTick, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, farmSoilIndependentStartTick, ...actual } = restored.city;
   assert.deepEqual(actual, original); assert.equal(version, 9); assert.equal(rulesVersion, 'chain-4');
   assert.equal(factoryProgressionStartTick, session.tick); assert.equal(farmLevelStartTick, session.tick);
   assert.equal(commercialUnifiedStartTick, session.tick);
+  assert.equal(farmSoilIndependentStartTick, session.tick);
   assert.deepEqual(commercialUnifiedBaseline, { moneyEntries: session.ledger.length, cropEntries: session.cropLedger.length, goodsEntries: session.goodsLedger.length });
   assert.deepEqual(JSON.parse(JSON.stringify(restored.runtime)), parkRuntime);
   const saved = serializeParkSession(restored.city, restored.runtime);
   assert.deepEqual(deserializeParkSession(saved), restored);
   const bad = structuredClone(session); const b = bad.buildings.find((x: Building) => x.zone === 'R'); b.level = 4; b.housingType = 'apartment';
   assert.throws(() => deserializeParkSession(JSON.stringify(bad)));
-  const data = new Map([[SAVE_KEY, old]]), storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
-  saveStoredCity(storage, saved, null); assert.equal(data.get(FARM_LEVEL_BACKUP_KEY), old); assert.equal(readStoredCity(storage, 'backup')?.raw, old);
 });
 
 test('future and mismatched housing schemas are rejected without changing the saved snapshot', () => {
@@ -116,18 +114,4 @@ test('future and mismatched housing schemas are rejected without changing the sa
     (v: any) => { const b = v.buildings.find((item: any) => item.id === home.id); b.level = 10; b.housingType = 'condo'; },
   ]) { const bad = structuredClone(parsed); edit(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
   assert.equal(serialize(city), original);
-});
-
-test('full or failed v15 backup prevents replacement of the original save', () => {
-  const current = legacyParkSession();
-  const old = JSON.stringify(current), next = serialize(deserialize(old));
-  const data = new Map<string, string>([[SAVE_KEY, old]]);
-  for (let i = 0; i < 8; i++) data.set(i ? `${FARM_LEVEL_BACKUP_KEY}.${i}` : FARM_LEVEL_BACKUP_KEY, `prior-${i}`);
-  const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
-  assert.throws(() => saveStoredCity(storage, next, null), /Farm level backup slots are full/);
-  assert.equal(data.get(SAVE_KEY), old);
-  const blocked = new Map<string, string>([[SAVE_KEY, old]]);
-  const failing = { getItem: (k: string) => blocked.get(k) ?? null, setItem: (k: string, v: string) => { if (k === FARM_LEVEL_BACKUP_KEY) throw new Error('quota'); blocked.set(k, v); } };
-  assert.throws(() => saveStoredCity(failing, next, null), /quota/);
-  assert.equal(blocked.get(SAVE_KEY), old);
 });

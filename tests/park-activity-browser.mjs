@@ -76,12 +76,8 @@ try {
   assert.equal(digest(await snapshot()), digest(beforePause), 'Paused render has no activity or economic drift');
   checks.push('Real Edge WebGL startup, actual visitor identities, pause freeze');
 
-  await button('save'); assert.match(await evaluate('document.getElementById("status").textContent'), /^Saved/); const saved = await snapshot();
-  await evaluate('window.parkActivityCandidate.advance(7)');
-  await button('load');
-  assert.match(await evaluate('document.getElementById("status").textContent'), /^Loaded/);
-  assert.equal(digest(await snapshot()), digest(saved), 'Save-load exact city + activity + clock remainder');
-  checks.push('UI save/load restores exact city and activity snapshot');
+  assert.equal(await evaluate('!!document.getElementById("save") || !!document.getElementById("load")'), false, 'Preview offers no browser persistence controls');
+  checks.push('Preview has no browser save/load controls');
 
   await button('evening');
   const evening = await snapshot();

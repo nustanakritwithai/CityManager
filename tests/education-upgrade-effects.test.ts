@@ -96,6 +96,13 @@ test('demolition withdraws unfinished study but preserves resident diplomas; dep
 test('only changing resident diplomas changes real month-end home and farm upgrades, not jobs or economic flows', () => {
   const ready = createCity(61025);
   for (let day = 0; day < 119; day++) step(ready);
+  // Balanced admissions no longer concentrate enough residents in the first
+  // cottage by default. Fill one with existing families to isolate diplomas.
+  const home = ready.buildings.find(b => b.zone === 'R' && b.level === 3)!;
+  assert.ok(home);
+  const residents = [...ready.households.filter(h => h.home === home.id), ...ready.households.filter(h => h.home !== home.id)].slice(0, 3);
+  assert.equal(residents.length, 3);
+  for (const h of residents) h.home = home.id;
   ready.education!.people = ready.households.map(h => person({ householdId: h.id, basic: h.workforce }));
   ready.education!.residentBasic = ready.households.reduce((sum, h) => sum + h.workforce, 0);
   ready.education!.schoolReadyDays = 30;

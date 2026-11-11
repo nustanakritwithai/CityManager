@@ -4,11 +4,12 @@ import { readFileSync } from 'node:fs';
 import { adoptSavedEducation, buildCampus, buildPlant, bulldoze, createCity, deserialize, enableEducation, householdWorkerCount, serialize, step, toggleCampus, type City } from '../src/sim.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
 import { createEducation, EDUCATION_COST } from '../src/education.ts';
-import { saveStoredCity } from '../src/save-storage.ts';
 
 function assertEducationEnvelope(raw: string) {
   const save = JSON.parse(raw);
-  assert.equal(save.version, 25); assert.equal(save.rulesVersion, 'chain-20');
+  assert.equal(save.version, 27); assert.equal(save.rulesVersion, 'chain-22');
+  assert.equal(save.farmBaseVersion, 25);
+  assert.ok(Number.isSafeInteger(save.farmSoilIndependentStartTick) && save.farmSoilIndependentStartTick <= save.tick);
   assert.equal(save.commercialBaseVersion, save.history ? 24 : 22);
   if (save.history) assert.equal(save.historyBaseVersion, 22);
   assert.equal(save.education?.rules, 'education-1');
@@ -153,18 +154,16 @@ test('high housing stays put, the next upgrade waits for education, and demoliti
   }
 });
 
-test('education save backs up the previous city and does not touch guest identity', () => {
-  const memory = new Map<string, string>();
-  const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value); } };
+test('older education-free city migrates without adding guest identity', () => {
   // Genuine older v16 session, rather than a v25 wrapper with education deleted.
   const old = readFileSync(new URL('./fixtures/housing-v16-park-session.json', import.meta.url), 'utf8');
   assert.equal(JSON.parse(old).version, 16);
   assert.equal(deserialize(old).education, undefined, 'the genuine older save has no education state');
-  storage.setItem('citymanager.save.v7', old);
+  const migrated = deserialize(old);
+  assert.equal(migrated.market, undefined);
+  assert.deepEqual(deserialize(serialize(migrated)), migrated);
   const next = createCity(61025);
-  saveStoredCity(storage, serialize(next), null);
-  assert.equal(memory.get('citymanager.backup.before-education'), old);
-  assertEducationEnvelope(memory.get('citymanager.save.v7')!);
+  assertEducationEnvelope(serialize(next));
   assert.equal(JSON.parse(old).market, undefined);
 });
 

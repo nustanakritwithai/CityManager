@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MarketClient, MARKET_SAVE_KEY } from '../src/market-client.ts';
 import { createCity, deserialize, serialize, step } from '../src/sim.ts';
-import { SAVE_KEY } from '../src/save-storage.ts';
 import { useMarketStorage } from '../src/market-client.ts';
 
 const guest = '00000000-0000-4000-8000-000000000003', receipt = '00000000-0000-4000-8000-000000000004', claim = '00000000-0000-4000-8000-000000000005';
@@ -12,6 +11,12 @@ async function environment(run: (store: Map<string, string>) => Promise<void>) {
   const locks = { async request<T>(_name: string, _options: unknown, callback: (lock: unknown | null) => Promise<T>) { if (held) return callback(null); held = true; try { return await callback({}); } finally { held = false; } } };
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {} }); Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks } }); Object.defineProperty(globalThis, 'document', { configurable: true, value: { cookie: 'cm_csrf=test' } }); useMarketStorage({ getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } });
   try { await run(store); } finally { globalThis.fetch = oldFetch; names.forEach((name, i) => before[i] ? Object.defineProperty(globalThis, name, before[i]!) : Reflect.deleteProperty(globalThis, name)); }
+}
+// Only server-acknowledged serialized snapshots satisfy the durable-city reader.
+// This fixture is independent of the market journal's in-memory storage.
+function acknowledgedServerSnapshot() {
+  let raw: string | null = null;
+  return { read: () => raw, acknowledge: (snapshot: string) => { raw = snapshot; } };
 }
 function seeded(store: Map<string, string>) { const c = new MarketClient(() => createCity(1, { starter: false }), 'http://127.0.0.1:4317'); c.journal.guestId = guest; store.set(MARKET_SAVE_KEY, JSON.stringify(c.journal)); }
 
@@ -69,17 +74,17 @@ test('legacy unkeyed cancel cannot be fenced under a newly assigned key', async 
 }));
 
 test('ACK requires the matching durable city and receipt before network access', async () => environment(async store => {
-  seeded(store); let city = createCity(1, { starter: false }), sends = 0; const client = new MarketClient(() => city, 'http://127.0.0.1:4317', { readDurableCity: () => store.get(SAVE_KEY) ?? null }); client.journal.receipts[receipt] = { claimId: claim, state: 'applied', firmId: 2, itemId: 'crop:rice', quantity: 1 }; const saved = serialize(city, client.exportSave()); store.set(SAVE_KEY, saved); globalThis.fetch = async () => { sends++; return new Response('{}', { status: 200 }); };
+  seeded(store); const serverSnapshot = acknowledgedServerSnapshot(); let city = createCity(1, { starter: false }), sends = 0; const client = new MarketClient(() => city, 'http://127.0.0.1:4317', { readDurableCity: serverSnapshot.read }); client.journal.receipts[receipt] = { claimId: claim, state: 'applied', firmId: 2, itemId: 'crop:rice', quantity: 1 }; const saved = serialize(city, client.exportSave()); serverSnapshot.acknowledge(saved); globalThis.fetch = async () => { sends++; return new Response('{}', { status: 200 }); };
   city = createCity(2, { starter: false }); await assert.rejects(client.ack(receipt), /saved-city-recovery-required/); assert.equal(sends, 0); city = deserialize(saved); await client.ack(receipt); assert.equal(sends, 1); assert.equal(client.journal.receipts[receipt].state, 'delivered');
 }));
 
 test('real city save reload recovers a lost ACK without applying the crop twice', async () => environment(async store => {
-  seeded(store); let city = createCity(61025, { starter: true }); for (let i = 0; i < 360 && !city.firms.some(f=>f.zone==='C'&&f.owner!==null); i++) step(city); const target = city.firms.find(f=>f.zone==='C'&&f.owner!==null); assert.ok(target, 'seeded engine city must contain an owned commercial business');
-  let client = new MarketClient(() => city, 'http://127.0.0.1:4317', { readDurableCity: () => store.get(SAVE_KEY) ?? null }), ackCalls = 0; const r = { receipt_id: receipt, item_code: 'crop:rice', quantity: 1 }; const before = target.crops.rice;
+  seeded(store); const serverSnapshot = acknowledgedServerSnapshot(); let city = createCity(61025, { starter: true }); for (let i = 0; i < 360 && !city.firms.some(f=>f.zone==='C'&&f.owner!==null); i++) step(city); const target = city.firms.find(f=>f.zone==='C'&&f.owner!==null); assert.ok(target, 'seeded engine city must contain an owned commercial business');
+  let client = new MarketClient(() => city, 'http://127.0.0.1:4317', { readDurableCity: serverSnapshot.read }), ackCalls = 0; const r = { receipt_id: receipt, item_code: 'crop:rice', quantity: 1 }; const before = target.crops.rice;
   globalThis.fetch = async url => { if (String(url).endsWith('/claim')) return new Response('{}', { status: 200 }); if (String(url).endsWith('/ack')) { ackCalls++; if (ackCalls === 1) throw new Error('ack response lost'); return new Response('{}', { status: 200 }); } throw new Error('unexpected request'); };
-  const save = () => { const market = client.exportSave(); store.set(SAVE_KEY, serialize(city, market)); city.market = market; };
+  const save = () => { const market = client.exportSave(); serverSnapshot.acknowledge(serialize(city, market)); city.market = market; };
   await client.claim(receipt); await assert.rejects(client.applyAndAck(r, save, target.id), /ack response lost/); assert.equal(target.crops.rice, before + 1);
-  const saved = deserialize(store.get(SAVE_KEY)!); city = createCity(1, { starter: false }); client = new MarketClient(() => city, 'http://127.0.0.1:4317', { readDurableCity: () => store.get(SAVE_KEY) ?? null }); const ackId = client.journal.operations.find(o => o.kind === 'ack' && o.state === 'pending')!.opId;
+  const saved = deserialize(serverSnapshot.read()!); city = createCity(1, { starter: false }); client = new MarketClient(() => city, 'http://127.0.0.1:4317', { readDurableCity: serverSnapshot.read }); const ackId = client.journal.operations.find(o => o.kind === 'ack' && o.state === 'pending')!.opId;
   const wrongCity = { ...saved.market!, cityId: '00000000-0000-4000-8000-000000000008' }; await assert.rejects(client.bindLoadedCity(wrongCity, () => { city = saved; }), /invalid market journal|saved-market-reconciliation-required/i); assert.equal(city.seed, 1);
   await client.bindLoadedCity(saved.market, () => { city = saved; }); assert.equal(client.journal.operations.find(o => o.kind === 'ack' && o.state === 'pending')?.opId, ackId); const loaded = city.firms.find(f => f.id === target.id)!; assert.equal(loaded.crops.rice, before + 1); await client.retry(ackId, save); assert.equal(loaded.crops.rice, before + 1); assert.equal(client.journal.receipts[receipt].state, 'delivered'); assert.equal(ackCalls, 2);
 }));

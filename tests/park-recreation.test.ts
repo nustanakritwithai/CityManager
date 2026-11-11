@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   advanceParkRecreation, createParkRecreation, restoreParkRecreation, serializeParkRecreation,
-  DEFAULT_PARK_RECREATION_TUNING, PARK_RECREATION_MAX_RESIDENTS, PARK_RECREATION_MAX_SCORE_UNITS,
+  DEFAULT_PARK_RECREATION_TUNING, PARK_RECREATION_MAX_SCORE_UNITS,
 } from '../src/park-recreation.ts';
 import type { ParkRecreationFrame, ParkRecreationState } from '../src/park-recreation.ts';
 
@@ -203,7 +203,10 @@ test('invalid observations and unknown identities reject atomically', () => {
     frame(2, [visit], { parks: [park, park] }),
     frame(2, [visit], { parks: [{ ...park, qualityPermille: 1001 }] }),
     frame(2, [visit], { parks: [{ ...park, comfortableCapacity: 0.5 }] }),
-    frame(2, [], { residentIds: Array.from({ length: PARK_RECREATION_MAX_RESIDENTS + 1 }, (_, i) => `h:${i}:m:0`) }),
+    frame(2, [visit], { parks: [{ ...park, comfortableCapacity: Number.MAX_SAFE_INTEGER + 1 }] }),
+    frame(2, [], { residentIds: null as never }),
+    frame(2, [], { parks: null as never }),
+    frame(2, null as never),
   ];
   for (const observation of invalid) {
     assert.throws(() => advanceParkRecreation(state, observation), RangeError);
@@ -239,12 +242,13 @@ test('zero tuning values disable respective effects without fabricating records'
   assert.equal(advanceUntil(earned, 1441, []).citizens[resident].scoreUnits, 250);
 });
 
-test('full roster remains bounded and input ordering does not affect canonical state', () => {
-  const residentIds = Array.from({ length: PARK_RECREATION_MAX_RESIDENTS }, (_, i) => `h:${i}:m:0`);
+test('large roster is complete and input ordering does not affect canonical state', () => {
+  const count = 4098;
+  const residentIds = Array.from({ length: count }, (_, i) => `h:${i}:m:0`);
   const visits = residentIds.map(citizenId => ({ ...visit, citizenId }));
-  const observed = frame(1, visits, { residentIds, parks: [{ ...park, comfortableCapacity: PARK_RECREATION_MAX_RESIDENTS }] });
+  const observed = frame(1, visits, { residentIds, parks: [{ ...park, comfortableCapacity: count }] });
   const state = advanceParkRecreation(createParkRecreation(), observed);
-  assert.equal(Object.keys(state.citizens).length, PARK_RECREATION_MAX_RESIDENTS);
+  assert.equal(Object.keys(state.citizens).length, count);
   const reversed = advanceParkRecreation(createParkRecreation(), { ...observed, residentIds: [...residentIds].reverse(), visits: [...visits].reverse() });
   assert.equal(serializeParkRecreation(reversed), serializeParkRecreation(state));
   const reduced = advanceParkRecreation(state, frame(2, [], { residentIds: [residentIds[0]] }));

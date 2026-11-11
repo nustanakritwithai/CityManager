@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as legacy from '../src/legacy-v4.ts';
 import { createCity, deserialize, serialize, step, zoneCell, firmCapacity, firmWage, firmRent, firmWorkerCount, isCommercial, isMarket, isRetail, summary, ownerFinance, contributeOwnerCapital, withdrawOwnerProfit, type City } from '../src/sim.ts';
-import { SAVE_KEY, AGRICULTURE_SAVE_KEY, AGRICULTURE_BACKUP_KEY, LATEST_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 
 function oldCity(day = 179) {
   const c = legacy.createCity();
@@ -11,15 +10,11 @@ function oldCity(day = 179) {
   return legacy.deserializeV4(legacy.serialize(c));
 }
 function preserved(c: City | legacy.City, throughTick = -1) {
-  const { commercialUnifiedStartTick: _commercialTick, commercialUnifiedBaseline: _commercialBaseline, history: _history, version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, parks: _parks, ...state } = c as City;
+  const { farmSoilIndependentStartTick: _soil, commercialUnifiedStartTick: _commercialTick, commercialUnifiedBaseline: _commercialBaseline, history: _history, version: _version, rulesVersion: _rules, typeBaseline: _types, growthStartTick: _growth, foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farm, cells: _cells, buildings: _buildings, firms: _firms, utilities: _utilities, plants: _plants, parks: _parks, ...state } = c as City;
   // Water and power changed shape in chain-4 (an outside contract and plants); the facts below did not.
   return {...state,ledger:state.ledger.filter(e=>e.tick>throughTick),goodsLedger:state.goodsLedger.filter(e=>e.tick>throughTick),cropLedger:state.cropLedger.filter(e=>e.tick>throughTick)};
 }
 const loaded = (c: City) => deserialize(serialize(c));
-function memory(initial: Record<string, string> = {}) {
-  const data = new Map(Object.entries(initial)), writes: string[] = [];
-  return { data, writes, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); writes.push(key); } };
-}
 
 test('v4 T market becomes commercial L1 without changing any economic or labor fact', () => {
   const old = oldCity(), before = legacy.serialize(old);
@@ -68,7 +63,7 @@ test('legacy retailers retain exact jobs at mapped commercial levels 2-4; market
   const frozen = JSON.parse(serialize(city));
   frozen.version = frozen.commercialBaseVersion;
   frozen.rulesVersion = ({19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18',24:'chain-19'} as Record<number,string>)[frozen.version];
-  delete frozen.commercialBaseVersion; delete frozen.commercialUnifiedStartTick; delete frozen.commercialUnifiedBaseline;
+  delete frozen.commercialBaseVersion; delete frozen.farmBaseVersion; delete frozen.farmSoilIndependentStartTick; delete frozen.commercialUnifiedStartTick; delete frozen.commercialUnifiedBaseline;
   assert.doesNotThrow(() => deserialize(JSON.stringify(frozen)), 'the same legacy wrapper with the original L1 remains valid');
   frozen.buildings.find((b: {id:number}) => b.id === market.building).level = 2;
   assert.throws(() => deserialize(JSON.stringify(frozen)), /corrupt/, 'a legacy wrapper cannot admit the new higher-level crop provenance');
@@ -132,14 +127,8 @@ test('migrated stock, wage liabilities and owner distributions survive determini
   assert.deepEqual(loaded(loaded(a)), a);
 });
 
-test('v4 local slot remains byte-for-byte recoverable with one immutable backup before explicit v6 save', () => {
-  const raw = legacy.serialize(oldCity()), migrated = serialize(deserialize(raw)), storage = memory({ [AGRICULTURE_SAVE_KEY]: raw });
-  assert.deepEqual(readStoredCity(storage), { raw, key: AGRICULTURE_SAVE_KEY }); assert.deepEqual(storage.writes, []);
-  assert.deepEqual(readStoredCity(storage, 'agriculture'), { raw, key: AGRICULTURE_SAVE_KEY });
-  assert.equal(saveStoredCity(storage, migrated, raw).backup, AGRICULTURE_BACKUP_KEY);
-  assert.equal(storage.data.get(AGRICULTURE_SAVE_KEY), raw); assert.equal(storage.data.get(AGRICULTURE_BACKUP_KEY), raw);
-  assert.equal(storage.data.get(SAVE_KEY), migrated); assert.equal(storage.data.get(LATEST_BACKUP_KEY), AGRICULTURE_BACKUP_KEY);
-  saveStoredCity(storage, migrated, raw);
-  assert.equal(storage.writes.filter(key => key === AGRICULTURE_BACKUP_KEY).length, 1);
-  assert.deepEqual(deserialize(readStoredCity(storage, 'backup')!.raw), deserialize(migrated));
+test('v4 migration is stable across serialization and repeated imports', () => {
+  const raw = legacy.serialize(oldCity()), migrated = deserialize(raw);
+  assert.deepEqual(deserialize(serialize(migrated)), migrated);
+  assert.deepEqual(deserialize(raw), migrated);
 });
