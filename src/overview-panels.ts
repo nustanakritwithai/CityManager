@@ -1,6 +1,6 @@
 /**
  * City overview dashboard: section navigation, treasury trend and budget, and the
- * 30-day supply chain. Read-only views over overview-data projections.
+ * 30-day supply chain and city tax settings.
  */
 import { treasuryBudget, supplyChain, goodsLines, type ChainFlow, type ChainNode } from './overview-data.ts';
 import { CROP_LABELS, PRODUCT_LABELS, RECIPE_LABELS } from './goods.ts';
@@ -18,6 +18,7 @@ import { overviewRevision } from './overview-revision.ts';
 import { municipalInvestments, renderMunicipalInvestments, type MunicipalInvestmentTool } from './municipal-investments.ts';
 import { treasurySpendable } from './sim.ts';
 import type { City } from './sim.ts';
+import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt } from './city-tax-policy.ts';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const money = (satang: number) => Math.round(satang / 100).toLocaleString('th-TH') + ' ฿';
@@ -25,6 +26,14 @@ const signed = (satang: number) => (satang > 0 ? '+' : satang < 0 ? '−' : '±'
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string) => {
   const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
+function taxField(title: string, max: number) {
+  const label = el('label', '', `${title} (%)`);
+  const input = el('input');
+  input.type = 'number'; input.inputMode = 'numeric'; input.required = true;
+  input.min = '0'; input.max = String(max); input.step = '1';
+  label.append(input);
+  return { label, input };
+}
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}) => {
   const node = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); return node;
 };
@@ -42,6 +51,12 @@ export class OverviewDashboard {
   private readonly goals = el('section', 'dash-card dash-goals');
   private readonly kpis = el('section', 'dash-kpis');
   private readonly finance = el('section', 'dash-card dash-finance');
+  private readonly financeHead = this.head('การเงินของเมือง', '');
+  private readonly financeNote = this.financeHead.querySelector('span')!;
+  private readonly financeCharts = el('div');
+  private readonly wageTax = taxField('ภาษีค่าจ้าง', MAX_TAX_RATES.wage);
+  private readonly profitTax = taxField('ภาษีกำไรกิจการ', MAX_TAX_RATES.profit);
+  private readonly taxStatus = el('p', 'dash-tax-status');
   private readonly chain = el('section', 'dash-card dash-chain');
   private readonly growth = el('section', 'dash-card dash-growth');
   private readonly modal = new ChartModal();
@@ -62,6 +77,22 @@ export class OverviewDashboard {
       });
       nav.append(button);
     }
+    const taxForm = el('form', 'dash-tax');
+    const taxFields = el('fieldset');
+    const controls = el('div', 'dash-tax-controls');
+    const submit = el('button', '', 'ตั้งอัตรารอบถัดไป');
+    submit.type = 'submit';
+    controls.append(this.wageTax.label, this.profitTax.label, submit);
+    this.taxStatus.setAttribute('role', 'status');
+    taxFields.append(el('legend', '', 'อัตราภาษีเมือง'), this.taxStatus, controls);
+    taxForm.append(taxFields);
+    taxForm.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!this.city || !taxForm.reportValidity()) return;
+      scheduleCityTaxes(this.city, { wage: this.wageTax.input.valueAsNumber, profit: this.profitTax.input.valueAsNumber });
+      this.updateTaxSettings(this.city, true);
+    });
+    this.finance.append(this.financeHead, taxForm, this.financeCharts);
     host.replaceChildren(nav, this.goals, this.kpis, this.finance, this.chain, this.growth);
   }
   get modalOpen() { return this.modal.isOpen; }
@@ -73,7 +104,9 @@ export class OverviewDashboard {
     const population = populationGuidance(city, goals);
     // Road edits and capital changes can alter displayed state without advancing time.
     const key = `${overviewRevision(city, goals, missions, challenges, population)}:${JSON.stringify(municipalInvestments(city))}:${treasurySpendable(city)}`;
-    if (city !== this.city) this.key = ''; // A loaded city may share day and ledger sizes.
+    const switchedCity = city !== this.city;
+    if (switchedCity) this.key = ''; // A loaded city may share day and ledger sizes.
+    this.updateTaxSettings(city, switchedCity);
     this.city = city; this.modal.update(city);
     if (key === this.key) return;
     this.key = key;
@@ -108,6 +141,22 @@ export class OverviewDashboard {
     const head = el('header', 'dash-head'); head.append(el('h3', '', title), el('span', 'dash-note', note)); return head;
   }
 
+  private updateTaxSettings(city: City, resetInputs: boolean) {
+    const active = taxRatesAt(city.taxPolicy, city.tick);
+    const latest = city.taxPolicy?.at(-1);
+    const pending = latest && latest.fromDay > city.tick ? latest : undefined;
+    if (resetInputs) {
+      this.wageTax.input.value = String(pending?.wage ?? active.wage);
+      this.profitTax.input.value = String(pending?.profit ?? active.profit);
+    }
+    const current = `ปัจจุบัน ค่าจ้าง ${active.wage}% · กำไรกิจการ ${active.profit}%`;
+    const next = pending
+      ? `ตั้งไว้สำหรับวันที่ ${pending.fromDay} ค่าจ้าง ${pending.wage}% · กำไรกิจการ ${pending.profit}%`
+      : `อัตราใหม่เริ่มใช้วันที่ ${nextTaxDay(city.tick)}`;
+    const status = `${current} · ${next}`;
+    if (this.taxStatus.textContent !== status) this.taxStatus.textContent = status;
+  }
+
   private renderFinance(city: City, series: DailySeries) {
     const budget = treasuryBudget(city);
     const mix = el('div', 'dash-mix');
@@ -115,7 +164,8 @@ export class OverviewDashboard {
       mixBar(budget.income.map((line, i) => ({ key: line.key, label: line.label, value: line.amount, slot: i + 1 })), money, 'รายรับคลังตามแหล่ง'),
       mixBar(budget.expense.map((line, i) => ({ key: line.key, label: line.label, value: line.amount, slot: i + 1 })), money, 'รายจ่ายคลังตามประเภท'),
     );
-    this.finance.replaceChildren(this.head('การเงินของเมือง', `วันที่ ${series.ticks[0]}–${city.tick}`), this.chart('treasury', series), this.chart('cashflow', series), mix, renderMunicipalInvestments(city, this.onSelectTool));
+    this.financeNote.textContent = `วันที่ ${series.ticks[0]}–${city.tick}`;
+    this.financeCharts.replaceChildren(this.chart('treasury', series), this.chart('cashflow', series), mix, renderMunicipalInvestments(city, this.onSelectTool));
   }
 
   private renderChain(city: City, series: DailySeries) {
