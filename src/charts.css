@@ -85,14 +85,82 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-expand:hover { color: var(--c-accent); border-color: rgba(243, 196, 107, .5); }
 .dash-expand .ui-icon { width: 100%; height: 100%; }
 .dash-mix { display: grid; gap: 14px; margin-top: 14px; }
-.dash-tax { margin: 10px 0 14px; }
-.dash-tax fieldset { min-width: 0; margin: 0; padding: 8px 10px 10px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 9px; }
-.dash-tax legend { padding: 0 5px; color: var(--chart-ink); font-weight: 650; }
-.dash-tax-status { margin: 0 0 8px; color: var(--chart-muted); font-size: 13px; }
-.dash-tax-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
-.dash-tax-controls label { display: grid; gap: 3px; color: var(--chart-ink-2); font-size: 13px; }
-.dash-tax-controls input { width: 5.5rem; min-height: 38px; padding: 4px 8px; border: 1px solid rgba(255, 255, 255, .24); border-radius: 6px; background: rgba(0, 0, 0, .2); color: var(--chart-ink); font: inherit; }
-.dash-tax-controls button { min-height: 38px; }
+.dash-nav .dash-nav-tax { border-color: #f3c46b88; background: #f3c46b18; color: var(--c-accent); }
+.dash-tax { margin: 12px 0 16px; scroll-margin-top: calc(8 * var(--u)); }
+.dash-tax fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: calc(10 * var(--u)) calc(12 * var(--u)) calc(12 * var(--u));
+  border: 1px solid #f3c46b88;
+  border-radius: var(--pnl-radius);
+  background: linear-gradient(150deg, #f3c46b24, transparent 62%), var(--pnl-surface);
+}
+.dash-tax legend { padding: 0 6px; color: var(--c-accent); font-size: calc(18 * var(--u)); font-weight: 750; }
+.dash-tax-status { margin: 0 0 calc(10 * var(--u)); color: var(--chart-ink-2); font-size: calc(13 * var(--u)); line-height: 1.55; white-space: pre-line; }
+.dash-tax-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: calc(8 * var(--u)); }
+.dash-tax-field {
+  --tax-accent: var(--c-accent);
+  min-width: 0;
+  padding: calc(10 * var(--u));
+  border: 1px solid var(--pnl-line);
+  border-radius: var(--pnl-radius-sm);
+  background: var(--pnl-bg);
+}
+.dash-tax-profit { --tax-accent: #9bc5ff; }
+.dash-tax-field-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; }
+.dash-tax-field label { color: var(--chart-ink); font-size: calc(14 * var(--u)); font-weight: 650; }
+.dash-tax-value { color: var(--tax-accent); font-size: calc(27 * var(--u)); line-height: 1; font-weight: 750; font-variant-numeric: tabular-nums; }
+.dash-tax-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: calc(44 * var(--u));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(to right, var(--tax-accent) var(--tax-fill, 0%), #526692 var(--tax-fill, 0%)) center / 100% 8px no-repeat;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+.dash-tax-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--pnl-bg);
+  border-radius: 50%;
+  background: var(--tax-accent);
+  box-shadow: 0 0 0 1px var(--tax-accent);
+}
+.dash-tax-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--pnl-bg);
+  border-radius: 50%;
+  background: var(--tax-accent);
+  box-shadow: 0 0 0 1px var(--tax-accent);
+}
+.dash-tax-limits { display: flex; justify-content: space-between; color: var(--chart-muted); font-size: calc(12 * var(--u)); }
+.dash-tax-impact { margin: 6px 0 0; color: var(--chart-ink-2); font-size: calc(13 * var(--u)); line-height: 1.45; }
+.dash-tax .dash-tax-submit {
+  width: 100%;
+  min-height: calc(44 * var(--u));
+  margin-top: calc(10 * var(--u));
+  border: 1px solid var(--c-accent);
+  border-radius: var(--pnl-radius-sm);
+  background: var(--c-accent);
+  color: #241b0d;
+  font-size: calc(14 * var(--u));
+  font-weight: 750;
+  cursor: pointer;
+}
+.dash-tax .dash-tax-submit:hover { background: #ffda92; }
+.dash-tax-range:focus-visible, .dash-tax-submit:focus-visible { outline: 2px solid var(--chart-ink); outline-offset: 2px; }
+@media (forced-colors: active) {
+  .dash-tax-range { appearance: auto; background: none; }
+  .dash-tax-range::-webkit-slider-thumb { appearance: auto; }
+}
 
 /* Expanded chart view */
 .chart-modal { position: fixed; z-index: 70; left: 50%; top: calc(80px + env(safe-area-inset-top, 0px)); translate: -50% 0; width: min(1100px, calc(100vw - 24px)); max-height: calc(100dvh - 120px); overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 0 14px; border: 1px solid var(--glass-edge, rgba(255, 255, 255, .16)); border-radius: 14px; background: var(--glass-solid, #31436c); box-shadow: 0 24px 60px rgba(0, 0, 0, .45); color: var(--chart-ink); }
