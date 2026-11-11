@@ -53,12 +53,12 @@ export class PassengerRail {
   private graph: RailGraph;
   private paths = new Map<string, RailPath | null>();
   private state: PassengerRailSnapshot;
-  constructor(config: PassengerRailConfig, graph: RailGraph, absoluteMinute: number, restored?: PassengerRailSnapshot) {
+  constructor(config: PassengerRailConfig, graph: RailGraph, absoluteMinute: number, restored?: PassengerRailSnapshot, scheduled = false) {
     validateConfig(config);
     if (!safeCount(absoluteMinute) || !safeCount(absoluteMinute + config.minimumDwellMinutes)) throw Error('Invalid rail start minute');
     this.config = structuredClone(config); this.graph = createRailGraph(graph.revision, graph.links);
     if(restored!==undefined){
-      validateRailSnapshot(this.config,this.graph,restored);
+      validateRailSnapshot(this.config,this.graph,restored,scheduled);
       if(restored.minute!==absoluteMinute)throw Error('Rail restore clock mismatch');
       this.state=structuredClone(restored);return;
     }
@@ -69,8 +69,8 @@ export class PassengerRail {
       train: { station: a.id, destination: null, path: [], remainingMinutes: 0, dwellUntil: absoluteMinute + config.minimumDwellMinutes, lastDepartureMinute: null, blockOwner: null } };
   }
   get snapshot(): PassengerRailSnapshot { return structuredClone(this.state); }
-  static restore(config:PassengerRailConfig,graph:RailGraph,snapshot:PassengerRailSnapshot):PassengerRail {
-    return new PassengerRail(config,graph,snapshot?.minute,snapshot);
+  static restore(config:PassengerRailConfig,graph:RailGraph,snapshot:PassengerRailSnapshot,scheduled=false):PassengerRail {
+    return new PassengerRail(config,graph,snapshot?.minute,snapshot,scheduled);
   }
   private station(id: string): PassengerStation {
     const s = this.config.stations.find(s => s.id === id); if (!s) throw Error('Station does not belong to line'); return s;
@@ -108,18 +108,19 @@ export class PassengerRail {
   }
   /** External game-clock adapter. Budget limits CPU work, never skips minutes or resets at midnight.
    * The host may call again with the same target to drain remainingMinutes. Pause advances nothing.
+   * Scheduled game service can dispatch without demand while accepting new riders.
    * A different city/backward clock requires a new runtime, not implicit demand erasure. */
-  advanceTo(absoluteMinute: number, budgetMinutes: number, paused = false): { processedMinutes: number; remainingMinutes: number } {
+  advanceTo(absoluteMinute: number, budgetMinutes: number, paused = false, dispatchEmpty = false): { processedMinutes: number; remainingMinutes: number } {
     if (!safeCount(absoluteMinute) || absoluteMinute < this.state.minute || !safeCount(budgetMinutes)) throw Error('Invalid external rail clock');
     const count = paused ? 0 : Math.min(absoluteMinute - this.state.minute, budgetMinutes);
     // Validate time headroom before any state mutation, including future travel/egress timestamps.
     const longest = this.graph.links.reduce((n, l) => n + l.minutes, 0);
     const padding = this.state.batches.reduce((n, b) => Math.max(n, b.egressMinutes), Math.max(longest, this.config.minimumDwellMinutes));
     if (!safeCount(absoluteMinute + padding)) throw Error('Rail clock overflow');
-    for (let i = 0; i < count; i++) this.minute();
+    for (let i = 0; i < count; i++) this.minute(dispatchEmpty);
     return { processedMinutes: count, remainingMinutes: absoluteMinute - this.state.minute };
   }
-  private minute(): void {
+  private minute(dispatchEmpty: boolean): void {
     const s = this.state, t = s.train; s.minute++;
     this.finishEgress();
     if (s.enabled) this.fillPlatforms();
@@ -146,7 +147,8 @@ export class PassengerRail {
     for (const b of s.batches) if (b.fromStation === station.id && b.waiting && board) {
       const n = Math.min(board, b.waiting); b.waiting -= n; b.onboard += n; board -= n;
     }
-    const needed = sum(s.batches, 'onboard') > 0 || s.enabled && s.batches.some(b => b.fromStation === next.id && b.outside + b.waiting > 0);
+    const needed = sum(s.batches, 'onboard') > 0
+      || s.enabled && (dispatchEmpty || s.batches.some(b => b.fromStation === next.id && b.outside + b.waiting > 0));
     if (!needed || s.minute < t.dwellUntil || t.lastDepartureMinute !== null && s.minute - t.lastDepartureMinute < this.config.minimumDepartureIntervalMinutes) return;
     t.destination = next.id; t.path = [...outward.cells]; t.remainingMinutes = outward.minutes;
     t.lastDepartureMinute = s.minute; t.blockOwner = this.config.trainId; // Entire corridor exclusive; ONLY one train is supported.
