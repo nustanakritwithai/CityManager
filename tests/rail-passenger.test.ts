@@ -43,7 +43,7 @@ test('two stations one train actually boards, transports, alights and completes 
   assert.equal(rail.diagnostics().completed, 13); assert.equal(rail.diagnostics().unresolved, 0);
   assert.equal(original.minute, 0); assert.equal(original.batches[0].onboard, 0);
 });
-test('boarding and alighting do not earn road relief until last-mile completion', () => {
+test('boarding and alighting do not earn completed-service credit until last-mile completion', () => {
   const rail = make(), o = offer('one', 2); rail.offer(o);
   let demand = reserveRailDemand(request(o), o.leaseId, o.persons);
   rail.advanceTo(2, 2); assert.equal(rail.diagnostics().onboard, 2); assert.deepEqual(rail.serviceReceipts(), []);

@@ -39,6 +39,10 @@ test('cell demolition removes only touching segments and retains other track and
 test('occupied and paused trains reject all removal without losing passengers or reservations; drained removal succeeds',()=>{
  const city=createCity();for(let i=0;i<60;i++)step(city);const runtime=createParkRuntime(city),rail=RailNetworkRuntime.create(city,'occupied-removal',city.tick*1440);runtime.rail=rail;
  rail.addStation('a',315);rail.addStation('b',312);rail.addTrackPath(315,339);rail.addTrackPath(339,336);rail.addTrackPath(336,312);rail.configureGameService();
+ // Current service only boards explicitly accepted traffic demand; the clock
+ // must not fabricate passengers to make the occupied-corridor test pass.
+ assert.deepEqual(rail.acceptTrafficDemand({epoch:'removal-worker',sequence:1,from:315,to:312,persons:8}),{accepted:true,reason:'accepted'});
+ assert.equal(rail.snapshot.model!.offeredPersons,8);
  advanceParkRuntime(city,runtime,120,()=>step(city));assert.ok(rail.snapshot.service!.snapshot.train.destination);
  for(const paused of [false,true]){
   if(paused)rail.setServiceEnabled(false);const before=serializeParkSession(city,runtime);

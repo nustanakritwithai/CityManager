@@ -94,3 +94,20 @@ test('agriculture correlation observes events without adding a navigation barrie
  for(const text of ['server.trace.observeBrowser(m.method,m.params)','installSaveLifecycleObserver.toString()','server.trace.navigation(\'scenario-leave\')','server.trace.navigation(\'manual-reload\')','assert.deepEqual(server.errors,[])','assert.deepEqual(interceptionErrors,[])','assert.equal(events.length,failOnce?2:1)'])assert.ok(source.includes(text),text);
  assert.doesNotMatch(source,/waitForSave|waitForNavigationSave/);
 });
+
+test('v28 wellbeing session survives acknowledged server save and reload',async()=>{
+ const upstream=createServer((_req,res)=>res.end('fixture'));await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
+ const f=await startPersistenceFixture(`http://127.0.0.1:${upstream.address().port}/CityManager/`);
+ try{
+  const {createCity,step}=await import('../src/sim.ts');
+  const {createParkRuntime,serializeParkSession,deserializeParkSession}=await import('../src/park-runtime.ts');
+  const city=createCity(61025);for(let day=0;day<12;day++)step(city);
+  const raw=serializeParkSession(city,createParkRuntime(city));assert.equal(JSON.parse(raw).version,28);
+  const ack=await f.fixture.seed(raw);
+  const command={action:'save',cityId:ack.cityId,expectedRevision:ack.revision,raw,metadata:ack.metadata};
+  const response=await fetch(new URL('/citymanager-api/v1/city-save',f.url),{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify(command)});
+  assert.equal(response.status,200);const saved=await response.json();assert.equal(saved.raw,raw);assert.equal(saved.revision,ack.revision+1);
+  const read=await fetch(new URL('/citymanager-api/v1/city-save',f.url));const loaded=await read.json();assert.equal(loaded.raw,raw);
+  assert.deepEqual(deserializeParkSession(loaded.raw).city,city);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();await new Promise(r=>upstream.close(r));}
+});

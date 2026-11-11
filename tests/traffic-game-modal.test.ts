@@ -21,3 +21,10 @@ test('normalization clipping remains visible after modal splitting and engine in
 test('a second rail line is rejected until shared-track capacity is defined',()=>{const s=sample();assert.throws(()=>compileGameModal(s.map,{taxis:[],rail:[line(),{...line(),id:'L2'}]}),/Invalid modal game configuration/);});
 test('coverage is determined before lossy OD binning, never granting rail to uncovered origins or destinations',()=>{const fill=Array.from({length:63},(_,i)=>({from:Math.floor(i/3),to:300+i,rate:.1})),s=sample([...fill,{from:25,to:10,rate:1},{from:25,to:28,rate:1}]),r=allocateGameModes(s,compileGameModal(s.map,{taxis:[],rail:[line(2)]}));close(r.stats.railDiverted,.6);close(r.stats.rawRoadBefore-r.stats.railDiverted,r.stats.rawRoadAfter);assert.ok(r.sample.demand.length<=64);});
 test('modal upgrades reduce modeled road load even when an OD is saturated',()=>{const s=sample([{from:25,to:28,rate:100}]),r=allocateGameModes(s,compileGameModal(s.map,{taxis:[],rail:[line(1.2)]}));close(r.stats.roadBefore,4);close(r.stats.railDiverted,1.2);close(r.stats.roadAfter,2.8);close(r.stats.clippedRate,96);assert.equal(new TrafficGame(r.sample).frame.clippedRate,96);});
+test('binned private contributors exclude source-specific taxi assignments before rail handoff',()=>{
+ const filler=Array.from({length:63},(_,i)=>({from:Math.floor(i/3),to:300+i,rate:.1}));
+ const s=sample([...filler,{from:25,to:10,rate:1},{from:25,to:28,rate:1}]);
+ const r=allocateGameModes(s,compileGameModal(s.map,{taxis:[depot],rail:[]}));
+ const group=r.privateContributors.filter(x=>x.roadFrom===25&&(x.from===25&&(x.to===10||x.to===28)));
+ assert.equal(group.length,2);close(group.reduce((n,x)=>n+x.weight,0),1);assert.ok(group.every(x=>x.weight>=0&&x.weight<=1));
+});

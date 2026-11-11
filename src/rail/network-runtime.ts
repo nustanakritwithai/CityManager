@@ -1,6 +1,6 @@
 import { expandedCellCoordinate, expandedCellPath, EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
 /** Application-owned passenger infrastructure. No road admission or money mutation.
- * Service policy must be supplied explicitly; the pending traffic bridge owns leases. */
+ * The traffic bridge supplies held demand; accepted leases live in this saved runtime. */
 import type {City} from '../sim.ts';
 import {createRailGraph,railPath,safeCount,validId,type RailGraph} from './graph.ts';
 import {PassengerRail,type PassengerRailConfig,type PassengerRailSnapshot} from './passenger.ts';
@@ -16,7 +16,10 @@ import {busDepotAt} from '../bus/buildings.ts';
 /** V1 game tuning, not real passenger forecasts. Initial service is economy-neutral. */
 export const GAME_RAIL_TRACK_MINUTES=120, GAME_RAIL_MAX_TRACK_SEGMENTS=96;
 export const GAME_RAIL_POLICY:RailServicePolicy=Object.freeze({seats:32,queueCapacity:64,boardingPerMinute:8,alightingPerMinute:8,minimumDwellMinutes:30,minimumDepartureIntervalMinutes:60,maxBatches:32});
+export const GAME_RAIL_MAX_PENDING_PERSONS=128, GAME_RAIL_MAX_WALK_MINUTES=3;
 export type RailModelState={version:1;accepting:boolean;nextSequence:number;nextOfferMinute:number;offeredPersons:number;retiredPersons:number};
+export type RailTrafficOffer={epoch:string;sequence:number;from:number;to:number;persons:number};
+export type RailTrafficResult={accepted:boolean;reason:'accepted'|'unavailable'|'uncovered'|'capacity'|'stale'};
 
 export type RailStationSite={id:string;cell:number};
 export type RailServicePolicy={seats:number;queueCapacity:number;boardingPerMinute:number;alightingPerMinute:number;minimumDwellMinutes:number;minimumDepartureIntervalMinutes:number;maxBatches:number};
@@ -58,7 +61,8 @@ function validate(state:RailNetworkState){
 export class RailNetworkRuntime {
   private state:RailNetworkState;
   private rail:PassengerRail|null=null;
-  private densityCache:{key:string;persons:[number,number]}|null=null;
+  private trafficEpoch:string|null=null;
+  private trafficReceipt:{offer:RailTrafficOffer;result:RailTrafficResult}|null=null;
   private readonly city:City;
   private constructor(city:City,state:RailNetworkState){validate(state);this.city=city;this.state=structuredClone(state);if(state.service)this.rail=PassengerRail.restore(state.service.config,state.graph,state.service.snapshot);}
   /** Called only by explicit configuration. Loading an old city never creates an ID. */
@@ -125,37 +129,48 @@ export class RailNetworkRuntime {
   }
   configureGameService(){this.configureService(GAME_RAIL_POLICY);this.state.model??={version:1,accepting:true,nextSequence:0,nextOfferMinute:this.state.minute+60,offeredPersons:0,retiredPersons:0};this.state.model.nextOfferMinute=this.state.minute+60;this.state.model.accepting=true;}
   setModelAccepting(accepting:boolean){this.assertWritable();if(!this.state.model||!this.state.service||typeof accepting!=='boolean')throw Error('No modeled rail service');this.state.model.accepting=accepting;this.changed();}
-  /** No road-demand subtraction: these are independent illustrative passenger queues. */
-  private canOfferModel():boolean {
+  /** Existing saved illustrative riders keep their leases and drain normally. New
+   * riders may only come from a traffic-game reservation, never local density. */
+  private canAcceptTraffic():boolean {
     if(!this.rail||!this.state.service||!this.state.model)return false;
     const snap=this.state.service.snapshot,stations=this.state.stations;
     const a=railPath(this.state.graph,stations[0].cell,stations[1].cell),b=railPath(this.state.graph,stations[1].cell,stations[0].cell);
-    const backlog=snap.batches.reduce((n,b)=>n+b.outside+b.waiting+b.onboard+b.egress.reduce((n,e)=>n+e.persons,0),0);
-    return !!(this.state.model.accepting&&snap.enabled&&Object.values(snap.openStations).every(Boolean)&&a&&b&&backlog<128&&snap.batches.length<GAME_RAIL_POLICY.maxBatches);
+    return !!(this.state.model.accepting&&snap.enabled&&Object.values(snap.openStations).every(Boolean)&&a&&b);
   }
-  private modelOffer(){
-    const m=this.state.model,s=this.state.service;if(!m||!s||!this.canOfferModel())return;
-    const stations=this.state.stations;
-    // Cache only read-only density/access projection. The key includes same-tick
-    // edits and households, not merely the economy tick; no finance is cached.
-    const key=JSON.stringify([stations,this.city.cells.map(c=>c.road),this.city.roadTopology,this.city.buildings.map(b=>[b.id,b.zone,b.cell,b.level]),this.city.households.map(h=>[h.home,h.members])]);
-    if(this.densityCache?.key!==key){
-      const persons=stations.map((a,side)=>{
-        const b=stations[1-side],near=(from:number,to:number)=>{const p=railAccessPath(this.city,from,to);return p!==null&&p.length-1<=3;};
-        const homes=new Set(this.city.buildings.filter(x=>x.zone==='R'&&near(x.cell,a.cell)).map(x=>x.id));
-        const population=this.city.households.filter(h=>h.home!==null&&homes.has(h.home)).reduce((n,h)=>n+h.members,0);
-        const destinations=this.city.buildings.filter(x=>x.zone!=='R'&&near(b.cell,x.cell)).reduce((n,x)=>n+x.level,0);
-        return population&&destinations?Math.max(1,Math.min(8,Math.floor(Math.sqrt(population*destinations)/2))):0;
-      }) as [number,number];this.densityCache={key,persons};
+  /** Explicit worker lifecycle boundary. Only its host may replace the epoch;
+   * delayed offers cannot reactivate an old worker. Nothing is added to saves. */
+  bindTrafficEpoch(epoch:string):void {
+    if(!validId(epoch))throw Error('Invalid rail traffic epoch');
+    if(this.trafficEpoch!==epoch){this.trafficEpoch=epoch;this.trafficReceipt=null;}
+  }
+  /** Commit exactly one held, whole-person traffic offer or decline all of it.
+   * Offers are ordered within one worker epoch. The host retains cumulative ACKs;
+   * this bounded receipt additionally makes the latest retry an exact no-op even
+   * after its passenger batch retires. Older sequences are never admitted again.
+   * Loading a saved city starts a fresh worker epoch, without replaying old demand. */
+  acceptTrafficDemand(offer:RailTrafficOffer):RailTrafficResult {
+    if(!offer||!validId(offer.epoch)||![offer.sequence,offer.from,offer.to,offer.persons].every(safeCount)||offer.sequence<1||offer.persons<1||offer.from>=this.city.cells.length||offer.to>=this.city.cells.length)throw Error('Invalid rail traffic offer');
+    if(this.trafficEpoch===null)this.bindTrafficEpoch(offer.epoch);
+    if(offer.epoch!==this.trafficEpoch)return {accepted:false,reason:'stale'};
+    const prior=this.trafficReceipt;
+    if(prior&&offer.sequence<=prior.offer.sequence){
+      if(offer.sequence<prior.offer.sequence)return {accepted:false,reason:'stale'};
+      if((['epoch','sequence','from','to','persons'] as const).some(key=>offer[key]!==prior.offer[key]))throw Error('Conflicting rail traffic retry');
+      return {...prior.result};
     }
-    for(let side=0;side<2;side++){
-      if(this.state.service!.snapshot.batches.length>=GAME_RAIL_POLICY.maxBatches||!this.canOfferModel())break;
-      const a=stations[side],b=stations[1-side];
-      const outstanding=this.state.service!.snapshot.batches.reduce((n,b)=>n+b.persons-b.completed,0);
-      const persons=Math.min(this.densityCache.persons[side],128-outstanding);if(!persons)continue;
+    let result:RailTrafficResult;
+    const service=this.state.service,trip=offer.from===offer.to?null:this.planTrip(offer.from,offer.to,GAME_RAIL_MAX_WALK_MINUTES,1);
+    if(!this.canAcceptTraffic())result={accepted:false,reason:'unavailable'};
+    else if(!trip)result={accepted:false,reason:'uncovered'};
+    else if(service!.snapshot.batches.length>=service!.config.maxBatches||service!.snapshot.batches.reduce((n,b)=>n+b.persons-b.completed,0)+offer.persons>GAME_RAIL_MAX_PENDING_PERSONS)result={accepted:false,reason:'capacity'};
+    else {
       const id=`model:${this.state.model!.nextSequence}`;
-      this.acceptPreparedDemand({id,from:a.cell,to:b.cell,offeredPersons:persons,roadAdmittedPersons:0,leases:[]},{id,requestId:id,leaseId:id,from:a.cell,to:b.cell,fromStation:a.id,toStation:b.id,persons,readyAtMinute:this.state.minute,egressMinutes:3});
+      this.acceptPreparedDemand({id,from:offer.from,to:offer.to,offeredPersons:offer.persons,roadAdmittedPersons:0,leases:[]},
+        {id,requestId:id,leaseId:id,from:offer.from,to:offer.to,fromStation:trip.fromStation,toStation:trip.toStation,persons:offer.persons,readyAtMinute:this.state.minute+trip.accessMinutes,egressMinutes:trip.egressMinutes});
+      result={accepted:true,reason:'accepted'};
     }
+    this.trafficReceipt={offer:{...offer},result:{...result}};
+    return result;
   }
   private retireModelCompleted(){
     if(!this.rail||!this.state.model||!this.state.service)return;
@@ -182,8 +197,8 @@ export class RailNetworkRuntime {
       if(!best||minutes<best.minutes)best={fromStation:a.id,toStation:b.id,accessMinutes:first,egressMinutes:last,minutes};
     }return best;
   }
-  /** Foundation adapter only. NOT called by main: authoritative traffic transaction is pending.
-   * The future bridge must atomically persist its own reservation with this result. */
+  /** Low-level atomic lease adapter. Production traffic intake uses
+   * acceptTrafficDemand so current eligibility and bounded capacity are checked. */
   acceptPreparedDemand(demand:ModalDemand,offer:PassengerOffer):ModalDemand {this.assertWritable();
     if(!this.rail||!this.state.service)throw Error('Service is not configured');
     if(this.state.model){const expected=`model:${this.state.model.nextSequence}`;if(demand.id!==expected||offer.id!==expected||offer.requestId!==expected||offer.leaseId!==expected)throw Error('Modeled rail accepts only its next sequence');}
@@ -199,7 +214,8 @@ export class RailNetworkRuntime {
     const elapsed=minute-this.state.minute;this.assertWritable(elapsed);this.assertParcels();
     while(this.state.minute<minute){const target=this.state.model?Math.min(minute,this.state.model.nextOfferMinute):minute;
       this.rail?.advanceTo(target,target-this.state.minute);this.state.minute=target;this.sync();this.retireModelCompleted();
-      if(this.state.model&&target===this.state.model.nextOfferMinute){this.state.model.nextOfferMinute=target+60;this.modelOffer();}
+      // Retain the v1 save clock field, but do not create independent riders.
+      if(this.state.model&&target===this.state.model.nextOfferMinute)this.state.model.nextOfferMinute=target+60;
     }this.state.revision+=elapsed;
   }
   private sync(){if(this.rail&&this.state.service){this.state.service.snapshot=this.rail.snapshot;for(const receipt of this.rail.serviceReceipts()){const i=this.state.service.demands.findIndex(d=>d.id===receipt.requestId);if(i<0)throw Error('Unowned rail completion');this.state.service.demands[i]=acknowledgeRailService(this.state.service.demands[i],receipt);}}}
