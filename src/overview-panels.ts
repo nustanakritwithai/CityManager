@@ -18,7 +18,7 @@ import { overviewRevision } from './overview-revision.ts';
 import { municipalInvestments, renderMunicipalInvestments, type MunicipalInvestmentTool } from './municipal-investments.ts';
 import { treasurySpendable } from './sim.ts';
 import type { City } from './sim.ts';
-import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt } from './city-tax-policy.ts';
+import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { taxHappinessPoints } from './resident-happiness.ts';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -28,20 +28,43 @@ const points = new Intl.NumberFormat('th-TH', { signDisplay: 'exceptZero' });
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string) => {
   const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
-function taxField(title: string, max: number) {
-  const label = el('label', '', `${title} (%)`);
-  const input = el('input');
-  input.type = 'number'; input.inputMode = 'numeric'; input.required = true;
+function taxField(key: keyof TaxRates, title: string, households: string) {
+  const max = MAX_TAX_RATES[key];
+  const field = el('div', `dash-tax-field dash-tax-${key}`);
+  const head = el('div', 'dash-tax-field-head');
+  const label = el('label', '', title);
+  const value = el('span', 'dash-tax-value');
+  value.setAttribute('aria-hidden', 'true');
+  const input = el('input', 'dash-tax-range');
+  input.id = `city-tax-${key}`;
+  input.type = 'range';
   input.min = '0'; input.max = String(max); input.step = '1';
-  label.append(input);
-  return { label, input };
+  label.htmlFor = input.id;
+  const limits = el('div', 'dash-tax-limits');
+  limits.setAttribute('aria-hidden', 'true');
+  limits.append(el('span', '', '0%'), el('span', '', `${max}%`));
+  const impact = el('p', 'dash-tax-impact');
+  impact.id = `${input.id}-impact`;
+  input.setAttribute('aria-describedby', impact.id);
+  head.append(label, value);
+  field.append(head, input, limits, impact);
+  return {
+    field, input,
+    preview(happiness: number) {
+      const rate = input.valueAsNumber;
+      value.textContent = `${rate}%`;
+      input.setAttribute('aria-valuetext', `${rate} เปอร์เซ็นต์`);
+      input.style.setProperty('--tax-fill', `${rate / max * 100}%`);
+      impact.textContent = `ผลต่อเป้าหมายความสุขของ${households} ${points.format(happiness)} คะแนน`;
+    },
+  };
 }
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}) => {
   const node = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); return node;
 };
 
 const NAV: readonly [string, string][] = [
-  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
+  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-taxes', 'ภาษี'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
   ['growth-anchor', 'ความต้องการ'], ['issue-section', 'ปัญหา'], ['event-log-section', 'เหตุการณ์'], ['money-section', 'บัญชี'],
 ];
 const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'C · พืชผล', factory: 'โรงงาน', shop: 'C · สินค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
@@ -56,10 +79,9 @@ export class OverviewDashboard {
   private readonly financeHead = this.head('การเงินของเมือง', '');
   private readonly financeNote = this.financeHead.querySelector('span')!;
   private readonly financeCharts = el('div');
-  private readonly wageTax = taxField('ภาษีค่าจ้าง', MAX_TAX_RATES.wage);
-  private readonly profitTax = taxField('ภาษีกำไรกิจการ', MAX_TAX_RATES.profit);
+  private readonly wageTax = taxField('wage', 'ภาษีค่าจ้าง', 'ครัวเรือนที่มีงานรับค่าจ้าง');
+  private readonly profitTax = taxField('profit', 'ภาษีกำไรกิจการ', 'ครัวเรือนเจ้าของกิจการ');
   private readonly taxStatus = el('p', 'dash-tax-status');
-  private readonly taxImpact = el('p', 'dash-tax-status');
   private readonly chain = el('section', 'dash-card dash-chain');
   private readonly growth = el('section', 'dash-card dash-growth');
   private readonly modal = new ChartModal();
@@ -72,7 +94,7 @@ export class OverviewDashboard {
     this.goals.id = 'dash-goals'; this.finance.id = 'dash-finance'; this.chain.id = 'dash-chain'; this.growth.id = 'dash-growth'; this.kpis.setAttribute('aria-label', 'ตัวเลขหลักของเมือง');
     const nav = el('nav', 'dash-nav'); nav.setAttribute('aria-label', 'ไปยังหมวดในภาพรวมเมือง');
     for (const [target, label] of NAV) {
-      const button = el('button', 'dash-nav-chip', label); button.type = 'button';
+      const button = el('button', target === 'dash-taxes' ? 'dash-nav-chip dash-nav-tax' : 'dash-nav-chip', label); button.type = 'button';
       button.addEventListener('click', () => {
         const section = document.getElementById(target);
         if (section instanceof HTMLDetailsElement) section.open = true;
@@ -81,18 +103,20 @@ export class OverviewDashboard {
       nav.append(button);
     }
     const taxForm = el('form', 'dash-tax');
+    taxForm.id = 'dash-taxes';
     const taxFields = el('fieldset');
     const controls = el('div', 'dash-tax-controls');
-    const submit = el('button', '', 'ตั้งอัตรารอบถัดไป');
+    const submit = el('button', 'dash-tax-submit', 'ตั้งอัตรารอบถัดไป');
     submit.type = 'submit';
-    controls.append(this.wageTax.label, this.profitTax.label, submit);
+    controls.append(this.wageTax.field, this.profitTax.field);
     this.taxStatus.setAttribute('role', 'status');
-    taxFields.append(el('legend', '', 'อัตราภาษีเมือง'), this.taxStatus, this.taxImpact, controls);
+    taxFields.append(el('legend', '', 'อัตราภาษีเมือง'), this.taxStatus, controls, submit);
     taxForm.append(taxFields);
+    taxForm.addEventListener('input', () => this.previewTaxRates());
     taxForm.addEventListener('submit', event => {
       event.preventDefault();
-      if (!this.city || !taxForm.reportValidity()) return;
-      scheduleCityTaxes(this.city, { wage: this.wageTax.input.valueAsNumber, profit: this.profitTax.input.valueAsNumber });
+      if (!this.city) return;
+      scheduleCityTaxes(this.city, this.draftTaxRates());
       this.updateTaxSettings(this.city, true);
     });
     this.finance.append(this.financeHead, taxForm, this.financeCharts);
@@ -144,6 +168,16 @@ export class OverviewDashboard {
     const head = el('header', 'dash-head'); head.append(el('h3', '', title), el('span', 'dash-note', note)); return head;
   }
 
+  private draftTaxRates(): TaxRates {
+    return { wage: this.wageTax.input.valueAsNumber, profit: this.profitTax.input.valueAsNumber };
+  }
+
+  private previewTaxRates() {
+    const impact = taxHappinessPoints(this.draftTaxRates());
+    this.wageTax.preview(impact.wage);
+    this.profitTax.preview(impact.profit);
+  }
+
   private updateTaxSettings(city: City, resetInputs: boolean) {
     const active = taxRatesAt(city.taxPolicy, city.tick);
     const latest = city.taxPolicy?.at(-1);
@@ -151,16 +185,14 @@ export class OverviewDashboard {
     if (resetInputs) {
       this.wageTax.input.value = String(pending?.wage ?? active.wage);
       this.profitTax.input.value = String(pending?.profit ?? active.profit);
+      this.previewTaxRates();
     }
     const current = `ปัจจุบัน ค่าจ้าง ${active.wage}% · กำไรกิจการ ${active.profit}%`;
     const next = pending
       ? `ตั้งไว้สำหรับวันที่ ${pending.fromDay} ค่าจ้าง ${pending.wage}% · กำไรกิจการ ${pending.profit}%`
       : `อัตราใหม่เริ่มใช้วันที่ ${nextTaxDay(city.tick)}`;
-    const status = `${current} · ${next}`;
+    const status = `${current}\n${next}`;
     if (this.taxStatus.textContent !== status) this.taxStatus.textContent = status;
-    const impact = taxHappinessPoints(pending ?? active);
-    const happiness = `ผลต่อเป้าหมายความสุข${pending ? 'รอบถัดไป' : 'ปัจจุบัน'} · ครัวเรือนที่มีงานรับค่าจ้าง ${points.format(impact.wage)} คะแนน · ครัวเรือนเจ้าของกิจการ ${points.format(impact.profit)} คะแนน`;
-    if (this.taxImpact.textContent !== happiness) this.taxImpact.textContent = happiness;
   }
 
   private renderFinance(city: City, series: DailySeries) {
