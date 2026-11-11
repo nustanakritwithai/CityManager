@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   save-smoke:
-    name: Save smoke
+    name: ${{ (github.event_name != 'deployment' || (github.event.deployment.environment == 'citymanager-calculation-verification' && github.ref == 'refs/heads/codex/fix-city-calculation-audit')) && 'Save smoke' || 'Ignore unrelated deployment' }}
     if: github.event_name != 'deployment' || (github.event.deployment.environment == 'citymanager-calculation-verification' && github.ref == 'refs/heads/codex/fix-city-calculation-audit')
     env:
       CALCULATION_CONTRACTS: ${{ inputs.calculation_contracts || github.event_name == 'deployment' }}
