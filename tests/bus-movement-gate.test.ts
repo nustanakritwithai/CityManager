@@ -194,9 +194,10 @@ test('live bus cruise matches road traffic scale while stops and blocked movemen
  assert.ok(Math.abs(blocked.progress-b.progress)<1e-7,'traffic gate holds position');
  allow=true; bridge.tick(300+1.501/60); const resumed=e.snapshot()[0];
  assert.ok(resumed.progress>blocked.progress,'bus resumes when road is clear');
- // First stop still has its complete dwell, independent of the faster road travel.
+ // The live clock holds for five seconds after the real arrival.
  bridge.tick(300+2.1/60); const dwelling=e.snapshot()[0]; assert.equal(dwelling.phase,'dwelling');
  const until=e.busesDetail()[0].until;
+ assert.ok((until-e.now)*60>4.5&&(until-e.now)*60<=5);
  bridge.tick(until-0.001/60); assert.equal(e.snapshot()[0].phase,'dwelling');
  bridge.tick(until+0.001/60); assert.equal(e.snapshot()[0].phase,'running');
  conserved(e);
@@ -204,12 +205,13 @@ test('live bus cruise matches road traffic scale while stops and blocked movemen
 
 test('live fleet headway and ride estimates use the same driving clock as buses', async () => {
  const {BusGameBridge}=await import('../src/bus/game-bridge.ts');
- const {BUS_LIVE_DRIVE_SECONDS_PER_TILE}=await import('../src/bus/types.ts');
- const c=host(3), route=busLineRoutes(c,{driveSecondsPerTile:BUS_LIVE_DRIVE_SECONDS_PER_TILE})[0];
+ const {BUS_LIVE_TIMING}=await import('../src/bus/types.ts');
+ const c=host(3), route=busLineRoutes(c,BUS_LIVE_TIMING)[0];
  const bridge=new BusGameBridge(c,300,()=>true),e=bridge.engine;
  const line=bridge.input().lines[0];
  assert.ok(route.headwayMinutes); assert.ok(Math.abs(line.waitMinutes-route.headwayMinutes/2)<1e-9);
  assert.ok(Math.abs(line.ride['10:11']-busRideMinutes(route,[10,11,12],10,11)!)<1e-9);
+ assert.ok(Math.abs(line.ride['10:12']-(route.legs[0].seconds+route.legs[1].seconds+5)/60)<1e-9);
  const detail=e.busesDetail();
  for(let k=0;k<3;k++)assert.ok(Math.abs(detail[k].until-(300+k*route.headwayMinutes!))<1e-9);
  bridge.tick(300+route.headwayMinutes!-1e-6);assert.equal(e.busesDetail()[1].phase,'home');

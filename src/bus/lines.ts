@@ -72,14 +72,14 @@ export type BusLineRoute = Readonly<{
   /** Depot exit → first stop (road path). Null if the depot has no road frontage reaching it. */
   fromDepot: readonly number[] | null;
   /** Stop calls per cycle, drive + dwell minutes for one full cycle. */
-  stopCalls: number; cycleMinutes: number;
+  stopCalls: number; cycleMinutes: number; dwellMinutes: number;
   /** Buses actually runnable (capacity granted in line-id order) and resulting headway (minutes). */
   buses: number; headwayMinutes: number | null;
   stops: readonly Readonly<{ stopId: number; cell: number; side: string }>[];
   /** Full cell polyline for overlays (legs concatenated, shared joints not repeated). */
   polyline: readonly number[];
 }>;
-export type BusRouteOptions = { net?: LinkNetwork; times?: ReadonlyMap<string, number>; driveSecondsPerTile?: number };
+export type BusRouteOptions = { net?: LinkNetwork; times?: ReadonlyMap<string, number>; driveSecondsPerTile?: number; dwellMinutes?: number };
 
 /** Stop call sequence for one cycle. */
 export function busServiceOrder(stopIds: readonly number[]): number[] {
@@ -92,6 +92,7 @@ export function busServiceOrder(stopIds: readonly number[]): number[] {
  */
 export function busLineRoutes(c: BusHost, o: BusRouteOptions = {}): readonly BusLineRoute[] {
   const b = c.bus; if (!b) return Object.freeze([]);
+  const dwellMinutes = o.dwellMinutes ?? BUS_DWELL_MIN;
   const net = o.net ?? buildNetwork(c), times = o.times ?? linkTimes(net, new Map());
   const stopById = new Map(b.stops.map(s => [s.id, s])), left = new Map(b.depots.map(d => [d.id, BUS_DEPOT_BUSES[d.level]]));
   const legSeconds = (p: number[]) => p.slice(1).reduce((s, x, i) => s + (o.driveSecondsPerTile ?? times.get(linkKey(p[i], x)) ?? Infinity), 0);
@@ -119,15 +120,20 @@ export function busLineRoutes(c: BusHost, o: BusRouteOptions = {}): readonly Bus
     if (!reason && !fromDepot) reason = 'unreachable';
     let buses = 0;
     if (!reason) { const free = left.get(depot!.id) ?? 0; buses = Math.min(l.busCount, free); left.set(depot!.id, free - buses); if (l.busCount === 0) reason = 'noBuses'; else if (buses === 0) reason = 'depotFull'; }
-    const stopCalls = Math.max(0, order.length - 1), drive = legs.reduce((s, g) => s + g.seconds, 0) / 60, cycleMinutes = legs.length ? drive + stopCalls * BUS_DWELL_MIN : 0;
+    const stopCalls = Math.max(0, order.length - 1), drive = legs.reduce((s, g) => s + g.seconds, 0) / 60, cycleMinutes = legs.length ? drive + stopCalls * dwellMinutes : 0;
     const polyline: number[] = []; for (const g of legs) for (const x of g.path) if (polyline.at(-1) !== x) polyline.push(x);
     out.push(Object.freeze({ lineId: l.id, depotId: l.depotId, loop, status: reason ? 'suspended' : 'running', ...(reason ? { reason } : {}), legs: Object.freeze(legs), fromDepot: fromDepot && Object.freeze(fromDepot),
-      stopCalls, cycleMinutes, buses: reason ? 0 : buses, headwayMinutes: reason || !buses ? null : cycleMinutes / buses, stops: Object.freeze(stops), polyline: Object.freeze(polyline) }));
+      stopCalls, cycleMinutes, dwellMinutes, buses: reason ? 0 : buses, headwayMinutes: reason || !buses ? null : cycleMinutes / buses, stops: Object.freeze(stops), polyline: Object.freeze(polyline) }));
   }
   return Object.freeze(out);
 }
 /** Headway (minutes) for a cycle time and fleet: cycle / buses; null without buses. */
 export const busHeadway = (cycleMinutes: number, buses: number): number | null => (buses > 0 && Number.isFinite(cycleMinutes) ? cycleMinutes / buses : null);
+
+export function formatBusHeadway(minutes: number): string {
+  if (minutes < 1) return `${Math.max(1, Math.round(minutes * 60))} วินาที`;
+  return `${Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1)} นาที`;
+}
 
 /**
  * Memoised routes: recomputed only when roads/topology or the bus section change (call freely each
@@ -137,7 +143,7 @@ export class BusRouteCache {
   private key = ''; private value: readonly BusLineRoute[] = Object.freeze([]);
   get(c: BusHost, o: BusRouteOptions = {}): readonly BusLineRoute[] {
     const roads = c.cells.reduce((s, x, i) => (x.road ? s + i + ',' : s), '');
-    const key = `${roads}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.bus ?? null)}|${o.times ? 'T' : ''}|${o.driveSecondsPerTile ?? ''}`;
+    const key = `${roads}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.bus ?? null)}|${o.times ? 'T' : ''}|${o.driveSecondsPerTile ?? ''}|${o.dwellMinutes ?? ''}`;
     if (o.times || key !== this.key) { this.value = busLineRoutes(c, o); this.key = o.times ? '' : key; }
     return this.value;
   }

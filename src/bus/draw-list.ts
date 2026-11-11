@@ -15,7 +15,7 @@ export type BusDrawList = {
   buses: BusDrawPose[];
   /** Buses with passengers — one roof-bar instance each. */
   loads: BusDrawPose[];
-  /** `phase === 'dwelling'` (stopped at a kerb for the engine's 1-minute dwell). */
+  /** `phase === 'dwelling'` (stopped at a kerb to board and alight). */
   dwelling: BusDrawPose[];
   lines: BusRibbon[];
   stops: BusStopMark[];

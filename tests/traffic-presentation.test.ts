@@ -80,6 +80,21 @@ test('rear bus requesting first cannot lock the front bus that needs to drain it
  assert.equal(p.allowBusMovement('rear',rear,{...rear,x:.3},[{...front,x:1.3}]),true);
 });
 
+test('a bus leaving its granted stop corridor can finish clearing a later request',()=>{
+ const p=new TrafficPresentation(),out={id:'out',x:0,z:0,headingX:1,headingZ:0,length:.78,width:.32};
+ const incoming={...out,id:'return',x:4,headingX:-1};
+ const exit={id:'stop-exit',samples:[out,{...out,x:2}]},arrival={id:'stop-arrival',samples:[incoming,{...incoming,x:2}]};
+ const departed={...out,x:.1},clearing={...out,x:1.6};
+ assert.equal(p.allowBusMovement(out.id,out,departed,[],[],[exit]),true);
+ p.frame(.025,false,[departed,incoming]);
+ assert.equal(p.allowBusMovement(incoming.id,incoming,{...incoming,x:3.9},[departed],[],[arrival]),false);
+ assert.equal(p.diagnostics.selectedDrain,incoming.id);
+ assert.equal(p.allowBusMovement(out.id,departed,clearing,[incoming],[],[exit]),true);
+ assert.equal(p.allowBusMovement(out.id,clearing,{...clearing,x:1.8},[incoming]),true);
+ assert.equal(p.allowBusMovement(out.id,{...clearing,x:1.8},{...clearing,x:2},[incoming]),true);
+ assert.equal(p.allowBusMovement(out.id,{...clearing,x:2},incoming,[incoming]),false,'escape rights cannot bypass a real vehicle');
+});
+
 test('early next-link hint reserves full turn before a crossing follower enters the corner',()=>{
  const p=new TrafficPresentation(),hint={x:.71,z:0,headingX:1,headingZ:0};
  const turn={...pose('turn',0,1,0,-1),upcomingTurn:hint},cross=pose('cross',-1,0);
