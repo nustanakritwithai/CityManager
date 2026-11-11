@@ -5,6 +5,7 @@ import {TAXI_DEPOT_UNITS,type TaxiDepotSite} from '../taxi/sites.ts';
 import {TAXI_AVAILABILITY_CAP} from '../taxi/types.ts';
 import {createRailGraph,type RailLink} from '../rail/graph.ts';
 import {railAccessPath} from '../rail/access.ts';
+import type {RailGameContributor} from '../rail/game-rail.ts';
 import {normalizeTrafficGameSample,type GameDemand,type TrafficGameSample} from './game.ts';
 
 /** Tunable game assumptions, NOT claims about real-world transport. One rate
@@ -59,7 +60,7 @@ export function compileGameModal(map:RoadMap,config:GameModalConfig) {
  * uncovered source must never receive another area's rail/taxi benefit merely
  * because the display model groups them together. Proportional budgets remain
  * bounded; all clipping is explicitly reported. Never mutates the input. */
-export function allocateGameModes(sample:TrafficGameSample,context:ReturnType<typeof compileGameModal>):{sample:TrafficGameSample;stats:GameModalStats} {
+export function allocateGameModes(sample:TrafficGameSample,context:ReturnType<typeof compileGameModal>):{sample:TrafficGameSample;stats:GameModalStats;privateContributors:RailGameContributor[]} {
  const normalized=normalizeTrafficGameSample(sample);
  if(signature(normalized.sample.map)!==context.signature)throw Error('Modal network changed; rebuild coverage');
  // Reconstruct the same representative bins as the core, then apportion each
@@ -101,5 +102,7 @@ export function allocateGameModes(sample:TrafficGameSample,context:ReturnType<ty
  const railDiverted=railShift.reduce((a,b)=>a+b,0),taxiDiverted=taxiShift.reduce((a,b)=>a+b,0),taxiLoaded=taxiDiverted*GAME_TAXI_LOADED_FACTOR,taxiEmpty=taxiDiverted*GAME_TAXI_EMPTY_FACTOR;
  const rawRoadBefore=raw.reduce((n,d)=>n+d.rate,0),rawRoadAfter=rawRoadBefore-railDiverted-taxiDiverted+taxiLoaded+taxiEmpty;
  const roadBefore=normalized.sample.demand.reduce((n,d)=>n+d.rate,0),roadAfter=demand.reduce((n,d)=>n+d.rate,0);
- return {sample:{map:normalized.sample.map,demand,clippedRate:normalized.clippedRate},stats:{clippedRate:normalized.clippedRate,clippedBefore:normalized.clippedRate,rawRoadBefore,rawRoadAfter,roadBefore,roadAfter,railDiverted,taxiDiverted,taxiLoaded,taxiEmpty,railByLine,taxiByDepot}};
+ const privateContributors:RailGameContributor[]=[];
+ for(const range of ranges){const total=rows.slice(range.start,range.end).reduce((n,d,j)=>n+Math.max(0,d.rate-railShift[range.start+j]-taxiShift[range.start+j]),0);if(total<=0)continue;for(let i=range.start;i<range.end;i++){const amount=Math.max(0,rows[i].rate-railShift[i]-taxiShift[i]);if(amount>0)privateContributors.push({from:rows[i].from,to:rows[i].to,roadFrom:range.representative.from,roadTo:range.representative.to,weight:amount/total});}}
+ return {privateContributors,sample:{map:normalized.sample.map,demand,clippedRate:normalized.clippedRate},stats:{clippedRate:normalized.clippedRate,clippedBefore:normalized.clippedRate,rawRoadBefore,rawRoadAfter,roadBefore,roadAfter,railDiverted,taxiDiverted,taxiLoaded,taxiEmpty,railByLine,taxiByDepot}};
 }

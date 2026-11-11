@@ -25,6 +25,10 @@ test('explicit stations, atomic track confirmation, service, cancellation and st
  const action=(key:string)=>{const button=find(body,e=>e.dataset.railAction===key);assert.ok(button,key);button.click();};
  const click=(id:string)=>{const button=find(body,e=>e.id===id);assert.ok(button,id);button.click();};
  try{
+  const note=find(body,e=>e.className==='rail-management-note')!.textContent;
+  assert.match(note,/ความต้องการเดินทางในแบบจำลองจราจร/);assert.match(note,/ไม่ใช่ประชาชนรายบุคคล/);
+  assert.match(note,/ต้องเปิดแบบจำลองจราจรจึงรับผู้โดยสารใหม่/);assert.match(note,/ลดความต้องการรถเฉพาะส่วนที่รถไฟรับไว้/);
+  assert.doesNotMatch(note,/ตามความหนาแน่น|ยังไม่ลดรถบนถนน/);
   action('station');ui.activate(288);click('rail-confirm-accept');assert.equal(runtime.rail,undefined,'Occupied road cannot become a station');assert.match(messages.at(-1)!,/ไม่มีถนนหรืออาคาร/);
   action('station');assert.equal(ui.activate(289),true);click('rail-confirm-cancel');assert.equal(runtime.rail,undefined);assert.equal(changes,0);
   action('station');ui.activate(289);click('rail-confirm-accept');assert.equal(runtime.rail!.snapshot.stations.length,1);
@@ -57,5 +61,27 @@ test('player-facing rail positions, straight track preview and the place-panel c
   action('station');ui.activate(292);click('rail-confirm-accept');
   action('add-track');ui.activate(289);assert.deepEqual(ui.preview(292)!.cells,[289,290,291,292],'Second tap previews the straight run');ui.activate(292);click('rail-confirm-accept');
   assert.equal(ui.placeCard(290)!.title,'รางรถไฟ');
+ }finally{ui.destroy();if(oldDocument)Object.defineProperty(globalThis,'document',oldDocument);else Reflect.deleteProperty(globalThis,'document');if(oldWindow)Object.defineProperty(globalThis,'window',oldWindow);else Reflect.deleteProperty(globalThis,'window');}
+});
+test('multi-cell removal, regular demolition and place-card removal use confirmed authoritative commands',()=>{
+ const oldDocument=Object.getOwnPropertyDescriptor(globalThis,'document'),oldWindow=Object.getOwnPropertyDescriptor(globalThis,'window');
+ const body=new Element(),dock=new Element(),canvas=new Element(),doc=new EventTarget();body.append(dock,canvas);
+ Object.assign(doc,{body,createElement:()=>new Element(),querySelector:(s:string)=>s==='.tool-buttons'?dock:s==='#city-canvas'?canvas:null});
+ Object.defineProperty(globalThis,'document',{configurable:true,value:doc});Object.defineProperty(globalThis,'window',{configurable:true,value:new EventTarget()});
+ const city=createCity(61031,{starter:false}),runtime=createParkRuntime(city);let changes=0;const messages:string[]=[];
+ const ui=installRailManagement({view:{cameraBlocked:false,abortGesture(){}} as any,city:()=>city,runtime:()=>runtime,selectTool(){},changed(){changes++},status:m=>messages.push(m),enabled:true});
+ const action=(key:string)=>find(body,e=>e.dataset.railAction===key)!.click(),click=(id:string)=>find(body,e=>e.id===id)!.click();
+ try{
+  for(const i of [289,293]){action('station');ui.activate(i);click('rail-confirm-accept');}
+  action('add-track');ui.activate(289);ui.activate(293);click('rail-confirm-accept');
+  const initial=runtime.rail!.snapshot,count=changes;
+  action('remove-track');ui.activate(293);ui.activate(289);assert.deepEqual(ui.preview(null)!.cells,[293,292,291,290,289]);click('rail-confirm-cancel');assert.deepEqual(runtime.rail!.snapshot,initial);assert.equal(changes,count);
+  ui.activate(293);ui.activate(289);click('rail-confirm-accept');assert.equal(runtime.rail!.snapshot.graph.links.length,0);assert.deepEqual(runtime.rail!.snapshot.stations,initial.stations);
+  action('add-track');ui.activate(289);ui.activate(293);click('rail-confirm-accept');
+  assert.equal(ui.demolish(400),false);assert.equal(ui.demolish(291),true);const before=runtime.rail!.snapshot;click('rail-confirm-cancel');assert.deepEqual(runtime.rail!.snapshot,before);
+  ui.demolish(291);click('rail-confirm-accept');assert.equal(ui.isReserved(291),false);assert.equal(runtime.rail!.snapshot.graph.links.length,4);assert.equal(ui.isReserved(289),true);
+  const card=ui.placeCard(290)!.card as unknown as Element;find(card,e=>e.dataset.railRemove==='290')!.click();click('rail-confirm-accept');assert.equal(ui.placeCard(290),null);assert.equal(ui.isReserved(289),true);
+  ui.demolish(289);click('rail-confirm-accept');assert.equal(runtime.rail!.snapshot.stations.length,1);assert.equal(ui.isReserved(289),false);
+  assert.equal(messages.some(m=>m.includes('ถอดราง')),true);
  }finally{ui.destroy();if(oldDocument)Object.defineProperty(globalThis,'document',oldDocument);else Reflect.deleteProperty(globalThis,'document');if(oldWindow)Object.defineProperty(globalThis,'window',oldWindow);else Reflect.deleteProperty(globalThis,'window');}
 });

@@ -181,7 +181,7 @@ const help: Record<string, string> = {
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
-  bulldoze: 'รื้อถอน · คืน 80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่ายและมีหลักฐาน · อาคารเอกชนไม่คืนเงินและค่ารื้อ ฿20 · ดูยอดที่การ์ดสถานที่ก่อนรื้อ · ป้ายและอู่รถเมล์จะถามก่อนลบ · V/Esc เพื่อออก',
+  bulldoze: 'รื้อถอน · คืน 80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่ายและมีหลักฐาน · อาคารเอกชนไม่คืนเงินและค่ารื้อ ฿20 · ดูยอดที่การ์ดสถานที่ก่อนรื้อ · รางรถไฟ ป้ายและอู่รถเมล์จะถามก่อนลบ · V/Esc เพื่อออก',
   'bus-depot': 'อู่รถเมล์ · แตะแปลงว่างที่ติดถนนเชื่อมประตูเมือง · รอบแรกไม่มีค่าใช้จ่าย',
   'bus-stop': 'ป้ายรถเมล์ · แตะถนนตรงที่ไม่ใช่ทางแยกหรือหัวมุม · ห่างป้ายอื่นอย่างน้อย 2 ช่อง · เลือกฝั่งให้ตรงทิศรถ',
   'bus-line': 'สายรถเมล์ · แตะป้ายตามลำดับ · ป้ายแรกซ้ำเป็นป้ายสุดท้ายคือสายวงกลม · กดสร้างสาย',
@@ -322,6 +322,7 @@ function taxiOccupies(cells: readonly number[]) {
 /** Runs before activate so bus can keep the activate lines. Taxi is a no-op while traffic is off. */
 function taxiActivate(index: number) {
   if(railUi?.activate(index))return;
+  if(tool==='bulldoze'&&railUi?.demolish(index))return;
   if(tool!=='select'&&railUi?.isReserved(index)){status('ช่องนี้มีสถานีหรือรางรถไฟ กรุณาจัดการรถไฟก่อน');return;}
   if (taxiFeature && tool === 'taxi') {
     status(resultSound(taxiSession.place(city, index, true, trafficOn), 'ui-place').message);
@@ -715,7 +716,7 @@ async function boot() {
   trafficControl.append(trafficControlTitle,trafficButton,trafficControlNote);$('#game-content .game-menu').prepend(trafficControl);
   const setTrafficEnabled=(enabled:boolean,persist=false)=>{
     trafficEnabled=enabled;trafficOn=enabled;trafficLayer?.destroy();trafficLayer=null;view.traffic.setCarsEnabled(!enabled);
-    if(enabled){try{const canvas=$('#city-canvas') as HTMLCanvasElement;trafficLayer=new TrafficLayer(view.app,screenCull(i=>view.project(i),()=>({width:canvas.clientWidth,height:canvas.clientHeight})),()=>{view.traffic.setCarsEnabled(true);status('แบบจำลองจราจรไม่พร้อม · กลับไปใช้รถตกแต่ง โดยไม่กระทบเซฟ');});}catch{view.traffic.setCarsEnabled(true);trafficInfo.textContent='แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน';}}
+    if(enabled){try{const canvas=$('#city-canvas') as HTMLCanvasElement;trafficLayer=new TrafficLayer(view.app,screenCull(i=>view.project(i),()=>({width:canvas.clientWidth,height:canvas.clientHeight})),()=>{view.traffic.setCarsEnabled(true);status('แบบจำลองจราจรไม่พร้อม · กลับไปใช้รถตกแต่ง โดยไม่กระทบเซฟ');});trafficLayer.setRailRuntimeReader(()=>parkRuntime.rail);}catch{view.traffic.setCarsEnabled(true);trafficInfo.textContent='แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน';}}
     trafficState.textContent=enabled?'เปิด':'ปิด';trafficButton.setAttribute('aria-label',enabled?'ปิดการจราจรจำลอง':'เปิดการจราจรจำลอง');trafficButton.setAttribute('aria-pressed',String(enabled));
     trafficSection.hidden=!enabled;
     if(persist){const saved=storeTrafficModel(enabled);try{const u=new URL(location.href);u.searchParams.delete('traffic');history.replaceState(history.state,'',u);}catch{/* preference still applies */}

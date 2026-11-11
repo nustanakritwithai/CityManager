@@ -164,7 +164,7 @@ jobs:
           CITYMANAGER_LAND_CHECKS: ${{ steps.scope.outputs.kind == 'land-expansion' && '1' || '' }}
           CITYMANAGER_PR182_CHECKS: ${{ steps.scope.outputs.kind == 'panel-polish' && '1' || '' }}
           CITYMANAGER_TRAFFIC_CHECKS: ${{ (steps.scope.outputs.kind == 'traffic-gap' || steps.scope.outputs.kind == 'traffic-presenter') && 'bumper-gap' || '' }}
-          CITYMANAGER_RAIL_CHECKS: ${{ (steps.scope.outputs.kind == 'rail' || steps.scope.outputs.kind == 'rail-scene' || steps.scope.outputs.kind == 'rail-map') && 'activation' || '' }}
+          CITYMANAGER_RAIL_CHECKS: 'activation'
           CITYMANAGER_TOOLBAR_CHECKS: ${{ steps.scope.outputs.kind == 'classic-toolbar' && 'classic' || '' }}
         run: |
           node tests/server-save-browser-smoke.mjs
