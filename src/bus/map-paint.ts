@@ -1,6 +1,6 @@
 /**
  * 2D bus overlay for the minimap and the full city map. Paints only a list the 3D renderer
- * published this frame. No engine, and nothing when `?bus=1` is off or `trafficLayer.bus` was missing.
+ * published this frame. Saved stops and depots remain visible without a running traffic engine.
  */
 import { busEnabled } from './types.ts';
 import { BUS_BODY, cellCenter, worldToCanvas } from './geometry.ts';
@@ -25,7 +25,7 @@ export function paintBusOverlay(ctx: CanvasRenderingContext2D, cellPx: number, l
       ctx.fillStyle = '#16314d'; ctx.font = `700 ${Math.max(6, r * 1.15)}px "IBM Plex Sans Thai", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(String(order.get(stop.id) ?? ''), p.x, p.y + 0.5);
     }
-    if (labels && stop.waiting > 0) {
+    if (labels && stop.waiting !== null && stop.waiting > 0) {
       // Waiting riders as a gold count badge on the stop's shoulder (building names sit above and below).
       const text = String(stop.waiting);
       ctx.font = `700 ${Math.max(8, cellPx * 0.26)}px "IBM Plex Sans Thai", sans-serif`;
@@ -84,7 +84,7 @@ export function busCellNote(cell: number): string | null {
   if (!busEnabled()) return null;
   const draw = publishedBusMap(); if (!draw) return null;
   const stop = draw.stops.find(item => item.cell === cell);
-  if (stop) return `ป้ายรถเมล์ ${stopOrder(draw.stops).get(stop.id)} · ${stop.kind === 'shelter' ? 'ศาลา' : 'ป้ายเสา'} · รอ ${stop.waiting} คน`;
+  if (stop) return `ป้ายรถเมล์ ${stopOrder(draw.stops).get(stop.id)} · ${stop.kind === 'shelter' ? 'ศาลา' : 'ป้ายเสา'}${stop.waiting === null ? '' : ` · รอ ${stop.waiting} คน`}`;
   const depot = draw.depots.find(item => item.cell === cell);
   if (depot) return `อู่รถเมล์ · ระดับ ${depot.level}${depot.open ? '' : ' · ปิด'}`;
   return null;
