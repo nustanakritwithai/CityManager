@@ -38,7 +38,7 @@ test('64 to 65 through normal zoned farm construction pays real capital and cons
   assert.equal(c.accounts.construction - priorConstruction, 40_000);
   assert.deepEqual(c.ledger.filter(e => e.to === opened[0].wallet && e.reason === 'Outside farm equity investment').map(e => e.amount), [300_000]);
   assert.deepEqual(c.ledger.filter(e => e.from === opened[0].wallet && e.reason === 'Firm building investment').map(e => e.amount), [40_000]);
-  assert.equal(opened[0].inventory, 0); assert.equal(JSON.parse(serialize(c)).version, 27); assert.equal(baseVersion(serialize(c)), 23); reconcile(c);
+  assert.equal(opened[0].inventory, 0); assert.equal(JSON.parse(serialize(c)).version, 28); assert.equal(baseVersion(serialize(c)), 23); reconcile(c);
 });
 
 test('automatic retail opening also crosses 64 without bypassing normal household capital', () => {

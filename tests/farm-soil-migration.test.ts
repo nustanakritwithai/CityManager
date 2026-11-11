@@ -10,6 +10,7 @@ function historicalSave(expanded: boolean) {
   let city = createCity(61025);
   delete city.farmSoilIndependentStartTick;
   for (let day = 0; day < 90; day++) step(city);
+  delete city.happiness; // This fixture models a save written before wellbeing existed.
   if (expanded) city = expandValidatedCity(city);
   const envelope = JSON.parse(serialize(city));
   const {farmBaseVersion, farmSoilIndependentStartTick: _boundary, ...base} = envelope;
@@ -30,7 +31,7 @@ for (const expanded of [false, true]) test(`v${expanded ? 26 : 25} journals surv
   assert.ok(city.cropLedger.some(e => e.kind === 'harvest' && e.tick > boundary));
   validateAgriculture(city,true,true);
   const next = serializeParkSession(city,createParkRuntime(city)), envelope = JSON.parse(next);
-  assert.equal(envelope.version,27); assert.equal(envelope.rulesVersion,'chain-22');
+  assert.equal(envelope.version,28); assert.equal(envelope.rulesVersion,'chain-23');
   assert.equal(envelope.farmBaseVersion,expanded?26:25);
   const restored = deserializeParkSession(next);
   assert.equal(restored.city.farmSoilIndependentStartTick,boundary);

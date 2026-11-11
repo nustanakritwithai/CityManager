@@ -29,7 +29,7 @@ test('enabled shuttle drains existing modeled riders without creating another de
 });
 test('v25 server session retains moving modeled train, sequence and queues across load and identical continued game time',()=>{
  const a=fixture();legacyPassengers(a.rail);advanceParkRuntime(a.city,a.runtime,200,()=>step(a.city));
- const raw=serializeParkSession(a.city,a.runtime);assert.equal(JSON.parse(raw).version,27);const b=deserializeParkSession(raw);assert.equal(serializeParkSession(b.city,b.runtime),raw);
+ const raw=serializeParkSession(a.city,a.runtime);assert.equal(JSON.parse(raw).version,28);const b=deserializeParkSession(raw);assert.equal(serializeParkSession(b.city,b.runtime),raw);
  for(const x of[a,b])advanceParkRuntime(x.city,x.runtime,1600,()=>step(x.city));
  assert.equal(serializeParkSession(a.city,a.runtime),serializeParkSession(b.city,b.runtime));
 });

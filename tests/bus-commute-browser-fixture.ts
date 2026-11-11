@@ -27,5 +27,5 @@ export function busCommuteBrowserFixture(){
  const runtime=createParkRuntime(restored);
  const raw=serializeParkSession(restored,runtime);assert.deepEqual(deserializeParkSession(raw).city,restored);
  const commutes=captureTrafficGameInput(restored,{busCommutes:true}).commutes;assert.deepEqual(commutes,[{home:homes[0].cell,work:b.cell,workers:4}]);
- return {raw,home:homes[0].cell,work:b.cell,homeRoad:at(3,12),workRoad:at(19,12),population:4,buses:3};
+ return {raw,home:homes[0].cell,work:b.cell,homeRoad:at(3,12),workRoad:at(19,12),population:4,buses:3,stops:c.bus.stops.length,depots:c.bus.depots.length};
 }

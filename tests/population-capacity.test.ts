@@ -27,7 +27,7 @@ test('the 129th household requires actual funded jobs and housing; funding is re
   assert.equal(c.households.length,129);assert.equal(c.populationCapacityVersion,1);
   const arrivals=c.ledger.filter(e=>e.tick===c.tick&&e.reason==='New household arrival savings');assert.equal(arrivals.length,1);assert.equal(arrivals[0].amount,150000);
   assert.equal(c.accounts.outside,before-150000);assert.equal(Object.values(c.accounts).reduce((a,b)=>a+b,0),0);
-  assert.equal(JSON.parse(serialize(c)).version,27);assert.equal(c.populationCapacityVersion,1);assertResumable(c);
+  assert.equal(JSON.parse(serialize(c)).version,28);assert.equal(c.populationCapacityVersion,1);assertResumable(c);
   for(const change of [(v:City)=>{v.utilities.outside={power:20,water:20};},(v:City)=>{v.firms=[];},(v:City)=>{const empty=v.buildings.find(b=>b.zone==='R'&&!v.households.some(h=>h.home===b.id))!;v.buildings=v.buildings.filter(b=>b.id!==empty.id);v.cells[empty.cell].building=null;}]){
     const blocked=fixture(128);change(blocked);step(blocked);assert.equal(blocked.households.length,128);
   }

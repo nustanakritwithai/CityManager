@@ -57,7 +57,7 @@ test('all maximum levels survive education adoption and monthly review without a
     b.level = maximum(b); if (b.zone === 'R') b.housingType = 'condo';
   }
   const raw = serialize(source), envelope = JSON.parse(raw);
-  assert.equal(envelope.version, 27); assert.equal(envelope.rulesVersion, 'chain-22');
+  assert.equal(envelope.version, 28); assert.equal(envelope.rulesVersion, 'chain-23');
   assert.equal(envelope.commercialBaseVersion, 24); assert.equal(envelope.historyBaseVersion, 19);
   assert.equal(envelope.education, undefined);
   const city = deserialize(raw), identities = city.buildings.map(b => ({ ...b }));
