@@ -22,7 +22,7 @@ function fixture() {
   // transition offsets together rather than retaining references to deleted history.
   const c = seeded(35), f = c.firms.find(f => f.zone === 'C' && f.owner)!;
   assert.ok(f?.owner);
-  delete c.history; c.ledger = []; c.cropLedger = []; c.goodsLedger = [];
+  delete c.history; delete c.happiness; c.ledger = []; c.cropLedger = []; c.goodsLedger = [];
   c.commercialUnifiedStartTick = 0; c.commercialUnifiedBaseline = { moneyEntries: 0, cropEntries: 0, goodsEntries: 0 };
   f.profit = 0; f.lastMonthProfit = 0; f.monthlyRevenue = 0; f.monthlyExpense = 0; f.workDays = {};
   Object.assign(f.owner!, { withdrawn: 0, taxPaid: 0, capitalContributed: 60_000, capitalReturned: 0 });
