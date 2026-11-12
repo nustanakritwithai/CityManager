@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { readFile, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -26,6 +27,16 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // backend instead of forcing the cross-platform SwiftShader implementation.
 // The fallback permission remains; Linux keeps its exact existing flags.
 const graphicsArgs=(platform=process.platform)=>platform==='win32'?['--enable-unsafe-swiftshader']:['--use-angle=swiftshader','--enable-unsafe-swiftshader'];
+// Capture only startup output from our isolated browser, before game navigation.
+// A bounded tail preserves fatal launch details without unbounded CI artifacts.
+function observeBrowserStartup(child,metadata){
+ metadata.stderr='';metadata.stderrTruncated=false;metadata.exitCode=null;metadata.signal=null;
+ const capture=chunk=>{const text=metadata.stderr+String(chunk);metadata.stderrTruncated ||= text.length>8192;metadata.stderr=text.slice(-8192);};
+ child.stderr?.on('data',capture);
+ child.once('exit',(code,signal)=>{metadata.exitCode=code;metadata.signal=signal;});
+ child.once('error',error=>{metadata.spawnError={code:error.code??null,message:String(error.message).slice(0,2048)};});
+ return ()=>{child.stderr?.removeListener('data',capture);child.stderr?.resume?.();};
+}
 function rendererMetadata(value){
  const v=value&&typeof value==='object'?value:{};
  const text=key=>typeof v[key]==='string'?v[key].slice(0,512):null;
@@ -131,6 +142,13 @@ function fixtureService(){
  return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0,traceSave:false,postAudit:[]};
 }
 async function selfTest(){
+ {const child=new EventEmitter();child.stderr=new EventEmitter();const metadata={};const stop=observeBrowserStartup(child,metadata);
+ child.stderr.emit('data',Buffer.from('startup failure'));assert.equal(metadata.stderr,'startup failure');
+ child.stderr.emit('data','x'.repeat(9000));assert.equal(metadata.stderr.length,8192);assert.equal(metadata.stderrTruncated,true);
+ stop();child.stderr.emit('data','not startup');assert.equal(metadata.stderr,'x'.repeat(8192));
+ child.emit('exit',null,'SIGTRAP');assert.equal(metadata.exitCode,null);assert.equal(metadata.signal,'SIGTRAP');
+ child.emit('error',Object.assign(Error('missing browser'),{code:'ENOENT'}));assert.equal(metadata.spawnError.code,'ENOENT');}
+
  assert.deepEqual(graphicsArgs('win32'),['--enable-unsafe-swiftshader'],'Windows uses the browser default backend, with the existing software fallback permission');
  assert.deepEqual(graphicsArgs('linux'),['--use-angle=swiftshader','--enable-unsafe-swiftshader'],'Linux graphics arguments stay unchanged');
  const renderer={renderer:'ANGLE test renderer',quality:'low',requestedQuality:'auto',shadows:false,postProcessing:false,traffic:true,paused:true,width:390,height:844,visibility:'visible',contextLosses:0};
@@ -178,7 +196,6 @@ async function selfTest(){
  assert.ok(failureAfterCleanup(null,[cleanup]) instanceof AggregateError,'Cleanup-only failure must fail acceptance');
  assert.equal(failureAfterCleanup(null,[]),null);
 
- const {EventEmitter}=await import('node:events');
  const cleanupCase=async({code=255,exitAt=Infinity,exitWithTaskkill=false,stderr='',launchError=null,pid=18765}={})=>{
   const child={pid,exitCode:null,signalCode:null},commands=[];let waits=0;
   const work=stopBrowser(child,{readyState:WebSocket.OPEN,send:raw=>commands.push(JSON.parse(raw))},{platform:'win32',wait:async ms=>{assert.equal(ms,100);if(++waits===exitAt)child.exitCode=0;},spawnProcess:(command,args,options)=>{
@@ -268,10 +285,12 @@ async function run(){
   const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/'+(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'?'?bus=1':'');
   profile=await mkdtemp(resolve(tmpdir(),'city-server-save-smoke-'));
   const browser=process.env.CITYMANAGER_BROWSER||(process.platform==='win32'?'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe':'google-chrome');
-  const graphics=graphicsArgs();diagnostics.browserLaunch={platform:process.platform,graphicsArgs:graphics,backendSelection:process.platform==='win32'?'browser-default':'forced-swiftshader'};
-  child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling',...graphics,'--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
+  const graphics=graphicsArgs();diagnostics.browserLaunch={browser,platform:process.platform,graphicsArgs:graphics,backendSelection:process.platform==='win32'?'browser-default':'forced-swiftshader'};
+  child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling',...graphics,'--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
+  const stopStartupCapture=observeBrowserStartup(child,diagnostics.browserLaunch);
   let launchError;child.on('error',e=>{launchError=e;});let debugPort;
-  for(let i=0;i<100&&!debugPort;i++){if(launchError)throw launchError;if(child.exitCode!==null)throw Error(`Browser exited ${child.exitCode}; no acceptance result`);try{debugPort=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);}catch{}await sleep(100);}
+  for(let i=0;i<100&&!debugPort;i++){if(launchError)throw launchError;if(child.exitCode!==null||child.signalCode!==null)throw Error(`Browser exited ${child.exitCode} signal ${child.signalCode}; no acceptance result`);try{debugPort=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);}catch{}await sleep(100);}
+  stopStartupCapture();diagnostics.browserLaunch.devToolsReady=Boolean(debugPort);
   assert.ok(debugPort,'Browser unavailable; acceptance NOT passed');
   const pages=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();ws=new WebSocket(pages.find(p=>p.type==='page').webSocketDebuggerUrl);
   const observedSaveRequests=new Set();
@@ -511,6 +530,7 @@ try {
  await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'passed',browserAcceptance:selfTestOnly?'not-run':runLostAckNextSave(process.env)?'passed':'passed-with-exclusion',toolbarEvidence,railEvidence,trafficGapEvidence,landEvidence,diagnostics},null,2));
 } catch(error) {
  await writeFile(resolve(output,'result.json'),JSON.stringify({started,finished:new Date().toISOString(),mode:selfTestOnly?'fixture-self-test':'built-browser-acceptance',status:'failed',browserAcceptance:selfTestOnly?'not-run':'not-passed',toolbarEvidence,railEvidence,trafficGapEvidence,landEvidence,diagnostics,error:String(error?.stack??error)},null,2));
+ if(diagnostics.browserLaunch&&!diagnostics.browserLaunch.devToolsReady)console.error('Browser startup diagnostic',JSON.stringify(diagnostics.browserLaunch));
  // Emit only bounded synthetic request and click metadata so CI logs can
  // distinguish a missed click from a failed ACK when artifacts are unavailable.
  if(diagnostics.lostAck?.posts){const {initialRevision,headRevision,initialReceiptCount,receiptCount,posts,fixtureAudit,network,ui}=diagnostics.lostAck;console.error('Lost ACK diagnostic',JSON.stringify({initialRevision,headRevision,initialReceiptCount,receiptCount,posts:posts.map(({sameOriginalKey,action,expectedRevision})=>({sameOriginalKey,action,expectedRevision})),fixtureAudit,network,retryMouse:diagnostics.retryMouse,ui:{bannerVisible:ui?.bannerVisible,saveDisabled:ui?.saveDisabled,clicks:ui?.clicks}}));}
