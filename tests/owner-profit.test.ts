@@ -22,7 +22,7 @@ function fixture() {
   // transition offsets together rather than retaining references to deleted history.
   const c = seeded(35), f = c.firms.find(f => f.zone === 'C' && f.owner)!;
   assert.ok(f?.owner);
-  delete c.history; delete c.happiness; c.ledger = []; c.cropLedger = []; c.goodsLedger = [];
+  delete c.history; c.ledger = []; c.cropLedger = []; c.goodsLedger = [];
   c.commercialUnifiedStartTick = 0; c.commercialUnifiedBaseline = { moneyEntries: 0, cropEntries: 0, goodsEntries: 0 };
   f.profit = 0; f.lastMonthProfit = 0; f.monthlyRevenue = 0; f.monthlyExpense = 0; f.workDays = {};
   Object.assign(f.owner!, { withdrawn: 0, taxPaid: 0, capitalContributed: 60_000, capitalReturned: 0 });
@@ -145,11 +145,19 @@ test('month close subtracts manual payouts from the automatic monthly allowance'
 });
 
 test('unreconciled legacy earnings leave balances and saves intact and disable new payouts', () => {
-  const { c, f } = fixture(); f.profit = 1_000_000;
+  // Unlike the isolated finance fixture, a save must retain arrival receipts
+  // and structural history so household happiness can be validated.
+  const c = seeded(35), f = c.firms.find(f => f.zone === 'C' && f.owner)!;
+  assert.ok(f?.owner);
+  assert.equal(serialize(deserialize(serialize(c))), serialize(c));
+  f.profit = 1_000_000;
   const before = serialize(c);
+  const accounts = structuredClone(c.accounts), ledger = structuredClone(c.ledger);
   assert.equal(ownerFinance(c, f.id)!.historyReconciled, false);
   assert.equal(withdrawOwnerProfit(c, f.id, 1).ok, false);
   assert.equal(serialize(c), before);
+  assert.deepEqual(c.accounts, accounts);
+  assert.deepEqual(c.ledger, ledger);
 });
 
 test('published v15 owned-shop save reconstructs retention and actual conversion without any state migration', () => {
