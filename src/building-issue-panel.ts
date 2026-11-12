@@ -18,6 +18,8 @@ export function renderBuildingIssues(city: City, cell: number | null, host: HTML
     if (fact.required !== undefined) row.dataset.required = String(fact.required);
     const copy = document.createElement('div'), label = document.createElement('strong'), detail = document.createElement('p');
     label.textContent = fact.text; detail.textContent = fact.detail; copy.append(label, detail);
+    // Next-level gates are listed in full in the level checklist below; here they stay one short line.
+    if (fact.kind === 'education' || fact.kind === 'upgrade') { row.classList.add('brief'); detail.hidden = true; }
     row.append(iconElement(ISSUE_ICONS[fact.kind]), copy); host.append(row);
   }
 }

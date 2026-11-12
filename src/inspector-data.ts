@@ -127,6 +127,8 @@ export function reasonLabel(reason: string): string {
   if (cropPurchase) return `ครัวเรือนซื้อพืชผล · รายการ #${cropPurchase[1]}`;
   const cropExchange = /^Crop exchange #(\d+)$/.exec(reason);
   if (cropExchange) return `ซื้อขายพืชผล · รายการ #${cropExchange[1]}`;
+  const cropExport = /^Crop export #(\d+)$/.exec(reason);
+  if (cropExport) return `ขายพืชผลส่งออก · รายการ #${cropExport[1]}`;
   const harvest = /^Farm harvest #(\d+)$/.exec(reason);
   if (harvest) return `ฟาร์มเก็บเกี่ยว · รายการ #${harvest[1]}`;
   const writeOff = /^Crop write-off #(\d+)$/.exec(reason);
