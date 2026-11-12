@@ -32,8 +32,11 @@ export async function verifyReadingPanels({ send, evaluate, button, cell, game, 
     const entry = cardCases.find(c=>c.kind===name);
     if (entry) {
       await cell(entry.cell);
+      await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.cell===${JSON.stringify(String(entry.cell))}`);
+      assert.equal(await evaluate("document.querySelector('#entity-content').dataset.entityId"),String(entry.buildingId),'Native map tap opens the exact building: '+name);
       if (entry.householdId) await button(`#entity-content [data-household-id="${entry.householdId}"]`);
       await until(`document.querySelector('#entity-content').dataset.cardKind===${JSON.stringify(name)}`);
+      assert.equal(await evaluate("document.querySelector('#entity-content').dataset.entityId"),String(entry.householdId??entry.buildingId),'Reading card retains the exact requested entity: '+name);
     } else {
       await button(name==='help'?'#toggle-help':name==='game'?'#toggle-game-menu':'#toggle-inspector');
       await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name==='ledger'?'city':name)}`);

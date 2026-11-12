@@ -43,6 +43,29 @@ export class ServerCitySaveClient {
  async save(raw:string,metadata:ServerCityMetadata):Promise<ServerCity>{
   if(!this.loaded||!this.value)throw Error('server-load-required');const ack=await this.begin({action:'save',cityId:this.value.cityId,expectedRevision:this.value.revision,raw,metadata});if('deleted' in ack)throw Error('invalid-server-ack');return ack;
  }
+ /** A clean automatic check must still detect a newer remote revision, even
+  * when its bytes are identical. Never adopt a remote head or create an intent. */
+ async verifyConfirmed():Promise<ServerCity>{
+  if(!this.loaded||!this.value)throw Error('server-load-required');
+  if(this.busy||this.intent)throw Error('server-save-pending');
+  if(this.conflicted)throw Object.assign(Error(this.rejection??'server-save-conflict'),{status:409});
+  const expected=this.value;this.busy=true;
+  try{
+   const value=await this.request('/v1/city-save',{method:'GET',cache:'no-store'});
+   if(value===null)throw Object.assign(Error('server-save-conflict'),{status:409});
+   if((value as ServerCityDeleted)?.deleted===true){this.validateDeleted(value);throw Object.assign(Error('city-lifecycle-changed'),{status:409});}
+   const actual=await this.validate(value);
+   if(actual.cityId!==expected.cityId||actual.revision!==expected.revision||actual.raw!==expected.raw||actual.rawHash!==expected.rawHash||actual.metadata.name!==expected.metadata.name||actual.metadata.population!==expected.metadata.population||actual.metadata.tick!==expected.metadata.tick)throw Object.assign(Error('server-save-conflict'),{status:409});
+   return clone(expected);
+  }catch(error){if((error as {status?:number})?.status===409){this.conflicted=true;this.rejection=error instanceof Error?error.message:'server-save-conflict';}throw error;}
+  finally{this.busy=false;}
+ }
+ /** Event order does not decide whether to write: only exact confirmed bytes
+  * and metadata do. A later clean lifecycle event performs a fresh verification. */
+ matchesConfirmed(raw:string,metadata:ServerCityMetadata){const current=this.value;return !!current&&current.raw===raw&&current.metadata.name===metadata.name&&current.metadata.population===metadata.population&&current.metadata.tick===metadata.tick;}
+ async saveOrVerify(raw:string,metadata:ServerCityMetadata):Promise<ServerCity>{
+  return this.matchesConfirmed(raw,metadata)?this.verifyConfirmed():this.save(raw,metadata);
+ }
  async delete():Promise<ServerCityDeleted>{if(!this.loaded||!this.value)throw Error('server-load-required');const ack=await this.begin({action:'delete',cityId:this.value.cityId,expectedRevision:this.value.revision});if(!('deleted' in ack))throw Error('invalid-server-delete-ack');return ack;}
  private async begin(command:Command):Promise<ServerCity|ServerCityDeleted>{
   if(command.action!=='delete')assertServerCitySize(command.raw);

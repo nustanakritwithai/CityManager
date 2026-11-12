@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { HOUSING_LEVELS, getHousingCapacity } from '../src/housing.ts';
 import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount } from '../src/sim.ts';
 import { advanceParkRuntime, createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
-import { SAVE_KEY, FARM_LEVEL_BACKUP_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { holdEducationReady } from './education-ready.ts';
 
 function fixture() {
@@ -37,7 +37,7 @@ test('each autonomous upgrade keeps the same parcel, identity, households and ac
     const { city, home } = fixture(); home.level = level; home.housingType = HOUSING_LEVELS[level - 1].type;
     const full = fill(city, home);
     const id = home.id, cell = home.cell, residents = city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]);
-    const before = city.ledger.filter(e => e.reason === 'Outside residential height investment').length;
+    const beforeTick = city.tick;
     if (!full) {
       // Not enough households in the city to fill this tier: the occupancy gate must hold it and say why.
       assert.ok(level >= 3, `levels 1-2 are never occupancy gated (${level})`);
@@ -48,8 +48,9 @@ test('each autonomous upgrade keeps the same parcel, identity, households and ac
     assert.equal(home.level, level + 1, `upgrade ${level}`); assert.equal(home.housingType, HOUSING_LEVELS[level].type); upgraded++;
     assert.equal(home.id, id); assert.equal(home.cell, cell); assert.equal(city.cells[cell].building, id);
     assert.deepEqual(city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]), residents);
-    assert.equal(city.ledger.filter(e => e.reason === 'Outside residential height investment' && e.tick === city.tick).length > 0, true);
-    assert.ok(city.ledger.filter(e => e.reason === 'Outside residential height investment').length > before);
+    const investment = city.ledger.filter(e => e.tick > beforeTick && e.reason === 'Outside residential height investment');
+    assert.ok(investment.length >= 1, 'at least one real height investment occurred');
+    assert.ok(investment.every(e => e.from === 'outside' && e.to === 'construction' && e.amount === 20_000));
     assert.equal(Object.values(city.accounts).reduce((a, b) => a + b, 0), 0);
     assert.deepEqual(deserialize(serialize(city)), city);
   }
@@ -80,20 +81,28 @@ test('upgrade explains and respects road, utility and resident financial conditi
   step(other.city); assert.equal(other.home.level, 3);
 });
 
-test('v15 park session migrates without changing state, rejects new housing under old version and keeps backup', () => {
-  const { city, home } = fixture(); assert.equal(buildPark(city, 0).ok, true);
-  const runtime = createParkRuntime(city); advanceParkRuntime(city, runtime, 650.5, () => step(city));
-  const session = JSON.parse(serializeParkSession(city, runtime));
-  delete session.education; session.version = 15; session.rulesVersion = 'chain-10'; delete session.factoryProgressionStartTick; delete session.farmLevelStartTick; const old = JSON.stringify(session);
-  const restored = deserializeParkSession(old);
-  const comparable = { ...city }; delete comparable.education;
-  assert.deepEqual(restored.city, { ...comparable, factoryProgressionStartTick: city.tick, farmLevelStartTick: city.tick }); assert.deepEqual(restored.runtime, runtime);
+/** The genuine v16 session contains only v15-compatible housing levels and no later fields. */
+function legacyParkSession() {
+  const session = JSON.parse(readFileSync(new URL('./fixtures/housing-v16-park-session.json', import.meta.url), 'utf8'));
+  assert.ok(session.buildings.filter((b: Building) => b.zone === 'R').every((b: Building) => b.level <= 3));
+  session.version = 15; session.rulesVersion = 'chain-10';
+  return session;
+}
+
+test('v15 park session migrates without changing state, rejects new housing under old version', () => {
+  const session = legacyParkSession(), old = JSON.stringify(session), restored = deserializeParkSession(old);
+  const { version: _v, rulesVersion: _r, parkRuntime, ...original } = session;
+  const { version, rulesVersion, factoryProgressionStartTick, farmLevelStartTick, commercialUnifiedStartTick, commercialUnifiedBaseline, farmSoilIndependentStartTick, ...actual } = restored.city;
+  assert.deepEqual(actual, original); assert.equal(version, 9); assert.equal(rulesVersion, 'chain-4');
+  assert.equal(factoryProgressionStartTick, session.tick); assert.equal(farmLevelStartTick, session.tick);
+  assert.equal(commercialUnifiedStartTick, session.tick);
+  assert.equal(farmSoilIndependentStartTick, session.tick);
+  assert.deepEqual(commercialUnifiedBaseline, { moneyEntries: session.ledger.length, cropEntries: session.cropLedger.length, goodsEntries: session.goodsLedger.length });
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.runtime)), parkRuntime);
   const saved = serializeParkSession(restored.city, restored.runtime);
   assert.deepEqual(deserializeParkSession(saved), restored);
-  const bad = structuredClone(session); const b = bad.buildings.find((x: { id: number }) => x.id === home.id); b.level = 4; b.housingType = 'apartment';
+  const bad = structuredClone(session); const b = bad.buildings.find((x: Building) => x.zone === 'R'); b.level = 4; b.housingType = 'apartment';
   assert.throws(() => deserializeParkSession(JSON.stringify(bad)));
-  const data = new Map([[SAVE_KEY, old]]), storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
-  saveStoredCity(storage, saved, null); assert.equal(data.get(FARM_LEVEL_BACKUP_KEY), old); assert.equal(readStoredCity(storage, 'backup')?.raw, old);
 });
 
 test('future and mismatched housing schemas are rejected without changing the saved snapshot', () => {
@@ -105,18 +114,4 @@ test('future and mismatched housing schemas are rejected without changing the sa
     (v: any) => { const b = v.buildings.find((item: any) => item.id === home.id); b.level = 10; b.housingType = 'condo'; },
   ]) { const bad = structuredClone(parsed); edit(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
   assert.equal(serialize(city), original);
-});
-
-test('full or failed v15 backup prevents replacement of the original save', () => {
-  const { city } = fixture(), current = JSON.parse(serialize(city)); delete current.education; current.version = 15; current.rulesVersion = 'chain-10'; delete current.factoryProgressionStartTick; delete current.farmLevelStartTick;
-  const old = JSON.stringify(current), next = serialize(deserialize(old));
-  const data = new Map<string, string>([[SAVE_KEY, old]]);
-  for (let i = 0; i < 8; i++) data.set(i ? `${FARM_LEVEL_BACKUP_KEY}.${i}` : FARM_LEVEL_BACKUP_KEY, `prior-${i}`);
-  const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
-  assert.throws(() => saveStoredCity(storage, next, null), /Farm level backup slots are full/);
-  assert.equal(data.get(SAVE_KEY), old);
-  const blocked = new Map<string, string>([[SAVE_KEY, old]]);
-  const failing = { getItem: (k: string) => blocked.get(k) ?? null, setItem: (k: string, v: string) => { if (k === FARM_LEVEL_BACKUP_KEY) throw new Error('quota'); blocked.set(k, v); } };
-  assert.throws(() => saveStoredCity(failing, next, null), /quota/);
-  assert.equal(blocked.get(SAVE_KEY), old);
 });

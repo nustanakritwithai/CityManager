@@ -5,16 +5,18 @@ import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { createCity, buildRoad, buildParallelRoad, editRoadJunction, serialize, deserialize, GATEWAY, SIZE } from '../src/sim.ts';
 import { roadDriveAllowed, roadLinked } from '../src/road-topology.ts';
-import { SAVE_KEY, ROAD_TOPOLOGY_BACKUP_KEY } from '../src/save-storage.ts';
-import { reachTouch } from './touch-reach.mjs';
+import { deserializeParkSession, expandValidatedParkSession } from '../src/park-runtime.ts';
+import { startPersistenceFixture } from './persistence-server-fixture.mjs';
+import { reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
 import { checkSelectMenu } from './select-menu-browser.mjs';
 import { checkGroupedToolMenus } from './grouped-tool-menu-browser.mjs';
 const output=resolve('.test-output/roads'), debugPort=9366;
-const url=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
-const allowed=new URL(url);assert.equal(allowed.hostname,'127.0.0.1');
+const upstreamUrl=process.env.CITYMANAGER_URL||'http://127.0.0.1:4173/CityManager/';
+assert.equal(new URL(upstreamUrl).hostname,'127.0.0.1');
 const cell=(x,y)=>y*SIZE+x;
 const initial=createCity(61025,{starter:false});buildRoad(initial,GATEWAY,cell(10,12));
-const original=serialize(initial),expected=deserialize(original);
+const original=serialize(initial),expected=expandValidatedParkSession(deserializeParkSession(original)).city;
 buildParallelRoad(expected,cell(5,12),cell(10,12),true);
 buildParallelRoad(expected,cell(10,13),cell(5,13),true);
 buildParallelRoad(expected,cell(5,12),cell(5,13));
@@ -24,15 +26,28 @@ assert.ok(roadDriveAllowed(expected,cell(6,12),cell(7,12)));
 assert.equal(roadDriveAllowed(expected,cell(7,12),cell(6,12)),false);
 if(process.argv.includes('--preflight')){assert.equal(serialize(deserialize(serialize(expected))),serialize(expected));console.log('road topology preflight passed');process.exit(0);}
 await mkdir(output, { recursive: true });
+const server=await startPersistenceFixture(upstreamUrl),url=server.url,allowed=new URL(url),storage=server.fixture;
+const interceptionErrors=[];let networkProbe;const observeProbe=url=>(networkProbe={url,active:false,requestId:null,failed:null});
 let occupied = false; try { occupied = (await fetch(`http://127.0.0.1:${debugPort}/json/version`, { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Road topology browser port is already in use');
 const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', [
   '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update',
   '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${resolve(output, 'profile')}`, 'about:blank',
 ], { windowsHide: true, stdio: 'ignore' });
-let ws, seq = 0; const pending = new Map(), errors = [], external = [], checks = [];
+let ws, seq = 0; const pending = new Map(), errors = [], external = [], providerRequests = [], checks = [];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const watchdog = setTimeout(() => { console.error('Road topology browser acceptance timed out'); child.kill(); process.exit(1); }, 150_000);
+let stage = 'road topology';
+const watchdog = setTimeout(() => {
+  console.error(`Road browser acceptance timed out in ${stage} after 150 seconds`);
+  child.kill();
+  process.exit(1);
+}, 150_000);
+// Each complete suite has its own deadline. Individual CDP calls still have 30 seconds.
+function startNextSuite(name) {
+  console.log(`Passed ${stage}. Starting ${name}.`);
+  stage = name;
+  watchdog.refresh();
+}
 async function send(method, params = {}) {
   const id = ++seq, result = new Promise((yes, no) => { const timer = setTimeout(() => { pending.delete(id); no(Error(`CDP timeout: ${method}`)); }, 30_000); pending.set(id, { yes: v => { clearTimeout(timer); yes(v); }, no: e => { clearTimeout(timer); no(e); } }); });
   ws.send(JSON.stringify({ id, method, params })); return result;
@@ -43,16 +58,50 @@ const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestA
 let touchMode=false;
 async function click(x,y) { if(touchMode){await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});return;} for (const type of ['mouseMoved','mousePressed','mouseReleased']) await send('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',clickCount:1}); }
 async function button(selector) {
-  if (await reachTouch(evaluate, button, selector)) return;
+  if (await reachTrafficControl(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
   assert.ok(p.w && p.h && !p.disabled, `Visible enabled ${selector}`);
   assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actual hit ${selector}`); await click(p.x,p.y);
 }
-async function close() { if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector'); await paints(); }
+async function close() {
+ if (await evaluate('document.querySelector("#inspector").dataset.open==="true"')) await button('#close-inspector');
+ // Clear the teaching overlay with a real player action before targeting land.
+ if (await evaluate('!!document.querySelector("#guide-card:not([hidden])")')) {
+   const before=await evaluate('window.cityManager.snapshot()');await button('#guide-dismiss');
+   await until('document.querySelector("#guide-card").hidden');
+   assert.equal(await evaluate('window.cityManager.snapshot()'),before,'Dismissing teaching advice preserves the road fixture');
+ }
+ await paints();
+}
 async function game() { await close(); await button('#toggle-game-menu'); await until('document.querySelector("#inspector").dataset.page==="game"'); }
 async function screenshot(name) { const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false}); await writeFile(resolve(output,name),Buffer.from(r.data,'base64')); }
-async function load(raw) { await game(); await evaluate(`localStorage.setItem(${JSON.stringify(SAVE_KEY)},${JSON.stringify(raw)})`); await button('#load'); }
+async function load(raw) {
+ await storage.leave({send,evaluate,until}); const ack=await storage.seed(raw);
+ storage.allowNavigation(); await send('Page.navigate',{url}); await storage.enter({evaluate,button});
+ assert.equal(ack.raw,raw);assert.equal(ack.revision,1);await storage.assertNoCityWrites(evaluate);
+}
+async function waitHead(revision){const start=Date.now();while(Date.now()-start<30000){if(storage.active.revision>revision)return;await sleep(75);}throw Error('Server save ACK timeout');}
+async function saveAndReload(){
+ const before=storage.active,raw=await evaluate('window.cityManager.sessionSnapshot()');await button('#save');await waitHead(before.revision);
+ await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')");
+ const ack=storage.active;assert.equal(ack.revision,before.revision+1);assert.equal(ack.raw,raw);
+ const event=storage.writes.at(-1);assert.equal(event.status,200);assert.equal(event.command.expectedRevision,before.revision);assert.equal(event.command.raw,raw);assert.equal(event.response.raw,raw);assert.equal(event.response.revision,ack.revision);
+ storage.allowNavigation(raw);await send('Page.reload',{ignoreCache:true});await storage.enter({evaluate,button});
+ assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),raw);await storage.assertNoCityWrites(evaluate);return ack;
+}
+async function failedSaveThenRetry(){
+ const before=storage.active,raw=await evaluate('window.cityManager.sessionSnapshot()'),writeStart=storage.writes.length;server.setSaveFailure(true);await button('#save');
+ await until("!!document.querySelector('#save-failure-banner:not([hidden])')");assert.ok(server.rejected.length);assert.deepEqual(storage.active,before);
+ assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await storage.assertNoCityWrites(evaluate);
+ server.setSaveFailure(false);await button('#save-failure-retry');await waitHead(before.revision);
+ await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')");
+ const ack=storage.active,events=storage.writes.slice(writeStart),failed=server.rejected.at(-1);assert.equal(ack.revision,before.revision+2);assert.equal(ack.raw,raw);assert.equal(events.length,2);
+ assert.equal(events[0].requestKey,failed.requestKey);assert.deepEqual(events[0].command,failed.command);assert.notEqual(events[1].requestKey,events[0].requestKey);
+ for(const [i,event] of events.entries()){assert.equal(event.status,200);assert.equal(event.command.expectedRevision,before.revision+i);assert.equal(event.command.raw,raw);assert.equal(event.response.raw,raw);assert.equal(event.response.revision,before.revision+i+1);}
+ storage.allowNavigation(raw);await send('Page.reload',{ignoreCache:true});await storage.enter({evaluate,button});
+ assert.equal(await evaluate('window.cityManager.sessionSnapshot()'),raw);await storage.assertNoCityWrites(evaluate);
+}
 
 async function selectRoad(mode) { await button('[data-tool="road"]');await until('!document.querySelector("#road-submenu").hidden');
  const layout=await evaluate('(()=>{const a=document.querySelector("[data-tool=road]").getBoundingClientRect(),m=document.querySelector("#road-submenu").getBoundingClientRect();return {a:{x:a.x,y:a.y,w:a.width,h:a.height},m:{x:m.x,y:m.y,b:m.bottom},buttons:[...document.querySelectorAll("#road-submenu button")].map(b=>{const r=b.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}})}})()');
@@ -68,14 +117,13 @@ async function tapCell(i){await paints();const p=await evaluate(`window.cityMana
 try {
  let targets;for(let i=0;i<100;i++){try{targets=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();break;}catch{await sleep(100);}}
  assert.ok(targets?.length);ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((yes,no)=>{ws.onopen=yes;ws.onerror=no});
- ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.no(Error(JSON.stringify(m.error))):p.yes(m.result);}if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails.text);if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')errors.push(m.params.args.map(a=>a.value??a.description).join(' '));if(m.method==='Fetch.requestPaused'){const local=new URL(m.params.request.url).origin===allowed.origin;if(!local)external.push(m.params.request.url);void send(local?'Fetch.continueRequest':'Fetch.failRequest',local?{requestId:m.params.requestId}:{requestId:m.params.requestId,errorReason:'BlockedByClient'});}};
- await send('Runtime.enable');await send('Page.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*',requestStage:'Request'}]});
+ ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.no(Error(JSON.stringify(m.error))):p.yes(m.result);}if(m.method==='Page.javascriptDialogOpening')void storage.dialog(m.params,send).catch(e=>interceptionErrors.push(String(e)));if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails.text);if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')errors.push(m.params.args.map(a=>a.value??a.description).join(' '));if(m.method==='Network.loadingFailed'&&m.params.requestId===networkProbe?.requestId)networkProbe.failed=m.params;if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(networkProbe?.active&&u===networkProbe.url)networkProbe.requestId=m.params.requestId;else{if(isPanelProviderRequest(u))providerRequests.push(u);if(/^https?:/.test(u)&&new URL(u).origin!==allowed.origin)external.push(u);}}};
+ await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await installTrafficNetworkFence({send,evaluate,protocol:await(await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(),origin:allowed.origin,additionalBlocked:panelProviderDenials(allowed.origin),observeProbe});await storage.install(send);
  await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,screenWidth:1440,screenHeight:1000,deviceScaleFactor:1,mobile:false});
- await send('Page.navigate',{url:url+'?starter=1'});await until('!!window.cityManager && window.cityManager.visuals().ready',60000);
  await load(original);await close();
  // Clicking the main road tool alone defaults to parallel-safe two-way placement.
  await button('[data-tool="road"]');await tapCell(cell(5,13));await tapCell(cell(10,13));
- const defaultExpected=deserialize(original);buildParallelRoad(defaultExpected,cell(5,13),cell(10,13));
+ const defaultExpected=expandValidatedParkSession(deserializeParkSession(original)).city;buildParallelRoad(defaultExpected,cell(5,13),cell(10,13));
  assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(defaultExpected));
  checks.push('Main road tool defaults to parallel-safe placement without choosing a submenu mode');
  await load(original);await close();
@@ -85,23 +133,22 @@ try {
  await selectRoad('normal');await tapCell(cell(10,12));await tapCell(cell(10,13));
  assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected,'Real controls produce exact intended topology and accounting');
  await screenshot('desktop-parallel-oneway.png');await button('[data-tool="select"]');await screenshot('desktop-road-arrows.png');
- await game();await button('#save');const saved=await evaluate(`localStorage.getItem(${JSON.stringify(SAVE_KEY)})`);const savedDoc=JSON.parse(saved);
- assert.equal(savedDoc.version,22);assert.equal(savedDoc.rulesVersion,'chain-17');
- assert.equal(savedDoc.roadTopology.version,1);
- assert.equal(savedDoc.accounts.treasury,expected.accounts.treasury);
- assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(ROAD_TOPOLOGY_BACKUP_KEY)})`),original,'Pre-edit city bytes preserved before the road-topology save');
- await button('#load');assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected);
- checks.push('Desktop real one-way, parallel junction controls and v22 save/load preserve the pre-edit backup, roads and accounting');
+ await game();await saveAndReload();assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected);
+ checks.push('Desktop real one-way and parallel junction controls survive exact server ACK and reload with road topology and accounting');
  await close();await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,screenWidth:390,screenHeight:844,deviceScaleFactor:1,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});await until('innerWidth===390');touchMode=true;
  await button('[data-tool="road"]');await until('!document.querySelector("#road-submenu").hidden');await screenshot('mobile-road-submenu.png');
  await button('[data-road-mode="split"]');await tapCell(cell(5,12));await tapCell(cell(5,13));editRoadJunction(expected,cell(5,12),cell(5,13),false);
  assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected,'Mobile junction edit retains all other links');
+ await game();await failedSaveThenRetry();assert.deepEqual(deserialize(await evaluate('window.cityManager.snapshot()')),expected);await close();
+ checks.push('Failed save leaves the prior server head untouched; retry ACK and reload retain mobile junction edit');
  await selectRoad('normal');await screenshot('mobile-parallel-tool.png');
  checks.push('390px menu stacks above original button with same dimensions; chosen junction can be separated');
+ startNextSuite('select menu');
  const selectorReport = await checkSelectMenu({ evaluate, button, click, send, screenshot, load, close, paints, fixture: original, cell: cell(5,12), setTouch: value => { touchMode = value; } });
  checks.push(...selectorReport.checks); await writeFile(resolve(output,'select-menu-report.json'), JSON.stringify(selectorReport,null,2));
+ startNextSuite('grouped tool menus');
  const groupedReport = await checkGroupedToolMenus({ evaluate, button, click, send, screenshot, load, close, paints, setTouch: value => { touchMode = value; } });
  checks.push(...groupedReport.checks); await writeFile(resolve(output,'grouped-tool-menu-report.json'), JSON.stringify(groupedReport,null,2));
- assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log(JSON.stringify({checks,errors,external}));
+ assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(providerRequests,[],'No advisor/provider requests');assert.deepEqual(interceptionErrors,[]);assert.deepEqual(server.errors,[]);await storage.assertNoCityWrites(evaluate);console.log(JSON.stringify({checks,errors,external}));
 } catch(error){if(ws?.readyState===1){try{await screenshot('failure.png');}catch{}}console.error(JSON.stringify({checks,errors,external,error:String(error)}));throw error;}
-finally{clearTimeout(watchdog);if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();}
+finally{clearTimeout(watchdog);if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();await server.close();}

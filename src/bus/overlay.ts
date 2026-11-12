@@ -4,8 +4,8 @@ import { expandedCellAt, expandedCellCoordinate } from '../expanded-map-grid.ts'
  * running/suspended, reason, headway). Suspended lines are dashed and captioned with the reason.
  * Does not move buses or touch the engine.
  */
-import { BusRouteCache, type BusHost, type BusLineRoute, type BusSuspendReason } from './lines.ts';
-import type { BusStopSide } from './types.ts';
+import { BusRouteCache, formatBusHeadway, type BusHost, type BusLineRoute, type BusSuspendReason } from './lines.ts';
+import { BUS_LIVE_TIMING, type BusStopSide } from './types.ts';
 import { BUS_KERB, BUS_SIDE, busLineColor, cellCenter } from './geometry.ts';
 
 const cache = new BusRouteCache();
@@ -38,20 +38,23 @@ export function busLineCaption(route: Pick<BusLineRoute, 'status' | 'reason' | '
     return why ? `หยุดวิ่ง · ${why}` : 'หยุดวิ่ง';
   }
   if (route.headwayMinutes == null) return 'วิ่ง';
-  const rounded = Math.round(route.headwayMinutes * 10) / 10;
-  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-  return `ทุก ${text} นาที · ${route.buses} คัน`;
+  return `ทุก ${formatBusHeadway(route.headwayMinutes)} · ${route.buses} คัน`;
 }
 
 const EMPTY: BusOverlay = { lines: [], stops: [], depots: [] };
 export function busOverlay(city: BusHost): BusOverlay {
   const bus = city.bus; if (!bus) return EMPTY;
-  const routes = cache.get(city);
-  return {
-    lines: routes.map((route, index) => lineVisual(route, index, routes.length)),
-    stops: [...bus.stops].sort((a, b) => a.id - b.id).flatMap(stop => stopVisual(stop)),
-    depots: [...bus.depots].sort((a, b) => a.id - b.id).map(depot => depotVisual(depot, city)),
-  };
+  const routes = cache.get(city, BUS_LIVE_TIMING);
+  return { lines: routes.map((route, index) => lineVisual(route, index, routes.length)), ...busInfrastructure(city) };
+}
+
+/** Physical sites do not depend on routes, fleet activity or the traffic model. */
+export function busInfrastructure(city: BusHost): Pick<BusOverlay, 'stops' | 'depots'> {
+  const bus=city.bus;
+  return bus ? {
+    stops: [...bus.stops].sort((a,b)=>a.id-b.id).flatMap(stop=>stopVisual(stop)),
+    depots: [...bus.depots].sort((a,b)=>a.id-b.id).map(depot=>depotVisual(depot,city)),
+  } : { stops: [], depots: [] };
 }
 
 function lineVisual(route: BusLineRoute, index: number, count: number): BusLineVisual {

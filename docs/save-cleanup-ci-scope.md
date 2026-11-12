@@ -18,3 +18,23 @@ The route runs:
 The save-safety workflow also runs its server-only contract tests and the same smoke.
 
 `tests/education-capacity.test.ts` is adapted but not run here, because two of its cases already fail on `main`. They are part of the pre-existing `npm test` failures, which stay at 71 before and after this change.
+
+## Remaining browser-save removal (D2)
+
+The remaining `save-storage` and `save-copy-codec` modules and their browser-only
+backup/quota tests are now removed. The park-activity review preview also has no
+Save/Load controls or persistent storage. Closing or reloading that preview resets
+it. Existing browser keys are left untouched; this change neither reads/imports
+nor clears old player data.
+
+Frozen legacy readers and their migration dependencies remain necessary for old
+server snapshots. Their v2/v3 integrity and corruption cases now live in
+`tests/legacy-save-readers.test.ts`; mixed feature suites retain city/session
+serialization, migration, identity, economics and invalid-input checks.
+`tests/server-city-entry.test.ts` checks every source entry for browser persistence
+APIs, including the isolated preview, and asserts that retired modules stay absent.
+
+D2 uses the full CI route. It does not extend D1's exact-diff exemption above.
+Explicit legacy-reader workflow commands replace the removed storage suite.
+Server-only browser acceptance must still prove existing server snapshots load,
+server ACK/retry/conflict behavior works, and obsolete browser keys remain intact.

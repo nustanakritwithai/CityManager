@@ -43,10 +43,8 @@ test('prices use construction constants, zoning is free rather than invented bui
   for(const [tool,cost] of [['road',ROAD_COST],['park',PARK.cost],['power',PLANTS.power.cost],['water',PLANTS.water.cost]] as const)
     assert.ok(BUILD_DETAILS[tool].price.includes((cost / 100).toLocaleString('en-US')));
   for(const tool of ['R','C','I','F']) assert.equal(BUILD_DETAILS[tool].price,'วางโซนฟรี');
-  // Demolition has no exported cost constant; guard the existing 2,000-satang/empty-free rule.
-  const sim = readFileSync(new URL('../src/sim.ts',import.meta.url),'utf8');
-  assert.ok(sim.includes('const cost = b || cell.road || plant || park || campus ? 2_000 : 0;'));
-  assert.equal(BUILD_DETAILS.bulldoze.price,'0–20 เครดิต/ช่อง');
+  assert.match(BUILD_DETAILS.bulldoze.price, /คืน 80% ของส่วนที่เมืองจ่าย/);
+  assert.match(BUILD_DETAILS.bulldoze.price, /เอกชนค่ารื้อ 20/);
   assert.equal(BUILD_SHORTCUTS['8'],undefined); assert.equal(BUILD_SHORTCUTS.b,'bulldoze');
 });
 test('keyboard guard preserves editing, IME and browser shortcuts', () => {

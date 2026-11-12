@@ -2,15 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, step } from '../src/sim.ts';
 
-test('a small city with two people buys food and its market does not falsely show no buyers', async () => {
-  const { buildRoad, zoneCell, GATEWAY, SIZE, isMarket } = await import('../src/sim.ts');
+test('a small city with two people buys food and its shop does not falsely show no buyers', async () => {
+  const { buildRoad, zoneCell, GATEWAY, SIZE, isCommercial } = await import('../src/sim.ts');
   const { buildingIssues } = await import('../src/map-overlay.ts');
   const city = createCity(61025, { starter: false });
   buildRoad(city, GATEWAY, GATEWAY + 5);
   for (const [x, zone] of [[1, 'R'], [2, 'R'], [3, 'C'], [4, 'F']] as const) zoneCell(city, 11 * SIZE + x, zone);
   for (let i = 0; i < 21; i++) step(city);
   assert.equal(city.households.reduce((n, h) => n + h.members, 0), 2);
-  const market = city.firms.find(isMarket); assert.ok(market);
+  const market = city.firms.find(isCommercial); assert.ok(market);
   const sales = city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'consumption' && e.from === market.wallet);
   assert.equal(sales.reduce((n, e) => n + e.quantity, 0), 2);
   for (const sale of sales) assert.ok(city.ledger.some(e => e.tick === sale.tick && e.from === sale.to && e.to === sale.from && e.amount === sale.cash && e.reason === sale.reason));
@@ -68,15 +68,13 @@ test('a family with only enough cash for one unit records unmet need', () => {
   assert.ok(observed, 'the constrained household purchased one unit');
 });
 
-test('saving the food version first preserves the previous version 12 bytes', async () => {
-  const { SAVE_KEY, FOOD_BACKUP_KEY, saveStoredCity } = await import('../src/save-storage.ts');
+test('version 12 food migration round-trips through the current session format', async () => {
   const { serialize, deserialize } = await import('../src/sim.ts');
   // Build the legacy fixture from a city before any per-person purchases are recorded.
-  const empty = createCity(61025); const old = JSON.parse(serialize(empty)); delete old.education; old.version = 12; old.rulesVersion = 'chain-7'; delete old.foodDemandStartTick; delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
+  const empty = createCity(61025); const old = JSON.parse(serialize(empty)); delete old.education; old.version = 12; old.rulesVersion = 'chain-7'; delete old.goalRulesVersion; delete old.commercialUnifiedStartTick; delete old.commercialUnifiedBaseline; delete old.commercialBaseVersion; delete old.farmBaseVersion; delete old.farmSoilIndependentStartTick; delete old.foodDemandStartTick; delete old.parks; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
   const raw = JSON.stringify(old), loaded = deserialize(raw); assert.equal(loaded.tick, empty.tick);
-  const values = new Map([[SAVE_KEY, raw]]);
-  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
-  saveStoredCity(storage, serialize(loaded), null);
-  assert.equal(values.get(FOOD_BACKUP_KEY), raw); assert.equal(JSON.parse(values.get(SAVE_KEY)!).version, 19);
-  assert.equal(deserialize(values.get(SAVE_KEY)!).tick, empty.tick);
+  const next = serialize(loaded);
+  assert.equal(JSON.parse(next).version, 27);
+  assert.equal(deserialize(next).tick, empty.tick);
+  assert.deepEqual(deserialize(next), loaded);
 });

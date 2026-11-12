@@ -21,7 +21,7 @@ export const BUILD_DETAILS: Readonly<Record<string, { label: string; price: stri
   park: { label: 'สวนสาธารณะ', price: credits(PARK.cost), key: '7' },
   school: { label: 'โรงเรียน', price: credits(EDUCATION_COST.school.build) },
   university: { label: 'มหาวิทยาลัย', price: credits(EDUCATION_COST.university.build) },
-  bulldoze: { label: 'รื้อถอน', price: '0–20 เครดิต/ช่อง', key: 'B' },
+  bulldoze: { label: 'รื้อถอน', price: 'คืน 80% ของส่วนที่เมืองจ่าย · เอกชนค่ารื้อ 20', key: 'B' },
 };
 
 export function blocksGameShortcuts(event: KeyboardEvent): boolean {

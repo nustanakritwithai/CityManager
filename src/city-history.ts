@@ -1,3 +1,4 @@
+import { roadReceiptCell, validateMunicipalRefunds } from './municipal-refunds.ts';
 import type { City, Entry } from './sim.ts';
 import type { CityHistory, HistoryDay } from './city-history-types.ts';
 import { captureAgricultureHistory } from './agriculture-validation.ts';
@@ -19,6 +20,8 @@ export function compactCityHistory(c: City): boolean {
  if(throughTick<=0||throughTick<=(c.history?.throughTick??-1)||throughTick<c.typeBaseline.tick)return false;
  const money=c.ledger.filter(e=>e.tick<=throughTick), crops=c.cropLedger.filter(e=>e.tick<=throughTick), goods=c.goodsLedger.filter(e=>e.tick<=throughTick);
  const tailMoney=c.ledger.filter(e=>e.tick>throughTick),tailCrops=c.cropLedger.filter(e=>e.tick>throughTick),tailGoods=c.goodsLedger.filter(e=>e.tick>throughTick);
+ // Never prune damaged receipt evidence into an apparently valid checkpoint.
+ validateMunicipalRefunds(c);
  const prior=c.history;
  // All captures must succeed before the live city is changed.
  const agriculture=captureAgricultureHistory(c,throughTick),typed=captureTypedHistory(c,throughTick);
@@ -49,11 +52,38 @@ export function compactCityHistory(c: City): boolean {
  for(const e of crops){totals.cropCount++;totals.cropQuantity=add(totals.cropQuantity,e.quantity);const d=day(e.tick);d.cropCount++;const k=({harvest:'cropsHarvested',process:'cropsProcessed',consumption:'cropsConsumed',writeoff:'cropsWrittenOff',export:'cropsExported'} as const)[e.kind as 'harvest'];if(k)d[k]=add(d[k],e.quantity);}
  // Keep exact sparse structural evidence only while its asset/account is relevant.
  const wallets=new Set([...c.firms.map(f=>f.wallet),...c.households.map(h=>h.wallet),...tailMoney.flatMap(e=>[e.from,e.to]),...tailGoods.flatMap(e=>[e.from,e.to]),...tailCrops.flatMap(e=>[e.from,e.to]),...Object.entries(c.accounts).filter(([,v])=>v!==0).map(([w])=>w)]);
- const ids=new Set([...c.firms.map(f=>f.id),...c.plants.map(p=>p.id),...c.parks.map(p=>p.id),...tailMoney.flatMap(e=>[...e.reason.matchAll(/#(\d+)/g)].map(m=>Number(m[1])))]);
+ const ids=new Set([...c.firms.map(f=>f.id),...c.plants.map(p=>p.id),...c.parks.map(p=>p.id),...(c.education?.campuses.map(p=>p.id)??[]),...tailMoney.flatMap(e=>[...e.reason.matchAll(/#(\d+)/g)].map(m=>Number(m[1])))]);
  const structural=(e:Entry)=> e.reason==='Initial municipal grant'||e.reason==='New household arrival savings'&&wallets.has(e.to)||
-  /^(?:Build |Demolish park|Self-employed |Market to shop conversion|Business takeover refit|Industry expansion capital|Outside industry (?:bootstrap equity|equity)|Funded industry |Industry expansion residual return)/.test(e.reason)&&
+  /^(?:Build |Upgrade (?:power plant|water pump|school|university) |Demolition refund |Demolish park|Self-employed |Market to shop conversion|Business takeover refit|Industry expansion capital|Outside industry (?:bootstrap equity|equity)|Funded industry |Industry expansion residual return)/.test(e.reason)&&
   (wallets.has(e.from)&&e.from.startsWith('firm:')||wallets.has(e.to)&&e.to.startsWith('firm:')||[...e.reason.matchAll(/#(\d+)/g)].some(m=>ids.has(Number(m[1]))));
- const structuralProofs=[...(prior?.structuralProofs??[]),...money].filter(structural);
+ const allProofs=[...(prior?.structuralProofs??[]),...money];
+ const fundedId=(e:Entry)=>/^(?:Industry expansion capital|Funded industry (?:demolition|takeover)|Industry expansion residual return) #([1-9]\d*)$/.exec(e.reason)?.[1];
+ // Keep or discard each funded-child lifecycle as a unit. A live sponsor alone does
+ // not make every old, zero-balance child relevant. A live takeover successor does
+ // need its refit marker, which in turn requires the original funding proof.
+ const lifecycleIds=new Set<string>();
+ const lifecycles=new Map<string,Entry[]>();
+ for(const e of [...allProofs,...tailMoney]) { const id=fundedId(e); if(id) lifecycles.set(id,[...(lifecycles.get(id)??[]),e]); }
+ // Do not turn a previously damaged partial lifecycle into a seemingly valid save
+ // by pruning its remaining evidence. Runtime-created and loaded states must carry
+ // the original funding and (once closed) the original closure marker.
+ for(const [id,entries] of lifecycles) {
+  const funded=entries.some(e=>e.reason===`Industry expansion capital #${id}`);
+  const closed=entries.some(e=>e.reason===`Funded industry demolition #${id}`||e.reason===`Funded industry takeover #${id}`);
+  if(!funded||(!c.firms.some(f=>String(f.id)===id)&&!closed)) throw Error('Incomplete funded industry lifecycle evidence');
+ }
+ for(const e of [...allProofs,...tailMoney]) {
+  const id=fundedId(e); if(!id)continue;
+  const successor=/^Funded industry takeover #/.test(e.reason)&&c.firms.some(f=>f.wallet===e.from&&f.takenOverAt===e.tick);
+  if(wallets.has(`firm:${id}`)||ids.has(Number(id))||successor)lifecycleIds.add(id);
+ }
+ // Roads reuse cells: only the last still-paid receipt at the checkpoint is needed.
+ // Completed build/refund pairs are already reflected in checkpoint accounts.
+ const roadProofs=new Map<number,Entry>();
+ // Match auditMoney's stable chronological replay even when a loaded ledger
+ // stores different-day entries out of order. Keep the original Entry identity.
+ for(const e of [...allProofs].sort((a,b)=>a.tick-b.tick)){const cell=roadReceiptCell(e);if(cell!==null){if(e.reason.startsWith('Build '))roadProofs.set(cell,e);else roadProofs.delete(cell);}}
+ const structuralProofs=allProofs.filter(e=>{const cell=roadReceiptCell(e);if(cell!==null)return roadProofs.get(cell)===e;const id=fundedId(e);return id ? lifecycleIds.has(id) : structural(e);});
  for(const [wallet,value] of Object.entries(accounts))if(value===0)delete accounts[wallet];
  for(const [wallet,value] of Object.entries(goodsBalances))if(value===0)delete goodsBalances[wallet];
  for(const wallet of Object.keys(firstProduction))if(!wallets.has(wallet)&&!structuralProofs.some(e=>e.from===wallet))delete firstProduction[wallet];

@@ -59,7 +59,9 @@ test('a zoned block fills: outside investors open factories for idle crops, home
 });
 
 test('outside equity is only valid for a later factory opened that day', { timeout: 120_000 }, () => {
-  const c = zonedBlock(); for (let d = 0; d < 330; d++) { step(c); keepSupplied(c); }
+  const c = zonedBlock();
+  // Capture the actual opening before monthly checkpointing compacts its journal entry.
+  for (let d = 0; d < 330 && !c.ledger.some(e => /^Outside industry equity #/.test(e.reason)); d++) { step(c); keepSupplied(c); }
   const raw = JSON.parse(serialize(c)), at = raw.ledger.findIndex((e: { reason: string }) => /^Outside industry equity #/.test(e.reason));
   assert.ok(at >= 0);
   for (const mutate of [
@@ -67,6 +69,20 @@ test('outside equity is only valid for a later factory opened that day', { timeo
     (x: any) => { x.ledger[at].from = 'treasury'; },
     (x: any) => { const id = Number(/#(\d+)/.exec(x.ledger[at].reason)![1]); x.firms.find((f: any) => f.id === id).zone = 'F'; },
   ]) { const bad = structuredClone(raw); mutate(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
+
+  // The same funding evidence must remain protected after checkpoint compaction.
+  const entry = raw.ledger[at];
+  for (let d = 0; d < 120 && !c.history?.structuralProofs.some(e => e.reason === entry.reason); d++) { step(c); keepSupplied(c); }
+  const compacted = JSON.parse(serialize(c));
+  const proof = compacted.history?.structuralProofs.findIndex((e: {reason: string}) => e.reason === entry.reason) ?? -1;
+  assert.ok(proof >= 0, 'the same funding event survives as a structural proof');
+  assert.deepEqual(compacted.history.structuralProofs[proof], entry);
+  assert.deepEqual(deserialize(JSON.stringify(compacted)), c);
+  for (const mutate of [
+    (x: any) => { x.history.structuralProofs[proof].amount = 1; },
+    (x: any) => { x.history.structuralProofs[proof].from = 'treasury'; },
+    (x: any) => { const id = Number(/#(\d+)/.exec(x.history.structuralProofs[proof].reason)![1]); x.firms.find((f: any) => f.id === id).zone = 'F'; },
+  ]) { const bad = structuredClone(compacted); mutate(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
 });
 
 test('the HUD counts only jobs a firm can pay for; a small early city still grows on its own savings', { timeout: 120_000 }, () => {

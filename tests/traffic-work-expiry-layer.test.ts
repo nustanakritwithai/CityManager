@@ -52,6 +52,10 @@ test('native fixture can exercise an entered reservation and its work-trip expir
  let entered=false;for(let i=0;i<3000&&!worker.expirations.includes(target.id);i++){frame(1020);if(layer.diagnostics.presentation.cornerOwners.some(r=>r.owner===`game:${target.id}`&&r.active&&r.entered))entered=true;}
  assert.equal(entered,true,'Actual presenter grants and enters this car corridor before expiration');
  assert.ok(worker.expirations.includes(target.id),'The actual worker acknowledges expiration');
+ const cancellation=layer.diagnostics.workCancellations.find(e=>e.id===target.id);assert.ok(cancellation);
+ assert.ok(cancellation.before.some(o=>o.owner===`game:${target.id}`&&o.active&&o.entered),'Immediately before the actual first expiry the target owns an entered corridor');
+ assert.ok(cancellation.after.every(o=>o.owner!==`game:${target.id}`),'Actual expiry releases the exact owner');
+ cancellation.before[0].owner='not-the-owner';assert.ok(layer.diagnostics.workCancellations.find(e=>e.id===target.id)!.before.some(o=>o.owner===`game:${target.id}`),'Diagnostic snapshots cannot mutate stored evidence');
  assert.ok(layer.diagnostics.presentation.cornerOwners.every(r=>r.owner!==`game:${target.id}`));assert.ok(!layer.diagnostics.presentation.selectedIds.includes(`game:${target.id}`));assert.deepEqual(faults,[]);layer.destroy();
 });
 
@@ -201,4 +205,18 @@ test('reloading after cutoff fences an old worker and opens a fresh commute on t
  layer.frame(restored,1020,false,.025,8);workers[1].flush();
  assert.ok(layer.diagnostics.presentation.selectedIds.includes(workId),'the work car survives the deadline');
  assert.deepEqual(faults,[]);assert.equal(JSON.stringify(c),before);assert.equal(JSON.stringify(restored),before);layer.destroy();
+});
+
+test('cancellation diagnostics stay bounded, detached and reset with the city epoch',()=>{
+ const worker=new WorkerFixture(),scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>worker as never,scene as never,false,()=>0),internal=layer as any;
+ internal.workClock={day:2,minute:1020};internal.workStalls={retain:()=>{},observe:()=>true};
+ for(let id=1;id<=130;id++){
+  internal.latest={cars:[{id,blocked:true}],workTrips:[{id,day:1}]};
+  assert.equal(internal.reconcileWorkTrips(.025),true);
+ }
+ const diagnostics=layer.diagnostics;assert.equal(typeof Object.getOwnPropertyDescriptor(diagnostics,'workCancellations')?.get,'function','Uninspected evidence must not be copied on every frame');
+ const evidence=diagnostics.workCancellations;assert.equal(evidence.length,128);assert.equal(evidence[0].id,3);assert.equal(evidence.at(-1)!.id,130);
+ evidence[0].id=999;assert.equal(layer.diagnostics.workCancellations[0].id,3,'A consumer cannot mutate stored diagnostic records');
+ layer.frame(createCity(123),0,true,0,0);assert.deepEqual(layer.diagnostics.workCancellations,[],'A new city fences previous-epoch evidence');layer.destroy();
 });

@@ -12,9 +12,9 @@ import {createCity,buildRoad,buildParallelRoad,deserialize,serialize,adoptSavedE
 import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../src/park-runtime.ts';
 import {trafficPlan} from '../src/traffic-plan.ts';
 import {populationFixture} from './population-capacity-fixture.ts';
-import {trafficGamePeakFixture} from './traffic-game-peak-fixture.ts';
+import {trafficGamePeakFixture,peakLiveCity} from './traffic-game-peak-fixture.ts';
 import {TrafficGame,captureTrafficGameSample} from '../src/traffic/game.ts';
-import {createTrafficServerFixture,reachTrafficControl,createTrafficNetworkAudit,startTrafficHttpFixture,installTrafficNetworkFence} from './traffic-server-entry-fixture.mjs';
+import {assertTrafficAutosaveCity,assertTrafficManualSaveChain,completeTrafficManualSave,createTrafficServerFixture,reachTrafficControl,createTrafficNetworkAudit,startTrafficHttpFixture,installTrafficNetworkFence,loadedTrafficSession} from './traffic-server-entry-fixture.mjs';
 import {trafficGameCase} from './traffic-game-cases.mjs';
 import {fallbackMetrics} from './traffic-game-fallback-metrics.mjs';
 import {peakTriplicateMetrics} from './traffic-game-peak-metrics.mjs';
@@ -26,15 +26,15 @@ const old=legacyCity(61025);for(let d=0;d<29;d++)legacyStep(old);
 const economyCity=deserialize(legacySerialize(old));adoptSavedEducation(economyCity);step(economyCity);
 let plan=trafficPlan(economyCity);for(let d=0;d<60&&!(plan.trucks.length&&plan.smoke.length);d++){step(economyCity);plan=trafficPlan(economyCity);}
 assert.ok(plan.trucks.length&&plan.smoke.length,'fixture must contain genuine delivery trucks and factory smoke');
-const economyRaw=serializeParkSession(economyCity,createParkRuntime(economyCity)),economyCityRaw=serialize(economyCity),expectedEconomy=deserialize(economyCityRaw);
+const economyRaw=serializeParkSession(economyCity,createParkRuntime(economyCity)),economyCityRaw=serialize(loadedTrafficSession(economyRaw).city),expectedEconomy=deserialize(economyCityRaw);
 for(let i=0;i<3;i++)step(expectedEconomy);
 // Validated synthetic density fixture, NOT a claim of natural growth or mobile FPS.
-const dense=populationFixture(334,true);step(dense);const denseRaw=serializeParkSession(dense,createParkRuntime(dense));
+const dense=populationFixture(334,true);step(dense);const denseRaw=serializeParkSession(dense,createParkRuntime(dense)),denseLive=loadedTrafficSession(denseRaw).city;
 assert.deepEqual(deserializeParkSession(denseRaw).city,dense);
 // Road control fixture built through actual economic commands, not a fake City.
 const road=createCity(61025,{starter:false});assert.equal(buildRoad(road,GATEWAY,cell(10,12)).ok,true);
 const roadRaw=serializeParkSession(road,createParkRuntime(road));
-const roadExpected=deserialize(serialize(road));assert.equal(buildParallelRoad(roadExpected,cell(5,13),cell(10,13)).ok,true);
+const roadExpected=loadedTrafficSession(roadRaw).city;assert.equal(buildParallelRoad(roadExpected,cell(5,13),cell(10,13)).ok,true);
 // Validated synthetic city: concentrated housing feeds a shared road
 // bottleneck. A player-built connected bypass improves game throughput.
 const bypassSeed=populationFixture(32,true),homes=bypassSeed.buildings.filter(b=>b.zone==='R'),firms=bypassSeed.buildings.filter(b=>b.zone!=='R');
@@ -42,13 +42,13 @@ bypassSeed.cells.forEach(c=>{c.road=false;c.zone=null;c.building=null;});
 for(const i of [272,273,274,275,...Array.from({length:10},(_,i)=>288+i)])bypassSeed.cells[i].road=true;
 for(const [i,b] of homes.entries()){b.cell=[271,248][i];bypassSeed.cells[b.cell]={road:false,zone:b.zone,building:b.id};}
 for(const [i,b] of firms.entries()){b.cell=[251,276,400,401,402,403,404][i];bypassSeed.cells[b.cell]={road:false,zone:b.zone,building:b.id};}
-const bypassCity=deserialize(serialize(bypassSeed)),bypassRaw=serializeParkSession(bypassCity,createParkRuntime(bypassCity)),bypassExpected=deserialize(serialize(bypassCity));
+const bypassCity=deserialize(serialize(bypassSeed)),bypassRaw=serializeParkSession(bypassCity,createParkRuntime(bypassCity)),bypassLive=loadedTrafficSession(bypassRaw).city,bypassExpected=deserialize(serialize(bypassLive));
 for(const [a,b] of [[296,320],[320,323],[323,275]])assert.equal(buildParallelRoad(bypassExpected,a,b).ok,true);
 assert.deepEqual(deserialize(serialize(bypassExpected)),bypassExpected);
 const pureGame=(c,n)=>{const game=new TrafficGame(captureTrafficGameSample(c));for(let i=0;i<n;i++)game.step();return game.frame;};
 // Both paths get the same bounded 20-step warmup: acceleration and safe corner traversal
 // consume the first ten steps. Demand and strict improvement remain unchanged.
-const baselineTwenty=pureGame(bypassCity,20),bypassTwenty=pureGame(bypassExpected,20);assert.ok(bypassTwenty.completed>baselineTwenty.completed,'Validated player-built bypass must improve the independent game');
+const baselineTwenty=pureGame(bypassLive,20),bypassTwenty=pureGame(bypassExpected,20);assert.ok(bypassTwenty.completed>baselineTwenty.completed,'Validated player-built bypass must improve the independent game');
 const blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1',software=process.env.CITYMANAGER_SOFTWARE_WEBGL==='1',expectDefault=process.env.TRAFFIC_GAME_EXPECT_DEFAULT==='1';
 const testPlan=trafficGameCase(process.env.TRAFFIC_GAME_CASE||'full',blocked);
 const workFixtures=testPlan.workExpiry?{signal:workExpiryBrowserFixture('signal'),closure:workExpiryBrowserFixture('closure')}:null;
@@ -130,13 +130,14 @@ async function verifyControlledAutosave(original,condition){
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
  await assertProtectedSaveUnchanged(original);
  const expected=await evaluate('window.cityManager.sessionSnapshot()');
- assert.notEqual(expected,original,'Citizen runtime advanced despite unchanged economic City');
+ const loaded=loadedTrafficSession(original),initialRuntime=serializeParkSession(loaded.city,loaded.runtime);
+ assert.notEqual(expected,initialRuntime,'Citizen runtime advanced despite unchanged economic City');
  await evaluate('window.__trafficInvokeAutosave()');
  await waitServerRaw(expected);
  const stored={primary:serverFixture.active.raw,revision:serverFixture.active.revision,schedule:await evaluate('window.__trafficAutosaveSchedule')};
  assert.equal(stored.primary,expected);assert.ok(stored.revision>1,'Autosave is a real later server revision');await serverFixture.assertNoCityWrites(evaluate);
- const restored=deserializeParkSession(stored.primary),baseline=deserializeParkSession(original);
- assert.equal(serialize(restored.city),serialize(baseline.city),'Autosave changes runtime, not economic City');
+ const restored=deserializeParkSession(stored.primary),baseline=loaded;
+ assertTrafficAutosaveCity(original,restored.city);
  assert.equal(serializeParkSession(restored.city,restored.runtime,restored.city.market),expected,'Production full-session deserialization round-trips saved runtime');
  assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(baseline.city));
  assert.deepEqual(stored.schedule,{mode:'controlled-single-60000ms-after-fallback-sample',registrations:1,invocations:1});
@@ -177,25 +178,33 @@ try{
  // Fresh profile has no explicit preference; this must be the *new* game model,
  // not the old assignment fleet. Its workload is a bounded visual allocation.
  setStage('fresh launch and default/opt-in');d=await navigate(economyRaw);if(!expectDefault){assert.equal(d.traffic,null,'pre-release default is off');d=await navigate(economyRaw,'?traffic=1');}
- await waitModel();d=await diag();assert.equal(d.traffic.mode,'allocation-game');assert.equal(d.traffic.paused,true);assert.ok(d.traffic.roads>0);assert.ok(d.decorative.trucks>0&&d.decorative.plumes>0);assert.equal(d.decorative.cars,0);assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),expectDefault?null:'1');
+ await waitModel();d=await diag();assert.equal(d.traffic.mode,'allocation-game');assert.equal(d.traffic.paused,true);assert.ok(d.traffic.roads>0);assert.ok(d.decorative.trucks>0&&d.decorative.plumes>0);assert.equal(d.decorative.cars,0);assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),null,'Visit preference is never written to browser storage');
  const initialCity=await evaluate('window.cityManager.snapshot()');assert.equal(initialCity,economyCityRaw);checks.push(expectDefault?'Fresh no-query launch uses default allocation game with delivery trucks/factory smoke':'Pre-release default OFF; explicit ON uses allocation game with delivery trucks/factory smoke');
  setStage('desktop activation and pause');await button('#pause');await until('window.cityManager.traffic()?.moving>0 && window.cityManager.traffic()?.cars>0 && window.cityManager.traffic()?.step>0',30000);d=await diag();assert.ok(d.traffic.demandRate>0);await screenshot('desktop-traffic-game.png');
  await button('#pause');await waitPausedModel();const paused=await diag(),pausedCity=await evaluate('window.cityManager.snapshot()');await sleep(600);const afterPause=await diag();for(const key of ['step','waiting','moving','completed','dropped','cancelled'])assert.equal(afterPause.traffic[key],paused.traffic[key],`Paused ${key} must not advance`);assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);checks.push('Game creates real rendered representative cars; pause freezes model and city');
  // Persist the ordinary city and park session only: game counters are ephemeral.
- setStage('save and server reload');await gameMenu();await until("!document.querySelector('#save').disabled");const oldRevision=serverFixture.active.revision;const expectedSaved=await evaluate('window.cityManager.sessionSnapshot()');await button('#save');const acknowledged=await waitServerRaw(expectedSaved,oldRevision);const saved=acknowledged.raw;const savedDoc=JSON.parse(saved);assert.equal(savedDoc.trafficRuntime,undefined);assert.equal(savedDoc.trafficGame,undefined);assert.deepEqual(deserializeParkSession(saved).city,deserialize(pausedCity));assert.deepEqual(JSON.parse(saved),JSON.parse(await evaluate('window.cityManager.sessionSnapshot()')));
- await serverFixture.assertNoCityWrites(evaluate);const oldBoot=await evaluate('window.__trafficGameBoot');await settleInterceptions();serverFixture.allowNavigation();await send('Page.reload',{ignoreCache:true});await until(`window.__trafficGameBoot!==${JSON.stringify(oldBoot)}`);await serverFixture.enter({send,evaluate,button,until});await waitModel();assert.equal((await diag()).traffic.step,0,'Acknowledged reload starts a fresh ephemeral game');assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);assert.equal(serverFixture.active.raw,saved);assert.ok(serverFixture.navigationEvidence.at(-1).beforeRevision===acknowledged.revision);await gameMenu();checks.push('Server ACK/reload preserves city and journals, stores no game sidecar, and resets the ephemeral worker');
+ setStage('save and server reload');await gameMenu();await until("!document.querySelector('#save').disabled");await settleInterceptions();await serverFixture.settle();const beforeSave=serverFixture.active,saveCursor=serverFixture.writes.length;const oldRevision=beforeSave.revision;const expectedSaved=await evaluate('window.cityManager.sessionSnapshot()');await completeTrafficManualSave(evaluate,button,until);const acknowledged=await waitServerRaw(expectedSaved,oldRevision);const saved=acknowledged.raw;const savedDoc=JSON.parse(saved);assert.equal(savedDoc.trafficRuntime,undefined);assert.equal(savedDoc.trafficGame,undefined);assert.deepEqual(deserializeParkSession(saved).city,deserialize(pausedCity));assert.deepEqual(JSON.parse(saved),JSON.parse(await evaluate('window.cityManager.sessionSnapshot()')));
+ await serverFixture.assertNoCityWrites(evaluate);const oldBoot=await evaluate('window.__trafficGameBoot');await settleInterceptions();await serverFixture.settle();const beforeReload=serverFixture.active;assertTrafficManualSaveChain(beforeSave,acknowledged,beforeReload,serverFixture.writes.slice(saveCursor),serverFixture.writes.slice(0,saveCursor),saved);serverFixture.allowNavigation(saved);await send('Page.reload',{ignoreCache:true});await serverFixture.enter({send,evaluate,button,until});assert.notEqual(await evaluate('window.__trafficGameBoot'),oldBoot,'Literal reload created a new browser context');assert.equal(await evaluate("new URL(location.href).searchParams.get('traffic')"),expectDefault?null:'1','Literal reload retains the original query override');await waitModel();assert.equal((await diag()).traffic.step,0,'Acknowledged reload starts a fresh ephemeral game');assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);assert.equal(serverFixture.active.raw,saved);assert.ok(serverFixture.navigationEvidence.at(-1).beforeRevision===beforeReload.revision);await gameMenu();checks.push('Server ACK/reload preserves city and journals, stores no game sidecar, and resets the ephemeral worker');
  // Test the actual game-menu control as well as URL preferences.
- setStage('toggle and persistent preference');await button('#traffic-game-toggle');await until('window.cityManager.traffic()===null');assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),'0');assert.equal(await evaluate("document.querySelector('#traffic-game-toggle').getAttribute('aria-pressed')"),'false');
- await button('#traffic-game-toggle');await waitModel();assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),'1');checks.push('Game-menu toggle switches the model and records both explicit OFF and ON');
+ setStage('toggle and visit-only preference');await button('#traffic-game-toggle');await until('window.cityManager.traffic()===null');assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),null);assert.equal(await evaluate("document.querySelector('#traffic-game-toggle').getAttribute('aria-pressed')"),'false');
+ await button('#traffic-game-toggle');await waitModel();assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),null);checks.push('Game-menu toggle switches the model for this visit without browser preference writes');
  }
  if(testPlan.economy){
- // OFF is a durable explicit preference; no-query reload must stay off. Re-enable
- // and compare deterministic economy replay to OFF, not just visual appearance.
- d=await navigate(economyRaw,'?traffic=0');assert.equal(d.traffic,null);assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),'0');assert.equal((await navigate(economyRaw)).traffic,null);
- assert.equal(await runThreeDays('?traffic=1'),await runThreeDays('?traffic=0'));checks.push('Explicit OFF survives reload; ON and OFF play identical three-day city/economy replay');
+ // OFF is a query-scoped preference; a fresh no-query visit restores the default.
+ // Compare deterministic economy replay between ON and OFF, not just appearance.
+ d=await navigate(economyRaw,'?traffic=0');assert.equal(d.traffic,null);assert.equal(await evaluate("localStorage.getItem('citymanager.traffic')"),null,'Query preference stays in page memory');d=await navigate(economyRaw);if(expectDefault){await waitModel();assert.equal((await diag()).traffic.mode,'allocation-game','New visit restores the enabled default');}else assert.equal(d.traffic,null,'New visit restores the disabled default');
+ assert.equal(await runThreeDays('?traffic=1'),await runThreeDays('?traffic=0'));checks.push('Query OFF lasts for this visit, reload restores default, and ON/OFF play identical three-day city/economy replay');
  // Paused road construction must update the actual model snapshot without
  // advancing its game clock or changing anything beyond ordinary road costs.
- setStage('paused road construction');d=await navigate(roadRaw,'?traffic=1');await waitModel();const beforeRoad=(await diag()).traffic;assert.equal(beforeRoad.roads,road.cells.filter(c=>c.road).length);await button('[data-tool="road"]');await tapCell(cell(5,13));await tapCell(cell(10,13));await until(`window.cityManager.traffic()?.roads===${roadExpected.cells.filter(c=>c.road).length}`);await waitPausedModel();d=await diag();assert.equal(d.traffic.step,beforeRoad.step);assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(roadExpected));checks.push('Real road tool updates paused game topology while preserving ordinary construction accounting');
+ setStage('paused road construction');d=await navigate(roadRaw,'?traffic=1');await waitModel();
+ // This empty-city fixture intentionally opens the teaching card. Dismiss it
+ // through the same native control a player uses before targeting covered land.
+ if(await evaluate('!!document.querySelector("#guide-card:not([hidden])")')){
+   const beforeDismiss=await evaluate('window.cityManager.snapshot()');await button('#guide-dismiss');
+   assert.equal(await evaluate('document.querySelector("#guide-card").hidden'),true);
+   assert.equal(await evaluate('window.cityManager.snapshot()'),beforeDismiss,'Dismissing advice does not alter the road fixture');
+ }
+ const beforeRoad=(await diag()).traffic;assert.equal(beforeRoad.roads,road.cells.filter(c=>c.road).length);await button('[data-tool="road"]');await tapCell(cell(5,13));await tapCell(cell(10,13));await until(`window.cityManager.traffic()?.roads===${roadExpected.cells.filter(c=>c.road).length}`);await waitPausedModel();d=await diag();assert.equal(d.traffic.step,beforeRoad.step);assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(roadExpected));checks.push('Real road tool updates paused game topology while preserving ordinary construction accounting');
  }
  if(testPlan.bypass){
  // Real player input builds a connected bypass. One game minute/second keeps
@@ -212,12 +221,12 @@ try{
  // so the economic City remains byte-identical during each short measurement.
  // OFF keeps decorative cars; ON replaces them with representative game cars.
  setStage('mobile dense OFF baseline');await viewport(true,false);d=await navigate(denseRaw,'?traffic=0',blocked);await viewport(true);let offBefore=null,offRaf=null,offAfter=null;
- {assert.equal(d.traffic,null);await citizenSpeed();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));await button('#pause');await sleep(1250);
-  offBefore=await diag();{const sample=await (blocked?fallbackRaf():mobileRaf());offRaf={...summarizeRaf(sample),...(blocked?{elapsedMs:sample.elapsedMs,trailingMs:sample.trailingMs,intervalsMs:sample.intervals,longTaskDurationsMs:sample.longTasks}:{})};}offAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));if(blocked)await assertProtectedSaveUnchanged(denseRaw);await button('#pause');await until('window.cityManager.parks().paused');if(blocked)await verifyControlledAutosave(denseRaw,'OFF');}
+ {assert.equal(d.traffic,null);await citizenSpeed();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(denseLive));await button('#pause');await sleep(1250);
+  offBefore=await diag();{const sample=await (blocked?fallbackRaf():mobileRaf());offRaf={...summarizeRaf(sample),...(blocked?{elapsedMs:sample.elapsedMs,trailingMs:sample.trailingMs,intervalsMs:sample.intervals,longTaskDurationsMs:sample.longTasks}:{})};}offAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(denseLive));if(blocked)await assertProtectedSaveUnchanged(denseRaw);await button('#pause');await until('window.cityManager.parks().paused');if(blocked)await verifyControlledAutosave(denseRaw,'OFF');}
 
  setStage('mobile dense ON setup');d=await navigate(denseRaw,'?traffic=1',blocked);await waitModel();d=await diag();assert.ok(d.traffic.demandRate>0);assert.equal(d.traffic.roads,dense.cells.filter(c=>c.road).length);assert.equal(d.traffic.failure,null);await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await evaluate("document.querySelector('#traffic-game-status').scrollIntoView({block:'nearest'})");await paints();const statusLayout=await evaluate(`(()=>{const e=document.querySelector('#traffic-game-status'),r=e.getBoundingClientRect();return {text:e.innerText,hidden:e.hidden,x:r.x,right:r.right,width:r.width,screen:innerWidth}})()`);assert.equal(statusLayout.hidden,false);assert.ok(/จำลอง/.test(statusLayout.text)&&/ไม่ใช่/.test(statusLayout.text),'UI explicitly identifies the allocation as simulated, not real trips');assert.ok(/64/.test(statusLayout.text)&&/128/.test(statusLayout.text),'UI discloses the representative visual/model caps');assert.ok(/บางช่วงถนน/.test(statusLayout.text)&&/แม้แบบจำลองมีรถอยู่/.test(statusLayout.text),'UI discloses that modeled traffic may not be drawn on every road');assert.ok(statusLayout.width>0&&statusLayout.x>=0&&statusLayout.right<=statusLayout.screen+1,JSON.stringify(statusLayout));await screenshot('mobile-dense-game-paused.png');await button('#park-recreation button[data-speed]');await closeInspector();
  await button('#pause');await until('window.cityManager.traffic()?.step>=1&&window.cityManager.traffic()?.moving>0',30000);await screenshot('mobile-dense-game-moving.png');
- setStage('mobile dense ON paired frame measurement');const onBefore=await diag(),onSample=await (blocked?fallbackRaf():mobileRaf()),onRaf={...summarizeRaf(onSample),...(blocked?{elapsedMs:onSample.elapsedMs,trailingMs:onSample.trailingMs,intervalsMs:onSample.intervals,longTaskDurationsMs:onSample.longTasks}:{})},onAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(dense));if(blocked)await assertProtectedSaveUnchanged(denseRaw);
+ setStage('mobile dense ON paired frame measurement');const onBefore=await diag(),onSample=await (blocked?fallbackRaf():mobileRaf()),onRaf={...summarizeRaf(onSample),...(blocked?{elapsedMs:onSample.elapsedMs,trailingMs:onSample.trailingMs,intervalsMs:onSample.intervals,longTaskDurationsMs:onSample.longTasks}:{})},onAfter=await diag();assert.equal(await evaluate('window.cityManager.snapshot()'),serialize(denseLive));if(blocked)await assertProtectedSaveUnchanged(denseRaw);
  const fallbackAssessment=blocked?fallbackMetrics(offRaf,onRaf,onAfter.traffic?.timing):null;
  frameIntervals={paired:true,off:offRaf,on:onRaf,cityBytesEqual:true,offBefore,offAfter,onBefore,onAfter,worker:{before:onBefore.traffic?.worker??null,after:onAfter.traffic?.worker??null},gameTiming:{before:onBefore.traffic?.timing??null,after:onAfter.traffic?.timing??null},fallbackAssessment,note:blocked?'Paired 12 s visible OFF/ON sampling with single periodic autosave callback deferred until after strict no-write checks; native lifecycle handlers retained. Post-sample actual autosave persistence is verified separately. Poor/unknown status remains explicit; epoch maxima include startup. Worker round-trip includes queue, compute and message transfer after submit. Software renderer and browser emulation are not physical-device FPS certification.':'Same fixture and economic City at citizen-view speed; OFF uses decorative cars, ON uses allocation-game cars. Worker round-trip includes worker queue, compute and message transfer after submit, not time before submit. Browser emulation and broad thresholds do not establish smoothness or physical-device FPS.'};
  if(blocked)assert.deepEqual(fallbackAssessment.issues,[],JSON.stringify({assessment:fallbackAssessment,gameTiming:frameIntervals.gameTiming}));
@@ -230,8 +239,7 @@ try{
  // repeat, replace, or selectively discard any pair. One 240 s watchdog applies.
  if(testPlan.peak){
   await viewport(true,false);
-  const peak=trafficGamePeakFixture(),peakCityRaw=serialize(peak),peakRaw=serializeParkSession(peak,createParkRuntime(peak));
-  assert.equal(serialize(deserializeParkSession(peakRaw).city),peakCityRaw);
+  const peak=trafficGamePeakFixture(),peakRaw=serializeParkSession(peak,createParkRuntime(peak)),peakCityRaw=serialize(peakLiveCity(peakRaw,peak));
   const pairs=[];
   peakComparison={fixture:{population:2000,roads:490,buildings:peak.buildings.length},protocol:{pairCount:3,order:['OFF','ON'],frameIntervalsPerCondition:120,warmupDiscardedFrames:10,attainmentLimitMs:25000,retries:0,perPairOnP95StrictlyBelowMs:100,perPairRelativeFactor:1.25,perPairRelativeAllowanceMs:10,performanceRule:'ALL_PAIRS',median:'summary-only',modelActors:128,renderedActors:64},pairs,assessment:null,
    note:'Three fixed alternating pairs, same synthetic City bytes; OFF retains decorative cars, ON renders a representative 64-car sample of the real 128-actor model. Every pair must pass the original thresholds; medians are summary only. CI heuristics do not certify physical-device performance.'};
@@ -260,5 +268,5 @@ try{
  await serverFixture.assertNoCityWrites(evaluate);
  const report={http:{deliveries:httpFixture.deliveries,errors:httpFixture.errors},networkFence,network:networkAudit.evidence,server:serverFixture.evidence,fallbackAutosaveSchedule,controlledAutosaveChecks,browser:await send('Browser.getVersion'),blockedModels:blocked,softwareWebGL:software,testCase:testPlan.name,evidenceCase,recoveryStorageMode,expectDefault,fixtures:{economy:{day:economyCity.tick,trucks:plan.trucks.length,smoke:plan.smoke.length},dense:{population:dense.households.reduce((n,h)=>n+h.members,0),buildings:dense.buildings.length}},checks,stages,errors,externalRequests,screenshots,frameIntervals,peakComparison,bypassTraces,workExpiryEvidence,note:'Installed Edge desktop/mobile emulation; not physical Android, FPS certification or live-site acceptance. All scenarios enter a real isolated server-acknowledged city. Browser-city persistence is forbidden; separate save safety gates retain server failure/lifecycle coverage.'};
  await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
-}catch(error){const failure={http:{deliveries:httpFixture.deliveries,errors:httpFixture.errors},networkFence,network:networkAudit.evidence,lastExpression,server:serverFixture.evidence,error:String(error),fallbackAutosaveSchedule,lastSaveTrace,controlledAutosaveChecks,stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,testCase:testPlan.name,evidenceCase,recoveryStorageMode,stages,errors,externalRequests,frameIntervals,peakComparison,bypassTraces,lastBypassTrace};try{await writeFile(resolve(output,'failure.json'),JSON.stringify(failure,null,2));}catch{}try{await screenshot('failure.png');await writeFile(resolve(output,'failure.json'),JSON.stringify({...failure,state:await diag(),workFrames:testPlan.workExpiry?await evaluate('(window.__workFrames??[]).slice(-25)'):undefined,page:await evaluate('({url:location.href,text:document.body.innerText.slice(-3000),idb:window.__recoveryIdb})')},null,2));}catch{}throw error;}
+}catch(error){const failure={http:{deliveries:httpFixture.deliveries,errors:httpFixture.errors},networkFence,network:networkAudit.evidence,lastExpression,server:serverFixture.evidence,error:String(error),fallbackAutosaveSchedule,lastSaveTrace,controlledAutosaveChecks,stage,stageElapsedMs:Date.now()-stageAt,totalElapsedMs:Date.now()-runStarted,testCase:testPlan.name,evidenceCase,recoveryStorageMode,stages,errors,externalRequests,frameIntervals,peakComparison,bypassTraces,lastBypassTrace};try{await writeFile(resolve(output,'failure.json'),JSON.stringify(failure,null,2));}catch{}try{await screenshot('failure.png');await writeFile(resolve(output,'failure.json'),JSON.stringify({...failure,state:await diag(),workFrames:testPlan.workExpiry?await evaluate('(window.__workFrames??[]).slice(-25)'):undefined,workRequests:testPlan.workExpiry?await evaluate('(window.__workRequests??[]).slice(-25)'):undefined,page:await evaluate('({url:location.href,text:document.body.innerText.slice(-3000),idb:window.__recoveryIdb})')},null,2));}catch{}throw error;}
 finally{clearTimeout(watchdog);if(ws?.readyState===1){try{await send('Browser.close');}catch{}ws.close();}child.kill();await httpFixture.close();}

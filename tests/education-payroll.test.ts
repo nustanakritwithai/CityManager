@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCampus, buildPark, buildPlant, bulldoze, createCity, deserialize, serialize, step, toggleCampus, type City } from '../src/sim.ts';
 import { createEducation, educationPayroll, initialCampusReport, stepEducation, takeEducationWages, type CampusKind, type EducationView } from '../src/education.ts';
+import { scheduleCityTaxes } from '../src/city-tax-policy.ts';
 
 function staff(kind: CampusKind) {
   const state = createEducation('new-city'), role = kind === 'school' ? 'teacher' : 'professor';
@@ -70,10 +71,27 @@ function cash(c: City, amount: number, wallet = 'treasury') {
   c.accounts[wallet] += delta; c.accounts.outside -= delta;
   c.ledger.push({ tick: c.tick, from: delta > 0 ? 'outside' : wallet, to: delta > 0 ? wallet : 'outside', amount: Math.abs(delta), reason: 'Synthetic payroll funding stress' });
 }
-function until(c: City, tick: number) { while (c.tick < tick) step(c); }
-function payments(c: City) { return c.ledger.filter(e => /^Monthly (school|university) wages #/.test(e.reason)); }
+// Capture payment rows as they occur; completed months are deliberately compacted
+// out of the raw tail, so absence from c.ledger is not evidence of nonpayment.
+const observed = new WeakMap<City, City['ledger']>();
+function until(c: City, tick: number) {
+  const rows = observed.get(c) ?? []; observed.set(c, rows);
+  while (c.tick < tick) {
+    step(c);
+    rows.push(...c.ledger.filter(e => e.tick === c.tick && /^Monthly (school|university) wages #/.test(e.reason)));
+  }
+}
+function payments(c: City) {
+  const rows = [...(observed.get(c) ?? [])], matched = new Map<string, number>();
+  for (const e of rows) { const key = JSON.stringify(e); matched.set(key, (matched.get(key) ?? 0) + 1); }
+  for (const e of c.ledger.filter(e => /^Monthly (school|university) wages #/.test(e.reason))) {
+    const key = JSON.stringify(e), count = matched.get(key) ?? 0;
+    if (count) matched.set(key, count - 1); else rows.push(e);
+  }
+  return rows;
+}
 function reconcile(c: City) {
-  const balances: Record<string, number> = {};
+  const balances: Record<string, number> = { ...c.history?.accounts };
   for (const e of c.ledger) { balances[e.from] = (balances[e.from] ?? 0) - e.amount; balances[e.to] = (balances[e.to] ?? 0) + e.amount; }
   for (const key of new Set([...Object.keys(c.accounts), ...Object.keys(balances)])) assert.equal(c.accounts[key] ?? 0, balances[key] ?? 0, key);
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
@@ -125,7 +143,8 @@ test('legacy unfunded liabilities survive settlements, reload and departure revi
   }
   cash(c, 27400); until(c, 180);
   assert.deepEqual(payments(c).map(e => e.amount), [22400]); assert.equal(educationPayroll(c.education), 0);
-  c = deserialize(serialize(c)); until(c, 210); assert.equal(payments(c).length, 1); reconcile(c);
+  const paidBeforeReload = payments(c); c = deserialize(serialize(c)); observed.set(c, paidBeforeReload);
+  until(c, 210); assert.equal(payments(c).length, 1); reconcile(c);
 });
 
 test('demolition rejects insufficient cash without mutation and settles earned claims once when funded', () => {
@@ -151,6 +170,26 @@ test('a late settlement exception rolls back every wallet, journal entry and ear
   assert.equal(serialize(c), before); reconcile(c);
   assert.equal(bulldoze(c, campus.cell).ok, true); assert.deepEqual(payments(c).map(e => e.amount), [1400, 2800]);
   deserialize(serialize(c)); reconcile(c);
+});
+
+test('a school that pays accrued wages after a rate change withholds the new rate', () => {
+  const c = fixture(), campus = c.education!.campuses[0];
+  scheduleCityTaxes(c, { wage: 17, profit: 20 });
+  cash(c, 2_000_000);
+  while (c.tick < 91) step(c);
+  assert.ok(educationPayroll(c.education) > 0);
+  const start = c.ledger.length;
+  assert.ok(bulldoze(c, campus.cell).ok);
+  const rows = c.ledger.slice(start);
+  const wages = rows.filter(entry => entry.reason === `Monthly school wages #${campus.id}`);
+  assert.ok(wages.length);
+  for (const entry of wages) {
+    assert.deepEqual(rows[rows.indexOf(entry) + 1], {
+      tick: 91, from: entry.to, to: 'treasury', amount: Math.floor(entry.amount * 17 / 100), reason: 'Monthly household wage tax',
+    });
+  }
+  reconcile(c);
+  assert.equal(serialize(deserialize(serialize(c))), serialize(c));
 });
 
 test('legacy education arrears preserve already reserved park pay and a loadable month-end', () => {

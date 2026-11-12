@@ -5,7 +5,6 @@ import { createCity, deserialize, serialize, step, farmCrop, selectFarmCrop, fir
 import { farmStockCapacity, harvestYield, proposeHarvest } from '../src/agriculture.ts';
 import { buildingNeed } from '../src/utilities.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
-import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { validateAgriculture } from '../src/agriculture-validation.ts';
 import { holdEducationReady } from './education-ready.ts';
 
@@ -85,7 +84,8 @@ test('six actual allocations harvest once and replay survives later demolition',
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   b.level = 6;
   const needed = 6 - firmWorkerCount(c, f.id);
-  const candidates = c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed);
+  const onFarm = new Set(c.employment.filter(e => e.firmId === f.id).map(e => e.householdId));
+  const candidates = c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing' && !onFarm.has(e.householdId)).slice(0, needed);
   assert.equal(candidates.length, needed);
   for (const allocation of candidates) allocation.firmId = f.id;
   step(c);
@@ -104,7 +104,8 @@ test('replay rejects a six-worker harvest truncated to the three-worker store', 
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   b.level = 6;
   const needed = 6 - firmWorkerCount(c, f.id);
-  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed)) a.firmId = f.id;
+  const onFarm = new Set(c.employment.filter(e => e.firmId === f.id).map(e => e.householdId));
+  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing' && !onFarm.has(e.householdId)).slice(0, needed)) a.firmId = f.id;
   step(c);
   const bad = structuredClone(c), harvest = bad.cropLedger.find(e => e.tick === bad.tick && e.kind === 'harvest' && e.to === f.wallet)!;
   const exported = bad.cropLedger.find(e => e.tick === bad.tick && e.kind === 'export' && e.from === f.wallet)!;
@@ -135,7 +136,8 @@ test('v15 migration fixes the boundary and admits valid pre- and post-upgrade ha
   const f = c.firms.find(f => f.zone === 'F')!, b = c.buildings.find(b => b.id === f.building)!;
   assert.equal(b.level, 4); b.level = 6;
   const needed = 6 - firmWorkerCount(c, f.id);
-  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing').slice(0, needed)) a.firmId = f.id;
+  const onFarm = new Set(c.employment.filter(e => e.firmId === f.id).map(e => e.householdId));
+  for (const a of c.employment.filter(e => e.firmId !== f.id && e.occupation === 'manufacturing' && !onFarm.has(e.householdId)).slice(0, needed)) a.firmId = f.id;
   step(c);
   assert.ok(c.cropLedger.some(e => e.kind === 'harvest' && e.tick === c.tick && e.workers === 6));
   assert.deepEqual(deserialize(serialize(c)), c);
@@ -143,16 +145,4 @@ test('v15 migration fixes the boundary and admits valid pre- and post-upgrade ha
   assert.throws(() => deserialize(JSON.stringify(bad)), /farm progression boundary/);
   bad.farmLevelStartTick = c.tick + 1;
   assert.throws(() => deserialize(JSON.stringify(bad)), /farm progression boundary/);
-});
-
-test('v15 bytes are backed up before the first new save and survive a backup failure', () => {
-  const c = createCity(61025), old = JSON.parse(serialize(c)); old.version = 15; old.rulesVersion = 'chain-10';
-  delete old.farmLevelStartTick; delete old.factoryProgressionStartTick;
-  const raw = JSON.stringify(old), fresh = serialize(c), values = new Map([[SAVE_KEY, raw]]);
-  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
-  saveStoredCity(storage, fresh, null);
-  assert.equal(values.get(FARM_LEVEL_BACKUP_KEY), raw); assert.equal(readStoredCity(storage, 'backup')?.raw, raw);
-  const failed = new Map([[SAVE_KEY, raw]]);
-  assert.throws(() => saveStoredCity({ getItem: key => failed.get(key) ?? null, setItem: () => { throw new Error('quota'); } }, fresh, null));
-  assert.equal(failed.get(SAVE_KEY), raw);
 });

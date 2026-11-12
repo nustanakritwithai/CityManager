@@ -1,3 +1,6 @@
+import { browserSnapshotState } from './browser-snapshot.ts';
+import { createPanelModelAudit } from './panel-model-audit.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
 // Focused visual-card acceptance. Root runs installed Edge sequentially; no provider requests.
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
@@ -5,45 +8,47 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { reachTouch } from './touch-reach.mjs';
-import { adoptSavedEducation, isMarket, isRetail, createCity, step, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
+import { startTrafficHttpFixture, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
+import { isMarket, isRetail, serialize, deserialize, bulldoze, homeOccupancy, housingCapacity, householdWorkerCount, firmWorkerCount, firmCapacity, firmWage, MONTH, contributeOwnerCapital, withdrawOwnerProfit } from '../src/sim.ts';
+import { buildingCardData } from '../src/building-card-data.ts';
+import { createBuildingCardsFixture, assertCommercialCardTrades } from './building-cards-fixture.ts';
 
-import { createCity as createCityV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
-
-const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
+const upstream = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/cards-normal');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
 const hash = value => createHash('sha256').update(value).digest('hex');
-// Genuine published v4 replay retains a real retailer beside the merged commercial-L1 market.
-const prior = createCityV4(61025); for (let day = 0; day < 29; day++) stepV4(prior);
-const fixture = deserialize(serializeV4(prior));
-adoptSavedEducation(fixture);
-const baseline = serialize(fixture); assert.deepEqual(deserialize(baseline), fixture);
-const later = deserialize(baseline); for (let day = 0; day < 30; day++) step(later);
-assert.equal(later.tick, 59); assert.deepEqual(deserialize(serialize(later)), later);
+const { fixture, legacyInput, baseline, later, shopCity, shopBuilding } = createBuildingCardsFixture();
 const kinds = ['house', 'shop', 'market', 'factory', 'farm'];
 const places = Object.fromEntries(kinds.map(kind => [kind, fixture.buildings.find(b => kind === 'house' ? b.zone === 'R' : fixture.firms.some(f => f.building === b.id && (kind === 'market' ? isMarket(f) : kind === 'shop' ? isRetail(f) : f.zone === (kind === 'farm' ? 'F' : 'I'))))]));
-assert.ok(Object.values(places).every(Boolean), 'Real day29 replay must contain all five building types');
+assert.ok(Object.values(places).every(Boolean), 'Real day29 replay retains both historical commercial origins, houses, factories and farms');
+// The historical retailer is still a market-tier building at days 29 and 59.
+const replayKinds = { house: 'house', shop: 'market', market: 'market', factory: 'factory', farm: 'farm' };
+for (const city of [fixture, later]) for (const [role, b] of Object.entries(places)) assert.equal(buildingCardData(city, b.id)?.kind, replayKinds[role]);
+assert.equal(buildingCardData(shopCity, shopBuilding.id)?.kind, 'shop');
 const marketFirm = fixture.firms.find(f => isMarket(f)), family = fixture.households.find(h => h.id === marketFirm.owner.householdId);
 const sourceHome = fixture.buildings.find(b => b.id === family.home), otherHome = fixture.buildings.find(b => b.zone === 'R' && b.id !== sourceHome.id && fixture.households.some(h => h.home === b.id));
 assert.ok(sourceHome && otherHome && family.members > 1);
 const contributed = deserialize(baseline); assert.equal(contributeOwnerCapital(contributed, marketFirm.id, 10000).ok, true);
 const withdrawn = deserialize(serialize(contributed)); assert.equal(withdrawOwnerProfit(withdrawn, marketFirm.id, 10000).ok, true);
-const preview = { seed: 61025, tick: fixture.tick, hash: hash(baseline), laterTick: later.tick, laterHash: hash(serialize(later)), places: Object.fromEntries(Object.entries(places).map(([kind, b]) => [kind, { buildingId: b.id, cell: b.cell }])), householdId: family.id, householdSourceBuildingId: sourceHome.id, cardKinds: [...kinds, 'household'] };
+const preview = { seed: 61025, tick: fixture.tick, hash: hash(baseline), laterTick: later.tick, laterHash: hash(serialize(later)), places: Object.fromEntries(Object.entries(places).map(([kind, b]) => [kind, { buildingId: b.id, cell: b.cell, cardKind: replayKinds[kind] }])), shop: { tick: shopCity.tick, hash: hash(serialize(shopCity)), buildingId: shopBuilding.id, cell: shopBuilding.cell, level: shopBuilding.level }, householdId: family.id, householdSourceBuildingId: sourceHome.id, cardKinds: [...kinds, 'household'] };
 if (process.argv.includes('--preflight')) { console.log(JSON.stringify(preview, null, 2)); process.exit(0); }
 
-const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [], signatures = {}, providerRequests = [];
+const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [], signatures = {}, providerRequests = [], externalRequests = [];
+let networkProbe = null;
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Building-card suite must run sequentially; CDP9349 is occupied');
+const httpFixture = await startTrafficHttpFixture(upstream), server = httpFixture.fixture, url = httpFixture.url;
 // Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
 const profile = await mkdtemp(resolve(output, 'edge-building-cards-'));
 const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 let ws, sequence = 0; const pending = new Map(), sleep = ms => new Promise(r => setTimeout(r, ms));
+const modelAudit = createPanelModelAudit({blocked,expectedErrors,evaluate,sleep});
 async function send(method, params = {}) { const id = ++sequence; const promise = new Promise((resolve, reject) => { const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout ${method}`)); }, 30000); pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } }); }); ws.send(JSON.stringify({ id, method, params })); return promise; }
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId,kind:document.querySelector("#entity-content").dataset.cardKind})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
@@ -67,30 +72,25 @@ async function button(selector) {
   assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actual hit ${selector}`); await click(p.x, p.y);
 }
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
-async function load(city) { await close(); await button('#toggle-game-menu'); await until('document.querySelector("#inspector").dataset.page==="game"'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(city))})`); await button('#load'); assert.deepEqual(await state(), city); await close(); }
+async function load(city, raw = serialize(city)) {
+  await server.leave({ send, evaluate, until });
+  const ack = await server.seed(raw); assert.equal(ack.raw, raw); assert.equal(ack.revision, 1);
+  const before = modelAudit.begin(); await send('Page.navigate', { url: url + '?starter=1' }); await server.enter({ evaluate, button }); await modelAudit.verify(before);
+  assert.deepEqual(await state(), city, 'Authenticated entry preserves the complete validated city');
+  server.assertDurable(raw, ack.revision); await server.assertNoCityWrites(evaluate); await close();
+}
 async function cell(index, expect = true) { await close(); await button('[data-tool="select"]'); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${index})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas'); await click(p.x, p.y); if (expect) await until('document.querySelector("#inspector").dataset.open==="true"'); await paints(); }
 async function place(city, b) { await cell(b.cell); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${b.id}'`); }
 async function household(city, h, source = city.buildings.find(b => b.id === h.home)) { await place(city, source); await button(`#entity-content [data-household-id="${h.id}"]`); await until(`document.querySelector('#entity-content').dataset.scope==='household'&&document.querySelector('#entity-content').dataset.entityId==='${h.id}'`); }
 async function metrics(expected) { const actual = await evaluate('Object.fromEntries([...document.querySelectorAll("#entity-content [data-context-metric]")].map(e=>[e.dataset.contextMetric,e.dataset.value]))'); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact contextual metric ${key}`); }
 function boundary(city, wallets) { const scope = new Set(wallets), fromTick = Math.max(0, city.tick - 29); let inflow = 0, outflow = 0; for (const e of city.ledger) if (e.tick >= fromTick && e.tick <= city.tick) { if (scope.has(e.to) && !scope.has(e.from)) inflow += e.amount; if (scope.has(e.from) && !scope.has(e.to)) outflow += e.amount; } return { fromTick, toTick: city.tick, inflow, outflow, net: inflow - outflow }; }
-function observedTrade(city, wallet, crops, direction) {
-  const rows = (crops ? city.cropLedger.filter(e => e.kind === 'trade' || e.kind === 'consumption') : city.goodsLedger.filter(e => e.from !== 'production' && e.reason !== 'Demolition stock write-off to outside'))
-    .filter(e => e.tick >= Math.max(0, city.tick - 29) && e.tick <= city.tick && (direction === 'buy' ? e.to === wallet : e.from === wallet));
-  if (!rows.length) return { quantity: null, cash: null, unit: null, status: 'missing' };
-  let quantity = 0, cash = 0;
-  for (const e of rows) {
-    const reason = crops ? e.reason : e.reason === 'Wholesale stock delivery' ? 'Local wholesale goods' : e.reason === 'Imported shop stock' ? 'Outside goods import' : e.reason === 'Exported goods' ? 'Outside market goods export' : e.reason === 'Household final consumption' ? `Household #${e.to.slice(10)} purchase` : null;
-    const paired = city.ledger.filter(m => m.tick === e.tick && m.from === e.to && m.to === e.from && m.reason === reason); assert.equal(paired.length, 1, 'Fixture physical trade has one actual matching cash payment');
-    quantity += e.quantity; cash += paired[0].amount;
-  }
-  return { quantity, cash, unit: cash % quantity === 0 ? cash / quantity : null, status: cash % quantity === 0 ? 'observed' : 'non-integer' };
-}
 async function card(city, kind, target) {
+  const beforeRaw = await evaluate('window.cityManager.snapshot()');
   await paints();
   const current = await route(); assert.equal(current.kind, kind); assert.equal(current.id, String(target.id));
-  const dom = await evaluate(`(()=>{const h=document.querySelector('#entity-content');return{heroes:h.querySelectorAll('.bc-hero').length,icons:h.querySelectorAll('.bc-type-icon').length,label:h.querySelector('.bc-type-label')?.textContent.trim(),period:[...h.querySelectorAll('.bc-period')].map(e=>({fromTick:e.dataset.fromTick,toTick:e.dataset.toTick,inclusive:e.dataset.inclusive})),sections:[...h.querySelectorAll('.bc-section[data-card-section]')].map(e=>e.dataset.cardSection),stats:Object.fromEntries([...h.querySelectorAll('[data-card-metric]')].map(e=>[e.dataset.cardMetric,{value:e.dataset.value,status:e.dataset.status}])),contextKeys:[...h.querySelectorAll('[data-context-metric]')].map(e=>e.dataset.contextMetric)}})()`);
+  const dom = await evaluate(`(()=>{const h=document.querySelector('#entity-content'),stats=root=>Object.fromEntries([...root.querySelectorAll('[data-card-metric]')].map(e=>[e.dataset.cardMetric,{value:e.dataset.value,status:e.dataset.status}]));return{heroes:h.querySelectorAll('.bc-hero').length,icons:h.querySelectorAll('.bc-type-icon').length,label:h.querySelector('.bc-type-label')?.textContent.trim(),period:[...h.querySelectorAll('.bc-period')].map(e=>({fromTick:e.dataset.fromTick,toTick:e.dataset.toTick,inclusive:e.dataset.inclusive})),sections:[...h.querySelectorAll('.bc-section[data-card-section]')].map(e=>e.dataset.cardSection),stats:stats(h),trades:[...h.querySelectorAll('[data-card-section="trade"]')].map(e=>({commodity:e.dataset.commodity,stats:stats(e),keys:[...e.querySelectorAll('[data-card-metric]')].map(n=>n.dataset.cardMetric)})),contextKeys:[...h.querySelectorAll('[data-context-metric]')].map(e=>e.dataset.contextMetric)}})()`);
   assert.equal(dom.heroes, 1); assert.equal(dom.icons, 1); assert.ok(dom.label); assert.equal(dom.period.length, 1); assert.equal(new Set(dom.contextKeys).size, dom.contextKeys.length, 'Retained semantic metrics must appear exactly once');
-  const required = { house: ['occupancy', 'residents'], household: ['members', 'finance', 'employment', 'skills'], shop: ['stock', 'trade', 'finance'], market: ['stock', 'trade', 'owner'], factory: ['production', 'employment', 'finance'], farm: ['plot', 'harvest', 'stock'] }[kind];
+  const required = { house: ['occupancy', 'residents'], household: ['members', 'finance', 'employment', 'skills'], shop: ['stock', 'trade', 'finance'], market: ['stock', 'trade', 'finance'], factory: ['production', 'employment', 'finance'], farm: ['plot', 'harvest', 'stock'] }[kind];
   for (const section of required) assert.ok(dom.sections.includes(section), `${kind} semantic section ${section}`); signatures[kind] = dom.sections.join('|');
   let wallets;
   if (kind === 'house') {
@@ -105,15 +105,11 @@ async function card(city, kind, target) {
     await metrics({ cash: city.accounts[f.wallet], reserved, spendable: city.accounts[f.wallet] - reserved, stock: f.inventory, workers: firmWorkerCount(city, f.id), profit: f.lastMonthProfit });
     assert.equal(await evaluate('document.querySelector("#entity-content").dataset.wallet'), f.wallet);
     assert.equal(await evaluate('Number(document.querySelector("#entity-content [data-context-metric=workers]").dataset.capacity)'), firmCapacity(target));
-    if (!isRetail(f)) await metrics({ 'crop-stock': f.cropInventory, 'crop-cost': f.cropCost });
-    if (f.zone === 'F') await metrics({ fertility: city.resources.fertility[target.cell], 'harvest-today': city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'harvest' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0) });
+    await metrics({ 'crop-stock': f.cropInventory, 'crop-cost': f.cropCost });
+    if (f.zone === 'F') await metrics({ 'yield-per-worker': 24, 'harvest-today': city.cropLedger.filter(e => e.tick === city.tick && e.kind === 'harvest' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0) });
     if (f.zone === 'I') await metrics({ 'recipe-input': 2, 'recipe-output': 8 });
-    if (isMarket(f)) await metrics({ 'owner-household': f.owner.householdId, 'owner-capital-contributed': f.owner.capitalContributed, 'owner-withdrawn': f.owner.withdrawn, 'owner-tax': f.owner.taxPaid });
-    if (f.zone === 'C') for (const direction of ['buy', 'sell']) {
-      const trade = observedTrade(city, f.wallet, isMarket(f), direction), prefix = direction === 'buy' ? 'purchase' : 'sales', qty = `${isMarket(f) ? 'crops' : 'goods'}-${direction === 'buy' ? 'purchased' : 'sold'}`;
-      assert.equal(dom.stats[qty]?.value, String(trade.quantity), `${kind} actual ${qty}`); assert.equal(dom.stats[`${prefix}-cash`]?.value, String(trade.cash), `${kind} paired ${prefix} cash`);
-      assert.deepEqual(dom.stats[`${prefix}-price`], { value: String(trade.unit), status: trade.status }, `${kind} paired-journal unit price; missing/fractional values are not invented`);
-    }
+    if (f.owner) { assert.ok(dom.sections.includes('owner'), 'Owner-operated firm retains its owner section'); await metrics({ 'owner-household': f.owner.householdId, 'owner-capital-contributed': f.owner.capitalContributed, 'owner-withdrawn': f.owner.withdrawn, 'owner-tax': f.owner.taxPaid }); }
+    if (f.zone === 'C') assertCommercialCardTrades(city, f.wallet, kind, dom.trades);
     if (f.zone === 'I') assert.equal(dom.stats['goods-produced-today']?.value, String(city.goodsLedger.filter(e => e.tick === city.tick && e.from === 'production' && e.to === f.wallet).reduce((n, e) => n + e.quantity, 0)), 'Factory actual daily output, not recipe capacity');
     const scopeLeaks = await evaluate(`(()=>{const w=${JSON.stringify(f.wallet)};return [...document.querySelectorAll('#entity-content .cx-flow-card[data-kind],#entity-content .cx-crop-card[data-kind]')].filter(e=>e.dataset.from!==w&&e.dataset.to!==w).map(e=>e.dataset)})()`); assert.deepEqual(scopeLeaks, [], 'Firm activity contains only its actual wallet counterparties');
   }
@@ -123,6 +119,7 @@ async function card(city, kind, target) {
     for (const key of ['inflow', 'outflow', 'net']) assert.equal(dom.stats[`cash-${key}`], undefined, 'No household wallet total is presented as house value');
   } else for (const key of ['inflow', 'outflow', 'net']) assert.equal(dom.stats[`cash-${key}`]?.value, String(expected[key]), `${kind} actual period cash-${key}`);
   assert.deepEqual(await state(), city, 'Read-only card selection leaves exact simulation and journals untouched');
+  assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw, 'Card selection preserves exact snapshot bytes');
 }
 async function screenshot(name) { await evaluate('document.querySelector("#inspector-body").scrollTop=0'); await paints(); const capture = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(capture.data, 'base64')); screenshots.push(name); }
 async function viewport(metric) { await close(); await send('Emulation.setDeviceMetricsOverride', { ...metric, deviceScaleFactor: 1 }); await send('Emulation.setTouchEmulationEnabled', { enabled: metric.mobile, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&screen.width===${metric.screenWidth}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`); await paints(); }
@@ -140,22 +137,24 @@ async function cameraBlocked(b) { const before = await evaluate(`window.cityMana
 try {
   let tabs; for (let n = 0; n < 100; n++) { try { tabs = await (await fetch('http://127.0.0.1:9349/json/list')).json(); break; } catch { await sleep(100); } }
   assert.ok(tabs?.some(t => t.type === 'page')); ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); } if (m.method === 'Fetch.requestPaused') { if (/\/api\/city-advisor\/report|\/chat\/completions/.test(m.params.request.url)) providerRequests.push(m.params.request.url); void send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'Failed' }); } };
-  await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
+  ws.onmessage = event => { const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails); if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); } if (m.method === 'Page.javascriptDialogOpening') void server.dialog(m.params, send).catch(error => errors.push(error.message)); if (m.method === 'Network.requestWillBeSent') { const u=m.params.request.url; if(networkProbe?.active && u===networkProbe.url) networkProbe.requestId=m.params.requestId; else { if (isPanelProviderRequest(u)) providerRequests.push(u); if (/^https?:/.test(u) && new URL(u).origin!==new URL(url).origin) externalRequests.push(u); } } if (m.method === 'Network.loadingFailed' && m.params.requestId===networkProbe?.requestId) networkProbe.failed=m.params; };
+  await send('Runtime.enable'); await send('Page.enable'); await server.install(send); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/city-advisor/report*', requestStage: 'Request' }, { urlPattern: '*/chat/completions*', requestStage: 'Request' }, ...(blocked ? [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] : [])] });
-  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready'); if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause'); await load(fixture);
+  await installTrafficNetworkFence({send,evaluate,protocol:await(await fetch('http://127.0.0.1:9349/json/protocol')).json(),origin:new URL(url).origin,blockedModels:blocked,additionalBlocked:panelProviderDenials(new URL(url).origin),observeProbe:probe=>(networkProbe={url:probe})});
+  await load(fixture, legacyInput);
 
-  for (const [kind, b] of Object.entries(places)) { await place(fixture, b); await card(fixture, kind, b); await screenshot(`cards-${kind}.png`); }
+  for (const [role, b] of Object.entries(places)) { await place(fixture, b); await card(fixture, replayKinds[role], b); await screenshot(`cards-${role === 'shop' ? 'legacy-retailer-market' : role}.png`); }
+  await load(shopCity); await place(shopCity, shopBuilding); await card(shopCity, 'shop', shopBuilding); await screenshot('cards-shop.png');
   assert.equal(new Set(Object.values(signatures)).size, 5, 'Five building types have distinct content section layouts');
-  checks.push('Five native building selections have distinct semantic layouts, correct selected identities, exact stocks/cash/workforce and wallet-scoped activity from the real seeded day29 city');
+  checks.push('Genuine day29 legacy replay retains both commercial origins as market-tier cards; paid day90 growth adds the level4 shop. All five building cards retain distinct layouts, exact identities/stocks/cash/workforce and both independently reconciled commercial commodity sections');
+  await load(fixture);
 
   await household(fixture, family, sourceHome); await card(fixture, 'household', family); await screenshot('cards-household.png');
   await button('#submenu-back'); assert.equal((await route()).id, String(sourceHome.id)); await card(fixture, 'house', sourceHome);
   await household(fixture, family, places.market); await card(fixture, 'household', family); await key('Escape'); assert.equal((await route()).id, String(places.market.id)); await card(fixture, 'market', places.market);
   checks.push('Household card keeps its shared family identity and real members/skills; native Back returns to the source house and Esc returns to the source business without another family leaking into its data');
 
-  await load(later); for (const kind of ['shop', 'market', 'factory', 'farm']) { const b = later.buildings.find(b => b.id === places[kind].id); await place(later, b); await card(later, kind, b); }
+  await load(later); for (const kind of ['shop', 'market', 'factory', 'farm']) { const b = later.buildings.find(b => b.id === places[kind].id); await place(later, b); await card(later, replayKinds[kind], b); }
   const factoryFirm = later.firms.find(f => f.building === places.factory.id);
   const factoryBefore = { crops: structuredClone(factoryFirm.crops), products: structuredClone(factoryFirm.products) };
   const requestedRecipe = ['rice-mill', 'cannery', 'sugar-mill'].find(value => value !== factoryFirm.recipe);
@@ -201,16 +200,19 @@ try {
   await load(fixture);
   for (const metric of [{ width: 360, height: 780, screenWidth: 360, screenHeight: 780, mobile: true }, { width: 844, height: 390, screenWidth: 844, screenHeight: 390, mobile: true }, { width: 980, height: 1960, screenWidth: 390, screenHeight: 780, mobile: true }]) {
     await viewport(metric);
-    for (const [kind, b] of Object.entries(places)) { await place(fixture, b); await card(fixture, kind, b); await layout(kind); if (metric.width === 360 && kind === 'market') await screenshot('cards-phone-market.png'); }
+    for (const [role, b] of Object.entries(places)) { await place(fixture, b); await card(fixture, replayKinds[role], b); await layout(replayKinds[role]); if (metric.width === 360 && role === 'market') await screenshot('cards-phone-market.png'); }
     await household(fixture, family); await card(fixture, 'household', family); await layout('household'); if (metric.width === 360) await screenshot('cards-phone-household.png');
     await button('#submenu-back'); assert.equal((await route()).id, String(sourceHome.id)); await place(fixture, places.market); await cameraBlocked(places.market); await key('Escape'); assert.notEqual((await route()).open, 'true'); await place(fixture, sourceHome); await button('#close-inspector'); assert.notEqual((await route()).open, 'true'); assert.deepEqual(await state(), fixture);
+    await load(shopCity); await place(shopCity, shopBuilding); await card(shopCity, 'shop', shopBuilding); await layout('shop'); if (metric.width === 360) await screenshot('cards-phone-shop.png');
+    await load(fixture);
   }
   checks.push('All six cards pass360×780 portrait,844×390 landscape and980-layout/screen390 with normalized14px content, actual44px Back/close hits, at least two meaningful first-screen metrics, no overflow and no camera input under cards');
 
-  assert.deepEqual(providerRequests, [], 'Card QA never attempts advisor/provider requests'); assert.deepEqual(errors, []);
-  const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 41); assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
-  checks.push('All model loads pass normally or exactly eight intentional failures use procedural fallback; no unexpected runtime/console errors or advisor/provider requests occur');
+  await server.assertNoCityWrites(evaluate);
+  assert.deepEqual(providerRequests, [], 'Card QA never attempts advisor/provider requests'); assert.deepEqual(externalRequests, []); assert.deepEqual(httpFixture.errors, []); assert.deepEqual(errors, []);
+  modelAudit.assertComplete(); const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
+  checks.push('All model loads pass normally or exactly 41 intentional failures per entry use procedural fallback; no unexpected runtime/console errors or advisor/provider requests occur');
   const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, checks, errors, expectedModelErrors: expectedErrors.length, providerRequests, fixture: preview, signatures, layouts, screenshots, note: 'Installed headless Edge; physical-screen ratio and touch are emulated, not real Galaxy S22 QA. No simulation implementation, API configuration or provider requests.' };
   await writeFile(resolve(output, 'building-cards-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
 } catch (error) { if (ws?.readyState === 1) try { await screenshot('cards-failure.png'); console.error('Route:', await route()); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
-finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }
+finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); await httpFixture.close(); }

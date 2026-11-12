@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { farmYieldPerWorker } from '../src/farm-production.ts';
 import assert from 'node:assert/strict';
 import { access, automaticFarmCrop, createCity, deserialize, farmCrop, firmWorkerCount, isMarket, selectFarmCrop, serialize, step, summary, zoneCell } from '../src/sim.ts';
 import { CROPS } from '../src/goods.ts';
@@ -11,7 +12,7 @@ test('farm demand retains published accounting before any farm reaches a new tie
     const buyers = city.firms.some(f => f.zone === 'I' || isMarket(f)) ||
       city.households.some(h => h.home !== null && access(city, city.buildings.find(b => b.id === h.home)!.cell)) && city.cells.some((cell, i) => cell.zone === 'C' && access(city, i));
     const needed = city.households.reduce((n, h) => n + h.members, 0) + city.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(city, f.id) * 2, 0);
-    const oldCapacity = farms.reduce((n, f) => { const b = city.buildings.find(b => b.id === f.building)!; return n + Math.floor(24 * Math.max(50, city.resources.fertility[b.cell]) / 100); }, 0);
+    const oldCapacity = farms.reduce((n, f) => { const b = city.buildings.find(b => b.id === f.building)!; return n + farmYieldPerWorker(city, b.cell); }, 0);
     assert.equal(summary(city).demand.F, buyers && (!farms.length || needed > oldCapacity) ? 1 : 0);
     checked++; step(city);
   }
@@ -73,9 +74,11 @@ test('farm zone accepts low fertility and invalid selection changes nothing', ()
 
 test('legacy v9 and v10 retain their market identity and load without advancing time', () => {
   const city = createCity(61025, { starter: false });
-  delete city.education; const { foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farmLevelStart, ...base } = city;
+  delete city.education; delete city.goalRulesVersion; delete city.commercialUnifiedStartTick; delete city.commercialUnifiedBaseline;
+  const { farmSoilIndependentStartTick: _soil, foodDemandStartTick: _food, factoryProgressionStartTick: _factory, farmLevelStartTick: _farmLevelStart, ...base } = city;
   const legacy = { ...base, version: 9, rulesVersion: 'chain-4' };
-  assert.deepEqual(deserialize(JSON.stringify(legacy)), city);
+  const migrated = deserialize(JSON.stringify(legacy));
+  assert.deepEqual(migrated, { ...city, commercialUnifiedStartTick: city.tick, commercialUnifiedBaseline: { moneyEntries: city.ledger.length, cropEntries: city.cropLedger.length, goodsEntries: city.goodsLedger.length } });
   const market = { version: 10 as const, rulesVersion: 'chain-5' as const, cityId: 'x', guestId: null, operations: [], escrow: [], receipts: {}, seq: '0' };
   const loaded = deserialize(JSON.stringify({ ...legacy, version: 10, rulesVersion: 'chain-5', market }));
   assert.deepEqual(loaded.market, market);

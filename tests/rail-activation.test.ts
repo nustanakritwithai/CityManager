@@ -12,7 +12,55 @@ function fixture(){
  rail.addStation('a',315);rail.addStation('b',312);rail.addTrackPath(315,339);rail.addTrackPath(339,336);rail.addTrackPath(336,312);rail.configureGameService();
  return {city,runtime,rail};
 }
+function emptyLine(){
+ const city=createCity(1,{starter:false}),runtime=createParkRuntime(city);
+ const rail=RailNetworkRuntime.create(city,'empty-line',0);runtime.rail=rail;
+ rail.addStation('a',1);rail.addStation('b',5);rail.addTrackPath(1,5);rail.configureGameService();
+ return {city,runtime,rail};
+}
 const count=(rail:RailNetworkRuntime)=>{const s=rail.snapshot;return {offered:s.model!.offeredPersons,completed:s.model!.retiredPersons+s.service!.snapshot.batches.reduce((n,b)=>n+b.completed,0),live:s.service!.snapshot.batches.reduce((n,b)=>n+b.persons-b.completed,0),batches:s.service!.snapshot.batches.length};};
+
+test('an open line leaves on schedule without riders and resumes the same empty trip from a save',()=>{
+ const {city,runtime,rail}=emptyLine();
+ const advance=(minutes:number)=>advanceParkRuntime(city,runtime,minutes,()=>step(city));
+ const train=()=>rail.snapshot.service!.snapshot.train;
+ const parked=serializeParkSession(city,runtime),old=deserializeParkSession(parked);
+ assert.equal(serializeParkSession(old.city,old.runtime),parked);
+ advance(29);assert.equal(train().destination,null);
+ advance(1);assert.equal(train().destination,'b');assert.equal(train().lastDepartureMinute,30);
+ advance(120);assert.equal(train().remainingMinutes,360);
+ const moving=serializeParkSession(city,runtime),loaded=deserializeParkSession(moving);
+ assert.equal(serializeParkSession(loaded.city,loaded.runtime),moving);
+ const forged=JSON.parse(moving);delete forged.parkRuntime.rail.network.model;
+ assert.throws(()=>deserializeParkSession(JSON.stringify(forged)),/Moving train has no service demand/);
+ advance(360);assert.equal(train().station,'b');assert.equal(train().destination,null);
+ advance(30);assert.equal(train().destination,'a');
+ advanceParkRuntime(loaded.city,loaded.runtime,390,()=>step(loaded.city));
+ assert.equal(serializeParkSession(loaded.city,loaded.runtime),serializeParkSession(city,runtime));
+ assert.deepEqual(count(rail),{offered:0,completed:0,live:0,batches:0});
+});
+
+for(const stop of ['pause','stop intake'] as const)test(`${stop} lets a moving empty train dock and stops further scheduled departures`,()=>{
+ const {city,runtime,rail}=emptyLine();
+ const advance=(minutes:number)=>advanceParkRuntime(city,runtime,minutes,()=>step(city));
+ rail.setStationOpen('b',false);
+ advance(60);
+ assert.equal(rail.snapshot.service!.snapshot.train.destination,null);
+ rail.setStationOpen('b',true);
+ advance(1);
+ assert.equal(rail.snapshot.service!.snapshot.train.destination,'b');
+ if(stop==='pause')rail.setServiceEnabled(false);else rail.setModelAccepting(false);
+ const moving=serializeParkSession(city,runtime);
+ assert.doesNotThrow(()=>deserializeParkSession(moving));
+ assert.throws(()=>rail.removeService(),/Train must dock/);
+ assert.equal(serializeParkSession(city,runtime),moving);
+ advance(600);
+ assert.equal(rail.snapshot.service!.snapshot.train.station,'b');
+ assert.equal(rail.snapshot.service!.snapshot.train.destination,null);
+ assert.equal(rail.snapshot.service!.snapshot.train.lastDepartureMinute,61);
+ rail.removeService();
+ assert.equal(rail.snapshot.service,null);
+});
 test('enabled shuttle derives bounded modeled riders, moves, and retires completed queues without changing money or road input',()=>{
  const {city,rail}=fixture(),raw=serialize(city),traffic=captureTrafficGameInput(city),start=rail.snapshot.minute;
  let moving=false;for(let t=60;t<=1440*4;t+=60){rail.advanceTo(start+t);moving ||= rail.snapshot.service!.snapshot.train.destination!==null;const c=count(rail);assert.equal(c.offered,c.completed+c.live);assert.ok(c.batches<=32);}
@@ -22,7 +70,7 @@ test('enabled shuttle derives bounded modeled riders, moves, and retires complet
 });
 test('v25 server session retains moving modeled train, sequence and queues across load and identical continued game time',()=>{
  const a=fixture();advanceParkRuntime(a.city,a.runtime,200,()=>step(a.city));
- const raw=serializeParkSession(a.city,a.runtime);assert.equal(JSON.parse(raw).version,25);const b=deserializeParkSession(raw);assert.equal(serializeParkSession(b.city,b.runtime),raw);
+ const raw=serializeParkSession(a.city,a.runtime);assert.equal(JSON.parse(raw).version,28);const b=deserializeParkSession(raw);assert.equal(serializeParkSession(b.city,b.runtime),raw);
  for(const x of[a,b])advanceParkRuntime(x.city,x.runtime,1600,()=>step(x.city));
  assert.equal(serializeParkSession(a.city,a.runtime),serializeParkSession(b.city,b.runtime));
 });

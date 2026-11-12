@@ -3,18 +3,17 @@
  * up-front checks in buildRoad / zoneCell / bulldoze (sim.ts) without mutating City;
  * tests compare every preview against the real action on a cloned city.
  */
-import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, campusSiteReason, type City, type Zone } from './sim.ts';
-import { EDUCATION_COST } from './education.ts';
+import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, campusSiteReason, campusAt, demolitionQuote, type City, type Zone } from './sim.ts';
+import { EDUCATION_COST, educationPayroll } from './education.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
-import { MAX_PARKS, PARK } from './parks.ts';
-import { FERTILITY_THRESHOLD } from './agriculture.ts';
+import { MAX_PARKS, PARK, parkPayroll } from './parks.ts';
 import { taxiEnabled } from './taxi/buildings.ts';
 import { sharedTaxiSession, taxiPlayTraffic } from './taxi/session.ts';
 
 export type PreviewCell = { cell: number; ok: boolean };
 export type Preview = { ok: boolean; cells: PreviewCell[]; cost: number; label: string };
 const ZONE_NAMES: Record<Exclude<Zone, null>, string> = { R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' };
-const DEMOLITION_COST = 2_000;
+
 const credits = (satang: number) => (satang / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
 const inMap = (cell:number,city:City) => Number.isInteger(cell) && cell >= 0 && cell < city.cells.length;
 
@@ -39,11 +38,11 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     return { ok, cost, label: start === null && added.length ? `${label} · แตะจุดจบ` : label, cells: path.map(cell => ({ cell, ok: ok && !blocked.has(cell) })) };
   }
   if (tool === 'R' || tool === 'C' || tool === 'I' || tool === 'F') {
-    const cell = city.cells[hover], fertility = city.resources.fertility[hover];
+    const cell = city.cells[hover];
     const reason = taxiHere ? 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อน' : parkAt(city, hover) || plantAt(city, hover) ? 'มีสวนหรือโรงน้ำไฟอยู่ ต้องรื้อก่อน' : cell.road ? 'ถนนวางโซนไม่ได้'
       : cell.building !== null && cell.zone !== tool ? 'มีอาคารอื่นอยู่ ต้องรื้อก่อน'
       : null;
-    const label = reason ?? (cell.zone === tool ? `เป็นโซน${ZONE_NAMES[tool]}อยู่แล้ว` : `วางโซน${ZONE_NAMES[tool]} · ไม่เสียเงิน${tool === 'F' ? ` · ดิน ${fertility}%` : ''}`);
+    const label = reason ?? (cell.zone === tool ? `เป็นโซน${ZONE_NAMES[tool]}อยู่แล้ว` : `วางโซน${ZONE_NAMES[tool]} · ไม่เสียเงิน${tool === 'F' ? ` · วางได้ทุกสี · ดินไม่มีผลต่อผลผลิต` : ''}`);
     return { ok: !reason, cost: 0, label, cells: [{ cell: hover, ok: !reason }] };
   }
   if (tool === 'power' || tool === 'water') {
@@ -70,9 +69,14 @@ export function previewPlacement(city: City, tool: string, start: number | null,
   }
   if (tool === 'bulldoze') {
     if (taxiHere) return { ok: true, cost: 0, label: 'รื้ออู่แท็กซี่ · ไม่เสียเงิน', cells: [{ cell: hover, ok: true }] };
-    const cell = city.cells[hover], target = cell.building !== null || cell.road || plantAt(city, hover) !== undefined || parkAt(city, hover) !== undefined, cost = target ? DEMOLITION_COST : 0;
-    const reason = hover === GATEWAY ? 'ประตูเมืองรื้อไม่ได้' : cost > treasury ? 'เงินคลังไม่พอค่ารื้อ' : null;
-    const label = reason ?? (parkAt(city, hover) ? `รื้อสวนสาธารณะ · ${credits(cost)} ฿` : cell.building !== null ? `รื้ออาคาร · ${credits(cost)} ฿` : cell.road ? `รื้อถนน · ${credits(cost)} ฿` : plantAt(city, hover) ? `รื้อ${PLANT_LABELS[plantAt(city, hover)!.kind]} · ${credits(cost)} ฿` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
+    const cell = city.cells[hover], quote = demolitionQuote(city, hover), cost = quote.fee;
+    const target = cell.building !== null || cell.road || plantAt(city, hover) || parkAt(city, hover) || campusAt(city, hover);
+    const source = cell.road ? 'roadworks' : 'construction';
+    const campus = campusAt(city, hover);
+    const unpaidCampus = campus && Object.values(campus.workDays).some(days => days > 0) && (city.accounts.treasury ?? 0) < educationPayroll(city.education) + city.parks.reduce((sum, p) => sum + parkPayroll(p), 0);
+    const reason = hover === GATEWAY ? 'ประตูเมืองรื้อไม่ได้' : unpaidCampus ? 'เงินคลังไม่พอสะสางค่าจ้างสถานศึกษา' : cost > treasury ? 'เงินคลังไม่พอค่ารื้อ'
+      : (city.accounts[source] ?? 0) < quote.refund ? 'บัญชีคืนเงินไม่พอ รื้อไม่ได้' : null;
+    const label = reason ?? (target ? `รื้อถอน · คืน ${credits(quote.refund)} ฿ (80% ของส่วนที่เมืองจ่าย) · ค่ารื้อ ${credits(cost)} ฿${quote.unknown ? ' · ประวัติเดิมไม่ครบ คืนเฉพาะที่มีหลักฐาน' : ''}` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');
     return { ok: !reason, cost, label, cells: [{ cell: hover, ok: !reason }] };
   }
   return null;

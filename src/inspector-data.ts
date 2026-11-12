@@ -73,7 +73,9 @@ const reasonLabels: Record<string, string> = {
   'Monthly household rent': 'ค่าเช่าของครัวเรือนประจำเดือน',
   'Outside residential height investment': 'เงินลงทุนเพิ่มชั้นบ้านจากภายนอก',
   'Profitable firm height investment': 'เงินลงทุนเพิ่มชั้นอาคารบริษัท',
+  'Taxi fares': 'ค่าโดยสารแท็กซี่ (รายการเดิม)',
   'Daily road upkeep': 'ค่าบำรุงถนนประจำวัน',
+  'Monthly municipal services': 'ค่าบริการพื้นฐานเมืองรายเดือน',
   'Daily worker production': 'สินค้าที่คนงานผลิต',
   'Wholesale stock delivery': 'ส่งสินค้าขายส่งเข้าร้าน',
   'Imported shop stock': 'สินค้านำเข้าเพื่อเติมร้าน',
@@ -107,10 +109,16 @@ export function reasonLabel(reason: string): string {
   if (parkWage) return `ค่าจ้างเจ้าหน้าที่สวน #${parkWage[1]} ตามวันทำงานจริง`;
   const parkUpkeep = /^Monthly park upkeep #(\d+)$/.exec(reason);
   if (parkUpkeep) return `ค่าบำรุงสวนสาธารณะ #${parkUpkeep[1]} รายเดือน`;
+  const upgrade = /^Upgrade (power plant|water pump) #(\d+) to level ([23])$/.exec(reason);
+  if (upgrade) return `อัปเกรด${upgrade[1] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${upgrade[2]} เป็นระดับ ${upgrade[3]}`;
   const plant = /^(Build|Demolish) (power plant|water pump) #(\d+)$/.exec(reason);
   if (plant) return `${plant[1] === 'Build' ? 'สร้าง' : 'รื้อ'}${plant[2] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${plant[3]}`;
   const upkeep = /^Monthly (power plant|water pump) upkeep #(\d+)$/.exec(reason);
   if (upkeep) return `ค่าบำรุง${upkeep[1] === 'power plant' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${upkeep[2]} รายเดือน`;
+  const refund = /^Demolition refund (park|power plant|water pump|school|university|road cell) [#@](\d+)$/.exec(reason);
+  if (refund) return `เงินคืน 80% จากการรื้อ${({park:'สวนสาธารณะ','power plant':'โรงไฟฟ้า','water pump':'โรงสูบน้ำ',school:'โรงเรียน',university:'มหาวิทยาลัย','road cell':'ถนนช่อง'} as Record<string,string>)[refund[1]]} #${refund[2]} (เฉพาะส่วนที่เมืองจ่าย)`;
+  const roadCell = /^Build road cell @(\d+)$/.exec(reason);
+  if (roadCell) return `สร้างถนนช่อง ${roadCell[1]}`;
   const road = /^Build (\d+) road cells$/.exec(reason);
   if (road) return `สร้างถนน ${road[1]} ช่อง`;
   const purchase = /^Household #(\d+) purchase$/.exec(reason);

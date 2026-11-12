@@ -1,3 +1,4 @@
+import { BUS_LIVE_TIMING } from './types.ts';
 import { formatCellCoordinate } from '../expanded-map-geometry.ts';
 /**
  * Player-facing bus actions (PR B6). Placement, line drafts and the panel read model.
@@ -8,7 +9,7 @@ import { formatCellCoordinate } from '../expanded-map-geometry.ts';
 import { SIZE, type City, type Result } from '../sim.ts';
 import { busDepotAt, busStopAt } from './buildings.ts';
 import { busLevelDisplayLines, busLevelQuote, nextBusLevel, upgradeBusLine } from './level.ts';
-import { BusRouteCache, busDepotLoad, busLineRoutes, createBusLine, deleteBusLine, editBusLine, type BusHost, type BusLineRoute, type BusLineSpec, type BusResult, type BusSuspendReason } from './lines.ts';
+import { BusRouteCache, busDepotLoad, busLineRoutes, createBusLine, deleteBusLine, editBusLine, formatBusHeadway, type BusHost, type BusLineRoute, type BusLineSpec, type BusResult, type BusSuspendReason } from './lines.ts';
 import { buildBusDepot, buildBusStop, busDepotReason, busStopSiteReason, defaultBusStopSide, removeBusDepot, removeBusStop } from './placement.ts';
 import { BUS_DEPOT_BUSES, busEnabled, type BusLevel, type BusLine, type BusStopSide } from './types.ts';
 import { getBusLiveSource, lastBusBoardNotes, type BusLiveRead } from './live.ts';
@@ -201,7 +202,7 @@ export type BusPanelModel = {
   waiting: number | null; boardNote: string | null;
 };
 
-const headwayLabel = (minutes: number | null) => minutes === null || !Number.isFinite(minutes) ? 'หัวคิว —' : `หัวคิว ${Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1)} นาที`;
+const headwayLabel = (minutes: number | null) => minutes === null || !Number.isFinite(minutes) ? 'หัวคิว —' : `หัวคิว ${formatBusHeadway(minutes)}`;
 function displayOf(line: Pick<BusLine, 'busLevel' | 'busCount'>): readonly string[] {
   try { return busLevelDisplayLines(line); } catch { return ['ระดับรถไม่ถูกต้อง']; }
 }
@@ -230,7 +231,7 @@ function liveOf(read: BusLiveRead, lineId: number): BusLiveCard {
   };
 }
 
-export function busPanelModel(host: BusHost, enabled = busEnabled(), read: BusLiveRead | null = enabled ? getBusLiveSource() : null, notes = enabled ? lastBusBoardNotes() : [], routes: readonly BusLineRoute[] = enabled ? busLineRoutes(host) : []): BusPanelModel {
+export function busPanelModel(host: BusHost, enabled = busEnabled(), read: BusLiveRead | null = enabled ? getBusLiveSource() : null, notes = enabled ? lastBusBoardNotes() : [], routes: readonly BusLineRoute[] = enabled ? busLineRoutes(host, BUS_LIVE_TIMING) : []): BusPanelModel {
   if (!enabled) return { enabled: false, depots: [], stops: [], lines: [], totals: null, waiting: null, boardNote: null };
   const routeById = new Map<number, BusLineRoute>(routes.map(route => [route.lineId, route]));
   const load = busDepotLoad(host);
@@ -273,5 +274,5 @@ export function busPanelModel(host: BusHost, enabled = busEnabled(), read: BusLi
 /** Same model, but routes come from the caller's cache so a refresh does not rebuild the graph twice. */
 export function cachedPanelModel(host: BusHost, cache: BusRouteCache, enabled = busEnabled(), read: BusLiveRead | null = enabled ? getBusLiveSource() : null, notes = enabled ? lastBusBoardNotes() : []): BusPanelModel {
   if (!enabled) return busPanelModel(host, false);
-  return busPanelModel(host, true, read, notes, cache.get(host));
+  return busPanelModel(host, true, read, notes, cache.get(host, BUS_LIVE_TIMING));
 }

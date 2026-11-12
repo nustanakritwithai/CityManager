@@ -1,3 +1,5 @@
+import { happinessTargets, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
+import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { onExplicitActivation } from './explicit-activation.ts';
 import { housingLevel } from './housing.ts';
@@ -10,10 +12,10 @@ import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
 import { peopleOf } from './education.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, commercialGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureForecast, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, commercialGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
-import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity, harvestYield } from './agriculture.ts';
+import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity } from './agriculture.ts';
 import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
@@ -37,6 +39,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const heldPointers = new Map<number, HTMLElement>(), heldKeys = new Map<string, HTMLElement>();
 const cash = (value: number, signed = false) => `${formatMoney(value, signed)} ฿`;
 const count = (value: number) => value.toLocaleString('th-TH');
+const happinessPoints = new Intl.NumberFormat('th-TH', { signDisplay: 'exceptZero' });
 
 /** UI-only feedback survives a native click's deferred same-context refresh. */
 export function showOwnerFinanceResult(firmId: number, message: string): void {
@@ -317,8 +320,8 @@ export function renderAgriculture(city: City, building: Building, firm: Firm, wo
   body.classList.add('cx-agriculture'); body.dataset.firmId = String(firm.id);
   const cards = [capacityMetric('crop-stock', 'พืชผลคงคลัง / เก็บได้', firm.cropInventory, cap, 'ล็อต'), metric('crop-cost', 'มูลค่าพืชผลตามบัญชี', cash(firm.cropCost), firm.cropCost, true), metric('production-tick', 'วันประมวลผลล่าสุด', String(firm.productionTick), firm.productionTick)];
   if (firm.zone === 'F') {
-    const fertility = city.resources.fertility[building.cell], actualHarvest = city.cropLedger.filter(entry => entry.tick === city.tick && entry.kind === 'harvest' && entry.to === firm.wallet).reduce((sum, entry) => sum + entry.quantity, 0);
-    cards.push(metric('fertility', 'ความอุดมสมบูรณ์', `${fertility}%`, fertility), metric('yield-per-worker', 'กำลังเก็บเกี่ยว / แรงงาน', `${harvestYield(Math.max(50, fertility), 1)} ล็อต/วัน`, harvestYield(Math.max(50, fertility), 1)), metric('harvest-today', 'เก็บเกี่ยวจริงวันนี้', `${actualHarvest} ล็อต`, actualHarvest));
+    const actualHarvest = city.cropLedger.filter(entry => entry.tick === city.tick && entry.kind === 'harvest' && entry.to === firm.wallet).reduce((sum, entry) => sum + entry.quantity, 0);
+    cards.push(metric('yield-per-worker', 'กำลังเก็บเกี่ยว / แรงงาน', `${farmYieldPerWorker(city, building.cell)} ล็อต/วัน`, farmYieldPerWorker(city, building.cell)), metric('harvest-today', 'เก็บเกี่ยวจริงวันนี้', `${actualHarvest} ล็อต`, actualHarvest));
   } else if (firm.zone === 'I') cards.push(metric('recipe-input', 'พืชผล / ชุด', `${CROP_RECIPE.crop} ล็อต`, CROP_RECIPE.crop), metric('recipe-output', 'สำเร็จรูป / ชุด', `${CROP_RECIPE.goods} หน่วย`, CROP_RECIPE.goods), metric('available-batches', 'ชุดที่แรงงานและสต็อกรองรับ', String(Math.min(workers, Math.floor((firm.recipe ? firm.crops[RECIPE[firm.recipe].crop] : 0) / CROP_RECIPE.crop))), Math.min(workers, Math.floor((firm.recipe ? firm.crops[RECIPE[firm.recipe].crop] : 0) / CROP_RECIPE.crop))));
   else cards.push(metric('crop-buy-price', 'ซื้อจากฟาร์ม / ล็อต', cash(CROP_PRICES.farmToTrader), CROP_PRICES.farmToTrader, true), metric('crop-factory-price', 'ขายให้โรงงาน / ล็อต', cash(CROP_PRICES.traderToFactory), CROP_PRICES.traderToFactory, true), metric('crop-household-price', 'ตะกร้าครัวเรือน / ล็อต', cash(CROP_PRICES.householdCrop), CROP_PRICES.householdCrop, true), metric('rent', 'ค่าเช่าพาณิชย์ / เดือน', cash(firmRent(firm)), firmRent(firm), true));
   body.append(metrics(cards), el('p', 'cx-detail-note', firm.zone === 'F' ? 'พืชผลเก็บเกี่ยวตั้งมูลค่าคงคลังเริ่มต้นเป็นศูนย์ ค่าจ้างและค่าเช่ายังเป็นค่าใช้จ่ายงวด ไม่ได้เป็นผลตอบแทนรับประกัน' : firm.zone === 'I' ? `แต่ละวันใช้ ${CROP_RECIPE.crop} ล็อตจริงต่อ ${CROP_RECIPE.goods} หน่วยสำเร็จรูป ขาดวัตถุดิบผลิตไม่ได้ และไม่ประมวลผลซ้ำวันเดิม` : 'กิจการพาณิชย์ไม่ผลิตหรือแปรรูป ซื้อพืชผลเข้าสต็อกก่อน ขายล็อตที่มีตั้งแต่ต้นวันเท่านั้น สต็อกที่โรงงานและครัวเรือนซื้อเป็นกองเดียวกัน'));
@@ -389,15 +392,39 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     metric('food-today', 'อาหารที่ซื้อวันนี้', `${food.purchased} / ${food.required} หน่วย`, food.purchased), metric('food-missing', 'อาหารที่ยังขาดวันนี้', `${food.missing} หน่วย`, food.missing),
     metric('needs', 'วันต่อเนื่องที่อาหารไม่ครบ', `${household.needs} วัน`, household.needs), metric('last-purchase', 'ซื้อครั้งล่าสุด', purchaseText(city, household), household.lastPurchaseTick)
   ]));
+  const happiness = city.happiness?.rows.find(row => row.householdId === household.id);
+  if (happiness) {
+    const facts = happinessTargets(city).get(household.id)!;
+    const detail = section('ความสุขในพื้นที่', `${happiness.score} / 100`); detail.classList.add('bc-happiness-source');
+    detail.append(el('p', 'happiness-summary', `เป้าหมายปัจจุบัน ${facts.target} / 100 · ต่ำกว่า 30 มาแล้ว ${happiness.distressDays} / ${HAPPINESS_DEPARTURE_DAYS} วัน · คะแนนลดวันละไม่เกิน 1 และฟื้นวันละไม่เกิน 2`));
+    detail.append(el('p', 'happiness-summary', `สวนใกล้บ้าน: ${facts.parkNearby ? 'มี' : 'ไม่มี'} · โรงเรียนที่เปิดใกล้บ้าน: ${facts.schoolNearby ? 'มี' : 'ไม่มี'} (ระยะแมนฮัตตันไม่เกิน 6 ช่องสำหรับสวน และ 8 ช่องสำหรับโรงเรียนที่มีที่เรียนเปิดจริง ไม่ใช่การนับครั้งที่เข้าใช้)`));
+    detail.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน: ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · สมมติแรงงานที่มีงาน 75% ใช้รถหนึ่งคันต่อคนในชั่วโมงเร่งด่วน ยังไม่หักรถโดยสารหรือรถไฟ ไม่ใช่ประวัติการเดินทางล้มเหลวจริง` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
+    detail.append(el('p', 'cx-detail-note', 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
+    detail.append(el('p', 'happiness-summary', `ผลต่อเป้าหมายจากภาษีค่าจ้าง ${happinessPoints.format(facts.wageTaxPoints)} คะแนน · ภาษีกำไรกิจการ ${happinessPoints.format(facts.profitTaxPoints)} คะแนน`));
+    detail.append(el('p', 'cx-detail-note', household.origin === 'legacy-v1' ? 'ครัวเรือนจากเมืองรุ่นเดิมได้รับการคุ้มครองจากการย้ายออก' : city.firms.some(f => f.owner?.householdId === household.id) ? 'เจ้าของกิจการได้รับการคุ้มครองจากการย้ายออก' : 'ถ้าคะแนนต่ำกว่า 30 ต่อเนื่องครบ 30 วัน อาจย้ายออกเมื่อสิ้นเดือน โดยมีเพดานจำนวนย้ายออกและจำนวนครัวเรือนขั้นต่ำ'));
+    output.push(detail);
+  } else { const detail=section('ความสุขในพื้นที่'); detail.classList.add('bc-happiness-source'); detail.append(el('p', 'happiness-summary', 'ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง')); output.push(detail); }
   if (city.education) { const person = peopleOf(city.education, household.id); const studying = person.school + person.university; const reserved = studying + person.teacher + person.professor; output.push(el('p', 'cx-detail-note', `ผู้เรียน ${studying} คน · วุฒิพื้นฐาน ${person.basic} · วุฒิขั้นสูง ${person.higher} · แรงงานที่ถูกกันไว้เรียนหรือสอน ${reserved} คน · เป็นจำนวนรวม ไม่มีรายชื่อรายบุคคล และไม่นับผู้พึ่งพิงเป็นนักเรียน`)); }
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
-  const leaves = departureDay(city, household.id);
-  if (leaves !== null) { const row = el('div', 'cx-status cx-departure-status'); row.dataset.departureDay = String(leaves); row.append(chip(`ไม่มีงาน · ย้ายออกในอีก ${leaves - city.tick} วัน`, false)); output.push(row); }
+  const departure = departureForecast(city, household.id);
+  if (departure) {
+    const row = el('div', 'cx-status cx-departure-status');
+    row.dataset.departureDay = String(departure.day);
+    const reason = departure.reason === 'happiness' ? 'ความสุขต่ำ' : 'ไม่มีงาน';
+    row.append(chip(`${reason} · อาจย้ายออกเร็วสุดอีก ${departure.day - city.tick} วัน`, false));
+    output.push(row);
+  }
   const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
   jobs.classList.add('bc-employment-source');
   rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow), ...labor.parkAllocations.map(a => { const row = el('div', 'cx-employment-row', `สวนสาธารณะ #${a.parkId} · ดูแลสวน ${a.workers} คน · ค่าจ้าง ${PARK_STAFF.monthlyWage / 100}/คน/เดือน`); Object.assign(row.dataset, { parkId: String(a.parkId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }));
   if (!employed) rows.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง หรือทำกิจการของตนเอง'));
-  if (leaves !== null) { const note = el('p', 'cx-detail-note cx-departure', `ถ้ายังไม่มีงานที่ได้ค่าจ้าง ครัวเรือนนี้จะย้ายออกพร้อมเงินออมตอนชำระสิ้นเดือนวันที่ ${leaves} (อีก ${leaves - city.tick} วัน)`); note.dataset.departureDay = String(leaves); rows.append(note); }
+  if (departure) {
+    const condition = departure.reason === 'happiness'
+      ? `ถ้าความสุขยังต่ำกว่า ${HAPPINESS_DISTRESS} ต่อเนื่อง` : 'ถ้ายังไม่มีงานที่ได้ค่าจ้าง';
+    const note = el('p', 'cx-detail-note cx-departure', `${condition} ครัวเรือนนี้อาจย้ายออกพร้อมเงินออมเร็วสุดเมื่อชำระสิ้นเดือนวันที่ ${departure.day} (อีก ${departure.day - city.tick} วัน) ตามเพดานการย้ายออกของเมือง`);
+    note.dataset.departureDay = String(departure.day);
+    rows.append(note);
+  }
   jobs.append(rows); output.push(jobs, renderWorkerSkills(city, household));
   const consumed = householdConsumption(city, household.id), basket = el('p', 'cx-detail-note cx-last-commodity', consumed ? `บัญชีบริโภคล่าสุด: ${consumed.commodity === 'crops' ? 'พืชผล' : 'สินค้าสำเร็จรูป'} ${consumed.quantity} ${consumed.commodity === 'crops' ? 'ล็อต' : 'หน่วย'} · วัน ${consumed.tick}` : 'ยังไม่มีรายการบริโภคในบัญชีของครัวเรือนนี้');
   if (consumed) Object.assign(basket.dataset, { commodity: consumed.commodity, tick: String(consumed.tick), quantity: String(consumed.quantity) }); output.push(basket);
@@ -414,7 +441,7 @@ type CardKind = CardData['kind'];
 type CardParts = {
   values: Map<string, HTMLElement>; statuses: HTMLElement[]; assumptions: HTMLElement[];
   journals: HTMLElement[]; notes: HTMLElement[]; progression: HTMLElement[]; residents: HTMLElement | null;
-  employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null; funding: HTMLElement | null;
+  employment: HTMLElement | null; skills: HTMLElement | null; owner: HTMLElement | null; funding: HTMLElement | null; happiness: HTMLElement | null;
 };
 function cardIcon(kind: CardKind): SVGElement {
   const paths: Record<CardKind, string> = {
@@ -452,7 +479,7 @@ function cardHero(data: CardData, city: City): HTMLElement {
 }
 /** Move existing metric nodes, retaining each raw key once and every live handler. */
 function cardParts(nodes: HTMLElement[]): CardParts {
-  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], progression: [], residents: null, employment: null, skills: null, owner: null, funding: null };
+  const parts: CardParts = { values: new Map(), statuses: [], assumptions: [], journals: [], notes: [], progression: [], residents: null, employment: null, skills: null, owner: null, funding: null, happiness: null };
   for (const node of nodes) {
     const cards = [...(node.matches('[data-context-metric]') ? [node] : []), ...node.querySelectorAll<HTMLElement>('[data-context-metric]')];
     for (const card of cards) { parts.values.set(card.dataset.contextMetric!, card); card.remove(); }
@@ -464,6 +491,7 @@ function cardParts(nodes: HTMLElement[]): CardParts {
     else if (node.dataset.buildingProgression) parts.progression.push(node);
     else if (node.classList.contains('bc-residents-source')) parts.residents = node;
     else if (node.classList.contains('bc-employment-source')) parts.employment = node;
+    else if (node.classList.contains('bc-happiness-source')) parts.happiness = node;
     else if (node.classList.contains('bc-skills-source')) parts.skills = node;
     else if (node.classList.contains('bc-owner-source')) parts.owner = node;
     else if (node.classList.contains('cx-industry-funding')) parts.funding = node;
@@ -644,6 +672,7 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
     output.push(cardGroup('พักอยู่จริง / ความจุ', 'occupancy', takeCards(parts, ['households', 'persons', 'vacant-households', 'vacant-persons']), 'bc-occupancy'));
     if (parts.residents) output.push(cardSection(parts.residents, 'residents'));
   } else if (data.kind === 'household') {
+    if (parts.happiness) output.push(cardSection(parts.happiness, 'happiness'));
     output.push(cardGroup('สมาชิกและกำลังแรงงาน', 'members', takeCards(parts, ['members', 'workforce', 'dependents', 'employed', 'unemployed'])), cardCash(data, parts));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); if (parts.skills) output.push(cardSection(parts.skills, 'skills'));
   } else if (data.kind === 'shop' || data.kind === 'market') {
@@ -696,8 +725,8 @@ function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLEle
       picker.append(el('p', 'cx-detail-note', `กำลังปลูก${CROP_LABELS[farmCrop(city, firm)]} · ${farmCropMode(firm) === 'auto' ? 'เลือกอัตโนมัติเมื่อฟาร์มเริ่มหรือเมื่อกดอัตโนมัติ' : 'ผู้เล่นเลือกเอง'}`), controls, el('p', 'cx-detail-note', `คงคลัง: ${CROPS.map(crop => `${CROP_LABELS[crop]} ${firm.crops[crop]}`).join(' · ')} ล็อต · พืชเดิมยังอยู่เมื่อเปลี่ยน`));
       output.push(cardSection(picker, 'crop-choice'));
     }
-    output.push(cardGroup('พื้นที่เพาะปลูก', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง'), ...takeCards(parts, ['fertility'])], 'bc-plot'));
-    output.push(cardGroup('การเก็บเกี่ยววันนี้', 'harvest', takeCards(parts, ['harvest-today', 'yield-per-worker', 'workers']), 'bc-yield'));
+    output.push(cardGroup('พื้นที่และกำลังผลิต', 'plot', [cardStat('plot-cells', 'พื้นที่อาคารบนกริด', 1, 'ช่อง'), ...takeCards(parts, ['yield-per-worker'])], 'bc-plot'));
+    output.push(cardGroup('การเก็บเกี่ยววันนี้', 'harvest', takeCards(parts, ['harvest-today', 'workers']), 'bc-yield'));
     output.push(cardGroup('พืชผลที่เก็บไว้', 'stock', takeCards(parts, ['crop-stock', 'crop-cost'])));
     const jobs = cardEmployment(parts); if (jobs) output.push(jobs); output.push(cardCash(data, parts));
   }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
-import { createCity, isMarket, step } from '../src/sim.ts';
+import { createCity, isCommercial, step } from '../src/sim.ts';
 
 // Node's test runner does not load CSS; the application bundler still does.
 registerHooks({ load(url, context, nextLoad) { return url.endsWith('.css') ? { format: 'module', source: '', shortCircuit: true } : nextLoad(url, context); } });
@@ -20,12 +20,12 @@ class FakeElement {
 }
 const findMetric = (node: FakeElement): FakeElement | undefined => node.dataset.contextMetric === 'crop-stock' ? node : node.children.map(findMetric).find(Boolean);
 
-test('farm inspector renders stock against each real level capacity without changing market or factory caps', () => {
+test('farm inspector renders stock against each real level capacity without changing shop or factory caps', () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => new FakeElement() } });
   try {
     const city = createCity(61025); for (let day = 0; day < 60; day++) step(city);
-    const farm = city.firms.find(f => f.zone === 'F')!, factory = city.firms.find(f => f.zone === 'I')!, market = city.firms.find(isMarket)!;
+    const farm = city.firms.find(f => f.zone === 'F')!, factory = city.firms.find(f => f.zone === 'I')!, market = city.firms.find(isCommercial)!;
     assert.ok(farm && factory && market);
     const farmBuilding = city.buildings.find(b => b.id === farm.building)!;
     for (const [level, capacity] of [[1, 96], [2, 96], [3, 96], [4, 120], [5, 144], [6, 168]]) {

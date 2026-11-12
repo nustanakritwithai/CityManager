@@ -10,12 +10,12 @@
  * would see an empty queue and those events would never reach the UI.
  *
  * This function does not construct an engine and does not call `advanceTo`. PR 5 owns the engine
- * on `trafficLayer.bus` and ticks it. `trafficLayer.bus` is null/undefined unless both the traffic
- * model and `?bus=1` are on — then this draws nothing, does not touch the city, and does not drain.
+ * on `trafficLayer.bus` and ticks it. When that engine is unavailable, saved static infrastructure
+ * still draws; no vehicle, passenger event, or waiting count is fabricated.
  */
 import type { BusHost } from './lines.ts';
 import type { BusEvent, BusSnapshot } from './types.ts';
-import { EMPTY_BUS_DRAW, busDrawList, type BusDrawList } from './draw-list.ts';
+import { EMPTY_BUS_DRAW, busDrawList, busInfrastructureDrawList, type BusDrawList } from './draw-list.ts';
 
 export type BusEventListener = (events: readonly BusEvent[]) => void;
 export type BusViewEngine = {
@@ -24,7 +24,7 @@ export type BusViewEngine = {
   busesDetail(): readonly { id: string; returning: boolean }[];
   waitingAt(stopId: number): number;
 };
-/** `bus` missing, null, or undefined → nothing to draw. Matches `trafficLayer` / `trafficLayer.bus`. */
+/** `bus` missing, null, or undefined means there is no live engine. */
 export type BusLayerLike = { bus?: { engine?: BusViewEngine | null } | null } | null | undefined;
 
 export class BusEventFanout {
@@ -56,12 +56,15 @@ export function busEngineFrom(source: BusLayerLike): BusViewEngine | null {
 }
 
 /**
- * Snapshot + the single `drainEvents` for this frame. `source.bus` null/undefined → empty draw,
- * no drain, subscribers are not called. Does not advance the engine.
+ * Snapshot + the single `drainEvents` for this frame. Without an engine, render saved static
+ * infrastructure with no live vehicles or waiters; do not drain or notify. Never advance the engine.
  */
 export function presentBuses(source: BusLayerLike, city: BusHost, fanout: BusEventFanout = shared): BusFrame {
   const engine = busEngineFrom(source);
-  if (!engine) return { drew: false, events: [], draw: EMPTY_BUS_DRAW };
+  if (!engine) {
+    if (!city?.bus) return { drew: false, events: [], draw: EMPTY_BUS_DRAW };
+    return { drew: true, events: [], draw: busInfrastructureDrawList(city) };
+  }
   const snapshots = engine.snapshot();
   const detail = engine.busesDetail();
   const events = engine.drainEvents();

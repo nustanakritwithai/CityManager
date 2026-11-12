@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {trafficGameCase} from './traffic-game-cases.mjs';
-test('disjoint CI partitions preserve every former full/core/extended assertion and paired comparison',()=>{
+test('available case plans preserve former full/core/extended assertions and paired comparison',()=>{
  for(const blocked of [false,true]){
   const full=trafficGameCase('full',blocked),extended=trafficGameCase('extended',blocked),names=blocked?['lifecycle','economy','bypass','dense']:['lifecycle','economy','bypass','dense','peak'];
   const parts=names.map(n=>trafficGameCase(n,blocked));assert.equal(full.expectedChecks,blocked?8:9);assert.equal(extended.expectedChecks,blocked?2:3);
@@ -7,7 +7,7 @@ test('disjoint CI partitions preserve every former full/core/extended assertion 
   assert.equal(new Set(parts.map(p=>p.output)).size,parts.length);
   for(const flag of ['lifecycle','economy','bypass','dense','peak'])assert.equal(parts.filter(p=>p[flag]).length,full[flag]?1:0,`${flag} covered exactly once`);
   assert.equal(parts.filter(p=>p.economy).length,1,'ON/OFF economy replay and paused road accounting remain together');
-  assert.equal(parts.filter(p=>p.dense).length,1,'OFF/ON dense pair remains together');assert.equal(parts.filter(p=>p.peak).length,blocked?0:1,'All three normal peak pairs remain together');
+  assert.equal(parts.filter(p=>p.dense).length,1,'OFF/ON dense pair remains together');assert.equal(parts.filter(p=>p.peak).length,blocked?0:1,'All three normal peak pairs remain together when the case is run');
   assert.equal(trafficGameCase('core',blocked).expectedChecks+extended.expectedChecks,full.expectedChecks);
  }
  assert.throws(()=>trafficGameCase('peak',true),/normal assets/);assert.throws(()=>trafficGameCase('typo',true),/Unknown/);
@@ -33,7 +33,46 @@ test('four disjoint fault jobs preserve all seven assertions exactly once with u
  const {trafficFaultCase}=await import('./traffic-game-cases.mjs'),{readFileSync}=await import('node:fs');const full=trafficFaultCase(),parts=['preferences','economy','construct','async'].map(trafficFaultCase);
  assert.equal(full.expectedChecks,7);assert.equal(parts.reduce((n,p)=>n+p.expectedChecks,0),7);assert.equal(parts.filter(p=>p.preferences).length,1);assert.equal(parts.filter(p=>p.economy).length,1);assert.deepEqual(parts.flatMap(p=>p.faults),['construct','async']);assert.throws(()=>trafficFaultCase('typo'),/Unknown/);
  const source=readFileSync(new URL('traffic-default-fault-smoke.mjs',import.meta.url),'utf8');assert.match(source,/180000/);assert.match(source,/for\(const fault of testPlan\.faults\)/);assert.match(source,/await threeDays\(\);const workers=await assertFaultWorkers/);assert.match(source,/checks.length,testPlan.expectedChecks/);assert.match(source,/if\(testPlan.preferences\)/);assert.match(source,/if\(testPlan.economy\)/);
- assert.match(source,/UI OFF is visit-only/);assert.match(source,/legacy traffic preference ignored/);assert.match(source,/traffic preference avoids browser writes/);assert.match(source,/await settleInterceptions\(\);await server.settle\(\);const before=server.active;server.allowNavigation\(\)/);
+ assert.match(source,/UI OFF is visit-only/);assert.match(source,/legacy traffic preference ignored/);assert.match(source,/traffic preference avoids browser writes/);
+ const reload=source.slice(source.indexOf('async function literalReload(){'),source.indexOf('/** Creation can happen'));
+ assert.ok(reload.startsWith('async function literalReload(){'),'Literal reload helper is present');
+ // Verify each actual assertion and operation in order: do not treat a read or
+ // navigation call by itself as proof that the current session was durably saved.
+ const sequence=[
+  "await settleInterceptions();await server.settle();const before=server.active;",
+  "assert.equal(await evaluate('window.cityManager.parks().paused'),true);",
+  "const outgoing=await evaluate('window.cityManager.sessionSnapshot()');",
+  "assert.equal(serialize(loadedTrafficSession(outgoing).city),cityRaw",
+  "server.allowNavigation(outgoing);await send('Page.reload');await server.enter({send,evaluate,button,until});",
+  "assert.notEqual(await evaluate('window.__boot'),oldBoot);",
+  "const navigation=server.navigationEvidence.at(-1);",
+  "assert.equal(server.active.raw,navigation.lifecycleSaves ? outgoing : before.raw",
+  "assert.equal(server.active.cityId,before.cityId);",
+  "assert.equal(navigation.beforeRevision,before.revision",
+  "assert.equal(await evaluate('window.cityManager.snapshot()'),cityRaw);await preserved();",
+ ];
+ const verifyReload=(text:string)=>{let at=-1;for(const part of sequence){const next=text.indexOf(part,at+1);assert.ok(next>at,`Missing or out-of-order reload proof: ${part}`);at=next;}};
+ verifyReload(reload);
+ // A dropped pause/capture/ACK assertion or reordered permission must fail.
+ for(const i of [1,2,3,4,7,8,9,10])assert.throws(()=>verifyReload(reload.replace(sequence[i],'')),/Missing or out-of-order reload proof/);
+ const unpaused=reload.replace(sequence[1],'').replace(sequence[2],`${sequence[2]}${sequence[1]}`);assert.throws(()=>verifyReload(unpaused),/Missing or out-of-order reload proof/);
+
  assert.match(source,/button\('#atmosphere-toggle'\);await button\('input\[name="atmosphere-time"\]\[value="noon"\]'\)/,'Decorative fallback sets noon through the current page-memory UI');
  assert.match(source,/server\.active\.raw,await evaluate\('window\.cityManager\.sessionSnapshot\(\)'\)/,'Paused revealed session must receive an exact server ACK');assert.match(source,/await revealDecorativeCars\(\);await acknowledgeRevealedSession\(\);await literalReload\(\)/);
+});
+
+test('lifecycle reload anchors its ACK chain at actual pre-navigation head',async()=>{
+ const {readFileSync}=await import('node:fs');const source=readFileSync(new URL('traffic-game-smoke.mjs',import.meta.url),'utf8');
+ const block=source.slice(source.indexOf("setStage('save and server reload')"),source.indexOf("setStage('toggle and visit-only preference')"));
+ const sequence=[
+  'await settleInterceptions();await serverFixture.settle();const beforeSave=serverFixture.active,saveCursor=serverFixture.writes.length;',
+  "await completeTrafficManualSave(evaluate,button,until);const acknowledged=await waitServerRaw(expectedSaved,oldRevision);",
+  'await settleInterceptions();await serverFixture.settle();const beforeReload=serverFixture.active;',
+  'assertTrafficManualSaveChain(beforeSave,acknowledged,beforeReload,serverFixture.writes.slice(saveCursor),serverFixture.writes.slice(0,saveCursor),saved);',
+  "serverFixture.allowNavigation(saved);await send('Page.reload',{ignoreCache:true});await serverFixture.enter({send,evaluate,button,until});",
+  "assert.equal(await evaluate('window.cityManager.snapshot()'),pausedCity);assert.equal(serverFixture.active.raw,saved);",
+  'serverFixture.navigationEvidence.at(-1).beforeRevision===beforeReload.revision',
+ ];
+ const verify=(s:string)=>{let at=-1;for(const part of sequence){const next=s.indexOf(part,at+1);assert.ok(next>at,`Missing or out-of-order reload proof: ${part}`);at=next;}};
+ verify(block);for(const part of sequence)assert.throws(()=>verify(block.replace(part,'')),/Missing or out-of-order reload proof/);
 });

@@ -5,17 +5,17 @@
 import type { BusHost } from './lines.ts';
 import type { BusSnapshot } from './types.ts';
 import { BUS_CROWD_CAP, BUS_SIDE } from './geometry.ts';
-import { busOverlay, type BusDepotVisual, type BusRibbon, type BusStopVisual } from './overlay.ts';
+import { busInfrastructure, busOverlay, type BusDepotVisual, type BusRibbon, type BusStopVisual } from './overlay.ts';
 import { busPoses, type BusDrawPose } from './poses.ts';
 
 export type BusCrowdMark = { stopId: number; x: number; z: number; y: number };
 export type BusCaption = { lineId: number; text: string; cell: number; color: string; paused: boolean };
-export type BusStopMark = BusStopVisual & { waiting: number };
+export type BusStopMark = BusStopVisual & { waiting: number | null };
 export type BusDrawList = {
   buses: BusDrawPose[];
   /** Buses with passengers — one roof-bar instance each. */
   loads: BusDrawPose[];
-  /** `phase === 'dwelling'` (stopped at a kerb for the engine's 1-minute dwell). */
+  /** `phase === 'dwelling'` (stopped at a kerb to board and alight). */
   dwelling: BusDrawPose[];
   lines: BusRibbon[];
   stops: BusStopMark[];
@@ -32,13 +32,13 @@ export function busDrawList(
   city: BusHost,
   snapshots: readonly BusSnapshot[],
   detail: readonly { id: string; returning: boolean }[],
-  waitingAt: (stopId: number) => number,
+  waitingAt: (stopId: number) => number | null,
 ): BusDrawList {
   const overlay = busOverlay(city);
   // True home buses are stored inside their depot; panel.live.home retains their count.
   // Waiting/running buses are never omitted for congestion.
   const buses = busPoses(snapshots.filter(bus => bus.phase !== 'home'), { detail, stops: city.bus?.stops ?? [], cellCount: city.cells.length });
-  const stops: BusStopMark[] = overlay.stops.map(stop => ({ ...stop, waiting: Math.max(0, waitingAt(stop.id) || 0) }));
+  const stops: BusStopMark[] = overlay.stops.map(stop => { const waiting=waitingAt(stop.id); return { ...stop, waiting: waiting === null ? null : Math.max(0, waiting || 0) }; });
   const captions: BusCaption[] = [];
   for (const line of overlay.lines) if (line.labelCell != null) captions.push({ lineId: line.lineId, text: line.caption, cell: line.labelCell, color: line.color, paused: line.paused });
   return {
@@ -47,10 +47,16 @@ export function busDrawList(
   };
 }
 
+/** Saved buildings only: no route planning, simulated waiting or vehicle state. */
+export function busInfrastructureDrawList(city: BusHost): BusDrawList {
+  const sites=busInfrastructure(city);
+  return { buses: [], loads: [], dwelling: [], lines: [], stops: sites.stops.map(s=>({...s,waiting:null})), depots: sites.depots, crowds: [], captions: [] };
+}
+
 export function busCrowds(stops: readonly BusStopMark[]): BusCrowdMark[] {
   const out: BusCrowdMark[] = [];
   for (const stop of stops) {
-    const count = Math.min(BUS_CROWD_CAP, Math.floor(stop.waiting));
+    const count = Math.min(BUS_CROWD_CAP, Math.floor(stop.waiting ?? 0));
     if (count <= 0) continue;
     const side = BUS_SIDE[stop.side], tx = side.z !== 0 ? 1 : 0, tz = side.x !== 0 ? 1 : 0;
     for (let i = 0; i < count; i++) {

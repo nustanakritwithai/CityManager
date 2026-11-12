@@ -109,8 +109,8 @@ export const EDGES: readonly NetEdge[] = Object.freeze([
   { from: 'eaten', to: 'firmCash', sign: 1, why: 'ยอดขายพืชผลเป็นรายได้ของตลาด', stream: 'eaten' },
   { from: 'exported', to: 'firmCash', sign: 1, why: 'ขายสินค้าออกนอกเมืองได้เงินเข้ากิจการ', stream: 'exported' },
   { from: 'firmCash', to: 'factories', sign: 1, why: 'โรงงานที่มีทุนพอออกทุนเปิดโรงงานใหม่' },
-  { from: 'employed', to: 'taxes', sign: 1, why: 'ค่าจ้างเสียภาษี 10% ทุกสิ้นเดือน' },
-  { from: 'firmCash', to: 'taxes', sign: 1, why: 'กิจการที่มีกำไรเสียภาษี 20% ของกำไรเดือนก่อน' },
+  { from: 'employed', to: 'taxes', sign: 1, why: 'หักภาษีตามอัตราเมืองเมื่อจ่ายค่าจ้าง' },
+  { from: 'firmCash', to: 'taxes', sign: 1, why: 'กิจการที่มีกำไรเสียภาษีตามอัตราเมืองเมื่อปิดบัญชี' },
   { from: 'taxes', to: 'treasury', sign: 1, why: 'ภาษีเข้าคลังเมืองทุกสิ้นเดือน', stream: 'taxes' },
 ]);
 
@@ -176,7 +176,7 @@ export function networkEvents(before: NetSnapshot, city: City): NetEvent[] {
   const out: NetEvent[] = [], wages = new Map<number, number>(), taxes = new Map<number, number>();
   const add = (map: Map<number, number>, tick: number, amount: number) => map.set(tick, (map.get(tick) ?? 0) + amount);
   for (let i = Math.max(0,before.ledger-(city.history?.moneyCount??0)); i < city.ledger.length; i++) {
-    const e = city.ledger[i], road = /^Build (\d+) road cells$/.exec(e.reason);
+    const e = city.ledger[i], road = /^Build (\d+) road cells$/.exec(e.reason) ?? (/^Build road cell @\d+$/.test(e.reason) ? ['', '1'] : null);
     if (road) out.push({ node: 'roads', icon: 'road', text: `สร้างถนน ${road[1]} ช่อง · ${baht(e.amount)}`, tick: e.tick });
     else if (e.reason === 'New household arrival savings') out.push({ node: 'households', icon: 'people', text: 'ครัวเรือนใหม่ย้ายเข้า', tick: e.tick });
     else if ((e.reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(e.reason))) add(wages, e.tick, e.amount);

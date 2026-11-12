@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
-import {createTrafficServerFixture,assertNavigationSaveChain,reachTrafficControl} from './traffic-server-entry-fixture.mjs';
+import {createTrafficServerFixture,assertNavigationSaveChain,reachTrafficControl,loadedTrafficSession,assertTrafficAutosaveCity} from './traffic-server-entry-fixture.mjs';
 const url='http://127.0.0.1:4195/CityManager/';
 import {createCity,step} from '../src/sim.ts';
 import {createParkRuntime,serializeParkSession} from '../src/park-runtime.ts';
@@ -8,7 +8,7 @@ const request=(method,body)=>({requestId:randomUUID(),request:{url:'http://127.0
 test('traffic fixture uses real ACK/revision/conflict contracts and preserves its head across reload entry',async()=>{
  const f=createTrafficServerFixture(url),ack=await f.seed(raw),messages=[];
  const send=async(method,params)=>{messages.push({method,params});};
- assert.equal(JSON.parse(raw).version,25);assert.equal(ack.metadata.tick,city.tick);assert.equal(ack.metadata.population,city.households.reduce((n,h)=>n+h.members,0));assert.equal(ack.revision,1);f.assertDurable(raw,1);
+ assert.equal(JSON.parse(raw).version,27);assert.equal(ack.metadata.tick,city.tick);assert.equal(ack.metadata.population,city.households.reduce((n,h)=>n+h.members,0));assert.equal(ack.revision,1);f.assertDurable(raw,1);
  const enter=async()=>{const predicates=[],buttons=[];await f.enter({button:async s=>{buttons.push(s);await f.intercept(request('GET'),send);},evaluate:async e=>{if(e==='window.__panelCityWrites')return [];if(e.startsWith('localStorage'))return null;predicates.push(e);return true;}});assert.deepEqual(buttons,['.guest-entry-card button']);assert.ok(predicates[1].includes('visuals().ready'));};
  await enter();await enter();f.assertDurable(raw,1); // Real reload does not call seed.
  const next=createCity(42);step(next);const changed=serializeParkSession(next,createParkRuntime(next));
@@ -33,6 +33,31 @@ test('only explicitly authorized beforeunload is handled, once; entry needs an A
  await f.install(send);assert.equal(sent.at(-1)[0],'Page.addScriptToEvaluateOnNewDocument');assert.ok(sent.at(-1)[1].source.includes('__panelCityWrites'));
 });
 
+test('reload lifecycle accepts only the captured economically identical migrated session',async()=>{
+ const f=createTrafficServerFixture(url),before=await f.seed(raw),live=loadedTrafficSession(raw);
+ const outgoing=serializeParkSession(live.city,live.runtime);assert.notEqual(outgoing,before.raw,'legacy seed expands to the real live session');
+ const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
+ f.allowNavigation(outgoing);
+ const payload={action:'save',cityId:before.cityId,expectedRevision:before.revision,raw:outgoing,metadata:before.metadata};
+ await f.enter({evaluate,button:async()=>{await f.intercept(request('POST',payload),async()=>{});await f.intercept(request('GET'),async()=>{});}});
+ assert.equal(f.active.raw,outgoing);assert.equal(f.active.revision,2);
+ assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+ const changed=structuredClone(live.city);step(changed);
+ assert.throws(()=>f.allowNavigation(serializeParkSession(changed,createParkRuntime(changed))),/Autosave changes runtime, not economic City/);
+ const g=createTrafficServerFixture(url),other=await g.seed(raw);g.allowNavigation(outgoing);
+ await assert.rejects(g.enter({evaluate,button:async()=>{
+  await g.intercept(request('POST',{...payload,cityId:other.cityId,raw:outgoing+' '}),async()=>{});
+  await g.intercept(request('GET'),async()=>{});
+ }}),/Lifecycle flush must match the captured outgoing session/);
+});
+
+test('no lifecycle save retains exact original acknowledged bytes',async()=>{
+ const f=createTrafficServerFixture(url),before=await f.seed(raw),live=loadedTrafficSession(raw);
+ f.allowNavigation(serializeParkSession(live.city,live.runtime));
+ await f.enter({button:async()=>{await f.intercept(request('GET'),async()=>{});},evaluate:async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true});
+ assert.deepEqual(f.active,before);assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:1,afterRevision:1,lifecycleSaves:0});
+});
+
 test('read-only navigation predicates retry only known destroyed-context errors',async()=>{
  const f=createTrafficServerFixture(url);await f.seed(raw);let calls=0;
  await f.enter({button:async()=>{await f.intercept(request('GET'),async()=>{});},evaluate:async e=>{if(++calls===1)throw Object.assign(Error('navigation'),{cdpError:{code:-32000,message:'Inspected target navigated or closed'}});return e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;}});
@@ -53,14 +78,35 @@ test('reload accepts only observed exact same-raw lifecycle ACK chains and the f
  await assert.rejects(g.enter({evaluate,button:async()=>{await g.intercept(request('GET'),async()=>{});await g.intercept(request('POST',{...payload,cityId:base.cityId}),async()=>{});}}),/Entered GET must match final/);
 });
 
+test('exact idempotent lifecycle retries reuse the acknowledged revision without hiding mismatches',async()=>{
+ const f=createTrafficServerFixture(url),base=await f.seed(raw),send=async()=>{};
+ const post=request('POST',{action:'save',cityId:base.cityId,expectedRevision:1,raw,metadata:base.metadata});
+ await f.intercept(post,send);f.allowNavigation();
+ const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
+ await f.enter({evaluate,button:async()=>{await f.intercept(post,send);await f.intercept(request('GET'),send);}});
+ assert.equal(f.active.revision,2);assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:2,afterRevision:2,lifecycleSaves:0});
+ const event=f.writes[0],retry=f.writes[1];
+ assert.deepEqual(assertNavigationSaveChain(base,f.active,[event,retry]),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+ const g=createTrafficServerFixture(url),start=await g.seed(raw);g.allowNavigation();
+ const same=request('POST',{action:'save',cityId:start.cityId,expectedRevision:start.revision,raw,metadata:start.metadata});
+ await g.enter({evaluate,button:async()=>{await g.intercept(same,send);await g.intercept(same,send);await g.intercept(request('GET'),send);}});
+ assert.equal(g.active.revision,2);assert.deepEqual(g.navigationEvidence.at(-1),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+
+ for(const bad of [
+  {...retry,command:{...retry.command,metadata:{...retry.command.metadata,tick:99}}},
+  {...retry,response:{...retry.response,revision:3}},
+  {...retry,requestKey:randomUUID()},
+ ])assert.throws(()=>assertNavigationSaveChain(base,f.active,[event,bad]));
+});
+
 test('reload revision failures retain assertion and bounded non-sensitive lifecycle diagnostics',async()=>{
  const f=createTrafficServerFixture(url),base=await f.seed(raw),send=async()=>{};
  const post=request('POST',{action:'save',cityId:base.cityId,expectedRevision:1,raw,metadata:base.metadata});
  await f.intercept(post,send);f.allowNavigation();
  const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
- await assert.rejects(f.enter({evaluate,button:async()=>{await f.intercept(post,send);await f.intercept(request('GET'),send);}}),error=>{
+ await assert.rejects(f.enter({evaluate,button:async()=>{f.writes.push({...f.writes[0],requestKey:randomUUID()});await f.intercept(request('GET'),send);}}),error=>{
   assert.match(error.message,/Lifecycle writes form an exact revision chain/);
-  assert.match(error.message,/"baselineRevision":2/);assert.match(error.message,/"repeatedKey":true/);
+  assert.match(error.message,/"baselineRevision":2/);assert.match(error.message,/"repeatedKey":false/);
   assert.equal(error.message.includes(raw),false);assert.equal(error.message.includes(post.request.headers['Idempotency-Key']),false);return true;
  });
 });
@@ -76,6 +122,17 @@ test('old page unload and in-flight service request settle before a new fixture 
  await assert.rejects(f.intercept(request('POST',{action:'save',cityId:'22222222-2222-4222-8222-222222222222',expectedRevision:1,raw,metadata:before.metadata}),async()=>{}),/Unexpected rejected traffic save/);assert.equal(f.active.revision,1);
 });
 
+
+test('retired page may retry an exact ACK observed before reseeding, never a changed command',async()=>{
+ const f=createTrafficServerFixture(url),before=await f.seed(raw),send=async()=>{};
+ const post=request('POST',{action:'save',cityId:before.cityId,expectedRevision:before.revision,raw,metadata:before.metadata});
+ await f.intercept(post,send);assert.equal(f.active.revision,2);
+ await f.leave({evaluate:async e=>e==='!!window.cityManager'||e==='window.cityManager.parks().paused'?true:e==='window.cityManager.sessionSnapshot()'?raw:e==='window.__panelCityWrites'?[]:null,send:async()=>{},until:async()=>{}});
+ const current=await f.seed(raw);await f.intercept(post,send);
+ assert.equal(f.evidence.retiredWrites.at(-1).ackRevision,2);assert.deepEqual(f.active,current);
+ const altered=structuredClone(post);altered.request.postData=JSON.stringify({...JSON.parse(post.request.postData),metadata:{...before.metadata,tick:99}});
+ await assert.rejects(f.intercept(altered,send),/Unexpected rejected traffic save|same command/);assert.deepEqual(f.active,current);
+});
 
 test('traffic native Save bypasses only the obsolete local-save waiter; other controls still use reachability',async()=>{
  let evaluated=0,clicked=0;
@@ -125,9 +182,13 @@ test('network fence is ordered exact-origin only, requires protocol support and 
  const blocked=target=>rules.find(rule=>new URLPattern(rule.urlPattern).test(target))?.block;
  for(const target of ['https://example.com/account','http://127.0.0.1:9999/','http://localhost:4195/'])assert.equal(blocked(target),true);assert.equal(blocked(origin+'/citymanager-api/v1/city-save'),false);assert.equal(blocked(origin+'/CityManager/assets/kenney-city/models/tree.glb?x=1'),true);
  assert.equal(rules[0].block,true);assert.match(rules[0].urlPattern,/models/);assert.deepEqual(rules[1],{urlPattern:origin+'/*',block:false});assert.deepEqual(rules.slice(2).map(x=>x.block),[true,true]);assert.throws(()=>trafficNetworkRules('http://example.com'));
+ const denied=[origin+'/api/city-advisor/*',origin+'/chat/completions*'],restricted=trafficNetworkRules(origin,false,denied);
+ const decision=target=>restricted.find(rule=>new URLPattern(rule.urlPattern).test(target))?.block;
+ assert.equal(decision(origin+'/api/city-advisor/report'),true);assert.equal(decision(origin+'/chat/completions'),true);
+ assert.equal(decision(origin+'/citymanager-api/v1/city-save'),false);assert.equal(decision('https://example.com/'),true);
  const protocol={domains:[{domain:'Network',commands:[{name:'setBlockedURLs',parameters:[{name:'urlPatterns'}]}]}]};let evidence,commands=[];
  const options={protocol,origin,send:async(method,params)=>commands.push({method,params}),observeProbe:target=>(evidence={url:target}),evaluate:async expression=>{if(expression.startsWith('fetch'))evidence.failed={blockedReason:'inspector'};return true;}};
- await installTrafficNetworkFence(options);assert.equal(commands[0].method,'Network.setBlockedURLs');assert.equal(new URL(evidence.url).hostname,'localhost');
+ await installTrafficNetworkFence({...options,additionalBlocked:denied});assert.equal(commands[0].method,'Network.setBlockedURLs');assert.deepEqual(commands[0].params.urlPatterns,restricted);assert.equal(new URL(evidence.url).hostname,'localhost');
  await assert.rejects(installTrafficNetworkFence({...options,protocol:{domains:[]}}),/must support/);
  await assert.rejects(installTrafficNetworkFence({...options,evaluate:async expression=>{if(expression.startsWith('fetch'))evidence.failed={blockedReason:'other'};return true;}}),/Must be CDP block/);
 });
@@ -135,3 +196,110 @@ test('network fence is ordered exact-origin only, requires protocol support and 
  test('browser runners never pause API or asset requests through Fetch after native HTTP migration',async()=>{
  const {readFileSync}=await import('node:fs');for(const file of ['traffic-game-smoke.mjs','traffic-default-fault-smoke.mjs']){const source=readFileSync(new URL(file,import.meta.url),'utf8');assert.equal(source.includes("send('Fetch.enable'"),false);assert.equal(source.includes("m.method==='Fetch.requestPaused'"),false);assert.ok(source.includes('installTrafficNetworkFence('));assert.ok(source.includes('httpFixture.errors,[]'));}
  });
+
+
+test('expected live session applies the real map migration without rewriting server bytes or advancing time', async () => {
+ const f=createTrafficServerFixture(url),ack=await f.seed(raw), loaded=loadedTrafficSession(ack.raw);
+ assert.equal(JSON.parse(ack.raw).version,27); assert.equal(loaded.city.cells.length,672);
+ assert.deepEqual(loaded.city.cells.slice(0,576),city.cells);
+ assert.deepEqual(loaded.city.accounts,city.accounts); assert.deepEqual(loaded.city.ledger,city.ledger);
+ assert.equal(loaded.city.tick,city.tick); assert.equal(loaded.runtime.activity.minute,0);
+ assert.equal(f.active.raw,raw); assert.equal(f.active.revision,1);
+ const expandedRaw=serializeParkSession(loaded.city,loaded.runtime);
+ assert.deepEqual(loadedTrafficSession(expandedRaw),loaded);
+});
+
+
+test('autosave compares the exact expanded economic city and rejects any economic mutation',()=>{
+ const live=loadedTrafficSession(raw), runtime=structuredClone(live.runtime);runtime.minuteRemainder=.25;
+ const saved=serializeParkSession(live.city,runtime),restored=loadedTrafficSession(saved);
+ assert.deepEqual(assertTrafficAutosaveCity(raw,restored.city),live.city);
+ const changed=structuredClone(restored.city);step(changed);
+ assert.deepEqual(loadedTrafficSession(serializeParkSession(changed,createParkRuntime(changed))).city,changed,'economic change is a valid, replayable city');
+ assert.throws(()=>assertTrafficAutosaveCity(raw,changed),/Autosave changes runtime, not economic City/);
+ assert.notEqual(serializeParkSession(live.city,live.runtime),saved,'runtime really changed');
+});
+
+test('lifecycle reload waits through fixture entry before checking the new boot marker',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const source=readFileSync(new URL('./traffic-game-smoke.mjs',import.meta.url),'utf8');
+ const start=source.indexOf("setStage('save and server reload')"),end=source.indexOf("setStage('toggle and visit-only preference')",start);
+ const segment=source.slice(start,end),reload=segment.indexOf("await send('Page.reload'");
+ const entry=segment.indexOf('await serverFixture.enter(',reload),check=segment.indexOf("assert.notEqual(await evaluate('window.__trafficGameBoot'),oldBoot",entry);
+ assert.ok(start>=0&&reload>=0&&entry>reload&&check>entry);
+ assert.equal(segment.slice(reload,entry).includes('await until('),false,'no unguarded boot poll during navigation');
+});
+
+test('manual save and later same-byte ACKs form an exact chain before and across reload',async()=>{
+ const {assertTrafficManualSaveChain}=await import('./traffic-server-entry-fixture.mjs');
+ const live=loadedTrafficSession(raw),session=serializeParkSession(live.city,live.runtime);
+ const f=createTrafficServerFixture(url),before=await f.seed(session),send=async()=>{},cursor=f.writes.length;
+ const save=revision=>request('POST',{action:'save',cityId:before.cityId,expectedRevision:revision,raw:session,metadata:before.metadata});
+ await f.intercept(save(1),send);const acknowledged=f.active;
+ await f.intercept(save(2),send);const beforeReload=f.active;
+ assert.deepEqual(assertTrafficManualSaveChain(before,acknowledged,beforeReload,f.writes.slice(cursor),f.writes.slice(0,cursor),session),{beforeRevision:1,afterRevision:3,lifecycleSaves:2});
+ const writes=f.writes.slice(cursor);
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,beforeReload,writes.slice(1),[],session));
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,beforeReload,[writes[0],{...writes[1],response:{...writes[1].response,raw:'wrong'}}],[],session));
+ assert.throws(()=>assertTrafficManualSaveChain(before,{...acknowledged,revision:99},beforeReload,writes,[],session));
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,{...beforeReload,deleted:true},writes,[],session),/Live heads/);
+ assert.throws(()=>assertTrafficManualSaveChain(before,acknowledged,{...beforeReload,revision:4},writes,[],session),/Every revision/);
+ f.allowNavigation(session);
+ const evaluate=async e=>e==='window.__panelCityWrites'?[]:e.startsWith('localStorage')?null:true;
+ await f.enter({evaluate,button:async()=>{await f.intercept(save(3),send);await f.intercept(save(4),send);await f.intercept(request('GET'),send);}});
+ assert.deepEqual(f.navigationEvidence.at(-1),{beforeRevision:3,afterRevision:5,lifecycleSaves:2});
+ assert.equal(f.active.raw,session);assert.equal(f.active.revision,5);
+});
+
+
+test('a pre-click autosave cannot impersonate successful manual Save',async()=>{
+ const {completeTrafficManualSave,assertTrafficManualSaveChain}=await import('./traffic-server-entry-fixture.mjs');
+ const live=loadedTrafficSession(raw),session=serializeParkSession(live.city,live.runtime);
+ const f=createTrafficServerFixture(url),before=await f.seed(session),send=async()=>{};let manualSuccess=false,manualEnabled=false;
+ const evaluate=async()=>manualSuccess;
+ const until=async expression=>{assert.match(expression,/#inspector-status/);if(!manualSuccess)throw Error('Manual success not observed');};
+ const button=async selector=>{assert.equal(selector,'#save');if(manualEnabled){await f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:2,raw:session,metadata:before.metadata}),send);manualSuccess=true;}};
+ // Autosave lands after the snapshot and before click. It has a valid ACK and
+ // same bytes, but absent manual completion still fails the real manual waiter.
+ await f.intercept(request('POST',{action:'save',cityId:before.cityId,expectedRevision:1,raw:session,metadata:before.metadata}),send);
+ const autosave=f.active;
+ assert.deepEqual(assertTrafficManualSaveChain(before,autosave,autosave,f.writes,[],session),{beforeRevision:1,afterRevision:2,lifecycleSaves:1});
+ await assert.rejects(completeTrafficManualSave(evaluate,button,until),/Manual success not observed/);
+ manualEnabled=true;await completeTrafficManualSave(evaluate,button,until);
+ assert.deepEqual(assertTrafficManualSaveChain(before,autosave,f.active,f.writes,[],session),{beforeRevision:1,afterRevision:3,lifecycleSaves:2});
+ await assert.rejects(completeTrafficManualSave(evaluate,button,until),/must be fresh/);
+});
+
+test('manual-only success signal follows awaited explicit server save',async()=>{
+ const {readFileSync}=await import('node:fs');const source=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
+ const signal='บันทึกเมืองบนเซิร์ฟเวอร์แล้ว · ตลาดยังปิดอยู่';
+ assert.equal(source.split(signal).length-1,1,'Success text is exclusive to explicit Save');
+ const start=source.indexOf("$('#save').addEventListener('click'"),end=source.indexOf('const campusAction',start);
+ const handler=source.slice(start,end);assert.ok(start>=0&&end>start);
+ assert.ok(handler.includes(`const saved=await trackedSave(true);sound('ui-save');status(saved.current?'${signal}'`),'Fresh manual success requires the acknowledged bytes to remain current');
+ assert.match(source,/route\?\.page === 'game'.*\$\('#inspector-status'\)\.textContent = text/);
+});
+
+test('HTTP diagnostics identify partial uploads and asset failures without suppressing errors or recording payloads',async()=>{
+ const {createServer,request}=await import('node:http'),{trafficHttpHandler}=await import('./traffic-server-entry-fixture.mjs');
+ const errors=[],deliveries=[],failureDetails=[];let handler,serviceCalls=0,bodySeen;
+ const received=new Promise(resolve=>{bodySeen=resolve;});
+ const http=createServer((req,res)=>{req.once('data',bodySeen);void handler(req,res);});
+ await new Promise(resolve=>http.listen(0,'127.0.0.1',resolve));
+ const origin=`http://127.0.0.1:${http.address().port}`,fixture=createTrafficServerFixture(origin+'/CityManager/'),ack=await fixture.seed(raw),intercept=fixture.intercept;
+ fixture.intercept=async(...args)=>{serviceCalls++;return intercept(...args);};
+ handler=trafficHttpHandler({origin,upstream:origin+'/CityManager/',fixture,errors,deliveries,failureDetails,forward:async()=>{throw Object.assign(Error('private-message'),{code:'private-code',cause:{code:'UND_ERR_SOCKET'}});}});
+ const until=async predicate=>{const deadline=Date.now()+5000;while(!predicate()){assert.ok(Date.now()<deadline,'Diagnostic event arrives');await new Promise(resolve=>setTimeout(resolve,10));}};
+ try{
+  const partial=request(origin+'/citymanager-api/v1/city-save',{method:'POST',headers:{'content-length':100000,'idempotency-key':'private-key','cookie':'private-cookie'}});partial.on('error',()=>{});partial.write('private-body');
+  await Promise.race([received,new Promise((_,reject)=>setTimeout(()=>reject(Error('Incoming body not observed')),5000).unref())]);partial.destroy();await until(()=>errors.length===1);
+  assert.match(errors[0],/^Fixture transport failure: Error \(ECONNRESET\)$/);assert.equal(serviceCalls,0);assert.deepEqual(fixture.active,ack);assert.deepEqual(deliveries,[],'Incomplete requests remain outside the service ACK list');
+  assert.deepEqual(failureDetails[0],{kind:'city-save',phase:'read-body',method:'POST',bodyBytes:12,bodyComplete:false,requestComplete:false,requestAborted:true,responseHeadersSent:false,responseFinished:false,responseDestroyed:true,serviceStatus:null,errorName:'Error',errorCode:'ECONNRESET',causeCode:null});
+  const asset=await fetch(origin+'/CityManager/private-asset?token=private-query');assert.equal(asset.status,500);assert.equal(errors.length,2);assert.equal(failureDetails[1].kind,'asset');assert.equal(failureDetails[1].phase,'forward-asset');assert.equal(failureDetails[1].errorCode,null);assert.equal(failureDetails[1].causeCode,'UND_ERR_SOCKET');
+  const response=await fetch(origin+'/citymanager-api/v1/city-save',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify({action:'save',cityId:ack.cityId,expectedRevision:ack.revision,raw,metadata:ack.metadata})});
+  assert.equal(response.status,200);const saved=await response.json();assert.equal(saved.raw,raw);assert.equal(saved.revision,ack.revision+1);assert.equal(serviceCalls,1);assert.equal(errors.length,2,'Later successful save cannot hide earlier failures');assert.throws(()=>assert.deepEqual(errors,[]));
+  for(let i=0;i<34;i++)await fetch(origin+'/CityManager/private-asset');
+  assert.equal(errors.length,36,'The fail-closed error list is not truncated');assert.equal(failureDetails.length,32,'Only diagnostic details are bounded');
+  assert.doesNotMatch(JSON.stringify({errors,failureDetails}),/private-|citymanager-api|idempotency|cookie|token|raw|stack/i);
+ }finally{http.closeAllConnections();await new Promise(resolve=>http.close(resolve));}
+});

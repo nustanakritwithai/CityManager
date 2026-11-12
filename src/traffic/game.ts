@@ -2,7 +2,7 @@ import { expandedRoadDirection } from '../expanded-road-topology.ts';
 import { expandedCellCoordinate, EXPANDED_MAP_CELLS } from '../expanded-map-grid.ts';
 import {SignalPeers,type SignalPeerSnapshot} from './signal-peers.ts';
 import {buildSignalCorridors,neighborSignalBias,type SignalCorridor,type NeighborSignalState} from './signal-coordination.ts';
-import {chooseSignal,signalTopologyKey,type TrafficSignalFrame,type SignalPhase,type SignalDemand} from './adaptive-signals.ts';
+import {chooseSignal,SIGNAL_URGENT_WAIT,signalTopologyKey,type TrafficSignalFrame,type SignalPhase,type SignalDemand} from './adaptive-signals.ts';
 import type {GameModalStats} from './game-modal.ts';
 import {roadNeighborsFor,validateRoadTopology,type RoadMap} from '../road-topology.ts';
 import type {City} from '../sim.ts';
@@ -12,7 +12,7 @@ import {shortestPath} from './routing.ts';
 import {createRoadNavigator,emptyNavigationStats,type NavigationStats} from './rrt-navigation.ts';
 import {gameBusShare,validGameBusInput,type GameBusFrame,type GameBusInput,type GameBusShare,type GameBusTotal} from '../bus/game-bus.ts';
 import {LANE_START,SLOT_PITCH} from '../citizen-road-queue.ts';
-import {TRAFFIC_SPACING,updateVehicleFollowing,type LaneVehicle} from './spacing.ts';
+import {JUNCTION_STOP,TRAFFIC_SPACING,updateVehicleFollowing,type LaneVehicle} from './spacing.ts';
 import {forEachParkActivityEmployedCitizen,WORK_END_MINUTE} from '../park-activity.ts';
 
 /** Bounded, ephemeral road-game traffic. One step represents one real second,
@@ -20,7 +20,7 @@ import {forEachParkActivityEmployedCitizen,WORK_END_MINUTE} from '../park-activi
  * the game never writes City, payroll or a save. */
 export const GAME_MAX_ODS=64, GAME_MAX_CARS=128, GAME_MAX_QUEUE=32, GAME_MAX_RATE=4;
 const STORAGE_PER_LANE=TRAFFIC_SPACING.maxPerLanePerTile, REROUTE_STEPS=5, SUBSTEPS=5;
-const JUNCTION_STOP=1-.25-TRAFFIC_SPACING.lengths.sedan/TRAFFIC_SPACING.worldPerTile/2, JUNCTION_CLEAR=1-JUNCTION_STOP;
+const JUNCTION_CLEAR=1-JUNCTION_STOP;
 export type GameDemand = {from:number;to:number;rate:number};
 export type TrafficGameSample = {map:RoadMap;demand:GameDemand[];clippedRate?:number};
 /** The existing visual morning commute starts at 06:30; the 17:00 cutoff is
@@ -29,10 +29,13 @@ export const WORK_TRIP_START_MINUTE=6*60+30, WORK_TRIP_END_MINUTE=WORK_END_MINUT
 const MAX_WORK_CANDIDATES=8192, MAX_UNACKNOWLEDGED_WORK_EXPIRATIONS=8192;
 export type WorkTripClock={day:number;minute:number;ack:number;crossedWorkDay?:number};
 export type WorkTripInput=WorkTripClock & {candidates:{citizenId:string;home:number;work:number}[];cancelIds?:number[];retiredIds?:number[]};
-export type TrafficGameInput = {map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[];bus?:GameBusInput;work?:WorkTripInput};
+// Aggregate assignments only: representative demand, not another citizen-trip ledger.
+export type GameCommute = {home:number;work:number;workers:number};
+const MAX_GAME_COMMUTES=65536, MAX_RAW_GAME_DEMAND=4096;
+export type TrafficGameInput = {commutes?:GameCommute[];map:RoadMap;homes:{cell:number;amount:number}[];destinations:{cell:number;amount:number}[];taxis?:TaxiDepotSite[];bus?:GameBusInput;work?:WorkTripInput};
 export type GameCar = {id:number;from:number;to:number;blocked:boolean;progress?:number;lane?:number;speed?:number;destination?:number;nextCell?:number;nextLane?:number;junction?:boolean;nextVisit?:number};
 export type GameRenderGroup = {key:string;from:number;to:number;amount:number;queued:number;storage:number;closed:boolean};
-export type TrafficGameFrame = {navigation?:NavigationStats;signals?:TrafficSignalFrame;modal?:GameModalStats|null;bus?:GameBusFrame;workTrips?:{id:number;day:number}[];expiredWorkTrips?:{sequence:number;id:number}[];/** Cumulative completed taxi trips and the road tiles they covered (fare input). */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
+export type TrafficGameFrame = {navigation?:NavigationStats;signals?:TrafficSignalFrame;modal?:GameModalStats|null;bus?:GameBusFrame;workTrips?:{id:number;day:number}[];expiredWorkTrips?:{sequence:number;id:number}[];/** Cumulative visual taxi movements and tiles; includes empty trips and is not an accounting input. */taxiTrips?:{trips:number;tiles:number};step:number;offered:number;completed:number;dropped:number;cancelled:number;waiting:number;moving:number;blocked:number;clippedRate:number;demandRate:number;roads:number;congestedLinks:number;cars:GameCar[];groups:GameRenderGroup[];loadByCell:{cell:number;load:number;queued:number}[]};
 type OD = GameDemand & {waiting:number;path:number[]|null};
 type Actor = {visits?:number;id:number;destination:number;path:number[];index:number;blocked:boolean;progress:number;speed:number;lane:number;workClaimPending?:boolean;workCitizen?:string};
 const cell=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<EXPANDED_MAP_CELLS;
@@ -54,7 +57,7 @@ export function bindTaxiSessionDepots(depots: readonly TaxiDepotSite[] | null): 
 /** Read building placement/density and road topology for ambient demand. The
  * optional work clock additionally reads existing assignments for work labels;
  * it never mutates the economy, financial journals or persistence. */
-export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;sessionDepots?:TaxiDepotSite[];workClock?:WorkTripClock}={}):TrafficGameInput {
+export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;sessionDepots?:TaxiDepotSite[];workClock?:WorkTripClock;busCommutes?:boolean}={}):TrafficGameInput {
   if(options.taxiEnabled!==undefined&&typeof options.taxiEnabled!=='boolean')throw Error('Invalid taxi game preference');
   const map:RoadMap={cells:city.cells.map(c=>({road:c.road})),...(city.roadTopology?{roadTopology:structuredClone(city.roadTopology)}:{})};
   const homes=new Map<number,number>(),destinations=new Map<number,number>(),homeAccess=new Map<number,number>();
@@ -71,16 +74,17 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;
   if(!Array.isArray(session)||saved.length+session.length>4)throw Error('Invalid traffic game taxi depots');
   const extra=session.map(d=>{if(!d||!Number.isSafeInteger(d.id)||d.id<1||ids.has(d.id)||!cell(d.cell)||d.cell>=map.cells.length||(d.level!==1&&d.level!==2)||typeof d.open!=='boolean')throw Error('Invalid traffic game taxi depot');ids.add(d.id);return {id:d.id,cell:d.cell,level:d.level,open:d.open};});
   const result:TrafficGameInput={map,homes:[...homes].map(([cell,amount])=>({cell,amount})),destinations:[...destinations].map(([cell,amount])=>({cell,amount})),taxis:options.taxiEnabled?[...saved,...extra]:[]};
-  if(options.workClock){
+  const clock=options.workClock;
+  const needsWork=!!clock&&((clock.minute>=WORK_TRIP_START_MINUTE&&clock.minute<WORK_TRIP_END_MINUTE)||clock.crossedWorkDay!==undefined);
+  if(clock)result.work={...clock,candidates:[]};
+  if(needsWork||options.busCommutes){
     // New work actors can only be claimed in the work window or when a
     // skipped window is being replayed. Keep the clock/ACK even when no
     // candidate roster is needed so outstanding cancellations still settle.
-    const {minute,crossedWorkDay}=options.workClock;
-    if((minute<WORK_TRIP_START_MINUTE||minute>=WORK_TRIP_END_MINUTE)&&crossedWorkDay===undefined){result.work={...options.workClock,candidates:[]};return result;}
     const buildings=new Map(city.buildings.map(b=>[b.id,b.cell]));
     const firms=new Map(city.firms.map(f=>[f.id,buildings.get(f.building)]));
     const parks=new Map(city.parks.map(p=>[p.id,p.cell]));
-    const candidates:WorkTripInput['candidates']=[];
+    const candidates:WorkTripInput['candidates']=[],commutes=new Map<string,GameCommute>();
     const workAccess=new Map<number,boolean>();
     forEachParkActivityEmployedCitizen(city,(citizenId,homeId,firmId,parkJobId)=>{
       if(homeId===null)return;
@@ -88,10 +92,12 @@ export function captureTrafficGameInput(city:City,options:{taxiEnabled?:boolean;
       if(home===undefined||work===undefined)return;
       let accessible=workAccess.get(work);if(accessible===undefined){accessible=frontages(map,work).length>0;workAccess.set(work,accessible);}
       if(!accessible)return;
-      candidates.push({citizenId,home,work});
+      if(needsWork)candidates.push({citizenId,home,work});
+      if(options.busCommutes){const key=pair(home,work),row=commutes.get(key);if(row)row.workers++;else commutes.set(key,{home,work,workers:1});}
     });
     candidates.sort((a,b)=>a.citizenId.localeCompare(b.citizenId));
-    result.work={...options.workClock,candidates:candidates.slice(0,MAX_WORK_CANDIDATES)};
+    if(clock)result.work={...clock,candidates:candidates.slice(0,MAX_WORK_CANDIDATES)};
+    if(options.busCommutes)result.commutes=[...commutes.values()].sort((a,b)=>a.home-b.home||a.work-b.work);
   }
   return result;
 }
@@ -102,21 +108,48 @@ export function trafficGameSampleFromInput(input:TrafficGameInput):TrafficGameSa
   if(!input||!input.map||!Array.isArray(input.map.cells)||![576,EXPANDED_MAP_CELLS].includes(input.map.cells.length)||input.map.cells.some(c=>!c||typeof c.road!=='boolean')||!Array.isArray(input.homes)||!Array.isArray(input.destinations)||input.homes.length>input.map.cells.length||input.destinations.length>input.map.cells.length||[...input.homes,...input.destinations].some(x=>!x||!cell(x.cell)||x.cell>=input.map.cells.length||!Number.isFinite(x.amount)||x.amount<0))throw Error('Invalid traffic game input');
   if(input.map.roadTopology)validateRoadTopology(input.map,input.map.roadTopology);
   const net=buildNetwork(input.map),work=[...input.destinations].sort((a,b)=>a.cell-b.cell),demand:GameDemand[]=[];
+  const commuteOn=!!input.bus?.lines.length&&input.commutes!==undefined;
+  const commutes=new Map<number,Map<number,number>>();let redirected=false;
+  if(commuteOn){
+    if(!Array.isArray(input.commutes)||input.commutes.length>MAX_GAME_COMMUTES||input.commutes.some(c=>!c||!cell(c.home)||!cell(c.work)||c.home>=input.map.cells.length||c.work>=input.map.cells.length||!Number.isSafeInteger(c.workers)||c.workers<1))throw Error('Invalid traffic game commutes');
+    for(const c of input.commutes){const jobs=commutes.get(c.home)??new Map<number,number>();jobs.set(c.work,(jobs.get(c.work)??0)+c.workers);commutes.set(c.home,jobs);}
+  }
   const cached=new Map<number,Int16Array>();
   const distances=(from:number)=>{let dist=cached.get(from);if(dist)return dist;dist=new Int16Array(input.map.cells.length);dist.fill(-1);dist[from]=0;const queue=[from];for(let i=0;i<queue.length;i++)for(const l of net.out.get(queue[i])??[])if(dist[l.to]<0){dist[l.to]=dist[queue[i]]+1;queue.push(l.to);}cached.set(from,dist);return dist;};
   for(const {cell:parcel,amount:weight} of [...input.homes].sort((a,b)=>a.cell-b.cell)) {
     const origins=frontages(input.map,parcel),options:{from:number;to:number;distance:number;size:number;parcel:number}[]=[];
-    for(const d of work){let best:{from:number;to:number;distance:number}|null=null;
-      for(const from of origins)for(const to of frontages(input.map,d.cell)){if(from===to)continue;const n=distances(from)[to];if(n<0)continue;if(!best||n<best.distance||n===best.distance&&(from<best.from||from===best.from&&to<best.to))best={from,to,distance:n};}
-      if(best)options.push({...best,size:d.amount,parcel:d.cell});
-    }
+    const routes=commuteOn?new Map<number,{from:number;to:number;distance:number}|null>():null;
+    const route=(destination:number)=>{
+      if(routes?.has(destination))return routes.get(destination)!;
+      let best:{from:number;to:number;distance:number}|null=null;
+      for(const from of origins)for(const to of frontages(input.map,destination)){if(from===to)continue;const n=distances(from)[to];if(n<0)continue;if(!best||n<best.distance||n===best.distance&&(from<best.from||from===best.from&&to<best.to))best={from,to,distance:n};}
+      routes?.set(destination,best);return best;
+    };
+    for(const d of work){const best=route(d.cell);if(best)options.push({...best,size:d.amount,parcel:d.cell});}
     // If no destination is reachable, preserve one representative disconnected
     // pressure route when both parcels have frontage; repair can then unlock it.
     if(!options.length&&origins.length){for(const d of work){const to=frontages(input.map,d.cell).find(n=>n!==origins[0]);if(to!==undefined)options.push({from:origins[0],to,distance:Math.abs(expandedCellCoordinate(to).x-expandedCellCoordinate(origins[0]).x)+Math.abs(expandedCellCoordinate(to).z-expandedCellCoordinate(origins[0]).z),size:d.amount,parcel:d.cell});}}
     options.sort((a,b)=>a.distance-b.distance||a.parcel-b.parcel||a.from-b.from||a.to-b.to);
-    for(const {from,to,size} of options.slice(0,2))demand.push({from,to,rate:Math.sqrt(weight*size)*.12});
+    if(!commuteOn){for(const {from,to,size} of options.slice(0,2))demand.push({from,to,rate:Math.sqrt(weight*size)*.12});continue;}
+    const ambient=options.slice(0,2).map(({from,to,size})=>({from,to,rate:Math.sqrt(weight*size)*.12}));
+    const jobs=[...commutes.get(parcel)??[]].sort((a,b)=>a[0]-b[0]).flatMap(([work,workers])=>{const r=route(work);return r?[{...r,workers}]:[];});
+    const workers=jobs.reduce((n,j)=>n+j.workers,0),share=weight>0?Math.min(1,workers/weight):0;
+    if(!share){demand.push(...ambient);continue;}
+    // Redirect the employed residents' fraction of this home's EXISTING budget.
+    // Never add a second commute stream beside its private-car demand. No
+    // ambient budget (e.g. a park-only city) still means no representative trips.
+    const budget=ambient.reduce((n,d)=>n+d.rate,0);if(budget>0)redirected=true;
+    for(const d of ambient)if(share<1)demand.push({...d,rate:d.rate*(1-share)});
+    for(const j of jobs)if(budget>0)demand.push({from:j.from,to:j.to,rate:budget*share*j.workers/workers});
   }
-  return {map:input.map,demand};
+  if(!redirected)return {map:input.map,demand};
+  // Aggregate before the raw-input bound. The existing 64-OD visual projection
+  // remains approximate; omitted excess is clipped, never counted as served.
+  const grouped=new Map<string,GameDemand>();
+  for(const d of demand){const key=pair(d.from,d.to),prior=grouped.get(key);if(prior)prior.rate+=d.rate;else grouped.set(key,{...d});}
+  const rows=[...grouped.values()].sort((a,b)=>a.from-b.from||a.to-b.to);
+  const clippedRate=rows.slice(MAX_RAW_GAME_DEMAND).reduce((n,d)=>n+d.rate,0);
+  return {map:input.map,demand:rows.slice(0,MAX_RAW_GAME_DEMAND),...(clippedRate>0?{clippedRate}:{})};
 }
 /** Convenience for tests; in the UI call captureTrafficGameInput on main and
  * trafficGameSampleFromInput in the worker to avoid routing on the render thread. */
@@ -257,12 +290,12 @@ export class TrafficGame {
   private actorLink(c:Actor):string {return linkKey(c.path[c.index],c.path[c.index+1]);}
   private laneCount(key:string):number {return this.network.links.get(key)?.lanes??1;}
   /** Free lane index, or -1 when every lane of the link is at the per-lane cap or bus load fills it. */
-  private pickLane(key:string):number {
+  private pickLane(key:string,withheld:ReadonlySet<string>):number {
     const link=this.network.links.get(key);if(!link)return -1;
     const here=this.cars.filter(c=>this.actorLink(c)===key);
     if(here.length+this.busLoad(key)+1>link.lanes*STORAGE_PER_LANE)return -1;
     let best=-1,n=Infinity;
-    for(let lane=0;lane<link.lanes;lane++){const count=here.filter(c=>c.lane===lane).length;if(count>=STORAGE_PER_LANE||!this.tailClear(key,lane))continue;if(count<n){best=lane;n=count;}}
+    for(let lane=0;lane<link.lanes;lane++){const count=here.filter(c=>c.lane===lane).length;if(withheld.has(key+":"+lane)||count>=STORAGE_PER_LANE||!this.tailClear(key,lane))continue;if(count<n){best=lane;n=count;}}
     return best;
   }
   private tailClear(key:string,lane:number):boolean {
@@ -449,19 +482,29 @@ export class TrafficGame {
   /** One departure per OD per substep, only into a bumper gap, so cars leave in a line instead of a burst. */
   private spawnWave(grant:ReadonlyMap<number,number>):void {
     const shift=this.ods.length?this.stepValue%this.ods.length:0;
-    const occupancy=new Map<string,number>();for(const c of this.cars){const k=this.actorLink(c);occupancy.set(k,(occupancy.get(k)??0)+1);}
+    const occupancy=new Map<string,number>(),withheld=new Set<string>();
+    for(const car of this.cars){
+      const current=this.actorLink(car);
+      occupancy.set(current,(occupancy.get(current)??0)+1);
+      const request=this.junctionRequests.get(car.id),node=car.path[car.index+1],next=car.path[car.index+2];
+      if(!request || request.node!==node || next===undefined || !this.network.links.has(current))continue;
+      if(this.junctionClock-request.since<SIGNAL_URGENT_WAIT)continue;
+      // A new departure must not take the next free slot from an overdue through car.
+      const exit=linkKey(node,next);
+      withheld.add(exit+":"+Math.min(car.lane,this.laneCount(exit)-1));
+    }
     let alternateTimes:Map<string,number>|undefined;
     for(const od of [...this.ods.slice(shift),...this.ods.slice(0,shift)]){
       if(od.waiting<1||this.cars.length>=GAME_MAX_CARS||grant.has(od.from))continue;
       let path=od.path;if(!path||path.length<2)continue;
-      let lane=this.pickLane(linkKey(path[0],path[1]));
+      let lane=this.pickLane(linkKey(path[0],path[1]),withheld);
       if(lane<0||!this.tailClear(linkKey(path[0],path[1]),lane)){
-        const starts=(this.network.out.get(od.from)??[]).filter(l=>{const key=linkKey(l.from,l.to),slot=this.pickLane(key);return slot>=0&&this.tailClear(key,slot);});
+        const starts=(this.network.out.get(od.from)??[]).filter(l=>{const key=linkKey(l.from,l.to),slot=this.pickLane(key,withheld);return slot>=0&&this.tailClear(key,slot);});
         if(!starts.length)continue;
         const graph={...this.network,out:new Map(this.network.out).set(od.from,starts)};
         alternateTimes??=new Map([...this.network.links].map(([k,l])=>[k,1+((occupancy.get(k)??0)+this.busLoad(k))/Math.max(1,l.lanes)*3]));
         const alt=shortestPath(graph,alternateTimes,od.from,od.to);if(!alt||alt.length<2)continue;
-        path=alt;lane=this.pickLane(linkKey(path[0],path[1]));if(lane<0)continue;
+        path=alt;lane=this.pickLane(linkKey(path[0],path[1]),withheld);if(lane<0)continue;
       }
       const first=linkKey(path[0],path[1]);if(!this.tailClear(first,lane))continue;
       const actor:Actor={id:this.nextId,destination:od.to,path:[...path],index:0,visits:0,blocked:false,progress:this.junctions.has(path[0])?JUNCTION_CLEAR:LANE_START,speed:0,lane,...(this.workMinute>=0?{workClaimPending:true}:{})};
@@ -480,7 +523,7 @@ export class TrafficGame {
     if(claimDay>=0)this.workLastWindow=Math.max(this.workLastWindow,claimDay);
     this.workClaimDay=claimDay;
     this.stepValue++;
-    for(const od of this.ods){const b=this.busShareFor(od),busPart=b?od.rate*b.share:0;if(b&&busPart>0){const key=`${od.from}:${od.to}:${b.lineId}:${b.fromStopId}:${b.toStopId}`,t=this.busTotals.get(key)??{from:od.from,to:od.to,lineId:b.lineId,fromStopId:b.fromStopId,toStopId:b.toStopId,total:0};t.total+=busPart;this.busTotals.set(key,t);this.busDiverted+=busPart;}const road=od.rate-busPart;this.offered+=road;const value=od.waiting+road;od.waiting=Math.min(GAME_MAX_QUEUE,value);this.dropped+=Math.max(0,value-GAME_MAX_QUEUE);}
+    for(const od of this.ods){const b=this.busShareFor(od),busPart=b?Math.max(0,od.rate-demandTaxiRate(od))*b.share:0;if(b&&busPart>0){const key=`${od.from}:${od.to}:${b.lineId}:${b.fromStopId}:${b.toStopId}`,t=this.busTotals.get(key)??{from:od.from,to:od.to,lineId:b.lineId,fromStopId:b.fromStopId,toStopId:b.toStopId,total:0};t.total+=busPart;this.busTotals.set(key,t);this.busDiverted+=busPart;}const road=od.rate-busPart;this.offered+=road;const value=od.waiting+road;od.waiting=Math.min(GAME_MAX_QUEUE,value);this.dropped+=Math.max(0,value-GAME_MAX_QUEUE);}
     if(this.stepValue%REROUTE_STEPS===0)this.replan();
     const grant=new Map<number,number>();
     // A body leaving the square still owns it across worker-step boundaries.

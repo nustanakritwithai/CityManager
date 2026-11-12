@@ -6,7 +6,7 @@ export async function landExpansionChecks({send,evaluate,capture,until,acknowled
  const mapPoint=()=>evaluate(`(()=>{const r=document.querySelector('.city-map-canvas').getBoundingClientRect(),cell=r.width/28;return {x:r.left+7.5*cell,y:r.top+3.5*cell};})()`);
  const tapCell=async(id,isTouch=false)=>{const p=await evaluate(`window.cityManager.cellScreen(${id})`);assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`),'city-canvas');await (isTouch?touch:mouse)(p.x,p.y);};
  await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});
- const before=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.equal(before.cells.length,672);assert.equal(before.version,26);assert.match(await evaluate("document.querySelector('.map-caption').textContent"),/24\s*×\s*28/);
+ const before=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.equal(before.cells.length,672);assert.equal(before.version,27);assert.match(await evaluate("document.querySelector('.map-caption').textContent"),/24\s*×\s*28/);
  await evaluate("document.querySelector('.minimap-open').click()");await until(()=>evaluate("!document.querySelector('.city-map').hidden"),'land desktop map');
  await capture('land-desktop-map');const p=await mapPoint();await mouse(p.x,p.y);
  await until(()=>evaluate("document.querySelector('#inspector').dataset.open==='true'"),'land desktop selection');
@@ -14,7 +14,7 @@ export async function landExpansionChecks({send,evaluate,capture,until,acknowled
  await evaluate("document.querySelector('#close-inspector').click();document.querySelector('[data-tool=road]').click()");
  await tapCell(5);await tapCell(653);
  await until(async()=>{const c=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));return c.cells[5].road&&c.cells[653].road;},'land road across seam');
- await capture('land-desktop-road');const saved=await acknowledge();assert.equal(saved.version,26);assert.ok(saved.cells[5].road&&saved.cells[653].road);
+ await capture('land-desktop-road');const saved=await acknowledge();assert.equal(saved.version,27);assert.ok(saved.cells[5].road&&saved.cells[653].road);
  await reload();const loaded=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(loaded.cells,saved.cells);assert.deepEqual(loaded.resources,saved.resources);assert.deepEqual(loaded.market,saved.market);assert.deepEqual(loaded.accounts,saved.accounts);
  await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
  await evaluate("document.querySelector('#toggle-stats').click();document.querySelector('.st-map').click()");await until(()=>evaluate("!document.querySelector('.city-map').hidden"),'land phone map');

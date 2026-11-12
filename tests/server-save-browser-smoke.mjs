@@ -17,11 +17,28 @@ let landEvidence={status:'not-run'};
 let trafficGapEvidence={status:'not-run',reason:'Bumper-gap acceptance is opt-in for the exact traffic transition.'};
 let railEvidence={status:'not-run',reason:'Rail UI acceptance is opt-in for the exact rail transition.'};
 let toolbarEvidence={status:'not-run',reason:'Unchanged toolbar matrix remains in visual PR167 coverage; this runner checks server-save UI only.'};
-const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],saveNetwork:[],server:null};
+const diagnostics={phase:'initialization',lastExpression:null,dialogs:[],navigationRetries:[],captures:[],runtimeErrors:[],saveNetwork:[],renderers:[],cdp:[],server:null};
 const OWNER='11111111-1111-4111-8111-111111111111', COOKIE='fixture-existing-owner', CSRF='fixture-csrf';
 const expectedReloadDialog=(type,scope)=>scope===true&&type==='beforeunload';
 const runLostAckNextSave=env=>env.CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE==='1';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Match the existing Windows native-input smokes: let Edge choose its graphics
+// backend instead of forcing the cross-platform SwiftShader implementation.
+// The fallback permission remains; Linux keeps its exact existing flags.
+const graphicsArgs=(platform=process.platform)=>platform==='win32'?['--enable-unsafe-swiftshader']:['--use-angle=swiftshader','--enable-unsafe-swiftshader'];
+function rendererMetadata(value){
+ const v=value&&typeof value==='object'?value:{};
+ const text=key=>typeof v[key]==='string'?v[key].slice(0,512):null;
+ const bool=key=>typeof v[key]==='boolean'?v[key]:null;
+ const number=key=>Number.isFinite(v[key])?v[key]:null;
+ return {renderer:text('renderer'),quality:text('quality'),requestedQuality:text('requestedQuality'),shadows:bool('shadows'),postProcessing:bool('postProcessing'),traffic:bool('traffic'),paused:bool('paused'),width:number('width'),height:number('height'),visibility:text('visibility'),contextLosses:number('contextLosses')};
+}
+function rememberCdp(log,event){log.push(event);if(log.length>80)log.splice(0,log.length-80);}
+// A queued automatic check can truthfully replace the manual-write label after
+// its ACK. Neither pending work nor acknowledgement of older bytes is settled.
+function acknowledgedSaveUi(text,failureVisible){
+ return !failureVisible&&['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน'].some(label=>text?.startsWith(label));
+}
 // Synthetic browser fixture only. Record the visible retry click and the
 // forwarded Save click without capturing cookies, keys, or city bytes.
 function installSaveClickTrace(){
@@ -70,19 +87,24 @@ async function screenshotReadback(send,probe,record){
  }
 }
 const failureAfterCleanup=(primary,errors)=>primary??(errors.length?new AggregateError(errors,'Browser fixture cleanup failed'):null);
-async function stopBrowser(child,ws){
+async function stopBrowser(child,ws,{platform=process.platform,spawnProcess=spawn,wait=sleep}={}){
  if(!child)return;
  const alive=()=>child.exitCode===null&&child.signalCode===null;
  // Ask the owned browser to shut down its children before removing its profile.
  try{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({id:2147483647,method:'Browser.close'}));}catch{/* The bounded owned-process fallback below still runs. */}
- for(let i=0;i<30&&alive();i++)await sleep(100);
- if(alive()&&child.pid){
-  if(process.platform==='win32'){
+ for(let i=0;i<30&&alive();i++)await wait(100);
+ if(alive()){
+  if(!Number.isSafeInteger(child.pid)||child.pid<=0)throw Error('Owned browser is still running without a valid PID');
+  let killFailure=null;
+  if(platform==='win32'){
    // Never target image names or unrelated browser processes.
-   await new Promise((ok,bad)=>{const killer=spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore'});const timer=setTimeout(()=>{killer.kill();bad(Error('Owned browser tree termination timed out'));},5000);killer.once('error',e=>{clearTimeout(timer);bad(e);});killer.once('close',code=>{clearTimeout(timer);code===0||!alive()?ok():bad(Error(`Owned browser taskkill exited ${code}`));});});
+   const result=await new Promise((ok,bad)=>{const killer=spawnProcess('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:['ignore','ignore','pipe']});let stderr='',denialTail='',accessDenied=false;killer.stderr?.on('data',chunk=>{const text=denialTail+String(chunk);accessDenied||=/access (?:is )?denied/i.test(text);denialTail=text.slice(-32);stderr=(stderr+String(chunk)).slice(0,4096);});const timer=setTimeout(()=>{killer.kill();bad(Error('Owned browser tree termination timed out'));},5000);killer.once('error',e=>{clearTimeout(timer);bad(e);});killer.once('close',code=>{clearTimeout(timer);ok({code,stderr,accessDenied});});});
+   if(result.code!==0||result.accessDenied){killFailure=Error(`Owned browser taskkill exited ${result.code}${result.accessDenied?' (access denied)':''}${result.stderr?': '+result.stderr.trim():''}`);if(result.accessDenied)throw killFailure;}
   }else child.kill('SIGTERM');
-  for(let i=0;i<30&&alive();i++)await sleep(100);
-  if(alive())throw Error('Owned browser did not exit');
+  // Browser.close and taskkill race with delivery of the owned child's exit
+  // event. A nonzero taskkill is not success unless that child actually exits.
+  for(let i=0;i<30&&alive();i++)await wait(100);
+  if(alive())throw killFailure??Error('Owned browser did not exit');
  }
 }
 
@@ -109,6 +131,19 @@ function fixtureService(){
  return {service,setResetAllowed(value){resetAllowed=value;},get state(){return structuredClone(state);},mode:'ok',delay:0,posts:[],acknowledged:0,traceSave:false,postAudit:[]};
 }
 async function selfTest(){
+ assert.deepEqual(graphicsArgs('win32'),['--enable-unsafe-swiftshader'],'Windows uses the browser default backend, with the existing software fallback permission');
+ assert.deepEqual(graphicsArgs('linux'),['--use-angle=swiftshader','--enable-unsafe-swiftshader'],'Linux graphics arguments stay unchanged');
+ const renderer={renderer:'ANGLE test renderer',quality:'low',requestedQuality:'auto',shadows:false,postProcessing:false,traffic:true,paused:true,width:390,height:844,visibility:'visible',contextLosses:0};
+ assert.deepEqual(rendererMetadata({...renderer,raw:'must not be retained',cookies:'must not be retained'}),renderer,'Only renderer and viewport metadata is retained');
+ assert.equal(rendererMetadata({renderer:'x'.repeat(600)}).renderer.length,512,'Renderer text is bounded');
+ assert.ok(Object.values(rendererMetadata(null)).every(value=>value===null));
+ assert.equal(rendererMetadata({width:Infinity,paused:'false'}).width,null);assert.equal(rendererMetadata({width:Infinity,paused:'false'}).paused,null);
+ const telemetry=[];for(let i=0;i<100;i++)rememberCdp(telemetry,{id:i,method:'Runtime.evaluate',status:i===99?'timeout':'ok',durationMs:i});
+ assert.equal(telemetry.length,80);assert.equal(telemetry[0].id,20);assert.equal(telemetry.at(-1).status,'timeout','Bounded telemetry preserves the latest failure');
+ for(const label of ['บันทึกบนเซิร์ฟเวอร์แล้ว','ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน']){
+  assert.equal(acknowledgedSaveUi(label+' 12:00:00',false),true);assert.equal(acknowledgedSaveUi(label,true),false);
+ }
+ for(const text of [undefined,'','กำลังบันทึก… · บันทึกบนเซิร์ฟเวอร์แล้ว','บันทึกไม่สำเร็จ · ตรวจสอบแล้วว่าเซฟบนเซิร์ฟเวอร์ตรงกัน','ยืนยันเซฟก่อนหน้าแล้ว · มีการเปลี่ยนแปลงใหม่ที่ยังไม่บันทึก','ยังไม่มีการบันทึกสำเร็จในรอบนี้'])assert.equal(acknowledgedSaveUi(text,false),false);
  assert.equal(runLostAckNextSave({}),false);assert.equal(runLostAckNextSave({CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE:'0'}),false);assert.equal(runLostAckNextSave({CITYMANAGER_RUN_LOST_ACK_NEXT_SAVE:'1'}),true);
  const listeners=[],syntheticWindow={},syntheticDocument={addEventListener:(type,fn,capture)=>listeners.push({type,fn,capture})};
  Function('window','document','Date',`(${installSaveClickTrace.toString()})()`)(syntheticWindow,syntheticDocument,Date);
@@ -142,6 +177,24 @@ async function selfTest(){
  assert.equal(failureAfterCleanup(primary,[cleanup]),primary,'Cleanup cannot mask acceptance failure');
  assert.ok(failureAfterCleanup(null,[cleanup]) instanceof AggregateError,'Cleanup-only failure must fail acceptance');
  assert.equal(failureAfterCleanup(null,[]),null);
+
+ const {EventEmitter}=await import('node:events');
+ const cleanupCase=async({code=255,exitAt=Infinity,exitWithTaskkill=false,stderr='',launchError=null,pid=18765}={})=>{
+  const child={pid,exitCode:null,signalCode:null},commands=[];let waits=0;
+  const work=stopBrowser(child,{readyState:WebSocket.OPEN,send:raw=>commands.push(JSON.parse(raw))},{platform:'win32',wait:async ms=>{assert.equal(ms,100);if(++waits===exitAt)child.exitCode=0;},spawnProcess:(command,args,options)=>{
+   assert.equal(command,'taskkill');assert.deepEqual(args,['/PID','18765','/T','/F']);assert.deepEqual(options.stdio,['ignore','ignore','pipe']);
+   const killer=new EventEmitter();killer.stderr=new EventEmitter();killer.kill=()=>assert.fail('Immediate synthetic taskkill must not time out');
+   queueMicrotask(()=>{if(launchError)killer.emit('error',launchError);else{if(exitWithTaskkill)child.exitCode=0;for(const chunk of Array.isArray(stderr)?stderr:[stderr])if(chunk)killer.stderr.emit('data',chunk);killer.emit('close',code);}});return killer;
+  }});
+  return {work,child,commands,waits:()=>waits};
+ };
+ const raced=await cleanupCase({exitAt:31});await raced.work;assert.equal(raced.child.exitCode,0);assert.equal(raced.waits(),31);assert.deepEqual(raced.commands,[{id:2147483647,method:'Browser.close'}]);
+ const concurrent=await cleanupCase({exitWithTaskkill:true});await concurrent.work;assert.equal(concurrent.child.exitCode,0);assert.equal(concurrent.waits(),30,'Already observed exit during taskkill needs no extra wait');
+ for(const code of [0,255]){const alive=await cleanupCase({code});await assert.rejects(alive.work,code===0?/Owned browser did not exit/:/taskkill exited 255/);assert.equal(alive.waits(),60,'Cleanup remains bounded and never treats an unconfirmed exit as success');}
+ for(const pid of [null,0,'18765']){const missing=await cleanupCase({pid});await assert.rejects(missing.work,/without a valid PID/);assert.equal(missing.waits(),30,'An unconfirmed child without an owned PID cannot pass cleanup or invoke taskkill');}
+ const denied=await cleanupCase({stderr:'ERROR: Access is denied.',exitWithTaskkill:true});await assert.rejects(denied.work,/Access is denied/);
+ const lateDenial=await cleanupCase({code:0,stderr:['x'.repeat(4096),'Access is ','denied.'],exitWithTaskkill:true});await assert.rejects(lateDenial.work,error=>/access denied/.test(error.message)&&error.message.length<4200,'Denial detection survives truncation and split chunks without unbounded diagnostics');
+ const launchError=Object.assign(Error('spawn taskkill EACCES'),{code:'EACCES'}),unavailable=await cleanupCase({launchError});await assert.rejects(unavailable.work,error=>error===launchError);
 
  assert.equal(expectedReloadDialog('beforeunload',true),true);
  for(const [type,scope] of [['beforeunload',false],['confirm',true],['alert',true],['prompt',true]])assert.equal(expectedReloadDialog(type,scope),false);
@@ -215,7 +268,8 @@ async function run(){
   const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/CityManager/'+(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'?'?bus=1':'');
   profile=await mkdtemp(resolve(tmpdir(),'city-server-save-smoke-'));
   const browser=process.env.CITYMANAGER_BROWSER||(process.platform==='win32'?'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe':'google-chrome');
-  child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
+  const graphics=graphicsArgs();diagnostics.browserLaunch={platform:process.platform,graphicsArgs:graphics,backendSelection:process.platform==='win32'?'browser-default':'forced-swiftshader'};
+  child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling',...graphics,'--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
   let launchError;child.on('error',e=>{launchError=e;});let debugPort;
   for(let i=0;i<100&&!debugPort;i++){if(launchError)throw launchError;if(child.exitCode!==null)throw Error(`Browser exited ${child.exitCode}; no acceptance result`);try{debugPort=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);}catch{}await sleep(100);}
   assert.ok(debugPort,'Browser unavailable; acceptance NOT passed');
@@ -236,8 +290,17 @@ async function run(){
    }
    if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(Object.assign(Error(JSON.stringify(m.error)),{cdpError:m.error})):p?.resolve(m.result);}};
   await new Promise((ok,bad)=>{ws.onopen=ok;ws.onerror=bad;});
-  const send=(method,params={})=>new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>{pending.delete(n);reject(Object.assign(Error(`CDP timeout: ${method}; phase=${diagnostics.phase}; expression=${diagnostics.lastExpression}`),{cdpTimeoutMethod:method}));},30_000);pending.set(n,{resolve:v=>{clearTimeout(t);resolve(v);},reject:e=>{clearTimeout(t);reject(e);}});ws.send(JSON.stringify({id:n,method,params}));});
+  const send=(method,params={})=>new Promise((resolve,reject)=>{
+   const n=++id,started=performance.now(),phase=diagnostics.phase,expression=method==='Runtime.evaluate'?String(params.expression??'').slice(0,240):undefined;let finished=false;
+   const record=status=>{if(finished)return;finished=true;rememberCdp(diagnostics.cdp,{id:n,method,phase,...(expression===undefined?{}:{expression}),status,durationMs:Math.round(performance.now()-started)});};
+   const t=setTimeout(()=>{pending.delete(n);record('timeout');reject(Object.assign(Error(`CDP timeout: ${method}; phase=${phase}; expression=${expression??diagnostics.lastExpression}`),{cdpTimeoutMethod:method}));},30_000);
+   pending.set(n,{resolve:v=>{clearTimeout(t);record('ok');resolve(v);},reject:e=>{clearTimeout(t);record('error');reject(e);}});ws.send(JSON.stringify({id:n,method,params}));
+  });
   const evaluate=async expression=>{if(unexpectedDialog)throw unexpectedDialog;diagnostics.lastExpression=expression.slice(0,240);const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
+  const recordRenderer=async phase=>{
+   const value=await evaluate("(()=>{const a=window.cityManager?.atmosphere();return {renderer:a?.renderer,quality:a?.quality,requestedQuality:a?.settings.quality,shadows:a?.shadows,postProcessing:a?.postProcessing,traffic:a?.settings.traffic,paused:window.cityManager?.parks().paused,width:innerWidth,height:innerHeight,visibility:document.visibilityState,contextLosses:window.__contextLosses}})()");
+   const evidence={phase,...rendererMetadata(value)};diagnostics.renderers.push(evidence);if(diagnostics.renderers.length>16)diagnostics.renderers.shift();console.log('Renderer evidence',JSON.stringify(evidence));
+  };
   const until=async(fn,label,ms=90_000)=>{diagnostics.phase=label;console.log('Acceptance phase:',label);const start=Date.now();while(Date.now()-start<ms){if(await fn())return;await sleep(100);}throw Error(`Timeout: ${label}`);};
   await send('Runtime.enable');await send('Page.enable');await send('Network.enable');await send('Inspector.enable');diagnostics.browserVersion=await send('Browser.getVersion');
   await send('Network.setCookie',{name:'cm_session',value:COOKIE,url:origin,httpOnly:true,sameSite:'Strict'});await send('Network.setCookie',{name:'cm_csrf',value:CSRF,url:origin,sameSite:'Strict'});
@@ -254,10 +317,14 @@ async function run(){
   const click=selector=>{diagnostics.phase=`click ${selector}`;return evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
   const entryPredicate=()=>evaluate("!!document.querySelector('.guest-entry-card button:not(:disabled)')");
   const reloadEntryPredicate=()=>reloadEntryRead(entryPredicate,error=>{diagnostics.navigationRetries.push({phase:diagnostics.phase,...error});console.log('Post-reload entry context retry',JSON.stringify(error));});
-  const enter=async({afterReload=false}={})=>{await until(afterReload?reloadEntryPredicate:entryPredicate,'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');};
+  const enter=async({afterReload=false}={})=>{await until(afterReload?reloadEntryPredicate:entryPredicate,'existing login entry');await click('.guest-entry-card button');await until(()=>evaluate('!!window.cityManager&&window.cityManager.visuals().ready'),'confirmed server city');await recordRenderer(afterReload?'reloaded server city':'initial server city');};
   const clean=async()=>assert.deepEqual(await evaluate('window.__cityWrites'),[],'browser city writes prohibited');
   const failed=()=>evaluate("!!document.querySelector('#save-failure-banner:not([hidden])')");
-  const settled=(label='acknowledged save UI')=>until(()=>evaluate("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')"),label);
+  const settled=(label='acknowledged save UI')=>until(async()=>{
+   const ui=await evaluate("({text:document.querySelector('#autosave-status')?.textContent,failureVisible:!!document.querySelector('#save-failure-banner:not([hidden])')})");
+   diagnostics.saveUi={...ui,acknowledged:f.acknowledged,revision:f.state.active?.revision??null};
+   return acknowledgedSaveUi(ui.text,ui.failureVisible);
+  },label);
   const capture=async (name,{requireReady=true}={})=>{
    assert.match(name,/^[a-z0-9_-]+$/i);const record={name,phase:diagnostics.phase,started:new Date().toISOString(),status:'pending'};diagnostics.captures.push(record);console.log('Capture start',name,'surface');let png;
    const probe=async()=>{assert.deepEqual(diagnostics.runtimeErrors,[],'No uncaught browser error or renderer crash');const health=await evaluate("({ready:window.cityManager?.visuals().ready,contextLosses:window.__contextLosses,visibility:document.visibilityState,width:innerWidth,height:innerHeight})");if(requireReady)assert.equal(health.ready,true);assert.equal(health.contextLosses,0,'WebGL context must remain live');return health;};
@@ -304,7 +371,7 @@ async function run(){
   }
   // No success before the server transaction acknowledgement.
   // Paused startup need not autosave: establish a real acknowledged manual save first.
-  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,26,'actual built game saves expanded checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).mapBaseVersion,25);assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-21');await clean();await capture('server-save-acknowledged');
+  const initialAck=f.acknowledged;await click('#save');await until(async()=>f.acknowledged>initialAck,'initial manual ACK');await settled();assert.equal(JSON.parse(f.state.active.raw).version,27,'actual built game saves expanded checkpointed server city');assert.equal(JSON.parse(f.state.active.raw).mapBaseVersion,25);assert.equal(JSON.parse(f.state.active.raw).commercialBaseVersion,24);assert.equal(JSON.parse(f.state.active.raw).rulesVersion,'chain-22');await clean();await capture('server-save-acknowledged');
   if(process.env.CITYMANAGER_TRAFFIC_CHECKS==='bumper-gap'){
    diagnostics.phase='actual bumper-gap traffic UI';trafficGapEvidence={status:'running'};
    const {trafficGapBrowserChecks}=await import('./traffic-gap-browser-checks.mjs');
@@ -348,11 +415,13 @@ async function run(){
   assert.equal(await evaluate(`!!document.querySelector('#save-failure-export,#export,#import,[download],input[type=file]')`),false,'no browser city export or import controls');
   for(const [name,width,height,mobile] of [['desktop',1280,800,false],['mobile',390,844,true]]){
    await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});await send('Emulation.setTouchEmulationEnabled',{enabled:mobile});
+   await recordRenderer('retry viewport '+name);
    f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure '+name);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
    if(process.env.CITYMANAGER_PR182_CHECKS==='1')await capture('pr182-banner-'+name);
    const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await pressRetry(mobile);await until(async()=>{diagnostics.retryBanner={name,initialRevision:rev,headRevision:f.state.active.revision,fixtureAudit:structuredClone(f.postAudit),clicks:await evaluate('window.__saveClickTrace')};return f.state.active.revision>rev;},'banner retry acknowledgement '+name);await settled();assert.deepEqual(f.posts[start+1],pendingCommand,'exact uncertain command retry');await clean();
   }
   await send('Emulation.setTouchEmulationEnabled',{enabled:false});await send('Emulation.clearDeviceMetricsOverride');
+  await recordRenderer('restored desktop viewport');
   // Commit succeeded but its ACK was lost. The banner must replay the original
   // key/body before trackedSave writes the current state as a new revision.
   // Explicitly excluded from this release's acceptance by the owner; keep it

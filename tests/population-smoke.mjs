@@ -1,18 +1,23 @@
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
+import { createPanelModelAudit } from './panel-model-audit.mjs';
+import { browserSnapshotState } from './browser-snapshot.ts';
 import { populationFixture, population2000Fixture } from './population-capacity-fixture.ts';
-import { assertSavedCity } from './park-session-assertions.mjs';
-// Household/housing acceptance on worker schema v6. Root runs suites sequentially.
-// The browser receives only strict-valid public-simulation fixtures via real Load.
+import { panelEntryCity, loadPanelCity, saveAndReloadPanel, assertPanelSaveChain } from './panel-ui-server.mjs';
+import { startTrafficHttpFixture, reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
+import { installPopulationSaveFault } from './population-server-fault.mjs';
+// Household/housing acceptance using authenticated isolated server persistence.
+// The browser receives only strict-valid synthetic fixtures; no local city copy is used.
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { adoptSavedEducation, firmWage, createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, WAGES, MONTH } from '../src/sim.ts';
-import { reachTouch } from './touch-reach.mjs';
 
-const url = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
+const upstream = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/population-preview');
 const blocked = process.env.CITYMANAGER_BLOCK_MODELS === '1';
+const mobilityOnly = process.argv.includes('--housing-mobility');
 const checks = [], errors = [], expectedErrors = [], screenshots = [], layouts = [];
 const legacyRaw = await readFile(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8'), legacy = JSON.parse(legacyRaw);
 const householdV2Raw = await readFile(new URL('./fixtures/legacy-v2-day180.json', import.meta.url), 'utf8');
@@ -39,7 +44,7 @@ for (let n = 0; n < 180; n++) {
     assert.equal(home.age, 0); assert.deepEqual(homeOccupancy(natural, home.id), { households: 0, persons: 0 });
     if (!vacantDay) vacantDay = serialize(natural);
   }
-  const arrival = natural.ledger.slice(previous.ledger.length).filter(e => e.reason === 'New household arrival savings');
+  const arrival = natural.ledger.filter(e => e.tick === natural.tick && e.reason === 'New household arrival savings');
   assert.ok(arrival.length <= 1, 'At most one new household per day');
   for (const entry of arrival) {
     assert.equal(entry.from, 'outside'); assert.equal(entry.amount, 150000);
@@ -57,7 +62,7 @@ for (let n = 0; n < 180; n++) {
 assert.ok(vacantDay && upgradeDay, 'Natural replay includes vacant construction and a capacity-only upgrade');
 // Preserve the published housing regression independently of new farm/market
 // startup timings. Migration adds no input stock or new people/buildings.
-const fixture = deserialize(workerV3Raw);
+let fixture = deserialize(workerV3Raw);
 const family = fixture.households.find(h => h.profile === 'family' && h.workforce === 2), factory = fixture.firms.find(f => f.zone === 'I'), shop = fixture.firms.find(f => f.zone === 'C');
 assert.ok(family && factory && shop); assert.equal(fixture.tick % MONTH, 0);
 assert.ok(fixture.firms.every(f => Object.keys(f.workDays).length === 0), 'Split-employer scenario begins after real monthly settlement');
@@ -74,16 +79,34 @@ fixture.employment.push({ householdId: family.id, firmId: factory.id, occupation
 assert.equal(JSON.stringify([fixture.accounts, fixture.ledger, fixture.goodsLedger, fixture.goods, fixture.firms.map(f => [f.inventory, f.workDays])]), financialBeforeSplit);
 deserialize(serialize(fixture));
 adoptSavedEducation(fixture);
-const fixtureRaw = serialize(fixture), sharedHome = fixture.buildings.find(b => b.zone === 'R' && homeOccupancy(fixture, b.id).households > 1);
+const fixtureRaw = serialize(fixture); fixture=panelEntryCity(fixtureRaw);
+const sharedHome = fixture.buildings.find(b => b.zone === 'R' && homeOccupancy(fixture, b.id).households > 1);
 assert.ok(sharedHome, 'Natural fixture contains a shared home');
-const keys = ['citymanager.save.v7', 'citymanager.save.v6', 'citymanager.save.v5', 'citymanager.save.v4', 'citymanager.save.v3', 'citymanager.save.v2', 'citymanager.save.v1', 'citymanager.backup.latest', ...[1, 2, 3, 4, 5, 6].flatMap(version => [`citymanager.backup.v${version}`, ...Array.from({ length: 7 }, (_, i) => `citymanager.backup.v${version}.${i + 1}`)])];
+// Isolated server fixture for the reported empty-new-homes case: preserve
+// every existing family/account/job, concentrate addresses in one taller home.
+const concentrated = panelEntryCity(fixtureRaw), moveHomes = concentrated.buildings.filter(b => b.zone === 'R').sort((a,b)=>a.cell-b.cell);
+const oldTower = moveHomes[0]; oldTower.level = 9; oldTower.housingType = 'condo';
+for (const resident of concentrated.households) resident.home = oldTower.id;
+concentrated.tick = 181; const concentratedRaw = serialize(concentrated); deserialize(concentratedRaw);
+const distributed = panelEntryCity(concentratedRaw); step(distributed); deserialize(serialize(distributed));
+const oldResidents = concentrated.households.map(h=>[h.id,h.members,h.wallet]);
+assert.ok(homeOccupancy(distributed,oldTower.id).households < concentrated.households.length);
+assert.deepEqual(distributed.households.map(h=>[h.id,h.members,h.wallet]),oldResidents);
+
+if(process.argv.includes('--preflight')){
+ assert.deepEqual(browserSnapshotState(serialize(fixture)),fixture);
+ for(const raw of [migratedRaw,serialize(householdV2Migrated),serialize(workerV3Migrated),vacantDay,upgradeDay])assert.deepEqual(browserSnapshotState(serialize(panelEntryCity(raw))),panelEntryCity(raw));
+ console.log(JSON.stringify({legacyHashes:[hash(legacyRaw),hash(householdV2Raw),hash(workerV3Raw)],fixtureTick:fixture.tick,fixtureCells:fixture.cells.length,family:family.id,sharedHome:sharedHome.id,mobilityHouseholds:distributed.households.map(h=>[h.id,h.home]),milestones}));process.exit(0);
+}
+const httpFixture=await startTrafficHttpFixture(upstream),server=httpFixture.fixture,url=httpFixture.url,fault=installPopulationSaveFault(server);
+
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
 let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/version', { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Run browser suites sequentially; CDP 9349 is occupied');
 // Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
 const profile = await mkdtemp(resolve(output, 'edge-population-'));
 const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-let ws, sequence = 0; const pending = new Map();
+let ws, sequence = 0,networkProbe=null; const pending = new Map(),externalRequests=[],providerRequests=[];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
@@ -96,21 +119,35 @@ async function send(method, params = {}) {
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function until(expression) { const start = Date.now(); while (Date.now() - start < 15000) { if (await evaluate(expression)) return; await sleep(60); } throw Error(`Timed out: ${expression}`); }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===21&&c.rulesVersion==="chain-16"&&c.populationCapacityVersion===1)||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const route = () => evaluate('({page:document.querySelector("#inspector").dataset.page,open:document.querySelector("#inspector").dataset.open,scope:document.querySelector("#entity-content").dataset.scope,id:document.querySelector("#entity-content").dataset.entityId})');
 async function click(x, y) { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: 1 }); }
-async function button(selector) { if (await reachTouch(evaluate, button, selector)) return;
+async function button(selector) { if (await reachTrafficControl(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`); await paints();
   const p = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,physicalWidth:r.width*k,physicalHeight:r.height*k,touch:navigator.maxTouchPoints>0,disabled:e.disabled}})()`);
   assert.ok(p.width && p.height && !p.disabled, `Visible enabled ${selector}`);
   if (p.touch) assert.ok(p.physicalWidth >= 43.5 && p.physicalHeight >= 43.5, `44px physical touch target ${selector}: ${JSON.stringify(p)}`);
+  if(selector==='.guest-entry-card button'&&p.touch){const readable=await evaluate(`(()=>{const e=document.querySelector('.guest-entry-card p'),r=document.querySelector('.guest-entry-card').getBoundingClientRect(),k=Math.min(1,screen.width/innerWidth);return{font:parseFloat(getComputedStyle(e).fontSize)*k,left:r.left,right:r.right,width:innerWidth}})()`);assert.ok(readable.font>=13.5&&readable.left>=0&&readable.right<=readable.width+1,`Readable contained guest entry ${JSON.stringify(readable)}`);}
+
   assert.equal(await evaluate(`!!document.elementFromPoint(${p.x},${p.y})?.closest(${JSON.stringify(selector)})`), true, `Actually hit ${selector}: ${JSON.stringify(p)}`);
   await click(p.x, p.y);
 }
 async function close() { if ((await route()).open === 'true') await button('#close-inspector'); await paints(); }
 async function page(name) { if ((await route()).open !== 'true' || (await route()).page !== name) { await close(); await button(name === 'city' ? '#toggle-inspector' : name === 'help' ? '#toggle-help' : '#toggle-game-menu'); } await until(`document.querySelector('#inspector').dataset.page===${JSON.stringify(name)}&&document.querySelector('#inspector').dataset.open==='true'`); }
 async function key(value) { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : undefined }); }
-async function load(raw) { await page('game'); await evaluate(`localStorage.setItem('citymanager.save.v7',${JSON.stringify(raw)})`); await button('#load'); const expected = deserialize(raw); adoptSavedEducation(expected); assert.deepEqual(await state(), expected, 'Loaded save keeps money, population and goods, and adds only an empty education record when the save had none'); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v7")'), raw, 'Loading does not rewrite the original save bytes'); await close(); }
+const modelAudit=createPanelModelAudit({blocked,expectedErrors,evaluate,sleep});
+async function load(raw) {
+ const before=modelAudit.begin();
+ await loadPanelCity(server,raw,{send,evaluate,button,until,url:url+'?starter=1'});
+ await modelAudit.verify(before);
+ assert.deepEqual(await state(),panelEntryCity(raw),'Authenticated server entry preserves the complete expanded city');
+}
+async function savePopulation(expected) {
+ const before=modelAudit.begin();
+ const result=await saveAndReloadPanel(server,expected,{send,evaluate,button,until});
+ await modelAudit.verify(before);return result;
+}
+
 async function place(building) { await close(); await button('[data-tool="select"]'); await paints(); const p = await evaluate(`window.cityManager.cellScreen(${building.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${p.x},${p.y})?.id`), 'city-canvas', `Actual canvas cell ${building.cell}`); await click(p.x, p.y); await until(`document.querySelector('#entity-content').dataset.scope==='place'&&document.querySelector('#entity-content').dataset.entityId==='${building.id}'`); }
 async function metrics(expected, root = '#entity-content') { const actual = await evaluate(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(root + ' [data-context-metric]')})].map(e=>[e.dataset.contextMetric,e.dataset.value]))`); for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], String(value), `Exact ${root} metric ${key}`); }
 async function household(h, source, city = fixture) {
@@ -120,6 +157,11 @@ async function household(h, source, city = fixture) {
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-employment-row")].map(e=>({householdId:Number(e.dataset.householdId),firmId:Number(e.dataset.firmId),workers:Number(e.dataset.workers),occupation:e.dataset.occupation,rank:e.dataset.rank,skill:e.dataset.skill}))'), rows);
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-skill-row")].map(e=>({skill:e.dataset.skill,total:Number(e.dataset.total),employed:Number(e.dataset.employed),unemployed:Number(e.dataset.unemployed)}))'), ['general', 'manufacturing', 'retail'].map(skill => { const employed = rows.filter(a => a.skill === skill).reduce((n, a) => n + a.workers, 0); return { skill, total: h.workerSkills[skill], employed, unemployed: h.workerSkills[skill] - employed }; }));
   assert.equal(await evaluate('!!document.querySelector("#entity-content .cx-legacy-assumption")'), h.origin === 'legacy-v1');
+  const happiness = await evaluate(`(()=>{const host=document.querySelector('#entity-content'),section=host.querySelector('[data-card-section="happiness"]');return {exists:!!section,direct:section?.parentElement===host,inDetails:!!section?.closest('details'),text:section?.innerText??''};})()`);
+  assert.equal(happiness.exists,true); assert.equal(happiness.direct,true); assert.equal(happiness.inDetails,false);
+  assert.ok(happiness.text.includes('ความสุขในพื้นที่'));
+  if (city.happiness) { const row = city.happiness.rows.find(r => r.householdId === h.id); assert.ok(happiness.text.includes(`${row.score} / 100`)); assert.ok(happiness.text.includes('เป้าหมายปัจจุบัน')); assert.ok(happiness.text.includes('สวนใกล้บ้าน:')); assert.ok(happiness.text.includes('โรงเรียนที่เปิดใกล้บ้าน:')); assert.ok(happiness.text.includes('ไม่ใช่ประวัติการเดินทางล้มเหลวจริง') && happiness.text.includes('ยังไม่หักรถโดยสารหรือรถไฟ') || happiness.text.includes('ยังไม่มีงานที่ได้รับมอบหมาย')); }
+  else assert.ok(happiness.text.includes('ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง'));
 }
 async function home(city, b) {
   await place(b); const used = homeOccupancy(city, b.id), cap = housingCapacity(b);
@@ -131,7 +173,6 @@ async function cityMetrics(city) {
   await page('city'); const s = summary(city), housed = city.households.filter(h => h.home !== null), persons = housed.reduce((n, h) => n + h.members, 0);
   await metrics({ population: s.population, households: s.households, workforce: s.workforce, dependents: s.dependents, employed: s.employed, unemployed: s.unemployed, homeless: s.homeless, 'homeless-persons': s.population - persons, 'home-slots': s.homeSlots, 'person-capacity': s.personCapacity, 'occupied-home-slots': housed.length, 'occupied-persons': persons, 'housing-vacancy': s.homeSlots - housed.length, 'person-vacancy': s.personCapacity - persons, treasury: city.accounts.treasury }, '#city-overview');
 }
-async function storage() { return evaluate(`Object.fromEntries(${JSON.stringify(keys)}.map(key=>[key,localStorage.getItem(key)]))`); }
 async function screenshot(name) { await paints(); const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); await writeFile(resolve(shots, name), Buffer.from(r.data, 'base64')); screenshots.push(name); }
 async function viewport(metric) { await close(); await send('Emulation.setDeviceMetricsOverride', { ...metric, deviceScaleFactor: metric.deviceScaleFactor ?? 1 }); await send('Emulation.setTouchEmulationEnabled', { enabled: metric.mobile, maxTouchPoints: 2 }); await until(`innerWidth===${metric.width}&&screen.width===${metric.screenWidth}&&document.querySelector('#city-canvas').clientWidth===${metric.width}`); await paints(); }
 async function layout() {
@@ -146,46 +187,40 @@ try {
     const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); }
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails);
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') { const a = m.params.args, expected = blocked && a.length === 2 && /^Failed to load resource \[\/CityManager\/assets\/kenney-city\/models\/([a-z]+(?:-[a-z]+)?)\.glb-container\]: Network error$/.test(a[0]?.value) && a[1]?.value === 'Network error'; (expected ? expectedErrors : errors).push(a); }
-    if (m.method === 'Fetch.requestPaused') void send('Fetch.failRequest', { requestId: m.params.requestId, errorReason: 'Failed' });
+    if(m.method==='Page.javascriptDialogOpening')void server.dialog(m.params,send).catch(error=>errors.push(String(error)));
+    if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(networkProbe?.active&&u===networkProbe.url)networkProbe.requestId=m.params.requestId;else { if(isPanelProviderRequest(u))providerRequests.push(u); if(/^https?:/.test(u)&&new URL(u).origin!==new URL(url).origin)externalRequests.push(u); }}
+    if(m.method==='Network.loadingFailed'&&m.params.requestId===networkProbe?.requestId)networkProbe.failed=m.params;
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable'); await send('Network.setCacheDisabled', { cacheDisabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, screenWidth: 1440, screenHeight: 1000, deviceScaleFactor: 1, mobile: false });
-  if (blocked) await send('Fetch.enable', { patterns: [{ urlPattern: '*kenney-city/models/*.glb', requestStage: 'Request' }] });
-  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager'); await until('window.cityManager.visuals().ready');
-  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")!=="true"')) await button('#pause');
+  await server.install(send);
+  await installTrafficNetworkFence({send,evaluate,protocol:await (await fetch('http://127.0.0.1:9349/json/protocol')).json(),origin:new URL(url).origin,blockedModels:blocked,additionalBlocked:[...panelProviderDenials(new URL(url).origin),new URL(url).origin+'/api/city-advisor/*',new URL(url).origin+'/*/api/city-advisor/*'],observeProbe:probe=>(networkProbe={url:probe})});
+  if (!mobilityOnly) {
+  // Repeated entry preserves the real legacy fixture, without a local city copy.
+  await load(migratedRaw);assert.deepEqual(await state(),panelEntryCity(migratedRaw));
+  await load(migratedRaw);assert.deepEqual(await state(),panelEntryCity(migratedRaw));
+  checks.push('Repeated authenticated server entry preserves exact migrated v1 population, wallets, goods, claims, tick and RNG without duplicate grants');
 
-  // Only test-owned keys in this isolated QA profile are reset. Loading is never
-  // allowed to write a migration, advance the clock or duplicate arrival savings.
-  const sentinel = serialize(createCity(91));
-  await evaluate(`for(const key of ${JSON.stringify(keys)})localStorage.removeItem(key);localStorage.setItem('citymanager.save.v1',${JSON.stringify(legacyRaw)});localStorage.setItem('citymanager.save.v2',${JSON.stringify(householdV2Raw)});localStorage.setItem('citymanager.save.v3',${JSON.stringify(workerV3Raw)});localStorage.setItem('citymanager.save.v7',${JSON.stringify(sentinel)})`);
-  await page('game'); const beforeImport = await storage(); await button('#load-legacy'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), beforeImport);
-  await button('#load-legacy'); await button('#load-legacy'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), beforeImport);
-  checks.push('Explicit strict v1 import is idempotent: exact frozen money/goods/claims/tick/RNG; loading never writes or repeats grants');
+  // A real service call fails before mutation, then the native retry uses the
+  // same pending request and obtains exact ACKs before a verified reload.
+  await page('game');const beforeFailure=server.active, stateBeforeFailure=await state(),cursor=server.writes.length;
+  fault.arm();await button('#save');await until('!!document.querySelector("#save-failure-banner:not([hidden])")');
+  assert.equal(fault.failures.length,1);assert.deepEqual(server.active,beforeFailure,'Failed service save leaves exact head and revision intact');
+  assert.equal(server.writes.length,cursor);assert.deepEqual(await state(),stateBeforeFailure);await server.assertNoCityWrites(evaluate);
+  const failed=fault.failures[0],pendingRaw=await evaluate('window.cityManager.sessionSnapshot()');
+  assert.equal(failed.command.raw,pendingRaw);assert.equal(failed.command.expectedRevision,beforeFailure.revision);
+  await button('#save-failure-retry');
+  await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')");
+  await server.settle();
+  assertPanelSaveChain(beforeFailure,server.active,server.writes.slice(cursor),pendingRaw,server.writes.slice(0,cursor));
+  const retry=server.writes.slice(cursor).find(e=>e.requestKey===failed.key);assert.ok(retry,'Pending request was retried with its original idempotency key');
+  assert.deepEqual(retry.command,failed.command);assert.equal(retry.status,200);assert.equal(retry.response.raw,failed.command.raw);
+  await savePopulation(stateBeforeFailure);
+  checks.push('Failed server save leaves head, revision and city unchanged; the exact pending request is retried and the acknowledged session survives reload');
 
-  // A failed backup must abort BEFORE replacing a different valid v6 save.
-  await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith("citymanager.backup.v1"))throw new DOMException("Acceptance backup quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
-  try { await button('#save'); assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/บันทึกสำเนากู้คืนในเบราว์เซอร์แล้ว/); assert.deepEqual(await storage(), beforeImport); assert.deepEqual(await state(), migrated); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
-  finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }
-  // Explicitly choose the original import again: test normal-primary migration
-  // separately from the confirmed active-IDB path covered by save-safety.
-  await button('#load-legacy');
-  await button('#save'); const backed = await storage(); assert.equal(backed['citymanager.save.v1'], legacyRaw); assert.equal(backed['citymanager.backup.v1'], legacyRaw); await assertSavedCity(evaluate, migrated);
-  assert.equal(Object.entries(backed).filter(([key, raw]) => key.startsWith('citymanager.backup.v1') && raw !== null).length, 1);
-  await button('#save'); assert.deepEqual(await storage(), backed); checks.push('Actual Save backs original v1 bytes immutably before v6; backup quota preserves old primary and repeated Save creates no duplicate backups');
-
-  await evaluate('localStorage.setItem("citymanager.save.v7","{broken")'); const corrupt = await storage(); await button('#load'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt);
-  await button('#load-backup'); assert.deepEqual(await state(), migrated); assert.deepEqual(await storage(), corrupt); await button('#save'); assert.deepEqual(await storage(), backed);
-  // Adopt the quota fixture through real Load. A direct external write after Load
-  // is now (correctly) a stale-tab conflict, covered by save-safety-smoke separately.
-  await load(sentinel); await page('game'); const beforeQuota = await storage(), stateBeforeQuota = await state();
-  await evaluate('window.__populationStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==="citymanager.save.v7")throw new DOMException("Acceptance primary quota", "QuotaExceededError");return window.__populationStorageSet.call(this,k,v)}');
-  try { await button('#save'); assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/บันทึกสำเนากู้คืนในเบราว์เซอร์แล้ว/); assert.deepEqual(await storage(), beforeQuota); assert.deepEqual(await state(), stateBeforeQuota); assert.equal(await evaluate('document.querySelector("#inspector-status").textContent.includes("Saved day")'), false); }
-  finally { await evaluate('Storage.prototype.setItem=window.__populationStorageSet;delete window.__populationStorageSet'); }
-  checks.push('Corrupt preferred v6 rejects without fallback or mutation; explicit backup recovers; primary quota preserves all current and stored state');
-
-  const vacant = deserialize(vacantDay), vacantHome = vacant.buildings.find(b => b.zone === 'R' && b.age === 0);
+  const vacant = panelEntryCity(vacantDay), vacantHome = vacant.buildings.find(b => b.zone === 'R' && b.age === 0);
   await load(vacantDay); await home(vacant, vacantHome); await metrics({ households: 0, persons: 0 }); await screenshot('vacant-new-home.png');
-  const upgraded = deserialize(upgradeDay); await load(upgradeDay); await cityMetrics(upgraded);
+  const upgraded = panelEntryCity(upgradeDay); await load(upgradeDay); await cityMetrics(upgraded);
   checks.push('Validated natural daily replay: new homes begin vacant, arrivals occur on later days at most once/day, each family funded once, capacity upgrades create no people');
 
   await load(fixtureRaw); await home(fixture, sharedHome); await screenshot('shared-home.png');
@@ -203,7 +238,7 @@ try {
   await cityMetrics(fixture); assert.ok(summary(fixture).population > summary(fixture).households); assert.equal(summary(fixture).population, summary(fixture).workforce + summary(fixture).dependents);
   checks.push('Firm rows count actual assigned workers once per household; city totals derive persons, households, workers, vacancies and homelessness from canonical entities');
 
-  const expectedDemolished = deserialize(fixtureRaw), displaced = expectedDemolished.households.filter(h => h.home === sharedHome.id).map(h => ({ ...h })), claimsBefore = expectedDemolished.firms.map(f => ({ id: f.id, workDays: { ...f.workDays } }));
+  const expectedDemolished = panelEntryCity(fixtureRaw), displaced = expectedDemolished.households.filter(h => h.home === sharedHome.id).map(h => ({ ...h })), claimsBefore = expectedDemolished.firms.map(f => ({ id: f.id, workDays: { ...f.workDays } }));
   assert.equal(bulldoze(expectedDemolished, sharedHome.cell).ok, true);
   await place(sharedHome); await button('[data-tool="bulldoze"]'); await close(); await paints(); const point = await evaluate(`window.cityManager.cellScreen(${sharedHome.cell})`); assert.equal(await evaluate(`document.elementFromPoint(${point.x},${point.y})?.id`), 'city-canvas'); await click(point.x, point.y);
   assert.deepEqual(await state(), expectedDemolished); assert.equal(expectedDemolished.accounts.treasury, fixture.accounts.treasury - 2000);
@@ -218,36 +253,53 @@ try {
   await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${expectedRehoused.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`); assert.deepEqual(await state(), expectedRehoused);
   for (const old of displaced) { const h = expectedRehoused.households.find(h => h.id === old.id); assert.notEqual(h.home, null); assert.equal(h.members, old.members); assert.equal(h.wallet, old.wallet); assert.equal(expectedRehoused.ledger.filter(e => e.to === h.wallet && e.reason === 'New household arrival savings').length, 1); }
   assert.equal(expectedRehoused.migration.arrivals, fixture.migration.arrivals); await cityMetrics(expectedRehoused);
-  await page('game'); await button('#save'); await assertSavedCity(evaluate, expectedRehoused); await button('#load'); assert.deepEqual(await state(), expectedRehoused); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.backup.v1")'), legacyRaw); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw);
-  checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact v6 Save/Load retains original v1 and backup');
+  await page('game'); await savePopulation(expectedRehoused); assert.deepEqual(await state(),expectedRehoused);
+  checks.push('One real daily tick matches deterministic replay: existing displaced families rehouse before new arrivals without repeat grants; exact server Save/reload preserves the complete session');
+  }
 
+  await load(concentratedRaw);
+  await household(concentrated.households[0], oldTower, concentrated); // Older saves have no history until the next day.
+  await home(concentrated, oldTower); await screenshot('housing-before-move.png');
+  await close(); await button('[data-speed="1"]');
+  await evaluate(`(()=>{const target=${distributed.tick};const stop=()=>{if(JSON.parse(window.cityManager.snapshot()).tick>=target){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click()}else requestAnimationFrame(stop)};requestAnimationFrame(stop)})()`);
+  await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${distributed.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`);
+  assert.deepEqual(await state(),distributed);
+  const movedResidents = distributed.households.filter(h => h.home !== oldTower.id);
+  assert.equal(movedResidents.length, 4, 'Exactly four existing families move in the weekly review');
+  for(const destination of moveHomes.slice(1)) await home(distributed,distributed.buildings.find(b=>b.id===destination.id));
+  for (const resident of movedResidents) await household(resident, distributed.buildings.find(b => b.id === resident.home), distributed);
+  await screenshot('housing-after-move.png');
+  await cityMetrics(distributed); await page('game'); await savePopulation(distributed); assert.deepEqual(await state(),distributed);
+  checks.push('Weekly redistribution moves existing whole families from an earlier tower into empty homes during a real browser tick; identities, exact deterministic state and the server ACK/reload remain intact');
+
+  if (!mobilityOnly) {
   await load(fixtureRaw);
   for (const metric of [{ width: 360, height: 740, screenWidth: 360, screenHeight: 780, mobile: true }, { width: 844, height: 390, screenWidth: 844, screenHeight: 390, mobile: true }, { width: 980, height: 2120, screenWidth: 390, screenHeight: 844, mobile: true }]) {
     await viewport(metric); await home(fixture, sharedHome); await layout(); await household(family, fixture.buildings.find(b => b.id === family.home)); await layout(); if (metric.width === 360) await screenshot('phone-family.png'); await cityMetrics(fixture); await layout(); await page('game'); await layout();
-    for (const id of ['save', 'load', 'load-v3', 'load-v2', 'load-legacy', 'load-backup', 'new-city']) {
-      await button(`#${id}`);
-      if (id === 'new-city') { await key('Escape'); assert.deepEqual(await state(), fixture); continue; }
-      if (id === 'load-v3') { assert.deepEqual(await state(), workerV3Migrated); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v3")'), workerV3Raw); await load(fixtureRaw); await page('game'); }
-      else if (id === 'load-v2') { assert.deepEqual(await state(), householdV2Migrated); assert.equal(await evaluate('localStorage.getItem("citymanager.save.v2")'), householdV2Raw); await load(fixtureRaw); await page('game'); }
-      else if (id === 'load-legacy' || id === 'load-backup') { assert.deepEqual(await state(), migrated); await load(fixtureRaw); await page('game'); }
-      else assert.deepEqual(await state(), fixture);
+    for(const id of ['load','load-v3','load-v2','load-legacy','load-backup'])assert.equal(await evaluate(`document.querySelector('#${id}')===null`),true,`${id} local import control is absent`);
+    await savePopulation(fixture);await page('game');
+    const beforeCancel=server.active,writesBefore=server.writes.length;await button('#new-city');await button('#save-management-cancel');
+    assert.deepEqual(await state(),fixture);assert.deepEqual(server.active,beforeCancel);assert.equal(server.writes.length,writesBefore);
+    await button('#new-city');assert.equal(await evaluate('!!document.querySelector("#save-management-dialog[open]")'),true);await key('Escape');
+    assert.equal(await evaluate('!!document.querySelector("#save-management-dialog[open]")'),false,'Escape dismisses the actual management dialog');
+    assert.deepEqual(await state(),fixture);assert.deepEqual(server.active,beforeCancel);assert.equal(server.writes.length,writesBefore);
+    for(const old of [migratedRaw,serialize(householdV2Migrated),serialize(workerV3Migrated)]){
+      await load(old);assert.deepEqual(await state(),panelEntryCity(old));await load(fixtureRaw);await page('game');
     }
     await key('Escape'); assert.notEqual((await route()).open, 'true');
   }
   // Synthetic high-density fixture uses explicit accounts/contracts, not fabricated gameplay growth.
-  const high = populationFixture(334, true); step(high); deserialize(serialize(high));
+  const highSeed = populationFixture(334, true); step(highSeed); const highRaw=serialize(highSeed),high=panelEntryCity(highRaw);
   await viewport({width:390,height:844,screenWidth:390,screenHeight:844,mobile:true});
-  await load(serialize(high)); await cityMetrics(high); await layout();
-  await page('game'); await button('#save'); await assertSavedCity(evaluate,high);
-  await button('#load'); assert.deepEqual(await state(),high);
+  await load(highRaw); await cityMetrics(high); await layout();
+  await page('game'); await savePopulation(high);assert.deepEqual(await state(),high);
   await cityMetrics(high); await screenshot('phone-population-1000.png');
   assert.ok(summary(high).population>=1002); assert.ok(high.employment.length>256);
-  checks.push('Synthetic 1000+ actual people and 256+ job allocations load, show exact city metrics and round-trip through real mobile Save/Load; no natural-growth or FPS claim');
+  checks.push('Synthetic 1000+ actual people and 256+ job allocations load, show exact city metrics and round-trip through real mobile server Save/reload; no natural-growth or FPS claim');
 
-  const twoK=population2000Fixture();step(twoK);deserialize(serialize(twoK));
-  await load(serialize(twoK));await cityMetrics(twoK);await layout();
-  await page('game');await button('#save');await assertSavedCity(evaluate,twoK);
-  await button('#load');assert.deepEqual(await state(),twoK);await close();
+  const twoKSeed=population2000Fixture();step(twoKSeed);const twoKRaw=serialize(twoKSeed),twoK=panelEntryCity(twoKRaw);
+  await load(twoKRaw);await cityMetrics(twoK);await layout();
+  await page('game');await savePopulation(twoK);assert.deepEqual(await state(),twoK);await close();
   await button('[data-speed="1"]');
   // Observe actual frame intervals at 1x, then pause in-page before reading state.
   await evaluate(`(()=>{window.__populationFrames=null;const deltas=[];let previous=null;const sample=now=>{if(previous!==null)deltas.push(now-previous);previous=now;if(deltas.length===120){const p=document.querySelector('#pause');if(p.getAttribute('aria-pressed')!=='true')p.click();window.__populationFrames=deltas;}else requestAnimationFrame(sample)};requestAnimationFrame(sample)})()`);
@@ -260,15 +312,17 @@ try {
   checks.push('2000-person current traffic diagnostics: '+JSON.stringify({quality:traffic2000.quality,traffic:traffic2000.traffic})+'; population is not vehicle count');
   checks.push(`2000-person 1x mobile-emulated scene: ${frameTimes.length} frame intervals, median ${frameSorted[60].toFixed(1)}ms, P95 ${frameSorted[113].toFixed(1)}ms, max ${frameSorted.at(-1).toFixed(1)}ms. Headless CI only, not physical Android.`);
   await cityMetrics(actual2000);await layout();await screenshot('phone-population-2000.png');
-  await page('game');await button('#save');await assertSavedCity(evaluate,actual2000);await button('#load');assert.deepEqual(await state(),actual2000);
+  await page('game');await savePopulation(actual2000);assert.deepEqual(await state(),actual2000);
   if(allocation2000){await close();await button('#pause');await until('(window.cityManager.traffic()?.cars??0)>0');const moving2000=await evaluate('window.cityManager.traffic()');await button('#pause');assert.ok(moving2000.cars>0,'Current enabled traffic survives automatic quality selection');checks.push('2000-person allocation traffic under automatic quality: '+JSON.stringify({cars:moving2000.cars,moving:moving2000.moving,failure:moving2000.failure}));}
-  checks.push('Exactly 2000 real people / 668 households retain complete simulation state, balanced accounts and session bytes through mobile Load, running at1x, Save and reload; job shortages remain explicit');
+  checks.push('Exactly 2000 real people / 668 households retain complete simulation state, balanced accounts and session bytes through authenticated entry, running at1x, Save and reload; job shortages remain explicit');
 
-  // Restore the intended v4 test city after recovery-button layout exercises.
-  await load(fixtureRaw); assert.deepEqual(await state(), fixture); assert.deepEqual(errors, []);
-  const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(expectedErrors.length, 41); assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
-  checks.push('360 phone, landscape and 980-layout/screen390 keep new contexts and recovery controls contained with real 44px Back/close; no unexpected runtime errors');
-  const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, checks, errors, expectedModelErrors: expectedErrors.length, fixture: { seed: fixture.seed, tick: fixture.tick, hash: hash(fixtureRaw), legacySha256: hash(legacyRaw), naturalHash: hash(serialize(natural)), employmentScenario: 'Two real family workers split across existing I/C firms; no accounts/journals/people edited' }, milestones, layouts, screenshots, note: 'Installed headless Edge; touch/viewport and physical-screen ratio emulated. No real-phone QA or performance claim.' };
+  // Restore the intended split-worker city after server persistence and layout exercises.
+  await load(fixtureRaw); assert.deepEqual(await state(), fixture);
+  checks.push('360 phone, landscape and 980-layout/screen390 keep contexts and server-save controls contained with real 44px Back/close; no unexpected runtime errors');
+  }
+  assert.deepEqual(httpFixture.errors,[]);assert.deepEqual(externalRequests,[]);assert.deepEqual(providerRequests,[],'Population QA never attempts advisor/provider requests');await server.assertNoCityWrites(evaluate); assert.deepEqual(errors, []);
+  modelAudit.assertComplete();const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
+  const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, mode: mobilityOnly ? 'housing-mobility-only' : 'full-population', checks, errors, expectedModelErrors: expectedErrors.length, mobility: { tick: distributed.tick, fixtureHash: hash(concentratedRaw), expectedHash: hash(serialize(distributed)), movedHouseholds: movedResidents.map(h => h.id), homes: distributed.households.map(h => [h.id, h.home]), verifiedServerReload: true }, fixture: { seed: fixture.seed, tick: fixture.tick, hash: hash(fixtureRaw), legacySha256: hash(legacyRaw), naturalHash: hash(serialize(natural)), employmentScenario: 'Two real family workers split across existing I/C firms; no accounts/journals/people edited' }, milestones, layouts, screenshots, note: 'Installed headless browser. Full-population mode also emulates touch/viewport and physical-screen ratio. No real-phone QA or performance claim.' };
   await writeFile(resolve(output, 'population-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
 } catch (error) { if (ws?.readyState === 1) try { await screenshot('population-failure.png'); console.error('Route:', await route()); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
-finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); }
+finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); await httpFixture.close(); }

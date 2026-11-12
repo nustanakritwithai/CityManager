@@ -1,14 +1,21 @@
+import { prepareCommuteEstimates } from './resident-commute.ts';
+import { advanceHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
+import { farmYieldPerWorker } from './farm-production.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
 import {isRailReserved,RAIL_PARCEL_MESSAGE} from './rail/reserved-parcels.ts';
 import { compactCityHistory, cropJournalLength, goodsJournalLength, moneyJournalLength, auditMoney } from './city-history.ts';
+import { demolitionQuote, municipalAsset, municipalRefundReason, validateMunicipalRefunds } from './municipal-refunds.ts';
+export { demolitionQuote } from './municipal-refunds.ts';
 import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
+import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
+export { MONTH } from './city-tax-policy.ts';
 export { OWNER_DEVELOPMENT_SHARE_DENOMINATOR } from './owner-profit.ts';
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
@@ -23,7 +30,7 @@ import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from
 import { EDUCATION_COST, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
-import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
+import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, plantLevel, plantLevelSpec, plantSpec, plantUpgradeReason, type PlantLevel, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
@@ -35,8 +42,10 @@ const LEGACY_MAX_FIRMS = 64;
 /** Structural save bound: 192 residential parcels at the largest 32-household tier. */
 export const MAX_CITY_HOUSEHOLDS = MAX_CITY_BUILDINGS * Math.max(...HOUSING_LEVELS.map(level => level.households));
 export const GATEWAY = 12 * SIZE;
-export const MONTH = 30;
 export const ROAD_COST = 5_000;
+/** Monthly contracted sanitation and general municipal services, per resident (satang).
+ * These are abstract operating costs, not a simulated service-quality system. */
+export const MUNICIPAL_SERVICE_PER_RESIDENT = 3_000;
 export const WAGES = { I: 60_000, C: 42_000, F: 42_000 } as const;
 export type Zone = 'R' | 'C' | 'I' | 'F' | null;
 export type Cell = { road: boolean; zone: Zone; building: number | null };
@@ -54,8 +63,11 @@ export type GoodsEntry = { tick: number; from: string; to: string; quantity: num
  * it (those stay untyped). A fresh city starts empty; a migrated v7 city records its stock on load.
  */
 export type TypeBaseline = { tick: number; cropEntries: number; goodsEntries: number; crops: Record<string, CropMix>; products: Record<string, ProductMix> };
-export type City = { commercialUnifiedStartTick?: number; commercialUnifiedBaseline?: {moneyEntries:number;cropEntries:number;goodsEntries:number};
+export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; commercialUnifiedBaseline?: {moneyEntries:number;cropEntries:number;goodsEntries:number};
   history?: CityHistory;
+  taxPolicy?: TaxChange[];
+  /** Versioned daily household wellbeing; older saves start neutrally on their next simulated day. */
+  happiness?: HappinessState;
   populationCapacityVersion?: 1;
   businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
@@ -63,6 +75,7 @@ export type City = { commercialUnifiedStartTick?: number; commercialUnifiedBasel
   factoryProgressionStartTick?: number;
   /** Earlier harvests were produced under the level 1–3 farm rules. */
   farmLevelStartTick?: number;
+  farmSoilIndependentStartTick?: number;
   version: 9; rulesVersion: 'chain-4'; typeBaseline: TypeBaseline; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number; departures?: number }; employment: EmploymentAllocation[];
   ownerLabor: OwnerLabor[]; resources: ResourceMap | ExpandedResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number; exported?: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
   seed: number; rng: number; tick: number; nextId: number;
@@ -278,9 +291,10 @@ export function industryGrowthStatus(c: City) {
   const industries = c.firms.filter(f => f.zone === 'I').sort((a, b) => a.id - b.id);
   const fundedVacancies = admissionFacts(c).vacancies;
   const cropAvailable = c.firms.filter(f => (f.zone === 'F' || isCommercial(f)) && access(c, building(c, f.building).cell) && firmWorkerCount(c, f.id) > 0).reduce((n, f) => n + f.cropInventory, 0);
+  const profitRate = taxRatesAt(c.taxPolicy, c.tick).profit;
   const facts = (f?: Firm) => {
     const cash = f ? balance(c, f.wallet) : 0, payrollReserve = f ? payroll(f) : 0;
-    const taxReserve = f ? Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense - payrollReserve) / 5) : 0;
+    const taxReserve = f ? taxSatang(f.monthlyRevenue - f.monthlyExpense - payrollReserve, profitRate) : 0;
     const rentReserve = 10_000, workingReserve = INDUSTRY_WORKING_RESERVE;
     return { sponsorFirmId: f?.id ?? null, cash, payrollReserve, taxReserve, rentReserve, workingReserve,
       requiredCapital: INDUSTRY_STARTUP_CAPITAL, availableCapital: Math.max(0, cash - payrollReserve - taxReserve - rentReserve - workingReserve) };
@@ -314,7 +328,7 @@ export function ownerFinance(c: City, firmId: number) {
   if (!f || !isCommercial(f) || !owner || !h) return null;
   // Paid wages are already in monthlyExpense; only still-unpaid claims accrue here.
   const earnedWages = payroll(f), currentProfit = BigInt(f.monthlyRevenue) - BigInt(f.monthlyExpense) - BigInt(earnedWages);
-  const tax = currentProfit > 0n ? currentProfit / 5n : 0n, taxReserve = Number(tax);
+  const tax = taxAmount(currentProfit, taxRatesAt(c.taxPolicy, c.tick).profit), taxReserve = Number(tax);
   const history = ownerProfitHistory(c, f, currentProfit - tax);
   // Spending retained earnings must not make that same profit available again.
   const profit = BigInt(f.profit) + currentProfit - BigInt(owner.taxPaid) - BigInt(owner.withdrawn) - tax - history.invested - history.retained;
@@ -417,15 +431,6 @@ function trimWorkAssignments(c: City): void {
   }
 }
 
-/** Taxi fare per completed passenger trip, integer satang: base + per road tile driven. */
-export const TAXI_TRIP_FARE = Object.freeze({ base: 50, perTile: 10 });
-export const taxiTripFare = (trips: number, tiles: number): number => Math.max(0, Math.floor(trips)) * TAXI_TRIP_FARE.base + Math.max(0, Math.floor(tiles)) * TAXI_TRIP_FARE.perTile;
-/** Credit completed taxi trips' fares to the treasury (riders pay from outside the modelled wallets). Returns satang paid. */
-export function collectTaxiFares(c: City, trips: number, tiles: number): number {
-  const fare = taxiTripFare(trips, tiles);
-  return fare > 0 ? transfer(c, 'outside', 'treasury', fare, 'Taxi fares') : 0;
-}
-
 /** Every transfer has a debit and credit. Outside is the sole permitted negative source account. */
 function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false, reservedTreasuryClaim = 0): number {
   const firm = c.firms.find(f => f.wallet === from);
@@ -480,7 +485,7 @@ const NEW_FACTORY_LOTS = 8;
  */
 export function chooseRecipe(c: City, factories: readonly Firm[] = c.firms.filter(f => f.zone === 'I' && f.recipe)): RecipeId {
   const spare = emptyCrops(), making = emptyCrops();
-  for (const f of c.firms) if (f.zone === 'F' && access(c, building(c, f.building).cell)) spare[farmCrop(c, f)] += Math.floor(24 * Math.max(50, c.resources.fertility[building(c, f.building).cell]) / 100) * building(c, f.building).level;
+  for (const f of c.firms) if (f.zone === 'F' && access(c, building(c, f.building).cell)) spare[farmCrop(c, f)] += farmYieldPerWorker(c, building(c, f.building).cell) * building(c, f.building).level;
   for (const f of factories) if (f.recipe) { spare[RECIPE[f.recipe].crop] -= capacity(building(c, f.building), f) * 2; making[RECIPE[f.recipe].crop]++; }
   const order = (a: CropId, b: CropId) => spare[b] - spare[a] || CROPS.indexOf(a) - CROPS.indexOf(b);
   const fed = CROPS.filter(k => spare[k] >= NEW_FACTORY_LOTS).sort((a, b) => making[a] - making[b] || order(a, b));
@@ -540,7 +545,7 @@ export function buildRoad(c: City, a: number, b: number): Result {
   const added = path.filter(i => !c.cells[i].road), cost = added.length * ROAD_COST;
   if (treasurySpendable(c) < cost) return { ok: false, message: `Need ${(cost / 100).toFixed(0)} credits for this road.` };
   if (!added.length) return { ok: true, message: 'Road already exists; no charge.' };
-  transfer(c, 'treasury', 'roadworks', cost, `Build ${added.length} road cells`);
+  for (const i of added) transfer(c, 'treasury', 'roadworks', ROAD_COST, `Build road cell @${i}`);
   for (const i of added) { c.cells[i].road = true; c.cells[i].zone = null; }
   reconcileBusStops(c, SIZE); // a new branch can turn a stop's cell into a junction
   const message = access(c, b) ? `Built ${added.length} road cells.` : 'Road built, but disconnected from the west outside gateway. Adjacent zones cannot grow.';
@@ -603,31 +608,39 @@ export function bulldoze(c: City, i: number): Result {
     const r = removeBusDepotFromState(c.bus, busDepot.id); if (r.ok) c.lastEvent = r.message; return r;
   }
   const cell = c.cells[i], b = c.buildings.find(v => v.id === cell.building), plant = plantAt(c, i), park = parkAt(c, i), campus = campusAt(c, i);
-  const cost = b || cell.road || plant || park || campus ? 2_000 : 0;
+  try { validateMunicipalRefunds(c); } catch { return { ok: false, message: 'Invalid city investment evidence; parcel and money retained.' }; }
+  const quote = demolitionQuote(c, i), cost = quote.fee;
+  const refundSource = cell.road ? 'roadworks' : 'construction';
+  if (balance(c, refundSource) < quote.refund) return { ok: false, message: 'Refund account cannot cover the recorded city investment; parcel retained.' };
+  const refund = () => {
+    const asset = municipalAsset(c, i);
+    if (quote.refund && transfer(c, refundSource, 'treasury', quote.refund, asset ? municipalRefundReason(asset.name, asset.id) : `Demolition refund road cell @${i}`) !== quote.refund) throw Error('Municipal refund invariant violated');
+  };
+  const refundMessage = `คืนเงินเข้าเมือง ${quote.refund / 100} เครดิต (80% ของเงินลงทุนที่เมืองจ่าย ${quote.paid / 100})${quote.unknown ? ' · ประวัติค่าใช้จ่ายเดิมไม่ครบ คืนเฉพาะส่วนที่มีหลักฐาน' : ''}`;
   if (treasurySpendable(c) < cost) return { ok: false, message: 'Need 20 credits for demolition.' };
   if (park) {
     payParkWages(c, park);
-    transfer(c, 'treasury', 'construction', cost, `Demolish park #${park.id}`);
+    refund();
     c.parks = c.parks.filter(p => p !== park);
-    c.lastEvent = `รื้อสวนสาธารณะ #${park.id} แล้ว · ค่ารื้อ 20 · หยุดค่าบำรุงของสวนนี้`;
+    c.lastEvent = `รื้อสวนสาธารณะ #${park.id} แล้ว · ${refundMessage} · หยุดค่าบำรุงของสวนนี้`;
     return { ok: true, message: c.lastEvent };
   }
   if (campus && c.education) {
-    payEducationWages(c, campus.id);
-    transfer(c, 'treasury', 'construction', cost, `Demolish campus #${campus.id}`);
+    if (!payEducationWages(c, campus.id)) return { ok: false, message: 'Need enough treasury cash to settle earned education wages before demolition; campus and money retained.' };
+    refund();
     withdrawCampus(c.education, campus.id);
-    c.lastEvent = `รื้อสถานศึกษา #${campus.id} แล้ว ผู้เรียนที่ยังไม่จบออกจากระบบ วุฒิที่ได้แล้วคงอยู่`;
+    c.lastEvent = `รื้อสถานศึกษา #${campus.id} แล้ว · ${refundMessage} · ผู้เรียนที่ยังไม่จบออกจากระบบ วุฒิที่ได้แล้วคงอยู่`;
     return { ok: true, message: c.lastEvent };
   }
   if (plant) {
-    transfer(c, 'treasury', 'construction', cost, `Demolish ${PLANT_NAMES[plant.kind]} #${plant.id}`);
+    refund();
     c.plants = c.plants.filter(p => p !== plant);
-    c.lastEvent = `${PLANT_NAMES[plant.kind]} #${plant.id} removed: the network loses ${PLANTS[plant.kind].capacity} ${plant.kind} units; the farthest buildings go without first.`;
+    c.lastEvent = `${PLANT_NAMES[plant.kind]} #${plant.id} removed · ${refundMessage}: the network loses ${plantSpec(plant).capacity} ${plant.kind} units; the farthest buildings go without first.`;
     return { ok: true, message: c.lastEvent };
   }
   const closingFirms = b ? c.firms.filter(f => f.building === b.id) : [];
   for (const f of closingFirms) {
-    const tax = Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense - payroll(f) - f.cropCost) / 5);
+    const tax = taxSatang(f.monthlyRevenue - f.monthlyExpense - payroll(f) - f.cropCost, taxRatesAt(c.taxPolicy, c.tick).profit);
     if (spendable(c, f) < tax) return { ok: false, message: 'Closure needs enough cash to settle earned wages and current profit tax; no demolition was charged.' };
     if (!writeOffCrops(c, f, agricultureHooks(c))) return { ok: false, message: 'Crop disposal could not be journaled; business and city retained.' };
   }
@@ -642,10 +655,13 @@ export function bulldoze(c: City, i: number): Result {
     for (const f of closing) closeFirm(c, f);
     c.buildings = c.buildings.filter(v => v.id !== b.id);
   }
+  const wasRoad = cell.road;
+  if (wasRoad) refund();
   forgetRoadTopology(c, i);
   cell.road = false; cell.zone = null; cell.building = null;
   const lostStops = reconcileBusStops(c, SIZE);
   c.lastEvent = lostStops.length ? `Parcel cleared. Bus stop #${lostStops.join(', #')} removed with the road.` : 'Parcel cleared. Disconnected buildings stop recruiting, trading and growing.';
+  if (wasRoad) c.lastEvent += ` · ${refundMessage}`;
   return { ok: true, message: c.lastEvent };
 }
 
@@ -668,6 +684,33 @@ export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
   return { ok: true, message: c.lastEvent };
 }
 
+/** Read-only quote and the action share the same treasury and road checks. */
+export function plantUpgradeStatus(c: City, id: number) {
+  const plant = c.plants.find(p => p.id === id);
+  if (!plant) return null;
+  const level = plantLevel(plant), nextLevel = level < 3 ? level + 1 as PlantLevel : null;
+  const current = plantSpec(plant), next = nextLevel ? plantLevelSpec(plant.kind, nextLevel) : null;
+  const available = treasurySpendable(c), online = access(c, plant.cell);
+  const reasons: string[] = [];
+  if (!next) reasons.push('ถึงระดับสูงสุดแล้ว');
+  else {
+    if (!online) reasons.push('ต่อถนนข้างโรงให้เชื่อมถึงประตูเมืองก่อนอัปเกรด');
+    if (available < next.upgradeCost) reasons.push(`เงินคลังใช้จ่ายได้ ${available / 100} ฿ ต้องใช้ ${next.upgradeCost / 100} ฿`);
+  }
+  return { level, nextLevel, current, next, available, online, reasons };
+}
+/** Expected level prevents a stale/repeated command from buying another level. */
+export function upgradePlant(c: City, id: number, expectedLevel: PlantLevel): Result {
+  const plant = c.plants.find(p => p.id === id), quote = plantUpgradeStatus(c, id);
+  if (!plant || !quote) return { ok: false, message: 'ไม่พบโรงน้ำหรือไฟแห่งนี้แล้ว' };
+  if (quote.level !== expectedLevel) return { ok: false, message: 'ระดับโรงเปลี่ยนไปแล้ว ตรวจสอบราคาใหม่ก่อนอัปเกรด' };
+  if (!quote.next || !quote.nextLevel || quote.reasons.length) return { ok: false, message: quote.reasons.join(' · ') };
+  transfer(c, 'treasury', 'construction', quote.next.upgradeCost, plantUpgradeReason(plant.kind, id, quote.nextLevel));
+  plant.level = quote.nextLevel as 2 | 3;
+  c.lastEvent = `${plant.kind === 'power' ? 'โรงไฟฟ้า' : 'โรงสูบน้ำ'} #${id} อัปเกรดเป็นระดับ ${plant.level} แล้ว · กำลังผลิต ${quote.next.capacity} หน่วย · ค่าบำรุง ${quote.next.upkeep / 100} ฿/เดือน`;
+  return { ok: true, message: c.lastEvent };
+}
+
 /** One empty, unzoned parcel. Parks need neither roads nor utility supply. */
 export function buildPark(c: City, i: number): Result {
   if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
@@ -686,7 +729,7 @@ export function buildPark(c: City, i: number): Result {
 /** Settle and remove one firm (its crops are already written off): wages, current tax, owner or sponsor capital, stock to outside. */
 function closeFirm(c: City, f: Firm) {
   payWages(c, f);
-  const paidTax = transfer(c, f.wallet, 'treasury', Math.floor(Math.max(0, f.monthlyRevenue - f.monthlyExpense) / 5), 'Closing firm profit tax');
+  const paidTax = transfer(c, f.wallet, 'treasury', taxSatang(f.monthlyRevenue - f.monthlyExpense, taxRatesAt(c.taxPolicy, c.tick).profit), 'Closing firm profit tax');
   if (f.owner) {
     f.owner.taxPaid += paidTax;
     const h = c.households.find(h => h.id === f.owner!.householdId)!;
@@ -786,7 +829,7 @@ function summarize(c: City) {
       I: industryGrowthStatus(c).ready ? 1 : 0,
       F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || missingCropForBuyers ||
         c.households.reduce((n, h) => n + h.members, 0) + c.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(c, f.id) * 2, 0) >
-        farms.reduce((n, f) => n + Math.floor(24 * Math.max(50, c.resources.fertility[building(c, f.building).cell]) / 100) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0)) ? 1 : 0 } };
+        farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0)) ? 1 : 0 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
 function blockers(c: City, i: number): string[] {
@@ -831,11 +874,11 @@ export function explainCell(c: City, i: number): string[] {
     for (const h of residents) output.push(`Household #${h.id}: ${h.members} members, ${h.workforce} workforce, ${householdWorkerCount(c, h.id)} allocated workers; wallet ${(balance(c, h.wallet) / 100).toFixed(2)} credits.${h.origin === 'legacy-v1' ? ' Composition is an explicit minimum assumption from v1.' : ''}`);
   }
   if (f) output.push(`Firm #${f.id}: ${firmWorkerCount(c, f.id)}/${capacity(b, f)} workers; finished inventory ${f.inventory}; crop inventory ${f.cropInventory}; wallet ${(balance(c, f.wallet) / 100).toFixed(2)} credits; earned wages reserved ${(payroll(f) / 100).toFixed(2)}.`, `Last monthly operating profit ${(f.lastMonthProfit / 100).toFixed(2)} credits.`,
-    f.zone === 'F' ? `Renewable crops require actual labour, roads, utilities and fertility; this parcel ${c.resources.fertility[i]}%. ${capacity(b)} worker slots, crop cap ${farmStockCapacity(b.level)}; no manufactured goods.` :
+    f.zone === 'F' ? `Renewable crops require actual labour, roads and water; soil does not affect future harvests (${farmYieldPerWorker(c, i)} lots per worker per day). ${capacity(b)} worker slots, crop cap ${farmStockCapacity(b.level)}; no manufactured goods.` :
     isCommercial(f) ? 'One commercial business stocks crops and finished goods. Crop opening stock can supply factories or household baskets; new crop purchases cannot resell this tick. Unsold stock never creates profit.' :
     f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale and outside export 3.50 credits.` : 'Buys goods locally at 3.50 credits or imports at 4.50; competes with crop markets for food at 8 credits per unit.',
     f.owner ? 'The owner works one unpaid post; hired employees accrue wages. Owner distributions use realised profit after tax, wage and working-cash reserves.' : 'Wages accrue per allocated worker-day and are paid each 30-day month. Reserved wages cannot fund stock or expansion.',
-    `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax 20%. Commercial businesses share levels 1–9; farms grow to level 6 from their own profit.`);
+    `Rent ${firmRent(f) / 100} credits/month; positive operating profit tax ${taxRatesAt(c.taxPolicy, c.tick).profit}%. Commercial businesses share levels 1–9; farms grow to level 6 from their own profit.`);
   if (f && isCommercial(f)) {
     const s = retailGrowthStatus(c, f);
     output.push(`Retail level ${s.level}: ${s.workers}/${s.current.workers} workers; shelf ${f.inventory}/${s.current.stock}, staffed refill limit ${s.staffed.stock}; sales have no fixed daily customer cap.`,
@@ -975,6 +1018,10 @@ function trade(c: City) {
     }
   }
 }
+function withholdWageTax(c: City, wallet: string, wage: number): void {
+  const tax = taxSatang(wage, taxRatesAt(c.taxPolicy, c.tick).wage);
+  if (transfer(c, wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Wage tax invariant violated.');
+}
 function payWages(c: City, f: Firm, onlyWallet?: string) {
   for (const [wallet, days] of Object.entries(f.workDays)) {
     if (onlyWallet && wallet !== onlyWallet) continue;
@@ -983,7 +1030,7 @@ function payWages(c: City, f: Firm, onlyWallet?: string) {
     delete f.workDays[wallet];
     const wage = transfer(c, f.wallet, wallet, owed, 'Monthly wages', true);
     if (wage !== owed) throw new Error('Payroll reserve invariant violated.');
-    transfer(c, wallet, 'treasury', Math.floor(wage / 10), 'Monthly household wage tax');
+    withholdWageTax(c, wallet, wage);
   }
 }
 function payParkWages(c: City, p: Park, onlyWallet?: string): void {
@@ -994,7 +1041,7 @@ function payParkWages(c: City, p: Park, onlyWallet?: string): void {
     // Park claims are already cash-backed. Legacy education arrears must not
     // block their reserved payment or leave park claims across a month boundary.
     if (transfer(c, 'treasury', wallet, owed, `Monthly park wages #${p.id}`, false, owed) !== owed) throw new Error('Park payroll reserve invariant violated.');
-    transfer(c, wallet, 'treasury', Math.floor(owed / 10), 'Monthly household wage tax');
+    withholdWageTax(c, wallet, owed);
   }
 }
 const isWage = (reason: string): boolean => reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
@@ -1012,8 +1059,7 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
       delete claim.campus.workDays[claim.wallet];
       const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
       if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
-      const tax = Math.floor(claim.amount / 10);
-      if (transfer(c, claim.wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Education wage tax invariant violated.');
+      withholdWageTax(c, claim.wallet, claim.amount);
     }
     return true;
   } catch (error) {
@@ -1024,13 +1070,14 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
 }
 function settleMonth(c: City) {
   const svc = utilities(c);
+  const profitRate = taxRatesAt(c.taxPolicy, c.tick).profit;
   for (const f of c.firms) {
     payWages(c, f);
     transfer(c, f.wallet, 'landlord', firmRent(f), 'Monthly firm rent', true);
     transfer(c, f.wallet, 'treasury', buildingBill(svc, f.building), 'Monthly water and power bill', true);
     f.lastMonthProfit = f.monthlyRevenue - f.monthlyExpense;
     f.profit += f.lastMonthProfit;
-    const taxPaid = transfer(c, f.wallet, 'treasury', Math.max(0, Math.floor(f.lastMonthProfit * .2)), 'Monthly firm profit tax');
+    const taxPaid = transfer(c, f.wallet, 'treasury', taxSatang(f.lastMonthProfit, profitRate), 'Monthly firm profit tax');
     if (f.owner) f.owner.taxPaid += taxPaid;
     f.monthlyRevenue = 0; f.monthlyExpense = 0;
     // Income is a distribution, not a new wage or expense. Pay after taxes and
@@ -1054,28 +1101,44 @@ function settleMonth(c: City) {
   }
   // The city buys what the gateway delivered and keeps its plants running.
   for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
-  for (const p of c.plants) transfer(c, 'treasury', 'upkeep', PLANTS[p.kind].upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
+  for (const p of c.plants) transfer(c, 'treasury', 'upkeep', plantSpec(p).upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
   for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
+  // Services scale with the people actually present at settlement, not empty housing.
+  // As with other upkeep, only available (non-payroll-reserved) cash is paid; no debt
+  // is created and loading an existing city does not itself charge a past bill.
+  const residents = c.households.reduce((n, h) => n + h.members, 0);
+  transfer(c, 'treasury', 'upkeep', residents * MUNICIPAL_SERVICE_PER_RESIDENT, 'Monthly municipal services');
   const { retrained, departed } = reviewLabour(c);
   c.lastEvent = 'Month settled: actual firm wages, household rent, water/power bills and taxes are in the money ledger.'
     + (retrained ? ` ${retrained} idle specialist worker(s) retrained as general workers for open jobs in the other trade.` : '')
-    + (departed ? ` ${departed} household(s) left the city after two months without paid work; their savings left with them.` : '');
+    + (departed ? ` ${departed} household(s) left after prolonged unemployment or severe unhappiness; their savings left with them.` : '');
 }
 
-/**
- * The month-end on which this household would leave if it still has no paid work, or null when it
- * stays (it has work, owns a firm, or came from a v1 import). The floor and the monthly cap can
- * only delay it.
- */
-export function departureDay(c: City, householdId: number): number | null {
+type DepartureForecast = { day: number; reason: 'unemployment' | 'happiness' };
+
+/** Earliest eligible settlement if current conditions persist. The monthly cap and floor can delay it. */
+export function departureForecast(c: City, householdId: number): DepartureForecast | null {
   const h = c.households.find(h => h.id === householdId);
-  if (!h || h.origin !== 'arrival' || householdWorkerCount(c, h.id) > 0 || c.firms.some(f => f.owner?.householdId === h.id)) return null;
+  if (!h || h.origin !== 'arrival' || c.firms.some(f => f.owner?.householdId === h.id)) return null;
+  const nextMonth = c.tick - c.tick % MONTH + MONTH;
+  const settlement = (eligibleDay: number) => Math.max(nextMonth, Math.ceil(eligibleDay / MONTH) * MONTH);
+  const happiness = c.happiness?.rows.find(row => row.householdId === h.id);
+  const happinessDay = happiness && happiness.score < HAPPINESS_DISTRESS
+    ? settlement(c.tick + HAPPINESS_DEPARTURE_DAYS - happiness.distressDays) : null;
+  if (householdWorkerCount(c, h.id) > 0) return happinessDay === null ? null : { day: happinessDay, reason: 'happiness' };
+
   let last = c.history?.lastIncome[h.wallet] ?? 0;
   for (let i = c.ledger.length - 1; i >= 0; i--) {
     const e = c.ledger[i];
     if (e.to === h.wallet && (isWage(e.reason) || e.reason === 'New household arrival savings')) { last = e.tick; break; }
   }
-  return Math.max(c.tick % MONTH ? c.tick - c.tick % MONTH + MONTH : c.tick + MONTH, Math.ceil((last + DEPARTURE_MONTHS * MONTH) / MONTH) * MONTH);
+  const unemploymentDay = settlement(last + DEPARTURE_MONTHS * MONTH);
+  return happinessDay !== null && happinessDay <= unemploymentDay
+    ? { day: happinessDay, reason: 'happiness' } : { day: unemploymentDay, reason: 'unemployment' };
+}
+
+export function departureDay(c: City, householdId: number): number | null {
+  return departureForecast(c, householdId)?.day ?? null;
 }
 
 /** Households never leave below this many, so a quiet city keeps a seed population. */
@@ -1090,8 +1153,8 @@ export const DEPARTURE_SHARE = .2;
  * their trade while the other trade has funded openings retrains as a general worker (career
  * change). A household with no worker in any job, no wage in the last two settlements and in
  * the city for at least that long leaves with its savings (to outside), freeing its home. Shop
- * owners and households that arrived recently stay; at most a fifth leave in one month, and the
- * city never drops below the floor.
+ * owners and legacy households stay; arrivals can also leave after sustained
+ * severe unhappiness. At most a fifth leave per month, subject to the floor.
  */
 function reviewLabour(c: City): { retrained: number; departed: number } {
   const open = { ...admissionFacts(c).vacanciesByZone };
@@ -1110,7 +1173,8 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   }
   for (const [wallet,tick] of Object.entries(c.history?.lastIncome??{})) if(tick>since) paid.add(wallet);
   const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
-  const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet))
+  const distressed = new Set(c.happiness?.rows.filter(row => row.distressDays >= HAPPINESS_DEPARTURE_DAYS).map(row => row.householdId) ?? []);
+  const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && (distressed.has(h.id) || householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet)))
     .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
   let departed = 0;
   for (const h of leaving) {
@@ -1119,7 +1183,11 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
     if (c.education) { if (!payEducationWages(c, undefined, h.wallet)) continue; forgetHouseholdEducation(c.education, h.id); }
     for (const f of c.firms) payWages(c, f, h.wallet); // no claim should remain after settlement; pay any that does
     transfer(c, h.wallet, 'outside', balance(c, h.wallet), 'Emigration savings');
+    c.employment = c.employment.filter(a => a.householdId !== h.id);
+    c.ownerLabor = c.ownerLabor.filter(a => a.householdId !== h.id);
+    for (const p of c.parks) if (p.staffing) p.staffing.allocations = p.staffing.allocations.filter(a => a.householdId !== h.id);
     c.households = c.households.filter(x => x.id !== h.id);
+    if (c.happiness) c.happiness.rows = c.happiness.rows.filter(row => row.householdId !== h.id);
     c.migration.departures = (c.migration.departures ?? 0) + 1;
     departed++;
   }
@@ -1130,18 +1198,85 @@ export function moveHousehold(c: City, householdId: number, destinationId: numbe
   const h = c.households.find(h => h.id === householdId), destination = c.buildings.find(b => b.id === destinationId && b.zone === 'R');
   if (!h || !destination) return { ok: false, message: 'Household or destination home does not exist.' };
   if (h.home === destinationId) return { ok: true, message: 'Household already lives here; no transfer or population change.' };
-  if (destination.age < 1 || !access(c, destination.cell) || !homeSupplied(c, destination)) return { ok: false, message: 'Destination needs a later daily tick, connected road, and a unit of spare power and water.' };
+  if (destination.age < 1 || !access(c, destination.cell)) return { ok: false, message: 'Destination needs a later daily tick and a connected road.' };
   if (!canAccommodate(housingCapacity(destination), homeOccupancy(c, destinationId), h.members)) return { ok: false, message: 'Destination lacks household slots or person capacity.' };
+  // Moving an existing resident releases the old home's utility demand. Evaluate
+  // the resulting network, without mutating live state or requiring spare supply
+  // twice. Never take either utility away from a building that has it now.
+  const roads = connectedRoads(c), before = utilityService(c, roads);
+  const after = utilityService({ ...c, households: c.households.map(value => value === h ? { ...value, home: destinationId } : value) }, roads);
+  if (!after.ok(destinationId) || [...before.served].some(([id, supplied]) => UTILITY_KINDS.some(kind => supplied[kind] && !after.served.get(id)?.[kind]))) {
+    return { ok: false, message: 'Destination needs power and water without interrupting existing service.' };
+  }
   h.home = destinationId;
   return { ok: true, message: 'Household moved with the same identity, wallet, members and earned wage claims.' };
 }
 function vacantHomes(c: City): Building[] {
-  return c.buildings.filter(b => b.zone === 'R' && b.age >= 1 && access(c, b.cell)).sort((a, b) => a.cell - b.cell || a.id - b.id);
+  const occupied = buildOccupancyIndex(c.households);
+  // Fill empty / less populated homes first instead of repeatedly filling the
+  // first parcel that grew taller. Stable ties keep replay/save reload identical.
+  return c.buildings.filter(b => b.zone === 'R' && b.age >= 1 && access(c, b.cell)).sort((a, b) =>
+    (occupied.get(a.id)?.households ?? 0) - (occupied.get(b.id)?.households ?? 0) ||
+    (occupied.get(a.id)?.persons ?? 0) - (occupied.get(b.id)?.persons ?? 0) || a.cell - b.cell || a.id - b.id);
 }
 function rehouse(c: City) {
   for (const h of [...c.households].filter(h => h.home === null).sort((a, b) => a.id - b.id)) {
-    for (const home of vacantHomes(c)) if (canAccommodate(housingCapacity(home), homeOccupancy(c, home.id), h.members)) { moveHousehold(c, h.id, home.id); break; }
+    const service = utilities(c);
+    if (!fits(service.spare, HOUSEHOLD_NEED)) return;
+    for (const home of vacantHomes(c)) if (homeSupplied(c, home, service) && canAccommodate(housingCapacity(home), homeOccupancy(c, home.id), h.members) && moveHousehold(c, h.id, home.id).ok) break;
   }
+}
+/** A bounded weekly review moves whole households, never synthetic residents. */
+export const HOUSING_RELOCATION_INTERVAL = 7;
+export const HOUSING_RELOCATION_LIMIT = 4;
+export const HOUSING_RELOCATION_ATTEMPTS = 32;
+export function rebalanceHousing(c: City): number {
+  // Displaced households have first claim on any usable housing and supply.
+  if (c.tick % HOUSING_RELOCATION_INTERVAL !== 0 || c.households.some(h => h.home === null)) return 0;
+  const homes = vacantHomes(c), occupied = buildOccupancyIndex(c.households);
+  const residents = new Map<number, Household[]>();
+  for (const h of [...c.households].sort((a, b) => a.id - b.id)) {
+    const at = residents.get(h.home!) ?? []; at.push(h); residents.set(h.home!, at);
+  }
+  const moved = new Set<number>();
+  let commute: ReturnType<typeof prepareCommuteEstimates> | undefined;
+  // Strictly better nearby amenities permit a single household to move; the
+  // older occupancy rule may only move to an equally good or better location.
+  const quality = new Map(homes.map(home => [home.id, homeAmenities(c, home.cell).points]));
+  const sources = [...homes].sort((a, b) => (occupied.get(b.id)?.households ?? 0) - (occupied.get(a.id)?.households ?? 0) || a.cell - b.cell || a.id - b.id);
+  const candidates = homes.flatMap(destination => sources.filter(source =>
+    source.id !== destination.id && ((quality.get(destination.id)! >= quality.get(source.id)! + 10) ||
+      (quality.get(destination.id)! >= quality.get(source.id)! && (occupied.get(source.id)?.households ?? 0) >= (occupied.get(destination.id)?.households ?? 0) + 2)),
+  ).map(source => ({ source, destination })));
+  // Bound failed checks as well as moves. Rotate through the entire candidate
+  // list so repeatedly unusable homes cannot starve a later feasible pair.
+  if (!candidates.length) return 0;
+  const offset = (Math.floor(c.tick / HOUSING_RELOCATION_INTERVAL) % candidates.length) * HOUSING_RELOCATION_ATTEMPTS % candidates.length;
+  for (let attempt = 0; attempt < Math.min(candidates.length, HOUSING_RELOCATION_ATTEMPTS) && moved.size < HOUSING_RELOCATION_LIMIT; attempt++) {
+    const { source, destination } = candidates[(offset + attempt) % candidates.length];
+    const used = occupied.get(destination.id) ?? { households: 0, persons: 0 }, sourceUsed = occupied.get(source.id)!;
+    // Recheck after every earlier move. Quality strictly improves, or equal
+    // quality reduces the sum of squared occupancies, preventing oscillation.
+    const improvement = quality.get(destination.id)! - quality.get(source.id)!;
+    if (improvement < 10 && (improvement < 0 || sourceUsed.households < used.households + 2)) continue;
+    const eligible = residents.get(source.id)?.filter(h => !moved.has(h.id) && canAccommodate(housingCapacity(destination), used, h.members)) ?? [];
+    // Rotate who gets evaluated so an unsuitable first household cannot starve others.
+    const h = eligible[(Math.floor(c.tick / HOUSING_RELOCATION_INTERVAL) + attempt) % eligible.length];
+    if (!h) continue;
+    commute ??= prepareCommuteEstimates(c);
+    // Citywide taxes follow the household to either address. Compare location effects alone.
+    const current = happinessTarget(homeAmenities(c, source.cell), commute.estimates.get(h.id));
+    const proposed = happinessTarget(homeAmenities(c, destination.cell), commute.atHome(h.id, destination.cell));
+    if (proposed < current || !moveHousehold(c, h.id, destination.id).ok) continue;
+    // Earlier moves change modeled link loads. Update the reusable graph before the next decision.
+    commute.moved(h.id, destination.cell);
+    occupied.set(source.id, { households: sourceUsed.households - 1, persons: sourceUsed.persons - h.members });
+    occupied.set(destination.id, { households: used.households + 1, persons: used.persons + h.members });
+    residents.set(source.id, residents.get(source.id)!.filter(value => value !== h));
+    residents.set(destination.id, [...residents.get(destination.id) ?? [], h]);
+    moved.add(h.id);
+  }
+  return moved.size;
 }
 function admissionFacts(c: City) {
   const vacanciesByZone = { I: 0, C: 0 }, svc = utilities(c);
@@ -1163,14 +1298,21 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (used.households >= room.households || used.persons >= room.persons) reasons.push('ความจุครัวเรือนหรือจำนวนคนเต็มแล้ว การเพิ่มระดับเพิ่มเฉพาะความจุ');
   if (c.households.some(h => h.home === null)) reasons.push('ครัวเรือนที่ไร้บ้านจะได้รับการจัดบ้านก่อนรับครัวเรือนใหม่');
   if (c.households.length >= MAX_CITY_HOUSEHOLDS) reasons.push('ถึงความจุสูงสุดตามจำนวนแปลงและระดับที่อยู่อาศัยของแผนที่แล้ว');
+  if (c.happiness?.rows.length && c.happiness.rows.reduce((sum,row)=>sum+row.score,0) / c.happiness.rows.length < 35) reasons.push('ยังไม่รับครัวเรือนใหม่เพราะความสุขเฉลี่ยต่ำกว่า 35 / 100 เมื่อเมืองดีขึ้นจึงรับได้อีก');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
+  reasons.push('บ้านที่ว่างหรือมีครัวเรือนน้อยกว่าได้รับการจัดบ้านก่อนอาคารที่มีคนมาก');
+  reasons.push(`ทุก ${HOUSING_RELOCATION_INTERVAL} วัน ย้ายครัวเรือนได้ไม่เกิน ${HOUSING_RELOCATION_LIMIT} ครัวเรือน ไปบ้านที่ใกล้สวนหรือโรงเรียนที่เปิดดีกว่า หรือกระจายจากบ้านที่มีมากกว่าปลายทางอย่างน้อย 2 ครัวเรือนโดยไม่ลดความใกล้สิ่งอำนวยความสะดวก ต้องมีที่ว่าง ถนน น้ำไฟ และไม่ตัดบริการอาคารอื่น`);
+  reasons.push('ความสุขค่อย ๆ ปรับตามอัตราภาษีเมือง ความใกล้สวนและโรงเรียน รวมถึงเวลาและเส้นทางไปทำงานที่แบบจำลองประมาณจากถนน');
+  reasons.push(`สิ้นเดือน ครัวเรือนที่ย้ายเข้ามาและไม่มีธุรกิจของตนอาจย้ายออกเมื่อความสุขต่ำกว่า 30 ติดต่อกัน ${HAPPINESS_DEPARTURE_DAYS} วัน โดยยังจำกัดจำนวนย้ายออกต่อเดือนและรักษาจำนวนครัวเรือนขั้นต่ำ`);
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
   reasons.push(`สิ้นเดือน: แรงงานเฉพาะทางที่สายงานเดิมไม่มีตำแหน่งว่างแต่อีกสายมี จะเปลี่ยนเป็นแรงงานทั่วไป ครัวเรือนที่ไม่มีงานได้ค่าจ้างเลย ${DEPARTURE_MONTHS} เดือนจะย้ายออกพร้อมเงินออม (เจ้าของร้านและผู้มาใหม่ไม่ย้าย เมืองเหลืออย่างน้อย ${DEPARTURE_FLOOR} ครัวเรือน)`);
   return reasons;
 }
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
+  // A severely unhappy city does not immediately replace every departure.
+  if (c.happiness?.rows.length && c.happiness.rows.reduce((sum,row)=>sum+row.score,0) / c.happiness.rows.length < 35) return;
   if (c.households.length >= MAX_CITY_HOUSEHOLDS || c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
   const facts = admissionFacts(c);
   if (!facts.bootstrap && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
@@ -1294,7 +1436,8 @@ function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
-  rehouse(c); employ(c); admitHousehold(c); trade(c);
+  rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c);
+  c.happiness = advanceHappiness(c, c.happiness);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
 }
@@ -1341,8 +1484,8 @@ function reviewGrows(c: City, b: Building): boolean | null {
 /** Thai blocker naming each short utility with needed vs spare units and what to build. */
 export function spareShortfall(extra: Need, spare: Need): string | null {
   const parts: string[] = [];
-  if (spare.power < extra.power) parts.push(`ไฟฟ้าต้องเพิ่ม ${extra.power} หน่วย แต่สำรองเหลือ ${spare.power} — สร้างโรงไฟฟ้าเพิ่ม`);
-  if (spare.water < extra.water) parts.push(`น้ำต้องเพิ่ม ${extra.water} หน่วย แต่สำรองเหลือ ${spare.water} — สร้างปั๊มน้ำเพิ่ม`);
+  if (spare.power < extra.power) parts.push(`ไฟฟ้าต้องเพิ่ม ${extra.power} หน่วย แต่สำรองเหลือ ${spare.power} — สร้างโรงไฟฟ้าเพิ่ม หรืออัปเกรดโรงเดิม`);
+  if (spare.water < extra.water) parts.push(`น้ำต้องเพิ่ม ${extra.water} หน่วย แต่สำรองเหลือ ${spare.water} — สร้างปั๊มน้ำเพิ่ม หรืออัปเกรดโรงเดิม`);
   return parts.length ? parts.join(' · ') : null;
 }
 /** Buildings otherwise ready by age, road and service whose next level needs more spare water or power than the city has. */
@@ -1369,7 +1512,7 @@ function stepWithRoads(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -1386,7 +1529,8 @@ export function createCity(seed = 20261023, options: { starter?: boolean } = {})
   for (const x of [4, 7]) zoneCell(c, 13 * SIZE + x, 'C');
   for (const x of [8, 10]) zoneCell(c, 13 * SIZE + x, 'I');
   const frontier = c.cells.map((cell, i) => !cell.road && cell.zone === null && access(c, i) ? i : -1).filter(i => i >= 0);
-  const farm = [...frontier].filter(i => c.resources.fertility[i] >= FERTILITY_THRESHOLD).sort((a, b) => c.resources.fertility[b] - c.resources.fertility[a] || a - b)[0];
+  // Retain the established starter layout; this is not a placement or harvest restriction.
+  const farm = [...frontier].filter(i => c.resources.fertility[i] >= FERTILITY_THRESHOLD).sort((a, b) => c.resources.fertility[b] - c.resources.fertility[a] || a - b)[0] ?? frontier[0];
   if (farm !== undefined) zoneCell(c, farm, 'F');
   const market = frontier.find(i => i !== farm); if (market !== undefined) zoneCell(c, market, 'C');
   c.lastEvent = 'Starter road and zones are funded by the recorded grant. Unpause and watch one seeded development review every 3 days.';
@@ -1400,6 +1544,7 @@ export function expandValidatedCity(c: City): City {
   return { ...expanded, ...(topology ? {roadTopology: topology} : {}) } as City;
 }
 export function serialize(c: City, market?: City['market']): string {
+  if (c.goalRulesVersion !== undefined && c.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   if (c.roadTopology) validateRoadTopology(c, c.roadTopology);
   const expanded = c.populationCapacityVersion === 1 || c.households.length > 128 || c.employment.length > 256;
   const educated = c.education !== undefined;
@@ -1410,7 +1555,15 @@ export function serialize(c: City, market?: City['market']): string {
   const envelope = { ...c, commercialUnifiedStartTick: c.commercialUnifiedStartTick ?? c.tick, commercialUnifiedBaseline: c.commercialUnifiedBaseline ?? {moneyEntries:moneyJournalLength(c),cropEntries:cropJournalLength(c),goodsEntries:goodsJournalLength(c)}, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) };
   const inner = c.history ? {...envelope, historyBaseVersion:envelope.version, version:24, rulesVersion:'chain-19'} : envelope;
   const commercial = {...inner, commercialBaseVersion:inner.version, version:25, rulesVersion:'chain-20'};
-  const json = JSON.stringify(c.cells.length === EXPANDED_MAP_CELLS ? {...commercial, mapBaseVersion:25, mapLayout:'north-24x28', version:26, rulesVersion:'chain-21'} : commercial);
+  const mapped = c.cells.length === EXPANDED_MAP_CELLS ? {...commercial, mapBaseVersion:25, mapLayout:'north-24x28', version:26, rulesVersion:'chain-21'} : commercial;
+  const boundary = c.farmSoilIndependentStartTick ?? c.tick;
+  if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary > c.tick) throw Error('Invalid soil-independent farm boundary');
+  const { happiness, taxPolicy, ...cityFields } = mapped;
+  const farm = {...cityFields, farmSoilIndependentStartTick: boundary, farmBaseVersion: mapped.version, version:27, rulesVersion:'chain-22'};
+  if (happiness) validateHappiness(c, happiness);
+  const base = happiness ? {...farm, happiness, version:28, rulesVersion:'chain-23'} : farm;
+  if (taxPolicy !== undefined) validateTaxPolicy(taxPolicy, c.tick);
+  const json = JSON.stringify(taxPolicy ? {...base, taxPolicy, taxBaseVersion:base.version, version:29, rulesVersion:'chain-24'} : base);
   if (json.length > 12_000_000) throw new Error('City save exceeds the processing limit. Server save is unconfirmed; keep this page open.');
   return json;
 }
@@ -1500,10 +1653,21 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     ids.add(f.id);
   }
   for (const p of version === 9 ? c.plants : []) {
-    if (!p || Object.keys(p).length !== 4 || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell, c) || !UTILITY_KINDS.includes(p.kind) || !int(p.tick) || p.tick > c.tick) fail();
+    if (!p || Object.keys(p).sort().join() !== (p.level === undefined ? 'cell,id,kind,tick' : 'cell,id,kind,level,tick') || (p.level !== undefined && p.level !== 2 && p.level !== 3) || !int(p.id, 1) || ids.has(p.id) || !validIndex(p.cell, c) || !UTILITY_KINDS.includes(p.kind) || !int(p.tick) || p.tick > c.tick) fail();
     const cell = c.cells[p.cell], built = historicalLedger.filter(e => e.reason === `Build ${PLANT_NAMES[p.kind]} #${p.id}`);
     if (cell.road || cell.zone !== null || cell.building !== null || c.plants.some(q => q !== p && q.cell === p.cell)) fail();
     if (built.length !== 1 || built[0].from !== 'treasury' || built[0].to !== 'construction' || built[0].amount !== PLANTS[p.kind].cost || built[0].tick !== p.tick) fail();
+    let recordedLevel: PlantLevel = 1;
+    let builtSeen = false;
+    for (const e of historicalLedger) {
+      if (e === built[0]) builtSeen = true;
+      if (e.reason.startsWith(`Upgrade ${PLANT_NAMES[p.kind]} #${p.id} `)) {
+        const next = recordedLevel + 1 as PlantLevel;
+        if (!builtSeen || next > 3 || e.reason !== plantUpgradeReason(p.kind, p.id, next) || e.from !== 'treasury' || e.to !== 'construction' || e.amount !== plantLevelSpec(p.kind, next).upgradeCost || e.tick < p.tick) fail();
+        recordedLevel = next;
+      }
+    }
+    if (recordedLevel !== plantLevel(p) || historicalLedger.some(e => e.reason === `Demolish ${PLANT_NAMES[p.kind]} #${p.id}`)) fail();
     ids.add(p.id);
   }
   for (const p of c.parks) {
@@ -1537,23 +1701,23 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       // A claim is settled once per wallet. Mid-month settlements only occur on
       // demolition; accepting one on a live park would leave already-paid days owed.
       const payment = `${id}:${e.tick}:${e.to}`;
-      if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !historicalLedger.some(row => row.tick === e.tick && row.reason === `Demolish park #${id}`)) fail();
+      if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !historicalLedger.some(row => row.tick === e.tick && (row.reason === `Demolish park #${id}` || row.reason === `Demolition refund park #${id}`))) fail();
       parkPayments.add(payment);
       const paid = (parkPaid.get(key) ?? 0) + e.amount;
       if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * PARK_STAFF.dailyWage) fail();
       parkPaid.set(key, paid);
       continue;
     }
-    const event = /^(Build|Demolish|Monthly park upkeep) (?:park )?#([1-9]\d*)$/.exec(e.reason);
+    const event = /^(Build|Demolish|Demolition refund|Monthly park upkeep) (?:park )?#([1-9]\d*)$/.exec(e.reason);
     if (!event) continue;
     const id = Number(event[2]);
-    if (!withParks || !int(id, 1) || id >= c.nextId || e.from !== 'treasury') fail();
+    if (!withParks || !int(id, 1) || id >= c.nextId || e.from !== (event[1] === 'Demolition refund' ? 'construction' : 'treasury')) fail();
     if (event[1] === 'Build') {
       if (parkBuilds.has(id) || e.to !== 'construction' || e.amount !== PARK.cost) fail();
       parkBuilds.set(id, e.tick);
     } else {
       if (!parkBuilds.has(id) || parkRemoved.has(id) || e.tick < parkBuilds.get(id)!) fail();
-      if (event[1] === 'Demolish') { if (e.to !== 'construction' || e.amount !== 2_000) fail(); parkRemoved.add(id); }
+      if (event[1] === 'Demolish' || event[1] === 'Demolition refund') { if (event[1] === 'Demolish' ? e.to !== 'construction' || e.amount !== 2_000 : e.to !== 'treasury' || e.amount !== PARK.cost * 4 / 5) fail(); parkRemoved.add(id); }
       else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > PARK.upkeep || parkBills.has(key)) fail(); parkBills.add(key); }
     }
   }
@@ -1672,23 +1836,41 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   const reconciled: Record<string, number> = Object.fromEntries(Object.keys(c.accounts).map(k => [k, c.history?.accounts[k]??0]));
   for (const e of c.ledger) { reconciled[e.from] -= e.amount; reconciled[e.to] += e.amount; }
   if (Object.entries(c.accounts).some(([key, value]) => reconciled[key] !== value)) fail();
+  validateMunicipalRefunds(c);
   validateAgriculture(c, extendedFactories, withFarmLevels);
   if (typed) validateTypes(c);
   return c;
 }
 
 /** Validate old saves before migration; never advance time, RNG, money or admission history on load. */
-function deserializeVersioned(json: string, expandedPopulation = false, expandedBusinesses = false, expandedCommercial = false, expandedMap = false): City {
+function deserializeVersioned(json: string, expandedPopulation = false, expandedBusinesses = false, expandedCommercial = false, expandedMap = false, soilIndependent = false): City {
   if (typeof json !== 'string' || json.length > 12_000_000) throw new Error('Save is too large or invalid.');
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error('Save is not valid JSON.'); }
   // v1–v6 are read and validated by the frozen v6 rules first, then carried forward unchanged.
   const version = parsed && typeof parsed === 'object' ? (parsed as { version: unknown }).version : undefined;
+  if (version === 28) {
+    const envelope = parsed as Record<string, unknown>;
+    if (envelope.rulesVersion !== 'chain-23' || !envelope.happiness) throw Error('Invalid happiness save version');
+    const { happiness, ...rest } = envelope;
+    const city = deserializeVersioned(JSON.stringify({...rest, version:27, rulesVersion:'chain-22'}), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap, soilIndependent);
+    validateHappiness(city, happiness); city.happiness = happiness; return city;
+  }
+  if (parsed && typeof parsed === 'object' && 'happiness' in parsed) throw Error('Happiness requires save v28');
+  if (version === 27) {
+    const envelope = parsed as Record<string, unknown>;
+    const boundary = envelope.farmSoilIndependentStartTick;
+    if (soilIndependent || envelope.rulesVersion !== 'chain-22' || (envelope.farmBaseVersion !== 25 && envelope.farmBaseVersion !== 26)) throw Error('Invalid soil-independent farm envelope');
+    if (!Number.isSafeInteger(boundary) || Number(boundary) < 0 || !Number.isSafeInteger(envelope.tick) || Number(boundary) > Number(envelope.tick)) throw Error('Invalid soil-independent farm boundary');
+    const {farmBaseVersion, ...rest} = envelope;
+    return deserializeVersioned(JSON.stringify({...rest, version:farmBaseVersion, rulesVersion:farmBaseVersion === 26 ? 'chain-21' : 'chain-20'}), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap, true);
+  }
+  if (parsed && typeof parsed === 'object' && ('farmBaseVersion' in parsed || !soilIndependent && 'farmSoilIndependentStartTick' in parsed)) throw Error('Soil-independent farms require save v27');
   if (version === 26) {
     const envelope = parsed as Record<string, unknown>;
     if (expandedMap || envelope.rulesVersion !== 'chain-21' || envelope.mapBaseVersion !== 25 || envelope.mapLayout !== 'north-24x28') throw Error('Invalid expanded map envelope');
     const {mapBaseVersion, mapLayout, ...rest} = envelope;
-    return deserializeVersioned(JSON.stringify({...rest,version:25,rulesVersion:'chain-20'}), expandedPopulation, expandedBusinesses, expandedCommercial, true);
+    return deserializeVersioned(JSON.stringify({...rest,version:25,rulesVersion:'chain-20'}), expandedPopulation, expandedBusinesses, expandedCommercial, true, soilIndependent);
   }
   if (parsed && typeof parsed === 'object' && ('mapBaseVersion' in parsed || 'mapLayout' in parsed)) throw Error('Expanded map requires save v26');
   if (version === 25) {
@@ -1701,7 +1883,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
     if(!boundary || typeof boundary!=='object' || Object.keys(boundary).length!==3 || !(['moneyEntries','cropEntries','goodsEntries'] as const).every(k=>Number.isSafeInteger(boundary[k])&&boundary[k]>=0) || boundary.moneyEntries>moneyJournalLength(rawCity) || boundary.cropEntries>cropJournalLength(rawCity) || boundary.goodsEntries>goodsJournalLength(rawCity)) throw Error('Invalid unified commercial ledger boundary');
     const {commercialBaseVersion, ...rest} = envelope;
     const rules: Record<number,string> = {19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18',24:'chain-19'};
-    return deserializeVersioned(JSON.stringify({...rest,version:commercialBaseVersion,rulesVersion:rules[Number(commercialBaseVersion)]}),expandedPopulation,expandedBusinesses,true,expandedMap);
+    return deserializeVersioned(JSON.stringify({...rest,version:commercialBaseVersion,rulesVersion:rules[Number(commercialBaseVersion)]}),expandedPopulation,expandedBusinesses,true,expandedMap,soilIndependent);
   }
   if (!expandedCommercial && parsed && typeof parsed === 'object' && ('commercialUnifiedStartTick' in parsed || 'commercialUnifiedBaseline' in parsed)) throw Error('Unified commerce requires save v25');
   if (parsed && typeof parsed === 'object' && 'commercialBaseVersion' in parsed) throw Error('Commercial progression requires save v25');
@@ -1711,7 +1893,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
     validateCityHistory(envelope as unknown as City);
     const {historyBaseVersion,...rest}=envelope;
     const rules:Record<number,string>={19:'chain-14',20:'chain-15',21:'chain-16',22:'chain-17',23:'chain-18'};
-    return deserializeVersioned(JSON.stringify({...rest,version:historyBaseVersion,rulesVersion:rules[Number(historyBaseVersion)]}),expandedPopulation,expandedBusinesses,expandedCommercial,expandedMap);
+    return deserializeVersioned(JSON.stringify({...rest,version:historyBaseVersion,rulesVersion:rules[Number(historyBaseVersion)]}),expandedPopulation,expandedBusinesses,expandedCommercial,expandedMap,soilIndependent);
   }
   if (version === 23) {
     const envelope = parsed as Record<string, unknown>;
@@ -1719,7 +1901,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
     const { businessCapacityVersion: _capacity, ...rest } = envelope;
     const innerVersion = rest.education !== undefined ? 22 : rest.populationCapacityVersion !== undefined ? 21 : rest.roadTopology !== undefined ? 20 : 19;
     const innerRules = innerVersion === 22 ? 'chain-17' : innerVersion === 21 ? 'chain-16' : innerVersion === 20 ? 'chain-15' : 'chain-14';
-    const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }), false, true, expandedCommercial, expandedMap);
+    const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }), false, true, expandedCommercial, expandedMap, soilIndependent);
     city.businessCapacityVersion = 1;
     // Keep original field order, including education and Guest market, on exact resume.
     const ordered = Object.fromEntries(Object.keys(envelope).filter(key => Object.hasOwn(city, key)).map(key => [key, (city as unknown as Record<string, unknown>)[key]]));
@@ -1735,9 +1917,10 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
     const hasRoads = rest.roadTopology !== undefined;
     const innerVersion = expandedInner ? 21 : hasRoads ? 20 : 19;
     const innerRules = expandedInner ? 'chain-16' : hasRoads ? 'chain-15' : 'chain-14';
-    const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap);
+    const city = deserializeVersioned(JSON.stringify({ ...rest, version: innerVersion, rulesVersion: innerRules }), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap, soilIndependent);
     assertEducationInvariants(education, city.households);
     city.education = education;
+    validateMunicipalRefunds(city);
     if (city.households.some(h => householdWorkerCount(city, h.id) > h.workforce)) trimWorkAssignments(city);
     if (city.households.some(h => householdWorkerCount(city, h.id) > h.workforce)) throw new Error('Education and jobs exceed household workforce');
     // Reuse the validated values while preserving the v22 envelope key order.
@@ -1751,7 +1934,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
     if (envelope.rulesVersion !== 'chain-16' || envelope.populationCapacityVersion !== 1) throw Error('Invalid population save version');
     const {populationCapacityVersion, ...base} = envelope;
     const hasRoads = 'roadTopology' in base;
-    const city = deserializeVersioned(JSON.stringify({...base, version: hasRoads ? 20 : 19, rulesVersion: hasRoads ? 'chain-15' : 'chain-14'}), true, expandedBusinesses, expandedCommercial, expandedMap);
+    const city = deserializeVersioned(JSON.stringify({...base, version: hasRoads ? 20 : 19, rulesVersion: hasRoads ? 'chain-15' : 'chain-14'}), true, expandedBusinesses, expandedCommercial, expandedMap, soilIndependent);
     city.populationCapacityVersion = 1;
     return city;
   }
@@ -1760,7 +1943,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
     const envelope = parsed as Record<string, unknown>;
     if(envelope.rulesVersion !== 'chain-15') throw Error('Invalid road save version');
     const {roadTopology,...base}=envelope;
-    const city=deserializeVersioned(JSON.stringify({...base,version:19,rulesVersion:'chain-14'}), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap);
+    const city=deserializeVersioned(JSON.stringify({...base,version:19,rulesVersion:'chain-14'}), expandedPopulation, expandedBusinesses, expandedCommercial, expandedMap, soilIndependent);
     validateRoadTopology(city,roadTopology); city.roadTopology=roadTopology; return city;
   }
   if(parsed && typeof parsed==='object' && 'roadTopology' in parsed) throw Error('Road topology requires save v20');
@@ -1823,14 +2006,28 @@ export function busValidationView(c: City): BusValidationView {
 }
 export function deserialize(json: string): City {
   const header=JSON.parse(json);
-  if(header?.history&&header.version!==24&&header.version!==25&&header.version!==26)throw Error('Unsupported or corrupt history checkpoint: requires save v24');
-  const city = deserializeVersioned(json);
+  if (header?.goalRulesVersion !== undefined && header.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
+  if (header?.history && ![24, 25, 26, 27, 28, 29].includes(header.version)) throw Error('Unsupported or corrupt history checkpoint: requires save v24');
+  let baseJson = json;
+  if (header?.version === 29) {
+    if (json.length > 12_000_000 || header.rulesVersion !== 'chain-24' || (header.taxBaseVersion !== 27 && header.taxBaseVersion !== 28)) throw Error('Invalid tax policy save version.');
+    validateTaxPolicy(header.taxPolicy, header.tick);
+    // Owner withdrawal validation needs the policy during ledger replay.
+    const { taxBaseVersion, ...base } = header;
+    baseJson = JSON.stringify({...base, version: taxBaseVersion, rulesVersion: taxBaseVersion === 28 ? 'chain-23' : 'chain-22'});
+  } else if (header && typeof header === 'object' && ('taxPolicy' in header || 'taxBaseVersion' in header)) {
+    throw Error('Tax policy requires save v29.');
+  }
+  const city = deserializeVersioned(baseJson);
+  // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
+  if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.
   if ('taxi' in city) validateTaxi(city.taxi, taxiValidationView(city));
   if ('bus' in city) { validateBus(city.bus, busValidationView(city)); reconcileBusStops(city, SIZE); }
   if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
   if (city.factoryProgressionStartTick === undefined) city.factoryProgressionStartTick = city.tick;
   if (city.farmLevelStartTick === undefined) city.farmLevelStartTick = city.tick;
+  if (city.farmSoilIndependentStartTick === undefined) city.farmSoilIndependentStartTick = city.tick;
   city.commercialUnifiedStartTick ??= city.tick;
   city.commercialUnifiedBaseline ??= {moneyEntries:moneyJournalLength(city),cropEntries:cropJournalLength(city),goodsEntries:goodsJournalLength(city)};
   compactCityHistory(city);

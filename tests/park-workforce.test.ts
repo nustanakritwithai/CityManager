@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createCity, step, buildPark, bulldoze, buildRoad, GATEWAY, access, serialize, deserialize, householdWorkerCount, parkEmploymentForHousehold, parkStaffingStatus, treasurySpendable, summary, type City } from '../src/sim.ts';
 import { PARK, PARK_STAFF, parkPayroll, parkWorkers } from '../src/parks.ts';
 import { householdLabor } from '../src/context-data.ts';
 import { householdCardData } from '../src/building-card-data.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
-import { SAVE_KEY, PARK_WORKFORCE_BACKUP_KEY, saveStoredCity, readStoredCity } from '../src/save-storage.ts';
 
 const run = (c: City, days: number) => { for (let i = 0; i < days; i++) step(c); };
 function isolated(): City {
@@ -25,7 +25,7 @@ function unique(c: City) {
     for (const skill of ['general', 'manufacturing', 'retail'] as const) assert.ok(jobs.filter(a => a.skill === skill).reduce((n, a) => n + a.workers, 0) <= h.workerSkills[skill]);
   }
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
-  const balances = Object.fromEntries(Object.keys(c.accounts).map(k => [k, 0]));
+  const balances = Object.fromEntries(Object.keys(c.accounts).map(k => [k, c.history?.accounts[k] ?? 0]));
   for (const e of c.ledger) { balances[e.from] -= e.amount; balances[e.to] += e.amount; }
   assert.deepEqual(balances, c.accounts);
 }
@@ -93,8 +93,21 @@ test('removal settles earned claims, releases workers, and stops payroll/upkeep 
 
 test('v14 migration changes no money/jobs/history; v15 retains earned claims and rejects double assignment or unfunded claims', () => {
   const c = isolated(); buildPark(c, 0);
-  const old = JSON.parse(serialize(c)); delete old.education; old.version = 14; old.rulesVersion = 'chain-9'; delete old.factoryProgressionStartTick; delete old.farmLevelStartTick;
-  const migrated = deserialize(JSON.stringify(old)); const comparable = { ...c, factoryProgressionStartTick: c.tick, farmLevelStartTick: c.tick }; delete comparable.education; assert.deepEqual(migrated, comparable);
+  // A genuine pre-unified v15 fixture without staffing is valid as v14 too.
+  // Changing a current v25 envelope's outer number would fabricate an invalid hybrid.
+  const old = JSON.parse(readFileSync(new URL('./fixtures/retail-v15.json', import.meta.url), 'utf8'));
+  assert.equal(old.parks.length, 0); old.version = 14; old.rulesVersion = 'chain-9';
+  const migrated = deserialize(JSON.stringify(old));
+  for (const key of ['accounts', 'buildings', 'households', 'firms', 'employment', 'ownerLabor', 'rng', 'tick', 'nextId']) assert.deepEqual((migrated as any)[key], old[key]);
+  const through = migrated.history?.throughTick ?? -1;
+  const past = old.ledger.filter((e: any) => e.tick <= through);
+  assert.equal(migrated.history?.moneyCount ?? 0, past.length);
+  assert.deepEqual(migrated.ledger, old.ledger.filter((e: any) => e.tick > through));
+  const historic: Record<string, number> = {};
+  for (const e of past) { historic[e.from] = (historic[e.from] ?? 0) - e.amount; historic[e.to] = (historic[e.to] ?? 0) + e.amount; }
+  for (const key of new Set([...Object.keys(historic), ...Object.keys(migrated.history?.accounts ?? {})]))
+    assert.equal(migrated.history?.accounts[key] ?? 0, historic[key] ?? 0, `historical ${key}`);
+  unique(migrated);
   step(c); const raw = serialize(c); assert.deepEqual(deserialize(raw), c);
   for (const corrupt of [
     (x: any) => x.parks[0].staffing.allocations.push({ ...x.parks[0].staffing.allocations[0] }),
@@ -105,8 +118,4 @@ test('v14 migration changes no money/jobs/history; v15 retains earned claims and
     (x: any) => { x.version = 14; x.rulesVersion = 'chain-9'; },
     (x: any) => { const spent = x.accounts.treasury; x.accounts.treasury = 0; x.accounts.construction += spent; x.ledger.push({ tick: x.tick, from: 'treasury', to: 'construction', amount: spent, reason: 'Spend reserved wages' }); },
   ]) { const bad = JSON.parse(raw); corrupt(bad); assert.throws(() => deserialize(JSON.stringify(bad))); }
-  const map = new Map([[SAVE_KEY, JSON.stringify(old)]]), storage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); } };
-  saveStoredCity(storage, raw, null); assert.equal(map.get(PARK_WORKFORCE_BACKUP_KEY), JSON.stringify(old)); assert.equal(readStoredCity(storage, 'backup')?.raw, JSON.stringify(old));
-  const failing = { getItem: (k: string) => k === SAVE_KEY ? JSON.stringify(old) : null, setItem: () => { throw Error('quota'); } };
-  assert.throws(() => saveStoredCity(failing, raw, null), /quota/); assert.equal(failing.getItem(SAVE_KEY), JSON.stringify(old));
 });

@@ -12,13 +12,35 @@ export const UTILITY_KINDS = ['power', 'water'] as const;
 export type UtilityKind = typeof UTILITY_KINDS[number];
 export type Need = Record<UtilityKind, number>;
 /** A city-built plant on one parcel; it supplies the network while it has connected road frontage. */
-export type Plant = { id: number; cell: number; kind: UtilityKind; tick: number };
+export type Plant = { id: number; cell: number; kind: UtilityKind; tick: number; level?: 2 | 3 };
 
 /** Units each plant adds, its construction cost and its monthly upkeep (satang). */
 export const PLANTS: Readonly<Record<UtilityKind, { capacity: number; cost: number; upkeep: number }>> = Object.freeze({
   power: Object.freeze({ capacity: 40, cost: 500_000, upkeep: 12_000 }),
   water: Object.freeze({ capacity: 40, cost: 300_000, upkeep: 6_000 }),
 });
+/** Upgrade costs are incremental, in satang; existing four-field plants remain level 1.
+ * Keep historical prices stable: save validation reconciles every construction receipt. */
+export type PlantLevel = 1 | 2 | 3;
+export const PLANT_LEVELS = Object.freeze({
+  power: Object.freeze([
+    Object.freeze({ capacity: 40, upkeep: 12_000, upgradeCost: 0 }),
+    Object.freeze({ capacity: 80, upkeep: 18_000, upgradeCost: 300_000 }),
+    Object.freeze({ capacity: 160, upkeep: 30_000, upgradeCost: 600_000 }),
+  ]),
+  water: Object.freeze([
+    Object.freeze({ capacity: 40, upkeep: 6_000, upgradeCost: 0 }),
+    Object.freeze({ capacity: 80, upkeep: 9_000, upgradeCost: 180_000 }),
+    Object.freeze({ capacity: 160, upkeep: 15_000, upgradeCost: 360_000 }),
+  ]),
+});
+export const plantLevel = (plant: Plant): PlantLevel => plant.level ?? 1;
+export function plantLevelSpec(kind: UtilityKind, level: PlantLevel) {
+  if (!Number.isInteger(level) || level < 1 || level > 3) throw Error('Invalid plant level');
+  return PLANT_LEVELS[kind][level - 1];
+}
+export const plantSpec = (plant: Plant) => plantLevelSpec(plant.kind, plantLevel(plant));
+export const plantUpgradeReason = (kind: UtilityKind, id: number, level: PlantLevel) => `Upgrade ${PLANT_NAMES[kind]} #${id} to level ${level}`;
 /** The outside contract a new city starts with at the gateway, in units. */
 export const OUTSIDE_SUPPLY: Readonly<Need> = Object.freeze({ power: 20, water: 20 });
 /** What a served user pays the city per unit each month (satang). */
@@ -65,7 +87,7 @@ export type Service = {
 export function utilityService(c: City, roads: ReadonlySet<number>): Service {
   const online = new Set(c.plants.filter(p => roadNeighborsFor(c,p.cell).some(n => roads.has(n))).map(p => p.id));
   const plants = none();
-  for (const p of c.plants) if (online.has(p.id)) plants[p.kind] += PLANTS[p.kind].capacity;
+  for (const p of c.plants) if (online.has(p.id)) plants[p.kind] += plantSpec(p).capacity;
   const capacity = { power: c.utilities.outside.power + plants.power, water: c.utilities.outside.water + plants.water };
   // A water source cannot give a building priority for power, or vice versa.
   const roadDistances = (kind: UtilityKind) => {

@@ -25,14 +25,20 @@ html,body {
 body {
   font-size:13px
 }
-.guest-entry-gate { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:24px; background:linear-gradient(145deg,#101a31 0%,#17223a 58%,#263d5a 100%); }
-.guest-entry-card { width:min(100%,420px); padding:32px 26px; border:1px solid #deecdf3d; border-radius:20px; background:#162038f7; box-shadow:0 20px 60px #08122699; text-align:center; }
-.guest-entry-card h1 { margin:0 0 12px; color:#f3c46b; font-size:clamp(30px,8vw,48px); letter-spacing:.08em; }
+.guest-entry-gate { --entry-unit:1px; position:fixed; inset:0; z-index:10000; display:grid; place-items:safe center; overflow:auto; padding:calc(24 * var(--entry-unit)); background:linear-gradient(145deg,#101a31 0%,#17223a 58%,#263d5a 100%); }
+.guest-entry-card { width:min(100%,calc(420 * var(--entry-unit))); padding:calc(32 * var(--entry-unit)) calc(26 * var(--entry-unit)); border:1px solid #deecdf3d; border-radius:20px; background:#162038f7; box-shadow:0 20px 60px #08122699; text-align:center; }
+.guest-entry-card h1 { margin:0 0 12px; color:#f3c46b; font-size:clamp(calc(30 * var(--entry-unit)),8vw,calc(48 * var(--entry-unit))); letter-spacing:.08em; }
 .guest-entry-card p { margin:10px 0; color:#d4deee; line-height:1.6; }
 .guest-entry-card .guest-entry-note { color:#a7b3cd; font-size:12px; }
-.guest-entry-card button { width:100%; min-height:48px; margin-top:18px; border:1px solid #f3c46b99; border-radius:12px; background:#355b75; color:#fff8e8; font:600 16px inherit; cursor:pointer; }
+.guest-entry-card button { width:100%; min-height:calc(48 * var(--entry-unit)); margin-top:calc(18 * var(--entry-unit)); border:1px solid #f3c46b99; border-radius:12px; background:#355b75; color:#fff8e8; font:inherit; font-size:calc(16 * var(--entry-unit)); font-weight:600; cursor:pointer; }
 .guest-entry-card button:disabled { opacity:.58; cursor:wait; }
 .guest-entry-status { min-height:24px; color:#f3c46b !important; }
+.guest-entry-slots { display:grid; gap:calc(10 * var(--entry-unit)); text-align:start; }
+.guest-entry-slots[hidden] { display:none; }
+.guest-entry-slots section { display:grid; grid-template-columns:1fr auto; align-items:center; gap:0 12px; padding:calc(10 * var(--entry-unit)); border:1px solid #deecdf3d; border-radius:12px; }
+.guest-entry-slots h2 { margin:0; font-size:calc(16 * var(--entry-unit)); }
+.guest-entry-slots section p { margin:2px 0 0; font-size:calc(12 * var(--entry-unit)); }
+.guest-entry-slots section button { grid-column:2; grid-row:1 / span 2; width:auto; margin:0; padding-inline:calc(12 * var(--entry-unit)); font-size:calc(14 * var(--entry-unit)); }
 .market-game-panel { margin-top:16px; padding:14px; border:1px solid #80b9db66; border-radius:12px; background:#182946; }
 .market-game-panel h3, .market-game-panel h4 { margin:0 0 8px; color:#f3c46b; }
 .market-game-panel p { margin:6px 0; color:#c4d0e4; }
@@ -1134,3 +1140,6 @@ dialog button {
 #save-recovery-details > button { display: block; width: 100%; margin: 8px 0; }
 #save-promotion-confirm { max-height: calc(100dvh - 32px); overflow-y: auto; }
 #save-promotion-confirm button { display: block; width: 100%; margin: 8px 0; }
+
+/* Keep utility prices in stable rows so an upgrade cannot move its button. */
+#plant-upgrade-quote { white-space: pre-line; line-height: 1.5; min-height: 4.5em; }

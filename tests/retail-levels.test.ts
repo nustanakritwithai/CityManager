@@ -1,10 +1,11 @@
+import { assertLegacyCheckpoint } from './legacy-history-check.ts';
+import { cropJournalLength, goodsJournalLength, moneyJournalLength } from '../src/city-history.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createCity, deserialize, firmWorkerCount, isRetail, retailDemand, serialize, step, type City } from '../src/sim.ts';
 import { retailCapacity, staffedRetailCapacity } from '../src/retail-capacity.ts';
 import { keepSupplied } from './plants.ts';
-import { FARM_LEVEL_BACKUP_KEY, SAVE_KEY, readStoredCity, saveStoredCity } from '../src/save-storage.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
 import { holdEducationReady } from './education-ready.ts';
 
@@ -34,7 +35,20 @@ test('legacy state migrates intact; only the new envelope admits extended levels
   // Produced by the published v15 engine from an actual converted shop.
   const old = readFileSync(new URL('./fixtures/retail-v15.json', import.meta.url), 'utf8'), raw = JSON.parse(old);
   assert.equal(raw.version, 15);
-  const loaded = deserialize(old), original = { ...raw, version: 9, rulesVersion: 'chain-4', factoryProgressionStartTick: raw.tick, farmLevelStartTick: raw.tick };
+  const loaded = deserialize(old);
+  // The current loader compacts older journal rows into a validated checkpoint.
+  // Verify every surviving row, all original journal lengths and all other state.
+  assertLegacyCheckpoint(loaded, raw);
+  const history = loaded.history!;
+  assert.equal(cropJournalLength(loaded), raw.cropLedger.length);
+  assert.equal(goodsJournalLength(loaded), raw.goodsLedger.length);
+  assert.equal(moneyJournalLength(loaded), raw.ledger.length);
+  const original = { ...raw, version: 9, rulesVersion: 'chain-4',
+    farmSoilIndependentStartTick: raw.tick, factoryProgressionStartTick: raw.tick, farmLevelStartTick: raw.tick,
+    commercialUnifiedStartTick: raw.tick,
+    commercialUnifiedBaseline: { moneyEntries: raw.ledger.length, cropEntries: raw.cropLedger.length, goodsEntries: raw.goodsLedger.length },
+    cropLedger: raw.cropLedger.slice(history.cropOffset), goodsLedger: raw.goodsLedger.slice(history.goodsOffset),
+    ledger: raw.ledger.slice(history.moneyCount), history };
   assert.deepEqual(loaded, original);
   const firm = loaded.firms.find(f => f.convertedAt !== undefined)!;
   const premise = loaded.buildings.find(b => b.id === firm.building)!;
@@ -49,11 +63,6 @@ test('legacy state migrates intact; only the new envelope admits extended levels
   assert.deepEqual(deserializeParkSession(serializeParkSession(loaded, runtime)), { city: loaded, runtime });
   const oldSession = { ...JSON.parse(old), parkRuntime: createParkRuntime(original) };
   assert.deepEqual(deserializeParkSession(JSON.stringify(oldSession)).city, original);
-  const items = new Map<string, string>([[SAVE_KEY, old]]);
-  const storage = { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v); } };
-  saveStoredCity(storage, upgraded, null);
-  assert.equal(items.get(FARM_LEVEL_BACKUP_KEY), old);
-  assert.equal(readStoredCity(storage, 'backup')?.raw, old);
 });
 
 test('a real shop upgrades on the same cell and buys and sells its expanded stock', () => {
@@ -85,7 +94,7 @@ test('a real shop upgrades on the same cell and buys and sells its expanded stoc
   const building = demandCity.buildings.find(b => b.id === expanded.building)!;
   assert.ok(firmWorkerCount(demandCity, expanded.id) >= 4);
   // Extra buyers isolate the demand signal; the snapshot is not stepped or saved.
-  for (let i = 0; i < 24; i++) demandCity.households.push({ ...demandCity.households[0] });
+  for (let i = 0; i < 120; i++) demandCity.households.push({ ...demandCity.households[0] });
   // The real shop may have continued beyond level five by day 400. Compare
   // exactly the level-four to level-five change, regardless of later growth.
   building.level = 5;
@@ -93,10 +102,10 @@ test('a real shop upgrades on the same cell and buys and sells its expanded stoc
   building.level = 4;
   assert.equal(retailDemand(demandCity), highDemand + 1);
   building.level = 5;
-  const stock = expanded.inventory;
-  expanded.inventory = 0;
+  const stock = expanded.inventory, cropStock = expanded.cropInventory;
+  expanded.inventory = 0; expanded.cropInventory = 0;
   assert.equal(retailDemand(demandCity), highDemand + 1, 'empty extra shelf does not suppress new shop demand');
-  expanded.inventory = stock;
+  expanded.inventory = stock; expanded.cropInventory = cropStock;
   demandCity.employment = demandCity.employment.filter(e => e.firmId !== expanded.id);
   assert.equal(retailDemand(demandCity), highDemand + 1, 'vacant extra jobs do not suppress new shop demand');
 });

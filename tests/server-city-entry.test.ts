@@ -9,14 +9,18 @@ test('entry keeps no browser-held Guest pin: identity comes only from the server
 test('production entry and save integration has no browser city writer or offline escape',()=>{
  const main=readFileSync(new URL('../src/main.ts',import.meta.url),'utf8');
  for(const forbidden of ['autoWipeOnce','restoreStartupCity','saveLocalCitySession','saveRecoveryCopy','saveActiveLocalSave','saveStoredCity','saveGuard','rememberResumeChoice','deleteOldSaves'])assert.ok(!main.includes(forbidden),forbidden);
- assert.match(main,/await serverSave.save\(raw/);
- assert.match(main,/await serverSave.retry\(\)/);
+ assert.match(main,/await persistServerCity\(serverSave/);
+ const lifecycle=readFileSync(new URL('../src/server-save-lifecycle.ts',import.meta.url),'utf8');
+ assert.match(lifecycle,/await client.retry\(\)/);
+ assert.match(lifecycle,/explicit\?client.save\(snapshot.raw,snapshot.metadata\):client.saveOrVerify\(snapshot.raw,snapshot.metadata\)/);
  assert.match(main,/market-disabled-server-save-required/);
  const gate=readFileSync(new URL('../src/server-city-entry.ts',import.meta.url),'utf8');
  assert.ok(!gate.includes('เล่นออฟไลน์'));
  assert.ok(gate.indexOf('await client.load()')<gate.indexOf('await client.create('));
  assert.ok(!gate.includes('client.archive('));
  assert.ok(!gate.includes('inventoryLegacyCities'));
+ assert.doesNotMatch(gate,/migrationIssues|save-storage|storage\?:unknown/);
+ assert.doesNotMatch(main,/city-migration-warning|serverEntry\.migrationIssues/);
  assert.ok(!readFileSync(new URL('../src/city-save-auth.ts',import.meta.url),'utf8').includes('citymanager.save.'));
  assert.ok(!readFileSync(new URL('../src/city-save-auth.ts',import.meta.url),'utf8').includes('/v1/auth/guest'));
 });
@@ -53,4 +57,30 @@ test('expired Pages token reconnects only the same existing Guest and stays memo
  globalThis.fetch=async(_input,init)=>{assert.equal(init?.credentials,'omit');assert.equal(new Headers(init?.headers).get('Authorization'),'Bearer memory-token');return new Response(JSON.stringify({guest_id:owner}),{status:200});};
  try{const auth=createCitySaveAuth();assert.equal(await auth.connect(),owner);assert.deepEqual(expectedGuests,[null]);token=null;assert.equal(await auth.connect(),owner);assert.deepEqual(expectedGuests,[null,owner]);const successFetch=globalThis.fetch;globalThis.fetch=async()=>new Response('{}',{status:401});await assert.rejects(auth.request('/v1/city-save'),(error:any)=>error.status===401);assert.equal(token,null);globalThis.fetch=successFetch;await auth.connect();assert.deepEqual(expectedGuests,[null,owner,owner]);}
  finally{Object.assign(pagesSession,methods);globalThis.fetch=originalFetch;delete (globalThis as any).location;delete (globalThis as any).localStorage;}
+});
+
+test('all source entries stay free of browser persistence APIs and retired save modules', async () => {
+ const {readdirSync,existsSync}=await import('node:fs');
+ const ts=(await import('typescript')).default;
+ const root=new URL('../src/',import.meta.url);
+ const retired=['save-storage.ts','save-copy-codec.ts','active-local-save.ts','auto-cleanup.ts','city-migration-inventory.ts','delete-old-saves.ts','local-city-save.ts','recovery-idb.ts','save-choice.ts','save-equivalence.ts','save-guard.ts','save-promotion.ts','save-recovery-info.ts','startup-save-feedback.ts','startup-save.ts'];
+ for(const name of retired)assert.equal(existsSync(new URL(name,root)),false,`${name} must remain retired`);
+ const forbidden=new Set(['localStorage','sessionStorage','indexedDB']);
+ function inspect(directory:URL){
+  for(const entry of readdirSync(directory,{withFileTypes:true})){
+   const url=new URL(entry.name+(entry.isDirectory()?'/':''),directory);
+   if(entry.isDirectory()){inspect(url);continue;}
+   if(!/\.[cm]?[jt]sx?$/.test(entry.name))continue;
+   const source=ts.createSourceFile(url.pathname,readFileSync(url,'utf8'),ts.ScriptTarget.Latest,true);
+   function visit(node:import('typescript').Node){
+    if(ts.isIdentifier(node))assert.ok(!forbidden.has(node.text),`${url.pathname}: browser persistence API ${node.text}`);
+    if(ts.isElementAccessExpression(node)&&node.argumentExpression&&ts.isStringLiteralLike(node.argumentExpression))assert.ok(!forbidden.has(node.argumentExpression.text),`${url.pathname}: browser persistence property ${node.argumentExpression.text}`);
+    ts.forEachChild(node,visit);
+   }
+   visit(source);
+  }
+ }
+ inspect(root);
+ const preview=readFileSync(new URL('../park-activity-preview.html',import.meta.url),'utf8');
+ assert.doesNotMatch(preview,/id=["'](?:save|load)["']/,'Preview must not expose retired persistence controls');
 });

@@ -2,37 +2,47 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { createCity, deserialize, serialize } from '../src/sim.ts';
+import { browserSnapshotState } from './browser-snapshot.ts';
+import { populationFixture } from './population-capacity-fixture.ts';
 
-test('browser snapshot helpers reject wrong current save envelopes before preserving exact city state', () => {
+test('browser snapshot helpers validate saves while preserving their raw journal representation', async () => {
   const directory = new URL('./', import.meta.url);
   const files = readdirSync(directory).filter(name => name.endsWith('-smoke.mjs'));
+  const city = createCity(61025), saved = serialize(city), parsed = JSON.parse(saved);
+  const historical = readFileSync(new URL('./fixtures/housing-v16-park-session.json', import.meta.url), 'utf8');
+  const historicCity = JSON.parse(historical); delete historicCity.parkRuntime;
+  const historicalRaw = JSON.stringify(historicCity);
   let checked = 0;
   for (const file of files) {
     const line = readFileSync(new URL(file, directory), 'utf8').split('\n').find(text => text.startsWith('const state'));
-    const expressions = [...(line?.matchAll(/evaluate\('([^']+)'\)/g) ?? [])].map(match => match[1]);
-    const expression = expressions.at(-1);
-    if (!expression) continue;
-    const evaluate = (value: object) => runInNewContext(expression, { window: { cityManager: { snapshot: () => JSON.stringify(value) } } });
-    const actual = evaluate({ version: 19, rulesVersion: 'chain-14', accounts: { treasury: 321 }, tick: 12 });
-    assert.deepEqual(JSON.parse(JSON.stringify(actual)), { version: 9, rulesVersion: 'chain-4', accounts: { treasury: 321 }, tick: 12 }, `${file}: full state preserved`);
-    const educated = evaluate({ version: 22, rulesVersion: 'chain-17', education: { version: 1, origin: 'new-city', campuses: [], people: [] }, accounts: { treasury: 321 }, tick: 12 });
-    assert.equal(educated.version, 9, `${file}: education save is normalized`);
-    assert.equal(educated.rulesVersion, 'chain-4');
-    assert.equal(educated.education.origin, 'new-city');
-    for (const invalid of [
-      { version: 18, rulesVersion: 'chain-13' },
-      { version: 19, rulesVersion: 'chain-13' },
-      { version: 19 },
-      { version: 20, rulesVersion: 'chain-14' },
-      { version: 22, rulesVersion: 'chain-14' },
-    ]) assert.throws(() => evaluate(invalid), /Unexpected current save envelope/, `${file}: invalid envelope rejected`);
+    if (!line || !line.includes('window.cityManager.snapshot()')) continue;
+    const run = runInNewContext(`async (evaluate, browserSnapshotState, deserialize, mode) => { ${line} return state(); }`);
+    const evaluate = async (expression: string) => expression === 'JSON.parse(window.cityManager.snapshot())' ? JSON.parse(saved) : saved;
+    const actual = await run(evaluate, browserSnapshotState, deserialize, 'candidate');
+    assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(city)), `${file}: complete city preserved`);
+    for (const edit of [
+      (v: any) => { v.version = 999; }, (v: any) => { v.rulesVersion = 'chain-14'; },
+      (v: any) => { v.commercialBaseVersion = 999; }, (v: any) => { v.accounts.treasury++; },
+    ]) {
+      const invalid = structuredClone(parsed); edit(invalid);
+      await assert.rejects(() => run(async () => JSON.stringify(invalid), browserSnapshotState, deserialize, 'candidate'), undefined, `${file}: invalid save rejected`);
+    }
     if (file === 'compact-smoke.mjs') {
-      assert.equal(expressions.length, 2, 'historical baseline has its own raw snapshot path');
       const legacy = { version: 1, accounts: { treasury: 123 } };
-      const raw = runInNewContext(expressions[0], { window: { cityManager: { snapshot: () => JSON.stringify(legacy) } } });
-      assert.deepEqual(JSON.parse(JSON.stringify(raw)), legacy, 'historical baseline remains unchanged');
+      const raw = await run(async () => legacy, browserSnapshotState, deserialize, 'baseline');
+      assert.deepEqual(JSON.parse(JSON.stringify(raw)), legacy, 'historical baseline remains untouched');
     }
     checked++;
   }
-  assert.equal(checked, 14, 'all browser city snapshot helpers are covered');
+  assert.equal(checked, 16, 'all browser city snapshot helpers, including plant upgrades and demolition refunds, are covered');
+  const historicalState = browserSnapshotState(historicalRaw);
+  assert.deepEqual(historicalState.ledger, historicCity.ledger, 'genuine old journals remain byte-for-byte represented');
+  assert.deepEqual(historicalState.cropLedger, historicCity.cropLedger);
+  assert.deepEqual(historicalState.goodsLedger, historicCity.goodsLedger);
+  assert.equal(historicalRaw, JSON.stringify(historicCity), 'validation leaves original save bytes untouched');
+  const uncheckpointed = serialize(populationFixture(128)), source = JSON.parse(uncheckpointed);
+  assert.ok(deserialize(uncheckpointed).ledger.length < source.ledger.length, 'fixture triggers real decoder compaction');
+  assert.deepEqual(browserSnapshotState(uncheckpointed).ledger, source.ledger, 'helper never substitutes the compacted decoder result');
+  assert.equal(uncheckpointed, JSON.stringify(source), 'the original raw bytes remain available for exact read-only comparisons');
 });

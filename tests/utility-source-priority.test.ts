@@ -7,6 +7,8 @@ function cityWithOppositePlant(kind: 'power' | 'water') {
   const city = createCity(1, { starter: false });
   const row = Math.floor(GATEWAY / SIZE);
   const roads = new Set(Array.from({ length: 7 }, (_, x) => GATEWAY + x));
+  // The supplied connected-road set must match the actual map used by roadLinked.
+  for (const cell of roads) city.cells[cell].road = true;
   city.plants = [{ id: 99, cell: (row + 1) * SIZE + 5, kind, tick: 0 }];
   city.utilities.outside = kind === 'water' ? { power: 1, water: 20 } : { power: 20, water: 1 };
   city.buildings = [
@@ -34,6 +36,8 @@ test('a power plant must not change water priority when water is scarce', () => 
 test('a gateway with zero power supply is not a power source when a plant supplies the city', () => {
   const city = createCity(1, { starter: false }); const row = Math.floor(GATEWAY / SIZE);
   const roads = new Set(Array.from({ length: 7 }, (_, x) => GATEWAY + x));
+  // The supplied connected-road set must match the actual map used by roadLinked.
+  for (const cell of roads) city.cells[cell].road = true;
   city.plants = [{ id: 99, cell: (row + 1) * SIZE + 5, kind: 'power', tick: 0 }];
   city.utilities.outside = { power: 0, water: 20 };
   city.buildings = [];

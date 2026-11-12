@@ -33,7 +33,7 @@ export async function railBrowserChecks({send,evaluate,capture,acknowledge,reloa
  checks.push('Normal game clock creates bounded modeled riders and moves actual mesh; pause freezes both without manual clock advancement');
  await capture('rail-moving-paused');
  await menu('manage');await tap('#rail-service-toggle');assert.equal((await rail()).snapshot.service.snapshot.enabled,false);await tap('#rail-management [aria-label="ปิดหน้าจัดการรถไฟ"]');
- const saved=await acknowledge();const savedRail=saved.parkRuntime.rail;assert.ok(savedRail);assert.equal(saved.version,25);
+ const saved=await acknowledge();const savedRail=saved.parkRuntime.rail;assert.ok(savedRail);assert.equal(saved.version,27);
  await reload();const restored=JSON.parse(await evaluate('window.cityManager.sessionSnapshot()'));assert.deepEqual(restored.parkRuntime.rail,savedRail,'Actual server ACK restores rail service, train, queues and modeled counters exactly');assert.equal((await rail()).trains,1);
  await capture('rail-restored');checks.push('Service paused through UI, complete v25 rail session ACKed and reloaded exactly from isolated server');
  return{status:'passed',checks,stations:savedRail.network.stations,offeredPersons:savedRail.network.model.offeredPersons};

@@ -6,7 +6,7 @@ import { householdFoodToday } from '../src/food-demand.ts';
 
 /** A real newly opened shop; test procurement is fully paid and journaled before the next day. */
 function fixture(level = 2, quantities = [1, 23]) {
-  const city = createCity(61025); for (let day = 0; day < 22; day++) step(city);
+  const city = createCity(61025); for (let day = 0; day < 10; day++) step(city);
   const shop = city.firms.find(isRetail)!, household = city.households[0];
   assert.ok(shop); assert.equal(shop.inventory, 0); assert.equal(household.members, 3);
   for (const market of city.firms.filter(isMarket)) assert.equal(bulldoze(city, city.buildings.find(b => b.id === market.building)!.cell).ok, true);

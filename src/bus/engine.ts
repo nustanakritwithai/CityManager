@@ -3,7 +3,7 @@ import { expandedCellCoordinate } from '../expanded-map-grid.ts';
  * BusEngine (PR B4, bus-design.th.md) — pure, deterministic, event-driven bus service. Modelled on
  * TaxiEngine phases. No UI, saves or economy. Driven by absolute GAME minutes (`advanceTo`).
  *
- * Phases: `toStart` (depot → first stop via `fromDepot`) → `dwelling` (BUS_DWELL_MIN at each stop:
+ * Phases: `toStart` (depot → first stop via `fromDepot`) → `dwelling` (timed pause at each stop:
  * alight, then board up to seat capacity 40/60/80 by line level) → `running` (next leg) … → `home`
  * (parked at the depot). Driving back to the depot is reported as `running` with 0 passengers and
  * `returning: true` in `busesDetail()`.
@@ -48,7 +48,7 @@ export type BusReleaseReason = 'timeout' | 'serviceEnd' | 'suspended' | 'unknown
 export type BusTurnIntent={id:string;samples:readonly BusSnapshot[]};
 export type BusMovementProposal = { busId: string; from: BusSnapshot; to: BusSnapshot; samples: readonly BusSnapshot[]; minute: number; kind: 'drive' | 'transition'; turns?:readonly BusTurnIntent[] };
 export type BusMovementGate = (proposal: BusMovementProposal, others: readonly BusSnapshot[]) => boolean;
-export type BusEngineOptions = { movementGate?: BusMovementGate; movementReset?: () => void; maxWaitMinutes?: number; release?: (requestId: string, persons: number, reason: BusReleaseReason) => void; times?: ReadonlyMap<string, number> };
+export type BusEngineOptions = { driveSecondsPerTile?: number; dwellMinutes?: number; boardDuringDwell?: boolean; movementGate?: BusMovementGate; movementReset?: () => void; maxWaitMinutes?: number; release?: (requestId: string, persons: number, reason: BusReleaseReason) => void; times?: ReadonlyMap<string, number> };
 export type BusSubmission = BusRequestMass & { requestId: string };
 type Waiting = { requestId: string; toStopId: number; persons: number; minute: number };
 type Rider = { requestId: string; toStopId: number; persons: number };
@@ -73,8 +73,13 @@ export class BusEngine {
   private movements={heldDrive:0,heldTransition:0,committedDrive:0,committedTransition:0};
   private cursor: number; private readonly start: number; private readonly maxWait: number;
   private readonly releaseHook: NonNullable<BusEngineOptions['release']>; private readonly fixedTimes?: ReadonlyMap<string, number>;
+  private readonly driveSecondsPerTile?: number; private readonly dwellMinutes: number; private readonly boardDuringDwell: boolean;
   totals = { accepted: 0, boarded: 0, completed: 0, released: 0, releasedBy: { timeout: 0, serviceEnd: 0, suspended: 0, unknownLine: 0, stranded: 0 } as Record<BusReleaseReason, number>, replans: 0, departures: 0 };
   constructor(host: BusHost, startMinute: number, o: BusEngineOptions = {}) {
+    if (o.driveSecondsPerTile !== undefined && (!Number.isFinite(o.driveSecondsPerTile) || o.driveSecondsPerTile <= 0)) throw RangeError('Invalid bus drive speed');
+    this.dwellMinutes = o.dwellMinutes ?? BUS_DWELL_MIN;
+    if (!Number.isFinite(this.dwellMinutes) || this.dwellMinutes <= 0) throw RangeError('Invalid bus dwell time');
+    this.driveSecondsPerTile = o.driveSecondsPerTile; this.boardDuringDwell = o.boardDuringDwell === true;
     this.movementGate = o.movementGate; this.movementReset = o.movementReset;
     this.host = host; this.cursor = this.start = startMinute; this.maxWait = o.maxWaitMinutes ?? BUS_MAX_WAIT_MIN;
     this.releaseHook = o.release ?? (() => {}); this.fixedTimes = o.times;
@@ -98,7 +103,7 @@ export class BusEngine {
 
   /** Re-read lines/roads (memoised). On change: resize fleets and replan moving buses from where they are. */
   refresh(t = this.cursor): void {
-    const next = this.cache.get(this.host, this.fixedTimes ? { times: this.fixedTimes } : {});
+    const next = this.cache.get(this.host, { ...(this.fixedTimes ? { times: this.fixedTimes } : {}), driveSecondsPerTile: this.driveSecondsPerTile, dwellMinutes: this.dwellMinutes });
     if (next === this.routes && this.net) return;
     this.revision++; this.movementReset?.();
     const first = !this.net; this.routes = next; this.net = buildNetwork(this.host); this.times = this.fixedTimes ?? linkTimes(this.net, new Map());
@@ -157,7 +162,7 @@ export class BusEngine {
     b.cell = b.path[k]; b.path = b.at = undefined;
   }
   private drive(b: Bus, path: readonly number[], t: number, phase: BusPhase): void {
-    const at = [t]; for (let i = 1; i < path.length; i++) at.push(at[i - 1] + (this.times.get(linkKey(path[i - 1], path[i])) ?? Infinity) / 60);
+    const at = [t]; for (let i = 1; i < path.length; i++) at.push(at[i - 1] + (this.driveSecondsPerTile ?? this.times.get(linkKey(path[i - 1], path[i])) ?? Infinity) / 60);
     b.phase = phase; b.path = [...path]; b.at = at; b.until = at.at(-1)!;
   }
   private goHome(b: Bus, t: number): void {
@@ -192,6 +197,19 @@ export class BusEngine {
       const key = `${m.lineId}:${m.fromStopId}`, q = this.queues.get(key) ?? [];
       q.push({ requestId: m.requestId, toStopId: m.toStopId, persons: m.persons, minute }); this.queues.set(key, q);
     }
+    // Live riders can arrive while a bus is still at the kerb. Never board against
+    // a stale or future engine clock, after departure, or before admitted arrival.
+    if (this.boardDuringDwell && Math.abs(minute-this.cursor)<1e-9 && inService(minute)) {
+      this.sweep(minute);
+      for (const b of this.buses) {
+        const r=this.route(b.lineId);
+        if (b.phase!=='dwelling' || b.retired || !r || r.status!=='running' || minute>=b.until-1e-9) continue;
+        const stopId=this.order(r)[b.idx];
+        if (this.stopCell(stopId)!==b.cell) continue;
+        this.boardAtStop(b,r,stopId,minute);
+        if (this.movementGate) b.stopIntent=this.stopDepartureIntent(b,minute);
+      }
+    }
   }
   /** Stops a bus at order index `k` will still reach in its current direction (loops wrap). */
   private ahead(r: BusLineRoute, k: number): Set<number> {
@@ -207,15 +225,16 @@ export class BusEngine {
     if (n) { this.totals.completed += n; this.events.push(Object.freeze({ kind: 'alight' as const, busId: b.id, lineId: b.lineId, stopId, cell: b.cell, minute: t, persons: n })); }
     b.onboard = b.onboard.filter(x => x.toStopId !== stopId);
     this.sweep(t);
-    if (inService(t) && !b.retired) {
-      const ahead = this.ahead(r, b.idx), key = `${b.lineId}:${stopId}`, q = this.queues.get(key) ?? [];
-      let room = this.busCapacity(b) - sum(b.onboard), boarded = 0;
-      for (const w of q) { if (room <= 0) break; if (!ahead.has(w.toStopId)) continue; const take = Math.min(room, w.persons); w.persons -= take; room -= take; boarded += take; b.onboard.push({ requestId: w.requestId, toStopId: w.toStopId, persons: take }); }
-      this.queues.set(key, q.filter(w => w.persons > 0));
-      if (boarded) { this.totals.boarded += boarded; this.events.push(Object.freeze({ kind: 'board' as const, busId: b.id, lineId: b.lineId, stopId, cell: b.cell, minute: t, persons: boarded })); }
-    }
-    b.phase = 'dwelling'; b.until = t + BUS_DWELL_MIN;
+    if (inService(t) && !b.retired) this.boardAtStop(b,r,stopId,t);
+    b.phase = 'dwelling'; b.until = t + this.dwellMinutes;
     if(this.movementGate)b.stopIntent=this.stopDepartureIntent(b,t);
+  }
+  private boardAtStop(b:Bus,r:BusLineRoute,stopId:number,t:number):void {
+    const ahead=this.ahead(r,b.idx),key=`${b.lineId}:${stopId}`,q=this.queues.get(key)??[];
+    let room=this.busCapacity(b)-sum(b.onboard),boarded=0;
+    for (const w of q) { if(room<=0)break; if(!ahead.has(w.toStopId))continue; const take=Math.min(room,w.persons);w.persons-=take;room-=take;boarded+=take;b.onboard.push({requestId:w.requestId,toStopId:w.toStopId,persons:take}); }
+    this.queues.set(key,q.filter(w=>w.persons>0));
+    if(boarded){this.totals.boarded+=boarded;this.events.push(Object.freeze({kind:'board' as const,busId:b.id,lineId:b.lineId,stopId,cell:b.cell,minute:t,persons:boarded}));}
   }
   private sweep(t: number): void {
     for (const [key, q] of [...this.queues].sort(([a], [b]) => (a < b ? -1 : 1))) {
@@ -304,7 +323,7 @@ export class BusEngine {
     const cell=b.phase==='dwelling'?b.cell:b.path?.at(-1);if(cell===undefined)return undefined;
     const remaining=b.phase==='dwelling'?b.onboard:b.onboard.filter(rider=>rider.toStopId!==order[idx]);
     const parked:Bus={...b,cell,phase:'dwelling',path:undefined,at:undefined,idx,onboard:remaining};
-    const departure:Bus={...parked},departureTime=b.phase==='dwelling'?b.until:t+BUS_DWELL_MIN;
+    const departure:Bus={...parked},departureTime=b.phase==='dwelling'?b.until:t+this.dwellMinutes;
     // Mirror eligibility only; preview never consumes queues or emits passenger events.
     const ahead=r?this.ahead(r,idx):new Set<number>();
     const willBoard=b.phase!=='dwelling'&&!!r&&inService(t)&&!b.retired&&sum(remaining)<this.busCapacity(b)&&(this.queues.get(`${b.lineId}:${order[idx]}`)??[]).some(w=>w.persons>0&&ahead.has(w.toStopId)&&t-w.minute<=this.maxWait+1e-9);
@@ -431,7 +450,11 @@ export function busRideMinutes(route: BusLineRoute, stopIds: readonly number[], 
   for (let k = 0; k < L; k++) if (o[k] === fromStopId) {
     let m = 0;
     const end = route.loop ? k + L - 1 : (k < L / 2 ? L / 2 : L);
-    for (let j = k; j < end; j++) { const g = route.legs[j % L]; m += g.seconds / 60 + BUS_DWELL_MIN; if (o[(j + 1) % L] === toStopId) { if (best === null || m - BUS_DWELL_MIN < best) best = m - BUS_DWELL_MIN; break; } }
+    for (let j = k; j < end; j++) {
+      m += route.legs[j % L].seconds / 60;
+      if (o[(j + 1) % L] === toStopId) { if (best === null || m < best) best = m; break; }
+      m += route.dwellMinutes;
+    }
   }
   return best;
 }

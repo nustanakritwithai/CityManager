@@ -16,7 +16,7 @@ test('the gateway contract caps growth until the city builds plants; plants lift
   assert.deepEqual(svc.capacity, OUTSIDE_SUPPLY, 'a new city has only the gateway contract');
   assert.ok(svc.used.power <= OUTSIDE_SUPPLY.power && svc.used.water <= OUTSIDE_SUPPLY.water);
   assert.equal(cityGoals(capped).won, false, 'without plants the sample city cannot win');
-  const supplied = createCity(61025); let won = 0;
+  const supplied = createCity(61025); delete supplied.goalRulesVersion; let won = 0;
   for (let d = 1; d <= 720; d++) { step(supplied); keepSupplied(supplied); if (!won && cityGoals(supplied).won) won = d; }
   assert.ok(supplied.plants.length >= 2 && won > 0, `with plants the city wins (day ${won})`);
   assert.ok(summary(supplied).population > summary(capped).population);
@@ -83,7 +83,7 @@ test('monthly bills: users pay the city, the city pays outside units and plant u
 
 test('a 2.0 (v8) save loads with a contract that covers what it already drew, and never shrinks', () => {
   const old = oldCity(61025); for (let day = 0; day < 400; day++) oldStep(old);
-  const raw = JSON.parse(serialize(deserialize(oldSerialize(old)))); delete raw.foodDemandStartTick; delete raw.factoryProgressionStartTick; delete raw.farmLevelStartTick; delete raw.plants; raw.utilities = { power: true, water: true }; raw.version = 8; raw.rulesVersion = 'chain-3';
+  const raw = JSON.parse(serialize(deserialize(oldSerialize(old)))); delete raw.commercialUnifiedStartTick; delete raw.commercialUnifiedBaseline; delete raw.commercialBaseVersion; delete raw.farmBaseVersion; delete raw.farmSoilIndependentStartTick; delete raw.foodDemandStartTick; delete raw.factoryProgressionStartTick; delete raw.farmLevelStartTick; delete raw.plants; raw.utilities = { power: true, water: true }; raw.version = 8; raw.rulesVersion = 'chain-3';
   const loaded = deserialize(JSON.stringify(raw)), drawn = utilities(loaded);
   assert.equal(loaded.version, 9); assert.deepEqual(loaded.plants, []);
   assert.ok(loaded.utilities.outside.power >= OUTSIDE_SUPPLY.power && loaded.utilities.outside.water >= OUTSIDE_SUPPLY.water);

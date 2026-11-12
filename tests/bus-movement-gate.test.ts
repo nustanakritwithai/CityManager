@@ -179,3 +179,67 @@ test('terminal preview accounts for eligible boarding before closure without con
 test('a denied empty departure crossing service close refreshes the protected actual return direction',()=>{
  let planned:number|undefined,actual:number|undefined;const e=new BusEngine(host(1),1376,{movementGate:p=>{if(p.kind==='transition'&&p.from.phase==='dwelling'&&p.from.cell===at(14,2)){if(p.minute<1380.1)return false;planned??=p.turns?.find(t=>t.id.includes(':stop:'))?.samples[3]?.next;actual??=p.to.next;}return true;}});e.advanceTo(1385);assert.equal(actual,at(13,2));assert.equal(planned,actual);assert.ok(e.movementStats.heldTransition>0);conserved(e);
 });
+
+test('live bus cruise matches road traffic scale while stops and blocked movement remain real', async () => {
+ const {BusGameBridge}=await import('../src/bus/game-bridge.ts');
+ let allow=true;
+ const bridge=new BusGameBridge(host(1),300,p=>p.kind!=='drive'||allow), e=bridge.engine;
+ bridge.tick(300+0.001/60);
+ const a=e.snapshot()[0]; assert.equal(a.phase,'toStart');
+ bridge.tick(300+0.501/60); const b=e.snapshot()[0];
+ assert.equal(b.cell,a.cell); assert.equal(b.next,a.next);
+ // Exactly 0.8 tiles/second while moving, compared with the car cap of 1 tile/second.
+ assert.ok(Math.abs((b.progress-a.progress)/0.5-0.8)<1e-7);
+ allow=false; bridge.tick(300+1.001/60); const blocked=e.snapshot()[0];
+ assert.ok(Math.abs(blocked.progress-b.progress)<1e-7,'traffic gate holds position');
+ allow=true; bridge.tick(300+1.501/60); const resumed=e.snapshot()[0];
+ assert.ok(resumed.progress>blocked.progress,'bus resumes when road is clear');
+ // The live clock holds for five seconds after the real arrival.
+ bridge.tick(300+2.1/60); const dwelling=e.snapshot()[0]; assert.equal(dwelling.phase,'dwelling');
+ const until=e.busesDetail()[0].until;
+ assert.ok((until-e.now)*60>4.5&&(until-e.now)*60<=5);
+ bridge.tick(until-0.001/60); assert.equal(e.snapshot()[0].phase,'dwelling');
+ bridge.tick(until+0.001/60); assert.equal(e.snapshot()[0].phase,'running');
+ conserved(e);
+});
+
+test('live fleet headway and ride estimates use the same driving clock as buses', async () => {
+ const {BusGameBridge}=await import('../src/bus/game-bridge.ts');
+ const {BUS_LIVE_TIMING}=await import('../src/bus/types.ts');
+ const c=host(3), route=busLineRoutes(c,BUS_LIVE_TIMING)[0];
+ const bridge=new BusGameBridge(c,300,()=>true),e=bridge.engine;
+ const line=bridge.input().lines[0];
+ assert.ok(route.headwayMinutes); assert.ok(Math.abs(line.waitMinutes-route.headwayMinutes/2)<1e-9);
+ assert.ok(Math.abs(line.ride['10:11']-busRideMinutes(route,[10,11,12],10,11)!)<1e-9);
+ assert.ok(Math.abs(line.ride['10:12']-(route.legs[0].seconds+route.legs[1].seconds+5)/60)<1e-9);
+ const detail=e.busesDetail();
+ for(let k=0;k<3;k++)assert.ok(Math.abs(detail[k].until-(300+k*route.headwayMinutes!))<1e-9);
+ bridge.tick(300+route.headwayMinutes!-1e-6);assert.equal(e.busesDetail()[1].phase,'home');
+ bridge.tick(300+route.headwayMinutes!+1e-6);assert.notEqual(e.busesDetail()[1].phase,'home');
+ bridge.tick(300+2*route.headwayMinutes!+1e-6);assert.notEqual(e.busesDetail()[2].phase,'home');
+ conserved(e);
+});
+
+test('live dwell boarding respects capacity and retains overflow', async () => {
+ const {BusGameBridge}=await import('../src/bus/game-bridge.ts');
+ const bridge=new BusGameBridge(host(1),300,()=>true),e=bridge.engine;
+ bridge.tick(300+2/60);assert.equal(e.snapshot()[0].phase,'dwelling');
+ e.submit([req('same',10,11,45),req('more',10,12,2)],e.now);
+ assert.equal(e.snapshot()[0].persons,40);assert.equal(e.waitingAt(10),7);
+ assert.equal(e.drainEvents().filter(x=>x.kind==='board').reduce((n,x)=>n+x.persons,0),40);
+ conserved(e);
+});
+
+
+test('dwell boarding obeys direction, closure, and admitted arrival', async () => {
+ const {BUS_LIVE_DRIVE_SECONDS_PER_TILE}=await import('../src/bus/types.ts');
+ const options={movementGate:()=>true,boardDuringDwell:true,driveSecondsPerTile:BUS_LIVE_DRIVE_SECONDS_PER_TILE};
+ const e=new BusEngine(host(1),300,options);e.advanceTo(300+76/60);
+ const bus=e.snapshot()[0];assert.equal(bus.phase,'dwelling');assert.equal(bus.cell,at(14,2));
+ e.submit([req('behind',11,10,2),req('ahead',11,12,3)]);assert.equal(e.snapshot()[0].persons,3);assert.equal(e.waitingAt(11),2);conserved(e);
+ const released:string[]=[],close=new BusEngine(host(1),1378.98,{...options,release:(_id,_n,reason)=>released.push(reason)});
+ close.advanceTo(1379.03);assert.equal(close.snapshot()[0].phase,'dwelling');
+ close.advanceTo(1380);close.submit([req('late',10,11,1)]);assert.deepEqual(released,['serviceEnd']);assert.equal(close.snapshot()[0].persons,0);conserved(close);
+ const held=new BusEngine(host(1),300,{...options,movementGate:p=>p.kind!=='transition'||p.to.phase!=='dwelling'});
+ held.advanceTo(300+3/60);held.submit([req('no-early-board',10,11,1)]);assert.equal(held.snapshot()[0].persons,0);assert.equal(held.waitingAt(10),1);conserved(held);
+});

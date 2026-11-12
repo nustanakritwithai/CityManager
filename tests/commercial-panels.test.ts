@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
+import {readFileSync} from 'node:fs';
 import {createCity,step,commercialGrowthStatus} from '../src/sim.ts';
 registerHooks({load(url,context,next){return url.endsWith('.css')?{format:'module',source:'',shortCircuit:true}:next(url,context);}});
 const {renderCommercialProgression,renderAgriculture}=await import('../src/context-panels.ts');
@@ -16,11 +17,12 @@ test('one commercial panel shows both stock types and identical growth across hi
  try{
   const city=createCity(61025);for(let day=0;day<60;day++)step(city);
   const firm=city.firms.find(f=>f.zone==='C')!;assert.ok(firm);const building=city.buildings.find(b=>b.id===firm.building)!;
-  for(const level of [1,3,4,6,7,9]){
+  for(const level of [1,3,4,5,6,7,9]){
    building.level=level;let prior:string|undefined;
    for(const historical of ['market','retail'] as const){
     firm.commercialKind=historical;const before=JSON.stringify(city),status=commercialGrowthStatus(city,firm);
     const panel=renderCommercialProgression(city,firm) as unknown as Element,body=text(panel);
+    assert.equal(panel.dataset.commercialGrowth,String(firm.id),'Unified progression retains the exact selected firm identity');
     assert.match(body,new RegExp(`ระดับ ${level}/9`));assert.match(body,/ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว/);assert.match(body,/ไม่ตัดสินค้าเดิมทิ้ง/);
     assert.match(body,level<=3?/ตลาด/:level<=6?/อาคารพาณิชย์/:/Big Mall/);
     if(level===9)assert.match(body,/ถึงระดับสูงสุดแล้ว/);else for(const reason of status.reasons)assert.ok(body.includes(reason),reason);
@@ -32,4 +34,11 @@ test('one commercial panel shows both stock types and identical growth across hi
    }
   }
  }finally{if(descriptor)Object.defineProperty(globalThis,'document',descriptor);else Reflect.deleteProperty(globalThis,'document');}
+});
+
+test('building progression acceptance uses the unified commercial panel without dropping identity or cost checks',()=>{
+ const source=readFileSync(new URL('./building-progression-smoke.mjs',import.meta.url),'utf8');
+ assert.match(source,/assert\.equal\(await evaluate\('document\.querySelector\("#entity-content \[data-commercial-growth\]"\)\?\.dataset\.commercialGrowth'\),String\(shop\.firm\.id\)\)/);
+ assert.match(source,/assert\.match\(await evaluate\('document\.querySelector\("#entity-content \[data-commercial-growth\]"\)\.textContent'\), \/ค่าก่อสร้าง 200 เครดิต/);
+ assert.doesNotMatch(source,/data-retail-growth|dataset\.retailGrowth/);
 });

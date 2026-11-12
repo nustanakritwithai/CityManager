@@ -4,7 +4,6 @@ import { buildCampus, createCity, deserialize, householdWorkerCount, serialize, 
 import { assertEducationInvariants, createEducation, EDUCATION_COST, educationOccupied, initialCampusReport, stepEducation, withdrawCampus, type CampusKind, type EducationPeople, type EducationView } from '../src/education.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
-import { SAVE_KEY } from '../src/save-storage.ts';
 
 const person = (householdId: number, values: Partial<EducationPeople> = {}): EducationPeople => ({ householdId, basic: 0, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0, ...values });
 function fixture(kind: CampusKind, localStaff: number, treasury: number) {
@@ -132,7 +131,17 @@ for (const kind of ['school', 'university'] as const) {
   }
 }
 
-test('v22 preserves split study cohorts and rejects inconsistent saved attendance', () => {
+function assertEducationEnvelope(raw: string) {
+  const save = JSON.parse(raw);
+  assert.equal(save.version, save.happiness ? 28 : 27); assert.equal(save.rulesVersion, save.happiness ? 'chain-23' : 'chain-22');
+  assert.equal(save.farmBaseVersion, 25);
+  assert.ok(Number.isSafeInteger(save.farmSoilIndependentStartTick) && save.farmSoilIndependentStartTick <= save.tick);
+  assert.equal(save.commercialBaseVersion, save.history ? 24 : 22);
+  if (save.history) assert.equal(save.historyBaseVersion, 22);
+  assert.equal(save.education?.rules, 'education-1');
+}
+
+test('current education envelope preserves split cohorts and rejects inconsistent saved attendance', () => {
   const city = createCity(3);
   assert.equal(buildCampus(city, 265, 'school').ok, true);
   for (let day = 0; day < 40; day++) step(city);
@@ -145,7 +154,7 @@ test('v22 preserves split study cohorts and rejects inconsistent saved attendanc
   assert.deepEqual(restored.education, city.education);
   assert.deepEqual(restored.accounts, city.accounts);
   assert.deepEqual(restored.households, city.households);
-  assert.equal(JSON.parse(raw).version, 22);
+  assertEducationEnvelope(raw);
   const again = deserialize(serialize(restored));
   step(restored); step(again);
   assert.deepEqual(again.education, restored.education);
@@ -190,7 +199,27 @@ test('seed 3 early school expansion keeps teaching until natural graduates can s
   assert.equal(firstGraduation[1], firstGraduation[0]);
 });
 
-test('an already expanded v22 school resumes saved progress without changing original money, identity or bytes', () => {
+test('a v22-format expanded school loads without money changes and continues teaching', () => {
+  const original = createCity(3);
+  assert.equal(buildCampus(original, 265, 'school').ok, true);
+  const campus = original.education!.campuses[0]; assert.equal(upgradeCampus(original, campus.id).ok, true);
+  // No simulated days have elapsed: this pre-unification v22-compatible fixture
+  // contains no unified trade or checkpoint to be erased by the projection.
+  assert.equal(original.tick, 0);
+  const old = JSON.parse(serialize(original));
+  assert.equal(old.history, undefined, 'projection must not discard a checkpoint');
+  delete old.goalRulesVersion; delete old.commercialUnifiedStartTick; delete old.commercialUnifiedBaseline; delete old.commercialBaseVersion; delete old.farmBaseVersion; delete old.farmSoilIndependentStartTick;
+  old.version = 22; old.rulesVersion = 'chain-17';
+  const raw = JSON.stringify(old), city = deserialize(raw);
+  assert.deepEqual(city.accounts, original.accounts); assert.deepEqual(city.education, original.education);
+  assert.equal(city.education!.campuses[0].level, 2);
+  for (let day = 0; day < 80; day++) step(city);
+  assert.ok(city.education!.completed.basic > 0, 'the loaded school actually graduates students');
+  assert.deepEqual(deserialize(serialize(city)), city);
+  assert.equal(JSON.stringify(old), raw, 'the old input snapshot is unchanged');
+});
+
+test('an already expanded school resumes saved progress without changing original money, identity or bytes', () => {
   const original = createCity(3);
   assert.equal(buildCampus(original, 265, 'school').ok, true);
   for (let day = 0; day < 30; day++) step(original);
@@ -201,8 +230,7 @@ test('an already expanded v22 school resumes saved progress without changing ori
   original.market = marketJournalForTest(null);
   original.market.guestId = '00000000-0000-4000-8000-000000000003';
   const raw = serializeParkSession(original, createParkRuntime(original));
-  assert.equal(JSON.parse(raw).version, 22);
-  // The server load path: an expanded school save must deserialize as-is.
+  assertEducationEnvelope(raw);
   const restored = deserializeParkSession(raw);
   const city = restored.city;
   for (const key of ['accounts', 'ledger', 'households', 'firms', 'goods', 'goodsLedger', 'crops', 'cropLedger', 'buildings', 'education', 'market'] as const) assert.deepEqual(city[key], original[key], key);
@@ -226,5 +254,5 @@ test('an already expanded v22 school resumes saved progress without changing ori
   assert.equal(city.education!.campuses[0].level, 2);
   assert.deepEqual(city.market, original.market);
   checkCity(city);
-  assert.deepEqual([...bytes], [[SAVE_KEY, raw]], 'loading and simulation never rewrote the original stored snapshot');
+  assert.deepEqual(JSON.parse(raw).education, original.education, 'the source snapshot is unchanged');
 });

@@ -1,28 +1,30 @@
-// Installed Edge, isolated loopback port/profile; no provider or authentication calls.
-import { documentIdentityScript, navigateDocument } from './active-local-save-navigation.mjs';
+import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
+import { browserSnapshotState } from './browser-snapshot.ts';
+// Installed Edge, synthetic loopback-only server/profile; no real provider calls.
+import { startTrafficHttpFixture, reachTrafficControl, installTrafficNetworkFence, loadedTrafficSession, assertNavigationSaveChain } from './traffic-server-entry-fixture.mjs';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, summary, housingCapacity } from '../src/sim.ts';
-import { reachTouch } from './touch-reach.mjs';
+import { createCity, step, serialize, deserialize, summary, housingCapacity } from '../src/sim.ts';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
-const profile = resolve(output, 'edge-signals');
-assert(profile.startsWith(output + sep));
 const shots = resolve(root, process.env.CITYMANAGER_SIGNALS_SCREENSHOT_DIR || 'docs/signal-preview');
-const url = process.env.CITYMANAGER_SIGNALS_URL || 'http://127.0.0.1:4187/CityManager/';
+const upstream = process.env.CITYMANAGER_SIGNALS_URL || 'http://127.0.0.1:4187/CityManager/';
 const debugPort = 9357;
 const candidateCommit = process.env.CITYMANAGER_SIGNALS_COMMIT || execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 assert.match(candidateCommit, /^[a-f0-9]{40}$/);
 await mkdir(output, { recursive: true }); await mkdir(shots, { recursive: true });
+const profile = await mkdtemp(resolve(output, 'edge-signals-'));
+assert(profile.startsWith(output + sep));
 let occupied = false;
 try { occupied = (await fetch(`http://127.0.0.1:${debugPort}/json/version`, { signal: AbortSignal.timeout(500) })).ok; } catch {}
 assert.equal(occupied, false, 'Signal suite uses its own CDP port; never reuse another browser');
+const httpFixture = await startTrafficHttpFixture(upstream), server = httpFixture.fixture, url = httpFixture.url;
 const browser = process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const child = spawn(browser, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--disable-gpu-shader-disk-cache', '--disk-cache-size=1048576', '--media-cache-size=1048576', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, '--window-size=1440,1000', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 const errors = [], checks = [], apiRequests = [], screenshots = [];
-let ws, sequence = 0; const pending = new Map();
+let ws, sequence = 0, networkProbe = null; const pending = new Map(), externalRequests = [], providerRequests = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function send(method, params = {}) {
   const id = ++sequence;
@@ -42,10 +44,10 @@ async function until(expression) {
   throw Error(`Condition timeout ${expression}`);
 }
 const paints = () => evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-const state = () => evaluate('(()=>{const c=JSON.parse(window.cityManager.snapshot());if(!((c.version===19&&c.rulesVersion==="chain-14")||(c.version===22&&c.rulesVersion==="chain-17")))throw new Error("Unexpected current save envelope");c.version=9;c.rulesVersion="chain-4";return c})()');
+const state = async () => browserSnapshotState(await evaluate('window.cityManager.snapshot()'));
 const count = selector => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`);
 async function button(selector) {
-  if (await reachTouch(evaluate, button, selector)) return;
+  if (await reachTrafficControl(evaluate, button, selector)) return;
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest',inline:'nearest'})`);
   await paints();
   const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height,disabled:e.disabled}})()`);
@@ -75,37 +77,41 @@ try {
     if (message.id && pending.has(message.id)) { const handler = pending.get(message.id); pending.delete(message.id); message.error ? handler.reject(Error(JSON.stringify(message.error))) : handler.resolve(message.result); }
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
     if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') errors.push('console.error');
-    if (message.method === 'Network.requestWillBeSent' && /\/api\/city-advisor\/report|opentyphoon/i.test(message.params.request.url)) apiRequests.push(message.params.request.url);
+    if (message.method === 'Page.javascriptDialogOpening') void server.dialog(message.params, send).catch(error => errors.push(String(error)));
+    if (message.method === 'Network.requestWillBeSent') {
+      const requested = message.params.request.url;
+      if (networkProbe?.active && requested === networkProbe.url) networkProbe.requestId = message.params.requestId;
+      else { if (isPanelProviderRequest(requested)) providerRequests.push(requested); if (/^https?:/.test(requested) && new URL(requested).origin !== new URL(url).origin) externalRequests.push(new URL(requested).origin + new URL(requested).pathname); }
+      if (/\/api\/city-advisor\/report|opentyphoon/i.test(requested)) apiRequests.push(requested);
+    }
+    if (message.method === 'Network.loadingFailed' && message.params.requestId === networkProbe?.requestId) networkProbe.failed = message.params;
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await send('Page.addScriptToEvaluateOnNewDocument', { source: documentIdentityScript });
-  await send('Page.navigate', { url: url + '?starter=1' }); await until('!!window.cityManager && window.cityManager.visuals().ready');
+  await server.install(send);
+  const origin = new URL(url).origin;
+  await installTrafficNetworkFence({ send, evaluate, protocol: await (await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(), origin,
+    additionalBlocked: [...panelProviderDenials(origin), origin + '/api/city-advisor/*', origin + '/*/api/city-advisor/*'],
+    observeProbe: probe => (networkProbe = { url: probe }) });
+  const seedAndEnter = async (raw, query) => {
+    if (await evaluate('!!window.cityManager')) await server.leave({ send, evaluate, until });
+    const ack = await server.seed(raw); assert.equal(ack.raw, raw); assert.equal(ack.revision, 1);
+    server.allowNavigation(); await send('Page.navigate', { url: url + query });
+    await server.enter({ send, evaluate, button, until });
+    assert.equal(server.active.raw, raw, 'Entry preserves the exact acknowledged source bytes');
+    assert.equal(server.active.revision, ack.revision, 'Entry does not create an unobserved revision');
+    assert.equal(await evaluate('window.cityManager.parks().paused'), true);
+    await server.assertNoCityWrites(evaluate); return ack;
+  };
+  const initialRaw = serialize(createCity(61025));
+  await seedAndEnter(initialRaw, '?starter=1');
   assert.equal(await evaluate('document.querySelector("#signal-entry").hidden'), true, 'Pilot hidden without feature flag');
   checks.push('Default feature gate hides panel and creates no report request');
 
-  // #141: the same profile now holds a stored city, so this boot opens the protected
-  // #startup-recovery-chooser modal over the HUD. Confirm the NEW document, then enter
-  // the preselected city with the real hit-tested Enter button before using the HUD.
-  await navigateDocument({ send, evaluate, url: `${url}?signals=1&starter=1`, ready: "!!document.querySelector('#startup-recovery-chooser[open]') || (!!window.cityManager && window.cityManager.visuals().ready)" });
-  if (await evaluate("!!document.querySelector('#startup-recovery-chooser[open]')")) {
-    await until("[...(document.querySelector('#startup-city-choice')?.options??[])].some(o=>o.value)");
-    if (await evaluate("document.querySelector('#startup-enter-city').disabled")) {
-      // No preselection: choose the stored primary (else first real choice) with real keyboard input.
-      if (await evaluate("document.querySelector('#startup-city-choice').hidden")) await button('#startup-change-city');
-      await button('#startup-city-choice');
-      const index = await evaluate("(()=>{const o=[...document.querySelector('#startup-city-choice').options];const i=o.findIndex(x=>x.value==='stored:current');return i>=0?i:o.findIndex(x=>x.value)})()");
-      const key = async (k, code) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: code === 'Home' ? 36 : code === 'ArrowDown' ? 40 : 13 }); };
-      await key('Home', 'Home'); for (let i = 0; i < index; i++) await key('ArrowDown', 'ArrowDown'); await key('Enter', 'Enter');
-      await until("!document.querySelector('#startup-enter-city').disabled");
-    }
-    await button('#startup-enter-city'); await until("!document.querySelector('#startup-recovery-chooser[open]')"); checks.push('Second visit passes the protected startup chooser by explicit Enter'); }
-  await until('!!window.cityManager && window.cityManager.visuals().ready');
-  if (await evaluate('document.querySelector("#pause").getAttribute("aria-pressed")==="false"')) await button('#pause');
-  const fixture = createCity(61025); for (let n = 0; n < 65; n++) step(fixture);
-  await button('#toggle-game-menu');
-  await evaluate(`localStorage.removeItem('citymanager.save.v7');localStorage.setItem('citymanager.save.v7',${JSON.stringify(serialize(fixture))})`); await button('#load'); await button('#close-inspector');
-  const before = await state(); assert.deepEqual(before, fixture);
+  const source = createCity(61025); for (let n = 0; n < 65; n++) step(source);
+  const fixtureRaw = serialize(source), fixture = loadedTrafficSession(fixtureRaw).city;
+  await seedAndEnter(fixtureRaw, '?signals=1&starter=1');
+  const before = await state(), beforeRaw = await evaluate('window.cityManager.snapshot()'); assert.deepEqual(before, fixture);
   await openSignals();
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'offline');
   assert.equal(await evaluate('document.querySelector("#signal-content").dataset.snapshotTick'), '65');
@@ -120,16 +126,16 @@ try {
   });
   assert.equal(await count('[data-signal-metric=population]'), 1);
   assert((await count('[data-missing-id^="missing.prior."]')) > 0);
-  assert.deepEqual(await state(), before, 'Opening report is read-only');
-  await button('#signal-refresh'); assert.deepEqual(await state(), before, 'Manual capture is read-only');
+  assert.deepEqual(await state(), before, 'Opening report is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw);
+  await button('#signal-refresh'); assert.deepEqual(await state(), before, 'Manual capture is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), beforeRaw);
   await shot('desktop-signals.png');
   checks.push('Actual people, household, employment, housing-capacity and credit units match save-v6 simulation with missing first history and no mutation');
 
   await button('#close-inspector'); await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=68'); await button('#pause');
-  const advanced = await state(); await openSignals();
+  const advanced = await state(), advancedRaw = await evaluate('window.cityManager.snapshot()'); await openSignals();
   assert.equal(await count('[data-signal-id^="trend."]'), 9);
-  assert.deepEqual(await state(), advanced, 'Comparative report is read-only');
+  assert.deepEqual(await state(), advanced, 'Comparative report is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), advancedRaw);
   await button('#close-inspector'); await button('#pause');
   await until(`JSON.parse(window.cityManager.snapshot()).tick>${advanced.tick}`); await button('#pause');
   await button('#toggle-inspector'); await button('#open-signals');
@@ -148,17 +154,38 @@ try {
   assert(mobile.height >= 740 * .9 && mobile.scrollWidth <= mobile.clientWidth + 1, 'Tall mobile reading surface has no horizontal overflow');
   assert(mobile.refreshWidth >= 44 && mobile.refreshHeight >= 44, '44px refresh control');
   await shot('mobile-signals.png');
-  const immutable = await state();
+  const immutable = await state(), immutableRaw = await evaluate('window.cityManager.snapshot()');
   await button('.signal-missing>summary'); await button('.signal-provenance>summary');
-  assert.deepEqual(await state(), immutable, 'Disclosures are read-only');
+  assert.deepEqual(await state(), immutable, 'Disclosures are read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), immutableRaw);
   await button('#submenu-back'); assert.equal(await evaluate('document.querySelector("#inspector").dataset.page'), 'city');
   await button('#close-inspector');
   assert.equal(await evaluate('document.querySelector("#inspector").dataset.open'), 'false');
   checks.push('360x740 mobile drawer, disclosures, Back and close preserve playfield and state');
 
-  await button('#toggle-game-menu'); await button('#load'); await button('#close-inspector'); await openSignals();
-  assert((await count('[data-missing-id^="missing.prior."]')) > 0, 'Load clears capture history');
+  // Save the current paused city, then reload the same authenticated city. This
+  // tests the original same-city history reset, not merely a new city identity.
+  await button('#toggle-game-menu'); await until("!!document.querySelector('#save:not(:disabled)')");
+  const savedCity = await evaluate('window.cityManager.snapshot()'), savedSession = await evaluate('window.cityManager.sessionSnapshot()');
+  await server.settle(); const previous = server.active, saveCursor = server.writes.length; await button('#save');
+  const saveDeadline = Date.now() + 30000;
+  while (Date.now() < saveDeadline && !(server.active.raw === savedSession && server.active.revision > previous.revision)) await sleep(80);
+  assert.equal(server.active.raw, savedSession, 'Native Save acknowledges exact paused session');
+  assert.ok(server.active.revision > previous.revision, 'Native Save advances the acknowledged revision');
+  await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')&&!document.querySelector('#save-failure-banner:not([hidden])')");
+  await server.settle(); const savedHead = server.active;
+  // Validate each real POST/ACK against the captured session and revision.
+  const chain = assertNavigationSaveChain({ ...previous, raw: savedSession }, savedHead, server.writes.slice(saveCursor), server.writes.slice(0, saveCursor));
+  assert.ok(chain.lifecycleSaves > 0, 'Save has an observed, newly acknowledged POST');
+  await server.assertNoCityWrites(evaluate); server.allowNavigation(); await send('Page.reload', { ignoreCache: true });
+  await server.enter({ send, evaluate, button, until });
+  assert.equal(server.active.raw, savedSession); assert.equal(server.active.cityId, savedHead.cityId);
+  assert.equal(server.navigationEvidence.at(-1).beforeRevision, savedHead.revision);
+  assert.equal(await evaluate('window.cityManager.snapshot()'), savedCity, 'Reload restores the exact acknowledged city');
+  await openSignals();
+  assert((await count('[data-missing-id^="missing.prior."]')) > 0, 'Reloading the same city clears capture history');
+  await server.assertNoCityWrites(evaluate); assert.deepEqual(httpFixture.errors, []); assert.deepEqual(externalRequests, []);
   assert.equal(apiRequests.length, 0, 'No API/provider request while connection is disabled');
+  assert.deepEqual(providerRequests, [], 'No provider endpoint attempts');
   assert.equal(errors.length, 0, `Browser errors: ${JSON.stringify(errors)}`);
   checks.push('Load resets history; zero browser errors and zero API/provider requests');
   await writeFile(resolve(shots, 'qa.json'), JSON.stringify({ sourceBaseCommit: '1ed7f8fac1e3d246dcdd883837d6f855c1d9d24a', candidateCommit, testedAt: new Date().toISOString(), url, browser: 'installed Microsoft Edge headless', checks, mobile, apiRequests: 0, browserErrors: 0, screenshots, deviceNote: 'Mobile viewport emulation; not a physical handset test.' }, null, 2)+'\n');
@@ -167,5 +194,6 @@ try {
   if (ws?.readyState === WebSocket.OPEN) { try { await send('Browser.close'); } catch {} ws.close(); }
   child.kill();
   await Promise.race([new Promise(resolve => child.once('exit',resolve)), sleep(2000)]);
+  await httpFixture.close();
   // Retain this task's bounded profile; latest task direction forbids more deletion.
 }

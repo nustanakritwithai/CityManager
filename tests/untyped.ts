@@ -15,6 +15,8 @@ export function untyped(json: string): Record<string, unknown> {
         baseline.goodsEntries !== (city.history?.goodsOffset ?? 0)+city.goodsLedger.length) throw Error('Only untouched pre-unification history can form a v7 fixture');
     delete city.commercialUnifiedStartTick; delete city.commercialUnifiedBaseline; delete city.commercialBaseVersion;
   }
+  if (city.farmSoilIndependentStartTick !== undefined && city.farmSoilIndependentStartTick !== city.tick) throw Error('Only untouched soil migration can form a legacy fixture');
+  delete city.farmSoilIndependentStartTick; delete city.farmBaseVersion;
   delete city.factoryProgressionStartTick; delete city.farmLevelStartTick; delete city.parks; delete city.foodDemandStartTick; delete city.typeBaseline; delete city.plants; city.utilities = { power: true, water: true };
   for (const f of city.firms) { delete f.crops; delete f.products; delete f.recipe; delete f.recipeMode; delete f.recipeChoices; delete f.cropChoices; delete f.cropMode; }
   for (const e of city.cropLedger) { delete e.crop; delete e.mix; }

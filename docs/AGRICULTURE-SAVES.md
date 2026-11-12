@@ -1,5 +1,7 @@
 # เซฟเก่าเมื่อเพิ่มการเกษตรและตลาดพืชผล
 
+> Current persistence: cities save only through the server. Browser-slot, backup and import instructions below describe historical releases and are no longer available. Legacy snapshot readers remain supported; existing browser data is left untouched.
+
 เอกสารนี้อธิบายการย้ายสู่ v4 ของ PR #12 ที่เผยแพร่แล้ว สำหรับรุ่นที่รวมตลาดเป็นพาณิชย์ C ระดับ 1 และอ่าน v1–v4 ไปยัง v5 ให้ใช้ [กติกาใหม่](COMMERCIAL-L1.md) ข้อมูลต้นฉบับเก่าต้องคงอยู่ การโหลดไม่บันทึกทับอัตโนมัติ
 
 candidate ที่ยังไม่ Merge/เผยแพร่ ใช้รุ่นข้อมูล `4 / agriculture-1` เพิ่มวัตถุดิบพืชผล ฟาร์ม และตลาดที่ครัวเรือนเป็นเจ้าของ โดยใช้กระเป๋าเงิน ประชากร แรงงาน และประวัติเดิมต่อไป เอกสารนี้อธิบายการแปลงข้อมูลและการกู้คืน ไม่ใช่การรับรองว่าเซฟใหม่หรือหน้าเว็บผ่าน QA ครบแล้ว
@@ -61,7 +63,7 @@ finished generic goods ที่มีอยู่ไม่กลายเป็
 ## ขอบเขตการตรวจ
 
 ```sh
-node --test tests/save-storage.test.ts
+node --test tests/legacy-save-readers.test.ts
 node --test tests/agriculture-validation.test.ts tests/agriculture-runtime.test.ts
 ```
 

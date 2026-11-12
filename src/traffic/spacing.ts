@@ -86,3 +86,6 @@ export function vehicleBox(p: { x: number; z: number; headingX: number; headingZ
 export function boxesOverlap(a: Box, b: Box, slack = 0): boolean {
   return a.minX < b.maxX - slack && b.minX < a.maxX - slack && a.minZ < b.maxZ - slack && b.minZ < a.maxZ - slack;
 }
+
+/** Vehicle centre progress limit while the model holds a car outside a junction. */
+export const JUNCTION_STOP=1-.25-TRAFFIC_SPACING.lengths.sedan/TRAFFIC_SPACING.worldPerTile/2;

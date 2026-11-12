@@ -1,3 +1,4 @@
+import { farmProductionFertility, FARM_YIELD_PER_WORKER } from './farm-production.ts';
 import { isCanonicalExpandedResourceMap } from './expanded-map-migration.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
@@ -6,6 +7,7 @@ import { MONTH, WAGES, isMarket, isRetail, type City, type CropEntry, type Firm 
 import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
+import { taxAmount, taxRatesAt } from './city-tax-policy.ts';
 
 const invalid = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture state.'); };
 function requireThat(value: unknown): asserts value { if (!value) invalid(); }
@@ -36,6 +38,7 @@ export function captureAgricultureHistory(c: City, throughTick: number): Agricul
 }
 function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: boolean, captureTick?: number): AgricultureSeed | undefined {
   const history = c.history;
+  if (c.farmSoilIndependentStartTick !== undefined) requireThat(isSafeCount(c.farmSoilIndependentStartTick) && c.farmSoilIndependentStartTick <= c.tick);
   // Missing boundary means this is an old snapshot and must use its old rules.
   const unified = c.commercialUnifiedStartTick !== undefined;
   if (unified) requireThat(isSafeCount(c.commercialUnifiedStartTick) && c.commercialUnifiedStartTick <= c.tick);
@@ -231,7 +234,8 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
         if (room < 0) continue;
         // Removed farms have no remaining cell; preserve historical v15 validation,
         // while new events must be possible at some actual effective fertility.
-        const matches = b ? e.quantity === Math.min(room, harvestYield(Math.max(50, c.resources.fertility[b.cell]), e.workers)) : oldRules
+        const independent = c.farmSoilIndependentStartTick !== undefined && e.tick > c.farmSoilIndependentStartTick;
+        const matches = independent ? e.quantity === Math.min(room, FARM_YIELD_PER_WORKER * e.workers) : b ? e.quantity === Math.min(room, harvestYield(farmProductionFertility(c, b.cell, e.tick), e.workers)) : oldRules
           ? e.quantity <= Math.min(room, 24 * e.workers)
           : Array.from({ length: 51 }, (_, i) => 50 + i).some(fertility => e.quantity === Math.min(room, harvestYield(fertility, e.workers)));
         if (matches) { feasible = level; break; }
@@ -399,7 +403,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified 
       if(month<=Math.floor(tick/30)) { retained+=developmentShare(row.profit-row.tax)-row.invested; if(retained<0n)retained=0n; }
       else {currentProfit+=row.profit;currentInvestment+=row.invested;}
     }
-    const tax=currentProfit>0n?currentProfit/5n:0n;
+    const tax=taxAmount(currentProfit,taxRatesAt(c.taxPolicy,tick).profit);
     retained+=developmentShare(currentProfit-tax)-currentInvestment;
     if(retained<0n)retained=0n;
     return {tax,retained,invested};
@@ -411,7 +415,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified 
     if (e.reason === 'Owner capital contribution') { requireThat(e.from === wallet && e.to === f.wallet); if (contributed === 0n) requireThat(e.amount === 60_000); contributed += BigInt(e.amount); }
     if (e.reason === 'Owner profit distribution') {
       requireThat(e.from === f.wallet && e.to === wallet);
-      const current = earnings(e.tick, i, e.tick - e.tick % 30), reserve = current > 0n ? current / 5n : 0n;
+      const current = earnings(e.tick, i, e.tick - e.tick % 30), reserve = taxAmount(current, taxRatesAt(c.taxPolicy, e.tick).profit);
       if (!unified || isMarket(f) && !post) requireThat(BigInt(e.amount) <= earnings(e.tick, i) - taxPaid - withdrawn - reserve && cash - BigInt(e.amount) >= 20_000n + reserve);
       else if (post) {
         const {tax,retained,invested} = minimumReserves(e.tick,i);

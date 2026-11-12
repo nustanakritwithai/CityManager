@@ -1,5 +1,6 @@
 import type {CitizenVehiclePose} from '../citizen-vehicle-poses.ts';
-import {TRAFFIC_SPACING} from './spacing.ts';
+import {JUNCTION_STOP,TRAFFIC_SPACING} from './spacing.ts';
+import type {GameCar} from './game.ts';
 export type PresentationObstacle={id?:string;x:number;z:number;headingX:number;headingZ:number;length:number;width:number};
 export type PresentationAdmissionBox={minX:number;maxX:number;minZ:number;maxZ:number};
 type Box=PresentationAdmissionBox;
@@ -12,6 +13,13 @@ const distance=(a:CitizenVehiclePose,b:CitizenVehiclePose)=>Math.hypot(a.x-b.x,a
 function footprint(p:PresentationObstacle){const hx=Math.abs(p.headingX),hz=Math.abs(p.headingZ);return {minX:p.x-(hx*p.length+hz*p.width)/2,maxX:p.x+(hx*p.length+hz*p.width)/2,minZ:p.z-(hz*p.length+hx*p.width)/2,maxZ:p.z+(hz*p.length+hx*p.width)/2};}
 const body=(p:CitizenVehiclePose)=>footprint({...p,length:TRAFFIC_SPACING.lengths.sedan,width:.3});
 const intersects=(a:ReturnType<typeof body>,b:ReturnType<typeof body>,gap:number=TRAFFIC_SPACING.standstillGap)=>a.minX-gap<b.maxX-EPS&&b.minX-gap<a.maxX-EPS&&a.minZ-gap<b.maxZ-EPS&&b.minZ-gap<a.maxZ-EPS;
+/** Conservative broad phase followed by the original exact child-box checks. */
+export function presentationUnionIntersectsBox(union:Box,boxes:readonly Box[],other:Box):boolean {
+ return intersects(union,other)&&boxes.some(box=>intersects(box,other));
+}
+export function presentationUnionsIntersect(a:Box,as:readonly Box[],b:Box,bs:readonly Box[]):boolean {
+ return intersects(a,b)&&as.some(x=>bs.some(y=>intersects(x,y)));
+}
 /** Conservative continuous body sweep, including intermediate rotation (not just endpoint boxes). */
 export function presentationSweep(from:PresentationObstacle,to:PresentationObstacle):Box {
  const a=footprint(from),b=footprint(to),box={minX:Math.min(a.minX,b.minX),maxX:Math.max(a.maxX,b.maxX),minZ:Math.min(a.minZ,b.minZ),maxZ:Math.max(a.maxZ,b.maxZ)};
@@ -27,6 +35,11 @@ export function presentationSweep(from:PresentationObstacle,to:PresentationObsta
 export function presentationCarSweep(from:CitizenVehiclePose,to:CitizenVehiclePose):Box {
  const start=Math.atan2(from.headingZ,from.headingX);let end=Math.atan2(to.headingZ,to.headingX);while(end-start>Math.PI)end-=2*Math.PI;while(end-start< -Math.PI)end+=2*Math.PI;
  const lo=Math.min(start,end),hi=Math.max(start,end),length=TRAFFIC_SPACING.lengths.sedan,width=.3;
+ // Most frames move straight with unchanged heading. The support extrema over a
+ // zero-width angular interval are its single endpoint; avoid scanning critical
+ // angles and allocating arrays while preserving the exact endpoint arithmetic.
+ if(lo===hi){const c=Math.abs(Math.cos(lo)),s=Math.abs(Math.sin(lo)),hx=(length*c+width*s)/2,hz=(width*c+length*s)/2;
+  return {minX:Math.min(from.x,to.x)-hx,maxX:Math.max(from.x,to.x)+hx,minZ:Math.min(from.z,to.z)-hz,maxZ:Math.max(from.z,to.z)+hz};}
  const support=(x:number,z:number)=>{const values=[lo,hi],critical=Math.atan2(z,x);for(let k=-2;k<=2;k++)for(const a of [critical,-critical,Math.PI-critical,Math.PI+critical]){const angle=a+k*2*Math.PI;if(angle>=lo&&angle<=hi)values.push(angle);}return Math.max(...values.map(a=>(x*Math.abs(Math.cos(a))+z*Math.abs(Math.sin(a)))/2));};
  const hx=support(length,width),hz=support(width,length);
  return {minX:Math.min(from.x,to.x)-hx,maxX:Math.max(from.x,to.x)+hx,minZ:Math.min(from.z,to.z)-hz,maxZ:Math.max(from.z,to.z)+hz};
@@ -99,8 +112,22 @@ function incomingPredecessor(owner:CitizenVehiclePose,other:CitizenVehiclePose,g
   &&Math.abs(lateral(other)-lateral(owner))<.3-EPS
   &&along(other)>position+EPS&&along(other)<=EPS;
 }
+/** Request downstream geometry early, but take space only on the actual approach. */
+function atCornerApproach(pose:CitizenVehiclePose, plan:Pick<NodePlan,'gate'|'box'|'boxes'>):boolean {
+ const gate=plan.gate;
+ if(!gate)return true;
+ const dx=pose.x-gate.x,dz=pose.z-gate.z;
+ const forward=dx*gate.headingX+dz*gate.headingZ;
+ const lateral=dx*gate.headingZ-dz*gate.headingX;
+ const reach=TRAFFIC_SPACING.lengths.sedan+TRAFFIC_SPACING.standstillGap;
+ const aligned=pose.headingX*gate.headingX+pose.headingZ*gate.headingZ>.99;
+ if(aligned && forward>=-reach && forward<=EPS && Math.abs(lateral)<.3)return true;
+
+ const bounds=body(pose);
+ return intersects(bounds,plan.box,0) && plan.boxes.some(box=>intersects(bounds,box,0));
+}
 function nodePlans(e:Entry):NodePlan[]{
- const plans:{key:string;visit?:number;nodeX?:number;nodeZ?:number;exit?:{x:number;z:number;headingX:number;headingZ:number};gate?:{x:number;z:number;headingX:number;headingZ:number};box:Box;boxes:Box[]}[]=[],seen=new Set<string>();
+ const plans:NodePlan[]=[],seen=new Set<string>();
  for(const p of [e.pose,...e.path,e.last]){
   const h=p.upcomingTurn;if(!h||h.nodeX===undefined||h.nodeZ===undefined)continue;
   const hx=h.incomingHeadingX??p.headingX,hz=h.incomingHeadingZ??p.headingZ;
@@ -121,6 +148,7 @@ function nodePlans(e:Entry):NodePlan[]{
 /** Bounded visible-car lifecycle and bus movement reservations; worker actors remain unchanged. */
 export class TrafficPresentation {
  private entries=new Map<string,Entry>();private pending:CitizenVehiclePose[]=[];private live=new Set<string>();private shown:CitizenVehiclePose[]=[];
+ private workerHolds:Map<string,number>|undefined;
  private admitted=0;private removed=0;private busIntrusions=0;private lastRemoved:string[]=[];
  private busPositions=new Map<string,PresentationObstacle>();
  private corners=new Map<string,CornerReservation>();
@@ -154,9 +182,12 @@ export class TrafficPresentation {
  allowBusMovement(id:string,from:PresentationObstacle,to:PresentationObstacle,others:readonly PresentationObstacle[]=[],samples:readonly PresentationObstacle[]=[],turns:readonly {id:string;samples:readonly PresentationObstacle[]}[]=[]):boolean {
   if(turns.length>3||turns.some(t=>t.samples.length<2||t.samples.length>1154)||new Set(turns.map(t=>t.id)).size!==turns.length)throw Error('Invalid bounded bus turn intents');
   this.busPositions.set(id,from);this.peersForSelection=[{...from,id},...others];
-  const wasSelected=this.selectedOwner===id;let pendingChanged=false;
+  const wasSelected=this.selectedOwner===id;let pendingChanged=false,releasedGrant=false;
   const keep=new Set([id,...turns.map(t=>`${id}:turn:${t.id}`)]);
-  for(const [key,r]of this.reservations)if(r.owner===id&&!keep.has(key)){if(!this.granted(r))pendingChanged=true;this.reservations.delete(key);}
+  for(const [key,r]of this.reservations)if(r.owner===id&&!keep.has(key)){
+   if(this.granted(r))releasedGrant=true;else pendingChanged=true;
+   this.reservations.delete(key);
+  }
   const sweep=(points:readonly PresentationObstacle[])=>points.slice(1).map((p,i)=>presentationSweep(points[i],p));
   const immediate=sweep([from,...samples,to]);
   const plans=turns.length?turns.map(t=>{const key=`${id}:turn:${t.id}`;return {key,boxes:this.reservations.get(key)?.boxes??sweep(t.samples),turnId:t.id};}):[{key:id,boxes:immediate,turnId:undefined}];
@@ -169,6 +200,9 @@ export class TrafficPresentation {
    const domain=[...this.reservations.values()].filter(r=>r.owner===this.selectedOwner).flatMap(r=>r.boxes),current=footprint(from);
    const stillInside=domain.some(b=>intersects(current,b));
    if(!stillInside)this.selectedBusEpoch.delete(id);
+   // A granted bus can enter while this request is draining. Keep its escape
+   // rights when the old token ends but its body still occupies the new corridor.
+   else if(releasedGrant)this.selectedBusEpoch.add(id);
    if(stillInside&&!this.selectedBusEpoch.has(id)){const known=this.selectedPeerBodies.findIndex(b=>Math.abs(b.minX-current.minX)+Math.abs(b.maxX-current.maxX)+Math.abs(b.minZ-current.minZ)+Math.abs(b.maxZ-current.maxZ)<EPS);if(known>=0){this.selectedPeerBodies.splice(known,1);this.selectedBusEpoch.add(id);}}
    evacuating=this.selectedBusEpoch.has(id);
   }
@@ -188,6 +222,12 @@ export class TrafficPresentation {
  }
  reconcileBuses(ids:readonly string[]):void {const live=new Set(ids);for(const id of this.busPositions.keys())if(!live.has(id))this.busPositions.delete(id);for(const [id,r]of this.reservations)if(!live.has(r.owner))this.reservations.delete(id);if(this.selectedOwner&&!live.has(this.selectedOwner))this.selectedOwner=null;}
  clearBusReservations():void {this.reservations.clear();this.busPositions.clear();this.selectedOwner=null;this.selectedBusEpoch.clear();this.selectedPeerBodies=[];this.birthOpportunity=1;}
+ /** Detached ownership snapshot for one cancellation; never mutates reservations. */
+ cornerOwnersFor(id:string):{owner:string;active:boolean;entered:boolean}[] {
+  const result:{owner:string;active:boolean;entered:boolean}[]=[];
+  for(const r of this.corners.values())if(r.owner===id)result.push({owner:r.owner,active:r.active,entered:r.entered});
+  return result;
+ }
  /** Immediately remove explicitly cancelled car identities. Normal completed
   * trips still use the terminal path in update(); this path is reserved for a
   * an explicitly identified cancellation or its worker receipt.
@@ -215,6 +255,9 @@ export class TrafficPresentation {
   for(const r of [...corners].sort((a,b)=>a.order-b.order)){
    if(r.active)continue;
    const owner=this.entries.get(r.owner);
+   if(owner && this.workerHolds && r.visit!==undefined){
+    if(this.workerHolds.get(r.owner)===r.visit || !atCornerApproach(owner.pose,r))continue;
+   }
    if(owner&&entries.some(e=>e.id!==r.owner&&incomingPredecessor(owner.pose,e.pose,r.gate)))continue;
    if(corners.some(c=>c.owner===r.owner&&c.order<r.order&&!c.active))continue;
    if(entries.some(e=>e.id!==r.owner&&intersects(e.box,r.box)&&r.boxes.some(b=>intersects(e.box,b))))continue;
@@ -225,7 +268,18 @@ export class TrafficPresentation {
   }
  }
 
- update(raw:readonly CitizenVehiclePose[],preferred:readonly CitizenVehiclePose[]=raw,liveIds:readonly string[]=raw.map(p=>p.vehicleId)){
+ update(raw:readonly CitizenVehiclePose[],preferred:readonly CitizenVehiclePose[]=raw,liveIds:readonly string[]=raw.map(p=>p.vehicleId),cars?:readonly GameCar[]){
+  // Record only vehicles whose current visit has not cleared the worker stop line.
+  // A later visit (or a completed trip) must let the buffered crossing finish.
+  if(cars){
+   const holds=this.workerHolds??new Map<string,number>();
+   holds.clear();
+   for(const car of cars){
+    if(car.junction && car.progress!==undefined && car.progress<=JUNCTION_STOP && car.nextVisit!==undefined)
+     holds.set('game:'+car.id,car.nextVisit);
+   }
+   this.workerHolds=holds;
+  }else this.workerHolds=undefined;
   const byId=new Map(raw.map(p=>[p.vehicleId,presentationTarget(p)]));this.live=new Set(liveIds);
   for(const [id,e]of this.entries){
    if(!this.live.has(id)){
@@ -243,9 +297,17 @@ export class TrafficPresentation {
  frame(dt:number,paused:boolean,buses:readonly PresentationObstacle[]=[]):CitizenVehiclePose[]{
   if(!Number.isFinite(dt)||dt<0)throw Error('Invalid presentation timestep');if(paused)return this.shown.map(p=>({...p}));
   for(const [key,r]of this.corners){const e=this.entries.get(r.owner);if(!e||(r.entered&&(r.exit?e.pose.headingX*r.exit.headingX+e.pose.headingZ*r.exit.headingZ>.99&&(e.pose.x-r.exit.x)*r.exit.headingX+(e.pose.z-r.exit.z)*r.exit.headingZ>=-EPS:!intersects(body(e.pose),r.box)))){if(e&&r.plan!=='legacy'){if(r.visit!==undefined)e.completedVisit=Math.max(e.completedVisit,r.visit);else e.completedNodes.add(r.plan);}this.corners.delete(key);}}
-  for(const [id,e]of this.entries){const plans=nodePlans(e).filter(p=>p.key!=='legacy'||![...this.corners.values()].some(r=>r.owner===id&&r.plan!=='legacy')),desired=new Set(plans.map(p=>p.key));
-   for(const [key,r]of this.corners)if(r.owner===id&&!r.entered&&!desired.has(r.plan))this.corners.delete(key);
-   for(const plan of plans){const key=`${id}@${plan.key}`;if(!this.corners.has(key)&&[...this.corners.values()].filter(r=>r.owner===id).length>=2)break;if(!this.corners.has(key))this.corners.set(key,{owner:id,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:false,active:false});}
+  // Partition once in original map order. Each loop iteration mutates only its
+  // own entries, so other owners' snapshots remain valid.
+  const ownedByOwner=new Map<string,[string,CornerReservation][]>();
+  for(const pair of this.corners){const owner=pair[1].owner,owned=ownedByOwner.get(owner);if(owned)owned.push(pair);else ownedByOwner.set(owner,[pair]);}
+  for(const [id,e]of this.entries){
+   // The legacy decision uses the pre-prune set, as in the original algorithm.
+   const owned=ownedByOwner.get(id)??[], nonlegacy=owned.some(([,r])=>r.plan!=='legacy');
+   const plans=nodePlans(e).filter(p=>p.key!=='legacy'||!nonlegacy),desired=new Set(plans.map(p=>p.key));
+   let count=owned.length;
+   for(const [key,r]of owned)if(!r.entered&&!desired.has(r.plan)){this.corners.delete(key);count--;}
+   for(const plan of plans){const key=`${id}@${plan.key}`;if(!this.corners.has(key)){if(count>=2)break;this.corners.set(key,{owner:id,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:false,active:false});count++;}}
   }
   const obstacles=buses.map(footprint);this.acquireCorners(obstacles);
   const corners=[...this.corners.values()],reservations=[...this.reservations.values()].filter(r=>this.granted(r)),total=Math.min(dt,.25),steps=Math.max(1,Math.ceil(total/.025)),slice=total/steps;
@@ -262,12 +324,16 @@ export class TrafficPresentation {
   // Safe births are deferred rather than flashed for a frame and subsequently hidden.
   if(this.selectedOwner){this.birthDeferredFrames+=this.pending.length?1:0;this.drainFrames++;this.drainSeconds+=Math.min(dt,.25);this.maxDrainSeconds=Math.max(this.maxDrainSeconds,this.drainSeconds);}
   for(const p of this.pending){if(this.entries.size>=this.limit||this.selectedOwner)break;
+   // Do not introduce a new leader ahead of an already committed corridor.
+   // Reject before constructing turn geometry when the answer is already known.
+   if(corners.some(c=>c.active&&this.entries.has(c.owner)&&incomingPredecessor(this.entries.get(c.owner)!.pose,p,c.gate)))continue;
    const candidate:Entry={pose:{...p},last:{...p},path:[],speed:0,distance:0,motion:'waiting',retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()};
    const birthPlans=nodePlans(candidate);
-   // Do not introduce a new leader ahead of an already committed corridor.
-   if(corners.some(c=>c.active&&this.entries.has(c.owner)&&incomingPredecessor(this.entries.get(c.owner)!.pose,p,c.gate)))continue;
+   if(birthPlans.some(plan=>plan.visit!==undefined && this.workerHolds?.get(p.vehicleId)===plan.visit))continue;
    if(birthPlans.some(n=>[...this.entries.values()].some(e=>incomingPredecessor(p,e.pose,n.gate))))continue;
-   if(birthPlans.some(n=>[...footprints.values()].some(b=>n.boxes.some(a=>intersects(a,b)))||obstacles.some(b=>n.boxes.some(a=>intersects(a,b)))||corners.some(c=>c.active&&n.boxes.some(a=>c.boxes.some(b=>intersects(a,b))))||reservations.some(r=>r.boxes.some(b=>n.boxes.some(a=>intersects(a,b))))))continue;
+   // Each union box encloses all of its exact boxes. A miss cannot intersect
+   // any child box; a hit still runs the original exact collision checks.
+   if(birthPlans.some(n=>[...footprints.values()].some(b=>presentationUnionIntersectsBox(n.box,n.boxes,b))||obstacles.some(b=>presentationUnionIntersectsBox(n.box,n.boxes,b))||corners.some(c=>c.active&&presentationUnionsIntersect(n.box,n.boxes,c.box,c.boxes))||reservations.some(r=>r.boxes.some(b=>presentationUnionIntersectsBox(n.box,n.boxes,b)))))continue;
    if(clear(p,p.vehicleId)){this.entries.set(p.vehicleId,{pose:{...p},last:{...p},path:[],speed:Math.max(0,Math.min(2,p.speed??0)),distance:0,motion:'waiting',retiring:false,retiredFor:0,completedNodes:new Set(),completedVisit:-1,nodeGeometry:new Map()});footprints.set(p.vehicleId,body(p));this.admitted++;
     for(const plan of birthPlans){const r:CornerReservation={owner:p.vehicleId,plan:plan.key,visit:plan.visit,exit:plan.exit,gate:plan.gate,box:plan.box,boxes:plan.boxes,order:++this.reservationSequence,entered:plan.boxes.some(b=>intersects(body(p),b)),active:true};this.corners.set(`${p.vehicleId}@${plan.key}`,r);corners.push(r);}
    }}

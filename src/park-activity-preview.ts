@@ -1,11 +1,10 @@
 import { buildPark, createCity, deserialize, serialize, step, summary, SIZE, type City } from './sim.ts';
 import { atmosphereAt } from './atmosphere.ts';
 import { CityView } from './renderer.ts';
-import { createParkActivity, advanceParkActivity, startParkActivityDay, parkActivityVisitors, serializeParkActivity, restoreParkActivity } from './park-activity.ts';
+import { createParkActivity, advanceParkActivity, startParkActivityDay, parkActivityVisitors, serializeParkActivity } from './park-activity.ts';
 import { SceneParkActivity, type ParkActivityQuality } from './scene-park-activity.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const SAVE_KEY = 'citymanager.park-activity.candidate.v1';
 const neighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < SIZE * (SIZE - 1) ? i + SIZE : -1].filter(n => n >= 0);
 function candidateCity(): City {
   const city = createCity(61025);
@@ -74,19 +73,6 @@ async function boot() {
   $('evening').onclick = () => { activity = createParkActivity(city, 16 * 60 + 55); minuteRemainder = 0; refresh(); status('Restarted this day’s leisure preview; city accounts and labor are unchanged.'); };
   $<HTMLSelectElement>('speed').onchange = event => { speed = Number((event.target as HTMLSelectElement).value); };
   $<HTMLSelectElement>('quality').onchange = event => { people.setQuality((event.target as HTMLSelectElement).value as ParkActivityQuality); refresh(); };
-  $('save').onclick = () => {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ version: 1, city: serialize(city), activity: serializeParkActivity(activity), minuteRemainder })); status('Saved the candidate city and activity clock together.'); }
-    catch (error) { status(`Save failed: ${error instanceof Error ? error.message : error}`); }
-  };
-  $('load').onclick = () => {
-    try {
-      const value = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
-      if (value?.version !== 1 || !Number.isFinite(value.minuteRemainder) || value.minuteRemainder < 0 || value.minuteRemainder >= 1) throw new Error('No valid candidate save.');
-      const loaded = deserialize(value.city), loadedActivity = restoreParkActivity(loaded, value.activity);
-      city = loaded; activity = loadedActivity; minuteRemainder = value.minuteRemainder; paused = true;
-      view.render(city, city.parks[0]?.cell ?? null, []); refresh(); status('Loaded exact activity state; paused for inspection.');
-    } catch (error) { status(`Load failed: ${error instanceof Error ? error.message : error}`); }
-  };
   view.app.on('update', (dt: number) => {
     if (paused || document.hidden) return;
     minuteRemainder += Math.min(dt, .25) * speed;
