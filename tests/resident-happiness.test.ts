@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCampus, buildPark, bulldoze, createCity, departureDay, departureForecast, deserialize, householdWorkerCount, serialize, step, rebalanceHousing, SIZE, type City } from '../src/sim.ts';
+import { buildCampus, buildPark, bulldoze, createCity, departureDay, departureForecast, deserialize, firmWage, householdWorkerCount, serialize, step, rebalanceHousing, SIZE, type City } from '../src/sim.ts';
 import { HAPPINESS_DEPARTURE_DAYS, HAPPINESS_UNEMPLOYED_POINTS, happinessTarget, happinessTargets } from '../src/resident-happiness.ts';
 import { scheduleCityTaxes } from '../src/city-tax-policy.ts';
 import { peopleOf } from '../src/education.ts';
@@ -60,7 +60,7 @@ test('new rates move wage earners and business owners gradually from the effecti
   assert.equal(high.get(owner)!.wageTaxPoints, 0, 'an unpaid owner post is not a wage job');
   assert.equal(high.get(employee)!.profitTaxPoints, 0);
   const arrival = neutral.households.find(h => !neutral.employment.some(job => job.householdId === h.id) && h.id !== owner)!;
-  assert.equal(high.get(arrival.id)!.target, baseline.get(arrival.id)!.target);
+  assert.equal(high.get(arrival.id)!.wageTaxPoints, 0, 'an arrival has no wage tax effect before their first shift');
 });
 
 test('park and campus jobs qualify for wage tax effects, study alone is exempt, and targets are bounded', () => {
@@ -95,6 +95,27 @@ test('park and campus jobs qualify for wage tax effects, study alone is exempt, 
   const inaccessible = { householdId: owner, workers: 1, reachableWorkers: 0, unreachableWorkers: 1, averageSeconds: null, freeFlowSeconds: null };
   assert.equal(happinessTarget({ parkNearby: false, schoolNearby: false, points: 0 }, inaccessible, -40), 0);
 });
+
+test('a funded park job with a walking route does not require road frontage', () => {
+  const city = createCity(42);
+  advance(city, 4);
+  const control = deserialize(serialize(city));
+  assert.ok(buildPark(city, 125).ok);
+  step(city);
+  step(control);
+
+  const [worker] = city.parks[0].staffing!.allocations;
+  const baseline = happinessTargets(control).get(worker.householdId)!;
+  const employed = happinessTargets(city).get(worker.householdId)!;
+  assert.equal(baseline.target, 35);
+  assert.equal(employed.workers, 1);
+  assert.equal(employed.parkNearby, true);
+  assert.equal(employed.unreachableWorkers, 0);
+  assert.equal(employed.commuteSeconds, 432);
+  assert.equal(employed.delaySeconds, 0);
+  assert.equal(employed.target, 60);
+});
+
 test('losing a wage job to a disconnected road does not raise happiness at maximum wage tax', () => {
   const city = createCity(42);
   scheduleCityTaxes(city, { wage: 30, profit: 20 });
@@ -134,6 +155,25 @@ test('arrival affordability uses the funded occupation and the wage tax on its f
     assert.equal(city.migration.arrivals, arrivals);
   }
 });
+
+test('three-person arrivals must cover three food portions and an affordable single can still enter', () => {
+  for (const [wage, members, grossWages] of [[18, 3, [42_000, 60_000]], [19, 1, [60_000]], [30, 1, [60_000]]] as const) {
+    const city = createCity(42);
+    scheduleCityTaxes(city, { wage, profit: 20 });
+    advance(city, 90);
+    const previousArrivals = city.migration.arrivals;
+    step(city);
+    assert.equal(city.migration.arrivals, previousArrivals + 1);
+    const entrant = city.households.at(-1)!;
+    assert.equal(entrant.members, members);
+    step(city);
+    const actualWages = city.employment.filter(job => job.householdId === entrant.id)
+      .map(job => firmWage(city.firms.find(firm => firm.id === job.firmId)!) * job.workers)
+      .sort((a, b) => a - b);
+    assert.deepEqual(actualWages, grossWages);
+  }
+});
+
 test('a single household can move to an empty home near a park without later oscillation',()=>{
  const c=createCity(17,{starter:false}); for(let x=0;x<=10;x++)c.cells[12*SIZE+x].road=true;
  const source=11*SIZE+1, dest=11*SIZE+9;
@@ -180,6 +220,30 @@ test('save validation rejects low scores with impossible distress streaks and pr
   assert.deepEqual(deserialize(JSON.stringify(raw)).happiness!.rows[0], row);
   row.score = 30;
   assert.throws(() => deserialize(JSON.stringify(raw)), /Invalid happiness row/);
+});
+
+test('save validation bounds wellbeing by the arrival receipt in both live and compacted ledgers', () => {
+  const city = createCity(42);
+  advance(city, 121);
+  const receipt = city.ledger.find(entry => entry.tick === 121 && entry.reason === 'New household arrival savings')!;
+  assert.ok(receipt);
+  const id = city.households.find(household => household.wallet === receipt.to)!.id;
+  const raw = JSON.parse(serialize(city));
+  const row = raw.happiness.rows.find((entry: { householdId: number }) => entry.householdId === id);
+  assert.equal(row.score, 79);
+  for (const [score, distressDays] of [[0, 30], [78, 0], [83, 0]]) {
+    Object.assign(row, { score, distressDays });
+    assert.throws(() => deserialize(JSON.stringify(raw)), /Invalid happiness row/);
+  }
+
+  advance(city, 59);
+  assert.ok(city.history?.structuralProofs.some(entry => entry.tick === receipt.tick && entry.to === receipt.to));
+  const compacted = JSON.parse(serialize(city));
+  const compactedRow = compacted.happiness.rows.find((entry: { householdId: number }) => entry.householdId === id);
+  Object.assign(compactedRow, { score: 29, distressDays: 10 });
+  assert.doesNotThrow(() => deserialize(JSON.stringify(compacted)));
+  compactedRow.distressDays++;
+  assert.throws(() => deserialize(JSON.stringify(compacted)), /Invalid happiness row/);
 });
 
 test('a working household with sustained low happiness gets a conditional month-end forecast', () => {

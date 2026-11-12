@@ -1294,20 +1294,26 @@ function admissionFacts(c: City) {
   return { vacancies, vacanciesByZone, offers, existingUnemployed, bootstrap: c.migration.arrivals < 2 };
 }
 function arrivalProfile(c: City, facts: ReturnType<typeof admissionFacts>) {
-  const family = facts.vacancies >= 2 && facts.existingUnemployed === 0;
-  const members = family ? 3 : 1, workforce = family ? 2 : 1;
-  const workerSkills: WorkerSkills = { general: 1, manufacturing: family && facts.vacanciesByZone.I > 0 ? 1 : 0, retail: family && facts.vacanciesByZone.I === 0 ? 1 : 0 };
-  if (facts.bootstrap) return { members, workforce, workerSkills, affordable: true };
   // Admission follows today's employment allocation. The first shift is tomorrow.
   const firstPayDay = c.tick - c.tick % MONTH + MONTH;
   const rate = taxRatesAt(c.taxPolicy, firstPayDay).wage;
-  const jobs = allocateEmployment([{ id: c.nextId, workforce, workerSkills, accessible: true }], facts.offers, []);
-  const net = jobs.reduce((sum, job) => {
-    const gross = facts.offers.find(offer => offer.id === job.firmId)!.wage * job.workers;
-    return sum + gross - taxSatang(gross, rate);
-  }, 0);
-  const affordable = net >= MONTH * 800 + 10_000 + HOUSEHOLD_BILL;
-  return { members, workforce, workerSkills, affordable };
+  const project = (family: boolean) => {
+    const members = family ? 3 : 1, workforce = family ? 2 : 1;
+    const workerSkills: WorkerSkills = { general: 1, manufacturing: family && facts.vacanciesByZone.I > 0 ? 1 : 0, retail: family && facts.vacanciesByZone.I === 0 ? 1 : 0 };
+    if (facts.bootstrap) return { members, workforce, workerSkills, affordable: true };
+    const jobs = allocateEmployment([{ id: c.nextId, workforce, workerSkills, accessible: true }], facts.offers, []);
+    const net = jobs.reduce((sum, job) => {
+      const gross = facts.offers.find(offer => offer.id === job.firmId)!.wage * job.workers;
+      return sum + gross - taxSatang(gross, rate);
+    }, 0);
+    const affordable = net >= members * MONTH * 800 + 10_000 + HOUSEHOLD_BILL;
+    return { members, workforce, workerSkills, affordable };
+  };
+  if (facts.vacancies >= 2 && facts.existingUnemployed === 0) {
+    const family = project(true);
+    if (family.affordable) return family;
+  }
+  return project(false);
 }
 export function explainMigration(c: City, buildingId: number): string[] {
   const b = c.buildings.find(b => b.id === buildingId && b.zone === 'R');
