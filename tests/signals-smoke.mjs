@@ -7,6 +7,8 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, summary, housingCapacity } from '../src/sim.ts';
+import { averageHouseholdHappiness } from '../src/resident-happiness.ts';
+import { captureCitySignals } from '../src/signal-data.ts';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
 const shots = resolve(root, process.env.CITYMANAGER_SIGNALS_SCREENSHOT_DIR || 'docs/signal-preview');
@@ -122,6 +124,8 @@ try {
     employed: aggregate.employed, unemployed: aggregate.unemployed, treasury: fixture.accounts.treasury / 100,
     incomePerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.to === 'treasury').reduce((n,e) => n+e.amount,0)/100,
     expensesPerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.from === 'treasury').reduce((n,e) => n+e.amount,0)/100,
+    // Captured only when the city carries happiness state: one score per household, averaged.
+    ...(averageHouseholdHappiness(fixture.happiness) === null ? {} : { averageHappiness: averageHouseholdHappiness(fixture.happiness) }),
     housingCapacity: fixture.buildings.reduce((n,b) => n+housingCapacity(b).persons,0),
   });
   assert.equal(await count('[data-signal-metric=population]'), 1);
@@ -134,7 +138,7 @@ try {
   await button('#close-inspector'); await button('[data-speed="10"]'); await button('#pause');
   await until('JSON.parse(window.cityManager.snapshot()).tick>=68'); await button('#pause');
   const advanced = await state(), advancedRaw = await evaluate('window.cityManager.snapshot()'); await openSignals();
-  assert.equal(await count('[data-signal-id^="trend."]'), 9);
+  assert.equal(await count('[data-signal-id^="trend."]'), captureCitySignals(advanced).metrics.length);
   assert.deepEqual(await state(), advanced, 'Comparative report is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), advancedRaw);
   await button('#close-inspector'); await button('#pause');
   await until(`JSON.parse(window.cityManager.snapshot()).tick>${advanced.tick}`); await button('#pause');
