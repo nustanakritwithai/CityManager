@@ -61,24 +61,31 @@ for(const stop of ['pause','stop intake'] as const)test(`${stop} lets a moving e
  rail.removeService();
  assert.equal(rail.snapshot.service,null);
 });
-test('enabled shuttle derives bounded modeled riders, moves, and retires completed queues without changing money or road input',()=>{
+/** A v1 save may already own illustrative riders; new intake no longer creates them. */
+function legacyPassengers(rail:RailNetworkRuntime){const s=rail.snapshot,id=`model:${s.model!.nextSequence}`;return rail.acceptPreparedDemand({id,from:315,to:312,offeredPersons:8,roadAdmittedPersons:0,leases:[]},{id,requestId:id,leaseId:id,from:315,to:312,fromStation:'a',toStation:'b',persons:8,readyAtMinute:s.minute,egressMinutes:3});}
+test('density and a running clock cannot create independent illustrative passengers',()=>{
+ const {rail}=fixture(),start=rail.snapshot.minute;rail.advanceTo(start+1440*4);
+ assert.equal(count(rail).offered,0);assert.equal(count(rail).live,0);assert.equal(rail.snapshot.model!.nextSequence,0);
+});
+test('enabled shuttle drains existing modeled riders without creating another demand stream',()=>{
  const {city,rail}=fixture(),raw=serialize(city),traffic=captureTrafficGameInput(city),start=rail.snapshot.minute;
+ legacyPassengers(rail);
  let moving=false;for(let t=60;t<=1440*4;t+=60){rail.advanceTo(start+t);moving ||= rail.snapshot.service!.snapshot.train.destination!==null;const c=count(rail);assert.equal(c.offered,c.completed+c.live);assert.ok(c.batches<=32);}
- const totals=count(rail);assert.ok(totals.offered>32);assert.ok(totals.completed>0);assert.ok(rail.snapshot.model!.retiredPersons>0);assert.ok(moving);
+ const totals=count(rail);assert.equal(totals.offered,8);assert.equal(totals.completed,8);assert.ok(rail.snapshot.model!.retiredPersons>0);assert.ok(moving);
  assert.equal(serialize(city),raw);assert.deepEqual(captureTrafficGameInput(city),traffic,'no unsupported traffic-relief claim');
  const before=rail.snapshot;assert.throws(()=>rail.acceptPreparedDemand({id:'model:0',from:315,to:312,offeredPersons:1,roadAdmittedPersons:0,leases:[]},{id:'model:0',requestId:'model:0',leaseId:'model:0',from:315,to:312,fromStation:'a',toStation:'b',persons:1,readyAtMinute:start,egressMinutes:3}),/next sequence/);assert.deepEqual(rail.snapshot,before);
 });
 test('v25 server session retains moving modeled train, sequence and queues across load and identical continued game time',()=>{
- const a=fixture();advanceParkRuntime(a.city,a.runtime,200,()=>step(a.city));
+ const a=fixture();legacyPassengers(a.rail);advanceParkRuntime(a.city,a.runtime,200,()=>step(a.city));
  const raw=serializeParkSession(a.city,a.runtime);assert.equal(JSON.parse(raw).version,28);const b=deserializeParkSession(raw);assert.equal(serializeParkSession(b.city,b.runtime),raw);
  for(const x of[a,b])advanceParkRuntime(x.city,x.runtime,1600,()=>step(x.city));
  assert.equal(serializeParkSession(a.city,a.runtime),serializeParkSession(b.city,b.runtime));
 });
 test('closed or paused service creates no new riders, retains waiting passengers and can resume without resets',()=>{
- const {rail}=fixture(),start=rail.snapshot.minute;rail.advanceTo(start+120);const offered=count(rail).offered;assert.ok(offered>0);
+ const {rail}=fixture(),start=rail.snapshot.minute;legacyPassengers(rail);rail.advanceTo(start+120);const offered=count(rail).offered;assert.ok(offered>0);
  rail.setStationOpen('b',false);rail.advanceTo(start+600);assert.equal(count(rail).offered,offered);assert.throws(()=>rail.removeService());
  rail.setStationOpen('b',true);rail.setServiceEnabled(false);rail.advanceTo(start+1200);assert.equal(count(rail).offered,offered);
- rail.setServiceEnabled(true);rail.advanceTo(start+2500);assert.ok(count(rail).completed>0);assert.ok(count(rail).offered>offered);
+ rail.setServiceEnabled(true);rail.advanceTo(start+2500);assert.ok(count(rail).completed>0);assert.equal(count(rail).offered,offered);
 });
 test('atomic track construction and mutual occupancy reject before mutation, cash or ID allocation',()=>{
  const {city,runtime,rail}=fixture(),raw=serializeParkSession(city,runtime),id=city.nextId;
@@ -90,7 +97,7 @@ test('disconnected line cannot launch and hostile unbounded service policy rejec
  rail.addTrackPath(1,5);assert.throws(()=>rail.configureService({...GAME_RAIL_POLICY,seats:Number.MAX_SAFE_INTEGER}),/bounds/);assert.equal(rail.snapshot.service,null);
 });
 test('modeled restore rejects compensated excessive backlog, altered policy, null model and clock/counter forgery',()=>{
- const {city,runtime,rail}=fixture();advanceParkRuntime(city,runtime,60,()=>step(city));const raw=serializeParkSession(city,runtime),saved=JSON.parse(raw),original=rail.snapshot;
+ const {city,runtime,rail}=fixture();legacyPassengers(rail);advanceParkRuntime(city,runtime,60,()=>step(city));const raw=serializeParkSession(city,runtime),saved=JSON.parse(raw),original=rail.snapshot;
  for(const corrupt of[
    (n:any)=>{const batch=n.service.snapshot.batches[0],d=n.service.demands[0];batch.persons+=128;batch.outside+=128;d.offeredPersons+=128;d.leases[0].persons+=128;n.model.offeredPersons+=128;},
    (n:any)=>{n.service.config.maxBatches=1024;},
@@ -102,13 +109,14 @@ test('modeled restore rejects compensated excessive backlog, altered policy, nul
  assert.deepEqual(rail.snapshot,original);assert.equal(serializeParkSession(city,runtime),raw);
 });
 test('stopping new intake drains all retained riders before safe removal and later reconfiguration',()=>{
- const {city,runtime,rail}=fixture(),start=rail.snapshot.minute;advanceParkRuntime(city,runtime,120,()=>step(city));const offered=count(rail).offered;assert.ok(offered>0);
+ const {city,runtime,rail}=fixture(),start=rail.snapshot.minute;legacyPassengers(rail);advanceParkRuntime(city,runtime,120,()=>step(city));const offered=count(rail).offered;assert.ok(offered>0);
  rail.setModelAccepting(false);const raw=serializeParkSession(city,runtime),loaded=deserializeParkSession(raw);assert.equal(loaded.runtime.rail!.snapshot.model!.accepting,false);
  rail.advanceTo(start+4000);assert.equal(count(rail).offered,offered);assert.equal(count(rail).live,0);assert.equal(count(rail).completed,offered);
  const fence=rail.snapshot.model!.nextSequence;rail.removeService();assert.equal(rail.snapshot.service,null);rail.configureGameService();assert.equal(rail.snapshot.model!.nextSequence,fence);assert.equal(rail.snapshot.model!.accepting,true);
- rail.advanceTo(start+5000);assert.ok(count(rail).offered>offered);assert.ok(rail.snapshot.model!.nextSequence>fence);
+ rail.advanceTo(start+5000);assert.equal(count(rail).offered,offered);assert.equal(rail.snapshot.model!.nextSequence,fence);
+ assert.equal(rail.acceptTrafficDemand({epoch:'new-worker',sequence:1,from:315,to:312,persons:2}).accepted,true);assert.equal(count(rail).offered,offered+2);assert.equal(rail.snapshot.model!.nextSequence,fence+1);
 });
 test('modeled rail one-minute and batched clocks agree exactly including retired counters',()=>{
- const a=fixture(),b=fixture(),start=a.rail.snapshot.minute;a.rail.advanceTo(start+1440);for(let t=1;t<=1440;t++)b.rail.advanceTo(start+t);assert.deepEqual(a.rail.snapshot,b.rail.snapshot);
+ const a=fixture(),b=fixture(),start=a.rail.snapshot.minute;legacyPassengers(a.rail);legacyPassengers(b.rail);a.rail.advanceTo(start+1440);for(let t=1;t<=1440;t++)b.rail.advanceTo(start+t);assert.deepEqual(a.rail.snapshot,b.rail.snapshot);
  const paused=b.rail.snapshot;advanceParkRuntime(b.city,b.runtime,0,()=>step(b.city));assert.deepEqual(b.rail.snapshot,paused);
 });

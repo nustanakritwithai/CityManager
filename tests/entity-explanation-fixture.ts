@@ -1,4 +1,4 @@
-import { createCity, serialize, step } from '../src/sim.ts';
+import { createCity, serialize, step, summary, housingCapacity, type City } from '../src/sim.ts';
 import { deserializeParkSession, expandValidatedParkSession } from '../src/park-runtime.ts';
 import { captureEntityExplanation } from '../src/entity-explanation-data.ts';
 
@@ -21,4 +21,18 @@ export function entityInsufficientFixture() {
     step(young);
   }
   throw Error('Actual early-game entity must provide missing evidence');
+}
+
+/** Exact ten public aggregate facts expected from this initialized fixture. */
+export function entitySignalMetrics(city:City) {
+  const aggregate=summary(city);
+  if(!city.happiness?.rows.length)throw Error('Entity signal fixture requires initialized happiness');
+  return {
+    population:aggregate.population,households:city.households.length,businesses:city.firms.length,
+    employed:aggregate.employed,unemployed:aggregate.unemployed,treasury:city.accounts.treasury/100,
+    incomePerTick:city.ledger.filter(e=>e.tick===city.tick&&e.to==='treasury').reduce((n,e)=>n+e.amount,0)/100,
+    expensesPerTick:city.ledger.filter(e=>e.tick===city.tick&&e.from==='treasury').reduce((n,e)=>n+e.amount,0)/100,
+    averageHappiness:city.happiness.rows.reduce((sum,row)=>sum+row.score,0)/city.households.length,
+    housingCapacity:city.buildings.reduce((n,b)=>n+housingCapacity(b).persons,0),
+  };
 }

@@ -4,7 +4,8 @@ import { bulldoze, contributeOwnerCapital, deserialize, serialize } from '../src
 import { deserializeParkSession, expandValidatedParkSession } from '../src/park-runtime.ts';
 import { captureEntityExplanation } from '../src/entity-explanation-data.ts';
 import { browserSnapshotState } from './browser-snapshot.ts';
-import { entityExplanationCity, entityInsufficientFixture } from './entity-explanation-fixture.ts';
+import { captureCitySignals } from '../src/signal-data.ts';
+import { entityExplanationCity, entityInsufficientFixture, entitySignalMetrics } from './entity-explanation-fixture.ts';
 import { createPanelServerFixture } from './panel-server-entry-fixture.mjs';
 
 test('entity fixture has real selected entities, supported actions, exact server ACK and load state', async () => {
@@ -40,4 +41,13 @@ test('early entity uses real missing evidence and round-trips through validated 
   const loaded = expandValidatedParkSession(deserializeParkSession(raw)).city;
   assert.deepEqual(loaded, city);
   assert.deepEqual(captureEntityExplanation(loaded, { kind: 'building', buildingId: building.id }), snapshot);
+});
+
+test('entity browser retains ten exact city signal facts including initialized happiness',()=>{
+  const {city}=entityExplanationCity(),raw=serialize(city),expected=entitySignalMetrics(city),capture=captureCitySignals(city);
+  assert.deepEqual(Object.keys(expected).sort(),['averageHappiness','businesses','employed','expensesPerTick','households','housingCapacity','incomePerTick','population','treasury','unemployed']);
+  assert.equal(capture.metrics.length,10);
+  assert.deepEqual(Object.fromEntries(capture.metrics.map(m=>[m.id,m.value])),expected);
+  assert.equal(serialize(city),raw);
+  assert.throws(()=>entitySignalMetrics({...city,happiness:undefined}),/initialized happiness/);
 });

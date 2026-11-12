@@ -8,6 +8,9 @@ import { installPopulationSaveFault } from './population-server-fault.mjs';
 // Household/housing acceptance using authenticated isolated server persistence.
 // The browser receives only strict-valid synthetic fixtures; no local city copy is used.
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { happinessTargets } from '../src/resident-happiness.ts';
+import { assertPopulationHappiness } from './population-happiness-checks.mjs';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -93,7 +96,21 @@ const oldResidents = concentrated.households.map(h=>[h.id,h.members,h.wallet]);
 assert.ok(homeOccupancy(distributed,oldTower.id).households < concentrated.households.length);
 assert.deepEqual(distributed.households.map(h=>[h.id,h.members,h.wallet]),oldResidents);
 
+// Retain bounded startup-only evidence; no game navigation or account data is captured.
+function observeBrowserStartup(child,metadata){
+ metadata.stderr='';metadata.stderrTruncated=false;metadata.exitCode=null;metadata.signal=null;
+ const capture=chunk=>{const text=metadata.stderr+String(chunk);metadata.stderrTruncated ||= text.length>8192;metadata.stderr=text.slice(-8192);};
+ child.stderr?.on('data',capture);
+ child.once('exit',(code,signal)=>{metadata.exitCode=code;metadata.signal=signal;});
+ child.once('error',error=>{metadata.spawnError={code:error.code??null,message:String(error.message).slice(0,2048)};});
+ return ()=>{child.stderr?.removeListener('data',capture);child.stderr?.resume?.();};
+}
 if(process.argv.includes('--preflight')){
+ const child=new EventEmitter();child.stderr=new EventEmitter();const startup={},stop=observeBrowserStartup(child,startup);
+ child.stderr.emit('data','x'.repeat(9000));assert.equal(startup.stderr.length,8192);assert.equal(startup.stderrTruncated,true);
+ stop();child.stderr.emit('data','after navigation');assert.equal(startup.stderr,'x'.repeat(8192));
+ child.emit('exit',null,'SIGTRAP');assert.equal(startup.signal,'SIGTRAP');assert.equal(startup.exitCode,null);
+ child.emit('error',Object.assign(Error('missing browser'),{code:'ENOENT'}));assert.equal(startup.spawnError.code,'ENOENT');
  assert.deepEqual(browserSnapshotState(serialize(fixture)),fixture);
  for(const raw of [migratedRaw,serialize(householdV2Migrated),serialize(workerV3Migrated),vacantDay,upgradeDay])assert.deepEqual(browserSnapshotState(serialize(panelEntryCity(raw))),panelEntryCity(raw));
  console.log(JSON.stringify({legacyHashes:[hash(legacyRaw),hash(householdV2Raw),hash(workerV3Raw)],fixtureTick:fixture.tick,fixtureCells:fixture.cells.length,family:family.id,sharedHome:sharedHome.id,mobilityHouseholds:distributed.households.map(h=>[h.id,h.home]),milestones}));process.exit(0);
@@ -105,7 +122,8 @@ let occupied = false; try { occupied = (await fetch('http://127.0.0.1:9349/json/
 assert.equal(occupied, false, 'Run browser suites sequentially; CDP 9349 is occupied');
 // Each invocation owns its synthetic storage; never inherit another suite's unsaved recovery pair.
 const profile = await mkdtemp(resolve(output, 'edge-population-'));
-const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+const child = spawn(process.env.CITYMANAGER_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=9349', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: ['ignore','ignore','pipe'] });
+const browserStartup={lastPollError:null,lastHttpStatus:null,polls:0},stopStartupCapture=observeBrowserStartup(child,browserStartup);
 let ws, sequence = 0,networkProbe=null; const pending = new Map(),externalRequests=[],providerRequests=[];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function send(method, params = {}) {
@@ -158,10 +176,9 @@ async function household(h, source, city = fixture) {
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content .cx-skill-row")].map(e=>({skill:e.dataset.skill,total:Number(e.dataset.total),employed:Number(e.dataset.employed),unemployed:Number(e.dataset.unemployed)}))'), ['general', 'manufacturing', 'retail'].map(skill => { const employed = rows.filter(a => a.skill === skill).reduce((n, a) => n + a.workers, 0); return { skill, total: h.workerSkills[skill], employed, unemployed: h.workerSkills[skill] - employed }; }));
   assert.equal(await evaluate('!!document.querySelector("#entity-content .cx-legacy-assumption")'), h.origin === 'legacy-v1');
   const happiness = await evaluate(`(()=>{const host=document.querySelector('#entity-content'),section=host.querySelector('[data-card-section="happiness"]');return {exists:!!section,direct:section?.parentElement===host,inDetails:!!section?.closest('details'),text:section?.innerText??''};})()`);
-  assert.equal(happiness.exists,true); assert.equal(happiness.direct,true); assert.equal(happiness.inDetails,false);
-  assert.ok(happiness.text.includes('ความสุขในพื้นที่'));
-  if (city.happiness) { const row = city.happiness.rows.find(r => r.householdId === h.id); assert.ok(happiness.text.includes(`${row.score} / 100`)); assert.ok(happiness.text.includes('เป้าหมายปัจจุบัน')); assert.ok(happiness.text.includes('สวนใกล้บ้าน:')); assert.ok(happiness.text.includes('โรงเรียนที่เปิดใกล้บ้าน:')); assert.ok(happiness.text.includes('ไม่ใช่ประวัติการเดินทางล้มเหลวจริง') && happiness.text.includes('ยังไม่หักรถโดยสารหรือรถไฟ') || happiness.text.includes('ยังไม่มีงานที่ได้รับมอบหมาย')); }
-  else assert.ok(happiness.text.includes('ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง'));
+  const happinessRow=city.happiness?.rows.find(r=>r.householdId===h.id);
+  if(city.happiness)assert.ok(happinessRow,'Validated city retains this household happiness row');
+  assertPopulationHappiness(happiness,happinessRow,happinessRow?happinessTargets(city).get(h.id):undefined);
 }
 async function home(city, b) {
   await place(b); const used = homeOccupancy(city, b.id), cap = housingCapacity(b);
@@ -181,8 +198,15 @@ async function layout() {
 }
 
 try {
-  let tabs; for (let n = 0; n < 100; n++) { try { tabs = await (await fetch('http://127.0.0.1:9349/json/list')).json(); break; } catch { await sleep(100); } }
-  assert.ok(tabs?.some(t => t.type === 'page')); ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+  let tabs; for (let n = 0; n < 100; n++) {
+    browserStartup.polls=n+1;
+    if(browserStartup.spawnError)throw Error(`Browser launch failed: ${JSON.stringify(browserStartup.spawnError)}`);
+    if(child.exitCode!==null||child.signalCode!==null)throw Error(`Browser exited ${child.exitCode} signal ${child.signalCode}; no acceptance result`);
+    try { const response=await fetch('http://127.0.0.1:9349/json/list');browserStartup.lastHttpStatus=response.status;tabs=await response.json();if(tabs?.some(t=>t.type==='page'))break; }
+    catch(error) { browserStartup.lastPollError=String(error).slice(0,2048); }
+    await sleep(100);
+  }
+  assert.ok(tabs?.some(t => t.type === 'page'),'Installed browser exposes a page within the original 100 startup polls');stopStartupCapture(); ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
   ws.onmessage = event => {
     const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); }
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails);
@@ -322,7 +346,7 @@ try {
   }
   assert.deepEqual(httpFixture.errors,[]);assert.deepEqual(externalRequests,[]);assert.deepEqual(providerRequests,[],'Population QA never attempts advisor/provider requests');await server.assertNoCityWrites(evaluate); assert.deepEqual(errors, []);
   modelAudit.assertComplete();const visuals = await evaluate('window.cityManager.visuals()'); if (blocked) { assert.equal(visuals.failed.length, 41); } else { assert.equal(visuals.loaded.length, 41); assert.equal(visuals.failed.length, 0); }
-  const version = await send('Browser.getVersion'), report = { date: new Date().toISOString(), url, browser: version.product, mode: mobilityOnly ? 'housing-mobility-only' : 'full-population', checks, errors, expectedModelErrors: expectedErrors.length, mobility: { tick: distributed.tick, fixtureHash: hash(concentratedRaw), expectedHash: hash(serialize(distributed)), movedHouseholds: movedResidents.map(h => h.id), homes: distributed.households.map(h => [h.id, h.home]), verifiedServerReload: true }, fixture: { seed: fixture.seed, tick: fixture.tick, hash: hash(fixtureRaw), legacySha256: hash(legacyRaw), naturalHash: hash(serialize(natural)), employmentScenario: 'Two real family workers split across existing I/C firms; no accounts/journals/people edited' }, milestones, layouts, screenshots, note: 'Installed headless browser. Full-population mode also emulates touch/viewport and physical-screen ratio. No real-phone QA or performance claim.' };
+  const version = await send('Browser.getVersion'), report = { browserStartup, date: new Date().toISOString(), url, browser: version.product, mode: mobilityOnly ? 'housing-mobility-only' : 'full-population', checks, errors, expectedModelErrors: expectedErrors.length, mobility: { tick: distributed.tick, fixtureHash: hash(concentratedRaw), expectedHash: hash(serialize(distributed)), movedHouseholds: movedResidents.map(h => h.id), homes: distributed.households.map(h => [h.id, h.home]), verifiedServerReload: true }, fixture: { seed: fixture.seed, tick: fixture.tick, hash: hash(fixtureRaw), legacySha256: hash(legacyRaw), naturalHash: hash(serialize(natural)), employmentScenario: 'Two real family workers split across existing I/C firms; no accounts/journals/people edited' }, milestones, layouts, screenshots, note: 'Installed headless browser. Full-population mode also emulates touch/viewport and physical-screen ratio. No real-phone QA or performance claim.' };
   await writeFile(resolve(output, 'population-report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
-} catch (error) { if (ws?.readyState === 1) try { await screenshot('population-failure.png'); console.error('Route:', await route()); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
-finally { if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); await httpFixture.close(); }
+} catch (error) { stopStartupCapture();await writeFile(resolve(output,'population-report.json'),JSON.stringify({status:'failed',mode:mobilityOnly?'housing-mobility-only':'full-population',browserStartup,error:String(error),checks,errors,layouts,screenshots},null,2));if (ws?.readyState === 1) try { await screenshot('population-failure.png'); console.error('Route:', await route()); } catch {} console.error('Unexpected browser errors:', errors); throw error; }
+finally { stopStartupCapture();if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); } child.kill(); await httpFixture.close(); }
