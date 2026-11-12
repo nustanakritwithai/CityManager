@@ -14,6 +14,7 @@ import { browserSnapshotState } from './browser-snapshot.ts';
 import { startPersistenceFixture } from './persistence-server-fixture.mjs';
 import { installTrafficNetworkFence, reachTrafficControl } from './traffic-server-entry-fixture.mjs';
 import { loadPanelCity, panelEntryCity, saveAndReloadPanel } from './panel-ui-server.mjs';
+import { createHostDiagnostics, browserResponsivenessSource } from './plant-responsiveness-diagnostics.mjs';
 import { isPanelProviderRequest, panelProviderDenials } from './panel-network-denies.mjs';
 
 const output = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || '.test-output/plant-upgrades');
@@ -29,13 +30,14 @@ const startedAt = Date.now(), diagnostics = { phase: 'setup', stages: [], cdp: [
 let ws, sequence = 0, networkProbe, fixture, browser, app, touchInput = false;
 let primaryFailure;
 const pending = new Map();
+const responsiveness = createHostDiagnostics();
 function boundedPush(list, value, limit = 80) { list.push(value); if (list.length > limit) list.splice(0, list.length - limit); }
 function stage(phase) {
   diagnostics.phase = phase; boundedPush(diagnostics.stages, { phase, elapsedMs: Date.now() - startedAt });
   console.log('Plant acceptance phase:', phase);
 }
 function resultReport(status, error) {
-  return { status, date: new Date().toISOString(), suiteTimeoutMs, elapsedMs: Date.now() - startedAt, ...(error ? { error: String(error.stack ?? error) } : {}), checks, screenshots, layouts, bursts, keyboardTraces, errors, interceptionErrors, externalRequests, providerRequests, processLogs, diagnostics, pendingCommands: [...pending.values()].map(item => ({ ...item.metadata, pendingMs: Date.now() - item.metadata.queuedAt })) };
+  return { status, date: new Date().toISOString(), suiteTimeoutMs, elapsedMs: Date.now() - startedAt, ...(error ? { error: String(error.stack ?? error) } : {}), checks, screenshots, layouts, bursts, keyboardTraces, errors, interceptionErrors, externalRequests, providerRequests, processLogs, diagnostics, responsiveness: responsiveness.snapshot(), pendingCommands: [...pending.values()].map(item => ({ ...item.metadata, pendingMs: Date.now() - item.metadata.queuedAt })) };
 }
 function writeFailure(error, write = writeFileSync) {
   // Emergency watchdog output must be durable BEFORE process.exit, which skips
@@ -190,7 +192,7 @@ async function send(method, params = {}) {
   const response = new Promise((yes, no) => {
     let finished = false;
     const record = status => { if (finished) return; finished = true; boundedPush(diagnostics.cdp, { ...metadata, status, durationMs: Math.round(performance.now() - started) }); };
-    const timer = setTimeout(() => { pending.delete(id); record('timeout'); no(Object.assign(Error(`CDP timeout: ${method}; phase=${metadata.phase}; expression=${metadata.expression ?? ''}`), { cdpTimeoutMethod: method })); }, commandTimeoutMs(method));
+    const timer = setTimeout(() => { pending.delete(id); responsiveness.expired(metadata); record('timeout'); no(Object.assign(Error(`CDP timeout: ${method}; phase=${metadata.phase}; expression=${metadata.expression ?? ''}`), { cdpTimeoutMethod: method })); }, commandTimeoutMs(method));
     pending.set(id, { metadata, yes: value => { clearTimeout(timer); record('ok'); yes(value); }, no: error => { clearTimeout(timer); record('error'); no(error); } });
   });
   ws.send(JSON.stringify({ id, method, params }));
@@ -379,14 +381,14 @@ async function screenshot(name) {
   let png;
   const probe = async () => {
     assert.deepEqual(errors, [], 'No browser errors before surface readback');
-    return evaluate('({ready:window.cityManager?.visuals().ready,contextLosses:window.__plantContextLosses,width:innerWidth,height:innerHeight,visibility:document.visibilityState})');
+    return evaluate('({ready:window.cityManager?.visuals().ready,contextLosses:window.__plantContextLosses,width:innerWidth,height:innerHeight,visibility:document.visibilityState,responsiveness:window.__plantResponsivenessSnapshot?.()})');
   };
   try {
     const result = await screenshotReadback(send, probe, record); png = Buffer.from(result.data, 'base64');
-    Object.assign(record, pngEvidence(png));
+    Object.assign(record, await responsiveness.operation('png-validation', () => pngEvidence(png)));
     const health = record.healthAfterTimeout ?? record.health;
     assert.deepEqual([record.width, record.height], [health.width, health.height], 'Screenshot contains the entire live viewport at device scale1');
-    const path = resolve(output, `${name}.png`); await writeFile(path, png); screenshots.push(path); record.status = 'saved';
+    const path = resolve(output, `${name}.png`); await responsiveness.operation('png-write', () => writeFile(path, png)); screenshots.push(path); record.status = 'saved';
   } catch (error) {
     record.status = 'failed'; record.error = String(error);
     if (png) {
@@ -587,7 +589,7 @@ for (const port of [appPort, debugPort]) {
 const watchdog = setTimeout(() => {
   const timeout = Error(`Plant browser acceptance timed out after ${suiteTimeoutMs}ms; phase=${diagnostics.phase}`);
   diagnostics.watchdog = { elapsedMs: Date.now() - startedAt, phase: diagnostics.phase };
-  try { writeFailure(primaryFailure ?? timeout); } catch (error) { console.error('Could not preserve watchdog evidence:', error); }
+  try { responsiveness.pinFailure(); writeFailure(primaryFailure ?? timeout); } catch (error) { console.error('Could not preserve watchdog evidence:', error); }
   console.error(timeout.message); browser?.kill(); app?.kill(); process.exit(1);
 }, suiteTimeoutMs);
 function logProcess(child, label) {
@@ -597,6 +599,7 @@ function logProcess(child, label) {
   return child;
 }
 try {
+  responsiveness.start();
   stage('launch built app and browser');
   app = logProcess(spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(appPort), '--strictPort'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }), 'app');
   let ready = false; for (let i = 0; i < 100; i++) { try { ready = (await fetch(upstream)).ok; } catch {} if (ready) break; await sleep(100); }
@@ -611,6 +614,7 @@ try {
   await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
   ws.onmessage = event => {
     const message = JSON.parse(event.data), p = pending.get(message.id);
+    if (!p && message.id !== undefined) responsiveness.late(message);
     if (p) { pending.delete(message.id); message.error ? p.no(Error(JSON.stringify(message.error))) : p.yes(message.result); }
     if (message.method === 'Page.javascriptDialogOpening') void fixture.fixture.dialog(message.params, send).catch(error => interceptionErrors.push(String(error)));
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
@@ -623,7 +627,7 @@ try {
     }
   };
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
-  await send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__plantContextLosses=0;document.addEventListener("webglcontextlost",()=>window.__plantContextLosses++,true)' });
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__plantContextLosses=0;document.addEventListener("webglcontextlost",()=>window.__plantContextLosses++,true);' + browserResponsivenessSource });
   await installTrafficNetworkFence({ send, evaluate, protocol: await (await fetch(`http://127.0.0.1:${debugPort}/json/protocol`)).json(), origin, additionalBlocked: panelProviderDenials(origin), observeProbe: url => (networkProbe = { url, active: false, requestId: null, failed: null }) });
   await fixture.fixture.install(send);
   for (const metric of [{ name: 'desktop', width: 1440, height: 1000, mobile: false }, { name: 'phone', width: 390, height: 844, mobile: true }]) {
@@ -640,12 +644,12 @@ try {
   const report = { ...resultReport('passed'), browser: (await send('Browser.getVersion')).product, note: 'Real full-app native CDP mouse, touchStart/touchEnd, and keyboard input with synthetic server service. Phone metrics/touch are emulated, not physical-device QA.' };
   await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));
 } catch (error) {
-  primaryFailure = error; writeFailure(error);
+  primaryFailure = error; responsiveness.pinFailure(); writeFailure(error);
   if (ws?.readyState === 1) { try { await screenshot('failure'); console.error('DOM:', await evaluate('document.querySelector("#plant-actions")?.outerHTML')); } catch {} }
   writeFailure(error);
   console.error('Browser errors:', errors); throw error;
 } finally {
-  clearTimeout(watchdog);
+  clearTimeout(watchdog); responsiveness.stop();
   if (ws?.readyState === 1) { try { await send('Browser.close'); } catch {} ws.close(); }
   browser?.kill(); app?.kill(); if (fixture) await fixture.close();
   await writeFile(resolve(output, 'processes.log'), JSON.stringify(processLogs, null, 2));
