@@ -163,7 +163,8 @@ try {
 
   await openSignals(); await untilRequests(1);
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'pending');
-  assert.equal(await count('[data-signal-metric]'), 9, 'Immediate deterministic metrics remain readable during loading');
+  // Happiness joins the capture whenever the city carries happiness state, so count what this fixture really captures.
+  assert.equal(await count('[data-signal-metric]'), captureCitySignals(fixture).metrics.length, 'Immediate deterministic metrics remain readable during loading');
   assert.equal(await visible('#signal-summary'), true);
   assert.equal(await visible('#signal-cancel'), true);
   assert.equal(await evaluate('document.querySelector("#signal-refresh").disabled'), true);
@@ -200,8 +201,9 @@ try {
 
   await button('#signal-refresh'); await untilRequests(4);
   await until('document.querySelector("#signal-mode").dataset.mode==="ai"');
-  assert.deepEqual(apiRequests.at(-1), { tick: advanced.tick, priorTick: failedCapture, metrics: 9, behavior: 'ai' });
-  assert.equal(await count('[data-signal-id^="trend."]'), 9);
+  const advancedMetrics = captureCitySignals(advanced).metrics.length;
+  assert.deepEqual(apiRequests.at(-1), { tick: advanced.tick, priorTick: failedCapture, metrics: advancedMetrics, behavior: 'ai' });
+  assert.equal(await count('[data-signal-id^="trend."]'), advancedMetrics);
   const comparison = await evaluate('Object.fromEntries([...document.querySelectorAll("[data-comparison-metric]")].map(e=>[e.dataset.comparisonMetric,{current:Number(e.dataset.current),prior:e.dataset.prior===""?null:Number(e.dataset.prior),delta:e.dataset.delta===""?null:Number(e.dataset.delta)}]))');
   const currentReport = buildLocalSignalReport({ schemaVersion: 1, locale: 'th', snapshot: {
     tick: advanced.tick, window: { startTick: failedCapture, endTick: advanced.tick },
