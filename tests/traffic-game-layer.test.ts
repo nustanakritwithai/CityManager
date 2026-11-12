@@ -237,3 +237,23 @@ test('short browser approach holds and resumes under measured low render cadence
  assert.ok(hold,'previously driven bus must genuinely hold on congested road');assert.ok(resume&&resume<30000,'actual congested hold must resume within unchanged browser wall budget');assert.ok(seen.size>0);assert.equal(serialize(city),before);
  console.log(JSON.stringify({fixture:'short-browser-approach',heldWallMs:hold.wall,resumedWallMs:resume,physicalSeconds:(layer.bus!.engine.now-420)*60}));layer.destroy();
 });
+
+test('worst-frame attribution correlates startup stages and preserves cumulative total on shorter paused frames',t=>{
+ let clock=0;t.mock.method(performance,'now',()=>clock);const city=createCity(7),before=serialize(city);
+ const worker=new FakeWorker();const post=worker.postMessage.bind(worker);worker.postMessage=m=>{clock+=4;post(m);};
+ const scene={sync:()=>{clock+=2;},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>{clock+=3;return worker as never;},scene as never,false,()=>0);
+ layer.frame(city,0,true,.1);const first=layer.diagnostics.timing;
+ assert.equal(first.maxFrameMs,11);assert.equal(first.worstFrame!.totalMs,11);assert.equal(first.worstFrame!.stages.clockReset,9);assert.equal(first.worstFrame!.stages.sceneSync,2);assert.equal(first.worstFrame!.context.cityChanged,true);assert.equal(first.worstFrame!.context.paused,true);
+ layer.frame(city,0,true,.1);assert.equal(layer.diagnostics.timing.lastFrameMs,0);assert.equal(layer.diagnostics.timing.maxFrameMs,11);assert.deepEqual(layer.diagnostics.timing.worstFrame,first.worstFrame);
+ first.worstFrame!.context.drawnCount=999;assert.equal(layer.diagnostics.timing.worstFrame!.context.drawnCount,0);assert.equal(serialize(city),before);layer.destroy();
+});
+test('worst-frame attribution records outer failure cleanup and contained worker-start failure',t=>{
+ let clock=0,calls=0;t.mock.method(performance,'now',()=>clock);const city=createCity(8),before=serialize(city);
+ const scene={sync:()=>{if(++calls===2){clock+=5;throw Error('sync unavailable');}},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const layer=new TrafficLayer({} as never,()=>true,()=>{clock+=2;},()=>new FakeWorker() as never,scene as never,false,()=>0);
+ assert.doesNotThrow(()=>layer.frame(city,0,true,.1));const w=layer.diagnostics.timing.worstFrame!;
+ assert.equal(w.totalMs,7);assert.equal(w.stages.sceneSync,5);assert.equal(w.stages.failure,2);assert.equal(w.context.failed,true);assert.equal(layer.diagnostics.timing.maxFrameMs,7);layer.destroy();
+ const failed=new TrafficLayer({} as never,()=>true,()=>{},()=>{clock+=4;throw Error('worker unavailable');},{...scene,sync:()=>{}} as never,false,()=>0);
+ failed.frame(city,0,true,.1);const f=failed.diagnostics.timing.worstFrame!;assert.equal(f.totalMs,4);assert.equal(f.stages.clockReset,4);assert.equal(f.context.failed,true);assert.equal(f.context.presented,false);assert.equal(serialize(city),before);failed.destroy();
+});

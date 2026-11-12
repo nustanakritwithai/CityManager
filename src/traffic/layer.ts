@@ -1,3 +1,4 @@
+import {FrameAttribution} from './frame-attribution.ts';
 import {RailGameBridge} from '../rail/game-bridge.ts';
 import type {RailNetworkRuntime} from '../rail/network-runtime.ts';
 import type {AppBase} from 'playcanvas';
@@ -45,6 +46,7 @@ export class TrafficLayer {
  private workCancellations:{id:number;before:{owner:string;active:boolean;entered:boolean}[];after:{owner:string;active:boolean;entered:boolean}[]}[]=[];
  private workStalls=new WorkStallTracker();
  private presenter=new TrafficPresentation();private drawn:CitizenVehiclePose[]=[];
+ private readonly frameAttribution=new FrameAttribution();
  private timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
  private anchor:number|null=null;private paused=true;private visible=true;private dirty=false;private renderDirty=true;private failure:string|null=null;
  constructor(private readonly app:AppBase,_onScreen:(cell:number)=>boolean=()=>true,private readonly onFailure:(message:string)=>void=()=>{},
@@ -55,6 +57,7 @@ export class TrafficLayer {
   this.signalDisplay.clear();try{this.signalScene?.sync([]);}catch{/* lost graphics */}try{this.signalScene?.setEnabled(false);}catch{/* lost graphics */}try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
  }
  private reset(city:City):void {
+  this.frameAttribution.resetEpoch();
   this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
   this.client?.dispose();this.client=null;this.city=city;this.latest=null;this.presenter=new TrafficPresentation();this.workStalls=new WorkStallTracker();this.crossedWorkDay=null;this.drawn=[];this.anchor=null;this.dirty=false;this.renderDirty=true;this.failure=null;this.workExpiryAck=0;this.workCancel.clear();this.workRetired.clear();this.workCancellations=[];this.cars.setEnabled(this.visible);this.cars.sync([]);
   this.signalDisplay.reset(city);this.signalScene?.sync([]);this.signalScene?.setEnabled(this.visible);
@@ -89,8 +92,10 @@ export class TrafficLayer {
   if(hidden&&this.city&&this.client&&!this.failure){this.paused=true;try{this.submit(this.city,false,true);}catch(error){this.fail(error);}}
  }
  frame(city:City,minuteOfDay:number,paused:boolean,dt:number,day=city.tick):void {
-  const frameStart=performance.now();
+  const frameStart=performance.now();this.frameAttribution.begin(frameStart);
+  const frameCityChanged=city!==this.city,dirtyAtEntry=this.dirty;let frameAdvance=false,presented=false,reconciled=false;
   try{const previousClock=this.workClock,cityChanged=city!==this.city,nextClock=paused&&!cityChanged&&previousClock?previousClock:{day,minute:minuteOfDay};this.workClock=!cityChanged&&previousClock&&previousClock.day*1440+previousClock.minute>nextClock.day*1440+nextClock.minute?previousClock:nextClock;if(cityChanged){this.paused=paused;this.reset(city);}
+  this.frameAttribution.next('schedule',performance.now());
   if(!cityChanged&&!paused&&previousClock){const crossed=crossedWorkWindowDay(previousClock.day*1440+previousClock.minute,this.workClock.day*1440+this.workClock.minute);if(crossed!==null)this.crossedWorkDay=Math.max(this.crossedWorkDay??-1,crossed);}
   const effective=this.workClock;const timeBoundary=!cityChanged&&(!previousClock||previousClock.day!==effective.day||(previousClock.minute<WORK_TRIP_START_MINUTE&&effective.minute>=WORK_TRIP_START_MINUTE)||(previousClock.minute<WORK_TRIP_END_MINUTE&&effective.minute>=WORK_TRIP_END_MINUTE));
   const pauseChanged=paused!==this.paused;this.paused=paused;let advance=false;
@@ -103,19 +108,25 @@ export class TrafficLayer {
    else if(now-this.anchor>=1000){this.anchor=now;const worker=this.client.status;advance=!worker.inflight&&!worker.pending;}
 
   }
+  this.frameAttribution.next('bus',performance.now());
   if(this.busOn&&!this.bus&&!this.failure)this.bus=new BusGameBridge(city,this.minute,this.busMovementGate,()=>this.presenter.clearBusReservations());
   if(this.bus)this.presenter.reconcileBuses(this.bus.engine.snapshot().map(b=>b.id));
   if(this.bus&&!paused&&!this.failure){this.minute+=Math.min(.25,Math.max(0,dt))/60;this.bus.tick(this.minute);}
   // The presenter evaluates expiry on every physical frame. Clock boundaries
   // alone need no worker request; a proven cancellation queues one immediately.
   if(timeBoundary&&paused)this.renderDirty=true;
+  frameAdvance=advance;this.frameAttribution.next('submit',performance.now());
   if((advance||pauseChanged||this.dirty)&&this.client&&!this.failure){this.dirty=false;this.submit(city,advance,paused);}
+  this.frameAttribution.next('presentation',performance.now());
   if(!this.failure&&(this.renderDirty||!paused)){
+   presented=true;
    this.drawn=this.presenter.frame(dt,paused,this.busObstacles());
-   if(this.reconcileWorkTrips(paused?0:dt)){this.drawn=this.presenter.frame(0,true);if(this.client)this.submit(city,false,paused);}
+   this.frameAttribution.next('reconcile',performance.now());
+   if(this.reconcileWorkTrips(paused?0:dt)){reconciled=true;this.drawn=this.presenter.frame(0,true);if(this.client)this.submit(city,false,paused);}
+   this.frameAttribution.next('sceneSync',performance.now());
    if(this.visible)this.cars.sync(this.drawn);this.renderDirty=false;
   }
-  }catch(error){this.fail(error);}finally{const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);}
+  }catch(error){this.frameAttribution.next('failure',performance.now());this.fail(error);}finally{const end=performance.now(),ms=end-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);this.frameAttribution.finish(end,ms,{cityChanged:frameCityChanged,paused,advance:frameAdvance,dirtyAtEntry,visible:this.visible,failed:this.failure!==null,busPresent:this.bus!==null,presented,reconciled,drawnCount:this.drawn.length});}
  }
  /** Use sustained lack of physical progress and a full-car-length reset; a car
   * must also be blocked now. Paused frames accumulate no time. */
@@ -155,7 +166,7 @@ export class TrafficLayer {
  get diagnostics(){const f=this.latest,worker=this.client?.status??null,presenter=this.presenter,bus=this.bus,signalDisplay=this.signalDisplay,signalScene=this.signalScene,workCancellations=this.workCancellations;return {...this.cars.diagnostics,mode:'allocation-game' as const,get presentation(){return presenter.diagnostics;},paused:this.paused,
   get signals(){return signalDisplay.diagnostics;},get signalRendering(){return signalScene?.diagnostics??null;},get busLedger(){return bus?.ledger()??null;},get busMovement(){return bus?.engine.movementStats??null;},busMinute:bus?.engine.now??null,busStranded:bus?.engine.strandedCount??0,ready:f!==null,updating:f===null||!!worker?.inflight||!!worker?.pending,step:f?.step??0,demandRate:f?.demandRate??0,waiting:f?.waiting??0,blocked:f?.blocked??0,moving:f?.moving??0,
   completed:f?.completed??0,dropped:f?.dropped??0,cancelled:f?.cancelled??0,clippedRate:f?.clippedRate??0,
-  roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,rail:f?.rail??null,failure:this.failure,worker,get workCancellations(){return workCancellations.map(e=>({id:e.id,before:e.before.map(o=>({...o})),after:e.after.map(o=>({...o}))}));},timing:{...this.timing}};}
+  roads:f?.roads??0,congestedLinks:f?.congestedLinks??0,loadByCell:f?.loadByCell??[],modal:f?.modal??null,rail:f?.rail??null,failure:this.failure,worker,get workCancellations(){return workCancellations.map(e=>({id:e.id,before:e.before.map(o=>({...o})),after:e.after.map(o=>({...o}))}));},timing:{...this.timing,worstFrame:this.frameAttribution.snapshot()}};}
  /** Cumulative completed taxi trips on the latest frame (resets with the game). */
  taxiTrips():{trips:number;tiles:number} {return this.latest?.taxiTrips??{trips:0,tiles:0};}
  /** Taxi cars already tagged on the latest frame. Null when the taxi flag is off. Bus does not use this. */
