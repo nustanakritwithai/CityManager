@@ -150,16 +150,23 @@ function householdButton(city: City, household: Household, source: Building, onH
   if (assignedWorkers !== undefined) button.dataset.incomeRole = ownerAssignments.length ? 'self-employed' : 'employee';
   const labor = assignedWorkers === undefined ? `ทำงาน ${householdWorkerCount(city, household.id)}/${household.workforce} คน` : `จากแรงงานในบ้าน ${household.workforce} คน`;
   const art = el('span', 'cx-person-symbol'), copy = el('span', 'cx-link-copy'); art.append(symbol('household'));
-  copy.append(el('strong', '', assignedWorkers === undefined ? `ครัวเรือน #${household.id}` : `${ownerAssignments.length ? 'ทำกิจการเอง' : 'รับแรงงาน'} ${assignedWorkers} คน · ครัวเรือน #${household.id}`));
+  copy.append(el('strong', '', `ครัวเรือน #${household.id}`));
   if (assignedWorkers === undefined) copy.append(householdVisual(household, householdWorkerCount(city, household.id), city.accounts[household.wallet] ?? 0, `${labor} · เงินร่วม ${cash(city.accounts[household.wallet] ?? 0)}`));
-  else copy.append(el('span', '', `${labor} · เงินร่วม ${cash(city.accounts[household.wallet] ?? 0)}`));
-  for (const allocation of assignments) {
-    const role = el('span', 'cx-assigned-role', `${allocation.occupation === 'manufacturing' ? 'งานผลิต' : 'งานค้าปลีก'} · ${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน`);
-    Object.assign(role.dataset, { skill: allocation.skill, occupation: allocation.occupation, workers: String(allocation.workers) }); copy.append(role);
-  }
-  for (const allocation of ownerAssignments) {
-    const role = el('span', 'cx-assigned-role', `ทำกิจการเอง · ${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน · ไม่มีเงินเดือน`);
-    Object.assign(role.dataset, { skill: allocation.skill, occupation: 'retail', workers: String(allocation.workers), incomeRole: 'self-employed' }); copy.append(role);
+  else {
+    // A worker row is one name and one line of chips: who does what, and the family purse. The rest is on the household page.
+    const meta = el('span', 'cx-worker-meta'), purse = el('span', 'cx-hh-cash');
+    for (const allocation of assignments) {
+      const role = el('span', 'cx-assigned-role', `${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน`);
+      role.title = `${allocation.occupation === 'manufacturing' ? 'งานผลิต' : 'งานค้าปลีก'} · ${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน`;
+      Object.assign(role.dataset, { skill: allocation.skill, occupation: allocation.occupation, workers: String(allocation.workers) }); meta.append(role);
+    }
+    for (const allocation of ownerAssignments) {
+      const role = el('span', 'cx-assigned-role owner', `ทำเอง · ${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน`);
+      role.title = `ทำกิจการเอง · ${WORKER_SKILL_LABELS[allocation.skill]} ${allocation.workers} คน · ไม่มีเงินเดือน`;
+      Object.assign(role.dataset, { skill: allocation.skill, occupation: 'retail', workers: String(allocation.workers), incomeRole: 'self-employed' }); meta.append(role);
+    }
+    purse.append(iconElement('coin', 'ui-icon'), el('span', '', `${Math.round((city.accounts[household.wallet] ?? 0) / 100).toLocaleString('th-TH')} ฿`));
+    purse.title = `${labor} · เงินร่วม ${cash(city.accounts[household.wallet] ?? 0)}`; meta.append(purse); copy.append(meta);
   }
   if (household.origin === 'legacy-v1') copy.append(el('small', 'cx-legacy-tag', 'สมาชิกจาก v1: สมมติขั้นต่ำ'));
   button.append(art, copy, el('span', 'cx-link-arrow', '→')); button.setAttribute('aria-label', `ดูข้อมูลครัวเรือน #${household.id}`); onExplicitActivation(button, () => onHousehold(household.id, source.id, source.cell)); return button;
