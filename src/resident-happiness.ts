@@ -108,13 +108,28 @@ export function validateHappiness(city:City, value:unknown):asserts value is Hap
  const v=value as HappinessState;
  const valid=(n:unknown,max:number)=>Number.isSafeInteger(n) && Number(n)>=0 && Number(n)<=max;
  if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!=='day,rows,version'||v.version!==1||v.day!==city.tick||!Array.isArray(v.rows)||v.rows.length!==city.households.length)throw Error('Invalid happiness state');
- const ids=new Set(city.households.map(h=>h.id)); let last=0;
+ const households = new Map(city.households.map(h => [h.id, h]));
+ const arrivals = new Map<string, number>();
+ for (const entries of [city.history?.structuralProofs ?? [], city.ledger]) {
+   for (const entry of entries) {
+     if (entry.reason === 'New household arrival savings') arrivals.set(entry.to, entry.tick);
+   }
+ }
+ let last=0;
  for(const row of v.rows){
-   if(!row||typeof row!=='object'||Object.keys(row).sort().join(',')!=='distressDays,householdId,score'||!Number.isSafeInteger(row.householdId)||row.householdId<=last||!ids.has(row.householdId)||!valid(row.score,100)||!valid(row.distressDays,HAPPINESS_DEPARTURE_DAYS))throw Error('Invalid happiness row');
+   if(!row||typeof row!=='object'||Object.keys(row).sort().join(',')!=='distressDays,householdId,score'||!Number.isSafeInteger(row.householdId)||row.householdId<=last||!valid(row.score,100)||!valid(row.distressDays,HAPPINESS_DEPARTURE_DAYS))throw Error('Invalid happiness row');
+   const household = households.get(row.householdId);
+   if (!household) throw Error('Invalid happiness row');
+   const arrival = household.origin === 'arrival' ? arrivals.get(household.wallet) : 0;
+   if (arrival === undefined) throw Error('Invalid happiness row');
+   // Arrivals get their first update on the day they enter. Legacy households
+   // have no arrival receipt and can have been updated since day one.
+   const days = city.tick - Math.max(1, arrival) + 1;
+   if (row.score < HAPPINESS_BASE - days || row.score > HAPPINESS_BASE + 2 * days) throw Error('Invalid happiness row');
    // Losing at most one point per day bounds the length of a continuous streak.
    const below = row.score < HAPPINESS_DISTRESS;
    const minimum = below ? HAPPINESS_DISTRESS - row.score : 0;
-   const maximum = below ? Math.max(0, city.tick - (HAPPINESS_BASE - HAPPINESS_DISTRESS)) : 0;
+   const maximum = below ? Math.max(0, days - (HAPPINESS_BASE - HAPPINESS_DISTRESS)) : 0;
    if(row.distressDays < minimum || row.distressDays > maximum)throw Error('Invalid happiness row');
    last=row.householdId;
  }

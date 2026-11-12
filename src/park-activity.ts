@@ -3,7 +3,7 @@ import { expandedCellCoordinate, expandedCellNeighbors } from './expanded-map-gr
  * The caller supplies integer game minutes; neither wall time nor atmosphere is read.
  * Identities are constituent slots of existing household counts, not extra population.
  */
-import { SIZE, type City } from './sim.ts';
+import type { City } from './sim.ts';
 import { WORKER_SKILLS } from './labor.ts';
 
 export const PARK_VISITOR_CAPACITY = 6, MAX_PARK_VISITORS = 64;

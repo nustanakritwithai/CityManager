@@ -67,13 +67,13 @@ test('ledger flows use only current-day treasury endpoints and convert integer s
     { tick: city.tick, from: 'household:1', to: 'firm:2', amount: 800, reason: 'Not a city receipt' },
     { tick: city.tick + 1, from: 'outside', to: 'treasury', amount: 77700, reason: 'Future receipt excluded' },
   ];
-  const before = serialize(city), capture = captureCitySignals(city);
+  const before = structuredClone(city), capture = captureCitySignals(city);
   assert.equal(metric(capture, 'households').value, city.households.length);
   assert.equal(metric(capture, 'businesses').value, city.firms.length);
   assert.equal(metric(capture, 'treasury').value, 1234.56);
   assert.equal(metric(capture, 'incomePerTick').value, 10.01);
   assert.equal(metric(capture, 'expensesPerTick').value, 2.05);
-  assert.equal(serialize(city), before);
+  assert.deepEqual(city, before);
   city.accounts.treasury = 0;
   assert.equal(metric(capture, 'treasury').value, 1234.56, 'capture owns values rather than live state references');
 });
