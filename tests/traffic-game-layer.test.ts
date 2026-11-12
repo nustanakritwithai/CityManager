@@ -257,3 +257,32 @@ test('worst-frame attribution records outer failure cleanup and contained worker
  const failed=new TrafficLayer({} as never,()=>true,()=>{},()=>{clock+=4;throw Error('worker unavailable');},{...scene,sync:()=>{}} as never,false,()=>0);
  failed.frame(city,0,true,.1);const f=failed.diagnostics.timing.worstFrame!;assert.equal(f.totalMs,4);assert.equal(f.stages.clockReset,4);assert.equal(f.context.failed,true);assert.equal(f.context.presented,false);assert.equal(serialize(city),before);failed.destroy();
 });
+
+test('completed projection attribution preserves original callback work and epoch maximum',t=>{
+ let clock=0;t.mock.method(performance,'now',()=>clock);const city=createCity(71),raw=serialize(city),worker=new FakeWorker();
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ const workers:FakeWorker[]=[];const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>{const next=workers.length?new FakeWorker():worker;workers.push(next);return next as never;},scene as never,false,()=>0);layer.frame(city,0,true,.1);
+ const internal=layer as any,calls:string[]=[];for(const [object,key,cost] of [[internal.presenter,'expire',1],[internal.signalDisplay,'accept',2],[internal.presenter,'update',6]] as const){const original=object[key].bind(object);object[key]=(...args:unknown[])=>{calls.push(key);clock+=cost;return original(...args);};}
+ internal.signalScene={sync:()=>{calls.push('signalSync');clock+=3;},setEnabled:()=>{}};internal.bus={engine:{now:420,strandedCount:0},onFrame:()=>{calls.push('bus');clock+=4;}};internal.railBridge={onFrame:()=>{calls.push('rail');clock+=5;}};
+ worker.flush();const timing=layer.diagnostics.timing,w=timing.worstProjection!;
+ assert.deepEqual(calls,['expire','accept','signalSync','bus','rail','update']);assert.equal(timing.projections,1);assert.equal(timing.maxProjectionMs,21);assert.equal(w.totalMs,21);assert.equal(w.context.projectionIndex,1);assert.ok(Number.isSafeInteger(w.context.signalHeadCount));
+ assert.equal(w.stages.expiry,1);assert.equal(w.stages.signalAccept,2);assert.equal(w.stages.signalSync,3);assert.equal(w.stages.bus,4);assert.equal(w.stages.rail,5);assert.equal(w.stages.presenter,6);assert.equal(w.context.failed,false);assert.equal(w.context.paused,true);assert.equal(w.context.inputCars,0);assert.equal(serialize(city),raw);
+ w.stages.bus=999;assert.equal(layer.diagnostics.timing.worstProjection!.stages.bus,4);
+ // Existing epoch reset clears both old projection maximum and attribution.
+ internal.bus=null;layer.afterMapEdit(createCity(72),true);assert.equal(layer.diagnostics.timing.projections,0);assert.equal(layer.diagnostics.timing.maxProjectionMs,0);assert.equal(layer.diagnostics.timing.worstProjection,null);workers[1].flush();assert.equal(layer.diagnostics.timing.worstProjection!.context.projectionIndex,1);layer.destroy();
+});
+test('projection exceptions preserve outer propagation and inner bus/rail catch semantics',t=>{
+ let clock=0;t.mock.method(performance,'now',()=>clock);const city=createCity(73),raw=serialize(city);
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ for(const path of ['signal','bus','rail']){
+  const inner=path!=='signal';
+  const worker=new FakeWorker(),faults:string[]=[];const layer=new TrafficLayer({} as never,()=>true,m=>faults.push(m),()=>worker as never,scene as never,false,()=>0);layer.frame(city,0,true,.1);const internal=layer as any;let presented=false,railCalled=false;
+  const update=internal.presenter.update.bind(internal.presenter);internal.presenter.update=(...args:unknown[])=>{presented=true;return update(...args);};
+  if(inner){internal.bus={engine:{now:420,strandedCount:0},onFrame:()=>{if(path==='bus'){clock+=9;throw Error('bus projection failed');}}};internal.railBridge={onFrame:()=>{railCalled=true;if(path==='rail'){clock+=9;throw Error('rail projection failed');}}};}
+  else internal.signalDisplay.accept=()=>{clock+=9;throw Error('signal projection failed');};
+  assert.doesNotThrow(()=>worker.flush());const timing=layer.diagnostics.timing;
+  if(inner){assert.equal(timing.projections,1);assert.equal(timing.maxProjectionMs,9);assert.equal(timing.worstProjection!.stages[path as 'bus'|'rail'],9);assert.equal(timing.worstProjection!.context.failed,true);assert.equal(presented,true);assert.equal(railCalled,path==='rail');assert.equal(faults[0],`${path} projection failed`);}
+  else{assert.equal(timing.projections,0);assert.equal(timing.maxProjectionMs,0);assert.equal(timing.worstProjection,null);assert.equal(presented,false);assert.match(faults[0],/Traffic game display failed/);}
+  assert.equal(serialize(city),raw);layer.destroy();
+ }
+});
