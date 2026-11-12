@@ -6,7 +6,7 @@ import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
 import { signalReadingFixture } from './signal-reading-fixture.ts';
 import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
-import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
+import { buildLocalSignalReport, captureCitySignals, METRIC_DEFINITIONS } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
@@ -226,7 +226,7 @@ try {
   assert.equal(await evaluate('document.querySelector(\'[data-signal-id="trend.treasury"] .signal-technical\').open'), false, 'Technical references begin collapsed');
   assert(!await evaluate('document.querySelector(\'[data-signal-id="trend.treasury"] .signal-observation-detail>p\').textContent.includes("treasury")'), 'Plain Thai explanation keeps technical metric IDs in disclosure');
   assert.equal(await count('[data-missing-id^="missing.prior."]'), 0);
-  assert.equal(await count('[data-missing-id^="missing.current."]'), 3, 'Unsupported values remain missing, not fabricated zeroes');
+  assert.equal(await count('[data-missing-id^="missing.current."]'), Object.keys(METRIC_DEFINITIONS).length - advancedMetrics, 'Unsupported values remain missing, not fabricated zeroes');
   assert.deepEqual(await state(), advanced);
   checks.push('Only two actually captured endpoints create nine comparisons and exact deltas/windows; Thai drill-down includes metric/signal references, units and numbers, with missing values explicit');
 
