@@ -283,3 +283,10 @@
 #entity-content[data-card-kind] .cx-prog-cost, #entity-content[data-card-kind] .cx-prog-label { font-size: calc(12 * var(--bc-unit, 1px)); line-height: 1.5; }
 #entity-content[data-card-kind] .cx-prog-next { font-size: calc(14 * var(--bc-unit, 1px)); color: #e6ebf7; }
 #entity-content[data-card-kind] :is(.cx-prog-gains, .cx-prog-checks, .cx-digest-groups) { padding-left: 0; margin-left: 0; }
+
+/* Worker rows: name, then one wrapping line of role chips and the family purse. */
+.cx-worker-meta { display: flex; flex-wrap: wrap; align-items: center; gap: calc(6 * var(--reader-unit, 1px)); }
+#entity-content[data-card-kind] .cx-link-copy .cx-worker-meta .cx-assigned-role { padding: calc(2 * var(--bc-unit, 1px)) calc(9 * var(--bc-unit, 1px)); border-radius: 999px; background: #8fd3ff1f; color: #d9f1ff; white-space: nowrap; }
+#entity-content[data-card-kind] .cx-link-copy .cx-worker-meta .cx-assigned-role.owner { background: #f3c46b24; color: #f6d891; }
+.cx-worker-meta .cx-hh-cash { margin-left: auto; }
+#place-subtitle { text-wrap: balance; }

@@ -6,7 +6,7 @@ import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
 import { signalReadingFixture } from './signal-reading-fixture.ts';
 import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
-import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
+import { buildLocalSignalReport, captureCitySignals, METRIC_DEFINITIONS } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
@@ -163,7 +163,8 @@ try {
 
   await openSignals(); await untilRequests(1);
   assert.equal(await evaluate('document.querySelector("#signal-mode").dataset.mode'), 'pending');
-  assert.equal(await count('[data-signal-metric]'), 9, 'Immediate deterministic metrics remain readable during loading');
+  // Happiness joins the capture whenever the city carries happiness state, so count what this fixture really captures.
+  assert.equal(await count('[data-signal-metric]'), captureCitySignals(fixture).metrics.length, 'Immediate deterministic metrics remain readable during loading');
   assert.equal(await visible('#signal-summary'), true);
   assert.equal(await visible('#signal-cancel'), true);
   assert.equal(await evaluate('document.querySelector("#signal-refresh").disabled'), true);
@@ -200,8 +201,9 @@ try {
 
   await button('#signal-refresh'); await untilRequests(4);
   await until('document.querySelector("#signal-mode").dataset.mode==="ai"');
-  assert.deepEqual(apiRequests.at(-1), { tick: advanced.tick, priorTick: failedCapture, metrics: 9, behavior: 'ai' });
-  assert.equal(await count('[data-signal-id^="trend."]'), 9);
+  const advancedMetrics = captureCitySignals(advanced).metrics.length;
+  assert.deepEqual(apiRequests.at(-1), { tick: advanced.tick, priorTick: failedCapture, metrics: advancedMetrics, behavior: 'ai' });
+  assert.equal(await count('[data-signal-id^="trend."]'), advancedMetrics);
   const comparison = await evaluate('Object.fromEntries([...document.querySelectorAll("[data-comparison-metric]")].map(e=>[e.dataset.comparisonMetric,{current:Number(e.dataset.current),prior:e.dataset.prior===""?null:Number(e.dataset.prior),delta:e.dataset.delta===""?null:Number(e.dataset.delta)}]))');
   const currentReport = buildLocalSignalReport({ schemaVersion: 1, locale: 'th', snapshot: {
     tick: advanced.tick, window: { startTick: failedCapture, endTick: advanced.tick },
@@ -224,7 +226,7 @@ try {
   assert.equal(await evaluate('document.querySelector(\'[data-signal-id="trend.treasury"] .signal-technical\').open'), false, 'Technical references begin collapsed');
   assert(!await evaluate('document.querySelector(\'[data-signal-id="trend.treasury"] .signal-observation-detail>p\').textContent.includes("treasury")'), 'Plain Thai explanation keeps technical metric IDs in disclosure');
   assert.equal(await count('[data-missing-id^="missing.prior."]'), 0);
-  assert.equal(await count('[data-missing-id^="missing.current."]'), 3, 'Unsupported values remain missing, not fabricated zeroes');
+  assert.equal(await count('[data-missing-id^="missing.current."]'), Object.keys(METRIC_DEFINITIONS).length - advancedMetrics, 'Unsupported values remain missing, not fabricated zeroes');
   assert.deepEqual(await state(), advanced);
   checks.push('Only two actually captured endpoints create nine comparisons and exact deltas/windows; Thai drill-down includes metric/signal references, units and numbers, with missing values explicit');
 

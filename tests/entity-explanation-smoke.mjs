@@ -9,7 +9,7 @@ import { serialize, deserialize, bulldoze, contributeOwnerCapital } from '../src
 import { entityExplanationCity, entityInsufficientFixture } from './entity-explanation-fixture.ts';
 import { createPanelServerFixture, assertNoCityWrites } from './panel-server-entry-fixture.mjs';
 import { captureEntityExplanation, buildLocalEntityExplanation } from '../src/entity-explanation-data.ts';
-import { buildLocalSignalReport } from '../src/signal-data.ts';
+import { buildLocalSignalReport, captureCitySignals } from '../src/signal-data.ts';
 import { reachTouch } from './touch-reach.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
@@ -274,7 +274,7 @@ try {
     await layout(viewport); await shot(viewport.width === 980 ? 'entity-s22-wide.png' : 'entity-s22.png'); assert.deepEqual(await state(), fixture);
   }
   await close(); await button('#toggle-inspector'); await button('#open-signals'); await until('document.querySelector("#signal-mode").dataset.mode==="ai"');
-  assert.equal(await evaluate('document.querySelectorAll("[data-signal-metric]").length'), 9, 'Existing city report contract is unchanged');
+  assert.equal(await evaluate('document.querySelectorAll("[data-signal-metric]").length'), captureCitySignals(fixture).metrics.length, 'Existing city report contract is unchanged');
   await button('#city-fact-questions>summary');
   const beforeQuestion = await state(), entityCalls = requests.length, reportCalls = cityRequests.length; await button('#city-question-ask');
   assert.equal(await evaluate('document.querySelector("#city-question-answer").dataset.status'), 'observed');
