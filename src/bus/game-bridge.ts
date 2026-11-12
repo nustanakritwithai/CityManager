@@ -12,7 +12,7 @@
  * released = injected (by the game) + pendingReturn.
  */
 import { BusEngine, busRideMinutes, type BusMovementGate } from './engine.ts';
-import { BUS_LIVE_DRIVE_SECONDS_PER_TILE } from './types.ts';
+import { BUS_LIVE_TIMING } from './types.ts';
 import { busLineRoutes, busServiceOrder, type BusHost } from './lines.ts';
 import { createBusTrafficHook } from './traffic-hook.ts';
 import { createBusLoadSink } from '../traffic/bridge.ts';
@@ -27,14 +27,14 @@ export class BusGameBridge {
   totals = { diverted: 0, submitted: 0, returned: 0 };
   constructor(host: BusHost, minute: number, movementGate?: BusMovementGate, movementReset?: () => void) {
     this.host = host;
-    this.engine = new BusEngine(host, minute, { movementGate, movementReset, driveSecondsPerTile: BUS_LIVE_DRIVE_SECONDS_PER_TILE, boardDuringDwell: true, release: (id, persons) => { const k = this.reqs.get(id); if (k === undefined) throw Error(`Unknown bus request ${id}`); this.returns[k] = (this.returns[k] ?? 0) + persons / GAME_BUS_PERSONS_PER_RATE; this.totals.returned += persons; } });
+    this.engine = new BusEngine(host, minute, { ...BUS_LIVE_TIMING, movementGate, movementReset, boardDuringDwell: true, release: (id, persons) => { const k = this.reqs.get(id); if (k === undefined) throw Error(`Unknown bus request ${id}`); this.returns[k] = (this.returns[k] ?? 0) + persons / GAME_BUS_PERSONS_PER_RATE; this.totals.returned += persons; } });
     this.hook.connect(createBusLoadSink(load => { this.load = load; }));
   }
   private config(): Pick<GameBusInput, 'stops' | 'lines'> {
     const b = this.host.bus, key = JSON.stringify([this.engine.activeLineIds.map(id=>[id,this.engine.activeBusCount(id),this.engine.activeBusCapacity(id)]), b ?? null, this.host.cells.map(c => c.road ? 1 : 0).join(''), (this.host as { roadTopology?: unknown }).roadTopology ?? null]);
     if (key === this.cfgKey) return this.cfg;
     const lines: GameBusLine[] = [];
-    for (const r of b ? busLineRoutes(this.host,{driveSecondsPerTile:BUS_LIVE_DRIVE_SECONDS_PER_TILE}) : []) {
+    for (const r of b ? busLineRoutes(this.host, BUS_LIVE_TIMING) : []) {
       const line = b!.lines.find(l => l.id === r.lineId); if (!line || !this.engine.activeLineIds.includes(r.lineId) || r.status !== 'running' || r.headwayMinutes === null) continue;
       const ride: Record<string, number> = {}, ids = [...new Set(busServiceOrder(line.stopIds))];
       for (const f of ids) for (const t of ids) if (f !== t) { const m = busRideMinutes(r, line.stopIds, f, t); if (m !== null) ride[`${f}:${t}`] = m; }

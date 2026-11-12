@@ -27,8 +27,8 @@ export type BudgetLine = { key: string; label: string; amount: number };
 const INCOME: readonly [RegExp, string, string][] = [
   [/^Demolition refund /, 'demolition-refund', 'เงินคืนจากการรื้อ (80% ของส่วนที่เมืองจ่าย)'],
   [/^Taxi fares$/, 'legacy-taxi-fares', 'ค่าโดยสารแท็กซี่ (รายการเดิม)'],
-  [/^Monthly household wage tax$/, 'wage-tax', 'ภาษีค่าจ้าง 10%'],
-  [/firm profit tax$/i, 'profit-tax', 'ภาษีกำไรกิจการ 20%'],
+  [/^Monthly household wage tax$/, 'wage-tax', 'ภาษีค่าจ้าง'],
+  [/firm profit tax$/i, 'profit-tax', 'ภาษีกำไรกิจการ'],
   [/grant/i, 'grant', 'ทุนอุดหนุน'],
 ];
 const EXPENSE: readonly [RegExp, string, string][] = [

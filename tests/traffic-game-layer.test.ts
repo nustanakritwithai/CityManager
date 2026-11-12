@@ -134,7 +134,7 @@ test('busy bus completes its first corner and reaches the stop after natural car
  const box=(p:{x:number;z:number;headingX:number;headingZ:number},length:number,width:number)=>{const x=(Math.abs(p.headingX)*length+Math.abs(p.headingZ)*width)/2,z=(Math.abs(p.headingZ)*length+Math.abs(p.headingX)*width)/2;return {left:p.x-x,right:p.x+x,top:p.z-z,bottom:p.z+z};};
  let previousIds=new Set<string>();const seenIds=new Set<string>();
  let firstBus:string|undefined,held=false,resumed=false,heldCommits=0,arrived=false,departed=false;
- // Physical first approach, mandatory 60s dwell, then actual kerb departure: no fake clock shortcut.
+ // Physical first approach, timed dwell, then actual kerb departure.
  for(let i=0;i<6400;i++){
   now+=25;layer.frame(city,0,false,.025);worker.flush();assert.equal(layer.diagnostics.failure,null);
   const stats=layer.diagnostics.busMovement!;if(!held&&stats.heldDrive+stats.heldTransition>0){held=true;heldCommits=stats.committedDrive;}if(held&&stats.committedDrive>heldCommits)resumed=true;if(layer.bus!.engine.snapshot().some(b=>b.phase==='dwelling'))arrived=true;if(arrived&&layer.bus!.engine.snapshot().some(b=>b.phase==='running'&&b.progress>0))departed=true;
@@ -159,7 +159,7 @@ for(const level of [1,2,3] as const)test(`dense 12-junction mixed traffic comple
  const box=(p:{x:number;z:number;headingX:number;headingZ:number},length:number,width:number)=>{const x=(Math.abs(p.headingX)*length+Math.abs(p.headingZ)*width)/2,z=(Math.abs(p.headingZ)*length+Math.abs(p.headingX)*width)/2;return {left:p.x-x,right:p.x+x,top:p.z-z,bottom:p.z+z};};
  let previousIds=new Set<string>();const seenIds=new Set<string>();
  let firstBus:string|undefined,held=false,resumed=false,heldCommits=0,arrived=false,departed=false;
- // Physical first approach, mandatory 60s dwell, then actual kerb departure: no fake clock shortcut.
+ // Physical first approach, timed dwell, then actual kerb departure.
  let stops:number[]=[];let previousStop:number|undefined;let minVisible=Infinity,maxDeferred=0;
  for(let i=0;i<36000;i++){
   now+=25;layer.frame(city,0,false,.025);worker.flush();assert.equal(layer.diagnostics.failure,null);
@@ -181,6 +181,33 @@ for(const level of [1,2,3] as const)test(`dense 12-junction mixed traffic comple
  layer.setVisible(false);layer.frame(city,0,false,.025);assert.equal(layer.diagnostics.failure,null);layer.destroy();
 });
 
+
+test('six live buses clear their first stop and carry riders to the second under mixed traffic',async()=>{
+ const {busCommuteBrowserFixture}=await import('./bus-commute-browser-fixture.ts');
+ const {deserializeParkSession}=await import('../src/park-runtime.ts');
+ const {city}=deserializeParkSession(busCommuteBrowserFixture().raw);
+ city.bus!.lines[0].busCount=6;
+ const [first,second]=city.bus!.stops.map(stop=>stop.cell);
+ const before=serialize(city),worker=new FakeWorker();
+ const scene={sync:()=>{},setEnabled:()=>{},destroy:()=>{},diagnostics:{cars:0,drawBatches:0,trianglesPerCar:24,capacity:0}};
+ let now=0;
+ const layer=new TrafficLayer({} as never,()=>true,()=>{},()=>worker as never,scene as never,undefined,()=>now);
+ const reachedFirst=new Set<string>(),reachedSecond=new Set<string>();
+ for(let i=0;i<1800&&reachedSecond.size<6;i++){
+  now+=100;layer.frame(city,420,false,.1);worker.flush();
+  assert.equal(layer.diagnostics.failure,null);
+  for(const bus of layer.bus!.engine.snapshot())if(bus.phase==='dwelling'){
+   if(bus.cell===first)reachedFirst.add(bus.id);
+   if(bus.cell===second&&reachedFirst.has(bus.id))reachedSecond.add(bus.id);
+  }
+ }
+ assert.equal(reachedSecond.size,6);
+ assert.ok(layer.bus!.engine.totals.completed>0);
+ assert.equal(layer.diagnostics.presentation.busIntrusions,0);
+ assert.equal(layer.bus!.ledger().engineError,0);
+ assert.equal(serialize(city),before);
+ layer.destroy();
+});
 
 test('short browser approach holds and resumes under measured low render cadence without changing clocks',async()=>{
  const {trafficGapShortApproachFixture}=await import('./traffic-gap-fixture.ts');

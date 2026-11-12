@@ -49,7 +49,9 @@ test('version-five mapping includes owner labour and distinguishes people, house
   assert.equal(metric(capture, 'housingCapacity').unit, 'people');
   assert.equal(metric(capture, 'housingCapacity').value, city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0));
   const report = buildLocalSignalReport(requestForCapture(capture));
-  assert.deepEqual(report.data.missingData.filter(value => value.reason === 'current_metric_unavailable').map(value => value.metricRefs[0]), ['averageHappiness', 'pollution', 'trafficPressure']);
+  assert.equal(metric(capture, 'averageHappiness').value, city.happiness!.rows.reduce((sum, row) => sum + row.score, 0) / city.households.length);
+  assert.equal(metric(capture, 'averageHappiness').unit, 'index_0_100');
+  assert.deepEqual(report.data.missingData.filter(value => value.reason === 'current_metric_unavailable').map(value => value.metricRefs[0]), ['pollution', 'trafficPressure']);
   assert(report.data.signals.some(value => value.id === 'threshold.housing-capacity-exceeded'));
   assert.equal(serialize(city), before, 'capture/report preserve the complete version-five save and RNG');
 });
@@ -65,13 +67,13 @@ test('ledger flows use only current-day treasury endpoints and convert integer s
     { tick: city.tick, from: 'household:1', to: 'firm:2', amount: 800, reason: 'Not a city receipt' },
     { tick: city.tick + 1, from: 'outside', to: 'treasury', amount: 77700, reason: 'Future receipt excluded' },
   ];
-  const before = serialize(city), capture = captureCitySignals(city);
+  const before = structuredClone(city), capture = captureCitySignals(city);
   assert.equal(metric(capture, 'households').value, city.households.length);
   assert.equal(metric(capture, 'businesses').value, city.firms.length);
   assert.equal(metric(capture, 'treasury').value, 1234.56);
   assert.equal(metric(capture, 'incomePerTick').value, 10.01);
   assert.equal(metric(capture, 'expensesPerTick').value, 2.05);
-  assert.equal(serialize(city), before);
+  assert.deepEqual(city, before);
   city.accounts.treasury = 0;
   assert.equal(metric(capture, 'treasury').value, 1234.56, 'capture owns values rather than live state references');
 });

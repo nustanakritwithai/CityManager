@@ -1,4 +1,4 @@
-import { happinessTargets, HAPPINESS_DEPARTURE_DAYS } from './resident-happiness.ts';
+import { happinessTargets, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { onExplicitActivation } from './explicit-activation.ts';
@@ -12,7 +12,7 @@ import { householdFoodToday } from './food-demand.ts';
 import { firmGoodsLine, firmGoodsName } from './goods-view.ts';
 import { CROPS, RECIPES, CROP_LABELS, PRODUCT_LABELS, RECIPE, RECIPE_LABELS } from './goods.ts';
 import { peopleOf } from './education.ts';
-import { MONTH, access, departureDay, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, commercialGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
+import { MONTH, access, departureForecast, farmCrop, farmCropMode, householdWorkerCount, employmentForHousehold, housingCapacity, homeOccupancy, housingUpgradeStatus, productionUpgradeStatus, utilities, explainMigration, utilityAt, firmCapacity, firmCredentialCounts, firmRent, firmWage, ownerFinance, deadFirm, factoryTakeoverRecipe, commercialGrowthStatus, type City, type Household, type Firm, type Building } from './sim.ts';
 import { resolvePlace, relatedFlows, cityOverview, householdLabor, firmLabor, contextRevision, householdConsumption, growthStatusText, WORKER_SKILL_LABELS, WORKER_SKILL_ROLES } from './context-data.ts';
 import { formatMoney, cropFlowRows, accountLabel, reasonLabel, type CropFlowRow, type FlowKind, type FlowRow } from './inspector-data.ts';
 import { CROP_STOCK_CAPS, CHAIN_CROP_PRICES as CROP_PRICES, CROP_RECIPE, farmStockCapacity } from './agriculture.ts';
@@ -20,6 +20,7 @@ import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { iconElement } from './ui-icons.ts';
+import { RECENT_ENTRIES, ledgerDigest, type DigestRow } from './ledger-summary.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
 type HouseholdAction = (id: number, sourceBuildingId: number, sourceCell: number) => void;
@@ -38,6 +39,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const heldPointers = new Map<number, HTMLElement>(), heldKeys = new Map<string, HTMLElement>();
 const cash = (value: number, signed = false) => `${formatMoney(value, signed)} ฿`;
 const count = (value: number) => value.toLocaleString('th-TH');
+const happinessPoints = new Intl.NumberFormat('th-TH', { signDisplay: 'exceptZero' });
 
 /** UI-only feedback survives a native click's deferred same-context refresh. */
 export function showOwnerFinanceResult(firmId: number, message: string): void {
@@ -182,16 +184,33 @@ function flowCard(row: FlowRow, wallet: string): HTMLElement {
   summary.addEventListener('click', () => queueMicrotask(remember)); card.addEventListener('toggle', remember);
   return card;
 }
+/** Totals first: in, out and the biggest kinds over 30 days, so one row of numbers replaces a page of entries. */
+function digest(city: City, rows: readonly DigestRow[], wallet: string, unit: 'money' | 'goods' | 'crops'): HTMLElement {
+  const d = ledgerDigest(rows, wallet, city.tick), box = el('div', 'cx-digest'), amount = (value: number) => unit === 'money' ? cash(value) : `${count(value)} ${unit === 'crops' ? 'ล็อต' : 'หน่วย'}`;
+  Object.assign(box.dataset, { unit, fromTick: String(d.fromTick), toTick: String(d.toTick), totalIn: String(d.totalIn), totalOut: String(d.totalOut), entries: String(d.entries) });
+  if (!d.entries) { box.append(el('p', 'cx-digest-empty', '30 วันล่าสุดยังไม่มีรายการ')); return box; }
+  const tiles = el('div', 'cx-digest-tiles');
+  const tile = (tone: string, title: string, text: string) => { const t = el('div', `cx-digest-tile ${tone}`); t.append(el('span', '', title), el('strong', '', text)); return t; };
+  tiles.append(tile('in', 'เข้า', amount(d.totalIn)), tile('out', 'ออก', amount(d.totalOut)));
+  if (unit === 'money') { const net = d.totalIn - d.totalOut; tiles.append(tile(net < 0 ? 'out' : 'in', 'สุทธิ', cash(net, true))); }
+  const list = el('ul', 'cx-digest-groups');
+  for (const group of d.groups) {
+    const item = el('li', `cx-digest-group ${group.direction}`); Object.assign(item.dataset, { direction: group.direction, total: String(group.total), entries: String(group.entries) });
+    item.append(iconElement(group.direction === 'in' ? 'import' : 'export', 'ui-icon'), el('span', 'cx-digest-label', group.label), el('small', '', `${count(group.entries)} ครั้ง`), el('strong', '', `${group.direction === 'in' ? '+' : '−'}${amount(group.total)}`));
+    list.append(item);
+  }
+  box.append(el('p', 'cx-digest-period', `30 วันล่าสุด · วัน ${d.fromTick}–${d.toTick}`), tiles, list); return box;
+}
 function activity(city: City, kind: FlowKind, wallet: string, owner: string): HTMLElement {
   const body = section(kind === 'money' ? 'รายการเงินของบัญชีนี้' : 'รายการสินค้าที่เกี่ยวข้อง'), rows = relatedFlows(city, kind, wallet), key = `${wallet}:${kind}`;
   body.classList.add('cx-activity'); Object.assign(body.dataset, { wallet, kind, scope: 'wallet' });
   const note = el('p', 'cx-account-note', `${owner} · ${wallet} เท่านั้น`), counter = el('p', 'cx-count'), list = el('div', 'cx-flow-list'), controls = el('div', 'cx-flow-controls'), toggle = el('button', 'cx-button'); toggle.type = 'button'; toggle.dataset.contextFlowAction = 'toggle'; toggle.dataset.kind = kind; toggle.dataset.wallet = wallet; toggle.dataset.contextFocus = `activity:${wallet}:${kind}`;
   function update() {
-    const limit = activityLimits.get(key) ?? 8, shown = Math.min(rows.length, limit); counter.textContent = `แสดง ${count(shown)} จาก ${count(rows.length)} รายการ · ใหม่ → เก่า`; counter.dataset.shown = String(shown); counter.dataset.total = String(rows.length);
+    const limit = activityLimits.get(key) ?? RECENT_ENTRIES, shown = Math.min(rows.length, limit); counter.textContent = `ล่าสุด ${count(shown)} จาก ${count(rows.length)} รายการ`; counter.dataset.shown = String(shown); counter.dataset.total = String(rows.length);
     list.replaceChildren(...(rows.length ? rows.slice(0, shown).map(row => flowCard(row, wallet)) : [el('p', 'cx-detail-note', kind === 'money' ? 'ยังไม่มีการโอนเงินที่เกี่ยวข้องกับบัญชีนี้' : 'ยังไม่มีการเคลื่อนย้ายสินค้าที่เกี่ยวข้องกับบัญชีนี้')]));
-    toggle.hidden = rows.length <= 8; toggle.textContent = limit === Infinity ? 'กลับ 8 รายการล่าสุด' : `ดูทั้งหมด ${count(rows.length)} รายการ`; toggle.setAttribute('aria-expanded', String(limit === Infinity));
+    toggle.hidden = rows.length <= RECENT_ENTRIES; toggle.textContent = limit === Infinity ? `ย่อเหลือ ${RECENT_ENTRIES} รายการล่าสุด` : `ดูทั้งหมด ${count(rows.length)} รายการ`; toggle.setAttribute('aria-expanded', String(limit === Infinity));
   }
-  toggle.addEventListener('click', () => { activityLimits.set(key, activityLimits.get(key) === Infinity ? 8 : Infinity); update(); }); controls.append(toggle); body.append(note, counter, list, controls); update(); return body;
+  toggle.addEventListener('click', () => { activityLimits.set(key, activityLimits.get(key) === Infinity ? RECENT_ENTRIES : Infinity); update(); }); controls.append(toggle); body.append(digest(city, rows, wallet, kind), counter, list, controls, note); update(); return body;
 }
 function capacityMetric(key: string, title: string, occupied: number, capacity: number, unit: string): HTMLElement {
   const card = metric(key, title, `${count(occupied)} / ${count(capacity)} ${unit}`, occupied); card.dataset.capacity = String(capacity);
@@ -223,12 +242,12 @@ function cropActivity(city: City, wallet: string, owner: string): HTMLElement {
   body.classList.add('cx-activity', 'cx-crop-activity'); Object.assign(body.dataset, { wallet, kind: 'crops', scope: 'wallet' });
   const note = el('p', 'cx-account-note', `${owner} · ${wallet} เท่านั้น · หน่วยเป็นล็อตพืชผล`), counter = el('p', 'cx-count'), list = el('div', 'cx-flow-list'), controls = el('div', 'cx-flow-controls'), toggle = el('button', 'cx-button'); toggle.type = 'button'; toggle.dataset.contextFocus = `limit:${key}`;
   const update = () => {
-    const limit = activityLimits.get(key) ?? 8, shown = Math.min(rows.length, limit);
-    counter.textContent = `แสดง ${count(shown)} จาก ${count(rows.length)} รายการ · ใหม่ → เก่า`; Object.assign(counter.dataset, { shown: String(shown), total: String(rows.length) });
+    const limit = activityLimits.get(key) ?? RECENT_ENTRIES, shown = Math.min(rows.length, limit);
+    counter.textContent = `ล่าสุด ${count(shown)} จาก ${count(rows.length)} รายการ`; Object.assign(counter.dataset, { shown: String(shown), total: String(rows.length) });
     list.replaceChildren(...(rows.length ? rows.slice(0, shown).map(row => cropCard(row, wallet)) : [el('p', 'cx-detail-note', 'ยังไม่มีบัญชีเก็บเกี่ยว ซื้อขาย แปรรูป หรือตะกร้าพืชผลที่เกี่ยวข้องกับจุดนี้')]));
-    toggle.hidden = rows.length <= 8; toggle.textContent = limit === Infinity ? 'กลับ 8 รายการล่าสุด' : `ดูทั้งหมด ${count(rows.length)} รายการ`; toggle.setAttribute('aria-expanded', String(limit === Infinity));
+    toggle.hidden = rows.length <= RECENT_ENTRIES; toggle.textContent = limit === Infinity ? `ย่อเหลือ ${RECENT_ENTRIES} รายการล่าสุด` : `ดูทั้งหมด ${count(rows.length)} รายการ`; toggle.setAttribute('aria-expanded', String(limit === Infinity));
   };
-  toggle.addEventListener('click', () => { activityLimits.set(key, activityLimits.get(key) === Infinity ? 8 : Infinity); update(); }); controls.append(toggle); body.append(note, counter, list, controls); update(); return body;
+  toggle.addEventListener('click', () => { activityLimits.set(key, activityLimits.get(key) === Infinity ? RECENT_ENTRIES : Infinity); update(); }); controls.append(toggle); body.append(digest(city, rows, wallet, 'crops'), counter, list, controls, note); update(); return body;
 }
 function legacyAssumption(household: Household): HTMLElement | null {
   if (household.origin !== 'legacy-v1') return null;
@@ -244,17 +263,16 @@ function renderHouse(city: City, building: Building, households: Household[], on
   if (!households.length) list.append(empty('บ้านว่าง', 'ยังไม่มีครัวเรือนพักอาศัย การรับผู้ย้ายเข้าแยกจากการสร้างอาคารและเริ่มได้ในวันถัดไปเมื่อผ่านเงื่อนไข'));
   residents.append(list);
   const conditions = explainMigration(city, building.id).map(reason => el('p', '', reason));
-  const progression = upgrade.next ? [
-    el('p', '', `ถัดไป: ${labels[upgrade.next.type]} ระดับ ${upgrade.next.tierLevel} · ความจุ ${upgrade.next.households} ครัวเรือน / ${upgrade.next.persons} คน · ทุนภายนอก 200 เครดิต`),
-    el('p', '', upgrade.blocked.length ? `ยังขาด: ${upgrade.blocked.join(' · ')}` : 'ครบเงื่อนไขแล้ว รอตรวจอัตโนมัติสิ้นเดือน'),
-  ] : [el('p', '', 'ถึงระดับสูงสุดแล้ว')];
+  const progression = (panel: HTMLElement) => progressionBody(panel, { level: building.level, maximum: 9, label: `${labels[upgrade.current.type]} ระดับ ${upgrade.current.tierLevel} · พื้นที่ 1 ช่อง`,
+    next: upgrade.next ? { level: building.level + 1, title: `${labels[upgrade.next.type]} ระดับ ${upgrade.next.tierLevel}`, gains: [`รับได้ ${capacity.households} → ${upgrade.next.households} ครัวเรือน`, `${capacity.persons} → ${upgrade.next.persons} คน`] } : undefined,
+    blocked: upgrade.blocked, cost: upgrade.next ? 'ทุนภายนอก 200 เครดิต' : undefined, more: [] });
   return [status(city, building.cell), metrics([
     capacityMetric('households', 'พักอยู่ / รับได้', occupied.households, capacity.households, 'ครัวเรือน'),
     capacityMetric('persons', 'สมาชิก / รับได้', occupied.persons, capacity.persons, 'คน'),
     metric('vacant-households', 'ช่องครัวเรือนว่าง', count(Math.max(0, capacity.households - occupied.households)), Math.max(0, capacity.households - occupied.households)),
     metric('vacant-persons', 'ความจุสมาชิกว่าง', `${count(Math.max(0, capacity.persons - occupied.persons))} คน`, Math.max(0, capacity.persons - occupied.persons)),
     metric('level', 'ระดับอาคาร', `${labels[upgrade.current.type]} ${upgrade.current.tierLevel}`, building.level), metric('age', 'อายุอาคาร', `${building.age} วัน`, building.age)
-  ]), residents, (() => { const panel = section('ระดับที่อยู่อาศัยและการเติบโต'); panel.dataset.buildingProgression = String(building.id); panel.append(el('p', '', `${labels[upgrade.current.type]} ระดับ ${upgrade.current.tierLevel} · ระดับรวม ${building.level}/9 · พื้นที่ 1 ช่อง`), ...progression); return panel; })(), facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือน', ...conditions, el('p', '', `ความจุระดับใหม่เป็นค่าทดลอง ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
+  ]), residents, (() => { const panel = section('ระดับที่อยู่อาศัยและการเติบโต'); panel.dataset.buildingProgression = String(building.id); return progression(panel); })(), facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือน', ...conditions, el('p', '', `ความจุระดับใหม่เป็นค่าทดลอง ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
   const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building);
@@ -380,20 +398,34 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     const detail = section('ความสุขในพื้นที่', `${happiness.score} / 100`); detail.classList.add('bc-happiness-source');
     detail.append(el('p', 'happiness-summary', `เป้าหมายปัจจุบัน ${facts.target} / 100 · ต่ำกว่า 30 มาแล้ว ${happiness.distressDays} / ${HAPPINESS_DEPARTURE_DAYS} วัน · คะแนนลดวันละไม่เกิน 1 และฟื้นวันละไม่เกิน 2`));
     detail.append(el('p', 'happiness-summary', `สวนใกล้บ้าน: ${facts.parkNearby ? 'มี' : 'ไม่มี'} · โรงเรียนที่เปิดใกล้บ้าน: ${facts.schoolNearby ? 'มี' : 'ไม่มี'} (ระยะแมนฮัตตันไม่เกิน 6 ช่องสำหรับสวน และ 8 ช่องสำหรับโรงเรียนที่มีที่เรียนเปิดจริง ไม่ใช่การนับครั้งที่เข้าใช้)`));
-    detail.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน: ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · สมมติแรงงานที่มีงาน 75% ใช้รถหนึ่งคันต่อคนในชั่วโมงเร่งด่วน ยังไม่หักรถโดยสารหรือรถไฟ ไม่ใช่ประวัติการเดินทางล้มเหลวจริง` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
+    detail.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน · ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · งานดูแลสวนใช้เส้นทางเดินเท้าได้เมื่อรถไป–กลับไม่ได้ · แบบจำลองใช้แรงงานที่มีเส้นทางรถ 75% คำนวณการจราจรชั่วโมงเร่งด่วน และยังไม่ได้รวมรถโดยสารหรือรถไฟ` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
     detail.append(el('p', 'cx-detail-note', 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
+    detail.append(el('p', 'happiness-summary', `ผลต่อเป้าหมายจากภาษีค่าจ้าง ${happinessPoints.format(facts.wageTaxPoints)} คะแนน · ภาษีกำไรกิจการ ${happinessPoints.format(facts.profitTaxPoints)} คะแนน`));
+    detail.append(el('p', 'happiness-summary', `แรงงานว่างงาน ${facts.unemployedWorkers} คน · ผลต่อเป้าหมายความสุข ${happinessPoints.format(-facts.unemploymentPoints)} คะแนน`));
     detail.append(el('p', 'cx-detail-note', household.origin === 'legacy-v1' ? 'ครัวเรือนจากเมืองรุ่นเดิมได้รับการคุ้มครองจากการย้ายออก' : city.firms.some(f => f.owner?.householdId === household.id) ? 'เจ้าของกิจการได้รับการคุ้มครองจากการย้ายออก' : 'ถ้าคะแนนต่ำกว่า 30 ต่อเนื่องครบ 30 วัน อาจย้ายออกเมื่อสิ้นเดือน โดยมีเพดานจำนวนย้ายออกและจำนวนครัวเรือนขั้นต่ำ'));
     output.push(detail);
   } else { const detail=section('ความสุขในพื้นที่'); detail.classList.add('bc-happiness-source'); detail.append(el('p', 'happiness-summary', 'ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง')); output.push(detail); }
   if (city.education) { const person = peopleOf(city.education, household.id); const studying = person.school + person.university; const reserved = studying + person.teacher + person.professor; output.push(el('p', 'cx-detail-note', `ผู้เรียน ${studying} คน · วุฒิพื้นฐาน ${person.basic} · วุฒิขั้นสูง ${person.higher} · แรงงานที่ถูกกันไว้เรียนหรือสอน ${reserved} คน · เป็นจำนวนรวม ไม่มีรายชื่อรายบุคคล และไม่นับผู้พึ่งพิงเป็นนักเรียน`)); }
   if (home) output.push(status(city, home.cell)); else { const row = el('div', 'cx-status'); row.append(chip('รอจัดหาที่พัก', false)); output.push(row); }
-  const leaves = departureDay(city, household.id);
-  if (leaves !== null) { const row = el('div', 'cx-status cx-departure-status'); row.dataset.departureDay = String(leaves); row.append(chip(`ไม่มีงาน · ย้ายออกในอีก ${leaves - city.tick} วัน`, false)); output.push(row); }
+  const departure = departureForecast(city, household.id);
+  if (departure) {
+    const row = el('div', 'cx-status cx-departure-status');
+    row.dataset.departureDay = String(departure.day);
+    const reason = departure.reason === 'happiness' ? 'ความสุขต่ำ' : 'ไม่มีงาน';
+    row.append(chip(`${reason} · อาจย้ายออกเร็วสุดอีก ${departure.day - city.tick} วัน`, false));
+    output.push(row);
+  }
   const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
   jobs.classList.add('bc-employment-source');
   rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow), ...labor.parkAllocations.map(a => { const row = el('div', 'cx-employment-row', `สวนสาธารณะ #${a.parkId} · ดูแลสวน ${a.workers} คน · ค่าจ้าง ${PARK_STAFF.monthlyWage / 100}/คน/เดือน`); Object.assign(row.dataset, { parkId: String(a.parkId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }));
   if (!employed) rows.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง หรือทำกิจการของตนเอง'));
-  if (leaves !== null) { const note = el('p', 'cx-detail-note cx-departure', `ถ้ายังไม่มีงานที่ได้ค่าจ้าง ครัวเรือนนี้จะย้ายออกพร้อมเงินออมตอนชำระสิ้นเดือนวันที่ ${leaves} (อีก ${leaves - city.tick} วัน)`); note.dataset.departureDay = String(leaves); rows.append(note); }
+  if (departure) {
+    const condition = departure.reason === 'happiness'
+      ? `ถ้าความสุขยังต่ำกว่า ${HAPPINESS_DISTRESS} ต่อเนื่อง` : 'ถ้ายังไม่มีงานที่ได้ค่าจ้าง';
+    const note = el('p', 'cx-detail-note cx-departure', `${condition} ครัวเรือนนี้อาจย้ายออกพร้อมเงินออมเร็วสุดเมื่อชำระสิ้นเดือนวันที่ ${departure.day} (อีก ${departure.day - city.tick} วัน) ตามเพดานการย้ายออกของเมือง`);
+    note.dataset.departureDay = String(departure.day);
+    rows.append(note);
+  }
   jobs.append(rows); output.push(jobs, renderWorkerSkills(city, household));
   const consumed = householdConsumption(city, household.id), basket = el('p', 'cx-detail-note cx-last-commodity', consumed ? `บัญชีบริโภคล่าสุด: ${consumed.commodity === 'crops' ? 'พืชผล' : 'สินค้าสำเร็จรูป'} ${consumed.quantity} ${consumed.commodity === 'crops' ? 'ล็อต' : 'หน่วย'} · วัน ${consumed.tick}` : 'ยังไม่มีรายการบริโภคในบัญชีของครัวเรือนนี้');
   if (consumed) Object.assign(basket.dataset, { commodity: consumed.commodity, tick: String(consumed.tick), quantity: String(consumed.quantity) }); output.push(basket);
@@ -588,34 +620,52 @@ function renderIndustryGrowth(city: City): HTMLElement {
   return panel;
 }
 /** One level system for all commercial firms, regardless of historical save tags. */
+/** Level progress as a pip row, what the next level adds, then a short ✓/✗ checklist; the numbers fold away. */
+type Progression = { level: number; maximum: number; label?: string; next?: { level: number; title?: string; gains: string[] }; blocked: string[]; ready?: string; cost?: string; more: string[] };
+function progressionBody(panel: HTMLElement, p: Progression): HTMLElement {
+  const head = el('div', 'cx-prog-head'), pips = el('span', 'cx-prog-pips'); pips.ariaHidden = 'true';
+  for (let i = 1; i <= p.maximum; i++) pips.append(el('i', i <= p.level ? 'on' : ''));
+  head.append(el('strong', 'cx-prog-level', `ระดับ ${p.level}/${p.maximum}`), pips); if (p.label) head.append(el('span', 'cx-prog-label', p.label));
+  panel.append(head);
+  if (!p.next) { panel.append(el('p', 'cx-prog-max', 'ถึงระดับสูงสุดแล้ว')); }
+  else {
+    panel.append(el('p', 'cx-prog-next', `ระดับถัดไป ${p.next.level}${p.next.title ? ` · ${p.next.title}` : ''}`));
+    if (p.next.gains.length) { const gains = el('ul', 'cx-prog-gains'); for (const gain of p.next.gains) gains.append(el('li', '', gain)); panel.append(gains); }
+    const checks = el('ul', 'cx-prog-checks');
+    if (p.blocked.length) for (const reason of p.blocked) { const item = el('li', 'bad'); item.append(el('span', 'cx-prog-mark', '✗'), el('span', '', reason)); checks.append(item); }
+    else { const item = el('li', 'good'); item.append(el('span', 'cx-prog-mark', '✓'), el('span', '', p.ready ?? 'ครบเงื่อนไขแล้ว รอตรวจอัตโนมัติสิ้นเดือน')); checks.append(item); }
+    panel.append(checks); if (p.cost) panel.append(el('p', 'cx-prog-cost', p.cost));
+  }
+  if (p.more.length) { const more = el('details', 'cx-prog-more'), summary = el('summary', '', 'ตัวเลขและเงื่อนไขละเอียด'); more.append(summary, ...p.more.map(line => el('p', 'cx-prog-line', line))); panel.append(more); }
+  return panel;
+}
 export function renderCommercialProgression(city: City, firm: Firm): HTMLElement {
   const s = commercialGrowthStatus(city, firm), panel = section('ระดับพาณิชย์และการขยาย');
   panel.dataset.commercialGrowth = String(firm.id);
-  panel.append(el('p', '', commercialPresentation(s.level).label),
-    el('p', 'cx-detail-note', `ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว · คนทำงาน ${s.workers}/${s.current.workers} คน · คลังพืชผล ${CROP_STOCK_CAPS.T} ล็อต · พื้นที่สินค้าสำเร็จรูป ${s.current.stock} หน่วย (ใช้ได้ตามคนทำงาน ${s.staffed.stock})`),
-    el('p', 'cx-detail-note', 'ทุกช่วงใช้ระบบระดับเดียวกัน การขยายอาคารไม่ตัดสินค้าเดิมทิ้งและไม่เปลี่ยนบัญชีกิจการ'));
-  if (s.nextLevel === null) { panel.append(el('p', '', 'ถึงระดับสูงสุดแล้ว')); return panel; }
+  const more = [`ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว · คนทำงาน ${s.workers}/${s.current.workers} คน · คลังพืชผล ${CROP_STOCK_CAPS.T} ล็อต · พื้นที่สินค้าสำเร็จรูป ${s.current.stock} หน่วย (ใช้ได้ตามคนทำงาน ${s.staffed.stock})`];
+  if (s.nextLevel === null) return progressionBody(panel, { level: s.level, maximum: 9, label: commercialPresentation(s.level).label, blocked: [], more: [...more, 'ทุกช่วงใช้ระบบระดับเดียวกัน การขยายอาคารไม่ตัดสินค้าเดิมทิ้งและไม่เปลี่ยนบัญชีกิจการ'] });
   const before = buildingNeed('C', s.level), after = buildingNeed('C', s.nextLevel), spare = utilities(city).spare;
-  panel.append(el('p', '', `ระดับถัดไป ${s.nextLevel}: ${commercialPresentation(s.nextLevel).title} · ตรวจอัตโนมัติสิ้นเดือน`),
-    el('p', '', `ค่าก่อสร้าง ${s.cost / 100} เครดิตจากเงินกิจการ · เงินพ้นสำรองที่ต้องมี ${s.requiredSpendable / 100} เครดิต รวมเงินหมุนเวียน`),
-    el('p', '', `ต้องเพิ่มไฟ ${after.power - before.power} / น้ำ ${after.water - before.water} หน่วย · สำรองเมือง ไฟ ${spare.power} / น้ำ ${spare.water}`),
-    el('p', 'cx-detail-note', s.reasons.length ? `เงื่อนไขที่ยังขาด: ${s.reasons.join(' · ')}` : 'เงื่อนไขปัจจุบันครบ รอตรวจสิ้นเดือน; น้ำไฟสำรองอาจถูกใช้ก่อนถึงรอบตรวจ'));
-  return panel;
+  return progressionBody(panel, { level: s.level, maximum: 9, label: commercialPresentation(s.level).label,
+    next: { level: s.nextLevel, title: commercialPresentation(s.nextLevel).title, gains: [] }, blocked: s.reasons,
+    ready: 'เงื่อนไขปัจจุบันครบ รอตรวจสิ้นเดือน', cost: `ค่าก่อสร้าง ${s.cost / 100} เครดิตจากเงินกิจการ`,
+    more: [...more, `เงินพ้นสำรองที่ต้องมี ${s.requiredSpendable / 100} เครดิต รวมเงินหมุนเวียน`, `ต้องเพิ่มไฟ ${after.power - before.power} / น้ำ ${after.water - before.water} หน่วย · สำรองเมือง ไฟ ${spare.power} / น้ำ ${spare.water}`,
+      'ทุกช่วงใช้ระบบระดับเดียวกัน การขยายอาคารไม่ตัดสินค้าเดิมทิ้งและไม่เปลี่ยนบัญชีกิจการ · น้ำไฟสำรองอาจถูกใช้ก่อนถึงรอบตรวจ'] });
 }
 export function renderProductionProgression(city: City, firm: Firm): HTMLElement {
   const s = productionUpgradeStatus(city, firm), b = city.buildings.find(b => b.id === firm.building)!;
   const panel = section('ระดับอาคารและการขยาย'); panel.dataset.buildingProgression = String(b.id);
   const capacity = (level: number) => firm.zone === 'I' ? factoryCropCapacity(level) : farmStockCapacity(level);
-  panel.append(el('p', '', `ระดับ ${s.level}/${s.maximum} · พื้นที่ 1 ช่อง · คนทำงาน ${s.workers}/${firmCapacity(b)} คน · คลังวัตถุดิบ ${capacity(s.level)} ล็อต`));
-  if (s.nextLevel === null) { panel.append(el('p', '', 'ถึงระดับสูงสุดแล้ว')); return panel; }
-  panel.append(el('p', '', `ระดับถัดไป ${s.nextLevel}: รับคนทำงาน ${firmCapacity({ ...b, level: s.nextLevel })} คน · คลัง ${capacity(s.nextLevel)} ล็อต`),
-    el('p', '', `ค่าก่อสร้าง ${s.cost / 100} เครดิต จากเงินกิจการ · เงินปัจจุบัน ${cash(s.cash)} · พ้นสำรองค่าจ้าง ${cash(s.spendable)}`),
-    el('p', '', s.requiredSpendable ? `เงินพ้นสำรองที่ต้องมี ${cash(s.requiredSpendable)} รวมค่าก่อสร้างและเงินหมุนเวียน` : 'ต้องมีเงินกิจการอย่างน้อย 200 เครดิตตามกติกาปัจจุบัน'),
-    el('p', '', `น้ำไฟระดับปัจจุบัน: ไฟ ${s.before.power} / น้ำ ${s.before.water} · ระดับถัดไป: ไฟ ${s.after.power} / น้ำ ${s.after.water}`),
-    el('p', '', `ต้องเพิ่มไฟ ${s.extra.power} / น้ำ ${s.extra.water} หน่วย · สำรองเมือง ไฟ ${s.spare.power} / น้ำ ${s.spare.water}`),
-    el('p', '', s.reasons.length ? `ยังขาด: ${s.reasons.join(' · ')}` : 'เงื่อนไขปัจจุบันครบ รอตรวจอัตโนมัติสิ้นเดือน'),
-    el('p', 'cx-detail-note', 'เป็นค่าประเมินขณะนี้ ไม่รับประกันอัปเกรด อาคารอื่นอาจใช้น้ำไฟสำรองก่อนถึงรอบตรวจ การผลิตจริงยังต้องมีคนทำงาน วัตถุดิบ และบริการครบ'));
-  return panel;
+  const now = `คนทำงาน ${s.workers}/${firmCapacity(b)} คน · คลังวัตถุดิบ ${capacity(s.level)} ล็อต · พื้นที่ 1 ช่อง`;
+  if (s.nextLevel === null) return progressionBody(panel, { level: s.level, maximum: s.maximum, label: now, blocked: [], more: [] });
+  const workers = firmCapacity({ ...b, level: s.nextLevel });
+  return progressionBody(panel, { level: s.level, maximum: s.maximum, label: now,
+    next: { level: s.nextLevel, gains: [`คนทำงาน ${firmCapacity(b)} → ${workers} คน`, `คลัง ${capacity(s.level)} → ${capacity(s.nextLevel)} ล็อต`] }, blocked: s.reasons,
+    ready: 'เงื่อนไขปัจจุบันครบ รอตรวจอัตโนมัติสิ้นเดือน', cost: `ค่าก่อสร้าง ${s.cost / 100} เครดิตจากเงินกิจการ · พ้นสำรองตอนนี้ ${cash(s.spendable)}`,
+    more: [`เงินกิจการ ${cash(s.cash)} · พ้นสำรองค่าจ้าง ${cash(s.spendable)}`,
+      s.requiredSpendable ? `เงินพ้นสำรองที่ต้องมี ${cash(s.requiredSpendable)} รวมค่าก่อสร้างและเงินหมุนเวียน` : 'ต้องมีเงินกิจการอย่างน้อย 200 เครดิตตามกติกาปัจจุบัน',
+      `น้ำไฟระดับปัจจุบัน: ไฟ ${s.before.power} / น้ำ ${s.before.water} · ระดับถัดไป: ไฟ ${s.after.power} / น้ำ ${s.after.water}`,
+      `ต้องเพิ่มไฟ ${s.extra.power} / น้ำ ${s.extra.water} หน่วย · สำรองเมือง ไฟ ${s.spare.power} / น้ำ ${s.spare.water}`,
+      'เป็นค่าประเมินขณะนี้ ไม่รับประกันอัปเกรด อาคารอื่นอาจใช้น้ำไฟสำรองก่อนถึงรอบตรวจ การผลิตจริงยังต้องมีคนทำงาน วัตถุดิบ และบริการครบ'] });
 }
 function cardInterior(data: CardData, nodes: HTMLElement[], city: City): HTMLElement[] {
   const parts = cardParts(nodes), output = [cardHero(data, city), ...parts.statuses, ...parts.assumptions];

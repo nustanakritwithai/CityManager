@@ -1,4 +1,5 @@
 import { housingCapacity, householdWorkerCount, type City } from './sim.ts';
+import { averageHouseholdHappiness } from './resident-happiness.ts';
 
 /** Wire contract shared with the isolated city-advisor.rules.v1 backend. */
 export const METRIC_DEFINITIONS = {
@@ -16,7 +17,7 @@ export const METRIC_LABELS: Record<MetricId, string> = {
   population: 'ประชากร', households: 'ครัวเรือน', businesses: 'สถานประกอบการ',
   employed: 'แรงงานมีงาน', unemployed: 'แรงงานว่างงาน', treasury: 'เงินคลังเมือง',
   incomePerTick: 'เงินเข้าคลังในวันปัจจุบัน', expensesPerTick: 'เงินออกคลังในวันปัจจุบัน',
-  averageHappiness: 'ความสุข (ไม่มีข้อมูล)', housingCapacity: 'ความจุที่อยู่อาศัยเป็นคน',
+  averageHappiness: 'ความสุขเฉลี่ยครัวเรือน', housingCapacity: 'ความจุที่อยู่อาศัยเป็นคน',
   pollution: 'มลพิษ (ไม่มีข้อมูล)', trafficPressure: 'ความหนาแน่นจราจร (ไม่มีข้อมูล)',
 };
 export const UNIT_LABELS: Record<MetricUnit, string> = {
@@ -110,6 +111,7 @@ export function captureCitySignals(city: City): SignalCapture {
   const workforce = city.households.reduce((total, household) => total + household.workforce, 0);
   const employed = city.households.reduce((total, household) => total + householdWorkerCount(city, household.id), 0);
   const personCapacity = city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0);
+  const happiness = averageHouseholdHappiness(city.happiness);
   const metric = (id: MetricId, value: number): SignalMetric => ({ id, value, unit: METRIC_DEFINITIONS[id][0], source: SOURCE });
   const metrics = [
     metric('population', population),
@@ -120,6 +122,7 @@ export function captureCitySignals(city: City): SignalCapture {
     metric('treasury', city.accounts.treasury / 100),
     metric('incomePerTick', income / 100),
     metric('expensesPerTick', expense / 100),
+    ...(happiness === null ? [] : [metric('averageHappiness', happiness)]),
     metric('housingCapacity', personCapacity),
   ];
   return { tick: city.tick, metrics: metricList(metrics) };

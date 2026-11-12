@@ -1,0 +1,188 @@
+name: Publish verified CityManager calculation fixes
+on:
+  workflow_dispatch:
+    inputs:
+      feature_sha:
+        description: Exact calculation audit commit that passed the Node and HTTP checks
+        required: true
+        type: string
+      verification_run:
+        description: Successful Save smoke calculation-contract run ID for the same commit
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: citymanager-refs/heads/main
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'nustanakritwithai/CityManager' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pages: read
+    outputs:
+      asset: ${{ steps.bundle.outputs.asset }}
+      sha256: ${{ steps.bundle.outputs.sha256 }}
+    env:
+      FEATURE_SHA: ${{ inputs.feature_sha }}
+      SAVE_SMOKE_RUN: ${{ inputs.verification_run }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Require the merged source and retrieve its verified static build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$FEATURE_SHA" =~ ^[a-f0-9]{40}$ && "$SAVE_SMOKE_RUN" =~ ^[0-9]+$ ]]
+          git merge-base --is-ancestor "$FEATURE_SHA" "$GITHUB_SHA"
+          git diff --exit-code "$FEATURE_SHA" "$GITHUB_SHA" -- .
+          endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$SAVE_SMOKE_RUN"
+          gh api "$endpoint" > verified-run.json
+          gh api "$endpoint/jobs?filter=latest&per_page=100" > verified-jobs.json
+          gh api "$endpoint/artifacts?per_page=100" > verified-artifacts.json
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const read = name => JSON.parse(readFileSync(name, 'utf8'));
+          const run = read('verified-run.json');
+          assert.equal(run.id, Number(process.env.SAVE_SMOKE_RUN));
+          assert.equal(run.head_sha, process.env.FEATURE_SHA);
+          assert.equal(run.head_branch, 'codex/fix-city-calculation-audit');
+          assert.equal(run.path, '.github/workflows/save-smoke.yml');
+          assert.equal(run.event, 'deployment');
+          assert.equal(run.conclusion, 'success');
+          const job = read('verified-jobs.json').jobs.find(row => row.name === 'Save smoke');
+          assert.equal(job?.conclusion, 'success');
+          const result = name => job.steps.find(step => step.name === name)?.conclusion;
+          assert.equal(result('Build exactly like the Pages deploy'), 'success');
+          assert.equal(result('Calculation regressions and loopback save contracts'), 'success');
+          assert.equal(result('Save smoke on built bundle'), 'skipped');
+          const artifacts = read('verified-artifacts.json').artifacts.filter(item => item.name === 'citymanager-calculation-dist' && !item.expired);
+          assert.equal(artifacts.length, 1);
+          const artifact = artifacts[0];
+          assert.match(artifact.digest, /^sha256:[a-f0-9]{64}$/);
+          assert.equal(artifact.workflow_run.head_sha, process.env.FEATURE_SHA);
+          writeFileSync('verified-artifact.txt', artifact.id + '\n' + artifact.digest.slice(7) + '\n');
+          NODE
+          mapfile -t artifact < verified-artifact.txt
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/${artifact[0]}/zip" > verified-build.zip
+          printf "%s  verified-build.zip\n" "${artifact[1]}" | sha256sum --check
+          unzip -q verified-build.zip -d dist
+      - name: Confirm the static build and live API are ready
+        id: bundle
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const index = readFileSync('dist/index.html', 'utf8');
+          const asset = index.match(/<script[^>]+src="(\/CityManager\/assets\/[^"]+\.js)"/)?.[1];
+          assert.ok(asset, 'Main Pages bundle path missing');
+          const bytes = readFileSync(asset.replace('/CityManager/', 'dist/'));
+          const code = bytes.toString();
+          assert.ok(code.includes('/v1/city-save') && code.includes('/slots') && code.includes('เลือกเมืองอื่น'));
+          assert.ok(code.includes('อาจย้ายออกเร็วสุดอีก') && code.includes('ความสุขต่ำ'));
+          const base = 'https://citymanager.157-85-96-139.sslip.io/citymanager-api';
+          const origin = 'https://nustanakritwithai.github.io';
+          async function check(path, status, init = {}) {
+            const response = await fetch(base + path, { ...init, signal: AbortSignal.timeout(10000) });
+            assert.equal(response.status, status, path);
+            return response;
+          }
+          await check('/v1/pages/login', 200);
+          for (const path of ['/v1/city-save', '/v1/city-save/slots', ...[1,2,3].map(n => '/v1/city-save/slots/' + n)]) {
+            const result = await (await check(path, 401, {headers: {Origin: origin}})).json();
+            assert.ok(!result.raw && !result.owner && !result.cityId && !result.slots, 'Private save data exposed');
+          }
+          await check('/v1/city-save/slots/4', 404);
+          const preflight = await check('/v1/city-save/slots/3', 204, {
+            method: 'OPTIONS', headers: {
+              Origin: origin, 'Access-Control-Request-Method': 'POST',
+              'Access-Control-Request-Headers': 'authorization,idempotency-key,content-type',
+            },
+          });
+          assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), origin);
+          appendFileSync(process.env.GITHUB_OUTPUT, 'asset=' + asset + '\nsha256=' + createHash('sha256').update(bytes).digest('hex') + '\n');
+          NODE
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
+        with:
+          enablement: 'false'
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
+        with:
+          path: dist
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Require main to still name this publication commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
+      - name: Publish the verified static build
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+
+  confirm:
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Match the live bundle and check the public save boundary over HTTPS
+        env:
+          CITYMANAGER_URL: https://nustanakritwithai.github.io/CityManager/
+          ASSET: ${{ needs.verify.outputs.asset }}
+          SHA256: ${{ needs.verify.outputs.sha256 }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { setTimeout as delay } from 'node:timers/promises';
+          const { CITYMANAGER_URL: site, ASSET: asset, SHA256: expected, GITHUB_SHA: commit } = process.env;
+          assert.match(asset, /^\/CityManager\/assets\/[^/]+\.js$/);
+          assert.match(expected, /^[a-f0-9]{64}$/);
+          for (let attempt = 0; ; attempt++) {
+            try {
+              const url = new URL(site);
+              url.searchParams.set('release', commit);
+              const page = await fetch(url, { signal: AbortSignal.timeout(10000) });
+              assert.ok(page.ok && (await page.text()).includes(asset), 'Live index does not reference the released asset');
+              const response = await fetch(new URL(asset, site), { signal: AbortSignal.timeout(10000) });
+              assert.ok(response.ok, 'Released asset not found');
+              const hash = createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
+              assert.equal(hash, expected, 'Live asset bytes differ from the verified build');
+              console.log('Verified live asset', asset, hash);
+              break;
+            } catch (error) {
+              if (attempt >= 11) throw error;
+              await delay(5000);
+            }
+          }
+          NODE
+          node tests/server-save-live-readonly.mjs

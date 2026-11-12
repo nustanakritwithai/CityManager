@@ -42,7 +42,7 @@ function validate(state:RailNetworkState){
   const {config,snapshot,demands}=state.service;
   if(!exact(state.service,'config,demands,snapshot')||!exact(config,'id,lineId,maxBatches,minimumDepartureIntervalMinutes,minimumDwellMinutes,seats,stations,trainId')||state.stations.length!==2
     ||config.stations.some((s,i)=>!exact(s,'alightingPerMinute,boardingPerMinute,cell,id,queueCapacity')||s.id!==state.stations[i].id||s.cell!==state.stations[i].cell))throw Error('Rail service station mismatch');
-  PassengerRail.restore(config,graph,snapshot);
+  PassengerRail.restore(config,graph,snapshot,!!state.model);
   if(snapshot.minute!==state.minute||!Array.isArray(demands)||demands.length>config.maxBatches)throw Error('Rail service clock or ownership mismatch');
   const requests=new Set<string>(),leases=new Set<string>();
   for(const demand of demands){modalDemandSummary(demand);if(!exact(demand,'from,id,leases,offeredPersons,roadAdmittedPersons,to')||requests.has(demand.id))throw Error('Duplicate or malformed rail request');requests.add(demand.id);
@@ -64,7 +64,7 @@ export class RailNetworkRuntime {
   private trafficEpoch:string|null=null;
   private trafficReceipt:{offer:RailTrafficOffer;result:RailTrafficResult}|null=null;
   private readonly city:City;
-  private constructor(city:City,state:RailNetworkState){validate(state);this.city=city;this.state=structuredClone(state);if(state.service)this.rail=PassengerRail.restore(state.service.config,state.graph,state.service.snapshot);}
+  private constructor(city:City,state:RailNetworkState){validate(state);this.city=city;this.state=structuredClone(state);if(state.service)this.rail=PassengerRail.restore(state.service.config,state.graph,state.service.snapshot,!!state.model);}
   /** Called only by explicit configuration. Loading an old city never creates an ID. */
   static create(city:City,cityId:string,minute:number,epoch=0){const runtime=new RailNetworkRuntime(city,{version:1,cityId,epoch,revision:0,minute,stations:[],graph:createRailGraph(0,[]),service:null});runtime.publishReservations();return runtime;}
   static restore(city:City,value:RailSessionSave,cityRaw:string,minute:number){
@@ -155,7 +155,7 @@ export class RailNetworkRuntime {
     if(!this.rail||!this.state.model||!this.state.service)return;
     const snap=this.rail.snapshot,retired=snap.batches.filter(b=>b.completed===b.persons);if(!retired.length)return;
     const ids=new Set(retired.map(b=>b.id));this.state.model.retiredPersons+=retired.reduce((n,b)=>n+b.persons,0);
-    snap.batches=snap.batches.filter(b=>!ids.has(b.id));this.rail=PassengerRail.restore(this.state.service.config,this.state.graph,snap);
+    snap.batches=snap.batches.filter(b=>!ids.has(b.id));this.rail=PassengerRail.restore(this.state.service.config,this.state.graph,snap,true);
     this.state.service.demands=this.state.service.demands.filter(d=>!ids.has(d.id));this.state.service.snapshot=snap;
   }
   configureService(policy:RailServicePolicy){this.assertWritable();
@@ -164,7 +164,14 @@ export class RailNetworkRuntime {
     const config:PassengerRailConfig={id:`rail:${this.state.epoch}`,lineId:'shuttle',trainId:'shuttle-1',stations,seats:policy.seats,minimumDwellMinutes:policy.minimumDwellMinutes,minimumDepartureIntervalMinutes:policy.minimumDepartureIntervalMinutes,maxBatches:policy.maxBatches};
     const rail=new PassengerRail(config,this.state.graph,this.state.minute);this.rail=rail;this.state.service={config,snapshot:rail.snapshot,demands:[]};this.changed();
   }
-  removeService(){this.assertWritable();if(!this.rail||!this.state.service)throw Error('No shuttle line');const d=this.rail.diagnostics();if(d.outside+d.waiting+d.onboard+d.egress>0||this.state.service.demands.length>0)throw Error('Retained journeys require an authoritative retirement receipt');this.rail=null;this.state.service=null;this.changed();}
+  removeService(){
+    this.assertWritable();
+    if(!this.rail||!this.state.service)throw Error('No shuttle line');
+    const d=this.rail.diagnostics();
+    if(d.outside+d.waiting+d.onboard+d.egress>0||this.state.service.demands.length>0)throw Error('Retained journeys require an authoritative retirement receipt');
+    if(this.state.service.snapshot.train.destination!==null)throw Error('Train must dock before removing the line');
+    this.rail=null;this.state.service=null;this.changed();
+  }
   setStationOpen(id:string,open:boolean){this.assertWritable();if(!this.rail||typeof open!=='boolean')throw Error('Service is not configured');this.rail.setStationOpen(id,open);this.sync();this.changed();}
   setServiceEnabled(enabled:boolean){this.assertWritable();if(!this.rail||typeof enabled!=='boolean')throw Error('Service is not configured');this.rail.setServiceEnabled(enabled);this.sync();this.changed();}
   planTrip(from:number,to:number,maximumWalkMinutes:number,minutesPerWalkEdge:number){
@@ -181,7 +188,7 @@ export class RailNetworkRuntime {
   acceptPreparedDemand(demand:ModalDemand,offer:PassengerOffer):ModalDemand {this.assertWritable();
     if(!this.rail||!this.state.service)throw Error('Service is not configured');
     if(this.state.model){const expected=`model:${this.state.model.nextSequence}`;if(demand.id!==expected||offer.id!==expected||offer.requestId!==expected||offer.leaseId!==expected)throw Error('Modeled rail accepts only its next sequence');}
-    const copy=PassengerRail.restore(this.state.service.config,this.state.graph,this.rail.snapshot);
+    const copy=PassengerRail.restore(this.state.service.config,this.state.graph,this.rail.snapshot,!!this.state.model);
     const result=offerLeasedPassengerDemand(copy,demand,offer);if(!result.accepted)return demand;
     const old=this.state.service.demands.find(d=>d.id===demand.id);if(old&&JSON.stringify(old)!==JSON.stringify(result.demand))throw Error('Conflicting demand revision');
     if(old)return structuredClone(old);
@@ -192,7 +199,7 @@ export class RailNetworkRuntime {
     if(!safeCount(minute)||minute<this.state.minute)throw Error('Invalid rail clock');if(minute===this.state.minute)return;
     const elapsed=minute-this.state.minute;this.assertWritable(elapsed);this.assertParcels();
     while(this.state.minute<minute){const target=this.state.model?Math.min(minute,this.state.model.nextOfferMinute):minute;
-      this.rail?.advanceTo(target,target-this.state.minute);this.state.minute=target;this.sync();this.retireModelCompleted();
+      this.rail?.advanceTo(target,target-this.state.minute,false,this.state.model?.accepting===true);this.state.minute=target;this.sync();this.retireModelCompleted();
       // Retain the v1 save clock field, but do not create independent riders.
       if(this.state.model&&target===this.state.model.nextOfferMinute)this.state.model.nextOfferMinute=target+60;
     }this.state.revision+=elapsed;

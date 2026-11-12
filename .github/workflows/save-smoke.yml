@@ -4,10 +4,15 @@ name: Save smoke
 on:
   pull_request:
     branches: [main]
+  deployment:
   workflow_dispatch:
     inputs:
       live:
         description: 'Probe live assets/auth boundary read-only (does not test authenticated saves)'
+        type: boolean
+        default: false
+      calculation_contracts:
+        description: Run the calculation audit and loopback save contracts on the audit branch
         type: boolean
         default: false
 permissions:
@@ -17,10 +22,16 @@ concurrency:
   cancel-in-progress: true
 jobs:
   save-smoke:
-    name: Save smoke
+    name: ${{ (github.event_name != 'deployment' || (github.event.deployment.environment == 'citymanager-calculation-verification' && github.ref == 'refs/heads/codex/fix-city-calculation-audit')) && 'Save smoke' || 'Ignore unrelated deployment' }}
+    if: github.event_name != 'deployment' || (github.event.deployment.environment == 'citymanager-calculation-verification' && github.ref == 'refs/heads/codex/fix-city-calculation-audit')
+    env:
+      CALCULATION_CONTRACTS: ${{ inputs.calculation_contracts || github.event_name == 'deployment' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Restrict calculation contracts to the audit branch
+        if: env.CALCULATION_CONTRACTS == 'true'
+        run: test "$GITHUB_REF" = 'refs/heads/codex/fix-city-calculation-audit'
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -31,15 +42,38 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Build exactly like the Pages deploy
-        if: ${{ !inputs.live }}
+        if: ${{ !inputs.live || env.CALCULATION_CONTRACTS == 'true' }}
         env:
           VITE_MARKET_URL: 'https://citymanager.157-85-96-139.sslip.io/citymanager-api'
           VITE_CITY_ENTITY_ADVISOR_ONLINE: 'true'
           VITE_CITY_OWNER_ADVISOR_ONLINE: 'true'
         run: npm run build
       - name: Save smoke on built bundle
-        if: ${{ !inputs.live }}
+        if: ${{ !inputs.live && env.CALCULATION_CONTRACTS != 'true' }}
         run: CITYMANAGER_BROWSER=google-chrome node tests/server-save-browser-smoke.mjs
+      - name: Calculation regressions and loopback save contracts
+        if: env.CALCULATION_CONTRACTS == 'true'
+        run: |
+          node --experimental-strip-types --test --test-concurrency=3 \
+            tests/city-goals.test.ts tests/resident-happiness.test.ts tests/resident-commute.test.ts \
+            tests/migration-balance.test.ts tests/housing-mobility.test.ts tests/housing.test.ts \
+            tests/city-history.test.ts tests/city-series.test.ts tests/goods.test.ts tests/utilities.test.ts \
+            tests/city-tax-policy.test.ts tests/education-payroll.test.ts \
+            tests/signal-data.test.ts \
+            tests/bus-movement-gate.test.ts tests/bus-render.test.ts tests/traffic-presentation.test.ts \
+            tests/rail-activation.test.ts tests/rail-network-session.test.ts tests/rail-passenger.test.ts \
+            tests/demolition-refunds.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts \
+            tests/server-city-save.test.ts tests/server-save-lifecycle.test.ts tests/persistence-server-fixture.test.mjs
+          node --experimental-strip-types --test --test-name-pattern 'six live buses' tests/traffic-game-layer.test.ts
+          npm run assets:verify
+      - name: Retain the verified calculation build
+        if: env.CALCULATION_CONTRACTS == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: citymanager-calculation-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 3
       - name: Live public assets and unauthenticated boundary (read-only)
         if: ${{ inputs.live }}
         env:

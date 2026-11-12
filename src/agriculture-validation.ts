@@ -7,6 +7,7 @@ import { MONTH, WAGES, isMarket, isRetail, type City, type CropEntry, type Firm 
 import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
+import { taxAmount, taxRatesAt } from './city-tax-policy.ts';
 
 const invalid = (): never => { throw new Error('Unsupported or corrupt CityManager agriculture state.'); };
 function requireThat(value: unknown): asserts value { if (!value) invalid(); }
@@ -402,7 +403,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified 
       if(month<=Math.floor(tick/30)) { retained+=developmentShare(row.profit-row.tax)-row.invested; if(retained<0n)retained=0n; }
       else {currentProfit+=row.profit;currentInvestment+=row.invested;}
     }
-    const tax=currentProfit>0n?currentProfit/5n:0n;
+    const tax=taxAmount(currentProfit,taxRatesAt(c.taxPolicy,tick).profit);
     retained+=developmentShare(currentProfit-tax)-currentInvestment;
     if(retained<0n)retained=0n;
     return {tax,retained,invested};
@@ -414,7 +415,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified 
     if (e.reason === 'Owner capital contribution') { requireThat(e.from === wallet && e.to === f.wallet); if (contributed === 0n) requireThat(e.amount === 60_000); contributed += BigInt(e.amount); }
     if (e.reason === 'Owner profit distribution') {
       requireThat(e.from === f.wallet && e.to === wallet);
-      const current = earnings(e.tick, i, e.tick - e.tick % 30), reserve = current > 0n ? current / 5n : 0n;
+      const current = earnings(e.tick, i, e.tick - e.tick % 30), reserve = taxAmount(current, taxRatesAt(c.taxPolicy, e.tick).profit);
       if (!unified || isMarket(f) && !post) requireThat(BigInt(e.amount) <= earnings(e.tick, i) - taxPaid - withdrawn - reserve && cash - BigInt(e.amount) >= 20_000n + reserve);
       else if (post) {
         const {tax,retained,invested} = minimumReserves(e.tick,i);
