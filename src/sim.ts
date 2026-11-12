@@ -1,5 +1,5 @@
 import { prepareCommuteEstimates } from './resident-commute.ts';
-import { advanceHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
+import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
@@ -20,7 +20,7 @@ export { OWNER_DEVELOPMENT_SHARE_DENOMINATOR } from './owner-profit.ts';
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
 import { HOUSING_LEVELS, housingLevel, getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
-import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
+import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type LaborOffer, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
 import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RECIPE, FARM_MAX_LEVEL, farmStockCapacity, type ResourceMap } from './agriculture.ts';
 import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
@@ -844,7 +844,6 @@ function blockers(c: City, i: number): string[] {
   if (c.buildings.length >= MAX_CITY_BUILDINGS) reasons.push(`Prototype building limit (${MAX_CITY_BUILDINGS}) reached.`);
   if (cell.zone === 'R') {
     if (s.demand.R <= 0) reasons.push('No housing demand: usable vacant capacity already covers funded job opportunities and displaced households.');
-    if (WAGES.C * .9 - 30 * 800 - 10_000 - HOUSEHOLD_BILL <= 0) reasons.push('Expected income cannot cover purchases, rent and the water/power bill.');
   } else {
     if (c.firms.length >= MAX_CITY_FIRMS) reasons.push(`Firm limit (${MAX_CITY_FIRMS}) reached.`);
     if ((cell.zone === 'C' ? marketDemand(c) : s.demand[cell.zone]) <= 0) reasons.push(cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Commercial demand requires a staffed farm or factory and reachable households not already covered by existing shops.' : 'No retail demand: existing shops cover the household market.');
@@ -1264,7 +1263,7 @@ export function rebalanceHousing(c: City): number {
     const h = eligible[(Math.floor(c.tick / HOUSING_RELOCATION_INTERVAL) + attempt) % eligible.length];
     if (!h) continue;
     commute ??= prepareCommuteEstimates(c);
-    // Citywide taxes follow the household to either address. Compare location effects alone.
+    // Jobs and taxes follow the household to either address. Compare location effects alone.
     const current = happinessTarget(homeAmenities(c, source.cell), commute.estimates.get(h.id));
     const proposed = happinessTarget(homeAmenities(c, destination.cell), commute.atHome(h.id, destination.cell));
     if (proposed < current || !moveHousehold(c, h.id, destination.id).ok) continue;
@@ -1280,10 +1279,35 @@ export function rebalanceHousing(c: City): number {
 }
 function admissionFacts(c: City) {
   const vacanciesByZone = { I: 0, C: 0 }, svc = utilities(c);
-  for (const f of c.firms) if ( access(c, building(c, f.building).cell) && svc.ok(f.building)) vacanciesByZone[f.zone === 'F' ? 'I' : f.zone] += Math.min(Math.max(0, capacity(building(c, f.building), f) - firmWorkerCount(c, f.id)), Math.floor(spendable(c, f) / (firmWage(f) / MONTH)));
+  const offers: (LaborOffer & { wage: number })[] = [];
+  for (const f of c.firms) {
+    const site = building(c, f.building);
+    if (!access(c, site.cell) || !svc.ok(f.building)) continue;
+    const zone = f.zone === 'F' ? 'I' : f.zone, wage = firmWage(f);
+    const slots = Math.min(Math.max(0, capacity(site, f) - firmWorkerCount(c, f.id)), Math.floor(spendable(c, f) / (wage / MONTH)));
+    if (!slots) continue;
+    vacanciesByZone[zone] += slots;
+    offers.push({ id: f.id, zone, slots, budgetWorkers: slots, wage });
+  }
   const vacancies = vacanciesByZone.I + vacanciesByZone.C;
   const existingUnemployed = c.households.filter(h => householdAccess(c, h)).reduce((n, h) => n + h.workforce - householdWorkerCount(c, h.id), 0);
-  return { vacancies, vacanciesByZone, existingUnemployed, bootstrap: c.migration.arrivals < 2 };
+  return { vacancies, vacanciesByZone, offers, existingUnemployed, bootstrap: c.migration.arrivals < 2 };
+}
+function arrivalProfile(c: City, facts: ReturnType<typeof admissionFacts>) {
+  const family = facts.vacancies >= 2 && facts.existingUnemployed === 0;
+  const members = family ? 3 : 1, workforce = family ? 2 : 1;
+  const workerSkills: WorkerSkills = { general: 1, manufacturing: family && facts.vacanciesByZone.I > 0 ? 1 : 0, retail: family && facts.vacanciesByZone.I === 0 ? 1 : 0 };
+  if (facts.bootstrap) return { members, workforce, workerSkills, affordable: true };
+  // Admission follows today's employment allocation. The first shift is tomorrow.
+  const firstPayDay = c.tick - c.tick % MONTH + MONTH;
+  const rate = taxRatesAt(c.taxPolicy, firstPayDay).wage;
+  const jobs = allocateEmployment([{ id: c.nextId, workforce, workerSkills, accessible: true }], facts.offers, []);
+  const net = jobs.reduce((sum, job) => {
+    const gross = facts.offers.find(offer => offer.id === job.firmId)!.wage * job.workers;
+    return sum + gross - taxSatang(gross, rate);
+  }, 0);
+  const affordable = net >= MONTH * 800 + 10_000 + HOUSEHOLD_BILL;
+  return { members, workforce, workerSkills, affordable };
 }
 export function explainMigration(c: City, buildingId: number): string[] {
   const b = c.buildings.find(b => b.id === buildingId && b.zone === 'R');
@@ -1298,12 +1322,14 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (used.households >= room.households || used.persons >= room.persons) reasons.push('ความจุครัวเรือนหรือจำนวนคนเต็มแล้ว การเพิ่มระดับเพิ่มเฉพาะความจุ');
   if (c.households.some(h => h.home === null)) reasons.push('ครัวเรือนที่ไร้บ้านจะได้รับการจัดบ้านก่อนรับครัวเรือนใหม่');
   if (c.households.length >= MAX_CITY_HOUSEHOLDS) reasons.push('ถึงความจุสูงสุดตามจำนวนแปลงและระดับที่อยู่อาศัยของแผนที่แล้ว');
-  if (c.happiness?.rows.length && c.happiness.rows.reduce((sum,row)=>sum+row.score,0) / c.happiness.rows.length < 35) reasons.push('ยังไม่รับครัวเรือนใหม่เพราะความสุขเฉลี่ยต่ำกว่า 35 / 100 เมื่อเมืองดีขึ้นจึงรับได้อีก');
+  const happiness = averageHouseholdHappiness(c.happiness);
+  if (happiness !== null && happiness < 35) reasons.push('ยังไม่รับครัวเรือนใหม่เพราะความสุขเฉลี่ยต่ำกว่า 35 / 100 เมื่อเมืองดีขึ้นจึงรับได้อีก');
+  if (!facts.bootstrap && facts.vacancies > 0 && facts.existingUnemployed === 0 && !arrivalProfile(c, facts).affordable) reasons.push('รายได้หลังหักภาษีจากงานที่ว่างยังไม่พอค่าอาหาร ค่าเช่า และค่าน้ำไฟตามเกณฑ์รับคนเข้าเมือง');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
   reasons.push('บ้านที่ว่างหรือมีครัวเรือนน้อยกว่าได้รับการจัดบ้านก่อนอาคารที่มีคนมาก');
   reasons.push(`ทุก ${HOUSING_RELOCATION_INTERVAL} วัน ย้ายครัวเรือนได้ไม่เกิน ${HOUSING_RELOCATION_LIMIT} ครัวเรือน ไปบ้านที่ใกล้สวนหรือโรงเรียนที่เปิดดีกว่า หรือกระจายจากบ้านที่มีมากกว่าปลายทางอย่างน้อย 2 ครัวเรือนโดยไม่ลดความใกล้สิ่งอำนวยความสะดวก ต้องมีที่ว่าง ถนน น้ำไฟ และไม่ตัดบริการอาคารอื่น`);
-  reasons.push('ความสุขค่อย ๆ ปรับตามอัตราภาษีเมือง ความใกล้สวนและโรงเรียน รวมถึงเวลาและเส้นทางไปทำงานที่แบบจำลองประมาณจากถนน');
+  reasons.push('ความสุขค่อย ๆ ปรับตามภาษี การมีงานทำ ความใกล้สวนและโรงเรียน และเส้นทางไปทำงานที่ประมาณจากถนน');
   reasons.push(`สิ้นเดือน ครัวเรือนที่ย้ายเข้ามาและไม่มีธุรกิจของตนอาจย้ายออกเมื่อความสุขต่ำกว่า 30 ติดต่อกัน ${HAPPINESS_DEPARTURE_DAYS} วัน โดยยังจำกัดจำนวนย้ายออกต่อเดือนและรักษาจำนวนครัวเรือนขั้นต่ำ`);
   reasons.push('รับครัวเรือนใหม่ไม่เกินหนึ่งครัวเรือนต่อวัน สมาชิกเป็นจำนวนจริงของแต่ละครัวเรือน ไม่ใช่ตัวแทนประชากรแบบกลุ่มรวม');
   reasons.push(`สิ้นเดือน: แรงงานเฉพาะทางที่สายงานเดิมไม่มีตำแหน่งว่างแต่อีกสายมี จะเปลี่ยนเป็นแรงงานทั่วไป ครัวเรือนที่ไม่มีงานได้ค่าจ้างเลย ${DEPARTURE_MONTHS} เดือนจะย้ายออกพร้อมเงินออม (เจ้าของร้านและผู้มาใหม่ไม่ย้าย เมืองเหลืออย่างน้อย ${DEPARTURE_FLOOR} ครัวเรือน)`);
@@ -1312,13 +1338,13 @@ export function explainMigration(c: City, buildingId: number): string[] {
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
   // A severely unhappy city does not immediately replace every departure.
-  if (c.happiness?.rows.length && c.happiness.rows.reduce((sum,row)=>sum+row.score,0) / c.happiness.rows.length < 35) return;
+  const happiness = averageHouseholdHappiness(c.happiness);
+  if (happiness !== null && happiness < 35) return;
   if (c.households.length >= MAX_CITY_HOUSEHOLDS || c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
   const facts = admissionFacts(c);
   if (!facts.bootstrap && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
-  const family = facts.vacancies >= 2 && facts.existingUnemployed === 0;
-  const members = family ? 3 : 1, workforce = family ? 2 : 1;
-  if (!facts.bootstrap && Math.floor(WAGES.C * workforce * .9) < 30 * 800 + 10_000 + HOUSEHOLD_BILL) return;
+  const { members, workforce, workerSkills, affordable } = arrivalProfile(c, facts);
+  if (!affordable) return;
   const svc = utilities(c), home = vacantHomes(c).find(b => canAccommodate(housingCapacity(b), homeOccupancy(c, b.id), members) && homeSupplied(c, b, svc));
   if (!home) return;
   const id = c.nextId, wallet = `household:${id}`;
@@ -1327,8 +1353,7 @@ function admitHousehold(c: City) {
   c.nextId++;
   // Proposed entry capability profile: one flexible worker plus one specialist
   // in a currently funded role. Counts are disjoint; no per-person agents exist.
-  const workerSkills: WorkerSkills = { general: 1, manufacturing: family && facts.vacanciesByZone.I > 0 ? 1 : 0, retail: family && facts.vacanciesByZone.I === 0 ? 1 : 0 };
-  c.households.push({ id, home: home.id, members, workforce, dependents: family ? 1 : 0, workerSkills, skillSource: 'arrival-profile', profile: family ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
+  c.households.push({ id, home: home.id, members, workforce, dependents: members - workforce, workerSkills, skillSource: 'arrival-profile', profile: members > 1 ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
   if (c.households.length > 128) c.populationCapacityVersion = 1;
   c.migration.arrivals++;
   c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}`;

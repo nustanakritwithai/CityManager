@@ -6,6 +6,7 @@ import { estimateHouseholdCommutes, type CommuteEstimate } from './resident-comm
 import { DEFAULT_TAX_RATES, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 
 export const HAPPINESS_BASE = 80, HAPPINESS_DISTRESS = 30, HAPPINESS_DEPARTURE_DAYS = 30;
+export const HAPPINESS_UNEMPLOYED_POINTS = 25;
 export type HappinessRow = { householdId:number; score:number; distressDays:number };
 export type HappinessState = { version:1; day:number; rows:HappinessRow[] };
 export type HomeAmenity = { parkNearby:boolean; schoolNearby:boolean; points:number };
@@ -19,7 +20,13 @@ type HappinessTarget = {
   delaySeconds: number | null;
   wageTaxPoints: number;
   profitTaxPoints: number;
+  unemployedWorkers: number;
+  unemploymentPoints: number;
 };
+/** Each household has one score, including households with multiple members. */
+export function averageHouseholdHappiness(state?: HappinessState): number | null {
+  return state?.rows.length ? state.rows.reduce((sum, row) => sum + row.score, 0) / state.rows.length : null;
+}
 const distance = (a:number,b:number) => {const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b); return Math.abs(x.x-y.x)+Math.abs(x.z-y.z);};
 /** Provisional walking-distance proxy: nearby facilities, not measured use. */
 export function homeAmenities(city:City, cell:number):HomeAmenity {
@@ -34,17 +41,18 @@ export function taxHappinessPoints(rates: TaxRates) {
     profit: DEFAULT_TAX_RATES.profit - rates.profit,
   };
 }
-export function happinessTarget(amenities:HomeAmenity, commute?:CommuteEstimate, taxPoints = 0) {
+export function happinessTarget(amenities:HomeAmenity, commute?:CommuteEstimate, taxPoints = 0, unemploymentPoints = 0) {
   const inaccessible=commute?.workers ? Math.round(60*commute.unreachableWorkers/commute.workers):0;
   // Link costs assume 100 m tiles and 40 km/h. Long trips and congestion use
   // the same estimated seconds; no unsupported claim of actual failure.
   const long=(commute?.averageSeconds??0)>300?10:0;
   const delay=commute?.averageSeconds != null && commute.freeFlowSeconds != null && commute.averageSeconds - commute.freeFlowSeconds >= 10 && commute.averageSeconds >= commute.freeFlowSeconds * 1.02 ? 10 : 0;
-  return Math.max(0,Math.min(100,60+amenities.points-inaccessible-long-delay+taxPoints));
+  return Math.max(0,Math.min(100,60+amenities.points-inaccessible-long-delay+taxPoints-unemploymentPoints));
 }
 export function happinessTargets(city: City): Map<number, HappinessTarget> {
   const commutes = new Map(estimateHouseholdCommutes(city).map(row => [row.householdId, row]));
   const homes = new Map(city.buildings.map(b => [b.id, b.cell]));
+  const education = new Map(city.education?.people.map(person => [person.householdId, person]));
   const tax = taxHappinessPoints(taxRatesAt(city.taxPolicy, city.tick));
   const earnWages = new Set<number>();
   const ownBusinesses = new Set<number>();
@@ -53,7 +61,7 @@ export function happinessTargets(city: City): Map<number, HappinessTarget> {
     for (const park of city.parks) {
       for (const job of park.staffing?.allocations ?? []) if (job.workers > 0) earnWages.add(job.householdId);
     }
-    for (const person of city.education?.people ?? []) if (person.teacher + person.professor > 0) earnWages.add(person.householdId);
+    for (const person of education.values()) if (person.teacher + person.professor > 0) earnWages.add(person.householdId);
   }
   if (tax.profit) {
     for (const firm of city.firms) if (firm.owner) ownBusinesses.add(firm.owner.householdId);
@@ -63,10 +71,14 @@ export function happinessTargets(city: City): Map<number, HappinessTarget> {
     const cell = h.home === null ? undefined : homes.get(h.home);
     const amenities = cell === undefined ? { parkNearby: false, schoolNearby: false, points: 0 } : homeAmenities(city, cell);
     const commute = commutes.get(h.id);
+    const educationRole = education.get(h.id);
+    const studying = (educationRole?.school ?? 0) + (educationRole?.university ?? 0);
+    const unemployedWorkers = Math.max(0, h.workforce - (commute?.workers ?? 0) - studying);
+    const unemploymentPoints = unemployedWorkers * HAPPINESS_UNEMPLOYED_POINTS;
     const wageTaxPoints = earnWages.has(h.id) ? tax.wage : 0;
     const profitTaxPoints = ownBusinesses.has(h.id) ? tax.profit : 0;
     result.set(h.id, {
-      target: happinessTarget(amenities, commute, wageTaxPoints + profitTaxPoints),
+      target: happinessTarget(amenities, commute, wageTaxPoints + profitTaxPoints, unemploymentPoints),
       parkNearby: amenities.parkNearby,
       schoolNearby: amenities.schoolNearby,
       workers: commute?.workers ?? 0,
@@ -76,6 +88,8 @@ export function happinessTargets(city: City): Map<number, HappinessTarget> {
         ? Math.max(0, commute.averageSeconds - commute.freeFlowSeconds) : null,
       wageTaxPoints,
       profitTaxPoints,
+      unemployedWorkers,
+      unemploymentPoints,
     });
   }
   return result;
@@ -95,5 +109,13 @@ export function validateHappiness(city:City, value:unknown):asserts value is Hap
  const valid=(n:unknown,max:number)=>Number.isSafeInteger(n) && Number(n)>=0 && Number(n)<=max;
  if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!=='day,rows,version'||v.version!==1||v.day!==city.tick||!Array.isArray(v.rows)||v.rows.length!==city.households.length)throw Error('Invalid happiness state');
  const ids=new Set(city.households.map(h=>h.id)); let last=0;
- for(const row of v.rows){if(!row||typeof row!=='object'||Object.keys(row).sort().join(',')!=='distressDays,householdId,score'||!Number.isSafeInteger(row.householdId)||row.householdId<=last||!ids.has(row.householdId)||!valid(row.score,100)||!valid(row.distressDays,HAPPINESS_DEPARTURE_DAYS)||row.distressDays>city.tick||(row.score>=HAPPINESS_DISTRESS&&row.distressDays!==0))throw Error('Invalid happiness row'); last=row.householdId;}
+ for(const row of v.rows){
+   if(!row||typeof row!=='object'||Object.keys(row).sort().join(',')!=='distressDays,householdId,score'||!Number.isSafeInteger(row.householdId)||row.householdId<=last||!ids.has(row.householdId)||!valid(row.score,100)||!valid(row.distressDays,HAPPINESS_DEPARTURE_DAYS))throw Error('Invalid happiness row');
+   // Losing at most one point per day bounds the length of a continuous streak.
+   const below = row.score < HAPPINESS_DISTRESS;
+   const minimum = below ? HAPPINESS_DISTRESS - row.score : 0;
+   const maximum = below ? Math.max(0, city.tick - (HAPPINESS_BASE - HAPPINESS_DISTRESS)) : 0;
+   if(row.distressDays < minimum || row.distressDays > maximum)throw Error('Invalid happiness row');
+   last=row.householdId;
+ }
 }

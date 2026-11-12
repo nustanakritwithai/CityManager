@@ -59,6 +59,7 @@ jobs:
             tests/migration-balance.test.ts tests/housing-mobility.test.ts tests/housing.test.ts \
             tests/city-history.test.ts tests/city-series.test.ts tests/goods.test.ts tests/utilities.test.ts \
             tests/city-tax-policy.test.ts tests/education-payroll.test.ts \
+            tests/signal-data.test.ts \
             tests/bus-movement-gate.test.ts tests/bus-render.test.ts tests/traffic-presentation.test.ts \
             tests/rail-activation.test.ts tests/rail-network-session.test.ts tests/rail-passenger.test.ts \
             tests/demolition-refunds.test.ts tests/server-city-entry.test.ts tests/server-city-entry-flow.test.ts \
