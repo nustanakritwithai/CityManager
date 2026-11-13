@@ -1,0 +1,147 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFileSync} from 'node:fs';
+
+const html=readFileSync(new URL('../patches/pages-login-thai/login.html',import.meta.url),'utf8');
+const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const owner='11111111-1111-4111-8111-111111111111',state='s'.repeat(43),challenge='c'.repeat(43),origin='https://nustanakritwithai.github.io';
+const reply=(body={},ok=true,status=ok?200:400)=>({ok,status,json:async()=>body});
+function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}}
+async function setup({auto=false,holdInitialIdentity=false,handle=null,idPrefix='request',hasOpener=true,challengeParam=challenge,stateParam=state}={}){
+ const elements=new Map(),calls=[],listeners=new Map(),holds=new Map(),timers=new Map();let count=0,allow=true,timerId=0;
+ const get=id=>{if(!elements.has(id))elements.set(id,{disabled:false,textContent:'',value:''});return elements.get(id)};
+ const opener={postMessage:()=>{}};
+ const win={opener:hasOpener?opener:null,addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name)};
+ const initialIdentity=holdInitialIdentity?deferred():null;if(initialIdentity)holds.set('/citymanager-api/v1/me',initialIdentity);
+ const ctx={URLSearchParams,location:{search:`?${auto?'auto=1&':''}state=${stateParam}&challenge=${challengeParam}`},document:{cookie:'cm_csrf=fixture',getElementById:get},window:win,setInterval:()=>1,clearInterval:()=>{},setTimeout:(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id),crypto:{randomUUID:()=>`${idPrefix}-${++count}`},confirm:()=>allow,fetch:async(path,init)=>{calls.push({path,body:init?.body});if(holds.has(path)){const held=holds.get(path);holds.delete(path);return held.promise}if(handle){const result=await handle(path,init);if(result)return result}if(path.endsWith('/v1/me'))return reply({guest_id:owner});if(path.endsWith('/recovery-confirm'))return reply({state:'confirmed'});if(path.endsWith('/recovery-prepare')){const id=JSON.parse(init.body).request_id;return reply({request_id:id,recovery_code:`code-${id}`})}return reply({code:'auth-code'})}};
+ vm.createContext(ctx);vm.runInContext(script,ctx);for(let i=0;i<8;i++)await Promise.resolve();
+ const hold=path=>{const d=deferred();holds.set('/citymanager-api/v1/'+path,d);return d};
+ return {get,calls,listeners,win,hold,initialIdentity,fireWait:()=>{for(const [id,timer] of [...timers])if(timer.ms===15000){timers.delete(id);timer.fn()}},fireTimer:ms=>{for(const [id,timer] of [...timers])if(timer.ms===ms){timers.delete(id);timer.fn()}},force:code=>vm.runInContext(code,ctx),allow:value=>{allow=value},count:path=>calls.filter(c=>c.path.endsWith(path)).length};
+}
+test('confirm A blocks prepare B and all session-changing actions until A finishes',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();
+ for(const id of ['use','new','recover','code','confirm-code'])assert.equal(r.get(id).disabled,true,id);
+ await r.get('code').onclick();await r.get('new').onclick();await r.get('recover').onclick();await r.get('use').onclick();
+ assert.equal(r.count('/recovery-prepare'),1);assert.equal(r.count('/auth/guest'),0);assert.equal(r.count('/pages/recover'),0);assert.equal(r.count('/authorize'),0);assert.equal(r.get('secret').textContent,'code-request-1');
+ held.resolve(reply({state:'confirmed'}));await confirming;assert.equal(JSON.parse(r.calls.find(c=>c.path.endsWith('/recovery-confirm')).body).recovery_code,'code-request-1');assert.equal(r.get('secret').textContent,'');assert.equal(r.get('confirm-code').disabled,true);
+ await r.get('code').onclick();assert.equal(r.get('secret').textContent,'code-request-2');assert.equal(r.get('confirm-code').disabled,false);
+});
+test('confirm cannot use old code while a replacement prepare is pending',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-prepare');const preparing=r.get('code').onclick();await r.get('confirm-code').onclick();assert.equal(r.count('/recovery-confirm'),0);assert.equal(r.get('secret').textContent,'code-request-1');held.resolve(reply({request_id:'request-2',recovery_code:'code-request-2'}));await preparing;await r.get('confirm-code').onclick();assert.equal(JSON.parse(r.calls.find(c=>c.path.endsWith('/recovery-confirm')).body).recovery_code,'code-request-2');
+});
+test('failed confirm retains displayed code for an explicit retry',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();held.resolve(reply({error:'invalid request'},false));await confirming;assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('confirm-code').disabled,false);await r.get('confirm-code').onclick();assert.equal(r.count('/recovery-confirm'),2);assert.equal(JSON.parse(r.calls.at(-1).body).recovery_code,'code-request-1');
+});
+test('lost confirmation response keeps the same code and clearly reports uncertain outcome',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();held.reject(new TypeError('Failed to fetch'));await confirming;assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('confirm-code').disabled,false);assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);await r.get('confirm-code').onclick();const confirmations=r.calls.filter(c=>c.path.endsWith('/recovery-confirm'));assert.equal(confirmations.length,2);assert.equal(confirmations[0].body,confirmations[1].body);
+});
+test('simulated commit before response loss retries the same request without claiming early success',async()=>{
+ let active='prior',attempts=0;const handle=async(path,init)=>{if(!path.endsWith('/recovery-confirm'))return null;const body=JSON.parse(init.body);if(attempts++===0){active=body.recovery_code;throw new TypeError('connection lost after commit')}assert.equal(active,body.recovery_code);return reply({state:'confirmed'})};const r=await setup({handle});await r.get('code').onclick();await r.get('confirm-code').onclick();assert.equal(active,'code-request-1');assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(r.get('secret').textContent,'code-request-1');await r.get('confirm-code').onclick();assert.equal(r.get('secret').textContent,'');assert.match(r.get('message').textContent,/ยืนยันรหัสกู้คืนแล้ว/);const calls=r.calls.filter(c=>c.path.endsWith('/recovery-confirm'));assert.equal(calls[0].body,calls[1].body);
+});
+test('unreadable confirmation response remains uncertain; expired code requires a new prepare',async()=>{
+ const r=await setup();await r.get('code').onclick();const bad=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();bad.resolve({ok:true,json:async()=>{throw new SyntaxError('unreadable response')}});await confirming;assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(r.get('secret').textContent,'code-request-1');const expired=r.hold('pages/recovery-confirm');const retry=r.get('confirm-code').onclick();expired.resolve(reply({error:'recovery preparation expired'},false,409));await retry;assert.equal(r.get('secret').textContent,'');assert.equal(r.get('confirm-code').disabled,true);assert.match(r.get('message').textContent,/หมดอายุ.*สร้างรหัสใหม่/);
+});
+test('two simulated tabs: superseded confirmation does not present an unusable code as retryable',async()=>{
+ let active='prior';const rotations=new Map();const handle=async(path,init)=>{if(path.endsWith('/recovery-prepare')){const id=JSON.parse(init.body).request_id,code=`code-${id}`;rotations.set(id,{code,previous:active});return reply({request_id:id,recovery_code:code})}if(path.endsWith('/recovery-confirm')){const body=JSON.parse(init.body),saved=rotations.get(body.request_id);if(saved.previous!==active)return reply({error:'recovery rotation superseded'},false,409);active=saved.code;return reply({state:'confirmed'})}return null};
+ const a=await setup({handle,idPrefix:'tab-a'}),b=await setup({handle,idPrefix:'tab-b'});await a.get('code').onclick();await b.get('code').onclick();await a.get('confirm-code').onclick();await b.get('confirm-code').onclick();assert.equal(active,'code-tab-a-1');assert.equal(b.get('secret').textContent,'');assert.equal(b.get('confirm-code').disabled,true);assert.match(b.get('message').textContent,/ถูกแทนที่.*สร้างรหัสใหม่/);
+});
+test('documented limitation: another tab can later replace a confirmed code without updating the first tab',async()=>{
+ let active='prior';const rotations=new Map();const handle=async(path,init)=>{if(path.endsWith('/recovery-prepare')){const id=JSON.parse(init.body).request_id,code=`code-${id}`;rotations.set(id,{code,previous:active});return reply({request_id:id,recovery_code:code})}if(path.endsWith('/recovery-confirm')){const body=JSON.parse(init.body),saved=rotations.get(body.request_id);if(saved.previous!==active)return reply({error:'recovery rotation superseded'},false,409);active=saved.code;return reply({state:'confirmed'})}return null};
+ const a=await setup({handle,idPrefix:'tab-a'}),b=await setup({handle,idPrefix:'tab-b'});await a.get('code').onclick();await a.get('confirm-code').onclick();const earlierMessage=a.get('message').textContent;await b.get('code').onclick();await b.get('confirm-code').onclick();assert.equal(active,'code-tab-b-1');assert.equal(a.get('message').textContent,earlierMessage);assert.match(earlierMessage,/แท็บอื่น/);
+});
+test('cancelled creation keeps code; a failed or successful session switch invalidates it',async()=>{
+ for(const action of ['new','recover'])for(const succeeds of [false,true]){const r=await setup();await r.get('code').onclick();if(action==='new'){r.allow(false);await r.get('new').onclick();assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.count('/auth/guest'),0);r.allow(true)}const held=r.hold(action==='new'?'auth/guest':'pages/recover');const switching=r.get(action).onclick();assert.equal(r.get('secret').textContent,'');held.resolve(succeeds?reply():reply({error:'invalid request'},false));await switching;assert.equal(r.get('secret').textContent,'');assert.equal(r.get('confirm-code').disabled,true);if(!succeeds){assert.doesNotMatch(r.get('identity').textContent,new RegExp(owner));assert.match(r.get('identity').textContent,/ตรวจสอบบัญชีอีกครั้ง/)}await r.get('confirm-code').onclick();assert.equal(r.count('/recovery-confirm'),0)}
+});
+test('failed prepare preserves the previously displayed pending code',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-prepare');const preparing=r.get('code').onclick();held.resolve(reply({error:'invalid request'},false));await preparing;assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('confirm-code').disabled,false);await r.get('confirm-code').onclick();assert.equal(JSON.parse(r.calls.find(c=>c.path.endsWith('/recovery-confirm')).body).recovery_code,'code-request-1');
+});
+test('stale responses cannot clear or confirm a newer recovery generation',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();r.force("pendingRecovery={request_id:'new',recovery_code:'new-code'};sessionGeneration++;document.getElementById('secret').textContent='new-code'");held.resolve(reply({state:'confirmed'}));await confirming;assert.equal(r.get('secret').textContent,'new-code');assert.equal(r.get('confirm-code').disabled,false);assert.doesNotMatch(r.get('message').textContent,/ยืนยันรหัสกู้คืนแล้ว/);
+ const p=await setup();const preparingHeld=p.hold('pages/recovery-prepare');const preparing=p.get('code').onclick();p.force("pendingRecovery={request_id:'new',recovery_code:'new-code'};sessionGeneration++;document.getElementById('secret').textContent='new-code'");preparingHeld.resolve(reply({request_id:'old',recovery_code:'old-code'}));await preparing;assert.equal(p.get('secret').textContent,'new-code');assert.equal(p.get('confirm-code').disabled,false);
+});
+test('all actions are mutually exclusive while each request is outstanding',async()=>{
+ for(const [id,path] of [['use','pages/authorize'],['new','auth/guest'],['recover','pages/recover'],['code','pages/recovery-prepare'],['confirm-code','pages/recovery-confirm']]){const r=await setup();if(id==='confirm-code')await r.get('code').onclick();const held=r.hold(path);const started=r.get(id).onclick();const before=r.calls.length;for(const other of ['use','new','recover','code','confirm-code']){assert.equal(r.get(other).disabled,true,`${id} locks ${other}`);await r.get(other).onclick()}assert.equal(r.calls.length,before,`${id} admitted a competing request`);held.resolve(path==='pages/recovery-prepare'?reply({request_id:'request-1',recovery_code:'code-request-1'}):path==='pages/recovery-confirm'?reply({state:'confirmed'}):reply({code:'auth-code'}));await started}
+});
+test('late initial identity response cannot overwrite the identity after session recovery',async()=>{
+ const r=await setup({holdInitialIdentity:true});await r.get('recover').onclick();assert.match(r.get('identity').textContent,new RegExp(owner));r.initialIdentity.resolve(reply({guest_id:'old-account'}));for(let i=0;i<8;i++)await Promise.resolve();assert.match(r.get('identity').textContent,new RegExp(owner));assert.doesNotMatch(r.get('identity').textContent,/old-account/);
+});
+test('handshake during a pending user action cannot change its lock or silently authorize',async()=>{
+ const r=await setup({auto:true});const held=r.hold('pages/recovery-prepare');const preparing=r.get('code').onclick();r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});assert.equal(r.get('new').disabled,true);assert.equal(r.count('/authorize'),0);held.resolve(reply({request_id:'request-1',recovery_code:'code-request-1'}));await preparing;assert.equal(r.get('new').disabled,true);assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.count('/authorize'),0);
+});
+test('documented limitation: reload after an uncertain confirm loses the in-memory pending request',async()=>{
+ const first=await setup();await first.get('code').onclick();const held=first.hold('pages/recovery-confirm');const confirming=first.get('confirm-code').onclick();held.reject(new TypeError('connection lost'));await confirming;assert.match(first.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(first.get('secret').textContent,'code-request-1');
+ // A fresh VM represents a reload: it has no copy of the previous page's memory.
+ const reloaded=await setup();assert.equal(reloaded.get('secret').textContent,'');assert.equal(reloaded.get('confirm-code').disabled,true);await reloaded.get('confirm-code').onclick();assert.equal(reloaded.count('/recovery-confirm'),0);
+});
+
+test('pending recovery remains confirmable after authorization is sent',async()=>{
+ const r=await setup();await r.get('code').onclick();const oldCode=r.get('secret').textContent;await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.equal(r.get('secret').textContent,oldCode);assert.equal(r.get('confirm-code').disabled,false);assert.equal(r.get('use').disabled,true);assert.equal(r.get('new').disabled,true);assert.equal(r.get('recover').disabled,true);await r.get('confirm-code').onclick();assert.equal(JSON.parse(r.calls.find(c=>c.path.endsWith('/recovery-confirm')).body).recovery_code,oldCode);assert.equal(r.get('secret').textContent,'');
+});
+test('recovery can be prepared and confirmed after authorization is sent',async()=>{
+ const r=await setup();await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.equal(r.get('code').disabled,false);await r.get('code').onclick();assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('confirm-code').disabled,false);await r.get('confirm-code').onclick();assert.equal(r.count('/recovery-confirm'),1);assert.equal(r.get('secret').textContent,'');
+});
+test('stalled confirmation warns of uncertain outcome, preserves code and prevents conflicting requests',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm');const confirming=r.get('confirm-code').onclick();r.fireWait();assert.match(r.get('message').textContent,/ผลอาจยังไม่แน่นอน/);assert.match(r.get('message').textContent,/เก็บไว้ในที่ปลอดภัย/);assert.equal(r.get('secret').textContent,'code-request-1');for(const id of ['use','new','recover','code','confirm-code'])assert.equal(r.get(id).disabled,true);await r.get('confirm-code').onclick();await r.get('code').onclick();assert.equal(r.count('/recovery-confirm'),1);assert.equal(r.count('/recovery-prepare'),1);held.resolve(reply({state:'confirmed'}));await confirming;assert.match(r.get('message').textContent,/ยืนยันรหัสกู้คืนแล้ว/);assert.equal(r.get('secret').textContent,'');
+});
+
+test('uncertain confirmation locks conflicting actions and retries exact request across repeated errors',async()=>{
+ const outcomes=[()=>{throw new TypeError('lost')},()=>reply({error:'temporary'},false,503),()=>reply({error:'invalid request'},false,400),()=>reply({state:'confirmed'})];
+ const r=await setup({handle:async path=>path.endsWith('/recovery-confirm')?outcomes.shift()():null});await r.get('code').onclick();
+ for(let n=0;n<3;n++){await r.get('confirm-code').onclick();assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(r.get('secret').textContent,'code-request-1');for(const id of ['use','new','recover','code']){assert.equal(r.get(id).disabled,true,id);await r.get(id).onclick()}assert.equal(r.get('confirm-code').disabled,false);assert.equal(r.get('leave-uncertain').hidden,false)}
+ assert.equal(r.count('/recovery-prepare'),1);assert.equal(r.count('/auth/guest'),0);assert.equal(r.count('/pages/recover'),0);assert.equal(r.count('/authorize'),0);await r.get('confirm-code').onclick();const calls=r.calls.filter(c=>c.path.endsWith('/recovery-confirm'));assert.equal(calls.length,4);assert.ok(calls.every(c=>c.body===calls[0].body));assert.equal(r.get('secret').textContent,'');assert.equal(r.get('leave-uncertain').hidden,true);assert.equal(r.get('code').disabled,false)
+});
+test('only authoritative terminal 409 errors release the lock; 5xx error text is not enough',async()=>{
+ for(const error of ['recovery rotation superseded','recovery preparation expired']){const r=await setup();await r.get('code').onclick();let held=r.hold('pages/recovery-confirm'),confirming=r.get('confirm-code').onclick();held.resolve(reply({error},false,500));await confirming;assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('code').disabled,true);held=r.hold('pages/recovery-confirm');confirming=r.get('confirm-code').onclick();held.resolve(reply({error},false,409));await confirming;assert.equal(r.get('secret').textContent,'');assert.equal(r.get('confirm-code').disabled,true);assert.equal(r.get('code').disabled,false);assert.equal(r.get('leave-uncertain').hidden,true)}
+});
+test('unexpected successful response is uncertain and does not claim confirmation',async()=>{
+ for(const body of [{}, {state:'pending'},null]){const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm'),confirming=r.get('confirm-code').onclick();held.resolve(reply(body));await confirming;assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.doesNotMatch(r.get('message').textContent,/ยืนยันรหัสกู้คืนแล้ว/);assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('code').disabled,true)}
+});
+test('escape requires explicit confirmation, preserves the code and warns outcome remains unknown',async()=>{
+ const r=await setup();await r.get('code').onclick();const held=r.hold('pages/recovery-confirm'),confirming=r.get('confirm-code').onclick();held.reject(new TypeError('lost'));await confirming;r.allow(false);r.get('leave-uncertain').onclick();assert.equal(r.get('code').disabled,true);assert.equal(r.get('secret').textContent,'code-request-1');r.allow(true);r.get('leave-uncertain').onclick();assert.equal(r.get('leave-uncertain').hidden,true);assert.equal(r.get('code').disabled,false);assert.equal(r.get('secret').textContent,'code-request-1');assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.match(r.get('message').textContent,/รหัสเดิมและรหัสใหม่/);assert.equal(r.get('confirm-code').disabled,false);await r.get('code').onclick();assert.equal(r.get('secret').textContent,'code-request-2')
+});
+test('auto handshake cannot authorize during uncertain confirmation',async()=>{
+ const r=await setup({auto:true});await r.get('code').onclick();const held=r.hold('pages/recovery-confirm'),confirming=r.get('confirm-code').onclick();held.reject(new TypeError('lost'));await confirming;r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});for(let i=0;i<8;i++)await Promise.resolve();assert.equal(r.count('/authorize'),0);assert.equal(r.get('use').disabled,true);assert.equal(r.get('secret').textContent,'code-request-1')
+});
+
+
+test('late initial identity failure cannot erase uncertain confirmation warning',async()=>{
+ const r=await setup({holdInitialIdentity:true});await r.get('code').onclick();const held=r.hold('pages/recovery-confirm'),confirming=r.get('confirm-code').onclick();held.reject(new TypeError('lost'));await confirming;const warning=r.get('message').textContent;assert.match(warning,/ยังไม่ทราบผล/);r.initialIdentity.reject(new TypeError('identity unavailable'));for(let i=0;i<8;i++)await Promise.resolve();assert.equal(r.get('message').textContent,warning);assert.equal(r.get('secret').textContent,'code-request-1');assert.equal(r.get('code').disabled,true);assert.equal(r.get('confirm-code').disabled,false)
+});
+
+test('cancelled creation and late identity failure clears the loading indicator',async()=>{
+ const r=await setup({holdInitialIdentity:true});r.allow(false);await r.get('new').onclick();r.initialIdentity.reject(new TypeError('identity unavailable'));for(let i=0;i<8;i++)await Promise.resolve();assert.match(r.get('identity').textContent,/ตรวจสอบบัญชีที่จดจำไว้ไม่ได้/);assert.equal(r.count('/auth/guest'),0)
+});
+
+
+test('auto mode blocks use without a valid opener intent, including after timeout',async()=>{
+ const r=await setup({auto:true});assert.equal(r.get('use').disabled,true);await r.get('use').onclick();await assert.rejects(r.force('continueGuest()'),/รอการยืนยันจากเกม/);assert.equal(r.count('/authorize'),0);const receive=r.listeners.get('message');const valid={type:'citymanager-auth-intent',state,expectedGuest:owner};for(const e of [{origin:'https://invalid.example',source:r.win.opener,data:valid},{origin,source:{},data:valid},{origin,source:r.win.opener,data:{...valid,state:'wrong'}},{origin,source:r.win.opener,data:{...valid,expectedGuest:'not-a-uuid'}}]){receive(e);await r.get('use').onclick();assert.equal(r.get('use').disabled,true);assert.equal(r.count('/authorize'),0)}r.fireTimer(60000);assert.equal(r.listeners.has('message'),false);await r.get('use').onclick();assert.equal(r.count('/authorize'),0);assert.equal(r.get('use').disabled,true)
+});
+test('valid delayed auto intent authorizes only the matched guest',async()=>{
+ const r=await setup({auto:true});assert.equal(r.get('use').disabled,true);await r.get('use').onclick();assert.equal(r.count('/authorize'),0);r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});for(let i=0;i<16;i++)await Promise.resolve();assert.equal(r.count('/authorize'),1);const authorization=JSON.parse(r.calls.find(c=>c.path.endsWith('/authorize')).body);assert.deepEqual(authorization,{challenge,expected_guest:owner});assert.equal(r.get('use').disabled,true)
+});
+test('auto intent matching rejects a different guest before authorization',async()=>{
+ const other='22222222-2222-4222-8222-222222222222',r=await setup({auto:true});r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:other}});for(let i=0;i<16;i++)await Promise.resolve();assert.equal(r.count('/authorize'),0);assert.match(r.get('message').textContent,/บัญชี Guest ไม่ตรง/);assert.equal(r.get('use').disabled,false);await r.get('use').onclick();assert.equal(r.count('/authorize'),0);assert.match(r.get('message').textContent,/บัญชี Guest ไม่ตรง/)
+});
+test('intent arriving while busy enables only explicit matching authorization afterward',async()=>{
+ const r=await setup({auto:true});const held=r.hold('pages/recovery-prepare'),preparing=r.get('code').onclick();r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});assert.equal(r.get('use').disabled,true);assert.equal(r.count('/authorize'),0);held.resolve(reply({request_id:'request-1',recovery_code:'code-request-1'}));await preparing;assert.equal(r.get('use').disabled,false);assert.equal(r.count('/authorize'),0);await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.deepEqual(JSON.parse(r.calls.find(c=>c.path.endsWith('/authorize')).body),{challenge,expected_guest:owner})
+});
+test('manual non-auto use remains available without opener intent',async()=>{
+ const r=await setup();assert.equal(r.get('use').disabled,false);await r.get('use').onclick();assert.equal(r.count('/authorize'),1);assert.deepEqual(JSON.parse(r.calls.find(c=>c.path.endsWith('/authorize')).body),{challenge})
+});
+
+
+test('auto intent status is live, waits, and clears after a valid intent without modifying other status',async()=>{
+ assert.match(html,/<button id="use"[^>]*aria-describedby="auto-intent-status"/);assert.match(html,/<output id="auto-intent-status"[^>]*aria-live="polite"/);const r=await setup({auto:true});assert.equal(r.get('auto-intent-status').textContent,'กำลังรอการยืนยันจากเกม…');const held=r.hold('pages/recovery-prepare'),preparing=r.get('code').onclick();const actionMessage=r.get('message').textContent;r.listeners.get('message')({origin,source:r.win.opener,data:{type:'citymanager-auth-intent',state,expectedGuest:owner}});assert.equal(r.get('auto-intent-status').textContent,'');assert.equal(r.get('message').textContent,actionMessage);assert.equal(r.get('use').disabled,true);held.resolve(reply({request_id:'request-1',recovery_code:'code-request-1'}));await preparing;assert.equal(r.get('auto-intent-status').textContent,'');assert.equal(r.count('/authorize'),0)
+});
+test('auto intent timeout shows reopening guidance without overwriting other status',async()=>{
+ const r=await setup({auto:true});r.get('message').textContent='existing message';r.get('identity').textContent='existing identity';r.fireTimer(60000);assert.equal(r.get('auto-intent-status').textContent,'ไม่สามารถยืนยันคำขอจากเกมได้ หากกำลังจัดการรหัสกู้คืน ให้รอผลและเก็บรหัสเดิมกับรหัสใหม่ไว้ก่อนปิดหน้านี้ แล้วเปิดเข้าสู่ระบบจากเกมอีกครั้ง');assert.equal(r.get('message').textContent,'existing message');assert.equal(r.get('identity').textContent,'existing identity');assert.equal(r.get('use').disabled,true);assert.equal(r.count('/authorize'),0)
+});
+test('invalid auto entry shows reopening guidance and manual mode shows no auto status',async()=>{
+ const guidance='ไม่สามารถยืนยันคำขอจากเกมได้ หากกำลังจัดการรหัสกู้คืน ให้รอผลและเก็บรหัสเดิมกับรหัสใหม่ไว้ก่อนปิดหน้านี้ แล้วเปิดเข้าสู่ระบบจากเกมอีกครั้ง';for(const options of [{hasOpener:false},{challengeParam:'invalid'},{stateParam:'invalid'}]){const r=await setup({auto:true,...options});assert.equal(r.get('auto-intent-status').textContent,guidance);assert.equal(r.get('use').disabled,true);assert.equal(r.listeners.has('message'),false);await r.get('use').onclick();assert.equal(r.count('/authorize'),0)}const manual=await setup();assert.equal(manual.get('auto-intent-status').textContent,'');assert.equal(manual.get('use').disabled,false)
+});
+
+
+test('auto intent timeout keeps pending code and in-flight confirmation intact',async()=>{
+ const r=await setup({auto:true});await r.get('code').onclick();const code=r.get('secret').textContent,held=r.hold('pages/recovery-confirm'),confirming=r.get('confirm-code').onclick(),request=r.calls.find(c=>c.path.endsWith('/recovery-confirm')).body,actionMessage=r.get('message').textContent;r.fireTimer(60000);assert.match(r.get('auto-intent-status').textContent,/ให้รอผลและเก็บรหัสเดิมกับรหัสใหม่ไว้ก่อนปิดหน้านี้/);assert.equal(r.get('secret').textContent,code);assert.equal(r.get('message').textContent,actionMessage);assert.equal(r.get('confirm-code').disabled,true);assert.equal(r.count('/recovery-confirm'),1);await r.get('confirm-code').onclick();assert.equal(r.count('/recovery-confirm'),1);held.reject(new TypeError('connection lost'));await confirming;assert.equal(r.get('secret').textContent,code);assert.match(r.get('message').textContent,/ยังไม่ทราบผล/);assert.equal(r.get('confirm-code').disabled,false);await r.get('confirm-code').onclick();const calls=r.calls.filter(c=>c.path.endsWith('/recovery-confirm'));assert.equal(calls.length,2);assert.equal(calls[1].body,request)
+});
