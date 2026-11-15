@@ -2,6 +2,7 @@ import { roadNeighborsFor } from '../road-topology.ts';
 import {isRailReserved,RAIL_PARCEL_MESSAGE} from '../rail/reserved-parcels.ts';
 import { connectedRoads, SIZE, campusAt, parkAt, plantAt, type City, type Result } from '../sim.ts';
 import { taxiAt } from '../taxi/buildings.ts';
+import { civicAt } from '../civic/sites.ts';
 import { busDepotAt, busStopAt, busStopReason, busStopSides, createBus, removeBusDepotFromState, removeStopsFromState } from './buildings.ts';
 import { BUS_DEPOT_BUSES, BUS_LIMITS, busEnabled, type BusDepot, type BusStopSide } from './types.ts';
 /** Placement for bus depots and stops (PR B2). Round 1: no build cost, no upkeep, no economy effect. */
@@ -13,7 +14,7 @@ export function busDepotReason(c: City, i: number, enabled = busEnabled()): stri
   if (!Number.isInteger(i) || i < 0 || i >= c.cells.length) return 'ตำแหน่งอยู่นอกแผนที่';
   if(isRailReserved(c,i))return RAIL_PARCEL_MESSAGE;
   const cell = c.cells[i];
-  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return 'อู่รถเมล์ต้องใช้แปลงว่างที่ยังไม่ลงโซน';
+  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i) || civicAt(c, i)) return 'อู่รถเมล์ต้องใช้แปลงว่างที่ยังไม่ลงโซน';
   if (!roadNeighborsFor(c,i).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';
   if ((c.bus?.depots.length ?? 0) >= BUS_LIMITS.depots || !canAllocateId(c)) return `สร้างอู่รถเมล์ได้สูงสุด ${BUS_LIMITS.depots} แห่ง`;
   return null;

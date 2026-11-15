@@ -12,6 +12,7 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
+import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicUpkeepReason, createCivic, validateCivic, type CivicKind, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
@@ -90,6 +91,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   education?: EducationState;
   /** Optional taxi depots (phase D2; no stands). Absent = no taxi data; saves stay byte-identical. */
   taxi?: TaxiState;
+  /** Optional city services (clinic, police, fire). Absent = none built; saves stay byte-identical. */
+  civic?: CivicState;
   /** Optional bus depots/stops/lines (PR B2). Absent = no bus data; saves stay byte-identical. */
   bus?: BusState;
 };
@@ -224,7 +227,7 @@ export function campusSiteReason(c: City, i: number, kind: CampusKind): string |
   if (!c.education) return 'เมืองนี้ยังไม่มีข้อมูลการศึกษา';
   if (!validIndex(i, c)) return 'ตำแหน่งอยู่นอกแผนที่';
   const cell = c.cells[i];
-  const occupied = cell.road ? 'ถนน' : cell.zone === 'R' ? 'โซนบ้าน' : cell.zone === 'C' ? 'โซนพาณิชย์' : cell.zone === 'I' ? 'โซนโรงงาน' : cell.zone === 'F' ? 'โซนฟาร์ม' : cell.building !== null ? 'อาคาร' : plantAt(c, i) ? 'โรงน้ำหรือไฟ' : parkAt(c, i) ? 'สวน' : campusAt(c, i) ? 'สถานศึกษา' : taxiAt(c, i) ? 'อู่แท็กซี่' : null;
+  const occupied = cell.road ? 'ถนน' : cell.zone === 'R' ? 'โซนบ้าน' : cell.zone === 'C' ? 'โซนพาณิชย์' : cell.zone === 'I' ? 'โซนโรงงาน' : cell.zone === 'F' ? 'โซนฟาร์ม' : cell.building !== null ? 'อาคาร' : plantAt(c, i) ? 'โรงน้ำหรือไฟ' : parkAt(c, i) ? 'สวน' : campusAt(c, i) ? 'สถานศึกษา' : taxiAt(c, i) ? 'อู่แท็กซี่' : civicAt(c, i) ? 'อาคารบริการเมือง' : null;
   if (occupied) return `แปลงนี้เป็น${occupied}อยู่แล้ว ${name}วางบนแปลงว่างที่ยังไม่ลงโซน และต้องติดถนน`;
   if (!neighbors(i, c).some(n => connectedRoads(c).has(n))) return 'ต้องติดถนนที่เชื่อมถึงประตูเมือง';
   const limit = kind === 'school' ? EDUCATION_COST.maxSchools : EDUCATION_COST.maxUniversities;
@@ -540,6 +543,7 @@ export function buildRoad(c: City, a: number, b: number): Result {
   if (path.some(i => parkAt(c, i))) return { ok: false, message: 'มีสวนสาธารณะขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => campusAt(c, i))) return { ok: false, message: 'มีสถานศึกษาขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => taxiAt(c, i))) return { ok: false, message: 'มีอู่แท็กซี่ขวางทาง ต้องรื้อก่อนสร้างถนน' };
+  if (path.some(i => civicAt(c, i))) return { ok: false, message: 'มีอาคารบริการเมืองขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => busDepotAt(c, i))) return { ok: false, message: 'มีอู่รถเมล์ขวางทาง ต้องรื้อก่อนสร้างถนน' };
   if (path.some(i => c.cells[i].building !== null || plantAt(c, i))) return { ok: false, message: 'A building or plant blocks this road. Bulldoze it first.' };
   const added = path.filter(i => !c.cells[i].road), cost = added.length * ROAD_COST;
@@ -583,6 +587,7 @@ export function zoneCell(c: City, i: number, zone: Zone): Result {
   if (parkAt(c, i)) return { ok: false, message: 'มีสวนสาธารณะอยู่ ต้องรื้อก่อนวางโซน' };
   if (campusAt(c, i)) return { ok: false, message: 'มีสถานศึกษาอยู่ ต้องรื้อก่อนวางโซน' };
   if (taxiAt(c, i)) return { ok: false, message: 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อนวางโซน' };
+  if (civicAt(c, i)) return { ok: false, message: 'มีอาคารบริการเมืองอยู่ ต้องรื้อก่อนวางโซน' };
   if (busDepotAt(c, i)) return { ok: false, message: 'มีอู่รถเมล์อยู่ ต้องรื้อก่อนวางโซน' };
   if (plantAt(c, i)) return { ok: false, message: 'A water or power plant stands here. Bulldoze it before zoning.' };
   if (cell.building !== null && cell.zone !== zone) return { ok: false, message: 'Bulldoze the existing building before rezoning.' };
@@ -600,6 +605,14 @@ export function bulldoze(c: City, i: number): Result {
     // Round 1 is economy-neutral: taxi sites are built and removed without any charge.
     c.taxi = { ...c.taxi, depots: c.taxi.depots.filter(d => d !== taxi) };
     c.lastEvent = `รื้ออู่แท็กซี่ #${taxi.id} แล้ว`;
+    return { ok: true, message: c.lastEvent };
+  }
+  const civic = civicAt(c, i);
+  if (civic && c.civic) {
+    // Removal is free and refunds nothing; the monthly upkeep stops with the building.
+    const sites = c.civic.sites.filter(site => site !== civic);
+    if (sites.length) c.civic = { ...c.civic, sites }; else delete c.civic;
+    c.lastEvent = `รื้อ${CIVIC[civic.kind].label} #${civic.id} แล้ว · ไม่มีเงินคืน · หยุดค่าบำรุงของอาคารนี้`;
     return { ok: true, message: c.lastEvent };
   }
   const busDepot = busDepotAt(c, i);
@@ -673,7 +686,7 @@ export function buildPlant(c: City, i: number, kind: UtilityKind): Result {
   if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   if (!validIndex(i, c) || !UTILITY_KINDS.includes(kind)) return { ok: false, message: 'Invalid parcel or plant.' };
   const cell = c.cells[i], plant = PLANTS[kind];
-  if (cell.road || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return { ok: false, message: 'A plant needs an empty parcel; roads, buildings and other plants stay where they are.' };
+  if (cell.road || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i) || civicAt(c, i)) return { ok: false, message: 'A plant needs an empty parcel; roads, buildings and other plants stay where they are.' };
   if (!access(c, i)) return { ok: false, message: 'A plant needs road frontage connected to the west gateway; its supply travels along the roads.' };
   if (c.plants.length >= MAX_PLANTS || !canAllocateIds(c, 1)) return { ok: false, message: `Plant limit (${MAX_PLANTS}) reached.` };
   if (treasurySpendable(c) < plant.cost) return { ok: false, message: `Need ${plant.cost / 100} credits for a ${PLANT_NAMES[kind]}.` };
@@ -711,12 +724,29 @@ export function upgradePlant(c: City, id: number, expectedLevel: PlantLevel): Re
   return { ok: true, message: c.lastEvent };
 }
 
+/** One empty, unzoned parcel with connected road frontage, paid from the treasury; upkeep is charged each month. */
+export function buildCivic(c: City, i: number, kind: CivicKind): Result {
+  if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
+  if (!validIndex(i, c) || !CIVIC_KINDS.includes(kind)) return { ok: false, message: 'ตำแหน่งหรือชนิดอาคารบริการไม่ถูกต้อง' };
+  const cell = c.cells[i], spec = CIVIC[kind];
+  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i) || civicAt(c, i)) return { ok: false, message: `${spec.label}ต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน` };
+  if (!access(c, i)) return { ok: false, message: `${spec.label}ต้องติดถนนที่เชื่อมถึงประตูเมือง` };
+  if ((c.civic?.sites.length ?? 0) >= MAX_CIVIC_SITES || !canAllocateIds(c, 1)) return { ok: false, message: `สร้างอาคารบริการเพิ่มไม่ได้ (สูงสุด ${MAX_CIVIC_SITES} แห่ง)` };
+  if (treasurySpendable(c) < spec.cost) return { ok: false, message: `เงินคลังไม่พอ ${spec.label}ใช้ ${spec.cost / 100}` };
+  const id = c.nextId++;
+  transfer(c, 'treasury', 'construction', spec.cost, civicBuildReason(kind, id));
+  const civic = c.civic ?? createCivic();
+  c.civic = { ...civic, sites: [...civic.sites, { id, cell: i, kind, tick: c.tick }] };
+  c.lastEvent = `สร้าง${spec.label} #${id} แล้ว · บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points} · ค่าบำรุง ${spec.upkeep / 100} ฿/เดือน`;
+  return { ok: true, message: c.lastEvent };
+}
+
 /** One empty, unzoned parcel. Parks need neither roads nor utility supply. */
 export function buildPark(c: City, i: number): Result {
   if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
   if (!validIndex(i, c)) return { ok: false, message: 'ตำแหน่งสวนอยู่นอกแผนที่' };
   const cell = c.cells[i];
-  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i)) return { ok: false, message: 'สวนต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน' };
+  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i) || civicAt(c, i)) return { ok: false, message: 'สวนต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน' };
   if (c.parks.length >= MAX_PARKS || !canAllocateIds(c, 1)) return { ok: false, message: `สร้างสวนเพิ่มไม่ได้ (สูงสุด ${MAX_PARKS} แห่ง)` };
   if (treasurySpendable(c) < PARK.cost) return { ok: false, message: `เงินคลังไม่พอ สวนใช้ ${PARK.cost / 100}` };
   const id = c.nextId++;
@@ -1102,6 +1132,7 @@ function settleMonth(c: City) {
   for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
   for (const p of c.plants) transfer(c, 'treasury', 'upkeep', plantSpec(p).upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
   for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
+  for (const site of c.civic?.sites ?? []) transfer(c, 'treasury', 'upkeep', CIVIC[site.kind].upkeep, civicUpkeepReason(site.kind, site.id));
   // Services scale with the people actually present at settlement, not empty housing.
   // As with other upkeep, only available (non-payroll-reserved) cash is paid; no debt
   // is created and loading an existing city does not itself charge a past bill.
@@ -1582,6 +1613,7 @@ export function serialize(c: City, market?: City['market']): string {
   const businesses = c.businessCapacityVersion === 1 || c.firms.length > LEGACY_MAX_FIRMS;
   if (c.education) assertEducationInvariants(c.education, c.households);
   if (c.taxi !== undefined) validateTaxi(c.taxi, taxiValidationView(c));
+  if (c.civic !== undefined) validateCivic(c.civic, civicValidationView(c));
   if (c.bus !== undefined) validateBus(c.bus, busValidationView(c));
   const envelope = { ...c, commercialUnifiedStartTick: c.commercialUnifiedStartTick ?? c.tick, commercialUnifiedBaseline: c.commercialUnifiedBaseline ?? {moneyEntries:moneyJournalLength(c),cropEntries:cropJournalLength(c),goodsEntries:goodsJournalLength(c)}, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) };
   const inner = c.history ? {...envelope, historyBaseVersion:envelope.version, version:24, rulesVersion:'chain-19'} : envelope;
@@ -2017,13 +2049,22 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
 }
 
 /** Mark the transition at the loaded day without changing historical transactions. */
+/** Cells and ids the civic validator must not collide with. */
+export function civicValidationView(c: City): CivicValidationView {
+  const campuses = c.education?.campuses ?? [], taxi = c.taxi?.depots ?? [], bus = c.bus;
+  return {
+    cells: c.cells, tick: c.tick, nextId: c.nextId,
+    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...taxi.map(d => d.cell), ...(bus?.depots ?? []).map(d => d.cell)]),
+    otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...taxi, ...(bus ? [...bus.depots, ...bus.stops, ...bus.lines] : [])].map(x => x.id)),
+  };
+}
 /** Cells and ids the taxi validator must not collide with. */
 export function taxiValidationView(c: City): TaxiValidationView {
   const campuses = c.education?.campuses ?? [];
   return {
     cells: c.cells, tick: c.tick, nextId: c.nextId,
-    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...(c.bus?.depots ?? []).map(d => d.cell)]),
-    otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...(c.bus ? [...c.bus.depots, ...c.bus.stops, ...c.bus.lines] : [])].map(x => x.id)),
+    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...(c.bus?.depots ?? []).map(d => d.cell), ...(c.civic?.sites ?? []).map(d => d.cell)]),
+    otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...(c.bus ? [...c.bus.depots, ...c.bus.stops, ...c.bus.lines] : []), ...(c.civic?.sites ?? [])].map(x => x.id)),
   };
 }
 /** Cells and ids the bus validator must not collide with (taxi depots included). */
@@ -2031,8 +2072,8 @@ export function busValidationView(c: City): BusValidationView {
   const campuses = c.education?.campuses ?? [], taxi = c.taxi?.depots ?? [];
   return {
     cells: c.cells, roadTopology: c.roadTopology, width: SIZE, tick: c.tick, nextId: c.nextId,
-    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...taxi.map(d => d.cell)]),
-    otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...taxi].map(x => x.id)),
+    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...taxi.map(d => d.cell), ...(c.civic?.sites ?? []).map(d => d.cell)]),
+    otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...taxi, ...(c.civic?.sites ?? [])].map(x => x.id)),
   };
 }
 export function deserialize(json: string): City {
@@ -2054,6 +2095,7 @@ export function deserialize(json: string): City {
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.
   if ('taxi' in city) validateTaxi(city.taxi, taxiValidationView(city));
+  if ('civic' in city) validateCivic(city.civic, civicValidationView(city));
   if ('bus' in city) { validateBus(city.bus, busValidationView(city)); reconcileBusStops(city, SIZE); }
   if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
   if (city.factoryProgressionStartTick === undefined) city.factoryProgressionStartTick = city.tick;
