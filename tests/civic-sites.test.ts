@@ -95,3 +95,10 @@ test('a malformed civic section is rejected on load', () => {
   broken(s => { s.civic.rules = 'civic-2'; }, 'unknown rules');
   broken(s => { s.civic.sites[0].extra = 1; }, 'extra field');
 });
+
+test('ledger reasons read in Thai in the panels', async () => {
+  const { reasonLabel } = await import('../src/inspector-data.ts');
+  assert.equal(reasonLabel(civicBuildReason('police', 12)), 'สร้างสถานีตำรวจ #12');
+  assert.equal(reasonLabel(civicUpkeepReason('clinic', 7)), 'ค่าบำรุงสถานีอนามัย #7 รายเดือน');
+  assert.equal(reasonLabel(civicUpkeepReason('fire', 3)), 'ค่าบำรุงสถานีดับเพลิง #3 รายเดือน');
+});

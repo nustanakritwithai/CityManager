@@ -44,7 +44,9 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildCivic, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { CIVIC, CIVIC_KINDS, civicAt, civicUpkeepReason } from './civic/sites.ts';
+import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
 import { PARK, PARK_STAFF } from './parks.ts';
@@ -168,7 +170,7 @@ function syncEducationTools() {
     if (button) button.hidden = !on;
   }
 }
-const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
+const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', clinic: 'สถานีอนามัย', police: 'สถานีตำรวจ', fire: 'สถานีดับเพลิง', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
 const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
@@ -179,6 +181,7 @@ const help: Record<string, string> = {
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
   water: 'โรงสูบน้ำ ฿3,000 · +40 หน่วย · บำรุง ฿60/เดือน · วางแปลงว่างริมถนน น้ำวิ่งตามถนน อาคารใกล้ได้ก่อน',
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
+  ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, `${CIVIC[kind].label} ฿${(CIVIC[kind].cost / 100).toLocaleString('th-TH')} · 1 ช่องติดถนน · บ้านในระยะ ${CIVIC[kind].radius} ช่องได้ความสุข +${CIVIC[kind].points} · บำรุง ฿${CIVIC[kind].upkeep / 100}/เดือน`])),
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
   bulldoze: 'รื้อถอน · คืน 80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่ายและมีหลักฐาน · อาคารเอกชนไม่คืนเงินและค่ารื้อ ฿20 · ดูยอดที่การ์ดสถานที่ก่อนรื้อ · ป้ายและอู่รถเมล์จะถามก่อนลบ · V/Esc เพื่อออก',
@@ -291,6 +294,7 @@ async function activate(index: number) {
   } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
   else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
   else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
+  else if (tool === 'clinic' || tool === 'police' || tool === 'fire') status(resultSound(buildCivic(city, index, tool), 'ui-place').message);
   else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
   else if (tool === 'bulldoze') {
     busLock = true;
@@ -427,12 +431,13 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
     $('#place-subtitle').textContent = 'ข้อมูลเฉพาะครัวเรือน · ไม่ใช่บุคคลรายคน'; symbol('R', false);
   } else if (cell && cellIndex !== null) {
     const firm = building && city.firms.find(f => f.building === building.id);
-    const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex);
-    const name = campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
+    const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex), civic = civicAt(city, cellIndex);
+    const name = civic ? CIVIC[civic.kind].label : campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + formatCellCoordinate(cellIndex);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, cell.zone === 'C' && !!building && building.level <= 3, !!park);
     if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
+    if (civic) $('#place-subtitle').textContent = `บริการเมือง #${civic.id} · 1 ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
     const busCaption = busController?.caption(cellIndex); if (busCaption) $('#place-subtitle').textContent = busCaption;
     const rail = !cell.road && !cell.zone ? railUi?.placeCard(cellIndex) : null;
@@ -479,6 +484,15 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
         metric('บุคลากรในเมือง', `${report.localStaff} / ${report.requiredStaff}`, false, report.contract ? 'มีบุคลากรสัญญาจากภายนอก' : 'ไม่มีสัญญาภายนอก'),
         metric('เหตุผลที่ยังไม่เต็ม', report.reasons.join(' · ') || 'ให้บริการตามกำลัง', false));
       reasons.push('ผู้เรียนเป็นจำนวนคนในครัวเรือน ไม่ใช่รายชื่อรายบุคคล', 'ปิดบริการหรือขาดน้ำไฟหยุดความก้าวหน้า แต่ไม่ลบวุฒิที่ได้แล้ว');
+    }
+    else if (civic) {
+      const spec = CIVIC[civic.kind], homes = city.buildings.filter(b => b.zone === 'R'), reached = homes.filter(b => civicCellDistance(b.cell, civic.cell) <= spec.radius);
+      const lastDue = Math.floor(city.tick / 30) * 30, billed = city.ledger.find(e => e.reason === civicUpkeepReason(civic.kind, civic.id) && e.tick === lastDue);
+      metrics.push(metric('บ้านในระยะบริการ', `${reached.length} / ${homes.length} หลัง`, false, `ระยะ ${spec.radius} ช่องจากอาคาร`, reached.length),
+        metric('ความสุขของบ้านที่ถึง', `+${spec.points}`, false, 'นับครั้งเดียวต่อชนิดบริการ'),
+        metric('ค่าก่อสร้าง', money(spec.cost), true), metric('ค่าบำรุงรายเดือน', money(spec.upkeep), true));
+      if (lastDue > civic.tick) metrics.push(metric('จ่ายบำรุงเดือนล่าสุด', money(billed?.amount ?? 0), true, billed?.amount === spec.upkeep ? 'จ่ายครบจากคลังเมือง' : 'เงินคลังไม่พอจ่ายครบ ไม่มีการกู้หรือหักซ้ำ'));
+      reasons.push('รื้อได้โดยไม่เสียค่าใช้จ่ายและไม่มีเงินคืน ค่าบำรุงหยุดเมื่อรื้อ');
     }
     else if (park) {
       const staff = parkStaffingStatus(city, park);

@@ -724,16 +724,22 @@ export function upgradePlant(c: City, id: number, expectedLevel: PlantLevel): Re
   return { ok: true, message: c.lastEvent };
 }
 
+/** Why a service cannot stand here, or null. The preview and the action share this one rule. */
+export function civicSiteReason(c: City, i: number, kind: CivicKind): string | null {
+  if (isRailReserved(c, i)) return RAIL_PARCEL_MESSAGE;
+  if (!validIndex(i, c) || !CIVIC_KINDS.includes(kind)) return 'ตำแหน่งหรือชนิดอาคารบริการไม่ถูกต้อง';
+  const cell = c.cells[i], spec = CIVIC[kind];
+  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i) || civicAt(c, i)) return `${spec.label}ต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน`;
+  if (!access(c, i)) return `${spec.label}ต้องติดถนนที่เชื่อมถึงประตูเมือง`;
+  if ((c.civic?.sites.length ?? 0) >= MAX_CIVIC_SITES || !canAllocateIds(c, 1)) return `สร้างอาคารบริการเพิ่มไม่ได้ (สูงสุด ${MAX_CIVIC_SITES} แห่ง)`;
+  if (treasurySpendable(c) < spec.cost) return `เงินคลังไม่พอ ${spec.label}ใช้ ${spec.cost / 100}`;
+  return null;
+}
 /** One empty, unzoned parcel with connected road frontage, paid from the treasury; upkeep is charged each month. */
 export function buildCivic(c: City, i: number, kind: CivicKind): Result {
-  if(isRailReserved(c,i))return {ok:false,message:RAIL_PARCEL_MESSAGE};
-  if (!validIndex(i, c) || !CIVIC_KINDS.includes(kind)) return { ok: false, message: 'ตำแหน่งหรือชนิดอาคารบริการไม่ถูกต้อง' };
-  const cell = c.cells[i], spec = CIVIC[kind];
-  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i) || civicAt(c, i)) return { ok: false, message: `${spec.label}ต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน` };
-  if (!access(c, i)) return { ok: false, message: `${spec.label}ต้องติดถนนที่เชื่อมถึงประตูเมือง` };
-  if ((c.civic?.sites.length ?? 0) >= MAX_CIVIC_SITES || !canAllocateIds(c, 1)) return { ok: false, message: `สร้างอาคารบริการเพิ่มไม่ได้ (สูงสุด ${MAX_CIVIC_SITES} แห่ง)` };
-  if (treasurySpendable(c) < spec.cost) return { ok: false, message: `เงินคลังไม่พอ ${spec.label}ใช้ ${spec.cost / 100}` };
-  const id = c.nextId++;
+  const reason = civicSiteReason(c, i, kind);
+  if (reason) return { ok: false, message: reason };
+  const spec = CIVIC[kind], id = c.nextId++;
   transfer(c, 'treasury', 'construction', spec.cost, civicBuildReason(kind, id));
   const civic = c.civic ?? createCivic();
   c.civic = { ...civic, sites: [...civic.sites, { id, cell: i, kind, tick: c.tick }] };
