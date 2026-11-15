@@ -9,6 +9,8 @@ import './minimap.css';
 import { SIZE, GATEWAY, type City } from './sim.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { buildingIssues } from './map-overlay.ts';
+import { CIVIC, civicAt, type CivicKind } from './civic/sites.ts';
+const CIVIC_FILL: Record<CivicKind, string> = { clinic: '#3fa372', police: '#2f5fae', fire: '#c8452f' };
 import { alertIssues } from './building-issues.ts';
 import { busCellNote, paintBusOverlay } from './bus/map-paint.ts';
 import { busMapRevision } from './bus/map-state.ts';
@@ -36,6 +38,12 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
       ctx.fillStyle = c.zone === 'C' && building && building.level <= 3 ? BUILT.market : BUILT[c.zone];
       const pad = Math.max(1, cell * .18); ctx.fillRect(x + pad, y + pad, cell - pad * 2, cell - pad * 2);
     }
+  }
+  // City services: a white-rimmed tile in the kind's colour, so coverage gaps read at a glance.
+  for (const site of city.civic?.sites ?? []) {
+    const {x,y} = point(site.cell), pad = Math.max(.5, cell * .08);
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + pad, y + pad, cell - pad * 2, cell - pad * 2);
+    ctx.fillStyle = CIVIC_FILL[site.kind]; ctx.fillRect(x + pad * 2.5, y + pad * 2.5, cell - pad * 5, cell - pad * 5);
   }
   if (opts.issues?.size) {
     for (const i of opts.issues) {
@@ -150,7 +158,8 @@ export class Minimap {
   private describe(cell: number | null) {
     if (cell === null || !this.city) return;
     const c = this.city.cells[cell], b = c.building === null ? null : this.city.buildings.find(v => v.id === c.building);
-    const kind = c.road ? (cell === GATEWAY ? 'ประตูเมือง' : 'ถนน') : !c.zone ? 'ที่ดินว่าง' : b ? `${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} #${b.id} · ระดับ ${b.level}` : `โซน${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} (ว่าง)`;
+    const civic = civicAt(this.city, cell);
+    const kind = civic ? `${CIVIC[civic.kind].label} #${civic.id}` : c.road ? (cell === GATEWAY ? 'ประตูเมือง' : 'ถนน') : !c.zone ? 'ที่ดินว่าง' : b ? `${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} #${b.id} · ระดับ ${b.level}` : `โซน${{ R: 'บ้าน', C: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' }[c.zone]} (ว่าง)`;
     const bus = busCellNote(cell), rail = railCellNote(cell);
     this.mapInfo.textContent = `${formatCellCoordinate(cell)} · ${rail || bus || kind}${this.issues.has(cell) ? ' · มีปัญหา' : ''}`;
   }

@@ -290,3 +290,9 @@
 #entity-content[data-card-kind] .cx-link-copy .cx-worker-meta .cx-assigned-role.owner { background: #f3c46b24; color: #f6d891; }
 .cx-worker-meta .cx-hh-cash { margin-left: auto; }
 #place-subtitle { text-wrap: balance; }
+
+/* City services reaching a home: one chip per kind, green when covered. */
+.happiness-services { display: flex; flex-wrap: wrap; gap: calc(6 * var(--reader-unit, 1px)); margin: calc(6 * var(--reader-unit, 1px)) 0; }
+.happiness-services span { padding: calc(3 * var(--reader-unit, 1px)) calc(10 * var(--reader-unit, 1px)); border-radius: 999px; font-size: calc(12 * var(--reader-unit, 1px)); white-space: nowrap; }
+.happiness-services .on { background: #3ddc8a24; color: #9ff0c2; }
+.happiness-services .off { background: #ffffff10; color: #a9b6d3; }
