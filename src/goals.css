@@ -67,3 +67,8 @@ html[data-touch-ui] .goal-pill { min-width: 44px; min-height: 44px; margin: -12p
 #inspector .goal-mission-meter { display: block; width: 100%; height: calc(7 * var(--u)); margin: calc(5 * var(--u)) 0; accent-color: var(--pnl-accent); }
 #inspector .goal-mission-list p, #inspector .goal-missions-note { margin: 0; font-size: calc(12 * var(--u)); color: var(--pnl-muted); line-height: 1.4; }
 #inspector .goal-missions-note { margin-top: calc(10 * var(--u)); }
+
+/* Finished missions keep their name and bar only; the how-to line is for what is still open. */
+#inspector .goal-mission-list li.done > p { display: none; }
+#inspector .goal-mission-list { gap: calc(12 * var(--u)); }
+#inspector .goal-missions-note { margin-top: calc(10 * var(--u)); font-size: calc(11 * var(--u)); opacity: .8; }

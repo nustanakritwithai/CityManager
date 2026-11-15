@@ -26,16 +26,20 @@ export function renderMunicipalInvestments(city: City, onSelectTool?: (tool: Mun
   const section = document.createElement('section'); section.className = 'dash-investments'; section.dataset.municipalInvestments = 'true';
   const heading = document.createElement('h4'); heading.textContent = 'ใช้เงินคลังกับบริการเมือง'; section.append(heading);
   const note = document.createElement('p'); note.className = 'dash-note';
-  note.textContent = `เงินที่ใช้ได้หลังกันค่าจ้าง ${baht(treasurySpendable(city))} · เลือกเครื่องมือแล้วเลือกตำแหน่งเอง ค่าใช้จ่ายเกิดเมื่อสร้างสำเร็จ`; section.append(note);
-  const list = document.createElement('ul');
+  note.textContent = `ใช้ได้ ${baht(treasurySpendable(city))} หลังกันค่าจ้าง · แตะชื่อแล้วเลือกตำแหน่ง จ่ายเมื่อสร้างสำเร็จ`; section.append(note);
+  const list = document.createElement('ul'); list.className = 'dash-invest-list';
+  // One row per service: what it is and what it costs. What it does folds into one disclosure below.
+  const more = document.createElement('details'), summary = document.createElement('summary'); more.className = 'dash-invest-more'; summary.textContent = 'แต่ละบริการให้อะไร'; more.append(summary);
   for (const row of municipalInvestments(city)) {
     const item = document.createElement('li'), button = document.createElement('button'), detail = document.createElement('span');
-    button.type = 'button'; button.className = 'dash-nav-chip'; button.dataset.investmentTool = row.tool; button.textContent = `เลือก ${row.title}`;
+    button.type = 'button'; button.className = 'dash-nav-chip'; button.dataset.investmentTool = row.tool; button.textContent = row.title; button.title = `เลือก ${row.title} แล้วเลือกตำแหน่งบนแผนที่`;
     button.disabled = !onSelectTool; button.addEventListener('click', () => onSelectTool?.(row.tool));
-    detail.textContent = ` ก่อสร้าง ${baht(row.cost)} · บำรุง ${baht(row.upkeep)}/เดือน · ${row.benefit}${row.affordable ? '' : ' · เงินใช้ได้ตอนนี้ไม่พอ'}`;
+    detail.className = row.affordable ? 'dash-invest-cost' : 'dash-invest-cost short';
+    detail.textContent = `สร้าง ${baht(row.cost)} · บำรุง ${baht(row.upkeep)}/เดือน${row.affordable ? '' : ' · เงินไม่พอ'}`;
     item.append(button, detail); list.append(item);
+    const benefit = document.createElement('p'); benefit.className = 'dash-invest-benefit'; benefit.textContent = `${row.title}: ${row.benefit}`; more.append(benefit);
   }
-  section.append(list);
-  const caveat = document.createElement('p'); caveat.className = 'dash-note'; caveat.textContent = 'การสร้างยังขึ้นกับแปลง ถนน เครือข่าย และขีดจำกัดจริง เงินเหล่านี้ไม่ใช่ทุนโรงงานเอกชน'; section.append(caveat);
+  const caveat = document.createElement('p'); caveat.className = 'dash-invest-benefit'; caveat.textContent = 'การสร้างยังขึ้นกับแปลง ถนน เครือข่าย และขีดจำกัดจริง เงินเหล่านี้ไม่ใช่ทุนโรงงานเอกชน'; more.append(caveat);
+  section.append(list, more);
   return section;
 }
