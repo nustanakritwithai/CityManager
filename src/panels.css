@@ -251,3 +251,12 @@ html #game-content .save-group.danger #new-city { border-color: #ff8a7a88; color
 
 /* Bundled Thai typeface (IBM Plex Sans Thai, OFL 1.1) with the previous stack as fallback. */
 :root, button, input, select, textarea { font-family: "IBM Plex Sans Thai", "Segoe UI", Tahoma, Arial, sans-serif; }
+
+/* City services to buy: a name chip and its price per row; what each does sits in one disclosure. */
+.dash-invest-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.dash-invest-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.dash-invest-cost { font-size: 12px; line-height: 1.4; color: #c9d3ea; font-variant-numeric: tabular-nums; }
+.dash-invest-cost.short { color: #ffc0a8; }
+.dash-invest-more { margin-top: 8px; }
+.dash-invest-more summary { cursor: pointer; min-height: 36px; display: flex; align-items: center; font-size: 12px; color: #a9bde5; }
+.dash-invest-benefit { margin: 0 0 6px; font-size: 12px; line-height: 1.6; color: #a9bde5; }
