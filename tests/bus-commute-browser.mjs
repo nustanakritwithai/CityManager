@@ -34,7 +34,8 @@ function observer(){
 }
 let evidence;const watchdog=setTimeout(()=>{child.kill();console.error('Bus browser timeout');process.exit(1);},240000);
 try{
- let page;for(let i=0;i<100;i++){try{page=(await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(p=>p.type==='page');if(page)break;}catch{}await sleep(100);}assert.ok(page,'Chromium did not start: '+launchError);
+ // A cold runner can take well over 10 s to open the debugging port; the watchdog above still bounds the run.
+ let page;for(let i=0;i<300;i++){try{page=(await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(p=>p.type==='page');if(page)break;}catch{}await sleep(100);}assert.ok(page,'Chromium did not start: '+launchError);
  ws=new WebSocket(page.webSocketDebuggerUrl);ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}}else if(m.method==='Page.javascriptDialogOpening')void http.fixture.dialog(m.params,send).catch(error=>errors.push(String(error)));else if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails);else if(m.method==='Network.requestWillBeSent'){const u=m.params.request.url;if(probe?.active&&u===probe.url)probe.requestId=m.params.requestId;else if(/^https?:/.test(u)&&new URL(u).origin!==origin)external.push(u);}else if(m.method==='Network.loadingFailed'&&m.params.requestId===probe?.requestId)probe.failed=m.params;};
  await new Promise(r=>ws.onopen=r);for(const domain of ['Page','Network','Runtime'])await send(domain+'.enable');
  await installTrafficNetworkFence({send,evaluate,protocol:await(await fetch(`http://127.0.0.1:${port}/json/protocol`)).json(),origin,observeProbe:url=>(probe={url})});
