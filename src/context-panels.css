@@ -296,3 +296,14 @@
 .happiness-services span { padding: calc(3 * var(--reader-unit, 1px)) calc(10 * var(--reader-unit, 1px)); border-radius: 999px; font-size: calc(12 * var(--reader-unit, 1px)); white-space: nowrap; }
 .happiness-services .on { background: #3ddc8a24; color: #9ff0c2; }
 .happiness-services .off { background: #ffffff10; color: #a9b6d3; }
+
+/* Household happiness: score bar with a target tick, factor chips, and the wording in one disclosure. */
+.happiness-meter { position: relative; height: calc(10 * var(--reader-unit, 1px)); margin: calc(6 * var(--reader-unit, 1px)) 0 calc(4 * var(--reader-unit, 1px)); border-radius: 999px; background: #ffffff1a; overflow: visible; }
+.happiness-meter .fill { position: absolute; inset: 0 auto 0 0; width: calc(var(--score, 0) * 1%); border-radius: 999px; background: linear-gradient(90deg, #f3c46b, #9ff0c2); }
+.happiness-meter .mark { position: absolute; top: calc(-3 * var(--reader-unit, 1px)); bottom: calc(-3 * var(--reader-unit, 1px)); left: calc(var(--target, 0) * 1%); width: 2px; background: #fff; border-radius: 1px; }
+.inspector .cx-content .happiness-line, .happiness-line { margin: 0 0 calc(6 * var(--reader-unit, 1px)); font-size: calc(12 * var(--reader-unit, 1px)); color: #c9d3ea; }
+.happiness-services .bad { background: #ff9c9c24; color: #ffc0a8; }
+.happiness-more summary { cursor: pointer; min-height: calc(36 * var(--reader-unit, 1px)); display: flex; align-items: center; font-size: calc(12 * var(--reader-unit, 1px)); color: #a9bde5; }
+.happiness-more p { margin: 0 0 calc(6 * var(--reader-unit, 1px)); }
+#entity-content[data-card-kind] .happiness-more p { font-size: calc(12 * var(--bc-unit, 1px)); line-height: 1.6; }
+#entity-content[data-card-kind] .happiness-line { font-size: calc(12 * var(--bc-unit, 1px)); }
