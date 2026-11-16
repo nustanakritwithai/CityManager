@@ -4,11 +4,11 @@ import { createCity, buildRoad, buildPlant, buildPark, buildCampus, buildCivic, 
 import { selectorKeyEvents, selectorTouchEmulation, findCanvasDragStart } from './select-menu-browser.mjs';
 import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
-const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'school', 'university']]];
+const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'school', 'university']]];
 const cell = (x, y) => y * SIZE + x;
 export function groupedToolFixture() { const city = createCity(61025, { starter: false }); assert.equal(buildRoad(city, GATEWAY, cell(18, 12)).ok, true); return serialize(city); }
 function place(city, tool, index) {
-  return ['power', 'water'].includes(tool) ? buildPlant(city, index, tool) : tool === 'park' ? buildPark(city, index) : ['clinic', 'police', 'fire', 'library', 'temple', 'stadium'].includes(tool) ? buildCivic(city, index, tool) : ['school', 'university'].includes(tool) ? buildCampus(city, index, tool) : zoneCell(city, index, tool);
+  return ['power', 'water'].includes(tool) ? buildPlant(city, index, tool) : tool === 'park' ? buildPark(city, index) : ['clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport'].includes(tool) ? buildCivic(city, index, tool) : ['school', 'university'].includes(tool) ? buildCampus(city, index, tool) : zoneCell(city, index, tool);
 }
 // Preserve #107's native Enter/character events; extend only the group's navigation and numeric keys.
 export const groupedKeyEvents = value => selectorKeyEvents(value).map(event => ({ ...event,
@@ -81,7 +81,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     await button(selector); assert.deepEqual(await evaluate('[...document.querySelectorAll(".tool-submenu")].filter(m=>!m.hidden).map(m=>m.id)'), [`${id}-submenu`]); assert.equal(await state(), fixture);
   }
   await key('Escape'); await key('v');
-  checks.push('Exactly fifteen controls sit in two ordered groups; read-only toggles and all four tool menus exclude one another');
+  checks.push('Exactly sixteen controls sit in two ordered groups; read-only toggles and all four tool menus exclude one another');
 
   // A dismissal tap must not inherit demolition armed before opening a group.
   for (const [id] of groups) {
@@ -111,7 +111,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     assert.equal(place(expected, tool, at).ok, true); await tapCell(at); assert.equal(await state(), serialize(expected), `Unchanged ${tool} placement, accounting and constraints`);
   }
   await load(raw); await close(); await key('v');
-  checks.push('Shortcuts1–7, active anchor icon/name and all fifteen placement commands retain exact city snapshots and accounting');
+  checks.push('Shortcuts1–7, active anchor icon/name and all sixteen placement commands retain exact city snapshots and accounting');
 
   for (const [name, width, height, screenWidth] of [['mobile',390,844,390], ['small',320,568,320], ['landscape',844,390,844], ['short-landscape',640,240,640], ['touch-desktop-mode',980,780,390]]) {
     await viewport(width, height, true, screenWidth); await key('v');

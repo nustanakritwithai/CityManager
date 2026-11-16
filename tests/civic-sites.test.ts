@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, buildCivic, buildPark, buildPlant, buildRoad, zoneCell, bulldoze, access, treasurySpendable, MONTH, SIZE, type City } from '../src/sim.ts';
+import { createCity, step, serialize, deserialize, buildCivic, civicSiteReason, buildPark, buildPlant, buildRoad, zoneCell, bulldoze, access, treasurySpendable, MONTH, SIZE, type City } from '../src/sim.ts';
 import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCoverage, civicPoints, civicUpkeepReason } from '../src/civic/sites.ts';
 import { homeAmenities } from '../src/resident-happiness.ts';
 
@@ -18,9 +18,11 @@ test('a city that never builds a service keeps a byte-identical save', () => {
 
 test('building charges the treasury once, records the site and survives a save round trip', () => {
   const c = seeded();
-  const [cell] = sites(c); assert.notEqual(cell, undefined, 'fixture has a free parcel on a connected road');
   for (const kind of CIVIC_KINDS) {
-    const d = deserialize(serialize(c)), treasury = d.accounts.treasury, entries = d.ledger.length, r = buildCivic(d, cell, kind);
+    // Each kind is tried where its own footprint fits: larger kinds need more than one free parcel.
+    const d = deserialize(serialize(c)), cell = d.cells.map((_, i) => i).find(i => civicSiteReason(d, i, kind) === null)!;
+    assert.notEqual(cell, undefined, `fixture has room for a ${kind}`);
+    const treasury = d.accounts.treasury, entries = d.ledger.length, r = buildCivic(d, cell, kind);
     assert.equal(r.ok, true, r.message);
     const site = civicAt(d, cell)!; assert.deepEqual({ kind: site.kind, cell: site.cell, tick: site.tick }, { kind, cell, tick: d.tick });
     assert.equal(d.accounts.treasury, treasury - CIVIC[kind].cost);
@@ -105,4 +107,53 @@ test('ledger reasons read in Thai in the panels', async () => {
   assert.equal(reasonLabel(civicBuildReason('stadium', 40)), 'สร้างสนามฟุตบอล #40');
   assert.equal(reasonLabel(civicUpkeepReason('temple', 41)), 'ค่าบำรุงวัด #41 รายเดือน');
   assert.equal(reasonLabel('Build park #5'), 'สร้างสวนสาธารณะ #5', 'other Build reasons keep their own labels');
+});
+
+test('a larger site takes its whole footprint, by map coordinate, and one free parcel is not enough', async () => {
+  const { civicParcels, civicSiteReason } = await import('../src/sim.ts');
+  const { civicFootprint, civicCells } = await import('../src/civic/sites.ts');
+  const c = seeded();
+  // An anchor whose 2×2 block is free and touches a connected road.
+  const anchor = c.cells.map((_, i) => i).find(i => civicSiteReason(c, i, 'stadium') === null);
+  assert.notEqual(anchor, undefined, 'fixture has room for a stadium');
+  const parts = civicParcels(c, anchor!, 'stadium')!;
+  assert.deepEqual(civicFootprint('stadium'), [2, 2]); assert.equal(parts.length, 4); assert.equal(parts[0], anchor);
+  assert.deepEqual(parts.map(p => [p % SIZE - anchor! % SIZE, Math.floor(p / SIZE) - Math.floor(anchor! / SIZE)]), [[0, 0], [1, 0], [0, 1], [1, 1]], 'row by row from the top-left');
+  assert.equal(buildCivic(c, anchor!, 'stadium').ok, true);
+  const site = civicAt(c, anchor!)!; assert.deepEqual(civicCells(site), parts);
+  for (const part of parts) { assert.equal(civicAt(c, part), site, 'every parcel belongs to the site'); const before = serialize(c); assert.equal(buildPark(c, part).ok, false); assert.equal(zoneCell(c, part, 'R').ok, false); assert.equal(serialize(c), before); }
+  // Overlapping footprints are refused; the saved shape round-trips; removing any parcel removes the site.
+  assert.equal(buildCivic(c, parts[1], 'clinic').ok, false);
+  const saved = serialize(c); assert.equal(serialize(deserialize(saved)), saved);
+  assert.equal(bulldoze(c, parts[3]).ok, true); for (const part of parts) assert.equal(civicAt(c, part), undefined);
+  // The east edge of the map has no room for a second column.
+  const edge = SIZE - 1; assert.equal(civicParcels(c, edge, 'stadium'), null); assert.match(civicSiteReason(c, edge, 'stadium')!, /2×2/);
+});
+
+test('a one-parcel stadium from an older save still loads; a tampered footprint does not', () => {
+  const c = seeded(); const [cell] = sites(c);
+  assert.equal(buildCivic(c, cell, 'clinic').ok, true);
+  const save = JSON.parse(serialize(c)); save.civic.sites[0].kind = 'stadium';
+  const old = deserialize(JSON.stringify(save)); assert.equal(old.civic!.sites[0].cells, undefined); assert.equal(civicAt(old, cell)!.kind, 'stadium');
+  const bad = (edit: (s: any) => void, why: string) => { const copy = structuredClone(save); edit(copy); assert.throws(() => deserialize(JSON.stringify(copy)), /civic/, why); };
+  bad(s => { s.civic.sites[0].cells = [cell]; }, 'cells on a one-parcel shape');
+  bad(s => { s.civic.sites[0].cells = [cell, cell + 1, cell + 2, cell + 3]; }, 'not the 2×2 block');
+  bad(s => { s.civic.sites[0].kind = 'airport'; }, 'an airport is never one parcel');
+});
+
+test('an airport brings visitor income each month, more with each attraction, and none without its road', async () => {
+  const { cityAttractions, civicSiteReason } = await import('../src/sim.ts');
+  const { civicVisitorIncome, civicVisitorsReason } = await import('../src/civic/sites.ts');
+  assert.equal(civicVisitorIncome('airport', 0), 50_000); assert.equal(civicVisitorIncome('airport', 3), 140_000); assert.equal(civicVisitorIncome('clinic', 5), 0);
+  const c = seeded(MONTH + 5);
+  const anchor = c.cells.map((_, i) => i).find(i => civicSiteReason(c, i, 'airport') === null);
+  assert.notEqual(anchor, undefined, 'fixture has room and money for an airport');
+  assert.equal(buildCivic(c, anchor!, 'airport').ok, true);
+  const site = civicAt(c, anchor!)!; assert.equal(site.cells!.length, 6);
+  assert.deepEqual(homeAmenities(c, c.buildings.find(b => b.zone === 'R')!.cell).services!.airport, false, 'an airport adds no happiness');
+  const attractions = cityAttractions(c); assert.equal(attractions, c.parks.length);
+  while (c.tick % MONTH !== 0) step(c);
+  const income = c.ledger.filter(e => e.reason === civicVisitorsReason(site.id));
+  assert.deepEqual(income.map(e => [e.from, e.to, e.amount, e.tick]), [['outside', 'treasury', civicVisitorIncome('airport', cityAttractions(c)), c.tick]]);
+  deserialize(serialize(c));
 });

@@ -415,7 +415,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     const chips = el('p', 'happiness-services'); if (reach) chips.dataset.civicReach = CIVIC_KINDS.filter(kind => reach[kind]).join(',');
     const factor = (on: boolean, label: string, points: number, tone = on ? 'on' : 'off') => { const c = el('span', tone, `${on ? '✓' : '✗'} ${label}${on && points ? ` ${happinessPoints.format(points)}` : ''}`); chips.append(c); };
     factor(facts.parkNearby, 'สวน', 10); factor(facts.schoolNearby, 'โรงเรียน', 10);
-    if (reach) for (const kind of CIVIC_KINDS) factor(reach[kind], CIVIC[kind].label, CIVIC[kind].points);
+    if (reach) for (const kind of CIVIC_KINDS) if (CIVIC[kind].points) factor(reach[kind], CIVIC[kind].label, CIVIC[kind].points);
     const penalty = (label: string) => chips.append(el('span', 'bad', label));
     if (facts.unreachableWorkers) penalty(`ไปทำงานไม่ได้ ${facts.unreachableWorkers} คน`);
     else if (facts.commuteSeconds !== null && facts.commuteSeconds > 300) penalty('เดินทางเกิน 5 นาที −10');

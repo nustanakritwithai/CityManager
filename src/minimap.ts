@@ -9,8 +9,8 @@ import './minimap.css';
 import { SIZE, GATEWAY, type City } from './sim.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { buildingIssues } from './map-overlay.ts';
-import { CIVIC, civicAt, type CivicKind } from './civic/sites.ts';
-const CIVIC_FILL: Record<CivicKind, string> = { clinic: '#3fa372', police: '#2f5fae', fire: '#c8452f', library: '#8a6fc4', temple: '#d8a53a', stadium: '#4fb06a' };
+import { CIVIC, civicAt, civicCells, type CivicKind } from './civic/sites.ts';
+const CIVIC_FILL: Record<CivicKind, string> = { clinic: '#3fa372', police: '#2f5fae', fire: '#c8452f', library: '#8a6fc4', temple: '#d8a53a', stadium: '#4fb06a', airport: '#5d6b7c' };
 import { alertIssues } from './building-issues.ts';
 import { busCellNote, paintBusOverlay } from './bus/map-paint.ts';
 import { busMapRevision } from './bus/map-state.ts';
@@ -40,8 +40,8 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     }
   }
   // City services: a white-rimmed tile in the kind's colour, so coverage gaps read at a glance.
-  for (const site of city.civic?.sites ?? []) {
-    const {x,y} = point(site.cell), pad = Math.max(.5, cell * .08);
+  for (const site of city.civic?.sites ?? []) for (const part of civicCells(site)) {
+    const {x,y} = point(part), pad = Math.max(.5, cell * .08);
     ctx.fillStyle = '#fff'; ctx.fillRect(x + pad, y + pad, cell - pad * 2, cell - pad * 2);
     ctx.fillStyle = CIVIC_FILL[site.kind]; ctx.fillRect(x + pad * 2.5, y + pad * 2.5, cell - pad * 5, cell - pad * 5);
   }

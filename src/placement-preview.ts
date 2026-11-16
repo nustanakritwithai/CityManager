@@ -3,8 +3,8 @@
  * up-front checks in buildRoad / zoneCell / bulldoze (sim.ts) without mutating City;
  * tests compare every preview against the real action on a cloned city.
  */
-import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, campusSiteReason, civicSiteReason, campusAt, demolitionQuote, type City, type Zone } from './sim.ts';
-import { CIVIC, civicAt, isCivicKind } from './civic/sites.ts';
+import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, campusSiteReason, civicSiteReason, civicParcels, cityAttractions, campusAt, demolitionQuote, type City, type Zone } from './sim.ts';
+import { CIVIC, civicAt, civicSpec, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance as cellDistance } from './civic/reach.ts';
 import { EDUCATION_COST, educationPayroll } from './education.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
@@ -64,10 +64,12 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     return { ok: !reason, cost: reason ? 0 : PARK.cost, label: reason ?? `สวนสาธารณะ · ${credits(PARK.cost)} ฿ · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ${credits(PARK.upkeep)} ฿/เดือน`, cells: [{ cell: hover, ok: !reason }] };
   }
   if (isCivicKind(tool)) {
-    const spec = CIVIC[tool], reason = taxiHere ? 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อน' : civicSiteReason(city, hover, tool);
-    // Show who this site would reach: every home within the radius lights up with the parcel.
-    const reached = reason ? [] : city.buildings.filter(b => b.zone === 'R' && cellDistance(b.cell, hover) <= spec.radius).map(b => ({ cell: b.cell, ok: true }));
-    return { ok: !reason, cost: reason ? 0 : spec.cost, label: reason ?? `${spec.label} · ${credits(spec.cost)} ฿ · ถึง ${reached.length} บ้านในระยะ ${spec.radius} ช่อง · ความสุข +${spec.points} · บำรุง ${credits(spec.upkeep)} ฿/เดือน`, cells: [{ cell: hover, ok: !reason }, ...reached] };
+    const spec = civicSpec(tool), parts = civicParcels(city, hover, tool) ?? [hover];
+    const reason = taxiEnabled() && parts.some(part => sharedTaxiSession().at(part)) ? 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อน' : civicSiteReason(city, hover, tool);
+    // Show who this site would reach: every home within the radius of any of its parcels lights up with it.
+    const reached = reason || !spec.points ? [] : city.buildings.filter(b => b.zone === 'R' && parts.some(part => cellDistance(b.cell, part) <= spec.radius)).map(b => ({ cell: b.cell, ok: true }));
+    const effect = spec.visitors ? `นักท่องเที่ยวจ่าย ${credits(civicVisitorIncome(tool, cityAttractions(city)))} ฿/เดือน (มีสถานที่ท่องเที่ยว ${cityAttractions(city)} แห่ง)` : `ถึง ${reached.length} บ้านในระยะ ${spec.radius} ช่อง · ความสุข +${spec.points}`;
+    return { ok: !reason, cost: reason ? 0 : spec.cost, label: reason ?? `${spec.label} · ${credits(spec.cost)} ฿ · ${effect} · บำรุง ${credits(spec.upkeep)} ฿/เดือน`, cells: [...parts.map(cell => ({ cell, ok: !reason })), ...reached] };
   }
   if (tool === 'school' || tool === 'university') {
     const reason = taxiHere ? 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อน' : campusSiteReason(city, hover, tool);
