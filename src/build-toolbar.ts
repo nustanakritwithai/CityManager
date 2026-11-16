@@ -1,6 +1,7 @@
 import { ROAD_COST } from './sim.ts';
 import { PLANTS } from './utilities.ts';
 import { PARK } from './parks.ts';
+import { CIVIC } from './civic/sites.ts';
 import { EDUCATION_COST } from './education.ts';
 
 /** Match the established keyboard layout, not the visual order of grouped controls. */
@@ -19,6 +20,9 @@ export const BUILD_DETAILS: Readonly<Record<string, { label: string; price: stri
   power: { label: 'โรงไฟฟ้า', price: credits(PLANTS.power.cost), key: '5' },
   water: { label: 'โรงสูบน้ำ', price: credits(PLANTS.water.cost), key: '6' },
   park: { label: 'สวนสาธารณะ', price: credits(PARK.cost), key: '7' },
+  clinic: { label: CIVIC.clinic.label, price: credits(CIVIC.clinic.cost) },
+  police: { label: CIVIC.police.label, price: credits(CIVIC.police.cost) },
+  fire: { label: CIVIC.fire.label, price: credits(CIVIC.fire.cost) },
   school: { label: 'โรงเรียน', price: credits(EDUCATION_COST.school.build) },
   university: { label: 'มหาวิทยาลัย', price: credits(EDUCATION_COST.university.build) },
   bulldoze: { label: 'รื้อถอน', price: 'คืน 80% ของส่วนที่เมืองจ่าย · เอกชนค่ารื้อ 20', key: 'B' },

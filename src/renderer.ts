@@ -11,6 +11,7 @@ import { commercialVisualPlan } from './commercial-visuals.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
+import type { CivicKind } from './civic/sites.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
 import { CityAssets, disconnectedBuildingMaterial } from './asset-models.ts';
@@ -409,10 +410,12 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), services = utilityService(city, connected), online = services.online;
+    // One lookup table per refresh: a city without services pays nothing per parcel.
+    const civicByCell = city.civic?.sites.length ? new Map(city.civic.sites.map(site => [site.cell, site])) : undefined;
     const fadeLater: Entity[] = [];
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
@@ -432,7 +435,8 @@ export class CityView {
       const municipalPark = city.parks.find(p => p.cell === i), park = pocketPark(city, i), plant = city.plants.find(p => p.cell === i), plantOn = !!plant && online.has(plant.id);
       const campus = city.education?.campuses.find(item => item.cell === i);
       const stand = this.taxiDepots.find(d => d.cell === i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      const civic = civicByCell?.get(i);
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -481,6 +485,8 @@ export class CityView {
         this.campus(tile, campus.kind, campus.level);
       } else if (municipalPark) {
         this.municipalPark(tile);
+      } else if (civic) {
+        this.civic(tile, civic.kind);
       } else if (plant) {
         this.plant(tile, plant.kind, plantOn, plantLevel(plant));
       } else if (stand) {
@@ -594,6 +600,18 @@ export class CityView {
     this.box(tile, .6, 1.23, .65, .36, .25, .035, accent);
   }
   /** The complete garden stays inside one 2-unit tile, independently of roads. */
+  /** Clinic, police or fire station: one plain block in the kind's colour with a sign that reads from above. */
+  private civic(tile: Entity, kind: CivicKind) {
+    const [wall, trim] = { clinic: ['#eef1ec', '#3fa372'], police: ['#dfe6f2', '#2f5fae'], fire: ['#f1e3dc', '#c8452f'] }[kind];
+    this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#b9bcb4', false);
+    this.box(tile, -.1, .42, -.15, 1.25, .7, 1.05, wall);
+    this.box(tile, -.1, .8, -.15, 1.31, .08, 1.11, trim);
+    this.box(tile, -.1, .28, .39, .34, .42, .04, '#3b4658');
+    for (const x of [-.52, .32]) this.box(tile, x, .5, .39, .22, .2, .03, '#9ec3e6');
+    if (kind === 'clinic') { this.box(tile, -.1, .95, -.15, .5, .06, .16, trim); this.box(tile, -.1, .95, -.15, .16, .06, .5, trim); }
+    else if (kind === 'police') { this.box(tile, -.1, .95, -.15, .3, .16, .3, trim); this.box(tile, .62, .62, .6, .05, 1.1, .05, '#8b929c'); this.box(tile, .72, 1.08, .6, .22, .14, .02, trim); }
+    else { this.box(tile, .68, .7, -.5, .34, 1.3, .34, wall); this.box(tile, .68, 1.38, -.5, .4, .08, .4, trim); this.box(tile, -.32, .3, .39, .6, .46, .04, trim); }
+  }
   private municipalPark(tile: Entity) {
     this.box(tile, 0, .06, 0, 1.8, .08, 1.8, '#87a96b', false);
     this.box(tile, 0, .11, 0, .3, .025, 1.65, '#d4c7a5', false);

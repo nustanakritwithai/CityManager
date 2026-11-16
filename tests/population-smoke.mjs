@@ -160,7 +160,7 @@ async function household(h, source, city = fixture) {
   const happiness = await evaluate(`(()=>{const host=document.querySelector('#entity-content'),section=host.querySelector('[data-card-section="happiness"]');return {exists:!!section,direct:section?.parentElement===host,inDetails:!!section?.closest('details'),text:section?.innerText??''};})()`);
   assert.equal(happiness.exists,true); assert.equal(happiness.direct,true); assert.equal(happiness.inDetails,false);
   assert.ok(happiness.text.includes('ความสุขในพื้นที่'));
-  if (city.happiness) { const row = city.happiness.rows.find(r => r.householdId === h.id); assert.ok(happiness.text.includes(`${row.score} / 100`)); assert.ok(happiness.text.includes('เป้าหมายปัจจุบัน')); assert.ok(happiness.text.includes('สวนใกล้บ้าน:')); assert.ok(happiness.text.includes('โรงเรียนที่เปิดใกล้บ้าน:')); assert.ok(happiness.text.includes('ไม่ใช่ประวัติการเดินทางล้มเหลวจริง') && happiness.text.includes('ยังไม่หักรถโดยสารหรือรถไฟ') || happiness.text.includes('ยังไม่มีงานที่ได้รับมอบหมาย')); }
+  if (city.happiness) { const row = city.happiness.rows.find(r => r.householdId === h.id); assert.ok(happiness.text.includes(`${row.score} / 100`)); assert.ok(happiness.text.includes('เป้าหมายปัจจุบัน')); assert.ok(happiness.text.includes('สวนใกล้บ้าน:')); assert.ok(happiness.text.includes('โรงเรียนที่เปิดใกล้บ้าน:')); assert.ok(happiness.text.includes('แบบจำลองใช้แรงงานที่มีเส้นทางรถ 75%') && happiness.text.includes('ยังไม่ได้รวมรถโดยสารหรือรถไฟ') || happiness.text.includes('ยังไม่มีงานที่ได้รับมอบหมาย')); }
   else assert.ok(happiness.text.includes('ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง'));
 }
 async function home(city, b) {

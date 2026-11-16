@@ -119,6 +119,8 @@ export function reasonLabel(reason: string): string {
   if (refund) return `เงินคืน 80% จากการรื้อ${({park:'สวนสาธารณะ','power plant':'โรงไฟฟ้า','water pump':'โรงสูบน้ำ',school:'โรงเรียน',university:'มหาวิทยาลัย','road cell':'ถนนช่อง'} as Record<string,string>)[refund[1]]} #${refund[2]} (เฉพาะส่วนที่เมืองจ่าย)`;
   const roadCell = /^Build road cell @(\d+)$/.exec(reason);
   if (roadCell) return `สร้างถนนช่อง ${roadCell[1]}`;
+  const civic = /^(Build|Monthly) (clinic|police station|fire station)(?: upkeep)? #(\d+)$/.exec(reason);
+  if (civic) { const name = { clinic: 'สถานีอนามัย', 'police station': 'สถานีตำรวจ', 'fire station': 'สถานีดับเพลิง' }[civic[2] as 'clinic']; return civic[1] === 'Build' ? `สร้าง${name} #${civic[3]}` : `ค่าบำรุง${name} #${civic[3]} รายเดือน`; }
   const road = /^Build (\d+) road cells$/.exec(reason);
   if (road) return `สร้างถนน ${road[1]} ช่อง`;
   const purchase = /^Household #(\d+) purchase$/.exec(reason);
