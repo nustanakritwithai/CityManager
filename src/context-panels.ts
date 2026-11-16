@@ -1,4 +1,5 @@
-import { happinessTargets, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
+import { happinessTargets, homeAmenities, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
+import { CIVIC, CIVIC_KINDS } from './civic/sites.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { onExplicitActivation } from './explicit-activation.ts';
@@ -406,6 +407,13 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     detail.append(el('p', 'happiness-summary', `เป้าหมายปัจจุบัน ${facts.target} / 100 · ต่ำกว่า 30 มาแล้ว ${happiness.distressDays} / ${HAPPINESS_DEPARTURE_DAYS} วัน · คะแนนลดวันละไม่เกิน 1 และฟื้นวันละไม่เกิน 2`));
     detail.append(el('p', 'happiness-summary', `สวนใกล้บ้าน: ${facts.parkNearby ? 'มี' : 'ไม่มี'} · โรงเรียนที่เปิดใกล้บ้าน: ${facts.schoolNearby ? 'มี' : 'ไม่มี'} (ระยะแมนฮัตตันไม่เกิน 6 ช่องสำหรับสวน และ 8 ช่องสำหรับโรงเรียนที่มีที่เรียนเปิดจริง ไม่ใช่การนับครั้งที่เข้าใช้)`));
     detail.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน · ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · งานดูแลสวนใช้เส้นทางเดินเท้าได้เมื่อรถไป–กลับไม่ได้ · แบบจำลองใช้แรงงานที่มีเส้นทางรถ 75% คำนวณการจราจรชั่วโมงเร่งด่วน และยังไม่ได้รวมรถโดยสารหรือรถไฟ` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
+    // Which city services reach this home: one chip each, so a gap is a place to build.
+    const home = city.buildings.find(b => b.id === household.home), reach = home ? homeAmenities(city, home.cell).services : undefined;
+    if (reach) {
+      const services = el('p', 'happiness-services'); services.dataset.civicReach = CIVIC_KINDS.filter(kind => reach[kind]).join(',');
+      for (const kind of CIVIC_KINDS) services.append(el('span', reach[kind] ? 'on' : 'off', `${reach[kind] ? '✓' : '✗'} ${CIVIC[kind].label}${reach[kind] ? ` +${CIVIC[kind].points}` : ''}`));
+      detail.append(services);
+    }
     detail.append(el('p', 'cx-detail-note', 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
     detail.append(el('p', 'happiness-summary', `ผลต่อเป้าหมายจากภาษีค่าจ้าง ${happinessPoints.format(facts.wageTaxPoints)} คะแนน · ภาษีกำไรกิจการ ${happinessPoints.format(facts.profitTaxPoints)} คะแนน`));
     detail.append(el('p', 'happiness-summary', `แรงงานว่างงาน ${facts.unemployedWorkers} คน · ผลต่อเป้าหมายความสุข ${happinessPoints.format(-facts.unemploymentPoints)} คะแนน`));
