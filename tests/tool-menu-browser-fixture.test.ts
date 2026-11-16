@@ -42,9 +42,9 @@ test('both browser helpers seed original bytes and assert against the actual liv
   assert.match(selector, /const expected = deserialize\(loadedFixture\)/);
   assert.match(selector, /await load\(fixture\)/);
   assert.match(grouped, /raw = groupedToolFixture\(\), fixture = serialize\(loadedTrafficSession\(raw\)\.city\)/);
-  assert.equal((grouped.match(/await load\(raw\)/g) ?? []).length, 3);
+  assert.equal((grouped.match(/await load\(raw\)/g) ?? []).length, 4);
   assert.doesNotMatch(grouped, /await load\(fixture\)/);
-  assert.match(grouped, /const expected = deserialize\(fixture\)/);
+  assert.match(grouped, /let expected = deserialize\(fixture\)/);
 });
 
 const serviceTools = ['power', 'water', 'park', 'school', 'university'];

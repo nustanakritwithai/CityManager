@@ -7,6 +7,7 @@ import { homeAmenities } from '../src/resident-happiness.ts';
 const seeded = (days = 40) => { const c = createCity(61025); for (let i = 0; i < days; i++) step(c); return c; };
 /** Empty, unzoned parcels with connected road frontage, nearest the map start first. */
 const sites = (c: City) => c.cells.map((_, i) => i).filter(i => { const cell = c.cells[i]; return !cell.road && cell.zone === null && cell.building === null && access(c, i) && !c.parks.some(p => p.cell === i) && !c.plants.some(p => p.cell === i) && !c.education?.campuses.some(p => p.cell === i) && !civicAt(c, i); });
+const none = Object.fromEntries(CIVIC_KINDS.map(kind => [kind, false]));
 const distance = (a: number, b: number) => Math.abs(a % SIZE - b % SIZE) + Math.abs(Math.floor(a / SIZE) - Math.floor(b / SIZE));
 
 test('a city that never builds a service keeps a byte-identical save', () => {
@@ -71,17 +72,17 @@ test('covered homes gain each kind once; homes out of reach gain nothing', () =>
   const c = seeded();
   const [cell] = sites(c), home = c.buildings.filter(b => b.zone === 'R').sort((a, b) => distance(a.cell, cell) - distance(b.cell, cell))[0];
   const base = homeAmenities(c, home.cell);
-  assert.deepEqual(base.services, { clinic: false, police: false, fire: false });
+  assert.deepEqual(base.services, none);
   assert.equal(buildCivic(c, cell, 'clinic').ok, true);
   const inReach = distance(home.cell, cell) <= CIVIC.clinic.radius, after = homeAmenities(c, home.cell);
   assert.equal(after.services!.clinic, inReach); assert.equal(after.points, base.points + (inReach ? CIVIC.clinic.points : 0));
   // Pure coverage rule on a known layout: radius is inclusive, kinds do not stack with themselves.
   const host = { civic: { version: 1 as const, rules: 'civic-1' as const, sites: [{ id: 1, cell: 0, kind: 'clinic' as const, tick: 0 }, { id: 2, cell: 1, kind: 'clinic' as const, tick: 0 }, { id: 3, cell: 0, kind: 'fire' as const, tick: 0 }] } };
   const line = (a: number, b: number) => Math.abs(a - b);
-  assert.deepEqual(civicCoverage(host, CIVIC.clinic.radius, line), { clinic: true, police: false, fire: true });
+  assert.deepEqual(civicCoverage(host, CIVIC.clinic.radius, line), { ...none, clinic: true, fire: true });
   assert.equal(civicPoints(civicCoverage(host, CIVIC.clinic.radius, line)), CIVIC.clinic.points + CIVIC.fire.points);
-  assert.deepEqual(civicCoverage(host, CIVIC.fire.radius + 2, line), { clinic: false, police: false, fire: false });
-  assert.deepEqual(civicCoverage({}, 0, line), { clinic: false, police: false, fire: false });
+  assert.deepEqual(civicCoverage(host, CIVIC.fire.radius + 2, line), none);
+  assert.deepEqual(civicCoverage({}, 0, line), none);
 });
 
 test('a malformed civic section is rejected on load', () => {
@@ -101,4 +102,7 @@ test('ledger reasons read in Thai in the panels', async () => {
   assert.equal(reasonLabel(civicBuildReason('police', 12)), 'สร้างสถานีตำรวจ #12');
   assert.equal(reasonLabel(civicUpkeepReason('clinic', 7)), 'ค่าบำรุงสถานีอนามัย #7 รายเดือน');
   assert.equal(reasonLabel(civicUpkeepReason('fire', 3)), 'ค่าบำรุงสถานีดับเพลิง #3 รายเดือน');
+  assert.equal(reasonLabel(civicBuildReason('stadium', 40)), 'สร้างสนามฟุตบอล #40');
+  assert.equal(reasonLabel(civicUpkeepReason('temple', 41)), 'ค่าบำรุงวัด #41 รายเดือน');
+  assert.equal(reasonLabel('Build park #5'), 'สร้างสวนสาธารณะ #5', 'other Build reasons keep their own labels');
 });

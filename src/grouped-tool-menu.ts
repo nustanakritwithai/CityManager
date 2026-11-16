@@ -4,6 +4,7 @@ import { installToolMenu } from './tool-menu.ts';
 const services = [
   ['power', 'ไฟฟ้า'], ['water', 'ประปา'], ['park', 'สวน'],
   ['clinic', 'อนามัย'], ['police', 'ตำรวจ'], ['fire', 'ดับเพลิง'],
+  ['library', 'ห้องสมุด'], ['temple', 'วัด'], ['stadium', 'สนามบอล'],
   ['school', 'โรงเรียน'], ['university', 'มหาวิทยาลัย'],
 ] as const;
 
