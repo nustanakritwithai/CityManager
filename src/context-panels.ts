@@ -404,20 +404,34 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
   if (happiness) {
     const facts = happinessTargets(city).get(household.id)!;
     const detail = section('ความสุขในพื้นที่', `${happiness.score} / 100`); detail.classList.add('bc-happiness-source');
-    detail.append(el('p', 'happiness-summary', `เป้าหมายปัจจุบัน ${facts.target} / 100 · ต่ำกว่า 30 มาแล้ว ${happiness.distressDays} / ${HAPPINESS_DEPARTURE_DAYS} วัน · คะแนนลดวันละไม่เกิน 1 และฟื้นวันละไม่เกิน 2`));
-    detail.append(el('p', 'happiness-summary', `สวนใกล้บ้าน: ${facts.parkNearby ? 'มี' : 'ไม่มี'} · โรงเรียนที่เปิดใกล้บ้าน: ${facts.schoolNearby ? 'มี' : 'ไม่มี'} (ระยะแมนฮัตตันไม่เกิน 6 ช่องสำหรับสวน และ 8 ช่องสำหรับโรงเรียนที่มีที่เรียนเปิดจริง ไม่ใช่การนับครั้งที่เข้าใช้)`));
-    detail.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน · ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · งานดูแลสวนใช้เส้นทางเดินเท้าได้เมื่อรถไป–กลับไม่ได้ · แบบจำลองใช้แรงงานที่มีเส้นทางรถ 75% คำนวณการจราจรชั่วโมงเร่งด่วน และยังไม่ได้รวมรถโดยสารหรือรถไฟ` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
-    // Which city services reach this home: one chip each, so a gap is a place to build.
+    // Score against target as one bar, then one chip per thing that moves the target. The full wording folds away.
+    const meter = el('div', 'happiness-meter'); meter.dataset.score = String(happiness.score); meter.dataset.target = String(facts.target);
+    meter.style.setProperty('--score', String(happiness.score)); meter.style.setProperty('--target', String(facts.target));
+    meter.setAttribute('role', 'img'); meter.setAttribute('aria-label', `ความสุข ${happiness.score} จาก 100 เป้าหมาย ${facts.target}`);
+    meter.append(el('i', 'fill'), el('i', 'mark'));
+    const trend = happiness.score < facts.target ? 'กำลังเพิ่มขึ้น' : happiness.score > facts.target ? 'กำลังลดลง' : 'คงที่';
+    detail.append(meter, el('p', 'happiness-line', `เป้าหมายปัจจุบัน ${facts.target} · ${trend}${happiness.distressDays ? ` · ต่ำกว่า 30 มาแล้ว ${happiness.distressDays}/${HAPPINESS_DEPARTURE_DAYS} วัน` : ''}`));
     const home = city.buildings.find(b => b.id === household.home), reach = home ? homeAmenities(city, home.cell).services : undefined;
-    if (reach) {
-      const services = el('p', 'happiness-services'); services.dataset.civicReach = CIVIC_KINDS.filter(kind => reach[kind]).join(',');
-      for (const kind of CIVIC_KINDS) services.append(el('span', reach[kind] ? 'on' : 'off', `${reach[kind] ? '✓' : '✗'} ${CIVIC[kind].label}${reach[kind] ? ` +${CIVIC[kind].points}` : ''}`));
-      detail.append(services);
-    }
-    detail.append(el('p', 'cx-detail-note', 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
-    detail.append(el('p', 'happiness-summary', `ผลต่อเป้าหมายจากภาษีค่าจ้าง ${happinessPoints.format(facts.wageTaxPoints)} คะแนน · ภาษีกำไรกิจการ ${happinessPoints.format(facts.profitTaxPoints)} คะแนน`));
-    detail.append(el('p', 'happiness-summary', `แรงงานว่างงาน ${facts.unemployedWorkers} คน · ผลต่อเป้าหมายความสุข ${happinessPoints.format(-facts.unemploymentPoints)} คะแนน`));
-    detail.append(el('p', 'cx-detail-note', household.origin === 'legacy-v1' ? 'ครัวเรือนจากเมืองรุ่นเดิมได้รับการคุ้มครองจากการย้ายออก' : city.firms.some(f => f.owner?.householdId === household.id) ? 'เจ้าของกิจการได้รับการคุ้มครองจากการย้ายออก' : 'ถ้าคะแนนต่ำกว่า 30 ต่อเนื่องครบ 30 วัน อาจย้ายออกเมื่อสิ้นเดือน โดยมีเพดานจำนวนย้ายออกและจำนวนครัวเรือนขั้นต่ำ'));
+    const chips = el('p', 'happiness-services'); if (reach) chips.dataset.civicReach = CIVIC_KINDS.filter(kind => reach[kind]).join(',');
+    const factor = (on: boolean, label: string, points: number, tone = on ? 'on' : 'off') => { const c = el('span', tone, `${on ? '✓' : '✗'} ${label}${on && points ? ` ${happinessPoints.format(points)}` : ''}`); chips.append(c); };
+    factor(facts.parkNearby, 'สวน', 10); factor(facts.schoolNearby, 'โรงเรียน', 10);
+    if (reach) for (const kind of CIVIC_KINDS) factor(reach[kind], CIVIC[kind].label, CIVIC[kind].points);
+    const penalty = (label: string) => chips.append(el('span', 'bad', label));
+    if (facts.unreachableWorkers) penalty(`ไปทำงานไม่ได้ ${facts.unreachableWorkers} คน`);
+    else if (facts.commuteSeconds !== null && facts.commuteSeconds > 300) penalty('เดินทางเกิน 5 นาที −10');
+    if (facts.delaySeconds !== null && facts.delaySeconds >= 10) penalty(`รถติด ${Math.round(facts.delaySeconds)} วินาที`);
+    if (facts.unemployedWorkers) penalty(`ว่างงาน ${facts.unemployedWorkers} คน ${happinessPoints.format(-facts.unemploymentPoints)}`);
+    const tax = facts.wageTaxPoints + facts.profitTaxPoints; if (tax) chips.append(el('span', tax > 0 ? 'on' : 'bad', `ภาษี ${happinessPoints.format(tax)}`));
+    detail.append(chips);
+    const more = el('details', 'happiness-more'); more.append(el('summary', '', 'ที่มาของคะแนน'));
+    more.append(el('p', 'happiness-summary', `เป้าหมายปัจจุบัน ${facts.target} / 100 · ต่ำกว่า 30 มาแล้ว ${happiness.distressDays} / ${HAPPINESS_DEPARTURE_DAYS} วัน · คะแนนลดวันละไม่เกิน 1 และฟื้นวันละไม่เกิน 2`));
+    more.append(el('p', 'happiness-summary', `สวนใกล้บ้าน: ${facts.parkNearby ? 'มี' : 'ไม่มี'} · โรงเรียนที่เปิดใกล้บ้าน: ${facts.schoolNearby ? 'มี' : 'ไม่มี'} (ระยะแมนฮัตตันไม่เกิน 6 ช่องสำหรับสวน และ 8 ช่องสำหรับโรงเรียนที่มีที่เรียนเปิดจริง ไม่ใช่การนับครั้งที่เข้าใช้)`));
+    more.append(el('p', 'happiness-summary', facts.workers ? `แบบจำลองเส้นทางทำงานของแรงงาน ${facts.workers} คน · ${facts.unreachableWorkers} คนไม่มีเส้นทางไป–กลับ · เวลาเฉลี่ยทางที่ช้ากว่าประมาณ ${facts.commuteSeconds === null ? 'ไม่มีเส้นทาง' : `${Math.round(facts.commuteSeconds / 60 * 10) / 10} นาที`} · เวลาล่าช้าจากความหนาแน่นประมาณ ${facts.delaySeconds === null ? 'ไม่มีข้อมูล' : `${Math.round(facts.delaySeconds)} วินาที`} · งานดูแลสวนใช้เส้นทางเดินเท้าได้เมื่อรถไป–กลับไม่ได้ · แบบจำลองใช้แรงงานที่มีเส้นทางรถ 75% คำนวณการจราจรชั่วโมงเร่งด่วน และยังไม่ได้รวมรถโดยสารหรือรถไฟ` : 'ยังไม่มีงานที่ได้รับมอบหมายให้ประมาณเส้นทางเดินทาง'));
+    more.append(el('p', 'happiness-summary', 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
+    more.append(el('p', 'happiness-summary', `ผลต่อเป้าหมายจากภาษีค่าจ้าง ${happinessPoints.format(facts.wageTaxPoints)} คะแนน · ภาษีกำไรกิจการ ${happinessPoints.format(facts.profitTaxPoints)} คะแนน`));
+    more.append(el('p', 'happiness-summary', `แรงงานว่างงาน ${facts.unemployedWorkers} คน · ผลต่อเป้าหมายความสุข ${happinessPoints.format(-facts.unemploymentPoints)} คะแนน`));
+    more.append(el('p', 'happiness-summary', household.origin === 'legacy-v1' ? 'ครัวเรือนจากเมืองรุ่นเดิมได้รับการคุ้มครองจากการย้ายออก' : city.firms.some(f => f.owner?.householdId === household.id) ? 'เจ้าของกิจการได้รับการคุ้มครองจากการย้ายออก' : 'ถ้าคะแนนต่ำกว่า 30 ต่อเนื่องครบ 30 วัน อาจย้ายออกเมื่อสิ้นเดือน โดยมีเพดานจำนวนย้ายออกและจำนวนครัวเรือนขั้นต่ำ'));
+    detail.append(more);
     output.push(detail);
   } else { const detail=section('ความสุขในพื้นที่'); detail.classList.add('bc-happiness-source'); detail.append(el('p', 'happiness-summary', 'ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง')); output.push(detail); }
   if (city.education) { const person = peopleOf(city.education, household.id); const studying = person.school + person.university; const reserved = studying + person.teacher + person.professor; output.push(el('p', 'cx-detail-note', `ผู้เรียน ${studying} คน · วุฒิพื้นฐาน ${person.basic} · วุฒิขั้นสูง ${person.higher} · แรงงานที่ถูกกันไว้เรียนหรือสอน ${reserved} คน · เป็นจำนวนรวม ไม่มีรายชื่อรายบุคคล และไม่นับผู้พึ่งพิงเป็นนักเรียน`)); }
