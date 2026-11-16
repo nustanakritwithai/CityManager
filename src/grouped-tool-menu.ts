@@ -5,6 +5,7 @@ const services = [
   ['power', 'ไฟฟ้า'], ['water', 'ประปา'], ['park', 'สวน'],
   ['clinic', 'อนามัย'], ['police', 'ตำรวจ'], ['fire', 'ดับเพลิง'],
   ['library', 'ห้องสมุด'], ['temple', 'วัด'], ['stadium', 'สนามบอล'], ['airport', 'สนามบิน'],
+  ['hospital', 'โรงพยาบาล'], ['museum', 'พิพิธภัณฑ์'], ['amusement', 'สวนสนุก'],
   ['school', 'โรงเรียน'], ['university', 'มหาวิทยาลัย'],
 ] as const;
 

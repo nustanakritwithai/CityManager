@@ -157,3 +157,13 @@ test('an airport brings visitor income each month, more with each attraction, an
   assert.deepEqual(income.map(e => [e.from, e.to, e.amount, e.tick]), [['outside', 'treasury', civicVisitorIncome('airport', cityAttractions(c)), c.tick]]);
   deserialize(serialize(c));
 });
+
+test('services and places together add at most the cap', async () => {
+  const { CIVIC_POINTS_CAP, CIVIC_ATTRACTIONS } = await import('../src/civic/sites.ts');
+  const all = Object.fromEntries(CIVIC_KINDS.map(kind => [kind, true])) as Record<(typeof CIVIC_KINDS)[number], boolean>;
+  const uncapped = CIVIC_KINDS.reduce((n, kind) => n + CIVIC[kind].points, 0);
+  assert.ok(uncapped > CIVIC_POINTS_CAP, 'the cap matters once every kind is in reach');
+  assert.equal(civicPoints(all), CIVIC_POINTS_CAP);
+  assert.equal(civicPoints({ ...none, clinic: true, museum: true } as typeof all), CIVIC.clinic.points + CIVIC.museum.points, 'below the cap nothing is lost');
+  assert.deepEqual([...CIVIC_ATTRACTIONS], ['library', 'temple', 'stadium', 'museum', 'amusement']);
+});

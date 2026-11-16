@@ -410,7 +410,7 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), services = utilityService(city, connected), online = services.online;
@@ -639,7 +639,17 @@ export class CityView {
       this.box(tile, 0, 1.24, 0, .08, .3, .08, '#d8a53a');
       return;
     }
-    const [wall, trim] = { clinic: ['#eef1ec', '#3fa372'], police: ['#dfe6f2', '#2f5fae'], fire: ['#f1e3dc', '#c8452f'], library: ['#ece6f4', '#8a6fc4'] }[kind];
+    if (kind === 'amusement') {
+      // Ferris wheel on an A-frame, a striped tent and a ticket booth.
+      this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#c9d7a8', false);
+      for (const x of [-.62, -.18]) this.box(tile, x, .5, -.4, .05, .9, .05, '#8b929c');
+      this.box(tile, -.4, .95, -.4, .5, .05, .05, '#8b929c');
+      for (const [x, y] of [[-.4, 1.32], [-.4, .58], [-.77, .95], [-.03, .95], [-.66, 1.21], [-.14, 1.21], [-.66, .69], [-.14, .69]]) this.box(tile, x, y, -.4, .13, .13, .1, ['#e07bb5', '#f3c46b', '#5aa9e6', '#7bd389'][Math.round((x + y) * 10) & 3]);
+      this.box(tile, .45, .3, .35, .7, .4, .7, '#f4efe4'); this.box(tile, .45, .58, .35, .78, .16, .78, '#c8452f'); this.box(tile, .45, .74, .35, .46, .14, .46, '#f3c46b'); this.box(tile, .45, .9, .35, .16, .16, .16, '#c8452f');
+      this.box(tile, -.5, .22, .5, .3, .28, .3, '#5aa9e6');
+      return;
+    }
+    const [wall, trim] = { clinic: ['#eef1ec', '#3fa372'], police: ['#dfe6f2', '#2f5fae'], fire: ['#f1e3dc', '#c8452f'], library: ['#ece6f4', '#8a6fc4'], hospital: ['#f6f7f9', '#d9534f'], museum: ['#eef2ee', '#2f8f8a'] }[kind];
     this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#b9bcb4', false);
     this.box(tile, -.1, .42, -.15, 1.25, .7, 1.05, wall);
     this.box(tile, -.1, .8, -.15, 1.31, .08, 1.11, trim);
@@ -647,6 +657,8 @@ export class CityView {
     for (const x of [-.52, .32]) this.box(tile, x, .5, .39, .22, .2, .03, '#9ec3e6');
     if (kind === 'clinic') { this.box(tile, -.1, .95, -.15, .5, .06, .16, trim); this.box(tile, -.1, .95, -.15, .16, .06, .5, trim); }
     else if (kind === 'police') { this.box(tile, -.1, .95, -.15, .3, .16, .3, trim); this.box(tile, .62, .62, .6, .05, 1.1, .05, '#8b929c'); this.box(tile, .72, 1.08, .6, .22, .14, .02, trim); }
+    else if (kind === 'hospital') { this.box(tile, .5, .62, -.5, .5, 1.1, .5, wall); this.box(tile, .5, 1.2, -.5, .56, .06, .56, trim); this.box(tile, -.3, .95, -.15, .46, .06, .14, trim); this.box(tile, -.3, .95, -.15, .14, .06, .46, trim); }
+    else if (kind === 'museum') { for (const x of [-.56, -.33, -.1, .13, .36]) this.box(tile, x, .42, .42, .07, .7, .07, '#f7f9f7'); this.box(tile, -.1, .92, .3, 1.1, .16, .3, trim); this.box(tile, -.1, 1.04, .3, .6, .1, .2, trim); }
     else if (kind === 'fire') { this.box(tile, .68, .7, -.5, .34, 1.3, .34, wall); this.box(tile, .68, 1.38, -.5, .4, .08, .4, trim); this.box(tile, -.32, .3, .39, .6, .46, .04, trim); }
     else { for (const x of [-.56, -.26, .06, .36]) this.box(tile, x, .42, .42, .08, .7, .08, '#f7f4fb'); this.box(tile, -.1, .9, -.15, .9, .12, .7, trim); }
   }

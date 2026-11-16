@@ -5,7 +5,7 @@
  * can depend on it without a cycle. Stored only in the optional `city.civic` save section: a city that
  * never builds one keeps a byte-identical save.
  */
-export const CIVIC_KINDS = ['clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport'] as const;
+export const CIVIC_KINDS = ['clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement'] as const;
 export type CivicKind = typeof CIVIC_KINDS[number];
 /** `cell` is the top-left parcel. `cells` lists the whole footprint, top-left first, and is present only on sites larger than one parcel. */
 export type CivicSite = { id: number; cell: number; kind: CivicKind; tick: number; cells?: number[] };
@@ -25,15 +25,18 @@ export const CIVIC = Object.freeze({
   temple: Object.freeze({ label: 'วัด', cost: 200_000, upkeep: 3_000, radius: 7, points: 5 }),
   stadium: Object.freeze({ label: 'สนามฟุตบอล', cost: 800_000, upkeep: 20_000, radius: 12, points: 8, footprint: [2, 2] as const }),
   airport: Object.freeze({ label: 'สนามบิน', cost: 2_000_000, upkeep: 50_000, radius: 0, points: 0, footprint: [3, 2] as const, visitors: Object.freeze({ base: 50_000, perAttraction: 30_000 }) }),
+  hospital: Object.freeze({ label: 'โรงพยาบาล', cost: 1_200_000, upkeep: 30_000, radius: 14, points: 8, footprint: [2, 2] as const }),
+  museum: Object.freeze({ label: 'พิพิธภัณฑ์', cost: 400_000, upkeep: 8_000, radius: 8, points: 4 }),
+  amusement: Object.freeze({ label: 'สวนสนุก', cost: 1_000_000, upkeep: 25_000, radius: 12, points: 7, footprint: [2, 2] as const }),
 } satisfies Record<CivicKind, CivicSpec>);
 export const MAX_CIVIC_SITES = 20;
 /** Ledger reasons stay English like every other journal reason; panels translate them. */
-export const CIVIC_REASON_NAMES: Record<CivicKind, string> = { clinic: 'clinic', police: 'police station', fire: 'fire station', library: 'library', temple: 'temple', stadium: 'football stadium', airport: 'airport' };
+export const CIVIC_REASON_NAMES: Record<CivicKind, string> = { clinic: 'clinic', police: 'police station', fire: 'fire station', library: 'library', temple: 'temple', stadium: 'football stadium', airport: 'airport', hospital: 'hospital', museum: 'museum', amusement: 'amusement park' };
 export const civicBuildReason = (kind: CivicKind, id: number) => `Build ${CIVIC_REASON_NAMES[kind]} #${id}`;
 export const civicUpkeepReason = (kind: CivicKind, id: number) => `Monthly ${CIVIC_REASON_NAMES[kind]} upkeep #${id}`;
 export const civicVisitorsReason = (id: number) => `Airport visitors #${id}`;
 /** Kinds visitors come for; parks count too, and the caller adds them. */
-export const CIVIC_ATTRACTIONS: readonly CivicKind[] = ['library', 'temple', 'stadium'];
+export const CIVIC_ATTRACTIONS: readonly CivicKind[] = ['library', 'temple', 'stadium', 'museum', 'amusement'];
 export const civicSpec = (kind: CivicKind): CivicSpec => CIVIC[kind];
 export const civicFootprint = (kind: CivicKind): readonly [number, number] => civicSpec(kind).footprint ?? [1, 1];
 /** Every parcel a site stands on. */
@@ -52,7 +55,9 @@ export function civicCoverage(c: Host, cell: number, distance: (a: number, b: nu
   for (const site of c.civic?.sites ?? []) if (!covered[site.kind] && civicSpec(site.kind).points > 0 && civicCells(site).some(part => distance(cell, part) <= civicSpec(site.kind).radius)) covered[site.kind] = true;
   return covered;
 }
-export const civicPoints = (covered: Record<CivicKind, boolean>) => CIVIC_KINDS.reduce((n, kind) => n + (covered[kind] ? CIVIC[kind].points : 0), 0);
+/** Services and places together add at most this much to a home's target, so a city cannot buy full happiness with buildings alone. */
+export const CIVIC_POINTS_CAP = 30;
+export const civicPoints = (covered: Record<CivicKind, boolean>) => Math.min(CIVIC_POINTS_CAP, CIVIC_KINDS.reduce((n, kind) => n + (covered[kind] ? CIVIC[kind].points : 0), 0));
 
 /** Facts the validator needs from the city, supplied by sim.ts (keeps this module City-free). */
 export type CivicValidationView = {
