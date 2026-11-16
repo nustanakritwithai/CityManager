@@ -104,8 +104,8 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
   await key('v');
   let expected = deserialize(fixture); let index = 5;
   for (const [id, tools] of groups) for (const tool of tools) {
-    // One fixture cannot pay for every tool or seat them all beside its road: start a fresh one when the next would not fit.
-    if (!place(deserialize(serialize(expected)), tool, cell(index, 13)).ok) { await load(raw); await close(); await key('v'); assert.equal(await state(), fixture); expected = deserialize(fixture); index = 5; }
+    // One fixture cannot pay for every tool, and only columns 5–16 of the row are on screen at the desktop viewport: start a fresh one when the next would not fit.
+    if (index > 16 || !place(deserialize(serialize(expected)), tool, cell(index, 13)).ok) { await load(raw); await close(); await key('v'); assert.equal(await state(), fixture); expected = deserialize(fixture); index = 5; }
     const before = await state(), at = cell(index++, 13); await button(`[data-tool="${tool}"]`); assert.equal(await open(id), false); assert.equal(await selected(tool), true); assert.equal(await state(), before); await assertAnchorLabel(id);
     assert.equal(await evaluate(`document.querySelector('#${id}-tool').dataset.activeTool`), tool); assert.match(await evaluate(`document.querySelector('#${id}-tool').getAttribute('aria-label')`), /กำลังทำงาน/);
     assert.equal(place(expected, tool, at).ok, true); await tapCell(at); assert.equal(await state(), serialize(expected), `Unchanged ${tool} placement, accounting and constraints`);
