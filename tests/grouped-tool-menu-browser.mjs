@@ -126,8 +126,10 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
         assert.ok((scrollLeft-layout.scrollLeft)*deltaX<0, 'Native horizontal swipe scrolls the bounded row in its intended direction');
         assert.equal(await evaluate(`document.querySelector('#${id}-submenu').scrollTop`),0,'Horizontal swipe never scrolls vertically'); assert.equal(await selected('select'),true,'Menu scroll never arms an item'); assert.equal(await state(),fixture);
       }
+      // A swipe can leave the row gliding; a tap that lands mid-glide only stops it. Wait until the row is still.
+      for (let last = -1, n = 0; n < 60; n++) { const now = await evaluate(`document.querySelector('#${id}-submenu').scrollLeft`); if (now === last) break; last = now; await paints(); await paints(); }
       // The helper scrolls the actual last option and verifies elementFromPoint before its native tap.
-      await button(`[data-tool="${tools.at(-1)}"]`); assert.equal(await open(id), false); assert.equal(await selected(tools.at(-1)), true); assert.equal(await state(), fixture); await assertAnchorLabel(id); await key('v');
+      await button(`[data-tool="${tools.at(-1)}"]`); assert.equal(await open(id), false, `${name} ${id}: tapping the last option closes the row: ${JSON.stringify(await evaluate(`(()=>{const m=document.querySelector('#${id}-submenu'),b=document.querySelector('[data-tool="${tools.at(-1)}"]'),r=b.getBoundingClientRect();return{scrollLeft:m.scrollLeft,scroll:m.scrollWidth,client:m.clientWidth,pressed:b.getAttribute('aria-pressed'),button:[r.x,r.y,r.width,r.height],active:document.querySelector('#${id}-tool').dataset.activeTool,width:innerWidth}})()`))}`); assert.equal(await selected(tools.at(-1)), true); assert.equal(await state(), fixture); await assertAnchorLabel(id); await key('v');
     }
     await button('#services-tool'); const start=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`);
     const point = await evaluate(`(${findCanvasDragStart.toString()})(innerWidth,innerHeight,(x,y)=>document.elementFromPoint(x,y)?.id==='city-canvas')`);
