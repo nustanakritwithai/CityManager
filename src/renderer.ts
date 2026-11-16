@@ -410,7 +410,7 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), services = utilityService(city, connected), online = services.online;
@@ -600,9 +600,29 @@ export class CityView {
     this.box(tile, .6, 1.23, .65, .36, .25, .035, accent);
   }
   /** The complete garden stays inside one 2-unit tile, independently of roads. */
-  /** Clinic, police or fire station: one plain block in the kind's colour with a sign that reads from above. */
+  /** A city service or place: one small set piece per kind, in its own colour, that reads from above. */
   private civic(tile: Entity, kind: CivicKind) {
-    const [wall, trim] = { clinic: ['#eef1ec', '#3fa372'], police: ['#dfe6f2', '#2f5fae'], fire: ['#f1e3dc', '#c8452f'] }[kind];
+    if (kind === 'stadium') {
+      // Pitch with two stands and floodlight masts.
+      this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#9aa19a', false);
+      this.box(tile, 0, .1, 0, 1.2, .04, .78, '#4fb06a', false);
+      this.box(tile, 0, .125, 0, .02, .005, .78, '#f2f5ee', false);
+      for (const z of [-.66, .66]) { this.box(tile, 0, .22, z, 1.5, .26, .24, '#d9dde3'); this.box(tile, 0, .4, z * 1.08, 1.5, .1, .12, '#c8452f'); }
+      for (const [x, z] of [[-.8, -.8], [.8, -.8], [-.8, .8], [.8, .8]]) { this.box(tile, x, .55, z, .05, 1, .05, '#8b929c'); this.box(tile, x, 1.08, z, .2, .1, .08, '#f6f1c7'); }
+      return;
+    }
+    if (kind === 'temple') {
+      // Stepped base, hall and a stacked gold roof.
+      this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#c9b78f', false);
+      this.box(tile, 0, .16, 0, 1.3, .14, 1, '#efe6d2');
+      this.box(tile, 0, .46, 0, 1, .48, .72, '#f4efe4');
+      this.box(tile, 0, .76, 0, 1.2, .1, .9, '#b5452b');
+      this.box(tile, 0, .9, 0, .9, .12, .62, '#d8a53a');
+      this.box(tile, 0, 1.04, 0, .5, .14, .34, '#b5452b');
+      this.box(tile, 0, 1.24, 0, .08, .3, .08, '#d8a53a');
+      return;
+    }
+    const [wall, trim] = { clinic: ['#eef1ec', '#3fa372'], police: ['#dfe6f2', '#2f5fae'], fire: ['#f1e3dc', '#c8452f'], library: ['#ece6f4', '#8a6fc4'] }[kind];
     this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#b9bcb4', false);
     this.box(tile, -.1, .42, -.15, 1.25, .7, 1.05, wall);
     this.box(tile, -.1, .8, -.15, 1.31, .08, 1.11, trim);
@@ -610,7 +630,8 @@ export class CityView {
     for (const x of [-.52, .32]) this.box(tile, x, .5, .39, .22, .2, .03, '#9ec3e6');
     if (kind === 'clinic') { this.box(tile, -.1, .95, -.15, .5, .06, .16, trim); this.box(tile, -.1, .95, -.15, .16, .06, .5, trim); }
     else if (kind === 'police') { this.box(tile, -.1, .95, -.15, .3, .16, .3, trim); this.box(tile, .62, .62, .6, .05, 1.1, .05, '#8b929c'); this.box(tile, .72, 1.08, .6, .22, .14, .02, trim); }
-    else { this.box(tile, .68, .7, -.5, .34, 1.3, .34, wall); this.box(tile, .68, 1.38, -.5, .4, .08, .4, trim); this.box(tile, -.32, .3, .39, .6, .46, .04, trim); }
+    else if (kind === 'fire') { this.box(tile, .68, .7, -.5, .34, 1.3, .34, wall); this.box(tile, .68, 1.38, -.5, .4, .08, .4, trim); this.box(tile, -.32, .3, .39, .6, .46, .04, trim); }
+    else { for (const x of [-.56, -.26, .06, .36]) this.box(tile, x, .42, .42, .08, .7, .08, '#f7f4fb'); this.box(tile, -.1, .9, -.15, .9, .12, .7, trim); }
   }
   private municipalPark(tile: Entity) {
     this.box(tile, 0, .06, 0, 1.8, .08, 1.8, '#87a96b', false);

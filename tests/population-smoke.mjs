@@ -181,7 +181,8 @@ async function layout() {
 }
 
 try {
-  let tabs; for (let n = 0; n < 100; n++) { try { tabs = await (await fetch('http://127.0.0.1:9349/json/list')).json(); break; } catch { await sleep(100); } }
+  // A cold runner can take well over 10 s to open the debugging port and its first page target: wait for the page, up to 30 s.
+  let tabs; for (let n = 0; n < 300; n++) { try { tabs = await (await fetch('http://127.0.0.1:9349/json/list')).json(); if (tabs.some(t => t.type === 'page')) break; } catch { /* not listening yet */ } await sleep(100); }
   assert.ok(tabs?.some(t => t.type === 'page')); ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
   ws.onmessage = event => {
     const m = JSON.parse(event.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(Error(JSON.stringify(m.error))) : p.resolve(m.result); }

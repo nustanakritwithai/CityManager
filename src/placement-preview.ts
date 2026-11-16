@@ -4,7 +4,7 @@
  * tests compare every preview against the real action on a cloned city.
  */
 import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, campusSiteReason, civicSiteReason, campusAt, demolitionQuote, type City, type Zone } from './sim.ts';
-import { CIVIC, civicAt } from './civic/sites.ts';
+import { CIVIC, civicAt, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance as cellDistance } from './civic/reach.ts';
 import { EDUCATION_COST, educationPayroll } from './education.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
@@ -63,7 +63,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
       : treasury < PARK.cost ? 'เงินคลังไม่พอ' : null;
     return { ok: !reason, cost: reason ? 0 : PARK.cost, label: reason ?? `สวนสาธารณะ · ${credits(PARK.cost)} ฿ · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ${credits(PARK.upkeep)} ฿/เดือน`, cells: [{ cell: hover, ok: !reason }] };
   }
-  if (tool === 'clinic' || tool === 'police' || tool === 'fire') {
+  if (isCivicKind(tool)) {
     const spec = CIVIC[tool], reason = taxiHere ? 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อน' : civicSiteReason(city, hover, tool);
     // Show who this site would reach: every home within the radius lights up with the parcel.
     const reached = reason ? [] : city.buildings.filter(b => b.zone === 'R' && cellDistance(b.cell, hover) <= spec.radius).map(b => ({ cell: b.cell, ok: true }));

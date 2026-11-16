@@ -4,11 +4,11 @@ import { createCity, buildRoad, buildPlant, buildPark, buildCampus, buildCivic, 
 import { selectorKeyEvents, selectorTouchEmulation, findCanvasDragStart } from './select-menu-browser.mjs';
 import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
-const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'school', 'university']]];
+const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'school', 'university']]];
 const cell = (x, y) => y * SIZE + x;
 export function groupedToolFixture() { const city = createCity(61025, { starter: false }); assert.equal(buildRoad(city, GATEWAY, cell(18, 12)).ok, true); return serialize(city); }
 function place(city, tool, index) {
-  return ['power', 'water'].includes(tool) ? buildPlant(city, index, tool) : tool === 'park' ? buildPark(city, index) : ['clinic', 'police', 'fire'].includes(tool) ? buildCivic(city, index, tool) : ['school', 'university'].includes(tool) ? buildCampus(city, index, tool) : zoneCell(city, index, tool);
+  return ['power', 'water'].includes(tool) ? buildPlant(city, index, tool) : tool === 'park' ? buildPark(city, index) : ['clinic', 'police', 'fire', 'library', 'temple', 'stadium'].includes(tool) ? buildCivic(city, index, tool) : ['school', 'university'].includes(tool) ? buildCampus(city, index, tool) : zoneCell(city, index, tool);
 }
 // Preserve #107's native Enter/character events; extend only the group's navigation and numeric keys.
 export const groupedKeyEvents = value => selectorKeyEvents(value).map(event => ({ ...event,
@@ -81,7 +81,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     await button(selector); assert.deepEqual(await evaluate('[...document.querySelectorAll(".tool-submenu")].filter(m=>!m.hidden).map(m=>m.id)'), [`${id}-submenu`]); assert.equal(await state(), fixture);
   }
   await key('Escape'); await key('v');
-  checks.push('Exactly twelve controls sit in two ordered groups; read-only toggles and all four tool menus exclude one another');
+  checks.push('Exactly fifteen controls sit in two ordered groups; read-only toggles and all four tool menus exclude one another');
 
   // A dismissal tap must not inherit demolition armed before opening a group.
   for (const [id] of groups) {
@@ -102,14 +102,16 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     await button(`#${id}-tool`); await button('#cancel-tool'); assert.equal(await selected(tool), true, 'Cancel dismisses an open group before cancelling its existing placement mode'); assert.equal(await state(), fixture);
   }
   await key('v');
-  const expected = deserialize(fixture); let index = 5;
+  let expected = deserialize(fixture); let index = 5;
   for (const [id, tools] of groups) for (const tool of tools) {
+    // One fixture cannot pay for every tool, and only columns 5–16 of the row are on screen at the desktop viewport: start a fresh one when the next would not fit.
+    if (index > 16 || !place(deserialize(serialize(expected)), tool, cell(index, 13)).ok) { await load(raw); await close(); await key('v'); assert.equal(await state(), fixture); expected = deserialize(fixture); index = 5; }
     const before = await state(), at = cell(index++, 13); await button(`[data-tool="${tool}"]`); assert.equal(await open(id), false); assert.equal(await selected(tool), true); assert.equal(await state(), before); await assertAnchorLabel(id);
     assert.equal(await evaluate(`document.querySelector('#${id}-tool').dataset.activeTool`), tool); assert.match(await evaluate(`document.querySelector('#${id}-tool').getAttribute('aria-label')`), /กำลังทำงาน/);
     assert.equal(place(expected, tool, at).ok, true); await tapCell(at); assert.equal(await state(), serialize(expected), `Unchanged ${tool} placement, accounting and constraints`);
   }
   await load(raw); await close(); await key('v');
-  checks.push('Shortcuts1–7, active anchor icon/name and all twelve placement commands retain exact city snapshots and accounting');
+  checks.push('Shortcuts1–7, active anchor icon/name and all fifteen placement commands retain exact city snapshots and accounting');
 
   for (const [name, width, height, screenWidth] of [['mobile',390,844,390], ['small',320,568,320], ['landscape',844,390,844], ['short-landscape',640,240,640], ['touch-desktop-mode',980,780,390]]) {
     await viewport(width, height, true, screenWidth); await key('v');
@@ -124,8 +126,10 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
         assert.ok((scrollLeft-layout.scrollLeft)*deltaX<0, 'Native horizontal swipe scrolls the bounded row in its intended direction');
         assert.equal(await evaluate(`document.querySelector('#${id}-submenu').scrollTop`),0,'Horizontal swipe never scrolls vertically'); assert.equal(await selected('select'),true,'Menu scroll never arms an item'); assert.equal(await state(),fixture);
       }
+      // A swipe can leave the row gliding; a tap that lands mid-glide only stops it. Wait until the row is still.
+      for (let last = -1, n = 0; n < 60; n++) { const now = await evaluate(`document.querySelector('#${id}-submenu').scrollLeft`); if (now === last) break; last = now; await paints(); await paints(); }
       // The helper scrolls the actual last option and verifies elementFromPoint before its native tap.
-      await button(`[data-tool="${tools.at(-1)}"]`); assert.equal(await open(id), false); assert.equal(await selected(tools.at(-1)), true); assert.equal(await state(), fixture); await assertAnchorLabel(id); await key('v');
+      await button(`[data-tool="${tools.at(-1)}"]`); assert.equal(await open(id), false, `${name} ${id}: tapping the last option closes the row: ${JSON.stringify(await evaluate(`(()=>{const m=document.querySelector('#${id}-submenu'),b=document.querySelector('[data-tool="${tools.at(-1)}"]'),r=b.getBoundingClientRect();return{scrollLeft:m.scrollLeft,scroll:m.scrollWidth,client:m.clientWidth,pressed:b.getAttribute('aria-pressed'),button:[r.x,r.y,r.width,r.height],active:document.querySelector('#${id}-tool').dataset.activeTool,width:innerWidth}})()`))}`); assert.equal(await selected(tools.at(-1)), true); assert.equal(await state(), fixture); await assertAnchorLabel(id); await key('v');
     }
     await button('#services-tool'); const start=await evaluate(`window.cityManager.cellScreen(${cell(10,12)})`);
     const point = await evaluate(`(${findCanvasDragStart.toString()})(innerWidth,innerHeight,(x,y)=>document.elementFromPoint(x,y)?.id==='city-canvas')`);

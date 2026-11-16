@@ -10,7 +10,7 @@ import { SIZE, GATEWAY, type City } from './sim.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { CIVIC, civicAt, type CivicKind } from './civic/sites.ts';
-const CIVIC_FILL: Record<CivicKind, string> = { clinic: '#3fa372', police: '#2f5fae', fire: '#c8452f' };
+const CIVIC_FILL: Record<CivicKind, string> = { clinic: '#3fa372', police: '#2f5fae', fire: '#c8452f', library: '#8a6fc4', temple: '#d8a53a', stadium: '#4fb06a' };
 import { alertIssues } from './building-issues.ts';
 import { busCellNote, paintBusOverlay } from './bus/map-paint.ts';
 import { busMapRevision } from './bus/map-state.ts';

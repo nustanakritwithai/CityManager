@@ -45,7 +45,7 @@ import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildCivic, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
-import { CIVIC, CIVIC_KINDS, civicAt, civicUpkeepReason } from './civic/sites.ts';
+import { CIVIC, CIVIC_KINDS, civicAt, civicUpkeepReason, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
@@ -170,7 +170,7 @@ function syncEducationTools() {
     if (button) button.hidden = !on;
   }
 }
-const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', clinic: 'สถานีอนามัย', police: 'สถานีตำรวจ', fire: 'สถานีดับเพลิง', school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
+const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, CIVIC[kind].label])), school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
 const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
@@ -294,7 +294,7 @@ async function activate(index: number) {
   } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
   else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
   else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
-  else if (tool === 'clinic' || tool === 'police' || tool === 'fire') status(resultSound(buildCivic(city, index, tool), 'ui-place').message);
+  else if (isCivicKind(tool)) status(resultSound(buildCivic(city, index, tool), 'ui-place').message);
   else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
   else if (tool === 'bulldoze') {
     busLock = true;
