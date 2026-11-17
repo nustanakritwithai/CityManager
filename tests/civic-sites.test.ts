@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, buildCivic, civicSiteReason, buildPark, buildPlant, buildRoad, zoneCell, bulldoze, access, treasurySpendable, MONTH, SIZE, type City } from '../src/sim.ts';
-import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCoverage, civicPoints, civicUpkeepReason } from '../src/civic/sites.ts';
+import { createCity, step, serialize, deserialize, buildCivic, civicSiteReason, buildPark, buildPlant, buildRoad, zoneCell, bulldoze, access, treasurySpendable, householdWorkerCount, venueEmploymentForHousehold, MONTH, SIZE, type City } from '../src/sim.ts';
+const serializeRaw = (c: City) => JSON.stringify(c);
+import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCoverage, civicPoints, civicUpkeepReason, civicFeeReason, civicPayroll, civicWageReason, civicWorkers } from '../src/civic/sites.ts';
 import { homeAmenities } from '../src/resident-happiness.ts';
 
 const seeded = (days = 40) => { const c = createCity(61025); for (let i = 0; i < days; i++) step(c); return c; };
@@ -165,5 +166,63 @@ test('services and places together add at most the cap', async () => {
   assert.ok(uncapped > CIVIC_POINTS_CAP, 'the cap matters once every kind is in reach');
   assert.equal(civicPoints(all), CIVIC_POINTS_CAP);
   assert.equal(civicPoints({ ...none, clinic: true, museum: true } as typeof all), CIVIC.clinic.points + CIVIC.museum.points, 'below the cap nothing is lost');
-  assert.deepEqual([...CIVIC_ATTRACTIONS], ['library', 'temple', 'stadium', 'museum', 'amusement']);
+  assert.deepEqual([...CIVIC_ATTRACTIONS], ['library', 'temple', 'stadium', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert']);
+});
+
+const VENUES = CIVIC_KINDS.filter(kind => CIVIC[kind].staff);
+/** A venue next to homes in a city with spare labour, stepped day by day with a save round trip each day. */
+function venueCity(kind: (typeof VENUES)[number], days: number) {
+  const c = seeded(60), home = c.buildings.find(b => b.zone === 'R')!.cell;
+  // The starter city is fully employed; closing its factories and farms leaves residents looking for work.
+  for (const b of c.buildings.filter(b => b.zone === 'I' || b.zone === 'F')) assert.equal(bulldoze(c, b.cell).ok, true);
+  const cell = c.cells.map((_, i) => i).filter(i => civicSiteReason(c, i, kind) === null).sort((a, b) => distance(a, home) - distance(b, home))[0];
+  assert.equal(buildCivic(c, cell, kind).ok, true);
+  const site = () => civicAt(c, cell)!;
+  for (let i = 0; i < days; i++) { step(c); const saved = serialize(c); assert.equal(serialize(deserialize(saved)), saved, `day ${i}`); }
+  return { c, site, cell };
+}
+
+test('a venue hires residents, pays them monthly from the treasury and withholds wage tax', () => {
+  const { c, site } = venueCity('cinema', MONTH + 2), staff = CIVIC.cinema.staff!, id = site().id;
+  const wages = c.ledger.filter(e => e.reason === civicWageReason('cinema', id));
+  assert.ok(wages.length > 0, 'wages were paid at month end');
+  for (const e of wages) { assert.equal(e.from, 'treasury'); assert.match(e.to, /^household:\d+$/); assert.equal(e.amount % staff.dailyWage, 0); assert.equal(e.tick % MONTH, 0); }
+  assert.ok(wages.reduce((n, e) => n + e.amount, 0) <= staff.slots * MONTH * staff.dailyWage);
+  assert.ok(civicWorkers(site()) <= staff.slots); // firms hire first, so the venue may be short-staffed again by now
+  for (const a of site().staffing!.allocations) {
+    const h = c.households.find(h => h.id === a.householdId)!;
+    assert.ok(householdWorkerCount(c, h.id) <= h.workforce, 'a worker holds one job');
+  }
+  assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0, 'money is conserved');
+});
+
+test('households in reach pay the fee from their own wallet, one venue a day, within what the staff can serve', () => {
+  const { c, site } = venueCity('restaurant', 12), staff = CIVIC.restaurant.staff!, reason = civicFeeReason('restaurant', site().id);
+  const visits = c.ledger.filter(e => e.reason === reason);
+  assert.ok(visits.length > 0, 'somebody visited');
+  for (const e of visits) { assert.match(e.from, /^household:\d+$/); assert.equal(e.to, 'treasury'); assert.equal(e.amount, staff.fee); }
+  const perDay = new Map<number, string[]>(); for (const e of visits) perDay.set(e.tick, [...perDay.get(e.tick) ?? [], e.from]);
+  for (const [, wallets] of perDay) { assert.ok(wallets.length <= staff.slots * staff.visitsPerWorker); assert.equal(new Set(wallets).size, wallets.length, 'one visit per household per day'); }
+});
+
+test('a venue gives happiness only while someone works there, and removing it pays what was earned', () => {
+  const { c, site, cell } = venueCity('nightmarket', 5);
+  const home = c.buildings.find(b => b.zone === 'R' && distance(b.cell, cell) <= CIVIC.nightmarket.radius)!.cell;
+  assert.equal(civicCoverage(c, home, distance).nightmarket, true);
+  const staffing = site().staffing!, kept = staffing.allocations; staffing.allocations = [];
+  assert.equal(civicCoverage(c, home, distance).nightmarket, false, 'closed without staff');
+  staffing.allocations = kept;
+  const owed = civicPayroll(site()), id = site().id; assert.ok(owed > 0);
+  const entries = c.ledger.length; assert.equal(bulldoze(c, cell).ok, true);
+  assert.equal(c.ledger.slice(entries).filter(e => e.reason === civicWageReason('nightmarket', id)).reduce((n, e) => n + e.amount, 0), owed);
+  assert.equal(c.households.some(h => venueEmploymentForHousehold(c, h.id).length > 0), false);
+  const saved = serialize(c); assert.equal(serialize(deserialize(saved)), saved);
+});
+
+test('venue staffing in a save is checked: unknown households, too many workers and staffing on other kinds are refused', () => {
+  const { c, site } = venueCity('cinema', 3), bad = (mutate: (d: City) => void, why: string) => { const d = deserialize(serialize(c)); mutate(d); assert.throws(() => deserialize(JSON.stringify(JSON.parse(serializeRaw(d)))), undefined, why); };
+  const at = (d: City) => d.civic!.sites.find(s => s.id === site().id)!;
+  bad(d => { at(d).staffing!.allocations.push({ householdId: 999_999, skill: 'general', workers: 1 }); }, 'unknown household');
+  bad(d => { at(d).staffing!.allocations[0].workers = 99; }, 'too many workers');
+  bad(d => { (at(d) as { kind: string }).kind = 'clinic'; }, 'staffing on a kind without staff');
 });

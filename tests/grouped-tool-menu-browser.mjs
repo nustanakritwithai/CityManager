@@ -4,7 +4,7 @@ import { createCity, buildRoad, buildPlant, buildPark, buildCampus, buildCivic, 
 import { selectorKeyEvents, selectorTouchEmulation, findCanvasDragStart } from './select-menu-browser.mjs';
 import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
-const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'school', 'university']]];
+const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert', 'school', 'university']]];
 const cell = (x, y) => y * SIZE + x;
 export function groupedToolFixture() { const city = createCity(61025, { starter: false }); assert.equal(buildRoad(city, GATEWAY, cell(18, 12)).ok, true); return serialize(city); }
 function place(city, tool, index) {
@@ -81,7 +81,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     await button(selector); assert.deepEqual(await evaluate('[...document.querySelectorAll(".tool-submenu")].filter(m=>!m.hidden).map(m=>m.id)'), [`${id}-submenu`]); assert.equal(await state(), fixture);
   }
   await key('Escape'); await key('v');
-  checks.push('Exactly nineteen controls sit in two ordered groups; read-only toggles and all four tool menus exclude one another');
+  checks.push('Exactly twenty-three controls sit in two ordered groups; read-only toggles and all four tool menus exclude one another');
 
   // A dismissal tap must not inherit demolition armed before opening a group.
   for (const [id] of groups) {
@@ -111,7 +111,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     assert.equal(place(expected, tool, at).ok, true); await tapCell(at); assert.equal(await state(), serialize(expected), `Unchanged ${tool} placement, accounting and constraints`);
   }
   await load(raw); await close(); await key('v');
-  checks.push('Shortcuts1–7, active anchor icon/name and all nineteen placement commands retain exact city snapshots and accounting');
+  checks.push('Shortcuts1–7, active anchor icon/name and all twenty-three placement commands retain exact city snapshots and accounting');
 
   for (const [name, width, height, screenWidth] of [['mobile',390,844,390], ['small',320,568,320], ['landscape',844,390,844], ['short-landscape',640,240,640], ['touch-desktop-mode',980,780,390]]) {
     await viewport(width, height, true, screenWidth); await key('v');

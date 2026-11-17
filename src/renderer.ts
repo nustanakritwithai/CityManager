@@ -410,7 +410,7 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), services = utilityService(city, connected), online = services.online;
@@ -649,7 +649,28 @@ export class CityView {
       this.box(tile, -.5, .22, .5, .3, .28, .3, '#5aa9e6');
       return;
     }
-    const [wall, trim] = { clinic: ['#eef1ec', '#3fa372'], police: ['#dfe6f2', '#2f5fae'], fire: ['#f1e3dc', '#c8452f'], library: ['#ece6f4', '#8a6fc4'], hospital: ['#f6f7f9', '#d9534f'], museum: ['#eef2ee', '#2f8f8a'] }[kind];
+    if (kind === 'nightmarket') {
+      // Rows of small stalls under coloured awnings with a string of lamps.
+      this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#8d8a84', false);
+      for (const [n, [x, z]] of [[-.55, -.5], [0, -.5], [.55, -.5], [-.55, .45], [0, .45], [.55, .45]].entries()) {
+        this.box(tile, x, .22, z, .36, .26, .3, '#f4efe4'); this.box(tile, x, .42, z, .44, .08, .4, ['#c2569b', '#f3c46b', '#5aa9e6', '#e08a3c', '#7bd389', '#c8452f'][n]);
+      }
+      for (const x of [-.8, .8]) this.box(tile, x, .45, 0, .04, .8, .04, '#5b6068');
+      this.box(tile, 0, .84, 0, 1.6, .02, .02, '#5b6068');
+      for (const x of [-.6, -.3, 0, .3, .6]) this.box(tile, x, .78, 0, .07, .07, .07, '#ffe9a3');
+      return;
+    }
+    if (kind === 'concert') {
+      // Open ground with a roofed stage, speaker stacks and a lighting truss.
+      this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#a9b59a', false);
+      this.box(tile, 0, .2, -.55, 1.3, .22, .5, '#3a3f4a');
+      for (const x of [-.62, .62]) { this.box(tile, x, .62, -.55, .06, .9, .06, '#8b929c'); this.box(tile, x * 1.25, .36, -.4, .2, .5, .2, '#22262d'); }
+      this.box(tile, 0, 1.08, -.55, 1.4, .08, .6, '#3f6fd8');
+      for (const x of [-.4, 0, .4]) this.box(tile, x, 1, -.3, .1, .08, .08, ['#f3c46b', '#e07bb5', '#7bd389'][Math.round(x * 2.5) + 1]);
+      for (const [x, z] of [[-.5, .2], [-.15, .35], [.2, .2], [.5, .4], [-.3, .6], [.1, .65]]) this.box(tile, x, .16, z, .08, .16, .08, '#e9eef5');
+      return;
+    }
+    const [wall, trim] = { clinic: ['#eef1ec', '#3fa372'], police: ['#dfe6f2', '#2f5fae'], fire: ['#f1e3dc', '#c8452f'], library: ['#ece6f4', '#8a6fc4'], hospital: ['#f6f7f9', '#d9534f'], museum: ['#eef2ee', '#2f8f8a'], cinema: ['#ece8f6', '#7a4fd0'], restaurant: ['#f6ecdf', '#e08a3c'] }[kind];
     this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#b9bcb4', false);
     this.box(tile, -.1, .42, -.15, 1.25, .7, 1.05, wall);
     this.box(tile, -.1, .8, -.15, 1.31, .08, 1.11, trim);
@@ -658,6 +679,8 @@ export class CityView {
     if (kind === 'clinic') { this.box(tile, -.1, .95, -.15, .5, .06, .16, trim); this.box(tile, -.1, .95, -.15, .16, .06, .5, trim); }
     else if (kind === 'police') { this.box(tile, -.1, .95, -.15, .3, .16, .3, trim); this.box(tile, .62, .62, .6, .05, 1.1, .05, '#8b929c'); this.box(tile, .72, 1.08, .6, .22, .14, .02, trim); }
     else if (kind === 'hospital') { this.box(tile, .5, .62, -.5, .5, 1.1, .5, wall); this.box(tile, .5, 1.2, -.5, .56, .06, .56, trim); this.box(tile, -.3, .95, -.15, .46, .06, .14, trim); this.box(tile, -.3, .95, -.15, .14, .06, .46, trim); }
+    else if (kind === 'cinema') { this.box(tile, -.1, 1.02, .2, .9, .34, .1, '#22262d'); this.box(tile, -.1, 1.02, .26, .78, .24, .02, '#ffe9a3'); this.box(tile, -.1, .6, .44, .7, .1, .16, trim); }
+    else if (kind === 'restaurant') { this.box(tile, -.1, .62, .5, 1.2, .06, .3, trim); for (const x of [.6, .78]) { this.box(tile, x, .2, .55, .12, .2, .12, '#f4efe4'); this.box(tile, x, .38, .55, .22, .04, .22, trim); } this.box(tile, .3, 1, -.4, .14, .4, .14, '#8b929c'); }
     else if (kind === 'museum') { for (const x of [-.56, -.33, -.1, .13, .36]) this.box(tile, x, .42, .42, .07, .7, .07, '#f7f9f7'); this.box(tile, -.1, .92, .3, 1.1, .16, .3, trim); this.box(tile, -.1, 1.04, .3, .6, .1, .2, trim); }
     else if (kind === 'fire') { this.box(tile, .68, .7, -.5, .34, 1.3, .34, wall); this.box(tile, .68, 1.38, -.5, .4, .08, .4, trim); this.box(tile, -.32, .3, .39, .6, .46, .04, trim); }
     else { for (const x of [-.56, -.26, .06, .36]) this.box(tile, x, .42, .42, .08, .7, .08, '#f7f4fb'); this.box(tile, -.1, .9, -.15, .9, .12, .7, trim); }

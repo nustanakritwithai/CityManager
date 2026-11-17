@@ -31,6 +31,8 @@ export function prepareCommuteEstimates(city: City) {
   for (const a of city.employment) add(a.householdId, firms.get(a.firmId), a.workers);
   for (const a of city.ownerLabor) add(a.householdId, firms.get(a.firmId), a.workers);
   for (const park of city.parks) for (const a of park.staffing?.allocations ?? []) add(a.householdId, parks.get(a.parkId), a.workers, true);
+  // Venue staff (cinema, restaurant and the like) travel like park staff.
+  for (const site of city.civic?.sites ?? []) for (const a of site.staffing?.allocations ?? []) add(a.householdId, site.cell, a.workers, true);
   for (const person of city.education?.people ?? []) if (person.campusId !== null) add(person.householdId, campuses.get(person.campusId), person.teacher + person.professor);
   if (!jobs.length) return {all:[] as CommuteEstimate[], estimates:new Map<number,CommuteEstimate>(), atHome:(_householdId:number,_homeCell:number):CommuteEstimate|undefined=>undefined, moved:(_householdId:number,_homeCell:number):void=>{}};
   const net = buildNetwork(city), freeTimes = linkTimes(net, new Map());
