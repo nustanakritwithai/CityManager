@@ -113,8 +113,10 @@ test('no-park cities keep accounting and owner distributions deterministic throu
   // The only intended financial difference in this scenario is the three new service
   // bills; normalize their explicit amounts back out before comparing all state
   // except journals/checkpoint metadata, which have their own assertions below.
+  // Seed 61025's hash was updated when arrivals and weekly moves began to prefer higher land value: compared against
+  // main 57fac26 over the same 119 days, only household.home (and the excluded happiness rows) differ.
   const expected = new Map([
-    [61025, { owner: 'household:4', amounts: [36420, 72720, 99690], hash: 'b3505b6cf2dea837b1a3dfa6387f1eaff28173e2e88094f39f5e7d02d0420c8b' }],
+    [61025, { owner: 'household:4', amounts: [36420, 72720, 99690], hash: '0d7c5d2bf5f0fb6b06869fbc8e3c1e24c7854104a500788280f13b570deb961c' }],
     [20261023, { owner: 'household:2', amounts: [29310, 72720, 99570], hash: '1123995a145285345413c1a955f1a6872d10205324d25e46fa99faf28311cf4a' }],
   ]);
   for (const historicalSoil of [true, false]) for (const seed of [61025, 20261023]) {

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   buildRoad, createCity, deserialize, explainMigration, homeOccupancy, housingCapacity,
   HOUSING_RELOCATION_INTERVAL, HOUSING_RELOCATION_LIMIT, moveHousehold, rebalanceHousing,
-  serialize, step, utilities, GATEWAY, SIZE, type City,
+  serialize, step, utilities, landValues, GATEWAY, SIZE, type City,
 } from '../src/sim.ts';
 
 function concentrated() {
@@ -27,17 +27,24 @@ function validOccupancy(city: City) {
   }
 }
 
+// One new cottage stands in a factory's air: lower land value than the tower, so nobody is sent there.
+const polluted = (city: City, homes: City['buildings']) => homes.slice(1).filter(home => landValues(city)(home.cell) < landValues(city)(homes[0].cell));
+
 test('weekly review fills several new homes from the old tower without changing people, jobs, money or IDs', () => {
-  const { city, homes, source } = concentrated(), before = structuredClone(city);
-  assert.equal(rebalanceHousing(city), HOUSING_RELOCATION_LIMIT);
-  assert.equal(homeOccupancy(city, source.id).households, 2);
-  assert.ok(homes.slice(1).every(home => homeOccupancy(city, home.id).households === 1));
+  const { city, homes, source } = concentrated(), before = structuredClone(city), dirty = polluted(city, homes);
+  assert.equal(dirty.length, 1, 'the fixture has exactly one cottage in polluted air');
+  const clean = homes.slice(1).filter(home => !dirty.includes(home));
+  assert.equal(rebalanceHousing(city), clean.length);
+  assert.equal(homeOccupancy(city, source.id).households, 6 - clean.length);
+  assert.ok(clean.every(home => homeOccupancy(city, home.id).households === 1));
+  assert.equal(homeOccupancy(city, dirty[0].id).households, 0, 'nobody moves into worse land');
   assert.deepEqual(withoutAddresses(city), withoutAddresses(before));
   validOccupancy(city); assert.deepEqual(deserialize(serialize(city)), city);
 });
 
 test('balanced homes do not swap their last household or oscillate through repeated weekly reviews', () => {
-  const { city } = concentrated(); rebalanceHousing(city);
+  // The first week fills the clean cottages; the second evens out the tower against an equally valued cottage.
+  const { city } = concentrated(); rebalanceHousing(city); city.tick += HOUSING_RELOCATION_INTERVAL; assert.equal(rebalanceHousing(city), 1);
   const addresses = city.households.map(h => [h.id, h.home]);
   for (let n = 0; n < 104; n++) {
     city.tick += HOUSING_RELOCATION_INTERVAL;

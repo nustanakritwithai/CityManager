@@ -14,6 +14,7 @@ import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, val
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
 import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
+import { landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
@@ -1414,7 +1415,8 @@ export function rebalanceHousing(c: City): number {
   let commute: ReturnType<typeof prepareCommuteEstimates> | undefined;
   // Strictly better nearby amenities permit a single household to move; the
   // older occupancy rule may only move to an equally good or better location.
-  const quality = new Map(homes.map(home => [home.id, homeAmenities(c, home.cell).points]));
+  // Land value already weighs what is in reach against the pollution on the parcel.
+  const worth = landValues(c), quality = new Map(homes.map(home => [home.id, worth(home.cell)]));
   const sources = [...homes].sort((a, b) => (occupied.get(b.id)?.households ?? 0) - (occupied.get(a.id)?.households ?? 0) || a.cell - b.cell || a.id - b.id);
   const candidates = homes.flatMap(destination => sources.filter(source =>
     source.id !== destination.id && ((quality.get(destination.id)! >= quality.get(source.id)! + 10) ||
@@ -1437,8 +1439,9 @@ export function rebalanceHousing(c: City): number {
     if (!h) continue;
     commute ??= prepareCommuteEstimates(c);
     // Jobs and taxes follow the household to either address. Compare location effects alone.
-    const current = happinessTarget(homeAmenities(c, source.cell), commute.estimates.get(h.id));
-    const proposed = happinessTarget(homeAmenities(c, destination.cell), commute.atHome(h.id, destination.cell));
+    const air = pollutionReader(c);
+    const current = happinessTarget(homeAmenities(c, source.cell), commute.estimates.get(h.id), 0, 0, pollutionHappinessPoints(air(source.cell)));
+    const proposed = happinessTarget(homeAmenities(c, destination.cell), commute.atHome(h.id, destination.cell), 0, 0, pollutionHappinessPoints(air(destination.cell)));
     if (proposed < current || !moveHousehold(c, h.id, destination.id).ok) continue;
     // Earlier moves change modeled link loads. Update the reusable graph before the next decision.
     commute.moved(h.id, destination.cell);
@@ -1514,6 +1517,11 @@ export function explainMigration(c: City, buildingId: number): string[] {
   reasons.push(`สิ้นเดือน: แรงงานเฉพาะทางที่สายงานเดิมไม่มีตำแหน่งว่างแต่อีกสายมี จะเปลี่ยนเป็นแรงงานทั่วไป ครัวเรือนที่ไม่มีงานได้ค่าจ้างเลย ${DEPARTURE_MONTHS} เดือนจะย้ายออกพร้อมเงินออม (เจ้าของร้านและผู้มาใหม่ไม่ย้าย เมืองเหลืออย่างน้อย ${DEPARTURE_FLOOR} ครัวเรือน)`);
   return reasons;
 }
+/** A cached reader for land value on this city as it stands now. */
+export function landValues(c: City): (cell: number) => number {
+  const air = pollutionReader(c), seen = new Map<number, number>();
+  return cell => { let v = seen.get(cell); if (v === undefined) { v = landValue(homeAmenities(c, cell).points, access(c, cell), air(cell)); seen.set(cell, v); } return v; };
+}
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
   // A severely unhappy city does not immediately replace every departure.
@@ -1524,7 +1532,9 @@ function admitHousehold(c: City) {
   if (!facts.bootstrap && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
   const { members, workforce, workerSkills, affordable } = arrivalProfile(c, facts);
   if (!affordable) return;
-  const svc = utilities(c), home = vacantHomes(c).find(b => canAccommodate(housingCapacity(b), homeOccupancy(c, b.id), members) && homeSupplied(c, b, svc));
+  // A new household takes the best land it fits into; ties keep the usual order.
+  const svc = utilities(c), worth = landValues(c), fitting = vacantHomes(c).filter(b => canAccommodate(housingCapacity(b), homeOccupancy(c, b.id), members) && homeSupplied(c, b, svc));
+  const home = fitting.reduce<Building | undefined>((best, b) => !best || worth(b.cell) > worth(best.cell) ? b : best, undefined);
   if (!home) return;
   const id = c.nextId, wallet = `household:${id}`;
   // Outside is an explicit source. No existing family wallet or earned claim is duplicated.

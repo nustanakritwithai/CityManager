@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, buildPark, serialize, deserialize, type City } from '../src/sim.ts';
+import { createCity, step, buildPark, serialize, deserialize, landValues, access, type City } from '../src/sim.ts';
 import { POLLUTION, POLLUTION_HAPPINESS_CAP, landValue, pollutionAt, pollutionHappinessPoints, pollutionMap, pollutionReader } from '../src/environment.ts';
-import { happinessTarget, happinessTargets } from '../src/resident-happiness.ts';
+import { happinessTarget, happinessTargets, homeAmenities } from '../src/resident-happiness.ts';
 import { mapOverlay, TOOL_OVERLAY } from '../src/map-overlay.ts';
 import { expandedCellCoordinate } from '../src/expanded-map-grid.ts';
 
@@ -59,4 +59,9 @@ test('the park tool shows pollution and service tools show land value; both laye
   assert.ok(pollution.cells.length > 0 && pollution.legend.length === 3);
   assert.ok(land.cells.length > 0 && land.legend.length === 3);
   assert.ok(pollution.cells.every(cell => !c.cells[cell.cell].road));
+});
+
+test('the land value reader agrees with the formula for every parcel it is asked about', () => {
+  const c = grown(), read = landValues(c), air = pollutionReader(c);
+  for (const cell of [0, ...c.buildings.map(b => b.cell)]) assert.equal(read(cell), landValue(homeAmenities(c, cell).points, access(c, cell), air(cell)));
 });
