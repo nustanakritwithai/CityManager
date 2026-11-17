@@ -1,4 +1,4 @@
-import { access, MONTH, parkEmploymentForHousehold, summary, housingCapacity, homeOccupancy, industryGrowthStatus, utilityStatus, utilityUpgradeBlocks } from './sim.ts';
+import { access, MONTH, parkEmploymentForHousehold, venueEmploymentForHousehold, summary, housingCapacity, homeOccupancy, industryGrowthStatus, utilityStatus, utilityUpgradeBlocks } from './sim.ts';
 import type { Building, City, Firm, Household } from './sim.ts';
 import type { EmploymentAllocation, WorkerSkill } from './labor.ts';
 import { flowRows } from './inspector-data.ts';
@@ -19,20 +19,21 @@ export type SkillWorkforce = { skill: WorkerSkill; total: number; employed: numb
 export function householdLabor(city: City, id: number): {
   householdId: number; workforce: number; employed: number; unemployed: number;
   employers: number; employeeWorkers: number; selfEmployedWorkers: number; skillSource: Household['skillSource'];
-  skills: SkillWorkforce[]; allocations: EmploymentAllocation[]; ownerAllocations: City['ownerLabor']; parkAllocations: ReturnType<typeof parkEmploymentForHousehold>;
+  skills: SkillWorkforce[]; allocations: EmploymentAllocation[]; ownerAllocations: City['ownerLabor']; parkAllocations: ReturnType<typeof parkEmploymentForHousehold>; venueAllocations: ReturnType<typeof venueEmploymentForHousehold>;
 } | null {
   const household = city.households.find(value => value.id === id);
   if (!household) return null;
   const parkAllocations = parkEmploymentForHousehold(city, id).map(a => ({ ...a }));
+  const venueAllocations = venueEmploymentForHousehold(city, id);
   const allocations = city.employment.filter(value => value.householdId === id).map(value => ({ ...value }));
   const ownerAllocations = city.ownerLabor.filter(value => value.householdId === id).map(value => ({ ...value }));
   const skills = (['general', 'manufacturing', 'retail'] as const).map(skill => {
-    const total = household.workerSkills[skill], employed = [...allocations, ...ownerAllocations, ...parkAllocations].filter(value => value.skill === skill).reduce((sum, value) => sum + value.workers, 0);
+    const total = household.workerSkills[skill], employed = [...allocations, ...ownerAllocations, ...parkAllocations, ...venueAllocations].filter(value => value.skill === skill).reduce((sum, value) => sum + value.workers, 0);
     return { skill, total, employed, unemployed: total - employed };
   });
-  const employeeWorkers = [...allocations, ...parkAllocations].reduce((sum, value) => sum + value.workers, 0), selfEmployedWorkers = ownerAllocations.reduce((sum, value) => sum + value.workers, 0), employed = employeeWorkers + selfEmployedWorkers;
+  const employeeWorkers = [...allocations, ...parkAllocations, ...venueAllocations].reduce((sum, value) => sum + value.workers, 0), selfEmployedWorkers = ownerAllocations.reduce((sum, value) => sum + value.workers, 0), employed = employeeWorkers + selfEmployedWorkers;
   return { householdId: id, workforce: household.workforce, employed, unemployed: household.workforce - employed,
-    employers: new Set([...allocations, ...ownerAllocations].map(value => value.firmId).concat(parkAllocations.map(a => a.parkId))).size, employeeWorkers, selfEmployedWorkers, skillSource: household.skillSource, skills, allocations, ownerAllocations, parkAllocations };
+    employers: new Set([...allocations, ...ownerAllocations].map(value => value.firmId).concat(parkAllocations.map(a => a.parkId), venueAllocations.map(a => a.siteId))).size, employeeWorkers, selfEmployedWorkers, skillSource: household.skillSource, skills, allocations, ownerAllocations, parkAllocations, venueAllocations };
 }
 
 /** Group this establishment's workers by their shared household account once. */

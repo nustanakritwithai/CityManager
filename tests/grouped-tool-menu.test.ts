@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { installServicesMenu, installConstructionMenu } from '../src/grouped-tool-menu.ts';
+import { installServicesMenu, installLeisureMenu, installConstructionMenu } from '../src/grouped-tool-menu.ts';
 import { installToolMenu } from '../src/tool-menu.ts';
 
 // DOM-boundary tests exercise real listeners; they are not browser/layout evidence.
@@ -38,12 +38,13 @@ class Element {
   focus() { (globalThis.document as unknown as { activeElement: Element }).activeElement = this; }
   scrollIntoView() {}
 }
-const serviceTools = ['power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'school', 'university'], constructionTools = ['R', 'C', 'I', 'F'];
+const serviceTools = ['power', 'water', 'park', 'clinic', 'police', 'fire', 'hospital', 'school', 'university'], constructionTools = ['R', 'C', 'I', 'F'];
+const leisureTools = ['library', 'temple', 'museum', 'stadium', 'amusement', 'airport', 'cinema', 'restaurant', 'nightmarket', 'concert'];
 function environment(run: (document: Element & { body: Element; activeElement?: Element }, dock: Element, originals: Element[]) => void) {
   const names = ['document', 'window', 'innerWidth', 'innerHeight'] as const, old = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
   const document = Object.assign(new Element(), { body: new Element('body'), activeElement: undefined as Element | undefined, createElement: (tag: string) => new Element(tag) }); document.append(document.body);
   const dock = new Element(); dock.className = 'tool-buttons'; dock.rect = { left: 8, right: 382, top: 698, bottom: 748, width: 374, height: 50 };
-  const originals = [...constructionTools, ...serviceTools].map(tool => {
+  const originals = [...constructionTools, ...serviceTools, ...leisureTools].map(tool => {
     const button = new Element('button'); button.dataset.tool = tool; button.className = 'tool'; button.title = `Original ${tool}`;
     const glyph = new Element('span'); glyph.className = 'tool-icon'; glyph.innerHTML = `original-icon-${tool}`;
     const label = new Element('span'); label.textContent = tool; button.append(glyph, label); dock.append(button); return button;
@@ -52,7 +53,7 @@ function environment(run: (document: Element & { body: Element; activeElement?: 
   try { run(document, dock, originals); } finally { names.forEach((name, i) => old[i] ? Object.defineProperty(globalThis, name, old[i]!) : Reflect.deleteProperty(globalThis, name)); }
 }
 for (const [id, name, expected, install] of [
-  ['services', 'บริการ', serviceTools, installServicesMenu], ['construction', 'สร้าง', constructionTools, installConstructionMenu],
+  ['services', 'บริการ', serviceTools, installServicesMenu], ['leisure', 'บันเทิง', leisureTools, installLeisureMenu], ['construction', 'สร้าง', constructionTools, installConstructionMenu],
 ] as const) {
   test(`${id}: original ordered buttons, read-only disclosure and explicit selection`, () => environment((document, dock, originals) => {
     const chosen: string[] = [], controller = install(tool => { chosen.push(tool); controller.sync(tool); });
@@ -86,10 +87,10 @@ for (const [id, name, expected, install] of [
 test('services preserve education availability, focus and Escape without changing safe selected tool', () => environment((document, dock, originals) => {
   originals.find(button => button.dataset.tool === 'school')!.hidden = true; originals.find(button => button.dataset.tool === 'university')!.hidden = true;
   const chosen: string[] = [], controller = installServicesMenu(tool => chosen.push(tool)), menu = document.body.children.at(-1)!, anchor = dock.children.find(button => button.id === 'services-tool')!;
-  assert.deepEqual(menu.children.filter(button => button.hidden).map(button => button.dataset.tool), ['school', 'university']); menu.children[10].dispatch('click'); assert.deepEqual(chosen, []);
+  assert.deepEqual(menu.children.filter(button => button.hidden).map(button => button.dataset.tool), ['school', 'university']); menu.children[7].dispatch('click'); assert.deepEqual(chosen, []);
   controller.sync('park'); anchor.dispatch('click'); document.dispatch('pointerdown', { target: new Element('canvas') }); assert.equal(controller.isOpen(), false);
   anchor.dispatch('click'); document.dispatch('focusin', { target: new Element('button') }); assert.equal(controller.isOpen(), false);
-  anchor.dispatch('click', { detail: 0 }); assert.equal(document.activeElement, menu.children[0]); menu.dispatch('keydown', { key: 'End' }); assert.equal(document.activeElement, menu.children[9]);
+  anchor.dispatch('click', { detail: 0 }); assert.equal(document.activeElement, menu.children[0]); menu.dispatch('keydown', { key: 'End' }); assert.equal(document.activeElement, menu.children[6]);
   const event = document.dispatch('keydown', { key: 'Escape' }); assert.equal(event.prevented, true); assert.equal(event.stopped, true); assert.equal(controller.isOpen(), false); assert.equal(document.activeElement, anchor); assert.equal(anchor.dataset.activeTool, 'park'); assert.deepEqual(chosen, []);
 }));
 test('both groups, road and selector popups exclude each other; Cancel remains available to main', () => environment((document, dock) => {

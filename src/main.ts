@@ -25,7 +25,7 @@ import { createAutosave, installAutosave, describeAutosave } from './autosave.ts
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
 import { installSelectMenu } from './select-menu.ts';
-import { installServicesMenu, installConstructionMenu } from './grouped-tool-menu.ts';
+import { installServicesMenu, installLeisureMenu, installConstructionMenu } from './grouped-tool-menu.ts';
 import './grouped-tool-menu.css';
 import './tool-menu.css';
 import '@fontsource/ibm-plex-sans-thai/thai-400.css';
@@ -44,8 +44,8 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
-import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
@@ -144,7 +144,7 @@ const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: ''
 let view: CityView;
 let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
 let selectMenu: ReturnType<typeof installSelectMenu> | undefined;
-let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
+let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, leisureMenu: ReturnType<typeof installLeisureMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
 let quickSelection: number | null = null;
 let selectionActions: ReturnType<typeof installSelectionActions> | null = null;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -181,7 +181,7 @@ const help: Record<string, string> = {
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
   water: 'โรงสูบน้ำ ฿3,000 · +40 หน่วย · บำรุง ฿60/เดือน · วางแปลงว่างริมถนน น้ำวิ่งตามถนน อาคารใกล้ได้ก่อน',
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
-  ...Object.fromEntries(CIVIC_KINDS.map(kind => { const spec = civicSpec(kind), [columns, rows] = civicFootprint(kind), size = columns * rows === 1 ? '1 ช่อง' : `${columns}×${rows} ช่อง`; return [kind, `${spec.label} ฿${(spec.cost / 100).toLocaleString('th-TH')} · ${size}ติดถนน · ${spec.visitors ? 'นักท่องเที่ยวจ่ายเข้าคลังทุกเดือนตามจำนวนสถานที่ท่องเที่ยว' : `บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}`} · บำรุง ฿${spec.upkeep / 100}/เดือน`]; })),
+  ...Object.fromEntries(CIVIC_KINDS.map(kind => { const spec = civicSpec(kind), [columns, rows] = civicFootprint(kind), size = columns * rows === 1 ? '1 ช่อง' : `${columns}×${rows} ช่อง`; return [kind, `${spec.label} ฿${(spec.cost / 100).toLocaleString('th-TH')} · ${size}ติดถนน · ${spec.visitors ? 'นักท่องเที่ยวจ่ายเข้าคลังทุกเดือนตามจำนวนสถานที่ท่องเที่ยว' : `${spec.staff ? `จ้างคนในเมือง ${spec.staff.slots} ตำแหน่ง · ครัวเรือนในระยะจ่ายค่าบริการ ฿${spec.staff.fee / 100}/ครั้ง · ` : ''}บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}`} · บำรุง ฿${spec.upkeep / 100}/เดือน`]; })),
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
   bulldoze: 'รื้อถอน · คืน 80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่ายและมีหลักฐาน · อาคารเอกชนไม่คืนเงินและค่ารื้อ ฿20 · ดูยอดที่การ์ดสถานที่ก่อนรื้อ · ป้ายและอู่รถเมล์จะถามก่อนลบ · V/Esc เพื่อออก',
@@ -209,6 +209,7 @@ function setTool(next: string) {
   roadMenu?.close();
   selectMenu?.close(); selectMenu?.sync(next);
   servicesMenu?.close(); servicesMenu?.sync(next);
+  leisureMenu?.close(); leisureMenu?.sync(next);
   constructionMenu?.close(); constructionMenu?.sync(next);
   tool = next; roadStart = null; hover = null;
   if (next !== 'select') inspector(false);
@@ -257,6 +258,7 @@ function cancel() {
   view?.abortGesture();
   if (selectMenu?.isOpen()) { selectMenu.close(true); return; }
   if (servicesMenu?.isOpen()) { servicesMenu.close(true); return; }
+  if (leisureMenu?.isOpen()) { leisureMenu.close(true); return; }
   if (constructionMenu?.isOpen()) { constructionMenu.close(true); return; }
   if (cityNetwork?.open) { cityNetwork.toggle(false); return; }
   if (cityStatsPanel?.open) { cityStatsPanel.toggle(false); return; }
@@ -494,7 +496,14 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
         metrics.push(metric('รายได้นักท่องเที่ยว/เดือน', money(online ? civicVisitorIncome(civic.kind, attractions) : 0), true, online ? `ฐาน ${money(spec.visitors.base)} + ${money(spec.visitors.perAttraction)} ต่อสถานที่ท่องเที่ยว` : 'ถนนขาด นักท่องเที่ยวเข้าไม่ได้'),
           metric('สถานที่ท่องเที่ยวในเมือง', `${attractions} แห่ง`, false, 'สวน ห้องสมุด วัด สนามฟุตบอล', attractions));
       } else metrics.push(metric('บ้านในระยะบริการ', `${reached.length} / ${homes.length} หลัง`, false, `ระยะ ${spec.radius} ช่องจากอาคาร`, reached.length),
-        metric('ความสุขของบ้านที่ถึง', `+${spec.points}`, false, 'นับครั้งเดียวต่อชนิดบริการ'));
+        metric('ความสุขของบ้านที่ถึง', civicOpen(civic) ? `+${spec.points}` : 'ปิดอยู่', false, civicOpen(civic) ? 'นับครั้งเดียวต่อชนิดบริการ' : 'ยังไม่มีพนักงาน บ้านรอบข้างยังไม่ได้ความสุข'));
+      if (spec.staff) {
+        const venue = venueStatus(city, civic);
+        metrics.push(metric('พนักงาน', `${venue.employed} / ${venue.slots} คน`, false, !venue.connected ? 'ถนนขาด รับคนไม่ได้' : venue.employed === venue.slots ? 'ครบทุกตำแหน่ง' : venue.employed ? 'กำลังรับคนเพิ่ม' : 'รอคนว่างงานในเมืองหรือเงินคลังสำหรับค่าจ้าง', venue.employed),
+          metric('ลูกค้าวันนี้', `${venue.visitsToday} / ${venue.capacity} ครัวเรือน`, false, `ค่าบริการ ${money(spec.staff.fee)} ต่อครั้ง · ครัวเรือนจ่ายเมื่อมีเงินเหลือพอ`, venue.visitsToday),
+          metric('รายได้ค่าบริการเดือนนี้', money(venue.monthIncome), true, 'เข้าคลังเมือง'),
+          metric('ค่าจ้างที่ค้างจ่ายสิ้นเดือน', money(venue.earnedWages), true, `ครบทุกตำแหน่ง ${money(venue.monthlyWages)}/เดือน · จ่ายให้ครัวเรือนของพนักงาน`));
+      }
       metrics.push(metric('ค่าก่อสร้าง', money(spec.cost), true), metric('ค่าบำรุงรายเดือน', money(spec.upkeep), true));
       if (parts.length > 1) metrics.push(metric('พื้นที่', `${parts.length} ช่อง`, false, civicFootprint(civic.kind).join('×')));
       if (lastDue > civic.tick) metrics.push(metric('จ่ายบำรุงเดือนล่าสุด', money(billed?.amount ?? 0), true, billed?.amount === spec.upkeep ? 'จ่ายครบจากคลังเมือง' : 'เงินคลังไม่พอจ่ายครบ ไม่มีการกู้หรือหักซ้ำ'));
@@ -776,6 +785,7 @@ async function boot() {
   const selectButton = document.querySelector<HTMLButtonElement>('[data-tool="select"]')!;
   selectMenu = installSelectMenu(selectButton, next => { sound('ui-select'); setTool(next); });
   servicesMenu = installServicesMenu(next => { sound('ui-select'); setTool(next); });
+  leisureMenu = installLeisureMenu(next => { sound('ui-select'); setTool(next); });
   constructionMenu = installConstructionMenu(next => { sound('ui-select'); setTool(next); });
   const busComposer = document.createElement('div'); busComposer.id = 'bus-composer'; busComposer.hidden = true;
   $('#tool-help').before(busComposer);
@@ -1035,7 +1045,7 @@ async function boot() {
     const quickVisible = quickSelection !== null && tool === 'select' && $('#inspector').dataset.open !== 'true'
       && !cityStatsPanel?.open && !cityNetwork?.open && !minimap?.mapOpen && !dashboard?.modalOpen
       && !document.querySelector('dialog[open], [role="dialog"]:not([hidden])') && !hasOpenSubmenu()
-      && !selectMenu?.isOpen() && !servicesMenu?.isOpen() && !constructionMenu?.isOpen();
+      && !selectMenu?.isOpen() && !servicesMenu?.isOpen() && !leisureMenu?.isOpen() && !constructionMenu?.isOpen();
     selectionActions?.update(quickVisible);
     if (quickVisible && quickSelection !== null) { const point = view.project(quickSelection); const rect = $('#city-canvas').getBoundingClientRect(); selectionActions?.position(point.x + rect.left, point.y + rect.top); }
 

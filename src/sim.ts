@@ -12,7 +12,8 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, createCivic, validateCivic, type CivicKind, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicFeeReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { civicCellDistance } from './civic/reach.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
@@ -100,10 +101,30 @@ export type Result = { ok: boolean; message: string };
 const validIndex = (i: number, city?: Pick<City,'cells'>) => Number.isInteger(i) && i >= 0 && i < (city?.cells.length ?? EXPANDED_MAP_CELLS);
 const neighbors = (i: number, city: Pick<City,'cells'>) => expandedCellNeighbors(i).filter(n => n < city.cells.length);
 const balance = (c: City, id: string) => c.accounts[id] ?? 0;
-const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p), 0) + educationPayroll(c.education);
+/** Civic sites that hire residents (cinema, restaurant, night market, concert ground), in id order. */
+export const venues = (c: Pick<City, 'civic'>): CivicSite[] => (c.civic?.sites ?? []).filter(site => civicSpec(site.kind)?.staff).sort((a, b) => a.id - b.id);
+const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p), 0) + venues(c).reduce((n, site) => n + civicPayroll(site), 0) + educationPayroll(c.education);
 export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - treasuryPayroll(c));
 export const parkEmploymentForHousehold = (c: City, id: number) => c.parks.flatMap(p => p.staffing?.allocations ?? []).filter(a => a.householdId === id);
 const parkEmployment = (c: City) => c.parks.flatMap(p => p.staffing?.allocations ?? []);
+export const venueEmploymentForHousehold = (c: City, id: number) => venues(c).flatMap(site => (site.staffing?.allocations ?? []).map(a => ({ ...a, siteId: site.id, kind: site.kind }))).filter(a => a.householdId === id);
+const venueEmployment = (c: City) => venues(c).flatMap(site => site.staffing?.allocations ?? []);
+/** Venues are funded after parks, in id order, from what the treasury can still spend today. */
+function venueFundedSeats(c: City): Map<number, number> {
+  let budget = treasurySpendable(c) - [...parkFundedSeats(c).values()].reduce((n, seats) => n + seats * PARK_STAFF.dailyWage, 0);
+  return new Map(venues(c).map(site => {
+    const staff = civicSpec(site.kind).staff!, seats = Math.max(0, Math.min(staff.slots, Math.floor(budget / staff.dailyWage)));
+    budget -= seats * staff.dailyWage; return [site.id, seats];
+  }));
+}
+/** What a venue's panel shows: staff, today's customers and this month's takings and wages. */
+export function venueStatus(c: City, site: CivicSite) {
+  const staff = civicSpec(site.kind).staff!, employed = civicWorkers(site), since = c.tick - (c.tick % MONTH || MONTH);
+  const sum = (reason: string, tick: (t: number) => boolean) => c.ledger.filter(e => e.reason === reason && tick(e.tick)).reduce((n, e) => n + e.amount, 0);
+  const fee = civicFeeReason(site.kind, site.id);
+  return { employed, slots: staff.slots, capacity: civicDailyVisits(site), visitsToday: c.ledger.filter(e => e.reason === fee && e.tick === c.tick).length,
+    monthIncome: sum(fee, t => t > since), earnedWages: civicPayroll(site), monthlyWages: staff.slots * staff.dailyWage * MONTH, connected: civicCells(site).some(part => access(c, part)) };
+}
 /** ID-ordered funding shares prevent several parks promising the same treasury money. */
 function parkFundedSeats(c: City): Map<number, number> {
   let budget = treasurySpendable(c);
@@ -138,7 +159,7 @@ function random(c: City): number { c.rng = (Math.imul(c.rng, 1664525) + 10139042
 export const employmentForHousehold = (c: City, id: number): EmploymentAllocation[] => c.employment.filter(e => e.householdId === id);
 export const employmentForFirm = (c: City, id: number): EmploymentAllocation[] => c.employment.filter(e => e.firmId === id);
 export const firmWorkerCount = (c: City, id: number): number => employmentForFirm(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.firmId === id).length;
-export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length + parkEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + educationOccupied(c.education, id);
+export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length + parkEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + venueEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + educationOccupied(c.education, id);
 export const housingCapacity = (b: Building): HousingCapacity => b.zone === 'R' ? getHousingCapacity(b.housingType!, b.level) : { households: 0, persons: 0 };
 export const homeOccupancy = (c: City, id: number): HousingCapacity => buildOccupancyIndex(c.households).get(id) ?? { households: 0, persons: 0 };
 /**
@@ -419,17 +440,20 @@ function trimWorkAssignments(c: City): void {
     }
   }
   c.employment = c.employment.filter(e => e.workers > 0);
-  if (!c.parks.length) return;
-  // New owners may claim a worker after today's park shift. Keep earned pay, release
+  if (!c.parks.length && !venues(c).length) return;
+  // New owners may claim a worker after today's park or venue shift. Keep earned pay, release
   // only the assignment that conflicts with the real remaining skill pool.
+  const release = <T extends { householdId: number; skill: string; workers: number }>(staffing: { allocations: T[] }, h: Household, skill: string, left: number): number => {
+    for (const a of staffing.allocations.filter(a => a.householdId === h.id && a.skill === skill)) { a.workers = Math.min(a.workers, Math.max(0, left)); left -= a.workers; }
+    staffing.allocations = staffing.allocations.filter(a => a.workers > 0);
+    return left;
+  };
   for (const h of c.households) {
     const available = jobSkills(h);
     for (const skill of ['general', 'manufacturing', 'retail'] as const) {
       let left = available[skill] - c.employment.filter(a => a.householdId === h.id && a.skill === skill).reduce((n, a) => n + a.workers, 0);
-      for (const p of [...c.parks].sort((a, b) => a.id - b.id)) if (p.staffing) {
-        for (const a of p.staffing.allocations.filter(a => a.householdId === h.id && a.skill === skill)) { a.workers = Math.min(a.workers, Math.max(0, left)); left -= a.workers; }
-        p.staffing.allocations = p.staffing.allocations.filter(a => a.workers > 0);
-      }
+      for (const p of [...c.parks].sort((a, b) => a.id - b.id)) if (p.staffing) left = release(p.staffing, h, skill, left);
+      for (const site of venues(c)) if (site.staffing) left = release(site.staffing, h, skill, left);
     }
   }
 }
@@ -609,7 +633,8 @@ export function bulldoze(c: City, i: number): Result {
   }
   const civic = civicAt(c, i);
   if (civic && c.civic) {
-    // Removal is free and refunds nothing; the monthly upkeep stops with the building.
+    // Removal is free and refunds nothing; the monthly upkeep stops with the building. Staff are paid what they earned first.
+    payVenueWages(c, civic);
     const sites = c.civic.sites.filter(site => site !== civic);
     if (sites.length) c.civic = { ...c.civic, sites }; else delete c.civic;
     c.lastEvent = `รื้อ${CIVIC[civic.kind].label} #${civic.id} แล้ว · ไม่มีเงินคืน · หยุดค่าบำรุงของอาคารนี้`;
@@ -758,7 +783,7 @@ export function buildCivic(c: City, i: number, kind: CivicKind): Result {
   transfer(c, 'treasury', 'construction', spec.cost, civicBuildReason(kind, id));
   const civic = c.civic ?? createCivic();
   c.civic = { ...civic, sites: [...civic.sites, parts.length > 1 ? { id, cell: i, kind, tick: c.tick, cells: parts } : { id, cell: i, kind, tick: c.tick }] };
-  const effect = spec.visitors ? `นักท่องเที่ยวจ่ายเข้าคลัง ${civicVisitorIncome(kind, cityAttractions(c)) / 100} ฿/เดือน ตามจำนวนสถานที่ท่องเที่ยว` : `บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}`;
+  const effect = spec.visitors ? `นักท่องเที่ยวจ่ายเข้าคลัง ${civicVisitorIncome(kind, cityAttractions(c)) / 100} ฿/เดือน ตามจำนวนสถานที่ท่องเที่ยว` : `${spec.staff ? `รับพนักงาน ${spec.staff.slots} คนจากคนว่างงานในเมือง · ` : ''}บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}${spec.staff ? ' เมื่อเปิดบริการ' : ''}`;
   c.lastEvent = `สร้าง${spec.label} #${id} แล้ว · ${effect} · ค่าบำรุง ${spec.upkeep / 100} ฿/เดือน`;
   return { ok: true, message: c.lastEvent };
 }
@@ -847,8 +872,8 @@ export function summary(c: City) {
 }
 function summarize(c: City) {
   const svc = utilities(c);
-  const jobs = c.firms.filter(f => access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + capacity(building(c, f.building), f), 0) + c.parks.length * PARK_STAFF.slots;
-  const employed = c.employment.reduce((n, e) => n + e.workers, 0) + c.ownerLabor.length + parkEmployment(c).reduce((n, a) => n + a.workers, 0);
+  const jobs = c.firms.filter(f => access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + capacity(building(c, f.building), f), 0) + c.parks.length * PARK_STAFF.slots + venues(c).reduce((n, site) => n + civicSpec(site.kind).staff!.slots, 0);
+  const employed = c.employment.reduce((n, e) => n + e.workers, 0) + c.ownerLabor.length + parkEmployment(c).reduce((n, a) => n + a.workers, 0) + venueEmployment(c).reduce((n, a) => n + a.workers, 0);
   const workforce = c.households.reduce((n, h) => n + h.workforce, 0);
   const availableWorkers = c.households.filter(h => householdAccess(c, h)).reduce((n, h) => n + h.workforce - householdWorkerCount(c, h.id), 0);
   const recent = c.ledger.filter(e => e.tick > Math.max(0, c.tick - MONTH) && !e.reason.includes('grant'));
@@ -983,6 +1008,7 @@ function employ(c: City) {
     f.workDays[h.wallet] = (f.workDays[h.wallet] ?? 0) + allocation.workers;
   }
   employParks(c);
+  employVenues(c);
 }
 /** Same allocator, residual disjoint skill counts; no park/home road or utility test. */
 function employParks(c: City): void {
@@ -1001,6 +1027,45 @@ function employParks(c: City): void {
     for (const a of p.staffing.allocations) {
       const wallet = c.households.find(h => h.id === a.householdId)!.wallet;
       p.staffing.workDays[wallet] = (p.staffing.workDays[wallet] ?? 0) + a.workers;
+    }
+  }
+}
+/** Venues hire from the labour left after firms and parks; a venue with no road hires nobody. */
+function employVenues(c: City): void {
+  const sites = venues(c); if (!sites.length) return;
+  const prior = sites.flatMap(site => (site.staffing?.allocations ?? []).map(a => ({ ...a, firmId: site.id, occupation: 'park-maintenance' as const, rank: 'entry' as const })));
+  const funding = venueFundedSeats(c), parks = parkEmployment(c);
+  const allocations = allocateEmployment(c.households.map(h => {
+    const workerSkills = { ...h.workerSkills };
+    for (const a of [...c.employment, ...c.ownerLabor, ...parks].filter(a => a.householdId === h.id)) workerSkills[a.skill] = Math.max(0, workerSkills[a.skill] - a.workers);
+    const reduced = subtractEducationReserve(workerSkills, Math.min(educationOccupied(c.education, h.id), Object.values(workerSkills).reduce((sum, count) => sum + count, 0)));
+    return { id: h.id, workforce: Object.values(reduced).reduce((sum, count) => sum + count, 0), workerSkills: reduced, accessible: h.home !== null };
+  }), sites.map(site => ({ id: site.id, zone: 'P' as const, slots: civicCells(site).some(part => access(c, part)) ? civicSpec(site.kind).staff!.slots : 0, budgetWorkers: funding.get(site.id)! })), prior);
+  for (const site of sites) {
+    const mine = allocations.filter(a => a.firmId === site.id).map(a => ({ householdId: a.householdId, skill: a.skill, workers: a.workers }));
+    if (!mine.length && !site.staffing) continue;
+    site.staffing ??= { allocations: [], workDays: {} };
+    site.staffing.allocations = mine;
+    for (const a of mine) {
+      const wallet = c.households.find(h => h.id === a.householdId)!.wallet;
+      site.staffing.workDays[wallet] = (site.staffing.workDays[wallet] ?? 0) + a.workers;
+    }
+  }
+}
+/** A household spends at most this share of nothing: it visits only while it keeps this much after paying. */
+export const VISIT_CUSHION = 20_000;
+/** Each open venue serves homes in reach, as many as its staff can; a household visits one venue a day and pays from its own wallet. */
+function visitVenues(c: City): void {
+  const sites = venues(c).filter(site => civicWorkers(site) > 0); if (!sites.length) return;
+  const homes = new Map(c.buildings.filter(b => b.zone === 'R').map(b => [b.id, b.cell])), visited = new Set<number>();
+  for (const site of sites) {
+    const spec = civicSpec(site.kind), fee = spec.staff!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
+    const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius));
+    // Start from a different home each day so the same households are not always the ones served.
+    const start = guests.length ? (c.tick + site.id) % guests.length : 0;
+    for (let n = 0; n < guests.length && left > 0; n++) {
+      const h = guests[(start + n) % guests.length];
+      if (transfer(c, h.wallet, 'treasury', fee, civicFeeReason(site.kind, site.id)) === fee) { visited.add(h.id); left--; }
     }
   }
 }
@@ -1095,7 +1160,18 @@ function payParkWages(c: City, p: Park, onlyWallet?: string): void {
     withholdWageTax(c, wallet, owed);
   }
 }
-const isWage = (reason: string): boolean => reason === 'Monthly wages' || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
+function payVenueWages(c: City, site: CivicSite, onlyWallet?: string): void {
+  const wage = civicSpec(site.kind).staff?.dailyWage;
+  if (!wage) return;
+  for (const [wallet, days] of Object.entries(site.staffing?.workDays ?? {})) {
+    if (onlyWallet && wallet !== onlyWallet) continue;
+    const owed = days * wage;
+    delete site.staffing!.workDays[wallet];
+    if (transfer(c, 'treasury', wallet, owed, civicWageReason(site.kind, site.id), false, owed) !== owed) throw new Error('Venue payroll reserve invariant violated.');
+    withholdWageTax(c, wallet, owed);
+  }
+}
+const isWage = (reason: string): boolean => reason === 'Monthly wages' || isCivicWageReason(reason) || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
 function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boolean {
   if (!c.education) return true;
   const claims = takeEducationWages(c.education, onlyWallet, campusId);
@@ -1145,6 +1221,7 @@ function settleMonth(c: City) {
     }
   }
   for (const p of c.parks) payParkWages(c, p);
+  for (const site of venues(c)) payVenueWages(c, site);
   if (c.education) { payEducationWages(c); for (const payment of educationUpkeep(c.education)) transfer(c, 'treasury', 'upkeep', payment.amount, payment.reason); }
   for (const h of c.households) if (h.home !== null) {
     transfer(c, h.wallet, 'landlord', 10_000, 'Monthly household rent');
@@ -1233,6 +1310,7 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   let departed = 0;
   for (const h of leaving) {
     for (const p of c.parks) payParkWages(c, p, h.wallet);
+    for (const site of venues(c)) payVenueWages(c, site, h.wallet);
     // Preserve the creditor's identity while an old education claim is unpaid.
     if (c.education) { if (!payEducationWages(c, undefined, h.wallet)) continue; forgetHouseholdEducation(c.education, h.id); }
     for (const f of c.firms) payWages(c, f, h.wallet); // no claim should remain after settlement; pay any that does
@@ -1240,6 +1318,7 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
     c.employment = c.employment.filter(a => a.householdId !== h.id);
     c.ownerLabor = c.ownerLabor.filter(a => a.householdId !== h.id);
     for (const p of c.parks) if (p.staffing) p.staffing.allocations = p.staffing.allocations.filter(a => a.householdId !== h.id);
+    for (const site of venues(c)) if (site.staffing) site.staffing.allocations = site.staffing.allocations.filter(a => a.householdId !== h.id);
     c.households = c.households.filter(x => x.id !== h.id);
     if (c.happiness) c.happiness.rows = c.happiness.rows.filter(row => row.householdId !== h.id);
     c.migration.departures = (c.migration.departures ?? 0) + 1;
@@ -1522,7 +1601,7 @@ function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
-  rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c);
+  rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c); visitVenues(c);
   c.happiness = advanceHappiness(c, c.happiness);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
@@ -1830,9 +1909,10 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     if (!h || h.home === null || !f || (!expandedCommercial && isMarket(f)) || e.occupation !== (f.zone === 'I' || f.zone === 'F' ? 'manufacturing' : 'retail') || (e.skill !== 'general' && e.skill !== e.occupation) || pairs.has(pair)) fail();
     pairs.add(pair);
   }
+  if (venueEmployment(c).some(a => !c.households.some(h => h.id === a.householdId && h.home !== null))) fail();
   for (const h of c.households) {
-    if (householdWorkerCount(c, h.id) > h.workforce || c.firms.reduce((n, f) => n + (f.workDays[h.wallet] ?? 0), 0) + c.parks.reduce((n, p) => n + (p.staffing?.workDays[h.wallet] ?? 0), 0) > h.workforce * (c.tick % MONTH)) fail();
-    for (const skill of ['general', 'manufacturing', 'retail'] as const) if ([...employmentForHousehold(c, h.id), ...parkEmploymentForHousehold(c, h.id), ...c.ownerLabor.filter(a => a.householdId === h.id)].filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) > h.workerSkills[skill]) fail();
+    if (householdWorkerCount(c, h.id) > h.workforce || c.firms.reduce((n, f) => n + (f.workDays[h.wallet] ?? 0), 0) + c.parks.reduce((n, p) => n + (p.staffing?.workDays[h.wallet] ?? 0), 0) + venues(c).reduce((n, site) => n + (site.staffing?.workDays[h.wallet] ?? 0), 0) > h.workforce * (c.tick % MONTH)) fail();
+    for (const skill of ['general', 'manufacturing', 'retail'] as const) if ([...employmentForHousehold(c, h.id), ...parkEmploymentForHousehold(c, h.id), ...venueEmploymentForHousehold(c, h.id), ...c.ownerLabor.filter(a => a.householdId === h.id)].filter(e => e.skill === skill).reduce((n, e) => n + e.workers, 0) > h.workerSkills[skill]) fail();
   }
   for (const f of c.firms) if (firmWorkerCount(c, f.id) > capacity(building(c, f.building), f) || Object.values(f.workDays).reduce((n, days) => n + days, 0) > capacity(building(c, f.building), f) * (c.tick % MONTH)) fail();
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();

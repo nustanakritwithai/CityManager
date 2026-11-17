@@ -68,7 +68,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     const reason = taxiEnabled() && parts.some(part => sharedTaxiSession().at(part)) ? 'มีอู่แท็กซี่อยู่ ต้องรื้อก่อน' : civicSiteReason(city, hover, tool);
     // Show who this site would reach: every home within the radius of any of its parcels lights up with it.
     const reached = reason || !spec.points ? [] : city.buildings.filter(b => b.zone === 'R' && parts.some(part => cellDistance(b.cell, part) <= spec.radius)).map(b => ({ cell: b.cell, ok: true }));
-    const effect = spec.visitors ? `นักท่องเที่ยวจ่าย ${credits(civicVisitorIncome(tool, cityAttractions(city)))} ฿/เดือน (มีสถานที่ท่องเที่ยว ${cityAttractions(city)} แห่ง)` : `ถึง ${reached.length} บ้านในระยะ ${spec.radius} ช่อง · ความสุข +${spec.points}`;
+    const effect = spec.visitors ? `นักท่องเที่ยวจ่าย ${credits(civicVisitorIncome(tool, cityAttractions(city)))} ฿/เดือน (มีสถานที่ท่องเที่ยว ${cityAttractions(city)} แห่ง)` : `${spec.staff ? `จ้าง ${spec.staff.slots} คน · ` : ''}ถึง ${reached.length} บ้านในระยะ ${spec.radius} ช่อง · ความสุข +${spec.points}`;
     return { ok: !reason, cost: reason ? 0 : spec.cost, label: reason ?? `${spec.label} · ${credits(spec.cost)} ฿ · ${effect} · บำรุง ${credits(spec.upkeep)} ฿/เดือน`, cells: [...parts.map(cell => ({ cell, ok: !reason })), ...reached] };
   }
   if (tool === 'school' || tool === 'university') {

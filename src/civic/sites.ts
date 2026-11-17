@@ -5,18 +5,22 @@
  * can depend on it without a cycle. Stored only in the optional `city.civic` save section: a city that
  * never builds one keeps a byte-identical save.
  */
-export const CIVIC_KINDS = ['clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport'] as const;
+export const CIVIC_KINDS = ['clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert'] as const;
 export type CivicKind = typeof CIVIC_KINDS[number];
 /** `cell` is the top-left parcel. `cells` lists the whole footprint, top-left first, and is present only on sites larger than one parcel. */
-export type CivicSite = { id: number; cell: number; kind: CivicKind; tick: number; cells?: number[] };
+export type CivicAllocation = { householdId: number; skill: 'general' | 'manufacturing' | 'retail'; workers: number };
+/** Who works at a staffed venue today, and the days each wallet has earned and not yet been paid for. */
+export type CivicStaffing = { allocations: CivicAllocation[]; workDays: Record<string, number> };
+export type CivicSite = { id: number; cell: number; kind: CivicKind; tick: number; cells?: number[]; staffing?: CivicStaffing };
 export type CivicState = { version: 1; rules: 'civic-1'; sites: CivicSite[] };
 
 /**
  * Money in satang. `radius` is Manhattan cells from the nearest parcel of the site; `points` is happiness for a covered home.
  * `footprint` is [columns, rows] and defaults to one parcel. `visitors` is monthly income from outside: a base plus an
- * amount per attraction in the city.
+ * amount per attraction in the city. `staff` makes the kind a venue: it hires residents for a daily wage, serves
+ * `visitsPerWorker` households a day for `fee` each, and gives its happiness only while someone works there.
  */
-export type CivicSpec = { label: string; cost: number; upkeep: number; radius: number; points: number; footprint?: readonly [number, number]; visitors?: { base: number; perAttraction: number } };
+export type CivicSpec = { label: string; cost: number; upkeep: number; radius: number; points: number; footprint?: readonly [number, number]; visitors?: { base: number; perAttraction: number }; staff?: { slots: number; dailyWage: number; fee: number; visitsPerWorker: number } };
 export const CIVIC = Object.freeze({
   clinic: Object.freeze({ label: 'สถานีอนามัย', cost: 250_000, upkeep: 6_000, radius: 7, points: 5 }),
   police: Object.freeze({ label: 'สถานีตำรวจ', cost: 300_000, upkeep: 8_000, radius: 8, points: 5 }),
@@ -25,19 +29,37 @@ export const CIVIC = Object.freeze({
   temple: Object.freeze({ label: 'วัด', cost: 200_000, upkeep: 3_000, radius: 7, points: 5 }),
   stadium: Object.freeze({ label: 'สนามฟุตบอล', cost: 800_000, upkeep: 20_000, radius: 12, points: 8, footprint: [2, 2] as const }),
   airport: Object.freeze({ label: 'สนามบิน', cost: 2_000_000, upkeep: 50_000, radius: 0, points: 0, footprint: [3, 2] as const, visitors: Object.freeze({ base: 50_000, perAttraction: 30_000 }) }),
+  hospital: Object.freeze({ label: 'โรงพยาบาล', cost: 1_200_000, upkeep: 30_000, radius: 14, points: 8, footprint: [2, 2] as const }),
+  museum: Object.freeze({ label: 'พิพิธภัณฑ์', cost: 400_000, upkeep: 8_000, radius: 8, points: 4 }),
+  amusement: Object.freeze({ label: 'สวนสนุก', cost: 1_000_000, upkeep: 25_000, radius: 12, points: 7, footprint: [2, 2] as const }),
+  cinema: Object.freeze({ label: 'โรงภาพยนตร์', cost: 350_000, upkeep: 6_000, radius: 8, points: 5, staff: Object.freeze({ slots: 3, dailyWage: 1_400, fee: 600, visitsPerWorker: 3 }) }),
+  restaurant: Object.freeze({ label: 'ร้านอาหาร', cost: 180_000, upkeep: 3_000, radius: 6, points: 4, staff: Object.freeze({ slots: 2, dailyWage: 1_400, fee: 500, visitsPerWorker: 4 }) }),
+  nightmarket: Object.freeze({ label: 'ตลาดกลางคืน', cost: 300_000, upkeep: 5_000, radius: 9, points: 5, staff: Object.freeze({ slots: 4, dailyWage: 1_400, fee: 400, visitsPerWorker: 4 }) }),
+  concert: Object.freeze({ label: 'ลานคอนเสิร์ต', cost: 900_000, upkeep: 15_000, radius: 12, points: 7, footprint: [2, 2] as const, staff: Object.freeze({ slots: 4, dailyWage: 1_400, fee: 900, visitsPerWorker: 3 }) }),
 } satisfies Record<CivicKind, CivicSpec>);
-export const MAX_CIVIC_SITES = 20;
+export const MAX_CIVIC_SITES = 32;
 /** Ledger reasons stay English like every other journal reason; panels translate them. */
-export const CIVIC_REASON_NAMES: Record<CivicKind, string> = { clinic: 'clinic', police: 'police station', fire: 'fire station', library: 'library', temple: 'temple', stadium: 'football stadium', airport: 'airport' };
+export const CIVIC_REASON_NAMES: Record<CivicKind, string> = { clinic: 'clinic', police: 'police station', fire: 'fire station', library: 'library', temple: 'temple', stadium: 'football stadium', airport: 'airport', hospital: 'hospital', museum: 'museum', amusement: 'amusement park', cinema: 'cinema', restaurant: 'restaurant', nightmarket: 'night market', concert: 'concert ground' };
 export const civicBuildReason = (kind: CivicKind, id: number) => `Build ${CIVIC_REASON_NAMES[kind]} #${id}`;
 export const civicUpkeepReason = (kind: CivicKind, id: number) => `Monthly ${CIVIC_REASON_NAMES[kind]} upkeep #${id}`;
 export const civicVisitorsReason = (id: number) => `Airport visitors #${id}`;
+export const civicWageReason = (kind: CivicKind, id: number) => `Monthly ${CIVIC_REASON_NAMES[kind]} wages #${id}`;
+export const civicFeeReason = (kind: CivicKind, id: number) => `Visit ${CIVIC_REASON_NAMES[kind]} #${id}`;
+const VENUE_NAMES = () => CIVIC_KINDS.filter(kind => civicSpec(kind).staff).map(kind => CIVIC_REASON_NAMES[kind]).join('|');
+export const isCivicWageReason = (reason: string) => new RegExp(`^Monthly (${VENUE_NAMES()}) wages #[1-9]\\d*$`).test(reason);
 /** Kinds visitors come for; parks count too, and the caller adds them. */
-export const CIVIC_ATTRACTIONS: readonly CivicKind[] = ['library', 'temple', 'stadium'];
+export const CIVIC_ATTRACTIONS: readonly CivicKind[] = ['library', 'temple', 'stadium', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert'];
 export const civicSpec = (kind: CivicKind): CivicSpec => CIVIC[kind];
 export const civicFootprint = (kind: CivicKind): readonly [number, number] => civicSpec(kind).footprint ?? [1, 1];
 /** Every parcel a site stands on. */
 export const civicCells = (site: CivicSite): readonly number[] => site.cells ?? [site.cell];
+export const civicWorkers = (site: CivicSite): number => site.staffing?.allocations.reduce((n, a) => n + a.workers, 0) ?? 0;
+/** Wages earned at a venue and not yet paid. */
+export const civicPayroll = (site: CivicSite): number => Object.values(site.staffing?.workDays ?? {}).reduce((n, days) => n + days, 0) * (civicSpec(site.kind).staff?.dailyWage ?? 0);
+/** A venue is open while at least one resident works there; every other kind is always open. */
+export const civicOpen = (site: CivicSite): boolean => !civicSpec(site.kind).staff || civicWorkers(site) > 0;
+/** Households a venue can serve today. */
+export const civicDailyVisits = (site: CivicSite): number => civicWorkers(site) * (civicSpec(site.kind).staff?.visitsPerWorker ?? 0);
 /** Monthly income of one airport given how many attractions the city has. */
 export const civicVisitorIncome = (kind: CivicKind, attractions: number) => { const v = civicSpec(kind).visitors; return v ? v.base + v.perAttraction * Math.max(0, attractions) : 0; };
 
@@ -49,10 +71,12 @@ export const civicAt = (c: Host, i: number): CivicSite | undefined => c.civic?.s
 /** Which kinds reach a home; `distance` is supplied by the caller so this module stays map-free. */
 export function civicCoverage(c: Host, cell: number, distance: (a: number, b: number) => number): Record<CivicKind, boolean> {
   const covered = Object.fromEntries(CIVIC_KINDS.map(kind => [kind, false])) as Record<CivicKind, boolean>;
-  for (const site of c.civic?.sites ?? []) if (!covered[site.kind] && civicSpec(site.kind).points > 0 && civicCells(site).some(part => distance(cell, part) <= civicSpec(site.kind).radius)) covered[site.kind] = true;
+  for (const site of c.civic?.sites ?? []) if (!covered[site.kind] && civicSpec(site.kind).points > 0 && civicOpen(site) && civicCells(site).some(part => distance(cell, part) <= civicSpec(site.kind).radius)) covered[site.kind] = true;
   return covered;
 }
-export const civicPoints = (covered: Record<CivicKind, boolean>) => CIVIC_KINDS.reduce((n, kind) => n + (covered[kind] ? CIVIC[kind].points : 0), 0);
+/** Services and places together add at most this much to a home's target, so a city cannot buy full happiness with buildings alone. */
+export const CIVIC_POINTS_CAP = 30;
+export const civicPoints = (covered: Record<CivicKind, boolean>) => Math.min(CIVIC_POINTS_CAP, CIVIC_KINDS.reduce((n, kind) => n + (covered[kind] ? CIVIC[kind].points : 0), 0));
 
 /** Facts the validator needs from the city, supplied by sim.ts (keeps this module City-free). */
 export type CivicValidationView = {
@@ -72,8 +96,20 @@ export function validateCivic(value: unknown, view: CivicValidationView): assert
   const ids = new Set<number>(), cells = new Set<number>();
   for (const site of s.sites) {
     const keys = site && typeof site === 'object' ? Object.keys(site).sort().join(',') : '';
-    if (keys !== 'cell,id,kind,tick' && keys !== 'cell,cells,id,kind,tick') fail('site fields');
+    if (!['cell,id,kind,tick', 'cell,cells,id,kind,tick', 'cell,id,kind,staffing,tick', 'cell,cells,id,kind,staffing,tick'].includes(keys)) fail('site fields');
     if (!CIVIC_KINDS.includes(site.kind)) fail('site kind');
+    if (site.staffing !== undefined) {
+      const staff = civicSpec(site.kind).staff, st = site.staffing, int = (n: unknown, min: number) => Number.isSafeInteger(n) && (n as number) >= min;
+      if (!staff || !st || typeof st !== 'object' || Object.keys(st).sort().join(',') !== 'allocations,workDays' || !Array.isArray(st.allocations) || !st.workDays || typeof st.workDays !== 'object' || Array.isArray(st.workDays)) fail('site staffing');
+      const pairs = new Set<string>();
+      for (const a of st.allocations) {
+        if (!a || typeof a !== 'object' || Object.keys(a).sort().join(',') !== 'householdId,skill,workers' || !int(a.householdId, 1) || !int(a.workers, 1) || !['general', 'manufacturing', 'retail'].includes(a.skill) || pairs.has(`${a.householdId}:${a.skill}`)) fail('site staffing');
+        pairs.add(`${a.householdId}:${a.skill}`);
+      }
+      if (civicWorkers(site) > staff!.slots) fail('site staffing');
+      for (const [wallet, days] of Object.entries(st.workDays)) if (!/^household:[1-9]\d*$/.test(wallet) || !int(days, 1)) fail('site staffing');
+      if (Object.values(st.workDays).reduce((n, days) => n + days, 0) > staff!.slots * Math.max(0, view.tick - site.tick)) fail('site staffing');
+    }
     if (!Number.isSafeInteger(site.id) || site.id < 1 || site.id >= view.nextId || ids.has(site.id) || view.otherIds.has(site.id)) fail('site id');
     // A site without `cells` is one parcel: every kind was, before larger footprints existed, so old stadiums stay valid.
     const footprint = site.cells === undefined ? [site.cell] : view.footprint(site.kind, site.cell);

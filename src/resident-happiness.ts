@@ -64,6 +64,7 @@ export function happinessTargets(city: City): Map<number, HappinessTarget> {
     for (const park of city.parks) {
       for (const job of park.staffing?.allocations ?? []) if (job.workers > 0) earnWages.add(job.householdId);
     }
+    for (const site of city.civic?.sites ?? []) for (const job of site.staffing?.allocations ?? []) if (job.workers > 0) earnWages.add(job.householdId);
     for (const person of education.values()) if (person.teacher + person.professor > 0) earnWages.add(person.householdId);
   }
   if (tax.profit) {

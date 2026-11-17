@@ -1,5 +1,5 @@
 import type { City } from './sim.ts';
-import { CIVIC, CIVIC_KINDS, CIVIC_REASON_NAMES } from './civic/sites.ts';
+import { CIVIC, CIVIC_KINDS, CIVIC_REASON_NAMES, civicSpec } from './civic/sites.ts';
 
 export type FlowKind = 'money' | 'goods';
 export type FlowRow = {
@@ -122,6 +122,8 @@ export function reasonLabel(reason: string): string {
   if (roadCell) return `สร้างถนนช่อง ${roadCell[1]}`;
   const visitors = /^Airport visitors #(\d+)$/.exec(reason);
   if (visitors) return `รายได้นักท่องเที่ยวผ่านสนามบิน #${visitors[1]}`;
+  const venue = /^(?:Monthly (.+?) wages|Visit (.+?)) #(\d+)$/.exec(reason), venueKind = venue && CIVIC_KINDS.find(kind => civicSpec(kind).staff && CIVIC_REASON_NAMES[kind] === (venue[1] ?? venue[2]));
+  if (venue && venueKind) return venue[1] ? `ค่าจ้างพนักงาน${CIVIC[venueKind].label} #${venue[3]}` : `ค่าบริการ${CIVIC[venueKind].label} #${venue[3]}`;
   const civic = /^(Build|Monthly) (.+?)(?: upkeep)? #(\d+)$/.exec(reason), civicKind = civic && CIVIC_KINDS.find(kind => CIVIC_REASON_NAMES[kind] === civic[2]);
   if (civic && civicKind) return civic[1] === 'Build' ? `สร้าง${CIVIC[civicKind].label} #${civic[3]}` : `ค่าบำรุง${CIVIC[civicKind].label} #${civic[3]} รายเดือน`;
   const road = /^Build (\d+) road cells$/.exec(reason);
