@@ -12,7 +12,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { adoptSavedEducation, firmWage, createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, WAGES, MONTH } from '../src/sim.ts';
+import { adoptSavedEducation, firmWage, createCity, step, serialize, deserialize, bulldoze, summary, housingCapacity, homeOccupancy, firmWorkerCount, householdWorkerCount, employmentForHousehold, employmentForFirm, landValues, WAGES, MONTH } from '../src/sim.ts';
 
 const upstream = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
 const output = resolve('.test-output'), shots = resolve(process.env.CITYMANAGER_SCREENSHOT_DIR || 'docs/population-preview');
@@ -266,7 +266,11 @@ try {
   await button('#pause'); await until(`JSON.parse(window.cityManager.snapshot()).tick>=${distributed.tick}&&document.querySelector('#pause').getAttribute('aria-pressed')==='true'`);
   assert.deepEqual(await state(),distributed);
   const movedResidents = distributed.households.filter(h => h.home !== oldTower.id);
-  assert.equal(movedResidents.length, 4, 'Exactly four existing families move in the weekly review');
+  // Families only move onto land at least as good as the tower's; a cottage in a factory's air stays empty.
+  const worth = landValues(concentrated), cleanHomes = moveHomes.slice(1).filter(b => worth(b.cell) >= worth(oldTower.cell));
+  assert.ok(cleanHomes.length >= 3, 'The fixture still has several clean new homes');
+  assert.equal(movedResidents.length, cleanHomes.length, 'One existing family moves into each clean new home in the weekly review');
+  assert.ok(moveHomes.slice(1).filter(b => !cleanHomes.includes(b)).every(b => homeOccupancy(distributed, b.id).households === 0), 'Nobody is sent onto worse land');
   for(const destination of moveHomes.slice(1)) await home(distributed,distributed.buildings.find(b=>b.id===destination.id));
   for (const resident of movedResidents) await household(resident, distributed.buildings.find(b => b.id === resident.home), distributed);
   await screenshot('housing-after-move.png');
