@@ -140,7 +140,7 @@ try {
   const advanced = await state(), advancedRaw = await evaluate('window.cityManager.snapshot()'); await openSignals();
   assert.deepEqual(await evaluate('Array.from(document.querySelectorAll(\'[data-signal-id^="trend."]\'), e => e.dataset.signalId).sort()'), [
     'trend.averageHappiness', 'trend.businesses', 'trend.employed', 'trend.expensesPerTick',
-    'trend.households', 'trend.housingCapacity', 'trend.incomePerTick', 'trend.population',
+    'trend.households', 'trend.housingCapacity', 'trend.incomePerTick', 'trend.pollution', 'trend.population',
     'trend.treasury', 'trend.unemployed',
   ].sort());
   assert.deepEqual(await state(), advanced, 'Comparative report is read-only'); assert.equal(await evaluate('window.cityManager.snapshot()'), advancedRaw);
