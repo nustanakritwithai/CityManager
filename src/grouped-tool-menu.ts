@@ -1,18 +1,22 @@
 import { iconElement } from './ui-icons.ts';
 import { installToolMenu } from './tool-menu.ts';
 
+/** What a city needs to run: utilities, safety, health and schooling. */
 const services = [
   ['power', 'ไฟฟ้า'], ['water', 'ประปา'], ['park', 'สวน'],
-  ['clinic', 'อนามัย'], ['police', 'ตำรวจ'], ['fire', 'ดับเพลิง'],
-  ['library', 'ห้องสมุด'], ['temple', 'วัด'], ['stadium', 'สนามบอล'], ['airport', 'สนามบิน'],
-  ['hospital', 'รพ.'], ['museum', 'พิพิธภัณฑ์'], ['amusement', 'สวนสนุก'],
-  ['cinema', 'โรงหนัง'], ['restaurant', 'ร้านอาหาร'], ['nightmarket', 'ตลาดคืน'], ['concert', 'คอนเสิร์ต'],
+  ['clinic', 'อนามัย'], ['police', 'ตำรวจ'], ['fire', 'ดับเพลิง'], ['hospital', 'รพ.'],
   ['school', 'โรงเรียน'], ['university', 'มหาวิทยาลัย'],
+] as const;
+/** Where people go: places to visit and venues that hire residents. */
+const leisure = [
+  ['library', 'ห้องสมุด'], ['temple', 'วัด'], ['museum', 'พิพิธภัณฑ์'], ['stadium', 'สนามบอล'], ['amusement', 'สวนสนุก'], ['airport', 'สนามบิน'],
+  ['cinema', 'โรงหนัง'], ['restaurant', 'ร้านอาหาร'], ['nightmarket', 'ตลาดคืน'], ['concert', 'คอนเสิร์ต'],
 ] as const;
 
 const construction = [['R', 'บ้าน'], ['C', 'พาณิชย์'], ['I', 'โรงงาน'], ['F', 'ฟาร์ม']] as const;
 
 export const installServicesMenu = (choose: (tool: string) => void) => installGroupedToolMenu('services', 'บริการเมือง', 'บริการ', services, choose);
+export const installLeisureMenu = (choose: (tool: string) => void) => installGroupedToolMenu('leisure', 'สถานที่และบันเทิง', 'บันเทิง', leisure, choose);
 export const installConstructionMenu = (choose: (tool: string) => void) => installGroupedToolMenu('construction', 'สิ่งปลูกสร้าง', 'สร้าง', construction, choose);
 
 /** Move the existing controls, not their commands, into a disclosure that never arms placement or demolition. */
@@ -23,7 +27,7 @@ function installGroupedToolMenu(id: string, name: string, caption: string, tools
   }));
   const anchor = document.createElement('button'); anchor.id = `${id}-tool`; anchor.type = 'button';
   anchor.className = 'tool grouped-tool-anchor';
-  const icon = iconElement(id === 'construction' ? 'build' : 'overview', 'tool-icon svg-glyph'), label = document.createElement('span');
+  const icon = iconElement(id === 'construction' ? 'build' : id === 'leisure' ? 'amusement' : 'overview', 'tool-icon svg-glyph'), label = document.createElement('span');
   const defaultIcon = icon.innerHTML;
   anchor.append(icon, label); options[0].button.before(anchor);
   const menu = document.createElement('div'); menu.id = `${id}-submenu`; menu.className = 'grouped-tool-submenu';

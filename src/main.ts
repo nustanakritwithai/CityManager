@@ -25,7 +25,7 @@ import { createAutosave, installAutosave, describeAutosave } from './autosave.ts
 import { roadTopologyKey } from './road-topology.ts';
 import { installRoadMenu, type RoadMode } from './road-menu.ts';
 import { installSelectMenu } from './select-menu.ts';
-import { installServicesMenu, installConstructionMenu } from './grouped-tool-menu.ts';
+import { installServicesMenu, installLeisureMenu, installConstructionMenu } from './grouped-tool-menu.ts';
 import './grouped-tool-menu.css';
 import './tool-menu.css';
 import '@fontsource/ibm-plex-sans-thai/thai-400.css';
@@ -144,7 +144,7 @@ const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: ''
 let view: CityView;
 let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
 let selectMenu: ReturnType<typeof installSelectMenu> | undefined;
-let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
+let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, leisureMenu: ReturnType<typeof installLeisureMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
 let quickSelection: number | null = null;
 let selectionActions: ReturnType<typeof installSelectionActions> | null = null;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
@@ -209,6 +209,7 @@ function setTool(next: string) {
   roadMenu?.close();
   selectMenu?.close(); selectMenu?.sync(next);
   servicesMenu?.close(); servicesMenu?.sync(next);
+  leisureMenu?.close(); leisureMenu?.sync(next);
   constructionMenu?.close(); constructionMenu?.sync(next);
   tool = next; roadStart = null; hover = null;
   if (next !== 'select') inspector(false);
@@ -257,6 +258,7 @@ function cancel() {
   view?.abortGesture();
   if (selectMenu?.isOpen()) { selectMenu.close(true); return; }
   if (servicesMenu?.isOpen()) { servicesMenu.close(true); return; }
+  if (leisureMenu?.isOpen()) { leisureMenu.close(true); return; }
   if (constructionMenu?.isOpen()) { constructionMenu.close(true); return; }
   if (cityNetwork?.open) { cityNetwork.toggle(false); return; }
   if (cityStatsPanel?.open) { cityStatsPanel.toggle(false); return; }
@@ -783,6 +785,7 @@ async function boot() {
   const selectButton = document.querySelector<HTMLButtonElement>('[data-tool="select"]')!;
   selectMenu = installSelectMenu(selectButton, next => { sound('ui-select'); setTool(next); });
   servicesMenu = installServicesMenu(next => { sound('ui-select'); setTool(next); });
+  leisureMenu = installLeisureMenu(next => { sound('ui-select'); setTool(next); });
   constructionMenu = installConstructionMenu(next => { sound('ui-select'); setTool(next); });
   const busComposer = document.createElement('div'); busComposer.id = 'bus-composer'; busComposer.hidden = true;
   $('#tool-help').before(busComposer);
@@ -1042,7 +1045,7 @@ async function boot() {
     const quickVisible = quickSelection !== null && tool === 'select' && $('#inspector').dataset.open !== 'true'
       && !cityStatsPanel?.open && !cityNetwork?.open && !minimap?.mapOpen && !dashboard?.modalOpen
       && !document.querySelector('dialog[open], [role="dialog"]:not([hidden])') && !hasOpenSubmenu()
-      && !selectMenu?.isOpen() && !servicesMenu?.isOpen() && !constructionMenu?.isOpen();
+      && !selectMenu?.isOpen() && !servicesMenu?.isOpen() && !leisureMenu?.isOpen() && !constructionMenu?.isOpen();
     selectionActions?.update(quickVisible);
     if (quickVisible && quickSelection !== null) { const point = view.project(quickSelection); const rect = $('#city-canvas').getBoundingClientRect(); selectionActions?.position(point.x + rect.left, point.y + rect.top); }
 

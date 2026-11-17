@@ -4,7 +4,7 @@ import { createCity, buildRoad, buildPlant, buildPark, buildCampus, buildCivic, 
 import { selectorKeyEvents, selectorTouchEmulation, findCanvasDragStart } from './select-menu-browser.mjs';
 import { loadedTrafficSession } from './traffic-server-entry-fixture.mjs';
 
-const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert', 'school', 'university']]];
+const groups = [['construction', ['R', 'C', 'I', 'F']], ['services', ['power', 'water', 'park', 'clinic', 'police', 'fire', 'hospital', 'school', 'university']], ['leisure', ['library', 'temple', 'museum', 'stadium', 'amusement', 'airport', 'cinema', 'restaurant', 'nightmarket', 'concert']]];
 const cell = (x, y) => y * SIZE + x;
 export function groupedToolFixture() { const city = createCity(61025, { starter: false }); assert.equal(buildRoad(city, GATEWAY, cell(18, 12)).ok, true); return serialize(city); }
 function place(city, tool, index) {
@@ -77,11 +77,11 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     await button(`#${id}-tool`); await key('Escape'); assert.equal(await open(id), false); assert.equal(await selected('select'), true);
     await button(`#${id}-tool`); await button('#cancel-tool'); assert.equal(await open(id), false); assert.equal(await state(), fixture);
   }
-  for (const [selector, id] of [['#services-tool', 'services'], ['#construction-tool', 'construction'], ['[data-tool="road"]', 'road'], ['[data-tool="select"]', 'select'], ['#services-tool', 'services']]) {
+  for (const [selector, id] of [['#services-tool', 'services'], ['#construction-tool', 'construction'], ['[data-tool="road"]', 'road'], ['[data-tool="select"]', 'select'], ['#leisure-tool', 'leisure'], ['#services-tool', 'services']]) {
     await button(selector); assert.deepEqual(await evaluate('[...document.querySelectorAll(".tool-submenu")].filter(m=>!m.hidden).map(m=>m.id)'), [`${id}-submenu`]); assert.equal(await state(), fixture);
   }
   await key('Escape'); await key('v');
-  checks.push('Exactly twenty-three controls sit in two ordered groups; read-only toggles and all four tool menus exclude one another');
+  checks.push('Exactly twenty-three controls sit in three ordered groups; read-only toggles and all five tool menus exclude one another');
 
   // A dismissal tap must not inherit demolition armed before opening a group.
   for (const [id] of groups) {
