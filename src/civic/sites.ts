@@ -11,7 +11,9 @@ export type CivicKind = typeof CIVIC_KINDS[number];
 export type CivicAllocation = { householdId: number; skill: 'general' | 'manufacturing' | 'retail'; workers: number };
 /** Who works at a staffed venue today, and the days each wallet has earned and not yet been paid for. */
 export type CivicStaffing = { allocations: CivicAllocation[]; workDays: Record<string, number> };
-export type CivicSite = { id: number; cell: number; kind: CivicKind; tick: number; cells?: number[]; staffing?: CivicStaffing };
+/** A household that leases a venue from the city: it keeps the takings, pays its staff daily and the city a monthly rent. */
+export type CivicOperator = { householdId: number; since: number };
+export type CivicSite = { id: number; cell: number; kind: CivicKind; tick: number; cells?: number[]; staffing?: CivicStaffing; operator?: CivicOperator };
 export type CivicState = { version: 1; rules: 'civic-1'; sites: CivicSite[] };
 
 /**
@@ -46,7 +48,12 @@ export const civicVisitorsReason = (id: number) => `Airport visitors #${id}`;
 export const civicWageReason = (kind: CivicKind, id: number) => `Monthly ${CIVIC_REASON_NAMES[kind]} wages #${id}`;
 export const civicFeeReason = (kind: CivicKind, id: number) => `Visit ${CIVIC_REASON_NAMES[kind]} #${id}`;
 const VENUE_NAMES = () => CIVIC_KINDS.filter(kind => civicSpec(kind).staff).map(kind => CIVIC_REASON_NAMES[kind]).join('|');
-export const isCivicWageReason = (reason: string) => new RegExp(`^Monthly (${VENUE_NAMES()}) wages #[1-9]\\d*$`).test(reason);
+export const isCivicWageReason = (reason: string) => new RegExp(`^(?:Monthly|Daily) (${VENUE_NAMES()}) wages #[1-9]\\d*$`).test(reason);
+/** A leased venue pays its staff each day from the operator's wallet. */
+export const civicDailyWageReason = (kind: CivicKind, id: number) => `Daily ${CIVIC_REASON_NAMES[kind]} wages #${id}`;
+export const civicRentReason = (kind: CivicKind, id: number) => `Monthly ${CIVIC_REASON_NAMES[kind]} rent #${id}`;
+/** A household needs this much to take on a venue: ten days of wages for every post. */
+export const civicLeaseCapital = (kind: CivicKind) => { const staff = civicSpec(kind).staff; return staff ? staff.slots * staff.dailyWage * 10 : 0; };
 /** Kinds visitors come for; parks count too, and the caller adds them. */
 export const CIVIC_ATTRACTIONS: readonly CivicKind[] = ['library', 'temple', 'stadium', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert'];
 export const civicSpec = (kind: CivicKind): CivicSpec => CIVIC[kind];
@@ -86,6 +93,8 @@ export type CivicValidationView = {
   footprint: (kind: CivicKind, anchor: number) => number[] | null;
   /** Cells and ids already held by parks, plants, campuses, taxi and bus sites. */
   otherCells: ReadonlySet<number>; otherIds: ReadonlySet<number>;
+  /** Households that exist now; a venue's operator must be one of them. */
+  householdIds?: ReadonlySet<number>;
 };
 /** Throws on any malformed or conflicting civic section. Runs only when `civic` is present. */
 export function validateCivic(value: unknown, view: CivicValidationView): asserts value is CivicState {
@@ -93,10 +102,11 @@ export function validateCivic(value: unknown, view: CivicValidationView): assert
   const s = value as CivicState;
   if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).sort().join(',') !== 'rules,sites,version' || s.version !== 1 || s.rules !== 'civic-1' || !Array.isArray(s.sites)) fail('envelope');
   if (s.sites.length > MAX_CIVIC_SITES) fail('too many sites');
-  const ids = new Set<number>(), cells = new Set<number>();
+  const ids = new Set<number>(), cells = new Set<number>(), operators = new Set<number>();
   for (const site of s.sites) {
     const keys = site && typeof site === 'object' ? Object.keys(site).sort().join(',') : '';
-    if (!['cell,id,kind,tick', 'cell,cells,id,kind,tick', 'cell,id,kind,staffing,tick', 'cell,cells,id,kind,staffing,tick'].includes(keys)) fail('site fields');
+    const optional = keys.split(',').filter(key => !['cell', 'id', 'kind', 'tick'].includes(key));
+    if (!['cell', 'id', 'kind', 'tick'].every(key => keys.split(',').includes(key)) || optional.some(key => !['cells', 'staffing', 'operator'].includes(key))) fail('site fields');
     if (!CIVIC_KINDS.includes(site.kind)) fail('site kind');
     if (site.staffing !== undefined) {
       const staff = civicSpec(site.kind).staff, st = site.staffing, int = (n: unknown, min: number) => Number.isSafeInteger(n) && (n as number) >= min;
@@ -109,6 +119,15 @@ export function validateCivic(value: unknown, view: CivicValidationView): assert
       if (civicWorkers(site) > staff!.slots) fail('site staffing');
       for (const [wallet, days] of Object.entries(st.workDays)) if (!/^household:[1-9]\d*$/.test(wallet) || !int(days, 1)) fail('site staffing');
       if (Object.values(st.workDays).reduce((n, days) => n + days, 0) > staff!.slots * Math.max(0, view.tick - site.tick)) fail('site staffing');
+      // A leased venue pays each day, so it never carries unpaid days.
+      if (site.operator !== undefined && Object.keys(st.workDays).length) fail('site staffing');
+    }
+    if (site.operator !== undefined) {
+      const op = site.operator;
+      if (!civicSpec(site.kind).staff || !op || typeof op !== 'object' || Object.keys(op).sort().join(',') !== 'householdId,since' || !Number.isSafeInteger(op.householdId) || op.householdId < 1 || !Number.isSafeInteger(op.since) || op.since < site.tick || op.since > view.tick) fail('site operator');
+      if (view.householdIds && !view.householdIds.has(op.householdId)) fail('site operator');
+      if (operators.has(op.householdId)) fail('site operator');
+      operators.add(op.householdId);
     }
     if (!Number.isSafeInteger(site.id) || site.id < 1 || site.id >= view.nextId || ids.has(site.id) || view.otherIds.has(site.id)) fail('site id');
     // A site without `cells` is one parcel: every kind was, before larger footprints existed, so old stadiums stay valid.

@@ -307,3 +307,10 @@
 .happiness-more p { margin: 0 0 calc(6 * var(--reader-unit, 1px)); }
 #entity-content[data-card-kind] .happiness-more p { font-size: calc(12 * var(--bc-unit, 1px)); line-height: 1.6; }
 #entity-content[data-card-kind] .happiness-line { font-size: calc(12 * var(--bc-unit, 1px)); }
+
+/* Lease or take back an entertainment venue: one full-width action under the venue's figures. */
+#venue-actions { margin-top: 12px; }
+#venue-actions[hidden] { display: none !important; }
+#venue-actions button { width: 100%; min-height: 44px; padding: 10px 14px; white-space: normal; overflow-wrap: anywhere; font-weight: 700; color: var(--amber); background: #f3c46b18; border-color: #f3c46b66; }
+#venue-actions button:hover { background: #f3c46b2a; }
+#venue-actions button[data-venue-action="end"] { color: var(--cream); background: #ffffff0d; border-color: #ffffff2e; }

@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, buildCivic, civicSiteReason, buildPark, buildPlant, buildRoad, zoneCell, bulldoze, access, treasurySpendable, householdWorkerCount, venueEmploymentForHousehold, MONTH, SIZE, type City } from '../src/sim.ts';
-const serializeRaw = (c: City) => JSON.stringify(c);
-import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCoverage, civicPoints, civicUpkeepReason, civicFeeReason, civicPayroll, civicWageReason, civicWorkers } from '../src/civic/sites.ts';
+import { createCity, step, serialize, deserialize, buildCivic, civicSiteReason, buildPark, buildPlant, buildRoad, zoneCell, bulldoze, access, treasurySpendable, householdWorkerCount, venueEmploymentForHousehold, leaseVenue, endVenueLease, venueLeaseCandidate, MONTH, SIZE, type City } from '../src/sim.ts';
+import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCoverage, civicPoints, civicUpkeepReason, civicFeeReason, civicDailyWageReason, civicRentReason, civicPayroll, civicWageReason, civicWorkers } from '../src/civic/sites.ts';
 import { homeAmenities } from '../src/resident-happiness.ts';
 
 const seeded = (days = 40) => { const c = createCity(61025); for (let i = 0; i < days; i++) step(c); return c; };
@@ -220,9 +219,45 @@ test('a venue gives happiness only while someone works there, and removing it pa
 });
 
 test('venue staffing in a save is checked: unknown households, too many workers and staffing on other kinds are refused', () => {
-  const { c, site } = venueCity('cinema', 3), bad = (mutate: (d: City) => void, why: string) => { const d = deserialize(serialize(c)); mutate(d); assert.throws(() => deserialize(JSON.stringify(JSON.parse(serializeRaw(d)))), undefined, why); };
+  const { c, site } = venueCity('cinema', 3), bad = (mutate: (d: City) => void, why: string) => { const d = JSON.parse(serialize(c)); mutate(d); assert.throws(() => deserialize(JSON.stringify(d)), /Invalid civic save|Unsupported or corrupt CityManager save/, why); };
   const at = (d: City) => d.civic!.sites.find(s => s.id === site().id)!;
+  assert.ok(site().staffing?.allocations.length, 'the fixture has staff to tamper with');
+  // The untouched save loads, so each refusal below comes from its own change.
+  { const d = JSON.parse(serialize(c)); assert.equal(serialize(deserialize(JSON.stringify(d))), serialize(c)); }
   bad(d => { at(d).staffing!.allocations.push({ householdId: 999_999, skill: 'general', workers: 1 }); }, 'unknown household');
   bad(d => { at(d).staffing!.allocations[0].workers = 99; }, 'too many workers');
   bad(d => { (at(d) as { kind: string }).kind = 'clinic'; }, 'staffing on a kind without staff');
+});
+
+test('a leased venue pays its staff daily from the operator, takes fees into the operator wallet and pays the city rent', () => {
+  const { c, site } = venueCity('cinema', 3), staff = CIVIC.cinema.staff!, id = site().id;
+  const candidate = venueLeaseCandidate(c, site())!; assert.ok(candidate, 'a household can afford the lease');
+  const r = leaseVenue(c, id); assert.equal(r.ok, true, r.message);
+  assert.deepEqual(site().operator, { householdId: candidate.id, since: c.tick });
+  assert.deepEqual(site().staffing?.workDays ?? {}, {}, 'city wages owed were settled at the hand-over');
+  assert.equal(leaseVenue(c, id).ok, false, 'one operator at a time');
+  const wallet = candidate.wallet, start = c.tick;
+  for (let i = 0; i < MONTH + 2; i++) { step(c); const saved = serialize(c); assert.equal(serialize(deserialize(saved)), saved, `day ${i}`); }
+  const rows = c.ledger.filter(e => e.tick > start);
+  const wages = rows.filter(e => e.reason === civicDailyWageReason('cinema', id)), fees = rows.filter(e => e.reason === civicFeeReason('cinema', id));
+  for (const e of wages) { assert.equal(e.from, wallet); assert.notEqual(e.to, wallet); assert.equal(e.amount % staff.dailyWage, 0); }
+  for (const e of fees) { assert.equal(e.to, wallet); assert.notEqual(e.from, wallet); }
+  assert.equal(rows.filter(e => e.reason === civicUpkeepReason('cinema', id)).length, 0, 'the city stops paying upkeep');
+  const rent = rows.filter(e => e.reason === civicRentReason('cinema', id)); assert.ok(rent.length >= 1); for (const e of rent) { assert.equal(e.from, wallet); assert.equal(e.to, 'treasury'); }
+  assert.ok(c.households.some(h => h.id === candidate.id), 'the operator household stays');
+  assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0, 'money is conserved');
+  assert.equal(endVenueLease(c, id).ok, true); assert.equal(site().operator, undefined);
+  const saved = serialize(c); assert.equal(serialize(deserialize(saved)), saved);
+});
+
+test('a lease in a save is checked: unknown household, a household running two venues, a lease with unpaid days and a lease on a service are refused', () => {
+  const { c, site } = venueCity('cinema', 3); assert.equal(leaseVenue(c, site().id).ok, true); step(c);
+  const bad = (mutate: (d: City) => void, why: string) => { const d = JSON.parse(serialize(c)); mutate(d); assert.throws(() => deserialize(JSON.stringify(d)), /Invalid civic save/, why); };
+  const at = (d: City) => d.civic!.sites.find(s => s.id === site().id)!;
+  assert.equal(serialize(deserialize(serialize(c))), serialize(c), 'the untouched lease loads');
+  bad(d => { at(d).operator!.householdId = 999_999; }, 'unknown household');
+  bad(d => { at(d).operator!.since = d.tick + 1; }, 'lease in the future');
+  bad(d => { at(d).staffing = { allocations: at(d).staffing?.allocations ?? [], workDays: { 'household:1': 1 } }; }, 'unpaid days under a lease');
+  bad(d => { (at(d) as { kind: string }).kind = 'clinic'; }, 'lease on a service');
+  bad(d => { const other = { ...at(d), id: d.nextId - 1 }; delete (other as { staffing?: unknown }).staffing; d.civic!.sites.push(other); }, 'second venue for the same household');
 });
