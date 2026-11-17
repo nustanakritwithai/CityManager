@@ -29,6 +29,7 @@ const INCOME: readonly [RegExp, string, string][] = [
   [/^Taxi fares$/, 'legacy-taxi-fares', 'ค่าโดยสารแท็กซี่ (รายการเดิม)'],
   [/^Monthly household wage tax$/, 'wage-tax', 'ภาษีค่าจ้าง'],
   [/^Visit (cinema|restaurant|night market|concert ground) #[1-9]\d*$/, 'venue-visits', 'ค่าบริการกิจการบันเทิง'],
+  [/^Monthly (cinema|restaurant|night market|concert ground) rent #[1-9]\d*$/, 'venue-rent', 'ค่าเช่ากิจการบันเทิง'],
   [/firm profit tax$/i, 'profit-tax', 'ภาษีกำไรกิจการ'],
   [/grant/i, 'grant', 'ทุนอุดหนุน'],
 ];

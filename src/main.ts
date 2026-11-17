@@ -44,7 +44,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
@@ -144,6 +144,17 @@ const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: ''
 let view: CityView;
 let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
 let selectMenu: ReturnType<typeof installSelectMenu> | undefined;
+/** Lease or take back an entertainment venue. One section, refreshed with the place panel. */
+const venueActions = document.createElement('section');
+function updateVenueActions(site: ReturnType<typeof civicAt>) {
+  venueActions.hidden = !site; if (!site) return;
+  venueActions.dataset.siteId = String(site.id);
+  const leased = !!site.operator, button = document.createElement('button'); button.type = 'button';
+  button.dataset.venueAction = leased ? 'end' : 'lease';
+  button.textContent = leased ? 'เมืองรับกิจการคืน' : 'ให้ครัวเรือนเช่าดำเนินการ';
+  button.title = leased ? 'รายได้กลับเข้าคลังเมือง เมืองจ่ายค่าจ้างและค่าบำรุงเอง' : 'ครัวเรือนที่มีเงินมากที่สุดรับไปดำเนินการ เก็บรายได้เอง จ่ายค่าจ้างทุกวัน และจ่ายค่าเช่าให้เมือง';
+  venueActions.replaceChildren(button);
+}
 let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, leisureMenu: ReturnType<typeof installLeisureMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
 let quickSelection: number | null = null;
 let selectionActions: ReturnType<typeof installSelectionActions> | null = null;
@@ -498,11 +509,13 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       } else metrics.push(metric('บ้านในระยะบริการ', `${reached.length} / ${homes.length} หลัง`, false, `ระยะ ${spec.radius} ช่องจากอาคาร`, reached.length),
         metric('ความสุขของบ้านที่ถึง', civicOpen(civic) ? `+${spec.points}` : 'ปิดอยู่', false, civicOpen(civic) ? 'นับครั้งเดียวต่อชนิดบริการ' : 'ยังไม่มีพนักงาน บ้านรอบข้างยังไม่ได้ความสุข'));
       if (spec.staff) {
-        const venue = venueStatus(city, civic);
-        metrics.push(metric('พนักงาน', `${venue.employed} / ${venue.slots} คน`, false, !venue.connected ? 'ถนนขาด รับคนไม่ได้' : venue.employed === venue.slots ? 'ครบทุกตำแหน่ง' : venue.employed ? 'กำลังรับคนเพิ่ม' : 'รอคนว่างงานในเมืองหรือเงินคลังสำหรับค่าจ้าง', venue.employed),
+        const venue = venueStatus(city, civic), op = venue.operator;
+        metrics.push(metric('ผู้ดำเนินการ', op ? `ครัวเรือน #${op.householdId}` : 'เมือง', false, op ? `เช่าตั้งแต่วันที่ ${op.since} · รายได้เข้าครัวเรือน จ่ายค่าจ้างทุกวันและค่าเช่ารายเดือน` : venue.candidate ? `ครัวเรือน #${venue.candidate} พร้อมรับเช่า` : `ยังไม่มีครัวเรือนที่มีเงิน ${money(venue.leaseCapital)} พอรับเช่า`),
+          metric('พนักงาน', `${venue.employed} / ${venue.slots} คน`, false, !venue.connected ? 'ถนนขาด รับคนไม่ได้' : venue.employed === venue.slots ? 'ครบทุกตำแหน่ง' : venue.employed ? 'กำลังรับคนเพิ่ม' : op ? 'ผู้ดำเนินการมีเงินไม่พอจ้าง หรือไม่มีคนว่างงาน' : 'รอคนว่างงานในเมืองหรือเงินคลังสำหรับค่าจ้าง', venue.employed),
           metric('ลูกค้าวันนี้', `${venue.visitsToday} / ${venue.capacity} ครัวเรือน`, false, `ค่าบริการ ${money(spec.staff.fee)} ต่อครั้ง · ครัวเรือนจ่ายเมื่อมีเงินเหลือพอ`, venue.visitsToday),
-          metric('รายได้ค่าบริการเดือนนี้', money(venue.monthIncome), true, 'เข้าคลังเมือง'),
-          metric('ค่าจ้างที่ค้างจ่ายสิ้นเดือน', money(venue.earnedWages), true, `ครบทุกตำแหน่ง ${money(venue.monthlyWages)}/เดือน · จ่ายให้ครัวเรือนของพนักงาน`));
+          metric('รายได้ค่าบริการเดือนนี้', money(venue.monthIncome), true, op ? `เข้าครัวเรือน #${op.householdId}` : 'เข้าคลังเมือง'));
+        if (op) metrics.push(metric('ค่าจ้างที่จ่ายเดือนนี้', money(op.wages), true, 'จ่ายทุกวันจากเงินผู้ดำเนินการ'), metric('ค่าเช่าที่จ่ายเมือง', money(op.rent), true, `${money(spec.upkeep)}/เดือน แทนค่าบำรุงที่เมืองเคยจ่าย`));
+        else metrics.push(metric('ค่าจ้างที่ค้างจ่ายสิ้นเดือน', money(venue.earnedWages), true, `ครบทุกตำแหน่ง ${money(venue.monthlyWages)}/เดือน · จ่ายให้ครัวเรือนของพนักงาน`));
       }
       metrics.push(metric('ค่าก่อสร้าง', money(spec.cost), true), metric('ค่าบำรุงรายเดือน', money(spec.upkeep), true));
       if (parts.length > 1) metrics.push(metric('พื้นที่', `${parts.length} ช่อง`, false, civicFootprint(civic.kind).join('×')));
@@ -544,6 +557,8 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
   $('#place-tags').replaceChildren(...tags); $('#place-metrics').replaceChildren(...metrics); $('#place-metrics').hidden = !metrics.length;
   const selectedCampus = cellIndex === null ? undefined : campusAt(city, cellIndex);
   $('#campus-actions').hidden = !selectedCampus;
+  const selectedVenue = cellIndex === null ? undefined : civicAt(city, cellIndex);
+  updateVenueActions(selectedVenue && civicSpec(selectedVenue.kind).staff ? selectedVenue : undefined);
   educationPanel?.update(city, selectedCampus);
   plantPanel?.update(city, route?.page === 'place' && cellIndex !== null ? plantAt(city, cellIndex) : undefined);
   $('#explanation').replaceChildren(...(railCard ? [railCard] : []), ...(busCard ? [busCard] : []), ...(checklist ? [checklist] : []), ...reasons.map(r=>node('p','reason',r))); $('.explain-section').hidden = !reasons.length && !checklist && !railCard && !busCard;
@@ -847,6 +862,13 @@ async function boot() {
   });
   educationPanel = installEducationPanel($('#campus-actions'));
   const plantActions = document.createElement('section'); $('#campus-actions').after(plantActions);
+  venueActions.id = 'venue-actions'; venueActions.className = 'venue-actions'; venueActions.hidden = true; $('#campus-actions').after(venueActions);
+  venueActions.addEventListener('click', event => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-venue-action]'), id = Number(venueActions.dataset.siteId);
+    if (!button || !id) return;
+    const result = button.dataset.venueAction === 'lease' ? leaseVenue(city, id) : endVenueLease(city, id);
+    status(resultSound(result, 'ui-select').message); render();
+  });
   plantPanel = installPlantPanel(plantActions, (quotedCity, id, level) => {
     if (quotedCity !== city || route?.page !== 'place' || plantAt(city, route.cell)?.id !== id) return;
     const result = upgradePlant(city, id, level); status(result.message); render(); plantPanel?.showResult(result);

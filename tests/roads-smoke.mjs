@@ -147,7 +147,7 @@ try {
  const selectorReport = await checkSelectMenu({ evaluate, button, click, send, screenshot, load, close, paints, fixture: original, cell: cell(5,12), setTouch: value => { touchMode = value; } });
  checks.push(...selectorReport.checks); await writeFile(resolve(output,'select-menu-report.json'), JSON.stringify(selectorReport,null,2));
  startNextSuite('grouped tool menus');
- const groupedReport = await checkGroupedToolMenus({ evaluate, button, click, send, screenshot, load, close, paints, setTouch: value => { touchMode = value; } });
+ const groupedReport = await checkGroupedToolMenus({ evaluate, button, click, send, screenshot, load, close, paints, setTouch: value => { touchMode = value; }, nextSuite: startNextSuite });
  checks.push(...groupedReport.checks); await writeFile(resolve(output,'grouped-tool-menu-report.json'), JSON.stringify(groupedReport,null,2));
  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(providerRequests,[],'No advisor/provider requests');assert.deepEqual(interceptionErrors,[]);assert.deepEqual(server.errors,[]);await storage.assertNoCityWrites(evaluate);console.log(JSON.stringify({checks,errors,external}));
 } catch(error){if(ws?.readyState===1){try{await screenshot('failure.png');}catch{}}console.error(JSON.stringify({checks,errors,external,error:String(error)}));throw error;}

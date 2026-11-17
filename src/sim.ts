@@ -12,7 +12,7 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicFeeReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
@@ -109,20 +109,51 @@ export const parkEmploymentForHousehold = (c: City, id: number) => c.parks.flatM
 const parkEmployment = (c: City) => c.parks.flatMap(p => p.staffing?.allocations ?? []);
 export const venueEmploymentForHousehold = (c: City, id: number) => venues(c).flatMap(site => (site.staffing?.allocations ?? []).map(a => ({ ...a, siteId: site.id, kind: site.kind }))).filter(a => a.householdId === id);
 const venueEmployment = (c: City) => venues(c).flatMap(site => site.staffing?.allocations ?? []);
-/** Venues are funded after parks, in id order, from what the treasury can still spend today. */
+const operatorWallet = (site: CivicSite) => site.operator ? `household:${site.operator.householdId}` : null;
+/** City-run venues are funded after parks, in id order, from what the treasury can still spend today; a leased venue hires what its operator can pay today. */
 function venueFundedSeats(c: City): Map<number, number> {
   let budget = treasurySpendable(c) - [...parkFundedSeats(c).values()].reduce((n, seats) => n + seats * PARK_STAFF.dailyWage, 0);
   return new Map(venues(c).map(site => {
-    const staff = civicSpec(site.kind).staff!, seats = Math.max(0, Math.min(staff.slots, Math.floor(budget / staff.dailyWage)));
+    const staff = civicSpec(site.kind).staff!, wallet = operatorWallet(site);
+    if (wallet) return [site.id, Math.max(0, Math.min(staff.slots, Math.floor(balance(c, wallet) / staff.dailyWage)))];
+    const seats = Math.max(0, Math.min(staff.slots, Math.floor(budget / staff.dailyWage)));
     budget -= seats * staff.dailyWage; return [site.id, seats];
   }));
+}
+/** The household that would take on a venue now: housed, not already running one, and holding enough for ten days of wages; the richest first. */
+export function venueLeaseCandidate(c: City, site: CivicSite): Household | null {
+  const capital = civicLeaseCapital(site.kind), busy = new Set(venues(c).flatMap(s => s.operator ? [s.operator.householdId] : []));
+  return c.households.filter(h => h.home !== null && !busy.has(h.id) && balance(c, h.wallet) >= capital)
+    .sort((a, b) => balance(c, b.wallet) - balance(c, a.wallet) || a.id - b.id)[0] ?? null;
+}
+/** Hand a city-run venue to a household. Wages the city owes are paid first; from tomorrow the household keeps the takings, pays staff daily and the city a monthly rent. */
+export function leaseVenue(c: City, siteId: number): Result {
+  const site = venues(c).find(s => s.id === siteId);
+  if (!site) return { ok: false, message: 'ไม่พบกิจการนี้' };
+  if (site.operator) return { ok: false, message: 'กิจการนี้มีผู้ดำเนินการอยู่แล้ว' };
+  const h = venueLeaseCandidate(c, site), label = CIVIC[site.kind].label;
+  if (!h) return { ok: false, message: `ยังไม่มีครัวเรือนที่มีเงินพอรับ${label} (ต้องมีอย่างน้อย ${civicLeaseCapital(site.kind) / 100} ฿)` };
+  payVenueWages(c, site);
+  if (site.staffing) site.staffing.workDays = {};
+  site.operator = { householdId: h.id, since: c.tick };
+  c.lastEvent = `ครัวเรือน #${h.id} รับดำเนิน${label} #${site.id} แล้ว · รายได้เข้าครัวเรือน · จ่ายค่าจ้างพนักงานทุกวัน และค่าเช่า ${CIVIC[site.kind].upkeep / 100} ฿/เดือนให้เมือง`;
+  return { ok: true, message: c.lastEvent };
+}
+/** Take a leased venue back: the city runs it again and keeps the takings. Nothing is owed either way because staff were paid daily. */
+export function endVenueLease(c: City, siteId: number): Result {
+  const site = venues(c).find(s => s.id === siteId);
+  if (!site?.operator) return { ok: false, message: 'กิจการนี้เมืองดำเนินการอยู่แล้ว' };
+  const id = site.operator.householdId; delete site.operator;
+  c.lastEvent = `เมืองรับ${CIVIC[site.kind].label} #${site.id} คืนจากครัวเรือน #${id} แล้ว · รายได้เข้าคลังเมืองอีกครั้ง`;
+  return { ok: true, message: c.lastEvent };
 }
 /** What a venue's panel shows: staff, today's customers and this month's takings and wages. */
 export function venueStatus(c: City, site: CivicSite) {
   const staff = civicSpec(site.kind).staff!, employed = civicWorkers(site), since = c.tick - (c.tick % MONTH || MONTH);
   const sum = (reason: string, tick: (t: number) => boolean) => c.ledger.filter(e => e.reason === reason && tick(e.tick)).reduce((n, e) => n + e.amount, 0);
-  const fee = civicFeeReason(site.kind, site.id);
-  return { employed, slots: staff.slots, capacity: civicDailyVisits(site), visitsToday: c.ledger.filter(e => e.reason === fee && e.tick === c.tick).length,
+  const fee = civicFeeReason(site.kind, site.id), daily = civicDailyWageReason(site.kind, site.id), wallet = operatorWallet(site);
+  const operator = wallet ? { householdId: site.operator!.householdId, since: site.operator!.since, wages: sum(daily, t => t > since), rent: sum(civicRentReason(site.kind, site.id), t => t > since - MONTH) } : null;
+  return { operator, candidate: wallet ? null : venueLeaseCandidate(c, site)?.id ?? null, leaseCapital: civicLeaseCapital(site.kind), employed, slots: staff.slots, capacity: civicDailyVisits(site), visitsToday: c.ledger.filter(e => e.reason === fee && e.tick === c.tick).length,
     monthIncome: sum(fee, t => t > since), earnedWages: civicPayroll(site), monthlyWages: staff.slots * staff.dailyWage * MONTH, connected: civicCells(site).some(part => access(c, part)) };
 }
 /** ID-ordered funding shares prevent several parks promising the same treasury money. */
@@ -1046,9 +1077,14 @@ function employVenues(c: City): void {
     if (!mine.length && !site.staffing) continue;
     site.staffing ??= { allocations: [], workDays: {} };
     site.staffing.allocations = mine;
+    const owner = operatorWallet(site), wage = civicSpec(site.kind).staff!.dailyWage;
     for (const a of mine) {
       const wallet = c.households.find(h => h.id === a.householdId)!.wallet;
-      site.staffing.workDays[wallet] = (site.staffing.workDays[wallet] ?? 0) + a.workers;
+      if (!owner) { site.staffing.workDays[wallet] = (site.staffing.workDays[wallet] ?? 0) + a.workers; continue; }
+      // A leased venue pays today's shift now; the operator's own household works for itself unpaid.
+      if (wallet === owner) continue;
+      const paid = transfer(c, owner, wallet, a.workers * wage, civicDailyWageReason(site.kind, site.id));
+      if (paid > 0) withholdWageTax(c, wallet, paid);
     }
   }
 }
@@ -1060,12 +1096,13 @@ function visitVenues(c: City): void {
   const homes = new Map(c.buildings.filter(b => b.zone === 'R').map(b => [b.id, b.cell])), visited = new Set<number>();
   for (const site of sites) {
     const spec = civicSpec(site.kind), fee = spec.staff!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
-    const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius));
+    const payee = operatorWallet(site) ?? 'treasury';
+    const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && h.wallet !== payee && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius));
     // Start from a different home each day so the same households are not always the ones served.
     const start = guests.length ? (c.tick + site.id) % guests.length : 0;
     for (let n = 0; n < guests.length && left > 0; n++) {
       const h = guests[(start + n) % guests.length];
-      if (transfer(c, h.wallet, 'treasury', fee, civicFeeReason(site.kind, site.id)) === fee) { visited.add(h.id); left--; }
+      if (transfer(c, h.wallet, payee, fee, civicFeeReason(site.kind, site.id)) === fee) { visited.add(h.id); left--; }
     }
   }
 }
@@ -1231,7 +1268,8 @@ function settleMonth(c: City) {
   for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
   for (const p of c.plants) transfer(c, 'treasury', 'upkeep', plantSpec(p).upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
   for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
-  for (const site of c.civic?.sites ?? []) transfer(c, 'treasury', 'upkeep', CIVIC[site.kind].upkeep, civicUpkeepReason(site.kind, site.id));
+  // A leased venue's operator pays rent instead of the city paying upkeep; a short wallet pays what it has.
+  for (const site of c.civic?.sites ?? []) { const wallet = operatorWallet(site); if (wallet) transfer(c, wallet, 'treasury', CIVIC[site.kind].upkeep, civicRentReason(site.kind, site.id)); else transfer(c, 'treasury', 'upkeep', CIVIC[site.kind].upkeep, civicUpkeepReason(site.kind, site.id)); }
   // Visitors arrive through an airport that still has its road: the more there is to see, the more they spend.
   for (const site of c.civic?.sites ?? []) if (civicSpec(site.kind).visitors && civicCells(site).some(part => access(c, part))) transfer(c, 'outside', 'treasury', civicVisitorIncome(site.kind, cityAttractions(c)), civicVisitorsReason(site.id));
   // Services scale with the people actually present at settlement, not empty housing.
@@ -1303,7 +1341,8 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
     else if (e.reason === 'New household arrival savings') recent.add(e.to);
   }
   for (const [wallet,tick] of Object.entries(c.history?.lastIncome??{})) if(tick>since) paid.add(wallet);
-  const owners = new Set(c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []));
+  // Business owners and venue operators stay: their household runs something the city depends on.
+  const owners = new Set([...c.firms.flatMap(f => f.owner ? [f.owner.householdId] : []), ...venues(c).flatMap(site => site.operator ? [site.operator.householdId] : [])]);
   const distressed = new Set(c.happiness?.rows.filter(row => row.distressDays >= HAPPINESS_DEPARTURE_DAYS).map(row => row.householdId) ?? []);
   const leaving = c.households.filter(h => h.origin === 'arrival' && !owners.has(h.id) && (distressed.has(h.id) || householdWorkerCount(c, h.id) === 0 && !paid.has(h.wallet) && !recent.has(h.wallet)))
     .sort((a, b) => a.id - b.id).slice(0, Math.min(Math.max(0, c.households.length - DEPARTURE_FLOOR), Math.ceil(c.households.length * DEPARTURE_SHARE)));
@@ -2157,7 +2196,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
 export function civicValidationView(c: City): CivicValidationView {
   const campuses = c.education?.campuses ?? [], taxi = c.taxi?.depots ?? [], bus = c.bus;
   return {
-    cells: c.cells, tick: c.tick, nextId: c.nextId, footprint: (kind, anchor) => civicParcels(c, anchor, kind),
+    cells: c.cells, tick: c.tick, nextId: c.nextId, footprint: (kind, anchor) => civicParcels(c, anchor, kind), householdIds: new Set(c.households.map(h => h.id)),
     otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...taxi.map(d => d.cell), ...(bus?.depots ?? []).map(d => d.cell)]),
     otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...taxi, ...(bus ? [...bus.depots, ...bus.stops, ...bus.lines] : [])].map(x => x.id)),
   };
