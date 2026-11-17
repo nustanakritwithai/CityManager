@@ -1,4 +1,5 @@
 import { housingCapacity, householdWorkerCount, type City } from './sim.ts';
+import { pollutionReader } from './environment.ts';
 import { averageHouseholdHappiness } from './resident-happiness.ts';
 
 /** Wire contract shared with the isolated city-advisor.rules.v1 backend. */
@@ -18,7 +19,7 @@ export const METRIC_LABELS: Record<MetricId, string> = {
   employed: 'แรงงานมีงาน', unemployed: 'แรงงานว่างงาน', treasury: 'เงินคลังเมือง',
   incomePerTick: 'เงินเข้าคลังในวันปัจจุบัน', expensesPerTick: 'เงินออกคลังในวันปัจจุบัน',
   averageHappiness: 'ความสุขเฉลี่ยครัวเรือน', housingCapacity: 'ความจุที่อยู่อาศัยเป็นคน',
-  pollution: 'มลพิษ (ไม่มีข้อมูล)', trafficPressure: 'ความหนาแน่นจราจร (ไม่มีข้อมูล)',
+  pollution: 'มลพิษเฉลี่ยที่บ้าน', trafficPressure: 'ความหนาแน่นจราจร (ไม่มีข้อมูล)',
 };
 export const UNIT_LABELS: Record<MetricUnit, string> = {
   people: 'คน', households: 'ครัวเรือน', establishments: 'แห่ง', currency: '฿',
@@ -112,6 +113,10 @@ export function captureCitySignals(city: City): SignalCapture {
   const employed = city.households.reduce((total, household) => total + householdWorkerCount(city, household.id), 0);
   const personCapacity = city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0);
   const happiness = averageHouseholdHappiness(city.happiness);
+  // Pollution where households actually live, averaged per household; absent while nobody has a home.
+  const air = pollutionReader(city), homes = new Map(city.buildings.map(building => [building.id, building.cell]));
+  const housed = city.households.filter(household => household.home !== null && homes.has(household.home));
+  const pollution = housed.length ? Math.round(housed.reduce((total, household) => total + air(homes.get(household.home!)!), 0) / housed.length * 10) / 10 : null;
   const metric = (id: MetricId, value: number): SignalMetric => ({ id, value, unit: METRIC_DEFINITIONS[id][0], source: SOURCE });
   const metrics = [
     metric('population', population),
@@ -124,6 +129,7 @@ export function captureCitySignals(city: City): SignalCapture {
     metric('expensesPerTick', expense / 100),
     ...(happiness === null ? [] : [metric('averageHappiness', happiness)]),
     metric('housingCapacity', personCapacity),
+    ...(pollution === null ? [] : [metric('pollution', pollution)]),
   ];
   return { tick: city.tick, metrics: metricList(metrics) };
 }

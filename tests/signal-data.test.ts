@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { pollutionAt } from '../src/environment.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createCity, housingCapacity, serialize, step, summary } from '../src/sim.ts';
@@ -51,7 +52,10 @@ test('version-five mapping includes owner labour and distinguishes people, house
   const report = buildLocalSignalReport(requestForCapture(capture));
   assert.equal(metric(capture, 'averageHappiness').value, city.happiness!.rows.reduce((sum, row) => sum + row.score, 0) / city.households.length);
   assert.equal(metric(capture, 'averageHappiness').unit, 'index_0_100');
-  assert.deepEqual(report.data.missingData.filter(value => value.reason === 'current_metric_unavailable').map(value => value.metricRefs[0]), ['pollution', 'trafficPressure']);
+  assert.deepEqual(report.data.missingData.filter(value => value.reason === 'current_metric_unavailable').map(value => value.metricRefs[0]), ['trafficPressure']);
+  const homes = new Map(city.buildings.map(building => [building.id, building.cell])), housed = city.households.filter(household => household.home !== null);
+  assert.equal(metric(capture, 'pollution').value, Math.round(housed.reduce((total, household) => total + pollutionAt(city, homes.get(household.home!)!), 0) / housed.length * 10) / 10, 'average pollution at the homes households live in');
+  assert.equal(metric(capture, 'pollution').unit, 'index_0_100');
   assert(report.data.signals.some(value => value.id === 'threshold.housing-capacity-exceeded'));
   assert.equal(serialize(city), before, 'capture/report preserve the complete version-five save and RNG');
 });
