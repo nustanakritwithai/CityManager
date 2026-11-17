@@ -472,7 +472,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       // Land itself: how clean the air is here and what the parcel is worth for its services, road and air.
       const dirt = pollutionAt(city, cellIndex), worth = landValue(homeAmenities(city, cellIndex).points, connected, dirt);
       metrics.push(metric('มลพิษ', `${dirt} / 100`, false, dirt ? `บ้านตรงนี้ความสุข −${pollutionHappinessPoints(dirt)} · สวนใกล้ ๆ ช่วยฟอกอากาศ` : 'อากาศดี ไม่มีโรงงาน โรงไฟฟ้า หรือสนามบินใกล้', dirt),
-        metric('มูลค่าที่ดิน', `${worth} / 100`, false, 'สูงขึ้นเมื่อมีบริการและสถานที่ในระยะและติดถนน ลดลงเมื่อมีมลพิษ', worth));
+        metric('มูลค่าที่ดิน', `${worth} / 100`, false, 'สูงขึ้นเมื่อมีบริการและสถานที่ในระยะและติดถนน ลดลงเมื่อมีมลพิษ · ครัวเรือนใหม่เลือกบ้านที่ดินดีก่อน และย้ายไปที่ดินที่ดีกว่าเมื่อมีที่ว่าง', worth));
     }
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
