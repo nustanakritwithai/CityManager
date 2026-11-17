@@ -5,6 +5,7 @@ import { expandedCellCoordinate } from './expanded-map-grid.ts';
 import { estimateHouseholdCommutes, type CommuteEstimate } from './resident-commute.ts';
 import { DEFAULT_TAX_RATES, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { civicCoverage, civicPoints, type CivicKind } from './civic/sites.ts';
+import { pollutionHappinessPoints, pollutionReader } from './environment.ts';
 
 export const HAPPINESS_BASE = 80, HAPPINESS_DISTRESS = 30, HAPPINESS_DEPARTURE_DAYS = 30;
 export const HAPPINESS_UNEMPLOYED_POINTS = 25;
@@ -23,6 +24,9 @@ type HappinessTarget = {
   profitTaxPoints: number;
   unemployedWorkers: number;
   unemploymentPoints: number;
+  /** Pollution 0–100 at the home and the happiness it costs. */
+  pollution: number;
+  pollutionPoints: number;
 };
 /** Each household has one score, including households with multiple members. */
 export function averageHouseholdHappiness(state?: HappinessState): number | null {
@@ -44,13 +48,13 @@ export function taxHappinessPoints(rates: TaxRates) {
     profit: DEFAULT_TAX_RATES.profit - rates.profit,
   };
 }
-export function happinessTarget(amenities:HomeAmenity, commute?:CommuteEstimate, taxPoints = 0, unemploymentPoints = 0) {
+export function happinessTarget(amenities:HomeAmenity, commute?:CommuteEstimate, taxPoints = 0, unemploymentPoints = 0, pollutionPoints = 0) {
   const inaccessible=commute?.workers ? Math.round(60*commute.unreachableWorkers/commute.workers):0;
   // Link costs assume 100 m tiles and 40 km/h. Long trips and congestion use
   // the same estimated seconds; no unsupported claim of actual failure.
   const long=(commute?.averageSeconds??0)>300?10:0;
   const delay=commute?.averageSeconds != null && commute.freeFlowSeconds != null && commute.averageSeconds - commute.freeFlowSeconds >= 10 && commute.averageSeconds >= commute.freeFlowSeconds * 1.02 ? 10 : 0;
-  return Math.max(0,Math.min(100,60+amenities.points-inaccessible-long-delay+taxPoints-unemploymentPoints));
+  return Math.max(0,Math.min(100,60+amenities.points-inaccessible-long-delay+taxPoints-unemploymentPoints-pollutionPoints));
 }
 export function happinessTargets(city: City): Map<number, HappinessTarget> {
   const commutes = new Map(estimateHouseholdCommutes(city).map(row => [row.householdId, row]));
@@ -70,7 +74,7 @@ export function happinessTargets(city: City): Map<number, HappinessTarget> {
   if (tax.profit) {
     for (const firm of city.firms) if (firm.owner) ownBusinesses.add(firm.owner.householdId);
   }
-  const result = new Map<number, HappinessTarget>();
+  const result = new Map<number, HappinessTarget>(), pollutionOf = pollutionReader(city);
   for (const h of city.households) {
     const cell = h.home === null ? undefined : homes.get(h.home);
     const amenities = cell === undefined ? { parkNearby: false, schoolNearby: false, points: 0 } : homeAmenities(city, cell);
@@ -81,8 +85,9 @@ export function happinessTargets(city: City): Map<number, HappinessTarget> {
     const unemploymentPoints = unemployedWorkers * HAPPINESS_UNEMPLOYED_POINTS;
     const wageTaxPoints = earnWages.has(h.id) ? tax.wage : 0;
     const profitTaxPoints = ownBusinesses.has(h.id) ? tax.profit : 0;
+    const pollution = cell === undefined ? 0 : pollutionOf(cell), pollutionPoints = pollutionHappinessPoints(pollution);
     result.set(h.id, {
-      target: happinessTarget(amenities, commute, wageTaxPoints + profitTaxPoints, unemploymentPoints),
+      target: happinessTarget(amenities, commute, wageTaxPoints + profitTaxPoints, unemploymentPoints, pollutionPoints),
       parkNearby: amenities.parkNearby,
       schoolNearby: amenities.schoolNearby,
       workers: commute?.workers ?? 0,
@@ -94,6 +99,8 @@ export function happinessTargets(city: City): Map<number, HappinessTarget> {
       profitTaxPoints,
       unemployedWorkers,
       unemploymentPoints,
+      pollution,
+      pollutionPoints,
     });
   }
   return result;

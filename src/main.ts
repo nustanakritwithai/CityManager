@@ -45,6 +45,8 @@ import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
+import { homeAmenities } from './resident-happiness.ts';
 import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
@@ -466,6 +468,12 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
     }
     // A larger service is connected when any of its parcels has road frontage, whichever parcel was tapped.
     const connected = civic ? civicCells(civic).some(part => access(city, part)) : access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
+    if (!cell.road && !civic && !park && !plant && !campus) {
+      // Land itself: how clean the air is here and what the parcel is worth for its services, road and air.
+      const dirt = pollutionAt(city, cellIndex), worth = landValue(homeAmenities(city, cellIndex).points, connected, dirt);
+      metrics.push(metric('มลพิษ', `${dirt} / 100`, false, dirt ? `บ้านตรงนี้ความสุข −${pollutionHappinessPoints(dirt)} · สวนใกล้ ๆ ช่วยฟอกอากาศ` : 'อากาศดี ไม่มีโรงงาน โรงไฟฟ้า หรือสนามบินใกล้', dirt),
+        metric('มูลค่าที่ดิน', `${worth} / 100`, false, 'สูงขึ้นเมื่อมีบริการและสถานที่ในระยะและติดถนน ลดลงเมื่อมีมลพิษ', worth));
+    }
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
     if (cell.zone === 'F') {
