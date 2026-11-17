@@ -1,5 +1,6 @@
 import { happinessTargets, homeAmenities, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
 import { CIVIC, CIVIC_KINDS, CIVIC_POINTS_CAP, civicSpec } from './civic/sites.ts';
+import { POLLUTION_HAPPINESS_CAP, POLLUTION_HAPPINESS_STEP } from './environment.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
 import { onExplicitActivation } from './explicit-activation.ts';
@@ -421,6 +422,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     else if (facts.commuteSeconds !== null && facts.commuteSeconds > 300) penalty('เดินทางเกิน 5 นาที −10');
     if (facts.delaySeconds !== null && facts.delaySeconds >= 10) penalty(`รถติด ${Math.round(facts.delaySeconds)} วินาที`);
     if (facts.unemployedWorkers) penalty(`ว่างงาน ${facts.unemployedWorkers} คน ${happinessPoints.format(-facts.unemploymentPoints)}`);
+    if (facts.pollutionPoints) penalty(`มลพิษ ${facts.pollution} ${happinessPoints.format(-facts.pollutionPoints)}`);
     const tax = facts.wageTaxPoints + facts.profitTaxPoints; if (tax) chips.append(el('span', tax > 0 ? 'on' : 'bad', `ภาษี ${happinessPoints.format(tax)}`));
     detail.append(chips);
     const more = el('details', 'happiness-more'); more.append(el('summary', '', 'ที่มาของคะแนน'));
@@ -430,6 +432,7 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
     more.append(el('p', 'happiness-summary', `บริการและสถานที่ในระยะรวมกันบวกได้สูงสุด ${CIVIC_POINTS_CAP} คะแนน · ` + 'เป้าหมายเริ่ม 60 คะแนน บวกอย่างละ 10 เมื่อมีสวนหรือโรงเรียนใกล้ หักสูงสุด 60 ตามสัดส่วนแรงงานที่ไม่มีเส้นทางไป–กลับ หักอีก 10 เมื่อเวลาเกิน 5 นาที และอีก 10 เมื่อเวลาล่าช้าอย่างน้อย 10 วินาทีและ 2%'));
     more.append(el('p', 'happiness-summary', `ผลต่อเป้าหมายจากภาษีค่าจ้าง ${happinessPoints.format(facts.wageTaxPoints)} คะแนน · ภาษีกำไรกิจการ ${happinessPoints.format(facts.profitTaxPoints)} คะแนน`));
     more.append(el('p', 'happiness-summary', `แรงงานว่างงาน ${facts.unemployedWorkers} คน · ผลต่อเป้าหมายความสุข ${happinessPoints.format(-facts.unemploymentPoints)} คะแนน`));
+    more.append(el('p', 'happiness-summary', `มลพิษที่บ้าน ${facts.pollution} / 100 จากโรงงาน โรงไฟฟ้า และสนามบินใกล้ ๆ · ทุก ${POLLUTION_HAPPINESS_STEP} หน่วยลดความสุข 1 คะแนน สูงสุด ${POLLUTION_HAPPINESS_CAP} · สวนสาธารณะใกล้ช่วยฟอกอากาศ`));
     more.append(el('p', 'happiness-summary', household.origin === 'legacy-v1' ? 'ครัวเรือนจากเมืองรุ่นเดิมได้รับการคุ้มครองจากการย้ายออก' : city.firms.some(f => f.owner?.householdId === household.id) ? 'เจ้าของกิจการได้รับการคุ้มครองจากการย้ายออก' : 'ถ้าคะแนนต่ำกว่า 30 ต่อเนื่องครบ 30 วัน อาจย้ายออกเมื่อสิ้นเดือน โดยมีเพดานจำนวนย้ายออกและจำนวนครัวเรือนขั้นต่ำ'));
     detail.append(more);
     output.push(detail);
