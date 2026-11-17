@@ -289,7 +289,8 @@ async function run(){
   child=spawn(browser,['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-background-timer-throttling',...graphics,'--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
   const stopStartupCapture=observeBrowserStartup(child,diagnostics.browserLaunch);
   let launchError;child.on('error',e=>{launchError=e;});let debugPort;
-  for(let i=0;i<100&&!debugPort;i++){if(launchError)throw launchError;if(child.exitCode!==null||child.signalCode!==null)throw Error(`Browser exited ${child.exitCode} signal ${child.signalCode}; no acceptance result`);try{debugPort=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);}catch{}await sleep(100);}
+  // Chrome on a busy CI runner can take longer than 10 s to write its port; allow 30 s as the other browser smokes do.
+  for(let i=0;i<300&&!debugPort;i++){if(launchError)throw launchError;if(child.exitCode!==null||child.signalCode!==null)throw Error(`Browser exited ${child.exitCode} signal ${child.signalCode}; no acceptance result`);try{debugPort=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);}catch{}await sleep(100);}
   stopStartupCapture();diagnostics.browserLaunch.devToolsReady=Boolean(debugPort);
   assert.ok(debugPort,'Browser unavailable; acceptance NOT passed');
   const pages=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();ws=new WebSocket(pages.find(p=>p.type==='page').webSocketDebuggerUrl);
