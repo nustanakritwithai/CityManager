@@ -50,7 +50,8 @@ export function groupedRowSwipe(layout) {
   return { x: layout.m.x + layout.m.w / 2, y: layout.m.y + layout.m.h / 2, deltaX: direction * Math.min(80, layout.m.w / 3) };
 }
 
-export async function checkGroupedToolMenus({ evaluate, button, click, send, screenshot, load, close, paints, setTouch }) {
+/** `nextSuite` starts a fresh deadline for each part; the menus now hold 23 tools in three groups, more than one deadline covers. */
+export async function checkGroupedToolMenus({ evaluate, button, click, send, screenshot, load, close, paints, setTouch, nextSuite = () => {} }) {
   const checks = [], layouts = [], raw = groupedToolFixture(), fixture = serialize(loadedTrafficSession(raw).city);
   const state = () => evaluate('window.cityManager.snapshot()');
   const open = id => evaluate(`!document.querySelector('#${id}-submenu').hidden`);
@@ -102,6 +103,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
     await button(`#${id}-tool`); await button('#cancel-tool'); assert.equal(await selected(tool), true, 'Cancel dismisses an open group before cancelling its existing placement mode'); assert.equal(await state(), fixture);
   }
   await key('v');
+  nextSuite('grouped tool menu placements');
   let expected = deserialize(fixture); let index = 5;
   for (const [id, tools] of groups) for (const tool of tools) {
     // One fixture cannot pay for every tool, and only columns 5–16 of the row are on screen at the desktop viewport: start a fresh one when the next would not fit.
@@ -113,6 +115,7 @@ export async function checkGroupedToolMenus({ evaluate, button, click, send, scr
   await load(raw); await close(); await key('v');
   checks.push('Shortcuts1–7, active anchor icon/name and all twenty-three placement commands retain exact city snapshots and accounting');
 
+  nextSuite('grouped tool menu viewports');
   for (const [name, width, height, screenWidth] of [['mobile',390,844,390], ['small',320,568,320], ['landscape',844,390,844], ['short-landscape',640,240,640], ['touch-desktop-mode',980,780,390]]) {
     await viewport(width, height, true, screenWidth); await key('v');
     for (const [id, tools] of groups) {
