@@ -12,7 +12,7 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicUpkeepReason, createCivic, validateCivic, type CivicKind, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, createCivic, validateCivic, type CivicKind, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
@@ -725,25 +725,41 @@ export function upgradePlant(c: City, id: number, expectedLevel: PlantLevel): Re
 }
 
 /** Why a service cannot stand here, or null. The preview and the action share this one rule. */
+/** The parcels a kind covers from its top-left parcel, row by row, by map coordinate; null when any would leave this city's map. */
+export function civicParcels(c: City, i: number, kind: CivicKind): number[] | null {
+  if (!validIndex(i, c)) return null;
+  const [columns, rows] = civicFootprint(kind), origin = expandedCellCoordinate(i), parts: number[] = [];
+  for (let dz = 0; dz < rows; dz++) for (let dx = 0; dx < columns; dx++) {
+    const part = expandedCellAt(origin.x + dx, origin.z + dz);
+    if (part === null || !validIndex(part, c)) return null;
+    parts.push(part);
+  }
+  return parts;
+}
 export function civicSiteReason(c: City, i: number, kind: CivicKind): string | null {
-  if (isRailReserved(c, i)) return RAIL_PARCEL_MESSAGE;
   if (!validIndex(i, c) || !CIVIC_KINDS.includes(kind)) return 'ตำแหน่งหรือชนิดอาคารบริการไม่ถูกต้อง';
-  const cell = c.cells[i], spec = CIVIC[kind];
-  if (cell.road || cell.zone !== null || cell.building !== null || plantAt(c, i) || parkAt(c, i) || campusAt(c, i) || taxiAt(c, i) || busDepotAt(c, i) || civicAt(c, i)) return `${spec.label}ต้องใช้แปลงว่าง 1 ช่อง ล้างโซนหรือรื้อสิ่งเดิมก่อน`;
-  if (!access(c, i)) return `${spec.label}ต้องติดถนนที่เชื่อมถึงประตูเมือง`;
+  const spec = civicSpec(kind), [columns, rows] = civicFootprint(kind), parts = civicParcels(c, i, kind);
+  const size = columns * rows === 1 ? '1 ช่อง' : `${columns}×${rows} ช่อง`;
+  if (!parts) return `${spec.label}ใช้พื้นที่ ${size} และต้องอยู่ในแผนที่ทั้งหมด`;
+  if (parts.some(part => isRailReserved(c, part))) return RAIL_PARCEL_MESSAGE;
+  if (parts.some(part => { const cell = c.cells[part]; return part === GATEWAY || cell.road || cell.zone !== null || cell.building !== null || plantAt(c, part) || parkAt(c, part) || campusAt(c, part) || taxiAt(c, part) || busDepotAt(c, part) || civicAt(c, part); })) return `${spec.label}ต้องใช้แปลงว่าง ${size} ล้างโซนหรือรื้อสิ่งเดิมก่อน`;
+  if (!parts.some(part => access(c, part))) return `${spec.label}ต้องติดถนนที่เชื่อมถึงประตูเมือง`;
   if ((c.civic?.sites.length ?? 0) >= MAX_CIVIC_SITES || !canAllocateIds(c, 1)) return `สร้างอาคารบริการเพิ่มไม่ได้ (สูงสุด ${MAX_CIVIC_SITES} แห่ง)`;
   if (treasurySpendable(c) < spec.cost) return `เงินคลังไม่พอ ${spec.label}ใช้ ${spec.cost / 100}`;
   return null;
 }
-/** One empty, unzoned parcel with connected road frontage, paid from the treasury; upkeep is charged each month. */
+/** Attractions visitors come for: parks plus libraries, temples and stadiums. */
+export const cityAttractions = (c: City): number => c.parks.length + (c.civic?.sites.filter(site => CIVIC_ATTRACTIONS.includes(site.kind)).length ?? 0);
+/** Empty, unzoned parcels with connected road frontage, paid from the treasury; upkeep is charged each month. `i` is the top-left parcel. */
 export function buildCivic(c: City, i: number, kind: CivicKind): Result {
   const reason = civicSiteReason(c, i, kind);
   if (reason) return { ok: false, message: reason };
-  const spec = CIVIC[kind], id = c.nextId++;
+  const spec = civicSpec(kind), id = c.nextId++, parts = civicParcels(c, i, kind)!;
   transfer(c, 'treasury', 'construction', spec.cost, civicBuildReason(kind, id));
   const civic = c.civic ?? createCivic();
-  c.civic = { ...civic, sites: [...civic.sites, { id, cell: i, kind, tick: c.tick }] };
-  c.lastEvent = `สร้าง${spec.label} #${id} แล้ว · บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points} · ค่าบำรุง ${spec.upkeep / 100} ฿/เดือน`;
+  c.civic = { ...civic, sites: [...civic.sites, parts.length > 1 ? { id, cell: i, kind, tick: c.tick, cells: parts } : { id, cell: i, kind, tick: c.tick }] };
+  const effect = spec.visitors ? `นักท่องเที่ยวจ่ายเข้าคลัง ${civicVisitorIncome(kind, cityAttractions(c)) / 100} ฿/เดือน ตามจำนวนสถานที่ท่องเที่ยว` : `บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}`;
+  c.lastEvent = `สร้าง${spec.label} #${id} แล้ว · ${effect} · ค่าบำรุง ${spec.upkeep / 100} ฿/เดือน`;
   return { ok: true, message: c.lastEvent };
 }
 
@@ -1139,6 +1155,8 @@ function settleMonth(c: City) {
   for (const p of c.plants) transfer(c, 'treasury', 'upkeep', plantSpec(p).upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
   for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
   for (const site of c.civic?.sites ?? []) transfer(c, 'treasury', 'upkeep', CIVIC[site.kind].upkeep, civicUpkeepReason(site.kind, site.id));
+  // Visitors arrive through an airport that still has its road: the more there is to see, the more they spend.
+  for (const site of c.civic?.sites ?? []) if (civicSpec(site.kind).visitors && civicCells(site).some(part => access(c, part))) transfer(c, 'outside', 'treasury', civicVisitorIncome(site.kind, cityAttractions(c)), civicVisitorsReason(site.id));
   // Services scale with the people actually present at settlement, not empty housing.
   // As with other upkeep, only available (non-payroll-reserved) cash is paid; no debt
   // is created and loading an existing city does not itself charge a past bill.
@@ -2059,7 +2077,7 @@ function deserializeVersioned(json: string, expandedPopulation = false, expanded
 export function civicValidationView(c: City): CivicValidationView {
   const campuses = c.education?.campuses ?? [], taxi = c.taxi?.depots ?? [], bus = c.bus;
   return {
-    cells: c.cells, tick: c.tick, nextId: c.nextId,
+    cells: c.cells, tick: c.tick, nextId: c.nextId, footprint: (kind, anchor) => civicParcels(c, anchor, kind),
     otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...taxi.map(d => d.cell), ...(bus?.depots ?? []).map(d => d.cell)]),
     otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...taxi, ...(bus ? [...bus.depots, ...bus.stops, ...bus.lines] : [])].map(x => x.id)),
   };
@@ -2069,7 +2087,7 @@ export function taxiValidationView(c: City): TaxiValidationView {
   const campuses = c.education?.campuses ?? [];
   return {
     cells: c.cells, tick: c.tick, nextId: c.nextId,
-    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...(c.bus?.depots ?? []).map(d => d.cell), ...(c.civic?.sites ?? []).map(d => d.cell)]),
+    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...(c.bus?.depots ?? []).map(d => d.cell), ...(c.civic?.sites ?? []).flatMap(civicCells)]),
     otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...(c.bus ? [...c.bus.depots, ...c.bus.stops, ...c.bus.lines] : []), ...(c.civic?.sites ?? [])].map(x => x.id)),
   };
 }
@@ -2078,7 +2096,7 @@ export function busValidationView(c: City): BusValidationView {
   const campuses = c.education?.campuses ?? [], taxi = c.taxi?.depots ?? [];
   return {
     cells: c.cells, roadTopology: c.roadTopology, width: SIZE, tick: c.tick, nextId: c.nextId,
-    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...taxi.map(d => d.cell), ...(c.civic?.sites ?? []).map(d => d.cell)]),
+    otherCells: new Set([...c.parks.map(p => p.cell), ...c.plants.map(p => p.cell), ...campuses.map(k => k.cell), ...taxi.map(d => d.cell), ...(c.civic?.sites ?? []).flatMap(civicCells)]),
     otherIds: new Set([...c.buildings, ...c.firms, ...c.households, ...c.parks, ...c.plants, ...campuses, ...taxi, ...(c.civic?.sites ?? [])].map(x => x.id)),
   };
 }

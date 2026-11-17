@@ -11,7 +11,7 @@ import { commercialVisualPlan } from './commercial-visuals.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
-import type { CivicKind } from './civic/sites.ts';
+import { civicCells, civicFootprint, type CivicKind } from './civic/sites.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
 import { CityAssets, disconnectedBuildingMaterial } from './asset-models.ts';
@@ -410,12 +410,12 @@ export class CityView {
   /** `invalid` marks previewed cells where the action would be refused (red frame). */
   render(city: City, selected: number | null, preview: number[], invalid: ReadonlySet<number> = new Set()) {
     this.app.renderNextFrame = true;
-    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
+    this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
     const connected = connectedRoads(city), services = utilityService(city, connected), online = services.online;
     // One lookup table per refresh: a city without services pays nothing per parcel.
-    const civicByCell = city.civic?.sites.length ? new Map(city.civic.sites.map(site => [site.cell, site])) : undefined;
+    const civicByCell = city.civic?.sites.length ? new Map(city.civic.sites.flatMap(site => civicCells(site).map(cell => [cell, site] as const))) : undefined;
     const fadeLater: Entity[] = [];
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
@@ -436,7 +436,7 @@ export class CityView {
       const campus = city.education?.campuses.find(item => item.cell === i);
       const stand = this.taxiDepots.find(d => d.cell === i);
       const civic = civicByCell?.get(i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${civic?.cells?.length ?? 1}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -486,7 +486,12 @@ export class CityView {
       } else if (municipalPark) {
         this.municipalPark(tile);
       } else if (civic) {
-        this.civic(tile, civic.kind);
+        // A larger site is drawn once, from its top-left parcel, stretched over its footprint; its other parcels stay bare.
+        if (i === civic.cell) {
+          const [columns, rows] = civic.cells ? civicFootprint(civic.kind) : [1, 1];
+          if (columns * rows === 1) this.civic(tile, civic.kind);
+          else { const piece = new Entity('Civic set piece'); piece.setLocalPosition((columns - 1) * UNIT / 2, 0, (rows - 1) * UNIT / 2); piece.setLocalScale(columns * 1.06, Math.min(columns, rows), rows * 1.06); tile.addChild(piece); this.civic(piece, civic.kind); }
+        }
       } else if (plant) {
         this.plant(tile, plant.kind, plantOn, plantLevel(plant));
       } else if (stand) {
@@ -609,6 +614,18 @@ export class CityView {
       this.box(tile, 0, .125, 0, .02, .005, .78, '#f2f5ee', false);
       for (const z of [-.66, .66]) { this.box(tile, 0, .22, z, 1.5, .26, .24, '#d9dde3'); this.box(tile, 0, .4, z * 1.08, 1.5, .1, .12, '#c8452f'); }
       for (const [x, z] of [[-.8, -.8], [.8, -.8], [-.8, .8], [.8, .8]]) { this.box(tile, x, .55, z, .05, 1, .05, '#8b929c'); this.box(tile, x, 1.08, z, .2, .1, .08, '#f6f1c7'); }
+      return;
+    }
+    if (kind === 'airport') {
+      // Apron, a runway with centre dashes, a terminal, a control tower and one parked plane.
+      this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#aeb4b0', false);
+      this.box(tile, 0, .1, .48, 1.74, .02, .46, '#3d444f', false);
+      for (const x of [-.66, -.33, 0, .33, .66]) this.box(tile, x, .115, .48, .16, .005, .04, '#f2f5ee', false);
+      this.box(tile, -.36, .26, -.5, .9, .34, .46, '#e9eef5');
+      this.box(tile, -.36, .46, -.5, .96, .06, .5, '#3f7fc4');
+      this.box(tile, -.36, .24, -.26, .7, .16, .02, '#9ec3e6');
+      this.box(tile, .62, .5, -.56, .12, .82, .12, '#d9dde3'); this.box(tile, .62, .96, -.56, .22, .14, .22, '#3f7fc4');
+      this.box(tile, .2, .2, .1, .5, .09, .1, '#f7f9fc'); this.box(tile, .16, .2, .1, .1, .03, .5, '#f7f9fc'); this.box(tile, .42, .27, .1, .06, .12, .03, '#c8452f');
       return;
     }
     if (kind === 'temple') {

@@ -3,6 +3,7 @@ export const ICONS: Record<string, string> = {
   school: '<path d="M3 10 12 3l9 7v11H3z" fill="currentColor"/><path d="M10 15h4v6h-4zM6 12h3v3H6zM15 12h3v3h-3z" fill="#0e172c"/><circle cx="12" cy="9" r="2" fill="#0e172c"/>',
   education: '<path d="m2 8 10-5 10 5-10 5zM6 11v6c4 3 8 3 12 0v-6M22 8v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
   pause: '<path d="M6 4h4v16H6zM14 4h4v16h-4z" fill="currentColor"/>',
+  airport: '<path d="M21 15.5v-2l-7.5-4.7V4a1.5 1.5 0 0 0-3 0v4.8L3 13.5v2l7.5-2.3V18l-2 1.5V21l3.5-1 3.5 1v-1.5l-2-1.5v-4.8z" fill="currentColor"/>',
   library: '<path d="M4 5h6a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
   temple: '<path d="M12 2v3M5 11l7-6 7 6M3 11h18M6 11v9M18 11v9M3 20h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 20v-4a2 2 0 0 1 4 0v4z" fill="currentColor"/>',
   stadium: '<ellipse cx="12" cy="12" rx="9.5" ry="6.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="7" y="9" width="10" height="6" rx="1" fill="currentColor"/><path d="M12 9v6" stroke="#0e172c" stroke-width="1.2"/>',

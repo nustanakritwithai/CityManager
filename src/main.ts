@@ -44,8 +44,8 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildCivic, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
-import { CIVIC, CIVIC_KINDS, civicAt, civicUpkeepReason, isCivicKind } from './civic/sites.ts';
+import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
@@ -181,7 +181,7 @@ const help: Record<string, string> = {
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
   water: 'โรงสูบน้ำ ฿3,000 · +40 หน่วย · บำรุง ฿60/เดือน · วางแปลงว่างริมถนน น้ำวิ่งตามถนน อาคารใกล้ได้ก่อน',
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
-  ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, `${CIVIC[kind].label} ฿${(CIVIC[kind].cost / 100).toLocaleString('th-TH')} · 1 ช่องติดถนน · บ้านในระยะ ${CIVIC[kind].radius} ช่องได้ความสุข +${CIVIC[kind].points} · บำรุง ฿${CIVIC[kind].upkeep / 100}/เดือน`])),
+  ...Object.fromEntries(CIVIC_KINDS.map(kind => { const spec = civicSpec(kind), [columns, rows] = civicFootprint(kind), size = columns * rows === 1 ? '1 ช่อง' : `${columns}×${rows} ช่อง`; return [kind, `${spec.label} ฿${(spec.cost / 100).toLocaleString('th-TH')} · ${size}ติดถนน · ${spec.visitors ? 'นักท่องเที่ยวจ่ายเข้าคลังทุกเดือนตามจำนวนสถานที่ท่องเที่ยว' : `บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}`} · บำรุง ฿${spec.upkeep / 100}/เดือน`]; })),
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
   bulldoze: 'รื้อถอน · คืน 80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่ายและมีหลักฐาน · อาคารเอกชนไม่คืนเงินและค่ารื้อ ฿20 · ดูยอดที่การ์ดสถานที่ก่อนรื้อ · ป้ายและอู่รถเมล์จะถามก่อนลบ · V/Esc เพื่อออก',
@@ -437,7 +437,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, cell.zone === 'C' && !!building && building.level <= 3, !!park);
     if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }
     if (park) $('#place-subtitle').textContent = `สวนเทศบาล #${park.id} · เลเวล ${park.level} · 1 ช่อง`;
-    if (civic) $('#place-subtitle').textContent = `บริการเมือง #${civic.id} · 1 ช่อง`;
+    if (civic) $('#place-subtitle').textContent = `บริการเมือง #${civic.id} · ${civicCells(civic).length} ช่อง`;
     if (campus) $('#place-subtitle').textContent = `${campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย'} #${campus.id} · ระดับ ${campus.level} · ${campus.open ? 'เปิดบริการ' : 'พักบริการ'}`;
     const busCaption = busController?.caption(cellIndex); if (busCaption) $('#place-subtitle').textContent = busCaption;
     const rail = !cell.road && !cell.zone ? railUi?.placeCard(cellIndex) : null;
@@ -451,7 +451,8 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       if (demolition.unknown) reasons.push('ประวัติเก่าระบุเงินที่เมืองจ่ายให้สิ่งนี้ไม่ครบ จึงคืนเฉพาะยอดที่มีหลักฐาน ไม่ใช้ราคาปัจจุบันแทน');
       if (building) reasons.push('อาคารนี้เอกชนเป็นผู้จ่าย เมืองจึงไม่มีเงินก่อสร้างคืน เงินและภาระของกิจการสะสางตามเดิม');
     }
-    const connected = access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
+    // A larger service is connected when any of its parcels has road frontage, whichever parcel was tapped.
+    const connected = civic ? civicCells(civic).some(part => access(city, part)) : access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));
     if (cell.zone === 'F') {
@@ -459,13 +460,13 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       tags.push(tag('เลือกชนิดพืชได้เอง', 'good'));
     }
     if (!cell.road && !park) {
-      const distance = gatewayRoadDistance(city, cellIndex);
+      const distance = gatewayRoadDistance(city, civic ? civicCells(civic).find(part => access(city, part)) ?? cellIndex : cellIndex);
       if (distance !== null) reasons.push(`ระยะจากประตูเมืองผ่านถนน ${distance} ช่อง รวมทางเข้าแปลง (ไม่ใช่เวลาเดินทาง)`);
     }
     const parcel = railCard || busCard ? null : parcelChecklist(city, cellIndex);
     if (parcel) checklist = parcelChecklistView(parcel);
     if (!park && !connected && !parcel) reasons.push('ต้องเชื่อมถนนข้างแปลงกับประตูภายนอกฝั่งตะวันตก');
-    if (!park && !utilityAt(city, cellIndex) && !parcel) reasons.push('น้ำหรือไฟในเครือข่ายไม่พอ การผลิตและเติบโตหยุดชั่วคราว สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน');
+    if (!park && !civic && !utilityAt(city, cellIndex) && !parcel) reasons.push('น้ำหรือไฟในเครือข่ายไม่พอ การผลิตและเติบโตหยุดชั่วคราว สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน');
     if (cell.road && !busCard) {
       const road = roadFacts(city, cellIndex)!;
       metrics.push(metric('สร้างต่อช่อง', money(5000), true), metric('บำรุงรักษาต่อวัน', money(10), true),
@@ -486,11 +487,16 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       reasons.push('ผู้เรียนเป็นจำนวนคนในครัวเรือน ไม่ใช่รายชื่อรายบุคคล', 'ปิดบริการหรือขาดน้ำไฟหยุดความก้าวหน้า แต่ไม่ลบวุฒิที่ได้แล้ว');
     }
     else if (civic) {
-      const spec = CIVIC[civic.kind], homes = city.buildings.filter(b => b.zone === 'R'), reached = homes.filter(b => civicCellDistance(b.cell, civic.cell) <= spec.radius);
+      const spec = civicSpec(civic.kind), parts = civicCells(civic), homes = city.buildings.filter(b => b.zone === 'R'), reached = homes.filter(b => parts.some(part => civicCellDistance(b.cell, part) <= spec.radius));
       const lastDue = Math.floor(city.tick / 30) * 30, billed = city.ledger.find(e => e.reason === civicUpkeepReason(civic.kind, civic.id) && e.tick === lastDue);
-      metrics.push(metric('บ้านในระยะบริการ', `${reached.length} / ${homes.length} หลัง`, false, `ระยะ ${spec.radius} ช่องจากอาคาร`, reached.length),
-        metric('ความสุขของบ้านที่ถึง', `+${spec.points}`, false, 'นับครั้งเดียวต่อชนิดบริการ'),
-        metric('ค่าก่อสร้าง', money(spec.cost), true), metric('ค่าบำรุงรายเดือน', money(spec.upkeep), true));
+      if (spec.visitors) {
+        const attractions = cityAttractions(city), online = parts.some(part => access(city, part));
+        metrics.push(metric('รายได้นักท่องเที่ยว/เดือน', money(online ? civicVisitorIncome(civic.kind, attractions) : 0), true, online ? `ฐาน ${money(spec.visitors.base)} + ${money(spec.visitors.perAttraction)} ต่อสถานที่ท่องเที่ยว` : 'ถนนขาด นักท่องเที่ยวเข้าไม่ได้'),
+          metric('สถานที่ท่องเที่ยวในเมือง', `${attractions} แห่ง`, false, 'สวน ห้องสมุด วัด สนามฟุตบอล', attractions));
+      } else metrics.push(metric('บ้านในระยะบริการ', `${reached.length} / ${homes.length} หลัง`, false, `ระยะ ${spec.radius} ช่องจากอาคาร`, reached.length),
+        metric('ความสุขของบ้านที่ถึง', `+${spec.points}`, false, 'นับครั้งเดียวต่อชนิดบริการ'));
+      metrics.push(metric('ค่าก่อสร้าง', money(spec.cost), true), metric('ค่าบำรุงรายเดือน', money(spec.upkeep), true));
+      if (parts.length > 1) metrics.push(metric('พื้นที่', `${parts.length} ช่อง`, false, civicFootprint(civic.kind).join('×')));
       if (lastDue > civic.tick) metrics.push(metric('จ่ายบำรุงเดือนล่าสุด', money(billed?.amount ?? 0), true, billed?.amount === spec.upkeep ? 'จ่ายครบจากคลังเมือง' : 'เงินคลังไม่พอจ่ายครบ ไม่มีการกู้หรือหักซ้ำ'));
       reasons.push('รื้อได้โดยไม่เสียค่าใช้จ่ายและไม่มีเงินคืน ค่าบำรุงหยุดเมื่อรื้อ');
     }
