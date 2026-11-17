@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, summary, housingCapacity } from '../src/sim.ts';
+import { pollutionAt } from '../src/environment.ts';
 
 const root = process.cwd(), output = resolve(root, '.test-output');
 const shots = resolve(root, process.env.CITYMANAGER_SIGNALS_SCREENSHOT_DIR || 'docs/signal-preview');
@@ -124,6 +125,8 @@ try {
     expensesPerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.from === 'treasury').reduce((n,e) => n+e.amount,0)/100,
     averageHappiness: fixture.happiness.rows.reduce((sum, row) => sum + row.score, 0) / fixture.households.length,
     housingCapacity: fixture.buildings.reduce((n,b) => n+housingCapacity(b).persons,0),
+    // Average pollution at the homes households live in, to one decimal.
+    pollution: Math.round(fixture.households.filter(h => h.home !== null).reduce((n,h) => n + pollutionAt(fixture, fixture.buildings.find(b => b.id === h.home).cell), 0) / fixture.households.filter(h => h.home !== null).length * 10) / 10,
   });
   assert.equal(await count('[data-signal-metric=population]'), 1);
   assert((await count('[data-missing-id^="missing.prior."]')) > 0);
