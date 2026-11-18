@@ -250,3 +250,11 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-profit { font-variant-numeric: tabular-nums; }
 .dash-profit.good { color: var(--c-good); } .dash-profit.bad { color: var(--c-bad); }
 .dash-risk.firm.good { border-left-color: var(--c-good); } .dash-risk.firm.flat { border-left-color: var(--pnl-line); }
+/* Economy insights: one tappable line each, worst first; the tag names the tone so colour is never alone. */
+.dash-economy .dash-insights { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
+.dash-insight { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--pnl-line); border-left: 3px solid var(--c-good); border-radius: var(--pnl-radius-sm); background: var(--pnl-bg); color: var(--chart-ink); font-size: calc(13.5 * var(--u)); line-height: 1.45; text-align: left; cursor: pointer; }
+.dash-insight.warn { border-left-color: var(--c-accent); } .dash-insight.bad { border-left-color: var(--c-bad); }
+.dash-insight-tag { padding: 1px 6px; border-radius: 6px; font-size: calc(11.5 * var(--u)); font-weight: 700; color: var(--c-good); background: rgba(255, 255, 255, .06); white-space: nowrap; }
+.dash-insight.warn .dash-insight-tag { color: var(--c-accent); } .dash-insight.bad .dash-insight-tag { color: var(--c-bad); }
+.dash-insight-go { color: var(--chart-muted); font-size: 18px; }
+.dash-insight:hover, .dash-insight:focus-visible { border-color: #f3c46b88; }

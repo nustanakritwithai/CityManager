@@ -20,9 +20,10 @@ import { budgetSummary, setCityBudget, treasurySpendable } from './sim.ts';
 import { BUDGET_LEVELS, type BudgetDepartment, type BudgetLevel } from './budget.ts';
 import { MAX_DISTRICTS, createDistrict, deleteDistrict, districtTone, renameDistrict } from './districts.ts';
 import { districtStats } from './district-stats.ts';
-import { moneyFlows, SECTOR_LABELS, type EconomySector } from './economy-flows.ts';
-import { businessSectors, BUSINESS_SECTOR_LABELS, BUYERS, BUYER_LABELS, COST_KINDS, COST_LABELS, type FirmResult } from './business-sectors.ts';
-import { householdEconomy, INCOME_KINDS, INCOME_LABELS, SAVINGS_BAND_LABELS, SPENDING_KINDS, SPENDING_LABELS } from './household-economy.ts';
+import { moneyFlows, SECTOR_LABELS, type EconomySector, type MoneyFlows } from './economy-flows.ts';
+import { economyInsights } from './economy-insights.ts';
+import { businessSectors, BUSINESS_SECTOR_LABELS, BUYERS, BUYER_LABELS, COST_KINDS, COST_LABELS, type BusinessSectors, type FirmResult } from './business-sectors.ts';
+import { householdEconomy, type HouseholdEconomy, INCOME_KINDS, INCOME_LABELS, SAVINGS_BAND_LABELS, SPENDING_KINDS, SPENDING_LABELS } from './household-economy.ts';
 import type { City } from './sim.ts';
 import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { taxHappinessPoints } from './resident-happiness.ts';
@@ -161,6 +162,10 @@ export class OverviewDashboard {
       this.renderBudget(this.city);
     });
     this.finance.append(this.financeHead, taxForm, this.budget, this.financeCharts);
+    this.economy.addEventListener('click', event => {
+      const target = (event.target as Element).closest<HTMLElement>('[data-target]')?.dataset.target;
+      if (target) document.getElementById(target)?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    });
     this.economy.id = 'dash-economy'; this.householdCard.id = 'dash-households'; this.businessCard.id = 'dash-business';
     this.districts.id = 'dash-districts';
     this.districts.addEventListener('click', event => {
@@ -195,7 +200,8 @@ export class OverviewDashboard {
     this.chartWidth = this.width();
     const series = dailySeries(city, 30);
     renderGoalsCard(this.goals, goals, missions, challenges, population);
-    this.renderKpis(city, series); this.renderBudget(city); this.renderEconomy(city); this.renderHouseholds(city); this.renderBusiness(city); this.renderDistricts(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
+    this.renderKpis(city, series); this.renderBudget(city); const flows = moneyFlows(city), homes = householdEconomy(city), business = businessSectors(city, undefined, RECIPE_LABELS);
+    this.renderEconomy(flows, homes, business); this.renderHouseholds(homes); this.renderBusiness(business); this.renderDistricts(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
   /** Chart width follows the card so text stays at its real size. */
@@ -231,8 +237,8 @@ export class OverviewDashboard {
 
   /** Named districts with what each holds; paint, rename or delete one, or start a new one. */
   /** Who paid whom over 30 days: each side's net, then the largest flows between sides as one-hue bars. */
-  private renderEconomy(city: City) {
-    const f = moneyFlows(city), net = (sector: EconomySector) => f.balances.find(b => b.sector === sector)!;
+  private renderEconomy(f: MoneyFlows, homes: HouseholdEconomy, business: BusinessSectors) {
+    const net = (sector: EconomySector) => f.balances.find(b => b.sector === sector)!;
     const keep = (text: string) => text.replace(/ /g, '\u00a0'); // an amount never breaks across lines
     const tone = (v: number) => v > 0 ? 'good' as const : v < 0 ? 'bad' as const : 'flat' as const;
     const side = (sector: EconomySector, icon: string) => {
@@ -249,12 +255,18 @@ export class OverviewDashboard {
     const figure = barList('เงินที่ไหลระหว่างฝ่าย', money(total), rows.map(r => ({ label: r.label, value: r.amount, text: money(r.amount), detail: `${r.entries.toLocaleString('th-TH')} รายการ` })), total, 'ยังไม่มีเงินไหลในช่วงนี้');
     const trade = f.within.firm ?? 0, transfers = f.within.household ?? 0;
     const facts = [trade ? `กิจการซื้อขายกันเอง ${money(trade)}` : '', transfers ? `ครัวเรือนจ่ายกันเอง ${money(transfers)}` : ''].filter(Boolean).join(' · ');
-    this.economy.replaceChildren(this.head('เงินไหลเวียนในเมือง', `วันที่ ${f.fromTick}–${f.toTick}`), tiles, figure, ...(facts ? [el('p', 'dash-funding-note', facts)] : []));
+    const insights = economyInsights(f, homes, business), notes = el('ul', 'dash-insights'); notes.setAttribute('aria-label', 'ข้อสังเกตเศรษฐกิจ');
+    for (const x of insights) {
+      const item = el('li'), go = el('button', `dash-insight ${x.tone}`); go.type = 'button'; go.dataset.target = x.target; go.dataset.insight = x.key;
+      go.append(el('span', 'dash-insight-tag', x.tone === 'bad' ? 'ต้องแก้' : x.tone === 'warn' ? 'น่าจับตา' : 'ดี'), el('span', 'dash-insight-text', x.text), el('span', 'dash-insight-go', '›'));
+      go.setAttribute('aria-label', `${x.text} · ไปที่รายละเอียด`); item.append(go); notes.append(item);
+    }
+    this.economy.replaceChildren(this.head('เงินไหลเวียนในเมือง', `วันที่ ${f.fromTick}–${f.toTick}`), ...(insights.length ? [notes] : []), tiles, figure, ...(facts ? [el('p', 'dash-funding-note', facts)] : []));
   }
 
   /** Household income and spending by kind, savings spread, and who cannot cover next month's rent and water/power. */
-  private renderHouseholds(city: City) {
-    const r = householdEconomy(city), keep = (text: string) => text.replace(/ /g, '\u00a0');
+  private renderHouseholds(r: HouseholdEconomy) {
+    const keep = (text: string) => text.replace(/ /g, '\u00a0');
     // Each kind keeps its colour slot; kinds with nothing this month are left out of the legend.
     const mix = el('div', 'dash-mix');
     mix.append(
@@ -284,8 +296,8 @@ export class OverviewDashboard {
   }
 
   /** Farms, factories and shops: takings against running costs on one scale, who buys, where the money goes, and the best and worst firms. */
-  private renderBusiness(city: City) {
-    const r = businessSectors(city, undefined, RECIPE_LABELS), open = r.sectors.filter(s => s.firms > 0);
+  private renderBusiness(r: BusinessSectors) {
+    const open = r.sectors.filter(s => s.firms > 0);
     const tone = (v: number) => v > 0 ? 'good' : v < 0 ? 'bad' : 'flat';
     const max = Math.max(1, ...open.flatMap(s => [s.revenue, s.costs]));
     const legend = el('div', 'dash-legend');
