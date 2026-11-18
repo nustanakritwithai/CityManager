@@ -56,6 +56,8 @@ export class CityView {
   private roadState: Set<number> | null = null;
   /** The city the work effects last compared against; another city (a load, a new game) starts still. */
   private effectsCity: City | null = null;
+  /** Wall-clock time of the last effects frame, or null while nothing animates. */
+  private fxClock: number | null = null;
   private dustMaterial!: StandardMaterial;
   private paveMaterial!: StandardMaterial;
   /** Incidents on the map: flames and smoke on a fire, a pair of warning lights for police or an ambulance. */
@@ -396,9 +398,12 @@ export class CityView {
   }
   /** Short grow/bounce for parcels that just gained a building or a level. */
   private animate(dt: number) {
-    if (!this.animations.size && !this.dust.length && !this.paving.length && !this.incidentFx.length) return;
-    // Always move forward, so an odd frame time (zero, negative or not a number) can never leave an effect running.
-    const step = Number.isFinite(dt) && dt > 0 ? Math.min(dt, .1) : 1 / 60;
+    const now = performance.now(), wall = this.fxClock === null ? 0 : (now - this.fxClock) / 1000; this.fxClock = now;
+    if (!this.animations.size && !this.dust.length && !this.paving.length && !this.incidentFx.length) { this.fxClock = null; return; }
+    // The engine caps dt at 0.1 s, so on a slow device a capped step would stretch every effect over many real
+    // seconds of redrawing. Work effects run on the wall clock instead (at least a 60th of a second a frame, at most
+    // half a second), so they always end on time; the grow-in keeps its capped step as before.
+    const step = Math.min(.5, Math.max(1 / 60, Number.isFinite(wall) ? wall : 0)), grow = Number.isFinite(dt) && dt > 0 ? Math.min(dt, .1) : 1 / 60;
     this.dust = this.dust.filter(cloud => {
       cloud.t += step;
       if (cloud.t >= DUST_SECONDS) { cloud.entity.destroy(); return false; }
@@ -423,7 +428,7 @@ export class CityView {
       return true;
     });
     for (const [cell, animation] of this.animations) {
-      animation.t += step;
+      animation.t += grow;
       const tile = this.tiles.get(cell)?.entity, done = animation.t >= (animation.kind === 'built' ? .7 : .5);
       tile?.setLocalScale(1, done ? 1 : buildScale(animation.kind, animation.t), 1);
       if (done) this.animations.delete(cell);
