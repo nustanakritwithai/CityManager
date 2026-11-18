@@ -220,3 +220,55 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-district-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .dash-district-action { min-height: 44px; padding: 0 12px; border: 1px solid var(--pnl-line); background: var(--pnl-surface); color: var(--chart-ink); }
 .dash-district-action.primary { border-color: #f3c46b88; background: #f3c46b24; color: var(--c-accent); font-weight: 700; }
+
+/* Economy: each side's 30-day net, then the largest flows between sides as one-hue bars on a shared scale. */
+.dash-economy-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.dash-flowbars { margin: 14px 0 0; }
+.dash-economy .dash-flowbar-list { display: grid; gap: 8px; margin: 6px 0 0; padding: 0; list-style: none; }
+.dash-flowbar { display: grid; gap: 4px; border-radius: 6px; outline-offset: 2px; }
+.dash-flowbar-head { display: flex; align-items: baseline; gap: 8px; font-size: calc(13 * var(--u)); color: var(--chart-ink-2); }
+.dash-flowbar-head span { flex: 1; min-width: 0; }
+.dash-flowbar-head strong { color: var(--chart-ink); font-variant-numeric: tabular-nums; }
+.dash-flowbar-head small { width: 3.2em; text-align: right; color: var(--chart-muted); font-variant-numeric: tabular-nums; }
+.dash-flowbar-track { display: block; height: 8px; border-radius: 4px; background: rgba(57, 135, 229, .14); }
+.dash-flowbar-fill { display: block; width: calc(var(--share) * 100%); min-width: 4px; height: 100%; border-radius: 4px; background: var(--series-1); }
+.dash-flowbar:focus-visible { outline: 2px solid var(--c-accent); }
+.dash-economy .dash-sub { margin: 14px 0 6px; color: var(--chart-ink); font-size: calc(14 * var(--u)); font-weight: 650; }
+.dash-economy .dash-risk-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.dash-risk { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--pnl-line); border-left: 3px solid var(--c-bad); border-radius: var(--pnl-radius-sm); background: var(--pnl-bg); font-size: calc(13 * var(--u)); color: var(--chart-ink-2); }
+.dash-risk strong { color: var(--chart-ink); }
+.dash-risk small { margin-left: auto; font-variant-numeric: tabular-nums; }
+.dash-risk.more { border-left-color: var(--pnl-line); }
+/* Business sectors: takings and running costs share one scale per card. */
+.dash-economy .dash-sector-list { display: grid; gap: 12px; margin: 8px 0 0; padding: 0; list-style: none; }
+.dash-sector { display: grid; gap: 4px; }
+.dash-sector-bar { display: grid; grid-template-columns: minmax(0, 1fr) 6.5em; align-items: center; gap: 8px; }
+.dash-sector-bar small { text-align: right; color: var(--chart-ink-2); font-size: calc(12.5 * var(--u)); font-variant-numeric: tabular-nums; }
+.dash-flowbar-fill.costs { background: var(--series-2); }
+.dash-business .dash-key.revenue::before { background: var(--series-1); }
+.dash-business .dash-key.costs::before { background: var(--series-2); }
+.dash-profit { font-variant-numeric: tabular-nums; }
+.dash-profit.good { color: var(--c-good); } .dash-profit.bad { color: var(--c-bad); }
+.dash-risk.firm.good { border-left-color: var(--c-good); } .dash-risk.firm.flat { border-left-color: var(--pnl-line); }
+/* Economy insights: one tappable line each, worst first; the tag names the tone so colour is never alone. */
+.dash-economy .dash-insights { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
+.dash-insight { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--pnl-line); border-left: 3px solid var(--c-good); border-radius: var(--pnl-radius-sm); background: var(--pnl-bg); color: var(--chart-ink); font-size: calc(13.5 * var(--u)); line-height: 1.45; text-align: left; cursor: pointer; }
+.dash-insight.warn { border-left-color: var(--c-accent); } .dash-insight.bad { border-left-color: var(--c-bad); }
+.dash-insight-tag { padding: 1px 6px; border-radius: 6px; font-size: calc(11.5 * var(--u)); font-weight: 700; color: var(--c-good); background: rgba(255, 255, 255, .06); white-space: nowrap; }
+.dash-insight.warn .dash-insight-tag { color: var(--c-accent); } .dash-insight.bad .dash-insight-tag { color: var(--c-bad); }
+.dash-insight-go { color: var(--chart-muted); font-size: 18px; }
+.dash-insight:hover, .dash-insight:focus-visible { border-color: #f3c46b88; }
+.dash-forecast { margin: 4px 0 8px; }
+.dash-forecast .dash-sub { margin: 0 0 6px; color: var(--chart-ink); font-size: calc(14 * var(--u)); font-weight: 650; }
+/* Month over month: label and newest value, the change on the month before, and three small columns (newest accented). */
+.dash-economy .dash-trend-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.dash-economy .dash-trend { display: grid; grid-template-columns: minmax(0, 1fr) auto 54px; align-items: center; gap: 10px; min-height: 0; margin: 0; padding: 6px 0; border-bottom: 1px solid var(--pnl-line); }
+.dash-trend-text { display: grid; gap: 1px; min-width: 0; }
+.dash-trend-text span { color: var(--chart-ink-2); font-size: calc(12.5 * var(--u)); }
+.dash-trend-text strong { color: var(--chart-ink); font-size: calc(15 * var(--u)); font-variant-numeric: tabular-nums; }
+.dash-trend-change { font-size: calc(12.5 * var(--u)); font-weight: 650; color: var(--chart-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-trend-change.good { color: var(--c-good); } .dash-trend-change.bad { color: var(--c-bad); }
+.dash-trend-bars { width: 54px; height: 26px; overflow: visible; }
+.dash-trend-bars rect { fill: var(--chart-muted); opacity: .55; }
+.dash-trend-bars rect.now { fill: var(--series-1); opacity: 1; }
+.dash-trend-bars .zero { stroke: var(--chart-ink-2); stroke-width: 1; }

@@ -1220,7 +1220,9 @@ function payVenueWages(c: City, site: CivicSite, onlyWallet?: string): void {
     withholdWageTax(c, wallet, owed);
   }
 }
-const isWage = (reason: string): boolean => reason === 'Monthly wages' || isCivicWageReason(reason) || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
+/** Pay for work: firm, campus, park and civic wages. */
+export const isWageReason = (reason: string): boolean => reason === 'Monthly wages' || isCivicWageReason(reason) || /^Monthly park wages #[1-9]\d*$/.test(reason) || /^Monthly (school|university) wages #[1-9]\d*$/.test(reason);
+const isWage = isWageReason;
 function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boolean {
   if (!c.education) return true;
   const claims = takeEducationWages(c.education, onlyWallet, campusId);
