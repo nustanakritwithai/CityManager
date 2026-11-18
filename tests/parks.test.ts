@@ -126,17 +126,25 @@ test('no-park cities keep accounting and owner distributions deterministic throu
     if (historicalSoil) delete loaded.farmSoilIndependentStartTick;
     const payouts = c.ledger.filter(e => e.reason === 'Owner profit distribution').map(e => [e.tick, e.from, e.to, e.amount]);
     const bills = c.ledger.filter(e => e.reason === 'Monthly municipal services').map(e => e.amount);
+    // Rent follows land value now; keep every rent so the witness can be normalized back to the flat 10,000.
+    const rents = c.ledger.filter(e => e.reason === 'Monthly household rent').map(e => ({ from: e.from, amount: e.amount }));
     for (let d = 60; d <= 120; d++) {
       step(c); step(loaded);
       assert.deepEqual(c, loaded, `seed ${seed}, day ${d}`);
       payouts.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Owner profit distribution').map(e => [e.tick, e.from, e.to, e.amount]));
       bills.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Monthly municipal services').map(e => e.amount));
+      rents.push(...c.ledger.filter(e => e.tick === d && e.reason === 'Monthly household rent').map(e => ({ from: e.from, amount: e.amount })));
       if (d === 119 && historicalSoil) {
         assert.deepEqual(bills, [24000, 24000, 33000]);
         assert.deepEqual(payouts, expected.get(seed)!.amounts.map((amount, index) => [30 * (index + 1), 'firm:8', expected.get(seed)!.owner, amount]));
         const { farmSoilIndependentStartTick: _soil, happiness: _happiness, ledger: _ledger, history: _history, goalRulesVersion: _goal, accounts, ...state } = c;
         const amount = bills.reduce((n, value) => n + value, 0);
-        const normalized = { ...state, accounts: { ...accounts, treasury: accounts.treasury + amount, upkeep: accounts.upkeep - amount } };
+        // Move each rent back to the flat 10,000 the witness was recorded with: only wallets and the landlord change.
+        const rentShift: Record<string, number> = {};
+        for (const e of rents) rentShift[e.from] = (rentShift[e.from] ?? 0) + e.amount - 10_000;
+        const rentAccounts = { ...accounts, landlord: accounts.landlord - Object.values(rentShift).reduce((n, v) => n + v, 0) };
+        for (const [wallet, shift] of Object.entries(rentShift)) rentAccounts[wallet] += shift;
+        const normalized = { ...state, accounts: { ...rentAccounts, treasury: accounts.treasury + amount, upkeep: accounts.upkeep - amount } };
         assert.equal(createHash('sha256').update(JSON.stringify(normalized)).digest('hex'), expected.get(seed)!.hash, `seed ${seed} balanced-admission trajectory after accounting for service bills`);
       }
       assert.deepEqual(c.parks, []); assert.equal(sum(c), 0);
