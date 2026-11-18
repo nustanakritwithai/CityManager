@@ -184,3 +184,25 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .chart-summary tbody th { text-align: left; font-weight: 600; color: var(--chart-ink); }
 .chart-summary tbody th i { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 3px; background: var(--c); vertical-align: middle; }
 .chart-summary thead th:first-child { text-align: left; }
+
+/* Department budget: one row each, five funding steps that read as a segmented control. */
+/* Beats `.inspector section`, which would drop the side padding. */
+.dash-finance .dash-funding {
+  display: block;
+  grid-column: 1 / -1;
+  margin: 0 0 16px;
+  padding: calc(10 * var(--u)) calc(12 * var(--u)) calc(12 * var(--u));
+  border: 1px solid var(--pnl-line);
+  border-radius: var(--pnl-radius);
+  background: var(--pnl-surface);
+  scroll-margin-top: calc(8 * var(--u));
+}
+.dash-funding h4 { margin: 0 0 calc(8 * var(--u)); color: var(--chart-ink); font-size: calc(16 * var(--u)); }
+.dash-funding-rows { display: grid; gap: calc(10 * var(--u)); }
+.dash-funding-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; margin-bottom: 6px; }
+.dash-funding-head strong { color: var(--chart-ink); font-size: calc(14 * var(--u)); }
+.dash-funding-cost { color: var(--chart-ink-2); font-size: calc(13 * var(--u)); font-variant-numeric: tabular-nums; }
+.dash-funding-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.dash-funding-step { min-width: 0; min-height: 44px; padding: 0 2px; border: 1px solid var(--pnl-line); background: var(--pnl-bg); color: var(--chart-ink-2); font-size: calc(13 * var(--u)); font-variant-numeric: tabular-nums; }
+.dash-funding-step[aria-pressed=true] { border-color: #f3c46b88; background: #f3c46b24; color: var(--c-accent); font-weight: 700; }
+.dash-funding-note { margin: calc(10 * var(--u)) 0 0; color: var(--chart-ink-2); font-size: calc(12.5 * var(--u)); line-height: 1.55; }

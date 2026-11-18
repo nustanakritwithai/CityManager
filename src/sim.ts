@@ -12,8 +12,9 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
+import { BUDGET_LABELS, DEPARTMENT_OF, MAX_BUDGET_LEVEL, budgetLevel, funded, isBudgetLevel, setBudgetLevel, validateBudget, type BudgetDepartment, type BudgetLevel, type BudgetState } from './budget.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
@@ -95,6 +96,7 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   taxi?: TaxiState;
   /** Optional city services (clinic, police, fire). Absent = none built; saves stay byte-identical. */
   civic?: CivicState;
+  budget?: BudgetState;
   /** Optional bus depots/stops/lines (PR B2). Absent = no bus data; saves stay byte-identical. */
   bus?: BusState;
 };
@@ -1271,9 +1273,9 @@ function settleMonth(c: City) {
   // The city buys what the gateway delivered and keeps its plants running.
   for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
   for (const p of c.plants) transfer(c, 'treasury', 'upkeep', plantSpec(p).upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
-  for (const p of c.parks) transfer(c, 'treasury', 'upkeep', PARK.upkeep, `Monthly park upkeep #${p.id}`);
+  for (const p of c.parks) transfer(c, 'treasury', 'upkeep', funded(PARK.upkeep, budgetLevel(c, 'parks')), `Monthly park upkeep #${p.id}`);
   // A leased venue's operator pays rent instead of the city paying upkeep; a short wallet pays what it has.
-  for (const site of c.civic?.sites ?? []) { const wallet = operatorWallet(site); if (wallet) transfer(c, wallet, 'treasury', CIVIC[site.kind].upkeep, civicRentReason(site.kind, site.id)); else transfer(c, 'treasury', 'upkeep', CIVIC[site.kind].upkeep, civicUpkeepReason(site.kind, site.id)); }
+  for (const site of c.civic?.sites ?? []) { const wallet = operatorWallet(site); if (wallet) transfer(c, wallet, 'treasury', CIVIC[site.kind].upkeep, civicRentReason(site.kind, site.id)); else transfer(c, 'treasury', 'upkeep', civicFundedUpkeep(c, site.kind), civicUpkeepReason(site.kind, site.id)); }
   // Visitors arrive through an airport that still has its road: the more there is to see, the more they spend.
   for (const site of c.civic?.sites ?? []) if (civicSpec(site.kind).visitors && civicCells(site).some(part => access(c, part))) transfer(c, 'outside', 'treasury', civicVisitorIncome(site.kind, cityAttractions(c)), civicVisitorsReason(site.id));
   // Services scale with the people actually present at settlement, not empty housing.
@@ -1522,6 +1524,23 @@ export function explainMigration(c: City, buildingId: number): string[] {
 }
 /** Days a home must stand before it may grow: half a month on prime land, a month elsewhere. */
 export const homeGrowthAge = (c: City, b: Building) => landValues(c)(b.cell) >= PRIME_LAND ? MONTH / 2 : MONTH;
+/** Change one department's funding. It applies from the next month-end bill and to service reach at once. */
+export function setCityBudget(c: City, department: BudgetDepartment, level: BudgetLevel): Result {
+  if (!BUDGET_LABELS[department] || !isBudgetLevel(level)) return { ok: false, message: 'ระดับงบไม่ถูกต้อง' };
+  setBudgetLevel(c, department, level);
+  c.lastEvent = `งบ${BUDGET_LABELS[department]} ${level}% · ค่าบำรุงและระยะบริการปรับตามงบ`;
+  return { ok: true, message: c.lastEvent };
+}
+/** What each department costs a month now, and how many places it funds. */
+export function budgetSummary(c: City) {
+  const sites = c.civic?.sites ?? [];
+  return (Object.keys(BUDGET_LABELS) as BudgetDepartment[]).map(department => {
+    const level = budgetLevel(c, department), kinds = sites.filter(site => DEPARTMENT_OF[site.kind] === department);
+    const base = department === 'parks' ? c.parks.length * PARK.upkeep : kinds.reduce((n, site) => n + CIVIC[site.kind].upkeep, 0);
+    const monthly = department === 'parks' ? c.parks.length * funded(PARK.upkeep, level) : kinds.reduce((n, site) => n + funded(CIVIC[site.kind].upkeep, level), 0);
+    return { department, label: BUDGET_LABELS[department], level, places: department === 'parks' ? c.parks.length : kinds.length, base, monthly };
+  });
+}
 /** A cached reader for land value on this city as it stands now. */
 export function landValues(c: City): (cell: number) => number {
   const air = pollutionReader(c), seen = new Map<number, number>();
@@ -1771,6 +1790,7 @@ export function serialize(c: City, market?: City['market']): string {
   if (c.education) assertEducationInvariants(c.education, c.households);
   if (c.taxi !== undefined) validateTaxi(c.taxi, taxiValidationView(c));
   if (c.civic !== undefined) validateCivic(c.civic, civicValidationView(c));
+  if (c.budget !== undefined) validateBudget(c.budget);
   if (c.bus !== undefined) validateBus(c.bus, busValidationView(c));
   const envelope = { ...c, commercialUnifiedStartTick: c.commercialUnifiedStartTick ?? c.tick, commercialUnifiedBaseline: c.commercialUnifiedBaseline ?? {moneyEntries:moneyJournalLength(c),cropEntries:cropJournalLength(c),goodsEntries:goodsJournalLength(c)}, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) };
   const inner = c.history ? {...envelope, historyBaseVersion:envelope.version, version:24, rulesVersion:'chain-19'} : envelope;
@@ -1938,7 +1958,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     } else {
       if (!parkBuilds.has(id) || parkRemoved.has(id) || e.tick < parkBuilds.get(id)!) fail();
       if (event[1] === 'Demolish' || event[1] === 'Demolition refund') { if (event[1] === 'Demolish' ? e.to !== 'construction' || e.amount !== 2_000 : e.to !== 'treasury' || e.amount !== PARK.cost * 4 / 5) fail(); parkRemoved.add(id); }
-      else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > PARK.upkeep || parkBills.has(key)) fail(); parkBills.add(key); }
+      else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > funded(PARK.upkeep, MAX_BUDGET_LEVEL) || parkBills.has(key)) fail(); parkBills.add(key); }
     }
   }
   for (const p of c.parks) if (c.tick % MONTH !== 0 && (parkPaid.get(`${p.id}:${Math.ceil(c.tick / MONTH)}`) ?? 0) + parkPayroll(p) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH) * PARK_STAFF.dailyWage) fail();
@@ -2254,6 +2274,7 @@ export function deserialize(json: string): City {
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.
   if ('taxi' in city) validateTaxi(city.taxi, taxiValidationView(city));
   if ('civic' in city) validateCivic(city.civic, civicValidationView(city));
+  if ('budget' in city) validateBudget(city.budget);
   if ('bus' in city) { validateBus(city.bus, busValidationView(city)); reconcileBusStops(city, SIZE); }
   if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
   if (city.factoryProgressionStartTick === undefined) city.factoryProgressionStartTick = city.tick;

@@ -16,7 +16,8 @@ import { cityChallenges } from './city-challenges.ts';
 import { populationGuidance } from './population-guidance.ts';
 import { overviewRevision } from './overview-revision.ts';
 import { municipalInvestments, renderMunicipalInvestments, type MunicipalInvestmentTool } from './municipal-investments.ts';
-import { treasurySpendable } from './sim.ts';
+import { budgetSummary, setCityBudget, treasurySpendable } from './sim.ts';
+import { BUDGET_LEVELS, type BudgetDepartment, type BudgetLevel } from './budget.ts';
 import type { City } from './sim.ts';
 import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { taxHappinessPoints } from './resident-happiness.ts';
@@ -64,7 +65,7 @@ const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
 };
 
 const NAV: readonly [string, string][] = [
-  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-taxes', 'ภาษี'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
+  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-taxes', 'ภาษี'], ['dash-funding', 'งบ'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
   ['growth-anchor', 'ความต้องการ'], ['issue-section', 'ปัญหา'], ['event-log-section', 'เหตุการณ์'], ['money-section', 'บัญชี'],
 ];
 const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'C · พืชผล', factory: 'โรงงาน', shop: 'C · สินค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
@@ -82,6 +83,7 @@ export class OverviewDashboard {
   private readonly wageTax = taxField('wage', 'ภาษีค่าจ้าง', 'ครัวเรือนที่มีงานรับค่าจ้าง');
   private readonly profitTax = taxField('profit', 'ภาษีกำไรกิจการ', 'ครัวเรือนเจ้าของกิจการ');
   private readonly taxStatus = el('p', 'dash-tax-status');
+  private readonly budget = el('section', 'dash-funding');
   private readonly chain = el('section', 'dash-card dash-chain');
   private readonly growth = el('section', 'dash-card dash-growth');
   private readonly modal = new ChartModal();
@@ -119,7 +121,14 @@ export class OverviewDashboard {
       scheduleCityTaxes(this.city, this.draftTaxRates());
       this.updateTaxSettings(this.city, true);
     });
-    this.finance.append(this.financeHead, taxForm, this.financeCharts);
+    this.budget.id = 'dash-funding';
+    this.budget.addEventListener('click', event => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-budget-level]');
+      if (!button || !this.city) return;
+      setCityBudget(this.city, button.dataset.department as BudgetDepartment, Number(button.dataset.budgetLevel) as BudgetLevel);
+      this.renderBudget(this.city);
+    });
+    this.finance.append(this.financeHead, taxForm, this.budget, this.financeCharts);
     host.replaceChildren(nav, this.goals, this.kpis, this.finance, this.chain, this.growth);
   }
   get modalOpen() { return this.modal.isOpen; }
@@ -141,7 +150,7 @@ export class OverviewDashboard {
     this.chartWidth = this.width();
     const series = dailySeries(city, 30);
     renderGoalsCard(this.goals, goals, missions, challenges, population);
-    this.renderKpis(city, series); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
+    this.renderKpis(city, series); this.renderBudget(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
   /** Chart width follows the card so text stays at its real size. */
@@ -151,6 +160,28 @@ export class OverviewDashboard {
     const expand = el('button', 'dash-expand'); expand.type = 'button'; expand.title = `ขยาย ${def.title}`; expand.setAttribute('aria-label', `ขยายกราฟ ${def.title}`);
     expand.append(iconElement('zoom-in')); expand.addEventListener('click', () => { if (this.city) this.modal.open(key, this.city); });
     head.append(el('h4', '', def.title), expand); box.append(head, renderChart(def, series, this.chartWidth, 140)); return box;
+  }
+
+  /** One row per department: what it costs a month at its funding, and five funding steps. Takes effect at once. */
+  private renderBudget(city: City) {
+    this.city = city;
+    const rows = budgetSummary(city), total = rows.reduce((n, row) => n + row.monthly, 0), base = rows.reduce((n, row) => n + row.base, 0);
+    const list = el('div', 'dash-funding-rows');
+    for (const row of rows) {
+      const line = el('div', 'dash-funding-row'); line.dataset.department = row.department;
+      const head = el('div', 'dash-funding-head');
+      head.append(el('strong', '', row.label), el('span', 'dash-funding-cost', row.places ? `${row.places} แห่ง · ${money(row.monthly)}/เดือน` : 'ยังไม่มีอาคาร'));
+      const steps = el('div', 'dash-funding-steps'); steps.setAttribute('role', 'group'); steps.setAttribute('aria-label', `งบ${row.label}`);
+      for (const level of BUDGET_LEVELS) {
+        const b = el('button', 'dash-funding-step', `${level}%`); b.type = 'button';
+        Object.assign(b.dataset, { department: row.department, budgetLevel: String(level) });
+        b.setAttribute('aria-pressed', String(level === row.level));
+        steps.append(b);
+      }
+      line.append(head, steps); list.append(line);
+    }
+    const note = el('p', 'dash-funding-note', `ค่าบำรุงรวม ${money(total)}/เดือน${total !== base ? ` (งบปกติ ${money(base)})` : ''} · งบต่ำประหยัดเงินแต่ระยะบริการและความสุขลดลง งบสูงกลับกัน · มีผลทันที ค่าบำรุงคิดตอนสิ้นเดือน`);
+    this.budget.replaceChildren(el('h4', '', 'งบประมาณรายหมวด'), list, note);
   }
 
   private renderKpis(city: City, series: DailySeries) {

@@ -47,7 +47,7 @@ import { CityView } from './renderer.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
 import { homeAmenities } from './resident-happiness.ts';
-import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
+import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind, civicReach, civicFundedPoints, civicFundedUpkeep, civicFunding } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
@@ -508,14 +508,14 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       reasons.push('ผู้เรียนเป็นจำนวนคนในครัวเรือน ไม่ใช่รายชื่อรายบุคคล', 'ปิดบริการหรือขาดน้ำไฟหยุดความก้าวหน้า แต่ไม่ลบวุฒิที่ได้แล้ว');
     }
     else if (civic) {
-      const spec = civicSpec(civic.kind), parts = civicCells(civic), homes = city.buildings.filter(b => b.zone === 'R'), reached = homes.filter(b => parts.some(part => civicCellDistance(b.cell, part) <= spec.radius));
+      const spec = civicSpec(civic.kind), parts = civicCells(civic), homes = city.buildings.filter(b => b.zone === 'R'), reached = homes.filter(b => parts.some(part => civicCellDistance(b.cell, part) <= civicReach(city, civic.kind)));
       const lastDue = Math.floor(city.tick / 30) * 30, billed = city.ledger.find(e => e.reason === civicUpkeepReason(civic.kind, civic.id) && e.tick === lastDue);
       if (spec.visitors) {
         const attractions = cityAttractions(city), online = parts.some(part => access(city, part));
         metrics.push(metric('รายได้นักท่องเที่ยว/เดือน', money(online ? civicVisitorIncome(civic.kind, attractions) : 0), true, online ? `ฐาน ${money(spec.visitors.base)} + ${money(spec.visitors.perAttraction)} ต่อสถานที่ท่องเที่ยว` : 'ถนนขาด นักท่องเที่ยวเข้าไม่ได้'),
           metric('สถานที่ท่องเที่ยวในเมือง', `${attractions} แห่ง`, false, 'สวน ห้องสมุด วัด สนามฟุตบอล', attractions));
-      } else metrics.push(metric('บ้านในระยะบริการ', `${reached.length} / ${homes.length} หลัง`, false, `ระยะ ${spec.radius} ช่องจากอาคาร`, reached.length),
-        metric('ความสุขของบ้านที่ถึง', civicOpen(civic) ? `+${spec.points}` : 'ปิดอยู่', false, civicOpen(civic) ? 'นับครั้งเดียวต่อชนิดบริการ' : 'ยังไม่มีพนักงาน บ้านรอบข้างยังไม่ได้ความสุข'));
+      } else metrics.push(metric('บ้านในระยะบริการ', `${reached.length} / ${homes.length} หลัง`, false, `ระยะ ${civicReach(city, civic.kind)} ช่องจากอาคาร`, reached.length),
+        metric('ความสุขของบ้านที่ถึง', civicOpen(civic) ? `+${civicFundedPoints(city, civic.kind)}` : 'ปิดอยู่', false, civicOpen(civic) ? 'นับครั้งเดียวต่อชนิดบริการ' : 'ยังไม่มีพนักงาน บ้านรอบข้างยังไม่ได้ความสุข'));
       if (spec.staff) {
         const venue = venueStatus(city, civic), op = venue.operator;
         metrics.push(metric('ผู้ดำเนินการ', op ? `ครัวเรือน #${op.householdId}` : 'เมือง', false, op ? `เช่าตั้งแต่วันที่ ${op.since} · รายได้เข้าครัวเรือน จ่ายค่าจ้างทุกวันและค่าเช่ารายเดือน` : venue.candidate ? `ครัวเรือน #${venue.candidate} พร้อมรับเช่า` : `ยังไม่มีครัวเรือนที่มีเงิน ${money(venue.leaseCapital)} พอรับเช่า`),
@@ -525,9 +525,9 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
         if (op) metrics.push(metric('ค่าจ้างที่จ่ายเดือนนี้', money(op.wages), true, 'จ่ายทุกวันจากเงินผู้ดำเนินการ'), metric('ค่าเช่าที่จ่ายเมือง', money(op.rent), true, `${money(spec.upkeep)}/เดือน แทนค่าบำรุงที่เมืองเคยจ่าย`));
         else metrics.push(metric('ค่าจ้างที่ค้างจ่ายสิ้นเดือน', money(venue.earnedWages), true, `ครบทุกตำแหน่ง ${money(venue.monthlyWages)}/เดือน · จ่ายให้ครัวเรือนของพนักงาน`));
       }
-      metrics.push(metric('ค่าก่อสร้าง', money(spec.cost), true), metric('ค่าบำรุงรายเดือน', money(spec.upkeep), true));
+      metrics.push(metric('ค่าก่อสร้าง', money(spec.cost), true), metric('ค่าบำรุงรายเดือน', money(civicFundedUpkeep(city, civic.kind)), true, civicFunding(city, civic.kind) !== 100 ? `งบหมวดนี้ ${civicFunding(city, civic.kind)}% · ปกติ ${money(spec.upkeep)}` : undefined));
       if (parts.length > 1) metrics.push(metric('พื้นที่', `${parts.length} ช่อง`, false, civicFootprint(civic.kind).join('×')));
-      if (lastDue > civic.tick) metrics.push(metric('จ่ายบำรุงเดือนล่าสุด', money(billed?.amount ?? 0), true, billed?.amount === spec.upkeep ? 'จ่ายครบจากคลังเมือง' : 'เงินคลังไม่พอจ่ายครบ ไม่มีการกู้หรือหักซ้ำ'));
+      if (lastDue > civic.tick) metrics.push(metric('จ่ายบำรุงเดือนล่าสุด', money(billed?.amount ?? 0), true, billed?.amount === civicFundedUpkeep(city, civic.kind) ? 'จ่ายครบจากคลังเมือง' : 'เงินคลังไม่พอจ่ายครบ ไม่มีการกู้หรือหักซ้ำ'));
       reasons.push('รื้อได้โดยไม่เสียค่าใช้จ่ายและไม่มีเงินคืน ค่าบำรุงหยุดเมื่อรื้อ');
     }
     else if (park) {
