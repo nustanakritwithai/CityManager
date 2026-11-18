@@ -4,13 +4,14 @@ import { createCity, step } from '../src/sim.ts';
 import { moneyFlows } from '../src/economy-flows.ts';
 import { householdEconomy } from '../src/household-economy.ts';
 import { businessSectors } from '../src/business-sectors.ts';
-import { MAX_INSIGHTS, economyInsights } from '../src/economy-insights.ts';
+import { MAX_INSIGHTS, RUNWAY_ALARM_DAYS, economyInsights } from '../src/economy-insights.ts';
+import { treasuryForecast } from '../src/treasury-forecast.ts';
 
-const inputs = () => { const c = createCity(61025); for (let i = 0; i < 120; i++) step(c); return { c, f: moneyFlows(c), h: householdEconomy(c), b: businessSectors(c) }; };
+const inputs = () => { const c = createCity(61025); for (let i = 0; i < 120; i++) step(c); return { c, f: moneyFlows(c), h: householdEconomy(c), b: businessSectors(c), t: treasuryForecast(c, 0, 0) }; };
 const keys = (xs: { key: string }[]) => xs.map(x => x.key);
 
 test('a grown city gets a few insights, each pointing at an overview section, worst news first', () => {
-  const { f, h, b } = inputs(), xs = economyInsights(f, h, b);
+  const { f, h, b, t } = inputs(), xs = economyInsights(f, h, b, t);
   assert.ok(xs.length >= 1 && xs.length <= MAX_INSIGHTS);
   const rank = { bad: 0, warn: 1, good: 2 };
   for (let i = 1; i < xs.length; i++) assert.ok(rank[xs[i - 1].tone] <= rank[xs[i].tone]);
@@ -19,12 +20,12 @@ test('a grown city gets a few insights, each pointing at an overview section, wo
 });
 
 test('trouble shows up as bad or warning insights', () => {
-  const { f, h, b } = inputs();
+  const { f, h, b, t } = inputs();
   h.atRisk = [{ id: 1, members: 2, savings: 0, bills: 50_000, net: -1 }];
   h.spendingMore = h.households;
   const factory = b.sectors.find(s => s.sector === 'I')!; factory.profit = -100_000; factory.firms = Math.max(1, factory.firms);
-  f.balances.find(x => x.sector === 'treasury')!.net = -5_000; f.leftCity = f.cameIn + 10_000;
-  const xs = economyInsights(f, h, b), k = keys(xs);
+  t.net = -5_000; t.runwayDays = 500; f.leftCity = f.cameIn + 10_000;
+  const xs = economyInsights(f, h, b, t), k = keys(xs);
   assert.equal(xs[0].key, 'at-risk'); assert.equal(xs[0].tone, 'bad'); assert.match(xs[0].text, /^1 ครัวเรือน/);
   assert.ok(k.includes('sector-loss-I')); assert.match(xs.find(x => x.key === 'sector-loss-I')!.text, /^โรงงานขาดทุนรวม 1,000 ฿/);
   assert.ok(k.includes('overspend'));
@@ -33,11 +34,21 @@ test('trouble shows up as bad or warning insights', () => {
 });
 
 test('one losing firm in a profitable economy is a warning naming it, and a quiet city still reads sensibly', () => {
-  const { f, h, b } = inputs();
+  const { f, h, b, t } = inputs();
   for (const s of b.sectors) s.profit = Math.max(1, s.profit);
   b.firms.push({ id: 99, sector: 'C', label: 'ร้านค้า #99', revenue: 0, costs: 12_300, profit: -12_300, cash: 0, workers: 1 });
-  const loss = economyInsights(f, h, b).find(x => x.key === 'firm-loss')!;
+  const loss = economyInsights(f, h, b, t).find(x => x.key === 'firm-loss')!;
   assert.equal(loss.tone, 'warn'); assert.match(loss.text, /ร้านค้า #99 \(−123 ฿\)/);
-  const quiet = economyInsights(moneyFlows({ tick: 1, ledger: [] }), householdEconomy({ tick: 1, ledger: [], households: [], accounts: {} }), businessSectors({ tick: 1, ledger: [], firms: [], accounts: {} }));
+  const quiet = economyInsights(moneyFlows({ tick: 1, ledger: [] }), householdEconomy({ tick: 1, ledger: [], households: [], accounts: {} }), businessSectors({ tick: 1, ledger: [], firms: [], accounts: {} }), treasuryForecast({ tick: 1, ledger: [], accounts: {} }, 0, 0));
   assert.deepEqual(quiet, []);
+});
+
+test('a treasury that will run dry soon is the first thing said about the treasury', () => {
+  const { f, h, b, t } = inputs();
+  t.net = -90_000; t.daily = -3_000; t.runwayDays = RUNWAY_ALARM_DAYS - 1;
+  const xs = economyInsights(f, h, b, t), runway = xs.find(x => x.key === 'runway')!;
+  assert.equal(runway.tone, 'bad'); assert.equal(runway.target, 'dash-finance'); assert.match(runway.text, /89 วัน/);
+  assert.ok(!xs.some(x => x.key === 'treasury'), 'one treasury line at a time');
+  t.runwayDays = RUNWAY_ALARM_DAYS;
+  assert.equal(economyInsights(f, h, b, t).find(x => x.key === 'treasury')!.tone, 'warn');
 });

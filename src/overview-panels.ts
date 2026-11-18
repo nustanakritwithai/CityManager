@@ -22,6 +22,7 @@ import { MAX_DISTRICTS, createDistrict, deleteDistrict, districtTone, renameDist
 import { districtStats } from './district-stats.ts';
 import { moneyFlows, SECTOR_LABELS, type EconomySector, type MoneyFlows } from './economy-flows.ts';
 import { economyInsights } from './economy-insights.ts';
+import { treasuryForecast, type TreasuryForecast } from './treasury-forecast.ts';
 import { businessSectors, BUSINESS_SECTOR_LABELS, BUYERS, BUYER_LABELS, COST_KINDS, COST_LABELS, type BusinessSectors, type FirmResult } from './business-sectors.ts';
 import { householdEconomy, type HouseholdEconomy, INCOME_KINDS, INCOME_LABELS, SAVINGS_BAND_LABELS, SPENDING_KINDS, SPENDING_LABELS } from './household-economy.ts';
 import type { City } from './sim.ts';
@@ -201,7 +202,8 @@ export class OverviewDashboard {
     const series = dailySeries(city, 30);
     renderGoalsCard(this.goals, goals, missions, challenges, population);
     this.renderKpis(city, series); this.renderBudget(city); const flows = moneyFlows(city), homes = householdEconomy(city), business = businessSectors(city, undefined, RECIPE_LABELS);
-    this.renderEconomy(flows, homes, business); this.renderHouseholds(homes); this.renderBusiness(business); this.renderDistricts(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
+    const forecast = treasuryForecast(city, treasurySpendable(city), budgetSummary(city).reduce((n, row) => n + row.monthly, 0));
+    this.renderEconomy(flows, homes, business, forecast); this.renderHouseholds(homes); this.renderBusiness(business); this.renderDistricts(city); this.renderFinance(city, series, forecast); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
   /** Chart width follows the card so text stays at its real size. */
@@ -237,7 +239,7 @@ export class OverviewDashboard {
 
   /** Named districts with what each holds; paint, rename or delete one, or start a new one. */
   /** Who paid whom over 30 days: each side's net, then the largest flows between sides as one-hue bars. */
-  private renderEconomy(f: MoneyFlows, homes: HouseholdEconomy, business: BusinessSectors) {
+  private renderEconomy(f: MoneyFlows, homes: HouseholdEconomy, business: BusinessSectors, forecast: TreasuryForecast) {
     const net = (sector: EconomySector) => f.balances.find(b => b.sector === sector)!;
     const keep = (text: string) => text.replace(/ /g, '\u00a0'); // an amount never breaks across lines
     const tone = (v: number) => v > 0 ? 'good' as const : v < 0 ? 'bad' as const : 'flat' as const;
@@ -255,7 +257,7 @@ export class OverviewDashboard {
     const figure = barList('เงินที่ไหลระหว่างฝ่าย', money(total), rows.map(r => ({ label: r.label, value: r.amount, text: money(r.amount), detail: `${r.entries.toLocaleString('th-TH')} รายการ` })), total, 'ยังไม่มีเงินไหลในช่วงนี้');
     const trade = f.within.firm ?? 0, transfers = f.within.household ?? 0;
     const facts = [trade ? `กิจการซื้อขายกันเอง ${money(trade)}` : '', transfers ? `ครัวเรือนจ่ายกันเอง ${money(transfers)}` : ''].filter(Boolean).join(' · ');
-    const insights = economyInsights(f, homes, business), notes = el('ul', 'dash-insights'); notes.setAttribute('aria-label', 'ข้อสังเกตเศรษฐกิจ');
+    const insights = economyInsights(f, homes, business, forecast), notes = el('ul', 'dash-insights'); notes.setAttribute('aria-label', 'ข้อสังเกตเศรษฐกิจ');
     for (const x of insights) {
       const item = el('li'), go = el('button', `dash-insight ${x.tone}`); go.type = 'button'; go.dataset.target = x.target; go.dataset.insight = x.key;
       go.append(el('span', 'dash-insight-tag', x.tone === 'bad' ? 'ต้องแก้' : x.tone === 'warn' ? 'น่าจับตา' : 'ดี'), el('span', 'dash-insight-text', x.text), el('span', 'dash-insight-go', '›'));
@@ -405,7 +407,21 @@ export class OverviewDashboard {
     if (this.taxStatus.textContent !== status) this.taxStatus.textContent = status;
   }
 
-  private renderFinance(city: City, series: DailySeries) {
+  /** If the next 30 days repeat the last 30: the balance then, how long the money lasts, and the next month-end bill. */
+  private renderForecast(f: TreasuryForecast) {
+    const box = el('div', 'dash-forecast'), tone = f.daily > 0 ? 'good' as const : f.daily < 0 ? 'bad' as const : 'flat' as const;
+    const runway = f.runwayDays === null ? 'ไม่ลดลง' : f.runwayDays >= 365 ? 'เกิน 1 ปี' : `${f.runwayDays.toLocaleString('th-TH')} วัน`;
+    const tiles = el('div', 'dash-economy-tiles');
+    tiles.append(
+      statTile({ label: 'คาดอีก 30 วัน', icon: 'coin', value: money(Math.max(0, f.nextMonth)), delta: { text: `${signed(f.daily)}/วัน`, tone }, note: `ตอนนี้ ${money(f.balance)}` }),
+      statTile({ label: 'เงินคลังพอใช้', icon: 'clock', value: runway, delta: { text: f.runwayDays === null ? 'รายรับไม่น้อยกว่ารายจ่าย' : 'ถ้ายังใช้เท่านี้', tone: f.runwayDays === null ? 'good' : f.runwayDays < 90 ? 'bad' : 'flat' }, note: `ใช้ได้ทันที ${money(f.spendable)}` }),
+    );
+    const note = el('p', 'dash-funding-note', `คิดจาก ${f.windowDays} วันที่ผ่านมา (ไม่รวมเงินตั้งเมือง): รับ ${money(f.income)} · จ่าย ${money(f.spending)} · ตัดบิลสิ้นเดือนอีก ${f.settlementIn} วัน${f.upkeep ? ` · ค่าบำรุงที่รู้แล้ว ${money(f.upkeep)}` : ''}`);
+    box.append(el('h4', 'dash-sub', 'พยากรณ์คลัง'), tiles, note);
+    return box;
+  }
+
+  private renderFinance(city: City, series: DailySeries, forecast: TreasuryForecast) {
     const budget = treasuryBudget(city);
     const mix = el('div', 'dash-mix');
     mix.append(
@@ -413,7 +429,7 @@ export class OverviewDashboard {
       mixBar(budget.expense.map((line, i) => ({ key: line.key, label: line.label, value: line.amount, slot: i + 1 })), money, 'รายจ่ายคลังตามประเภท'),
     );
     this.financeNote.textContent = `วันที่ ${series.ticks[0]}–${city.tick}`;
-    this.financeCharts.replaceChildren(this.chart('treasury', series), this.chart('cashflow', series), mix, renderMunicipalInvestments(city, this.onSelectTool));
+    this.financeCharts.replaceChildren(this.renderForecast(forecast), this.chart('treasury', series), this.chart('cashflow', series), mix, renderMunicipalInvestments(city, this.onSelectTool));
   }
 
   private renderChain(city: City, series: DailySeries) {
