@@ -8,15 +8,17 @@ import { MONTH, type City } from './sim.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { alertIssues } from './building-issues.ts';
 import { cityGoals } from './city-goals.ts';
+import { BURGLARY_REASON, MEDICAL_REASON } from './incidents.ts';
+import { cityPopulation, newlyUnlocked } from './unlocks.ts';
 
-export type CueName = 'ev-build-home' | 'ev-build-business' | 'ev-build-farm' | 'ev-arrival' | 'ev-month' | 'ev-shop' | 'ev-issue' | 'ev-broke' | 'jingle-level' | 'jingle-win';
-export type CueSnapshot = { tick: number; ledger: number; buildings: ReadonlySet<number>; shops: ReadonlySet<number>; issues: ReadonlySet<string>; level: number; won: boolean };
+export type CueName = 'ev-fire' | 'ev-alarm' | 'ev-medical' | 'ev-unlock' | 'ev-build-home' | 'ev-build-business' | 'ev-build-farm' | 'ev-arrival' | 'ev-month' | 'ev-shop' | 'ev-issue' | 'ev-broke' | 'jingle-level' | 'jingle-win';
+export type CueSnapshot = { tick: number; ledger: number; buildings: ReadonlySet<number>; shops: ReadonlySet<number>; issues: ReadonlySet<string>; level: number; won: boolean; population: number };
 
 const shopIds = (c: City) => new Set(c.firms.filter(f => f.zone === 'C').map(f => f.id));
 export function cueSnapshot(c: City): CueSnapshot {
   const goals = cityGoals(c);
   return { tick: c.tick, ledger: moneyJournalLength(c), buildings: new Set(c.buildings.map(b => b.id)), shops: shopIds(c),
-    issues: new Set(alertIssues(buildingIssues(c)).map(i => `${i.cell}:${i.kind}`)), level: goals.level, won: goals.won };
+    issues: new Set(alertIssues(buildingIssues(c)).map(i => `${i.cell}:${i.kind}`)), level: goals.level, won: goals.won, population: cityPopulation(c) };
 }
 
 /** True when this frame can finish the economic day, including a leftover fraction of a minute. */
@@ -30,16 +32,22 @@ export function cityCues(before: CueSnapshot, c: City, after = cueSnapshot(c)): 
   const out: CueName[] = [];
   if (after.won && !before.won) out.push('jingle-win');
   else if (after.level > before.level) out.push('jingle-level');
+  if (newlyUnlocked(c, before.population, after.population).length) out.push('ev-unlock');
+  // Incidents, worst first: a fire siren, a police alarm for a burglary, an ambulance for illness.
+  const fresh = c.ledger.slice(Math.max(0, before.ledger - (c.history?.moneyCount ?? 0))), reasons = new Set(fresh.map(e => e.reason));
+  if (fresh.some(e => /^Fire damage repair #[1-9]\d*$/.test(e.reason))) out.push('ev-fire');
+  if (reasons.has(BURGLARY_REASON)) out.push('ev-alarm');
+  if (reasons.has(MEDICAL_REASON)) out.push('ev-medical');
   for (const b of c.buildings) {
     if (before.buildings.has(b.id)) continue;
     out.push(b.zone === 'R' ? 'ev-build-home' : b.zone === 'F' ? 'ev-build-farm' : 'ev-build-business');
   }
   if ([...after.shops].some(id => !before.shops.has(id))) out.push('ev-shop');
-  for (let i = Math.max(0,before.ledger-(c.history?.moneyCount??0)); i < c.ledger.length; i++) if (c.ledger[i].reason === 'New household arrival savings') { out.push('ev-arrival'); break; }
+  if (reasons.has('New household arrival savings')) out.push('ev-arrival');
   if (Math.floor(c.tick / MONTH) > Math.floor(before.tick / MONTH)) out.push('ev-month');
-  const fresh = [...after.issues].filter(key => !before.issues.has(key));
-  if (fresh.some(key => key.endsWith(':broke'))) out.push('ev-broke');
-  else if (fresh.length) out.push('ev-issue');
+  const raised = [...after.issues].filter(key => !before.issues.has(key));
+  if (raised.some(key => key.endsWith(':broke'))) out.push('ev-broke');
+  else if (raised.length) out.push('ev-issue');
   return [...new Set(out)];
 }
 

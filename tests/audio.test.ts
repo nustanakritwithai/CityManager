@@ -4,6 +4,8 @@ import { AUDIO_DEFAULTS, AUDIO_KEY, busGain, loadAudioSettings, parseAudioSettin
 import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from '../src/audio-cues.ts';
 import { MONTH, createCity, serialize, step } from '../src/sim.ts';
 import { keepSupplied } from './plants.ts';
+import { BURGLARY_REASON, MEDICAL_REASON, fireReason } from '../src/incidents.ts';
+import { SYNTHS, EFFECTS } from '../src/audio-engine.ts';
 
 test('sound settings default on at a low level, clamp every volume and survive bad storage', () => {
   assert.deepEqual(parseAudioSettings(null), AUDIO_DEFAULTS);
@@ -60,4 +62,23 @@ test('the limiter keeps 10× speed calm but never drops a jingle or a month coin
   assert.deepEqual(busy.admit(['ev-month'], 200), [], 'the same coin still waits out its gap');
   busy.reset();
   assert.deepEqual(busy.admit(['ev-month'], 200), ['ev-month'], 'a loaded city starts with a clear limiter');
+});
+
+test('incidents sound once each, worst first, and opening a place plays a chime only in a city with progression', () => {
+  const c = createCity(61025); for (let d = 0; d < 120; d++) step(c); // 15 people: police and fire stations open
+  const before = cueSnapshot(c); c.tick++;
+  for (const reason of [MEDICAL_REASON, BURGLARY_REASON, fireReason(3), fireReason(4), MEDICAL_REASON]) c.ledger.push({ tick: c.tick, from: 'treasury', to: 'upkeep', amount: 1, reason });
+  const cues = cityCues(before, c);
+  assert.deepEqual(cues.filter(cue => ['ev-fire', 'ev-alarm', 'ev-medical'].includes(cue)), ['ev-fire', 'ev-alarm', 'ev-medical']);
+  const quiet = cueSnapshot(c); c.tick++;
+  assert.ok(!cityCues(quiet, c).some(cue => cue === 'ev-fire'), 'an old fire is not heard again');
+  const young = { ...cueSnapshot(c), tick: c.tick - 1, population: 0 };
+  assert.ok(!cityCues(young, c).includes('ev-unlock'), 'every place is open from the start without progression');
+  c.unlocks = { version: 1 };
+  assert.ok(cityCues(young, c).includes('ev-unlock'));
+});
+
+test('synthesised cues have no file and never share a name with one', () => {
+  for (const name of SYNTHS) assert.ok(!(EFFECTS as readonly string[]).includes(name), name);
+  assert.equal(new Set(SYNTHS).size, SYNTHS.length);
 });
