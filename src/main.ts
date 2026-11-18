@@ -46,6 +46,7 @@ import { renderContext, renderCityOverview, showOwnerFinanceResult } from './con
 import { CityView } from './renderer.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import { INCIDENT, INCIDENT_MIN_POPULATION } from './incidents.ts';
+import { UNLOCK_POPULATION, peopleToUnlock } from './unlocks.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
 import { homeAmenities } from './resident-happiness.ts';
 import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind, civicCoverage, civicReach, civicFundedPoints, civicFundedUpkeep, civicFunding } from './civic/sites.ts';
@@ -615,6 +616,18 @@ function renderEducationOverview() {
   const shortTeachers = education.campuses.filter(campus => campus.open && campus.report.localStaff + campus.report.contract < campus.report.requiredStaff).length;
   host.replaceChildren(node('h3', '', 'การศึกษา'), node('p', 'reason', `ที่เรียนที่ใช้ได้ ${openSeats}/${seats} · ผู้เรียน ${enrolled} · ถือวุฒิพื้นฐาน ${education.residentBasic} · ถือวุฒิขั้นสูง ${education.residentHigher} · จบสะสม ${education.completed.basic}/${education.completed.higher} · โรงเรียนพร้อม ${education.schoolReadyDays} วัน · มหาวิทยาลัยพร้อม ${education.universityReadyDays} วัน · สถานศึกษาที่ขาดครู ${shortTeachers}`));
 }
+/** Mark tools a progression city has not opened yet; the click itself is refused by the sim with the reason. */
+function syncUnlocks() {
+  for (const kind of CIVIC_KINDS) {
+    const button = document.querySelector<HTMLButtonElement>(`[data-tool="${kind}"]`); if (!button) continue;
+    const need = peopleToUnlock(city, kind), locked = need > 0;
+    if ((button.dataset.locked === 'true') === locked && (!locked || button.dataset.lockNeed === String(need))) continue;
+    button.dataset.locked = String(locked); button.dataset.lockNeed = locked ? String(need) : '';
+    const base = button.dataset.baseTitle ?? (button.dataset.baseTitle = button.title);
+    button.title = locked ? `${base} · ปลดล็อกเมื่อมีประชากร ${UNLOCK_POPULATION[kind]} คน (ขาดอีก ${need})` : base;
+    button.setAttribute('aria-label', button.title);
+  }
+}
 function render() {
   if (!view) return;
   reconcileParkRuntime(city, parkRuntime);
@@ -623,6 +636,7 @@ function render() {
   signalPanel?.sync();
   railUi?.sync();
   validateRoute(); const s = summary(city);
+  syncUnlocks();
   // Before the pause button is drawn: reaching stage 5 while running pauses for the win screen.
   const goals = cityGoals(city, s); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;

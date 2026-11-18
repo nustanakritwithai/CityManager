@@ -22,3 +22,6 @@
 .tool[data-tool=taxi] .tool-icon { color:#ffd25e; }
 #bus-tool .tool-icon { color:#8fd3ff; }
 #rail-tool .tool-icon { color:#c3b8ff; }
+/* A progression city's tool that has not opened yet: dimmed, with a small lock in the corner (no change to label width). */
+.tool[data-locked=true] { position: relative; opacity: .55; }
+.tool[data-locked=true]::after { content: '🔒'; position: absolute; top: 2px; right: 3px; font-size: 10px; line-height: 1; pointer-events: none; }

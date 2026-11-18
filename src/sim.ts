@@ -14,6 +14,7 @@ import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, val
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
 import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
+import { UNLOCK_POPULATION, cityPopulation, newlyUnlocked, peopleToUnlock, validateUnlocks, type UnlockState } from './unlocks.ts';
 import { BURGLARY_REASON, INCIDENT, INCIDENT_LABELS, INCIDENT_MIN_POPULATION, MEDICAL_REASON, fireReason, incidentRoll, type IncidentKind } from './incidents.ts';
 import { BUDGET_LABELS, DEPARTMENT_OF, MAX_BUDGET_LEVEL, budgetLevel, funded, isBudgetLevel, setBudgetLevel, validateBudget, type BudgetDepartment, type BudgetLevel, type BudgetState } from './budget.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
@@ -98,6 +99,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   /** Optional city services (clinic, police, fire). Absent = none built; saves stay byte-identical. */
   civic?: CivicState;
   budget?: BudgetState;
+  /** Present only in cities started with progression: larger places open as the population grows. */
+  unlocks?: UnlockState;
   /** Optional bus depots/stops/lines (PR B2). Absent = no bus data; saves stay byte-identical. */
   bus?: BusState;
 };
@@ -801,6 +804,8 @@ export function civicSiteReason(c: City, i: number, kind: CivicKind): string | n
   if (!validIndex(i, c) || !CIVIC_KINDS.includes(kind)) return 'ตำแหน่งหรือชนิดอาคารบริการไม่ถูกต้อง';
   const spec = civicSpec(kind), [columns, rows] = civicFootprint(kind), parts = civicParcels(c, i, kind);
   const size = columns * rows === 1 ? '1 ช่อง' : `${columns}×${rows} ช่อง`;
+  const locked = peopleToUnlock(c, kind);
+  if (locked) return `${spec.label}ปลดล็อกเมื่อเมืองมีประชากร ${UNLOCK_POPULATION[kind]} คน · ขาดอีก ${locked} คน`;
   if (!parts) return `${spec.label}ใช้พื้นที่ ${size} และต้องอยู่ในแผนที่ทั้งหมด`;
   if (parts.some(part => isRailReserved(c, part))) return RAIL_PARCEL_MESSAGE;
   if (parts.some(part => { const cell = c.cells[part]; return part === GATEWAY || cell.road || cell.zone !== null || cell.building !== null || plantAt(c, part) || parkAt(c, part) || campusAt(c, part) || taxiAt(c, part) || busDepotAt(c, part) || civicAt(c, part); })) return `${spec.label}ต้องใช้แปลงว่าง ${size} ล้างโซนหรือรื้อสิ่งเดิมก่อน`;
@@ -1697,7 +1702,10 @@ function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
+  const peopleBefore = cityPopulation(c);
   rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c); visitVenues(c); runIncidents(c);
+  const opened = newlyUnlocked(c, peopleBefore, cityPopulation(c));
+  if (opened.length) c.lastEvent = `ปลดล็อกแล้ว: ${opened.map(kind => CIVIC[kind].label).join(' · ')} · เมืองมีประชากร ${cityPopulation(c)} คน`;
   c.happiness = advanceHappiness(c, c.happiness);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
@@ -1814,6 +1822,7 @@ export function serialize(c: City, market?: City['market']): string {
   if (c.taxi !== undefined) validateTaxi(c.taxi, taxiValidationView(c));
   if (c.civic !== undefined) validateCivic(c.civic, civicValidationView(c));
   if (c.budget !== undefined) validateBudget(c.budget);
+  if (c.unlocks !== undefined) validateUnlocks(c.unlocks);
   if (c.bus !== undefined) validateBus(c.bus, busValidationView(c));
   const envelope = { ...c, commercialUnifiedStartTick: c.commercialUnifiedStartTick ?? c.tick, commercialUnifiedBaseline: c.commercialUnifiedBaseline ?? {moneyEntries:moneyJournalLength(c),cropEntries:cropJournalLength(c),goodsEntries:goodsJournalLength(c)}, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) };
   const inner = c.history ? {...envelope, historyBaseVersion:envelope.version, version:24, rulesVersion:'chain-19'} : envelope;
@@ -2298,6 +2307,7 @@ export function deserialize(json: string): City {
   if ('taxi' in city) validateTaxi(city.taxi, taxiValidationView(city));
   if ('civic' in city) validateCivic(city.civic, civicValidationView(city));
   if ('budget' in city) validateBudget(city.budget);
+  if ('unlocks' in city) validateUnlocks(city.unlocks);
   if ('bus' in city) { validateBus(city.bus, busValidationView(city)); reconcileBusStops(city, SIZE); }
   if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
   if (city.factoryProgressionStartTick === undefined) city.factoryProgressionStartTick = city.tick;
