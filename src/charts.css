@@ -206,3 +206,17 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-funding-step { min-width: 0; min-height: 44px; padding: 0 2px; border: 1px solid var(--pnl-line); background: var(--pnl-bg); color: var(--chart-ink-2); font-size: calc(13 * var(--u)); font-variant-numeric: tabular-nums; }
 .dash-funding-step[aria-pressed=true] { border-color: #f3c46b88; background: #f3c46b24; color: var(--c-accent); font-weight: 700; }
 .dash-funding-note { margin: calc(10 * var(--u)) 0 0; color: var(--chart-ink-2); font-size: calc(12.5 * var(--u)); line-height: 1.55; }
+
+/* Districts: one row per district with its colour, readings and actions. */
+.dash-district-list { display: grid; gap: calc(10 * var(--u)); }
+.dash-district-row { padding: calc(10 * var(--u)); border: 1px solid var(--pnl-line); border-radius: var(--pnl-radius-sm); background: var(--pnl-bg); }
+.dash-district-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.dash-district-head strong { color: var(--chart-ink); font-size: calc(15 * var(--u)); }
+.dash-district-meta { margin-left: auto; color: var(--chart-ink-2); font-size: calc(13 * var(--u)); font-variant-numeric: tabular-nums; }
+.dash-district-swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+.dash-district-swatch.d1 { background: #4e79a7; } .dash-district-swatch.d2 { background: #f28e2b; } .dash-district-swatch.d3 { background: #59a14f; } .dash-district-swatch.d4 { background: #e15759; }
+.dash-district-swatch.d5 { background: #b07aa1; } .dash-district-swatch.d6 { background: #76b7b2; } .dash-district-swatch.d7 { background: #edc948; } .dash-district-swatch.d8 { background: #ff9da7; }
+.dash-district-facts { margin: 6px 0 0; color: var(--chart-ink-2); font-size: calc(13 * var(--u)); line-height: 1.55; }
+.dash-district-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.dash-district-action { min-height: 44px; padding: 0 12px; border: 1px solid var(--pnl-line); background: var(--pnl-surface); color: var(--chart-ink); }
+.dash-district-action.primary { border-color: #f3c46b88; background: #f3c46b24; color: var(--c-accent); font-weight: 700; }

@@ -47,6 +47,8 @@ import { CityView } from './renderer.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import { INCIDENT, INCIDENT_MIN_POPULATION } from './incidents.ts';
 import { UNLOCK_POPULATION, peopleToUnlock } from './unlocks.ts';
+import { paintDistrict } from './districts.ts';
+import { expandedCellNeighbors } from './expanded-map-grid.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
 import { homeAmenities } from './resident-happiness.ts';
 import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind, civicCoverage, civicReach, civicFundedPoints, civicFundedUpkeep, civicFunding } from './civic/sites.ts';
@@ -162,6 +164,8 @@ function updateVenueActions(site: ReturnType<typeof civicAt>) {
 let servicesMenu: ReturnType<typeof installServicesMenu> | undefined, leisureMenu: ReturnType<typeof installLeisureMenu> | undefined, constructionMenu: ReturnType<typeof installConstructionMenu> | undefined;
 let quickSelection: number | null = null;
 let selectionActions: ReturnType<typeof installSelectionActions> | null = null;
+/** The district the 'district' tool paints, or null to take parcels out of every district. */
+let districtBrush: number | null = null;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
 let plantPanel: ReturnType<typeof installPlantPanel> | undefined;
@@ -185,8 +189,9 @@ function syncEducationTools() {
     if (button) button.hidden = !on;
   }
 }
-const toolNames: Record<string, string> = { select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, CIVIC[kind].label])), school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
+const toolNames: Record<string, string> = { district: 'ระบายย่าน', select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, CIVIC[kind].label])), school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
 const help: Record<string, string> = {
+  district: 'แตะแปลงเพื่อระบายย่าน (แตะครั้งละ 5 แปลง) · กดกลับเมื่อเสร็จ',
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
   R: 'โซนบ้านสร้างที่ว่างก่อน · ครัวเรือนย้ายเข้าเมื่อผ่านความจุ ถนน บริการ และงาน',
@@ -312,6 +317,12 @@ async function activate(index: number) {
   else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
   else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
   else if (isCivicKind(tool)) status(resultSound(buildCivic(city, index, tool), 'ui-place').message);
+  else if (tool === 'district') {
+    // A small brush: the tapped parcel and its four neighbours.
+    const brush = [index, ...expandedCellNeighbors(index)], name = districtBrush === null ? null : city.districts?.list.find(d => d.id === districtBrush)?.name;
+    const changed = paintDistrict(city, districtBrush, brush);
+    status(changed ? (name ? `ระบายย่าน ${name} ${changed} แปลง` : `เอาออกจากย่าน ${changed} แปลง`) : 'แปลงเหล่านี้อยู่ในย่านนี้แล้ว');
+  }
   else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
   else if (tool === 'bulldoze') {
     busLock = true;
@@ -685,7 +696,7 @@ function updateMapInfo(placement: Preview | null) {
   mapMarkers.setPreview(placement, hover);
   const mode = route ? undefined : TOOL_OVERLAY[tool], now = performance.now();
   const layout = city.cells.map(cell => (cell.road ? 'r' : cell.zone ?? '.') + (cell.building === null ? '' : 'b')).join('') + roadTopologyKey(city);
-  const overlayKey = `${mode}:${layout}`;
+  const overlayKey = `${mode}:${layout}${mode === 'districts' ? `:${JSON.stringify(city.districts ?? null)}` : ''}`;
   if (overlayKey !== mapInfo.overlayKey || mode && city.tick !== mapInfo.overlayTick && now - mapInfo.overlayAt > 500) {
     const overlay = mode ? mapOverlay(city, mode) : null;
     view.setOverlay(overlay); mapMarkers.setLegend(overlay);
@@ -1079,7 +1090,7 @@ async function boot() {
       $('#building-issue-details').scrollIntoView({ block: 'start', inline: 'nearest' });
     }
   });
-  dashboard = new OverviewDashboard($('#city-dashboard'), tool => setTool(tool));
+  dashboard = new OverviewDashboard($('#city-dashboard'), tool => setTool(tool), id => { districtBrush = id; setTool('district'); });
   cityHud = new CityHud((cell, buildingId) => { view.focus(cell); openRoute({ page: 'place', cell, buildingId }); }, () => {
     openRoute({ page: 'city' });
     const issues = document.querySelector<HTMLDetailsElement>('#issue-section'); if (issues) { issues.open = true; issues.scrollIntoView({ block: 'start' }); }
