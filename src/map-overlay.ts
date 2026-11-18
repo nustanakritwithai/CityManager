@@ -28,7 +28,7 @@ export const OVERLAY_LEGENDS: Readonly<Record<OverlayMode, [Tone, string][]>> = 
   growth: [['good', 'พร้อมเกิดอาคาร'], ['warn', 'มีอาคารแล้ว'], ['bad', 'ติดเงื่อนไข · แตะดูเหตุผล']],
   housing: [['good', 'มีที่ว่างรับครัวเรือน'], ['warn', 'เต็มแล้ว'], ['bad', 'บ้านว่าง / แปลงบ้านติดเงื่อนไข']],
   pollution: [['good', 'อากาศดี'], ['warn', 'มลพิษปานกลาง · ความสุขลดเล็กน้อย'], ['bad', 'มลพิษสูง · ความสุขลดมาก']],
-  districts: [['d1', 'แตะแปลงเพื่อระบายย่าน · สีตามย่าน']],
+  districts: [['d1', 'แตะแปลงเพื่อระบายย่าน'], ['d2', 'แต่ละย่านมีสีของตัวเอง']],
   landvalue: [['good', 'ที่ดินราคาสูง'], ['warn', 'ปานกลาง'], ['bad', 'ต่ำ · ขาดบริการหรือมลพิษ']],
   utilities: [['good', 'มีน้ำและไฟ · โรงผลิต'], ['warn', 'ขาดน้ำหรือไฟอย่างใดอย่างหนึ่ง'], ['bad', 'ไม่มีทั้งน้ำและไฟ · สร้างโรงเพิ่ม']],
 });
@@ -36,7 +36,8 @@ export function mapOverlay(city: City, mode: OverlayMode): Overlay {
   const cells: OverlayCell[] = [], roads = connectedRoads(city), svc = mode === 'utilities' ? utilities(city) : null;
   if (mode === 'districts') {
     for (const d of city.districts?.list ?? []) for (const cell of d.cells) cells.push({ cell, tone: districtTone(d.id), strength: .55 });
-    return { mode, cells, legend: city.districts?.list.length ? city.districts.list.map(d => [districtTone(d.id), d.name] as [Tone, string]) : OVERLAY_LEGENDS.districts };
+    // Each district by name, then a reminder of what a tap does, so the legend always reads on its own.
+    return { mode, cells, legend: city.districts?.list.length ? [...city.districts.list.map(d => [districtTone(d.id), d.name] as [Tone, string]), ['warn', 'แตะแปลงเพื่อระบาย · กดกลับเมื่อเสร็จ']] : OVERLAY_LEGENDS.districts };
   }
   const pollution = mode === 'pollution' || mode === 'landvalue' ? pollutionReader(city) : null;
   for (let i = 0; i < city.cells.length; i++) {

@@ -47,7 +47,8 @@ test('the district tool shows each district in its own colour with its name in t
   assert.equal(TOOL_OVERLAY.district, 'districts');
   const overlay = mapOverlay(c, 'districts');
   assert.deepEqual(overlay.cells.map(cell => [cell.cell, cell.tone]), [[10, 'd1'], [11, 'd1'], [20, 'd2']]);
-  assert.deepEqual(overlay.legend, [['d1', 'เหนือ'], ['d2', 'ใต้']]);
+  assert.deepEqual(overlay.legend.slice(0, 2), [['d1', 'เหนือ'], ['d2', 'ใต้']]);
+  assert.equal(overlay.legend.length, 3, 'a tap reminder follows the names');
 });
 
 test('a malformed districts section is rejected', () => {
