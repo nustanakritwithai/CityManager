@@ -233,3 +233,9 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-flowbar-track { display: block; height: 8px; border-radius: 4px; background: rgba(57, 135, 229, .14); }
 .dash-flowbar-fill { display: block; width: calc(var(--share) * 100%); min-width: 4px; height: 100%; border-radius: 4px; background: var(--series-1); }
 .dash-flowbar:focus-visible { outline: 2px solid var(--c-accent); }
+.dash-economy .dash-sub { margin: 14px 0 6px; color: var(--chart-ink); font-size: calc(14 * var(--u)); font-weight: 650; }
+.dash-economy .dash-risk-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.dash-risk { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--pnl-line); border-left: 3px solid var(--c-bad); border-radius: var(--pnl-radius-sm); background: var(--pnl-bg); font-size: calc(13 * var(--u)); color: var(--chart-ink-2); }
+.dash-risk strong { color: var(--chart-ink); }
+.dash-risk small { margin-left: auto; font-variant-numeric: tabular-nums; }
+.dash-risk.more { border-left-color: var(--pnl-line); }
