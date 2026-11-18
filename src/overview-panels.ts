@@ -20,6 +20,7 @@ import { budgetSummary, setCityBudget, treasurySpendable } from './sim.ts';
 import { BUDGET_LEVELS, type BudgetDepartment, type BudgetLevel } from './budget.ts';
 import { MAX_DISTRICTS, createDistrict, deleteDistrict, districtTone, renameDistrict } from './districts.ts';
 import { districtStats } from './district-stats.ts';
+import { moneyFlows, SECTOR_LABELS, type EconomySector } from './economy-flows.ts';
 import type { City } from './sim.ts';
 import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { taxHappinessPoints } from './resident-happiness.ts';
@@ -67,12 +68,14 @@ const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
 };
 
 const NAV: readonly [string, string][] = [
-  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-taxes', 'ภาษี'], ['dash-funding', 'งบ'], ['dash-districts', 'ย่าน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
+  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-taxes', 'ภาษี'], ['dash-funding', 'งบ'], ['dash-economy', 'เศรษฐกิจ'], ['dash-districts', 'ย่าน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
   ['growth-anchor', 'ความต้องการ'], ['issue-section', 'ปัญหา'], ['event-log-section', 'เหตุการณ์'], ['money-section', 'บัญชี'],
 ];
 const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'C · พืชผล', factory: 'โรงงาน', shop: 'C · สินค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
 const NODE_POS: Record<ChainNode, [number, number]> = { farm: [14, 18], market: [174, 18], household: [334, 104], factory: [14, 190], shop: [174, 190], outside: [334, 190] };
 const NODE_W = 92, NODE_H = 48;
+/** Flows listed by name; smaller ones fold into one "อื่น ๆ" row. */
+const ECONOMY_FLOW_ROWS = 6;
 
 export class OverviewDashboard {
   private readonly host: HTMLElement;
@@ -86,6 +89,7 @@ export class OverviewDashboard {
   private readonly profitTax = taxField('profit', 'ภาษีกำไรกิจการ', 'ครัวเรือนเจ้าของกิจการ');
   private readonly taxStatus = el('p', 'dash-tax-status');
   private readonly budget = el('section', 'dash-funding');
+  private readonly economy = el('section', 'dash-card dash-economy');
   private readonly districts = el('section', 'dash-card dash-districts');
   private readonly chain = el('section', 'dash-card dash-chain');
   private readonly growth = el('section', 'dash-card dash-growth');
@@ -132,6 +136,7 @@ export class OverviewDashboard {
       this.renderBudget(this.city);
     });
     this.finance.append(this.financeHead, taxForm, this.budget, this.financeCharts);
+    this.economy.id = 'dash-economy';
     this.districts.id = 'dash-districts';
     this.districts.addEventListener('click', event => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-district-action]');
@@ -144,7 +149,7 @@ export class OverviewDashboard {
       if (action === 'delete' && id && confirm('ลบย่านนี้? แปลงในย่านจะไม่อยู่ในย่านใด')) deleteDistrict(this.city, id);
       this.renderDistricts(this.city);
     });
-    host.replaceChildren(nav, this.goals, this.kpis, this.finance, this.districts, this.chain, this.growth);
+    host.replaceChildren(nav, this.goals, this.kpis, this.finance, this.economy, this.districts, this.chain, this.growth);
   }
   get modalOpen() { return this.modal.isOpen; }
   closeModal() { this.modal.close(); }
@@ -165,7 +170,7 @@ export class OverviewDashboard {
     this.chartWidth = this.width();
     const series = dailySeries(city, 30);
     renderGoalsCard(this.goals, goals, missions, challenges, population);
-    this.renderKpis(city, series); this.renderBudget(city); this.renderDistricts(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
+    this.renderKpis(city, series); this.renderBudget(city); this.renderEconomy(city); this.renderDistricts(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
   /** Chart width follows the card so text stays at its real size. */
@@ -200,6 +205,39 @@ export class OverviewDashboard {
   }
 
   /** Named districts with what each holds; paint, rename or delete one, or start a new one. */
+  /** Who paid whom over 30 days: each side's net, then the largest flows between sides as one-hue bars. */
+  private renderEconomy(city: City) {
+    const f = moneyFlows(city), net = (sector: EconomySector) => f.balances.find(b => b.sector === sector)!;
+    const keep = (text: string) => text.replace(/ /g, '\u00a0'); // an amount never breaks across lines
+    const tone = (v: number) => v > 0 ? 'good' as const : v < 0 ? 'bad' as const : 'flat' as const;
+    const side = (sector: EconomySector, icon: string) => {
+      const b = net(sector);
+      return statTile({ label: SECTOR_LABELS[sector], icon, value: signed(b.net), delta: { text: b.net > 0 ? 'เงินเข้ามากกว่าออก' : b.net < 0 ? 'เงินออกมากกว่าเข้า' : 'เข้าเท่ากับออก', tone: tone(b.net) }, note: `${keep(`รับ ${money(b.inflow)}`)} · ${keep(`จ่าย ${money(b.outflow)}`)}` });
+    };
+    const border = f.cameIn - f.leftCity;
+    const tiles = el('div', 'dash-economy-tiles');
+    tiles.append(side('household', 'household'), side('firm', 'shop'), side('treasury', 'coin'),
+      statTile({ label: 'เงินเข้าเมืองสุทธิ', icon: 'import', value: signed(border), delta: { text: border > 0 ? 'เข้ามากกว่ารั่วออก' : border < 0 ? 'รั่วออกมากกว่าเข้า' : 'เข้าเท่ากับออก', tone: tone(border) }, note: `${keep(`เข้า ${money(f.cameIn)}`)} · ${keep(`ออก ${money(f.leftCity)}`)}` }));
+    const total = f.flows.reduce((n, x) => n + x.amount, 0), shown = f.flows.slice(0, ECONOMY_FLOW_ROWS), rest = f.flows.slice(ECONOMY_FLOW_ROWS);
+    const rows = shown.map(x => ({ label: `${SECTOR_LABELS[x.from]} → ${SECTOR_LABELS[x.to]}`, amount: x.amount, entries: x.entries }));
+    if (rest.length) rows.push({ label: 'อื่น ๆ', amount: rest.reduce((n, x) => n + x.amount, 0), entries: rest.reduce((n, x) => n + x.entries, 0) });
+    const max = Math.max(1, ...rows.map(r => r.amount));
+    const figure = el('figure', 'dash-flowbars'), caption = el('figcaption', 'chart-mix-head');
+    caption.append(el('span', '', 'เงินที่ไหลระหว่างฝ่าย'), el('strong', '', money(total))); figure.append(caption);
+    const list = el('ul', 'dash-flowbar-list');
+    for (const r of rows) {
+      const share = total ? Math.round(r.amount / total * 100) : 0, item = el('li', 'dash-flowbar');
+      item.tabIndex = 0; item.title = `${r.label}: ${money(r.amount)} · ${share}% · ${r.entries.toLocaleString('th-TH')} รายการ`;
+      const head = el('div', 'dash-flowbar-head'); head.append(el('span', '', r.label), el('strong', '', money(r.amount)), el('small', '', `${share}%`));
+      const track = el('span', 'dash-flowbar-track'), bar = el('span', 'dash-flowbar-fill'); bar.style.setProperty('--share', (r.amount / max).toFixed(4));
+      track.setAttribute('aria-hidden', 'true'); track.append(bar); item.append(head, track); list.append(item);
+    }
+    figure.append(rows.length ? list : el('p', 'dash-funding-note', 'ยังไม่มีเงินไหลในช่วงนี้'));
+    const trade = f.within.firm ?? 0, transfers = f.within.household ?? 0;
+    const facts = [trade ? `กิจการซื้อขายกันเอง ${money(trade)}` : '', transfers ? `ครัวเรือนจ่ายกันเอง ${money(transfers)}` : ''].filter(Boolean).join(' · ');
+    this.economy.replaceChildren(this.head('เงินไหลเวียนในเมือง', `วันที่ ${f.fromTick}–${f.toTick}`), tiles, figure, ...(facts ? [el('p', 'dash-funding-note', facts)] : []));
+  }
+
   private renderDistricts(city: City) {
     this.city = city;
     const stats = districtStats(city), action = (label: string, kind: string, id = 0, className = 'dash-district-action') => {

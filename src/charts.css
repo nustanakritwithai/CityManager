@@ -220,3 +220,16 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-district-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .dash-district-action { min-height: 44px; padding: 0 12px; border: 1px solid var(--pnl-line); background: var(--pnl-surface); color: var(--chart-ink); }
 .dash-district-action.primary { border-color: #f3c46b88; background: #f3c46b24; color: var(--c-accent); font-weight: 700; }
+
+/* Economy: each side's 30-day net, then the largest flows between sides as one-hue bars on a shared scale. */
+.dash-economy-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.dash-flowbars { margin: 14px 0 0; }
+.dash-economy .dash-flowbar-list { display: grid; gap: 8px; margin: 6px 0 0; padding: 0; list-style: none; }
+.dash-flowbar { display: grid; gap: 4px; border-radius: 6px; outline-offset: 2px; }
+.dash-flowbar-head { display: flex; align-items: baseline; gap: 8px; font-size: calc(13 * var(--u)); color: var(--chart-ink-2); }
+.dash-flowbar-head span { flex: 1; min-width: 0; }
+.dash-flowbar-head strong { color: var(--chart-ink); font-variant-numeric: tabular-nums; }
+.dash-flowbar-head small { width: 3.2em; text-align: right; color: var(--chart-muted); font-variant-numeric: tabular-nums; }
+.dash-flowbar-track { display: block; height: 8px; border-radius: 4px; background: rgba(57, 135, 229, .14); }
+.dash-flowbar-fill { display: block; width: calc(var(--share) * 100%); min-width: 4px; height: 100%; border-radius: 4px; background: var(--series-1); }
+.dash-flowbar:focus-visible { outline: 2px solid var(--c-accent); }
