@@ -45,9 +45,10 @@ import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { INCIDENT, INCIDENT_MIN_POPULATION } from './incidents.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
 import { homeAmenities } from './resident-happiness.ts';
-import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind, civicReach, civicFundedPoints, civicFundedUpkeep, civicFunding } from './civic/sites.ts';
+import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind, civicCoverage, civicReach, civicFundedPoints, civicFundedUpkeep, civicFunding } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
@@ -468,6 +469,15 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
     }
     // A larger service is connected when any of its parcels has road frontage, whichever parcel was tapped.
     const connected = civic ? civicCells(civic).some(part => access(city, part)) : access(city, cellIndex); if (park) tags.push(tag('ไม่ต้องติดถนน', 'good')); else tags.push(tag(connected ? 'ถนนเชื่อมถึงเมือง' : 'ขาดการเชื่อมต่อ', connected ? 'good' : 'bad'));
+    if (building && city.households.reduce((n, h) => n + h.members, 0) >= INCIDENT_MIN_POPULATION) {
+      // Which incidents can reach this building because no service covers it.
+      const reach = civicCoverage(city, cellIndex, civicCellDistance), risks = [
+        !INCIDENT.fire.guards.some(kind => reach[kind]) ? 'ไฟไหม้' : null,
+        building.zone === 'R' && !INCIDENT.burglary.guards.some(kind => reach[kind]) ? 'ถูกงัดบ้าน' : null,
+        building.zone === 'R' && !INCIDENT.illness.guards.some(kind => reach[kind]) ? 'เจ็บป่วย' : null,
+      ].filter(Boolean);
+      tags.push(tag(risks.length ? `เสี่ยง${risks.join(' · ')}` : 'มีบริการคุ้มครองครบ', risks.length ? 'bad' : 'good'));
+    }
     if (!cell.road && !civic && !park && !plant && !campus) {
       // Land itself: how clean the air is here and what the parcel is worth for its services, road and air.
       const dirt = pollutionAt(city, cellIndex), worth = landValue(homeAmenities(city, cellIndex).points, connected, dirt);
