@@ -72,6 +72,8 @@ const reasonLabels: Record<string, string> = {
   'Monthly firm rent': 'ค่าเช่าของบริษัทประจำเดือน',
   'Monthly firm profit tax': 'ภาษีจากกำไรบริษัท',
   'Monthly household rent': 'ค่าเช่าของครัวเรือนประจำเดือน',
+  'Burglary loss': 'เงินที่ถูกขโมยจากการงัดบ้าน (ไม่มีสถานีตำรวจถึง)',
+  'Medical bill': 'ค่ารักษาพยาบาล (ไม่มีอนามัยหรือโรงพยาบาลถึง)',
   'Outside residential height investment': 'เงินลงทุนเพิ่มชั้นบ้านจากภายนอก',
   'Profitable firm height investment': 'เงินลงทุนเพิ่มชั้นอาคารบริษัท',
   'Taxi fares': 'ค่าโดยสารแท็กซี่ (รายการเดิม)',
@@ -120,6 +122,8 @@ export function reasonLabel(reason: string): string {
   if (refund) return `เงินคืน 80% จากการรื้อ${({park:'สวนสาธารณะ','power plant':'โรงไฟฟ้า','water pump':'โรงสูบน้ำ',school:'โรงเรียน',university:'มหาวิทยาลัย','road cell':'ถนนช่อง'} as Record<string,string>)[refund[1]]} #${refund[2]} (เฉพาะส่วนที่เมืองจ่าย)`;
   const roadCell = /^Build road cell @(\d+)$/.exec(reason);
   if (roadCell) return `สร้างถนนช่อง ${roadCell[1]}`;
+  const fire = /^Fire damage repair #(\d+)$/.exec(reason);
+  if (fire) return `ซ่อมความเสียหายจากไฟไหม้ อาคาร #${fire[1]} (ไม่มีสถานีดับเพลิงถึง)`;
   const visitors = /^Airport visitors #(\d+)$/.exec(reason);
   if (visitors) return `รายได้นักท่องเที่ยวผ่านสนามบิน #${visitors[1]}`;
   const venue = /^(?:(Monthly|Daily) (.+?) (wages|rent)|Visit (.+?)) #(\d+)$/.exec(reason), venueKind = venue && CIVIC_KINDS.find(kind => civicSpec(kind).staff && CIVIC_REASON_NAMES[kind] === (venue[2] ?? venue[4]));

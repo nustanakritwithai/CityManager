@@ -12,8 +12,9 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
+import { BURGLARY_REASON, INCIDENT, INCIDENT_LABELS, INCIDENT_MIN_POPULATION, MEDICAL_REASON, fireReason, incidentRoll, type IncidentKind } from './incidents.ts';
 import { BUDGET_LABELS, DEPARTMENT_OF, MAX_BUDGET_LEVEL, budgetLevel, funded, isBudgetLevel, setBudgetLevel, validateBudget, type BudgetDepartment, type BudgetLevel, type BudgetState } from './budget.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
@@ -1541,6 +1542,28 @@ export function budgetSummary(c: City) {
     return { department, label: BUDGET_LABELS[department], level, places: department === 'parks' ? c.parks.length : kinds.length, base, monthly };
   });
 }
+/** Fires, burglaries and illness where no service reaches; see incidents.ts. Returns what happened today. */
+export function runIncidents(c: City): Record<IncidentKind, number> {
+  const happened: Record<IncidentKind, number> = { fire: 0, burglary: 0, illness: 0 };
+  if (c.households.reduce((n, h) => n + h.members, 0) < INCIDENT_MIN_POPULATION) return happened;
+  const guarded = (cell: number, kinds: readonly CivicKind[]) => { const reach = civicCoverage(c, cell, civicCellDistance); return kinds.some(kind => reach[kind]); };
+  for (const b of [...c.buildings].sort((x, y) => x.id - y.id)) {
+    if (incidentRoll(c.seed, c.tick, b.id, 'fire') >= INCIDENT.fire.chance || guarded(b.cell, INCIDENT.fire.guards)) continue;
+    // The city pays for the damage it had no fire station to prevent.
+    if (transfer(c, 'treasury', 'upkeep', INCIDENT.fire.cost, fireReason(b.id)) > 0) happened.fire++;
+  }
+  for (const h of [...c.households].sort((x, y) => x.id - y.id)) {
+    if (h.home === null) continue;
+    const cell = building(c, h.home).cell;
+    if (incidentRoll(c.seed, c.tick, h.id, 'burglary') < INCIDENT.burglary.chance && !guarded(cell, INCIDENT.burglary.guards)
+      && transfer(c, h.wallet, 'outside', INCIDENT.burglary.cost, BURGLARY_REASON) > 0) happened.burglary++;
+    if (incidentRoll(c.seed, c.tick, h.id, 'illness') < INCIDENT.illness.chance && !guarded(cell, INCIDENT.illness.guards)
+      && transfer(c, h.wallet, 'outside', INCIDENT.illness.cost, MEDICAL_REASON) > 0) happened.illness++;
+  }
+  const news = (Object.keys(happened) as IncidentKind[]).filter(kind => happened[kind]).map(kind => `${INCIDENT_LABELS[kind]} ${happened[kind]}`);
+  if (news.length) c.lastEvent = `เหตุการณ์วันนี้: ${news.join(' · ')} · สร้างสถานีดับเพลิง ตำรวจ หรืออนามัยให้ถึงเพื่อป้องกัน`;
+  return happened;
+}
 /** A cached reader for land value on this city as it stands now. */
 export function landValues(c: City): (cell: number) => number {
   const air = pollutionReader(c), seen = new Map<number, number>();
@@ -1674,7 +1697,7 @@ function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
-  rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c); visitVenues(c);
+  rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c); visitVenues(c); runIncidents(c);
   c.happiness = advanceHappiness(c, c.happiness);
   transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }

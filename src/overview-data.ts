@@ -34,6 +34,7 @@ const INCOME: readonly [RegExp, string, string][] = [
   [/grant/i, 'grant', 'ทุนอุดหนุน'],
 ];
 const EXPENSE: readonly [RegExp, string, string][] = [
+  [/^Fire damage repair #[1-9]\d*$/, 'fire-damage', 'ซ่อมความเสียหายจากไฟไหม้'],
   [/^Monthly (cinema|restaurant|night market|concert ground) wages #[1-9]\d*$/, 'venue-wages', 'ค่าจ้างพนักงานกิจการบันเทิง'],
   [/^Monthly park wages #[1-9]\d*$/, 'park-wages', 'ค่าจ้างเจ้าหน้าที่สวน'],
   [/^Monthly park upkeep #[1-9]\d*$/, 'park-maintenance', 'ค่าบำรุงสวน (ไม่รวมค่าจ้าง)'],
