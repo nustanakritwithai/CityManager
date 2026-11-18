@@ -23,6 +23,7 @@ import { districtStats } from './district-stats.ts';
 import { moneyFlows, SECTOR_LABELS, type EconomySector, type MoneyFlows } from './economy-flows.ts';
 import { economyInsights } from './economy-insights.ts';
 import { treasuryForecast, type TreasuryForecast } from './treasury-forecast.ts';
+import { economyTrends, type EconomyTrends } from './economy-trends.ts';
 import { businessSectors, BUSINESS_SECTOR_LABELS, BUYERS, BUYER_LABELS, COST_KINDS, COST_LABELS, type BusinessSectors, type FirmResult } from './business-sectors.ts';
 import { householdEconomy, type HouseholdEconomy, INCOME_KINDS, INCOME_LABELS, SAVINGS_BAND_LABELS, SPENDING_KINDS, SPENDING_LABELS } from './household-economy.ts';
 import type { City } from './sim.ts';
@@ -84,6 +85,36 @@ const ECONOMY_FLOW_ROWS = 6;
 const AT_RISK_ROWS = 3;
 /** Firms listed at each end of the profit ranking. */
 const FIRM_ROWS = 3;
+/** Changes beyond this many percent read as ">999%": against a near-empty month the exact figure says little. */
+const TREND_CHANGE_CAP = 999;
+/** Figures that are a balance of money in and out, so they read with a sign. */
+const TREND_SIGNED: ReadonlySet<string> = new Set(['businessProfit', 'treasuryNet', 'borderNet']);
+/** The last three months of a few figures: newest value, change on the month before, and three small columns. */
+function trendBlock(t: EconomyTrends): HTMLElement[] {
+  if (t.windows.length < 2) return [];
+  const span = (w: { fromTick: number; toTick: number }) => `วันที่ ${w.fromTick}–${w.toTick}`;
+  const list = el('ul', 'dash-trend-list');
+  for (const r of t.rows) {
+    const item = el('li', 'dash-trend'), now = r.values.at(-1)!;
+    const tone = r.change === null || r.change === 0 || r.better === 0 ? 'flat' : (r.change > 0) === (r.better > 0) ? 'good' : 'bad';
+    const change = r.change === null ? 'ไม่มีฐานเทียบ' : `${r.change > 0 ? '▲' : r.change < 0 ? '▼' : '•'} ${Math.abs(r.change) > TREND_CHANGE_CAP ? `>${TREND_CHANGE_CAP}` : Math.abs(r.change).toLocaleString('th-TH')}%`;
+    const W = 54, H = 26, gap = 4, n = r.values.length, bw = (W - gap * (n - 1)) / n;
+    const top = Math.max(0, ...r.values), bottom = Math.min(0, ...r.values), range = top - bottom || 1, zero = H * top / range;
+    const plot = svg('svg', { viewBox: `0 0 ${W} ${H}`, class: 'dash-trend-bars', role: 'img', 'aria-label': `${r.label}: ${r.values.map((v, i) => `${span(t.windows[i])} ${signed(v)}`).join(', ')}` });
+    r.values.forEach((v, i) => {
+      const h = Math.max(1.5, Math.abs(v) / range * H), y = v >= 0 ? zero - h : zero;
+      const bar = svg('rect', { x: (i * (bw + gap)).toFixed(1), y: y.toFixed(1), width: bw.toFixed(1), height: h.toFixed(1), rx: 2, class: i === n - 1 ? 'now' : '' });
+      const tip = svg('title'); tip.textContent = `${span(t.windows[i])}: ${signed(v)}`; bar.append(tip); plot.append(bar);
+    });
+    if (bottom < 0) plot.append(svg('line', { x1: 0, x2: W, y1: zero.toFixed(1), y2: zero.toFixed(1), class: 'zero' }));
+    const text = el('div', 'dash-trend-text');
+    text.append(el('span', '', r.label), el('strong', '', r.values.some(v => v < 0) || TREND_SIGNED.has(r.key) ? signed(now) : money(now)));
+    item.append(text, el('span', `dash-trend-change ${tone}`, change), plot);
+    list.append(item);
+  }
+  const months = t.windows.map(span).join(' · ');
+  return [el('h4', 'dash-sub', `เทียบ ${t.windows.length} เดือนล่าสุด`), list, el('p', 'dash-funding-note', `แท่งจากซ้ายไปขวา: ${months} · ลูกศรเทียบกับเดือนก่อนหน้า`)];
+}
 type BarRow = { label: string; value: number; text: string; detail?: string };
 /** Horizontal bars in one hue on a shared scale, each row labelled with its value and share of `total`. */
 function barList(title: string, totalText: string, rows: readonly BarRow[], total: number, empty: string): HTMLElement {
@@ -203,7 +234,7 @@ export class OverviewDashboard {
     renderGoalsCard(this.goals, goals, missions, challenges, population);
     this.renderKpis(city, series); this.renderBudget(city); const flows = moneyFlows(city), homes = householdEconomy(city), business = businessSectors(city, undefined, RECIPE_LABELS);
     const forecast = treasuryForecast(city, treasurySpendable(city), budgetSummary(city).reduce((n, row) => n + row.monthly, 0));
-    this.renderEconomy(flows, homes, business, forecast); this.renderHouseholds(homes); this.renderBusiness(business); this.renderDistricts(city); this.renderFinance(city, series, forecast); this.renderChain(city, series); this.renderGrowth(city, series);
+    this.renderEconomy(flows, homes, business, forecast, economyTrends(city)); this.renderHouseholds(homes); this.renderBusiness(business); this.renderDistricts(city); this.renderFinance(city, series, forecast); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
   /** Chart width follows the card so text stays at its real size. */
@@ -239,7 +270,7 @@ export class OverviewDashboard {
 
   /** Named districts with what each holds; paint, rename or delete one, or start a new one. */
   /** Who paid whom over 30 days: each side's net, then the largest flows between sides as one-hue bars. */
-  private renderEconomy(f: MoneyFlows, homes: HouseholdEconomy, business: BusinessSectors, forecast: TreasuryForecast) {
+  private renderEconomy(f: MoneyFlows, homes: HouseholdEconomy, business: BusinessSectors, forecast: TreasuryForecast, trends: EconomyTrends) {
     const net = (sector: EconomySector) => f.balances.find(b => b.sector === sector)!;
     const keep = (text: string) => text.replace(/ /g, '\u00a0'); // an amount never breaks across lines
     const tone = (v: number) => v > 0 ? 'good' as const : v < 0 ? 'bad' as const : 'flat' as const;
@@ -263,7 +294,7 @@ export class OverviewDashboard {
       go.append(el('span', 'dash-insight-tag', x.tone === 'bad' ? 'ต้องแก้' : x.tone === 'warn' ? 'น่าจับตา' : 'ดี'), el('span', 'dash-insight-text', x.text), el('span', 'dash-insight-go', '›'));
       go.setAttribute('aria-label', `${x.text} · ไปที่รายละเอียด`); item.append(go); notes.append(item);
     }
-    this.economy.replaceChildren(this.head('เงินไหลเวียนในเมือง', `วันที่ ${f.fromTick}–${f.toTick}`), ...(insights.length ? [notes] : []), tiles, figure, ...(facts ? [el('p', 'dash-funding-note', facts)] : []));
+    this.economy.replaceChildren(this.head('เงินไหลเวียนในเมือง', `วันที่ ${f.fromTick}–${f.toTick}`), ...(insights.length ? [notes] : []), tiles, figure, ...(facts ? [el('p', 'dash-funding-note', facts)] : []), ...trendBlock(trends));
   }
 
   /** Household income and spending by kind, savings spread, and who cannot cover next month's rent and water/power. */
