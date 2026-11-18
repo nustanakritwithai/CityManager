@@ -239,3 +239,14 @@ button.chart-key:hover { background: rgba(255, 255, 255, .07); }
 .dash-risk strong { color: var(--chart-ink); }
 .dash-risk small { margin-left: auto; font-variant-numeric: tabular-nums; }
 .dash-risk.more { border-left-color: var(--pnl-line); }
+/* Business sectors: takings and running costs share one scale per card. */
+.dash-economy .dash-sector-list { display: grid; gap: 12px; margin: 8px 0 0; padding: 0; list-style: none; }
+.dash-sector { display: grid; gap: 4px; }
+.dash-sector-bar { display: grid; grid-template-columns: minmax(0, 1fr) 6.5em; align-items: center; gap: 8px; }
+.dash-sector-bar small { text-align: right; color: var(--chart-ink-2); font-size: calc(12.5 * var(--u)); font-variant-numeric: tabular-nums; }
+.dash-flowbar-fill.costs { background: var(--series-2); }
+.dash-business .dash-key.revenue::before { background: var(--series-1); }
+.dash-business .dash-key.costs::before { background: var(--series-2); }
+.dash-profit { font-variant-numeric: tabular-nums; }
+.dash-profit.good { color: var(--c-good); } .dash-profit.bad { color: var(--c-bad); }
+.dash-risk.firm.good { border-left-color: var(--c-good); } .dash-risk.firm.flat { border-left-color: var(--pnl-line); }
