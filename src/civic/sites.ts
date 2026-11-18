@@ -5,6 +5,7 @@
  * can depend on it without a cycle. Stored only in the optional `city.civic` save section: a city that
  * never builds one keeps a byte-identical save.
  */
+import { DEPARTMENT_OF, budgetLevel, funded, fundedReach, type BudgetState } from '../budget.ts';
 export const CIVIC_KINDS = ['clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert'] as const;
 export type CivicKind = typeof CIVIC_KINDS[number];
 /** `cell` is the top-left parcel. `cells` lists the whole footprint, top-left first, and is present only on sites larger than one parcel. */
@@ -72,18 +73,23 @@ export const civicVisitorIncome = (kind: CivicKind, attractions: number) => { co
 
 export const isCivicKind = (value: string): value is CivicKind => (CIVIC_KINDS as readonly string[]).includes(value);
 export const createCivic = (): CivicState => ({ version: 1, rules: 'civic-1', sites: [] });
-type Host = { civic?: CivicState };
+type Host = { civic?: CivicState; budget?: BudgetState };
+/** A kind's reach and happiness at its department's current funding. */
+export const civicFunding = (c: Host, kind: CivicKind) => budgetLevel(c, DEPARTMENT_OF[kind]);
+export const civicReach = (c: Host, kind: CivicKind) => fundedReach(civicSpec(kind).radius, civicFunding(c, kind));
+export const civicFundedPoints = (c: Host, kind: CivicKind) => funded(civicSpec(kind).points, civicFunding(c, kind));
+export const civicFundedUpkeep = (c: Host, kind: CivicKind) => funded(civicSpec(kind).upkeep, civicFunding(c, kind));
 export const civicAt = (c: Host, i: number): CivicSite | undefined => c.civic?.sites.find(s => s.cell === i || !!s.cells?.includes(i));
 
 /** Which kinds reach a home; `distance` is supplied by the caller so this module stays map-free. */
 export function civicCoverage(c: Host, cell: number, distance: (a: number, b: number) => number): Record<CivicKind, boolean> {
   const covered = Object.fromEntries(CIVIC_KINDS.map(kind => [kind, false])) as Record<CivicKind, boolean>;
-  for (const site of c.civic?.sites ?? []) if (!covered[site.kind] && civicSpec(site.kind).points > 0 && civicOpen(site) && civicCells(site).some(part => distance(cell, part) <= civicSpec(site.kind).radius)) covered[site.kind] = true;
+  for (const site of c.civic?.sites ?? []) if (!covered[site.kind] && civicSpec(site.kind).points > 0 && civicOpen(site) && civicCells(site).some(part => distance(cell, part) <= civicReach(c, site.kind))) covered[site.kind] = true;
   return covered;
 }
 /** Services and places together add at most this much to a home's target, so a city cannot buy full happiness with buildings alone. */
 export const CIVIC_POINTS_CAP = 30;
-export const civicPoints = (covered: Record<CivicKind, boolean>) => Math.min(CIVIC_POINTS_CAP, CIVIC_KINDS.reduce((n, kind) => n + (covered[kind] ? CIVIC[kind].points : 0), 0));
+export const civicPoints = (covered: Record<CivicKind, boolean>, c: Host = {}) => Math.min(CIVIC_POINTS_CAP, CIVIC_KINDS.reduce((n, kind) => n + (covered[kind] ? civicFundedPoints(c, kind) : 0), 0));
 
 /** Facts the validator needs from the city, supplied by sim.ts (keeps this module City-free). */
 export type CivicValidationView = {

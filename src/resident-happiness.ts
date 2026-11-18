@@ -6,6 +6,7 @@ import { estimateHouseholdCommutes, type CommuteEstimate } from './resident-comm
 import { DEFAULT_TAX_RATES, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { civicCoverage, civicPoints, type CivicKind } from './civic/sites.ts';
 import { pollutionHappinessPoints, pollutionReader } from './environment.ts';
+import { budgetLevel, funded, fundedReach } from './budget.ts';
 
 export const HAPPINESS_BASE = 80, HAPPINESS_DISTRESS = 30, HAPPINESS_DEPARTURE_DAYS = 30;
 export const HAPPINESS_UNEMPLOYED_POINTS = 25;
@@ -35,11 +36,11 @@ export function averageHouseholdHappiness(state?: HappinessState): number | null
 const distance = (a:number,b:number) => {const x=expandedCellCoordinate(a),y=expandedCellCoordinate(b); return Math.abs(x.x-y.x)+Math.abs(x.z-y.z);};
 /** Provisional walking-distance proxy: nearby facilities, not measured use. */
 export function homeAmenities(city:City, cell:number):HomeAmenity {
-  const parkNearby=city.parks.some(p=>distance(cell,p.cell)<=6);
+  const parks=budgetLevel(city,'parks'), parkNearby=city.parks.some(p=>distance(cell,p.cell)<=fundedReach(6,parks));
   const schoolNearby=!!city.education?.campuses.some(c=>c.kind==='school' && c.open && c.report.operatingSeats>0 && distance(cell,c.cell)<=8);
   // City services reach homes by the same walking-distance proxy; each covered kind adds its points once.
   const services=civicCoverage(city,cell,distance);
-  return {parkNearby,schoolNearby,services,points:(parkNearby?10:0)+(schoolNearby?10:0)+civicPoints(services)};
+  return {parkNearby,schoolNearby,services,points:(parkNearby?funded(10,parks):0)+(schoolNearby?10:0)+civicPoints(services,city)};
 }
 /** Tax points apply once per household and use the original rates as neutral. */
 export function taxHappinessPoints(rates: TaxRates) {
