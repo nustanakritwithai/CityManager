@@ -15,6 +15,8 @@ import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
 import { civicCells, civicFootprint, type CivicKind } from './civic/sites.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, diffRoads, dustPuff, placeList, buildScale, DUST_SECONDS, type BuildingState, type BuildEvent } from './build-events.ts';
+import { INCIDENT_SECONDS, flameHeight, lightLit, markFade, smokePuff, type IncidentMark } from './incident-marks.ts';
+import type { IncidentKind } from './incidents.ts';
 import { CityAssets, disconnectedBuildingMaterial } from './asset-models.ts';
 import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
@@ -29,6 +31,8 @@ const UNIT = 2;
 /** At most this many dust clouds at once; the oldest goes first. */
 const MAX_DUST = 8;
 const PAVE_SECONDS = .45;
+/** Incident marks alive at once; the oldest goes first. */
+const MAX_INCIDENT_FX = 10;
 const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
 
 export class CityView {
@@ -54,6 +58,9 @@ export class CityView {
   private effectsCity: City | null = null;
   private dustMaterial!: StandardMaterial;
   private paveMaterial!: StandardMaterial;
+  /** Incidents on the map: flames and smoke on a fire, a pair of warning lights for police or an ambulance. */
+  private incidentFx: { cell: number; kind: IncidentKind; entity: Entity; t: number; roof: number; flames: Entity[]; smoke: Entity[]; lights: Entity[] }[] = [];
+  private readonly fxMaterials = new Map<string, StandardMaterial>();
   private faded = new Map<StandardMaterial, StandardMaterial>();
   private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private highway = new Entity('Decorative highway');
@@ -389,13 +396,23 @@ export class CityView {
   }
   /** Short grow/bounce for parcels that just gained a building or a level. */
   private animate(dt: number) {
-    if (!this.animations.size && !this.dust.length && !this.paving.length) return;
+    if (!this.animations.size && !this.dust.length && !this.paving.length && !this.incidentFx.length) return;
     // Always move forward, so an odd frame time (zero, negative or not a number) can never leave an effect running.
     const step = Number.isFinite(dt) && dt > 0 ? Math.min(dt, .1) : 1 / 60;
     this.dust = this.dust.filter(cloud => {
       cloud.t += step;
       if (cloud.t >= DUST_SECONDS) { cloud.entity.destroy(); return false; }
       cloud.entity.children.forEach((puff, k, all) => { const p = dustPuff(k, all.length, cloud.t); (puff as Entity).setLocalPosition(p.x, p.y, p.z); (puff as Entity).setLocalScale(p.size, p.size * .7, p.size); });
+      return true;
+    });
+    this.incidentFx = this.incidentFx.filter(fx => {
+      fx.t += step;
+      if (fx.t >= INCIDENT_SECONDS[fx.kind]) { fx.entity.destroy(); return false; }
+      const fade = markFade(fx.kind, fx.t); fx.entity.setLocalScale(fade, fade, fade);
+      // Flames stand on the roof (dipping a little into it); smoke rises from just above them.
+      fx.flames.forEach((flame, k) => { const h = .75 * flameHeight(k, fx.t); flame.setLocalScale(.3, h, .3); flame.setLocalPosition(flame.getLocalPosition().x, fx.roof - .15 + h / 2, flame.getLocalPosition().z); });
+      fx.smoke.forEach((puff, k, all) => { const p = smokePuff(k, all.length, fx.t); puff.setLocalPosition(p.drift, fx.roof + .5 + p.y, p.drift * .6); puff.setLocalScale(p.size, p.size, p.size); });
+      fx.lights.forEach((light, k) => { light.enabled = lightLit(fx.t) === k; });
       return true;
     });
     this.paving = this.paving.filter(sweep => {
@@ -413,7 +430,7 @@ export class CityView {
     }
     this.app.renderNextFrame = true;
   }
-  get animating() { return this.animations.size + this.dust.length + this.paving.length; }
+  get animating() { return this.animations.size + this.dust.length + this.paving.length + this.incidentFx.length; }
   /** A ring of dust at a parcel (or a multi-parcel site's middle); fewer puffs on low quality. */
   private raiseDust(cell: number, site?: Parameters<typeof civicCells>[0]) {
     if (this.dust.length >= MAX_DUST) this.dust.shift()!.entity.destroy();
@@ -425,6 +442,44 @@ export class CityView {
       puff.setLocalScale(0, 0, 0); cloud.addChild(puff);
     }
     this.effects.addChild(cloud); this.dust.push({ entity: cloud, t: 0 }); this.app.renderNextFrame = true;
+  }
+  private fxMaterial(name: string, colour: [number, number, number], opacity: number) {
+    const key = `${name}:${opacity}`, cached = this.fxMaterials.get(key); if (cached) return cached;
+    const m = new StandardMaterial(); m.name = name; m.diffuse = new Color(...colour); m.emissive = new Color(...colour); m.useLighting = false; m.useFog = false;
+    if (opacity < 1) { m.opacity = opacity; m.blendType = BLEND_NORMAL; m.depthWrite = false; }
+    m.update(); this.fxMaterials.set(key, m); return m;
+  }
+  /** Height of the top of a parcel's model in world units, from its meshes' bounds (1 when it has none). */
+  private roofOf(cell: number) {
+    let top = 0;
+    for (const render of (this.tiles.get(cell)?.entity.findComponents('render') ?? []) as RenderComponent[]) for (const instance of render.meshInstances) top = Math.max(top, instance.aabb.getMax().y);
+    return top > .2 ? Math.min(top, 6) : 1;
+  }
+  /** Shows each incident where it happened for a few seconds; a newer mark on a parcel replaces the old one. Off with reduced motion. */
+  showIncidents(marks: readonly IncidentMark[]) {
+    if (this.reducedMotion.matches || !marks.length) return;
+    const part = (parent: Entity, type: 'box' | 'sphere', material: StandardMaterial, x: number, y: number, z: number, size: number) => {
+      const e = new Entity('Incident part'); e.addComponent('render', { type, material, castShadows: false, receiveShadows: false });
+      e.setLocalPosition(x, y, z); e.setLocalScale(size, size, size); parent.addChild(e); return e;
+    };
+    for (const mark of marks) {
+      for (const old of this.incidentFx.filter(fx => fx.cell === mark.cell)) old.entity.destroy();
+      this.incidentFx = this.incidentFx.filter(fx => fx.cell !== mark.cell);
+      const { x, z } = this.position(mark.cell), root = new Entity(`Incident ${mark.kind}`); root.setLocalPosition(x, 0, z); root.setLocalScale(0, 0, 0);
+      const roof = this.roofOf(mark.cell), fx = { cell: mark.cell, kind: mark.kind, entity: root, t: 0, roof, flames: [] as Entity[], smoke: [] as Entity[], lights: [] as Entity[] };
+      if (mark.kind === 'fire') {
+        const flame = this.fxMaterial('Incident flame', [1, .52, .12], .9), core = this.fxMaterial('Incident flame core', [1, .86, .3], .95), smoke = this.fxMaterial('Incident smoke', [.32, .31, .32], .6);
+        [[-.3, .15], [.28, -.2], [.05, .32]].forEach(([fx0, fz0], k) => fx.flames.push(part(root, 'box', k === 2 ? core : flame, fx0, 1, fz0, .3)));
+        for (let k = 0, n = this.quality === 'low' ? 3 : 5; k < n; k++) fx.smoke.push(part(root, 'sphere', smoke, 0, 1.5, 0, 0));
+      } else {
+        const [a, b] = mark.kind === 'burglary' ? [[1, .18, .2], [.2, .45, 1]] as const : [[1, 1, 1], [1, .2, .22]] as const, y = roof + .75;
+        fx.lights.push(part(root, 'sphere', this.fxMaterial(`Incident light ${a.join()}`, [...a], 1), -.3, y, 0, .36), part(root, 'sphere', this.fxMaterial(`Incident light ${b.join()}`, [...b], 1), .3, y, 0, .36));
+        part(root, 'box', this.fxMaterial('Incident light bar', [.16, .18, .22], 1), 0, y - .22, 0, .2).setLocalScale(.95, .12, .3);
+      }
+      this.effects.addChild(root); this.incidentFx.push(fx);
+    }
+    while (this.incidentFx.length > MAX_INCIDENT_FX) this.incidentFx.shift()!.entity.destroy();
+    this.app.renderNextFrame = true;
   }
   /** A warm square that opens over a new road parcel; along a drag they follow one another. */
   private sweepRoad(cell: number, order: number) {
@@ -613,7 +668,10 @@ export class CityView {
       }
     }
     for (const tile of fadeLater) this.fade(tile);
-    if (city !== this.effectsCity) { this.effectsCity = city; this.buildingState = new Map(); this.roadState = null; }
+    if (city !== this.effectsCity) {
+      this.effectsCity = city; this.buildingState = new Map(); this.roadState = null;
+      for (const fx of this.incidentFx) fx.entity.destroy(); this.incidentFx = [];
+    }
     const changes = diffBuildings(this.buildingState, placeList(city));
     this.buildingState = changes.next;
     const roads = diffRoads(this.roadState, city.cells);
