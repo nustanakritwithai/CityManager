@@ -14,7 +14,7 @@ import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
 import { civicCells, civicFootprint, type CivicKind } from './civic/sites.ts';
 import { pocketPark } from './scene-decor.ts';
-import { diffBuildings, buildScale, type BuildingState, type BuildEvent } from './build-events.ts';
+import { diffBuildings, diffRoads, dustPuff, placeList, buildScale, DUST_SECONDS, type BuildingState, type BuildEvent } from './build-events.ts';
 import { CityAssets, disconnectedBuildingMaterial } from './asset-models.ts';
 import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
@@ -26,6 +26,9 @@ import type { Overlay, Tone } from './map-overlay.ts';
 import { CanvasSelectionClickGuard } from './canvas-selection-click.ts';
 
 const UNIT = 2;
+/** At most this many dust clouds at once; the oldest goes first. */
+const MAX_DUST = 8;
+const PAVE_SECONDS = .45;
 const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
 
 export class CityView {
@@ -42,6 +45,13 @@ export class CityView {
   private overlayRef: Overlay | null = null;
   private buildingState = new Map<number, BuildingState>();
   private animations = new Map<number, { kind: BuildEvent['kind']; t: number }>();
+  /** Work effects: dust where something rose or fell, a warm sweep along new road. Visual only. */
+  private readonly effects = new Entity('Build effects');
+  private dust: { entity: Entity; t: number }[] = [];
+  private paving: { entity: Entity; t: number }[] = [];
+  private roadState: Set<number> | null = null;
+  private dustMaterial!: StandardMaterial;
+  private paveMaterial!: StandardMaterial;
   private faded = new Map<StandardMaterial, StandardMaterial>();
   private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private highway = new Entity('Decorative highway');
@@ -229,6 +239,13 @@ export class CityView {
     for (const spot of this.world.treeSpots) this.plantTree(spot.x, spot.y, spot.z, spot.scale);
     this.app.root.addChild(this.markers);
     this.app.root.addChild(this.overlayRoot);
+    this.app.root.addChild(this.effects);
+    this.dustMaterial = new StandardMaterial(); this.dustMaterial.name = 'Construction dust';
+    this.dustMaterial.diffuse = new Color(.95, .91, .84); this.dustMaterial.emissive = new Color(.97, .93, .86); this.dustMaterial.useLighting = false;
+    this.dustMaterial.opacity = .92; this.dustMaterial.blendType = BLEND_NORMAL; this.dustMaterial.depthWrite = false; this.dustMaterial.update();
+    this.paveMaterial = new StandardMaterial(); this.paveMaterial.name = 'Fresh road sweep';
+    this.paveMaterial.diffuse = new Color(1, .86, .5); this.paveMaterial.emissive = new Color(1, .78, .38); this.paveMaterial.useLighting = false;
+    this.paveMaterial.useFog = false; this.paveMaterial.opacity = .6; this.paveMaterial.blendType = BLEND_NORMAL; this.paveMaterial.depthWrite = false; this.paveMaterial.update();
     this.setQuality('high');
     this.app.on('update', (dt: number) => this.animate(dt));
     new ResizeObserver(() => this.resize()).observe(this.canvas);
@@ -370,7 +387,21 @@ export class CityView {
   }
   /** Short grow/bounce for parcels that just gained a building or a level. */
   private animate(dt: number) {
-    if (!this.animations.size) return;
+    if (!this.animations.size && !this.dust.length && !this.paving.length) return;
+    const step = Math.min(dt, .1);
+    this.dust = this.dust.filter(cloud => {
+      cloud.t += step;
+      if (cloud.t >= DUST_SECONDS) { cloud.entity.destroy(); return false; }
+      cloud.entity.children.forEach((puff, k, all) => { const p = dustPuff(k, all.length, cloud.t); (puff as Entity).setLocalPosition(p.x, p.y, p.z); (puff as Entity).setLocalScale(p.size, p.size * .7, p.size); });
+      return true;
+    });
+    this.paving = this.paving.filter(sweep => {
+      sweep.t += step;
+      const u = sweep.t / PAVE_SECONDS;
+      if (u >= 1) { sweep.entity.destroy(); return false; }
+      sweep.entity.enabled = u > 0; const grow = .45 + .55 * Math.max(0, u); sweep.entity.setLocalScale(UNIT * .92 * grow, .02, UNIT * .92 * grow);
+      return true;
+    });
     for (const [cell, animation] of this.animations) {
       animation.t += Math.min(dt, .1);
       const tile = this.tiles.get(cell)?.entity, done = animation.t >= (animation.kind === 'built' ? .7 : .5);
@@ -379,7 +410,27 @@ export class CityView {
     }
     this.app.renderNextFrame = true;
   }
-  get animating() { return this.animations.size; }
+  get animating() { return this.animations.size + this.dust.length + this.paving.length; }
+  /** A ring of dust at a parcel (or a multi-parcel site's middle); fewer puffs on low quality. */
+  private raiseDust(cell: number, site?: Parameters<typeof civicCells>[0]) {
+    if (this.dust.length >= MAX_DUST) this.dust.shift()!.entity.destroy();
+    const cells = site ? civicCells(site) : [cell], points = cells.map(c => this.position(c));
+    const x = points.reduce((n, p) => n + p.x, 0) / points.length, z = points.reduce((n, p) => n + p.z, 0) / points.length;
+    const cloud = new Entity('Dust'); cloud.setLocalPosition(x, 0, z); const spread = site ? Math.sqrt(cells.length) : 1; cloud.setLocalScale(spread, 1, spread);
+    for (let k = 0, n = this.quality === 'low' ? 4 : 7; k < n; k++) {
+      const puff = new Entity('Dust puff'); puff.addComponent('render', { type: 'sphere', material: this.dustMaterial, castShadows: false, receiveShadows: false });
+      puff.setLocalScale(0, 0, 0); cloud.addChild(puff);
+    }
+    this.effects.addChild(cloud); this.dust.push({ entity: cloud, t: 0 }); this.app.renderNextFrame = true;
+  }
+  /** A warm square that opens over a new road parcel; along a drag they follow one another. */
+  private sweepRoad(cell: number, order: number) {
+    const { x, z } = this.position(cell), sweep = new Entity('Road sweep');
+    sweep.addComponent('render', { type: 'box', material: this.paveMaterial, castShadows: false, receiveShadows: false });
+    // Just above a map overlay (.19), so the sweep shows while the road tool tints the roads.
+    sweep.setLocalPosition(x, .22, z); sweep.enabled = false; this.effects.addChild(sweep);
+    this.paving.push({ entity: sweep, t: -Math.min(order, 30) * .035 }); this.app.renderNextFrame = true;
+  }
 
   /** In-memory taxi stands. An empty list leaves every parcel signature unchanged. */
   setTaxiDepots(depots: readonly { cell: number; level: 1 | 2; open: boolean }[]) {
@@ -559,9 +610,17 @@ export class CityView {
       }
     }
     for (const tile of fadeLater) this.fade(tile);
-    const changes = diffBuildings(this.buildingState, city.buildings);
+    const changes = diffBuildings(this.buildingState, placeList(city));
     this.buildingState = changes.next;
-    if (!this.reducedMotion.matches) for (const event of changes.events) this.animations.set(event.cell, { kind: event.kind, t: 0 });
+    const roads = diffRoads(this.roadState, city.cells);
+    this.roadState = roads.next;
+    if (!this.reducedMotion.matches) {
+      for (const event of changes.events) {
+        if (event.kind !== 'removed') this.animations.set(event.cell, { kind: event.kind, t: 0 });
+        if (event.kind !== 'upgraded') this.raiseDust(event.cell, civicByCell?.get(event.cell));
+      }
+      roads.paved.forEach((cell, order) => this.sweepRoad(cell, order));
+    }
     this.traffic.sync(city);
     for (const child of [...this.markers.children]) child.destroy();
     for (const i of new Set([...preview, ...(selected === null ? [] : [selected])])) {
