@@ -8,10 +8,11 @@ import { CROP_BANDS, CROP_LABELS, cropForFertility, type CropId } from './goods.
 import { landValue, pollutionReader } from './environment.ts';
 import { homeAmenities } from './resident-happiness.ts';
 import { CIVIC_KINDS } from './civic/sites.ts';
+import { districtTone, type DistrictTone } from './districts.ts';
 
-export type OverlayMode = 'fertility' | 'roads' | 'growth' | 'housing' | 'utilities' | 'pollution' | 'landvalue';
+export type OverlayMode = 'fertility' | 'roads' | 'growth' | 'housing' | 'utilities' | 'pollution' | 'landvalue' | 'districts';
 /** Status tones, plus one per crop for the farm layer. */
-export type Tone = 'good' | 'warn' | 'bad' | CropId;
+export type Tone = 'good' | 'warn' | 'bad' | CropId | DistrictTone;
 export type OverlayCell = { cell: number; tone: Tone; strength: number };
 export type Overlay = { mode: OverlayMode; cells: OverlayCell[]; legend: [Tone, string][] };
 export { buildingIssues, ISSUE_TEXT } from './building-issues.ts';
@@ -19,7 +20,7 @@ export type { Issue, IssueKind } from './building-issues.ts';
 
 /** Which layer each build tool shows by default; select/pan/bulldoze show none. */
 /** A park cleans the air, so placing one shows pollution; services and places show land value. */
-export const TOOL_OVERLAY: Readonly<Record<string, OverlayMode | undefined>> = Object.freeze({ road: 'roads', R: 'housing', C: 'growth', I: 'growth', power: 'utilities', water: 'utilities', park: 'pollution', ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, 'landvalue' as const])) });
+export const TOOL_OVERLAY: Readonly<Record<string, OverlayMode | undefined>> = Object.freeze({ road: 'roads', R: 'housing', C: 'growth', I: 'growth', power: 'utilities', water: 'utilities', park: 'pollution', district: 'districts', ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, 'landvalue' as const])) });
 export const OVERLAY_LEGENDS: Readonly<Record<OverlayMode, [Tone, string][]>> = Object.freeze({
   // Optional soil information only: farms can be placed on any empty parcel.
   fertility: [['good', 'ดินอุดมสมบูรณ์สูง'], ['warn', 'ดินอุดมสมบูรณ์ปานกลาง'], ['bad', 'ดินอุดมสมบูรณ์ต่ำ · ปลูกได้']],
@@ -27,11 +28,16 @@ export const OVERLAY_LEGENDS: Readonly<Record<OverlayMode, [Tone, string][]>> = 
   growth: [['good', 'พร้อมเกิดอาคาร'], ['warn', 'มีอาคารแล้ว'], ['bad', 'ติดเงื่อนไข · แตะดูเหตุผล']],
   housing: [['good', 'มีที่ว่างรับครัวเรือน'], ['warn', 'เต็มแล้ว'], ['bad', 'บ้านว่าง / แปลงบ้านติดเงื่อนไข']],
   pollution: [['good', 'อากาศดี'], ['warn', 'มลพิษปานกลาง · ความสุขลดเล็กน้อย'], ['bad', 'มลพิษสูง · ความสุขลดมาก']],
+  districts: [['d1', 'แตะแปลงเพื่อระบายย่าน · สีตามย่าน']],
   landvalue: [['good', 'ที่ดินราคาสูง'], ['warn', 'ปานกลาง'], ['bad', 'ต่ำ · ขาดบริการหรือมลพิษ']],
   utilities: [['good', 'มีน้ำและไฟ · โรงผลิต'], ['warn', 'ขาดน้ำหรือไฟอย่างใดอย่างหนึ่ง'], ['bad', 'ไม่มีทั้งน้ำและไฟ · สร้างโรงเพิ่ม']],
 });
 export function mapOverlay(city: City, mode: OverlayMode): Overlay {
   const cells: OverlayCell[] = [], roads = connectedRoads(city), svc = mode === 'utilities' ? utilities(city) : null;
+  if (mode === 'districts') {
+    for (const d of city.districts?.list ?? []) for (const cell of d.cells) cells.push({ cell, tone: districtTone(d.id), strength: .55 });
+    return { mode, cells, legend: city.districts?.list.length ? city.districts.list.map(d => [districtTone(d.id), d.name] as [Tone, string]) : OVERLAY_LEGENDS.districts };
+  }
   const pollution = mode === 'pollution' || mode === 'landvalue' ? pollutionReader(city) : null;
   for (let i = 0; i < city.cells.length; i++) {
     const cell = city.cells[i];

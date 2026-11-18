@@ -18,6 +18,8 @@ import { overviewRevision } from './overview-revision.ts';
 import { municipalInvestments, renderMunicipalInvestments, type MunicipalInvestmentTool } from './municipal-investments.ts';
 import { budgetSummary, setCityBudget, treasurySpendable } from './sim.ts';
 import { BUDGET_LEVELS, type BudgetDepartment, type BudgetLevel } from './budget.ts';
+import { MAX_DISTRICTS, createDistrict, deleteDistrict, districtTone, renameDistrict } from './districts.ts';
+import { districtStats } from './district-stats.ts';
 import type { City } from './sim.ts';
 import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { taxHappinessPoints } from './resident-happiness.ts';
@@ -65,7 +67,7 @@ const svg = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
 };
 
 const NAV: readonly [string, string][] = [
-  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-taxes', 'ภาษี'], ['dash-funding', 'งบ'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
+  ['dash-goals', 'เป้าหมาย'], ['dash-finance', 'การเงิน'], ['dash-taxes', 'ภาษี'], ['dash-funding', 'งบ'], ['dash-districts', 'ย่าน'], ['dash-chain', 'ห่วงโซ่สินค้า'], ['dash-growth', 'เมืองโต'], ['city-overview', 'ประชากรและงาน'],
   ['growth-anchor', 'ความต้องการ'], ['issue-section', 'ปัญหา'], ['event-log-section', 'เหตุการณ์'], ['money-section', 'บัญชี'],
 ];
 const NODE_NAMES: Record<ChainNode, string> = { farm: 'ฟาร์ม', market: 'C · พืชผล', factory: 'โรงงาน', shop: 'C · สินค้า', household: 'ครัวเรือน', outside: 'ภายนอก' };
@@ -84,6 +86,7 @@ export class OverviewDashboard {
   private readonly profitTax = taxField('profit', 'ภาษีกำไรกิจการ', 'ครัวเรือนเจ้าของกิจการ');
   private readonly taxStatus = el('p', 'dash-tax-status');
   private readonly budget = el('section', 'dash-funding');
+  private readonly districts = el('section', 'dash-card dash-districts');
   private readonly chain = el('section', 'dash-card dash-chain');
   private readonly growth = el('section', 'dash-card dash-growth');
   private readonly modal = new ChartModal();
@@ -91,7 +94,7 @@ export class OverviewDashboard {
   private key = '';
   private chartWidth = 300;
 
-  constructor(host: HTMLElement, private readonly onSelectTool?: (tool: MunicipalInvestmentTool) => void) {
+  constructor(host: HTMLElement, private readonly onSelectTool?: (tool: MunicipalInvestmentTool) => void, private readonly onPaintDistrict?: (id: number | null) => void) {
     this.host = host;
     this.goals.id = 'dash-goals'; this.finance.id = 'dash-finance'; this.chain.id = 'dash-chain'; this.growth.id = 'dash-growth'; this.kpis.setAttribute('aria-label', 'ตัวเลขหลักของเมือง');
     const nav = el('nav', 'dash-nav'); nav.setAttribute('aria-label', 'ไปยังหมวดในภาพรวมเมือง');
@@ -129,7 +132,19 @@ export class OverviewDashboard {
       this.renderBudget(this.city);
     });
     this.finance.append(this.financeHead, taxForm, this.budget, this.financeCharts);
-    host.replaceChildren(nav, this.goals, this.kpis, this.finance, this.chain, this.growth);
+    this.districts.id = 'dash-districts';
+    this.districts.addEventListener('click', event => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-district-action]');
+      if (!button || !this.city) return;
+      const id = Number(button.dataset.districtId) || null, action = button.dataset.districtAction;
+      if (action === 'paint') { this.onPaintDistrict?.(id); return; }
+      if (action === 'erase') { this.onPaintDistrict?.(null); return; }
+      if (action === 'create') { const name = prompt('ชื่อย่านใหม่', `ย่าน ${(this.city.districts?.list.length ?? 0) + 1}`); const made = name ? createDistrict(this.city, name) : null; if (made) this.onPaintDistrict?.(made.id); else this.renderDistricts(this.city); return; }
+      if (action === 'rename' && id) { const current = this.city.districts?.list.find(d => d.id === id)?.name ?? ''; const name = prompt('ชื่อย่าน', current); if (name) renameDistrict(this.city, id, name); }
+      if (action === 'delete' && id && confirm('ลบย่านนี้? แปลงในย่านจะไม่อยู่ในย่านใด')) deleteDistrict(this.city, id);
+      this.renderDistricts(this.city);
+    });
+    host.replaceChildren(nav, this.goals, this.kpis, this.finance, this.districts, this.chain, this.growth);
   }
   get modalOpen() { return this.modal.isOpen; }
   closeModal() { this.modal.close(); }
@@ -139,7 +154,7 @@ export class OverviewDashboard {
     const missions = citySideMissions(city), challenges = cityChallenges(city);
     const population = populationGuidance(city, goals);
     // Road edits and capital changes can alter displayed state without advancing time.
-    const key = `${overviewRevision(city, goals, missions, challenges, population)}:${JSON.stringify(municipalInvestments(city))}:${treasurySpendable(city)}`;
+    const key = `${overviewRevision(city, goals, missions, challenges, population)}:${JSON.stringify(municipalInvestments(city))}:${treasurySpendable(city)}:${JSON.stringify(city.districts ?? null)}:${JSON.stringify(city.budget ?? null)}`;
     const switchedCity = city !== this.city;
     if (switchedCity) this.key = ''; // A loaded city may share day and ledger sizes.
     this.updateTaxSettings(city, switchedCity);
@@ -150,7 +165,7 @@ export class OverviewDashboard {
     this.chartWidth = this.width();
     const series = dailySeries(city, 30);
     renderGoalsCard(this.goals, goals, missions, challenges, population);
-    this.renderKpis(city, series); this.renderBudget(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
+    this.renderKpis(city, series); this.renderBudget(city); this.renderDistricts(city); this.renderFinance(city, series); this.renderChain(city, series); this.renderGrowth(city, series);
   }
 
   /** Chart width follows the card so text stays at its real size. */
@@ -182,6 +197,28 @@ export class OverviewDashboard {
     }
     const note = el('p', 'dash-funding-note', `ค่าบำรุงรวม ${money(total)}/เดือน${total !== base ? ` (งบปกติ ${money(base)})` : ''} · งบต่ำประหยัดเงินแต่ระยะบริการและความสุขลดลง งบสูงกลับกัน · มีผลทันที ค่าบำรุงคิดตอนสิ้นเดือน`);
     this.budget.replaceChildren(el('h4', '', 'งบประมาณรายหมวด'), list, note);
+  }
+
+  /** Named districts with what each holds; paint, rename or delete one, or start a new one. */
+  private renderDistricts(city: City) {
+    this.city = city;
+    const stats = districtStats(city), action = (label: string, kind: string, id = 0, className = 'dash-district-action') => {
+      const b = el('button', className, label); b.type = 'button'; b.dataset.districtAction = kind; if (id) b.dataset.districtId = String(id); return b;
+    };
+    const list = el('div', 'dash-district-list');
+    for (const d of stats) {
+      const row = el('div', 'dash-district-row'); row.dataset.districtId = String(d.id);
+      const head = el('div', 'dash-district-head'), swatch = el('span', `dash-district-swatch ${districtTone(d.id)}`);
+      head.append(swatch, el('strong', '', d.name), el('span', 'dash-district-meta', `${d.parcels} แปลง · ${d.people} คน`));
+      const facts = el('p', 'dash-district-facts', [`${d.households} ครัวเรือน`, d.happiness === null ? null : `ความสุข ${d.happiness}`, d.pollution === null ? null : `มลพิษ ${d.pollution}`, d.landValue === null ? null : `ที่ดิน ${d.landValue}`].filter(Boolean).join(' · '));
+      const actions = el('div', 'dash-district-actions'); actions.append(action('ระบาย', 'paint', d.id), action('เปลี่ยนชื่อ', 'rename', d.id), action('ลบ', 'delete', d.id));
+      row.append(head, facts, actions); list.append(row);
+    }
+    const footer = el('div', 'dash-district-actions');
+    if (stats.length < MAX_DISTRICTS) footer.append(action('＋ ย่านใหม่', 'create', 0, 'dash-district-action primary'));
+    if (stats.length) footer.append(action('เอาแปลงออกจากย่าน', 'erase'));
+    this.districts.replaceChildren(this.head('ย่านในเมือง', stats.length ? `${stats.length} / ${MAX_DISTRICTS} ย่าน` : 'ยังไม่มีย่าน'),
+      ...(stats.length ? [list] : [el('p', 'dash-district-facts', 'ตั้งชื่อย่านแล้วแตะแปลงบนแผนที่เพื่อระบาย ดูประชากร ความสุข มลพิษ และมูลค่าที่ดินแยกตามย่าน')]), footer);
   }
 
   private renderKpis(city: City, series: DailySeries) {

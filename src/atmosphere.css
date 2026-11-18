@@ -267,3 +267,7 @@ html[data-touch-ui=true] .kpi strong { font-size: calc(13 * var(--reader-unit, 1
 .atmosphere-menu .audio-track { margin: 6px 0; color: var(--muted); }
 .atmosphere-menu #audio-next { min-height: 44px; padding: 0 16px; border: 1px solid var(--glass-edge); border-radius: 10px; background: rgba(255, 255, 255, .08); color: inherit; font-weight: 600; }
 .atmosphere-menu #audio-next:hover, .atmosphere-menu #audio-next:focus-visible { border-color: var(--amber); }
+.map-legend-item.d1::before { background: #4e79a7; } .map-legend-item.d2::before { background: #f28e2b; }
+.map-legend-item.d3::before { background: #59a14f; } .map-legend-item.d4::before { background: #e15759; }
+.map-legend-item.d5::before { background: #b07aa1; } .map-legend-item.d6::before { background: #76b7b2; }
+.map-legend-item.d7::before { background: #edc948; } .map-legend-item.d8::before { background: #ff9da7; }
