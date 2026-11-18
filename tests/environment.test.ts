@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, buildPark, serialize, deserialize, landValues, access, type City } from '../src/sim.ts';
-import { POLLUTION, POLLUTION_HAPPINESS_CAP, RENT_BASE, householdRent, landValue, pollutionAt, pollutionHappinessPoints, pollutionMap, pollutionReader } from '../src/environment.ts';
+import { createCity, step, buildPark, buildCivic, civicSiteReason, homeGrowthAge, housingUpgradeStatus, serialize, deserialize, landValues, access, MONTH, type City } from '../src/sim.ts';
+import { POLLUTION, POLLUTION_HAPPINESS_CAP, PRIME_LAND, RENT_BASE, householdRent, landValue, pollutionAt, pollutionHappinessPoints, pollutionMap, pollutionReader } from '../src/environment.ts';
 import { happinessTarget, happinessTargets, homeAmenities } from '../src/resident-happiness.ts';
 import { mapOverlay, TOOL_OVERLAY } from '../src/map-overlay.ts';
 import { expandedCellCoordinate } from '../src/expanded-map-grid.ts';
@@ -75,4 +75,23 @@ test('rent follows land value: 10,000 at 50, from 7,000 to 13,000, and each home
   const rents = c.ledger.filter(e => e.tick === 60 && e.reason === 'Monthly household rent');
   assert.ok(rents.length > 0);
   for (const e of rents) assert.equal(e.amount, householdRent(worth(c.buildings.find(b => b.id === homes.get(e.from))!.cell)), e.from);
+});
+
+test('homes on prime land may grow at half the usual age; other homes still wait a month', () => {
+  const c = grown(), home = c.buildings.find(b => b.zone === 'R')!;
+  c.accounts.treasury += 5_000_000; c.accounts.outside -= 5_000_000;
+  // Ring the home with services until its land is prime.
+  for (const kind of ['clinic', 'police', 'fire', 'library', 'temple', 'museum'] as const) {
+    if (landValues(c)(home.cell) >= PRIME_LAND) break;
+    const spot = c.cells.map((_, i) => i).filter(i => civicSiteReason(c, i, kind) === null).sort((a, b) => distance(a, home.cell) - distance(b, home.cell))[0];
+    assert.equal(buildCivic(c, spot, kind).ok, true, kind);
+  }
+  assert.ok(landValues(c)(home.cell) >= PRIME_LAND, 'the home sits on prime land');
+  assert.equal(homeGrowthAge(c, home), MONTH / 2);
+  const plain = c.buildings.find(b => b.zone === 'R' && landValues(c)(b.cell) < PRIME_LAND);
+  if (plain) assert.equal(homeGrowthAge(c, plain), MONTH);
+  home.age = MONTH / 2;
+  assert.ok(!housingUpgradeStatus(c, home).blocked.some(reason => reason.startsWith('อาคารต้องมีอายุ')), 'half a month is old enough on prime land');
+  home.age = MONTH / 2 - 1;
+  assert.ok(housingUpgradeStatus(c, home).blocked.some(reason => reason.includes(`${MONTH / 2} วัน`)), 'younger homes are told the shorter wait');
 });

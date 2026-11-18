@@ -47,6 +47,8 @@ export const pollutionMap = (city: City): number[] => { const read = pollutionRe
 export const pollutionAt = (city: City, cell: number) => pollutionReader(city)(cell);
 export const pollutionHappinessPoints = (pollution: number) => Math.min(POLLUTION_HAPPINESS_CAP, Math.floor(Math.max(0, pollution) / POLLUTION_HAPPINESS_STEP));
 
+/** Homes on land at least this good may grow at half the usual age: investors want well-served, clean streets. */
+export const PRIME_LAND = 60;
 /** Monthly household rent in satang: 10,000 at land value 50, from 7,000 on the worst land to 13,000 on the best. */
 export const RENT_BASE = 10_000;
 export const householdRent = (value: number) => Math.round(RENT_BASE * (0.7 + 0.6 * Math.max(0, Math.min(100, value)) / 100));

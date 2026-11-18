@@ -45,7 +45,7 @@ import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
 import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
-import { householdRent, landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
+import { PRIME_LAND, householdRent, landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
 import { homeAmenities } from './resident-happiness.ts';
 import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
@@ -472,7 +472,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       // Land itself: how clean the air is here and what the parcel is worth for its services, road and air.
       const dirt = pollutionAt(city, cellIndex), worth = landValue(homeAmenities(city, cellIndex).points, connected, dirt);
       metrics.push(metric('มลพิษ', `${dirt} / 100`, false, dirt ? `บ้านตรงนี้ความสุข −${pollutionHappinessPoints(dirt)} · สวนใกล้ ๆ ช่วยฟอกอากาศ` : 'อากาศดี ไม่มีโรงงาน โรงไฟฟ้า หรือสนามบินใกล้', dirt),
-        metric('มูลค่าที่ดิน', `${worth} / 100`, false, `${cell.zone === 'R' ? `ค่าเช่าบ้านตรงนี้ ${money(householdRent(worth))}/เดือนต่อครัวเรือน · ` : ''}สูงขึ้นเมื่อมีบริการและสถานที่ในระยะและติดถนน ลดลงเมื่อมีมลพิษ · ครัวเรือนใหม่เลือกบ้านที่ดินดีก่อน และย้ายไปที่ดินที่ดีกว่าเมื่อมีที่ว่าง`, worth));
+        metric('มูลค่าที่ดิน', `${worth} / 100`, false, `${cell.zone === 'R' ? `ค่าเช่าบ้านตรงนี้ ${money(householdRent(worth))}/เดือนต่อครัวเรือน · ${worth >= PRIME_LAND ? 'ที่ดินดี: บ้านอัปเกรดได้ตั้งแต่อายุ 15 วัน · ' : `ถึง ${PRIME_LAND} บ้านจะอัปเกรดได้เร็วขึ้น · `}` : ''}สูงขึ้นเมื่อมีบริการและสถานที่ในระยะและติดถนน ลดลงเมื่อมีมลพิษ · ครัวเรือนใหม่เลือกบ้านที่ดินดีก่อน และย้ายไปที่ดินที่ดีกว่าเมื่อมีที่ว่าง`, worth));
     }
     if (firm && (firm.zone === 'F' || firm.zone === 'I')) tags.push(tag(firmGoodsName(city, firm), 'good'));
     if (cell.zone === 'F' && !building) tags.push(tag('เลือกพืชได้หลังสร้างฟาร์ม', 'good'));

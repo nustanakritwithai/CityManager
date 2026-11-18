@@ -14,7 +14,7 @@ import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, val
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
 import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
-import { householdRent, landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
+import { PRIME_LAND, householdRent, landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
@@ -208,7 +208,8 @@ export function housingUpgradeStatus(live: City, liveBuilding: Building) {
   const current = housingLevel(b.housingType!, b.level), next = HOUSING_LEVELS[b.level] ?? null;
   const blocked: string[] = [];
   if (next) {
-    if (b.age < MONTH) blocked.push('อาคารต้องมีอายุอย่างน้อย 30 วัน');
+    const minAge = homeGrowthAge(c, b);
+    if (b.age < minAge) blocked.push(`อาคารต้องมีอายุอย่างน้อย ${minAge} วัน${minAge < MONTH ? ' (ที่ดินดี จึงเร็วกว่าปกติ)' : ''}`);
     if (!access(c, b.cell)) blocked.push('ต้องมีถนนเชื่อมถึงประตูเมือง');
     if (!utilities(c).ok(b.id)) blocked.push('ต้องมีน้ำและไฟเพียงพอสำหรับผู้อยู่อาศัยปัจจุบัน');
     if (!homeFull(c, b)) blocked.push(`ต้องมีครัวเรือนเต็มทุกช่องก่อน (${homeOccupancy(c, b.id).households}/${housingCapacity(b).households} ครัวเรือน)`);
@@ -1519,6 +1520,8 @@ export function explainMigration(c: City, buildingId: number): string[] {
   reasons.push(`สิ้นเดือน: แรงงานเฉพาะทางที่สายงานเดิมไม่มีตำแหน่งว่างแต่อีกสายมี จะเปลี่ยนเป็นแรงงานทั่วไป ครัวเรือนที่ไม่มีงานได้ค่าจ้างเลย ${DEPARTURE_MONTHS} เดือนจะย้ายออกพร้อมเงินออม (เจ้าของร้านและผู้มาใหม่ไม่ย้าย เมืองเหลืออย่างน้อย ${DEPARTURE_FLOOR} ครัวเรือน)`);
   return reasons;
 }
+/** Days a home must stand before it may grow: half a month on prime land, a month elsewhere. */
+export const homeGrowthAge = (c: City, b: Building) => landValues(c)(b.cell) >= PRIME_LAND ? MONTH / 2 : MONTH;
 /** A cached reader for land value on this city as it stands now. */
 export function landValues(c: City): (cell: number) => number {
   const air = pollutionReader(c), seen = new Map<number, number>();
@@ -1627,7 +1630,7 @@ function grow(c: City) {
   // A taller building draws more water and power; it grows only while the network can supply it.
   const svc = utilities(c), spare = { ...svc.spare };
   for (const b of c.buildings) {
-    if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : b.zone === 'F' ? FARM_MAX_LEVEL : 3) || b.age < MONTH || !access(c, b.cell) || !svc.ok(b.id)) continue;
+    if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : b.zone === 'F' ? FARM_MAX_LEVEL : 3) || b.age < (b.zone === 'R' ? homeGrowthAge(c, b) : MONTH) || !access(c, b.cell) || !svc.ok(b.id)) continue;
     const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1, c.households.filter(h => h.home === b.id).length), extra = { power: after.power - before.power, water: after.water - before.water };
     if (!fits(spare, extra)) continue;
     const residents = c.households.filter(h => h.home === b.id), f = c.firms.find(f => f.building === b.id);
