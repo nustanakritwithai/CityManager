@@ -50,6 +50,8 @@ export class CityView {
   private dust: { entity: Entity; t: number }[] = [];
   private paving: { entity: Entity; t: number }[] = [];
   private roadState: Set<number> | null = null;
+  /** The city the work effects last compared against; another city (a load, a new game) starts still. */
+  private effectsCity: City | null = null;
   private dustMaterial!: StandardMaterial;
   private paveMaterial!: StandardMaterial;
   private faded = new Map<StandardMaterial, StandardMaterial>();
@@ -388,7 +390,8 @@ export class CityView {
   /** Short grow/bounce for parcels that just gained a building or a level. */
   private animate(dt: number) {
     if (!this.animations.size && !this.dust.length && !this.paving.length) return;
-    const step = Math.min(dt, .1);
+    // Always move forward, so an odd frame time (zero, negative or not a number) can never leave an effect running.
+    const step = Number.isFinite(dt) && dt > 0 ? Math.min(dt, .1) : 1 / 60;
     this.dust = this.dust.filter(cloud => {
       cloud.t += step;
       if (cloud.t >= DUST_SECONDS) { cloud.entity.destroy(); return false; }
@@ -403,7 +406,7 @@ export class CityView {
       return true;
     });
     for (const [cell, animation] of this.animations) {
-      animation.t += Math.min(dt, .1);
+      animation.t += step;
       const tile = this.tiles.get(cell)?.entity, done = animation.t >= (animation.kind === 'built' ? .7 : .5);
       tile?.setLocalScale(1, done ? 1 : buildScale(animation.kind, animation.t), 1);
       if (done) this.animations.delete(cell);
@@ -610,6 +613,7 @@ export class CityView {
       }
     }
     for (const tile of fadeLater) this.fade(tile);
+    if (city !== this.effectsCity) { this.effectsCity = city; this.buildingState = new Map(); this.roadState = null; }
     const changes = diffBuildings(this.buildingState, placeList(city));
     this.buildingState = changes.next;
     const roads = diffRoads(this.roadState, city.cells);
