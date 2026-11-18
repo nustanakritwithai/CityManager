@@ -37,3 +37,21 @@
   .map-markers .map-issue[data-visibility="alert"] .map-issue-symbol { animation: map-issue-in .9s ease-out 1; }
 }
 @keyframes map-issue-in { 0% { box-shadow: 0 0 0 0 #ff6b5bcc, 0 2px 6px #0008; } 100% { box-shadow: 0 0 0 12px #ff6b5b00, 0 2px 6px #0008; } }
+
+/* Money labels: a pill that rises and fades over a parcel whose money changed; colour plus the sign. */
+.map-markers .map-money { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 1; }
+.map-money-label {
+  position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+  padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; letter-spacing: .01em;
+  background: rgba(18, 28, 44, .82); border: 1px solid rgba(255, 255, 255, .18); box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+  animation: map-money-rise 1.6s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+.map-money-label.gain { color: #7ee2a0; }
+.map-money-label.loss { color: #ffab91; }
+@keyframes map-money-rise {
+  0% { opacity: 0; transform: translate(-50%, -20%) scale(.86); }
+  14% { opacity: 1; transform: translate(-50%, -60%) scale(1); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -200%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .map-money-label { display: none; } }

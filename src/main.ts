@@ -92,6 +92,7 @@ import { advancedEnabled, storeAdvanced } from './advanced.ts';
 import { AudioEngine, type SoundName } from './audio-engine.ts';
 import { installAudioPanel } from './audio-panel.ts';
 import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from './audio-cues.ts';
+import { moneyMark, moneyPops } from './money-pops.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
@@ -1142,6 +1143,7 @@ async function boot() {
     const minutes = Math.min(dt, 0.25) * speed * 1440;
     const tickBefore = city.tick;
     const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
+    const moneyBefore = before ? moneyMark(city) : null;
     let days = 0;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
     const frameStarted = performance.now(), frameDeadline = frameStarted + 8;
@@ -1158,6 +1160,7 @@ async function boot() {
     if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
+    if (days && moneyBefore !== null) mapMarkers?.showMoney(moneyPops(city, moneyBefore));
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
   Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });

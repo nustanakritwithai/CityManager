@@ -6,6 +6,11 @@ import { ISSUE_ICONS, ISSUE_PRIORITY, issueVisibility, type Issue } from './buil
 import { bindIssueInput } from './building-issue-input.ts';
 import { MAP_ISSUE_BUDGET, mapIssueShown, visibleIssueCells } from './building-issue-layout.ts';
 import type { Preview } from './placement-preview.ts';
+import type { MoneyPop } from './money-pops.ts';
+
+/** Money labels alive at once; the oldest leaves first. */
+const MAX_MONEY_LABELS = 8;
+const MONEY_LABEL_HEIGHT = 2.4;
 
 /** Existing map information layer; only 44px issue targets in select mode intercept input. */
 export class MapMarkers {
@@ -15,6 +20,8 @@ export class MapMarkers {
   private issues: { issue: Issue; node: HTMLButtonElement; dispose: () => void }[] = [];
   private selectionCells: number[] = [];
   private tipCell: number | null = null;
+  private money: { cell: number; node: HTMLElement }[] = [];
+  private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   // worldToScreen must not read and write the same vector.
   private readonly world = new Vec3();
   private readonly point = new Vec3();
@@ -68,6 +75,30 @@ export class MapMarkers {
 
   setVisible(visible: boolean) { this.layer.hidden = !visible; }
 
+  /** "+1,200 ฿" rising from each parcel whose money changed; shown only with map information on and full motion. */
+  showMoney(pops: readonly MoneyPop[]) {
+    if (this.layer.hidden || this.reducedMotion.matches) return;
+    for (const pop of pops) {
+      // A newer change at the same parcel replaces its label instead of stacking on it.
+      for (const old of this.money.filter(m => m.cell === pop.cell)) old.node.remove();
+      this.money = this.money.filter(m => m.cell !== pop.cell);
+      const node = document.createElement('span'), label = document.createElement('span');
+      node.className = 'map-money'; node.setAttribute('aria-hidden', 'true');
+      label.className = `map-money-label ${pop.amount > 0 ? 'gain' : 'loss'}`;
+      label.textContent = `${pop.amount > 0 ? '+' : '−'}${Math.round(Math.abs(pop.amount) / 100).toLocaleString('th-TH')} ฿`;
+      node.append(label); this.layer.append(node);
+      const entry = { cell: pop.cell, node }; this.money.push(entry); this.placeMoney(entry);
+      label.addEventListener('animationend', () => { node.remove(); this.money = this.money.filter(m => m !== entry); }, { once: true });
+    }
+    while (this.money.length > MAX_MONEY_LABELS) this.money.shift()!.node.remove();
+  }
+
+  private placeMoney(entry: { cell: number; node: HTMLElement }) {
+    const p = this.screen(entry.cell, MONEY_LABEL_HEIGHT), shown = p.z > 0 && p.x > -60 && p.x < innerWidth + 60 && p.y > -40 && p.y < innerHeight + 40;
+    entry.node.hidden = !shown;
+    if (shown) entry.node.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px)`;
+  }
+
   private screen(cell: number, height: number) {
     const { x, z } = this.view.position(cell);
     this.view.camera.camera!.worldToScreen(this.world.set(x, height, z), this.point);
@@ -91,6 +122,7 @@ export class MapMarkers {
       node.hidden = !shown; node.tabIndex = shown && this.view.mode === 'select' ? 0 : -1;
       if (shown) node.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px)`;
     }
+    for (const entry of this.money) this.placeMoney(entry);
     if (this.tipCell !== null && !this.tip.hidden) {
       const p = this.screen(this.tipCell, .3);
       this.tip.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px)`;
