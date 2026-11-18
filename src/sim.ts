@@ -14,7 +14,7 @@ import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, val
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
 import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
-import { landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
+import { householdRent, landValue, pollutionHappinessPoints, pollutionReader } from './environment.ts';
 import { busDepotAt, reconcileBusStops, removeBusDepotFromState, validateBus, type BusState, type BusValidationView } from './bus/buildings.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { MONTH, taxAmount, taxRatesAt, taxSatang, validateTaxPolicy, type TaxChange } from './city-tax-policy.ts';
@@ -1261,8 +1261,10 @@ function settleMonth(c: City) {
   for (const p of c.parks) payParkWages(c, p);
   for (const site of venues(c)) payVenueWages(c, site);
   if (c.education) { payEducationWages(c); for (const payment of educationUpkeep(c.education)) transfer(c, 'treasury', 'upkeep', payment.amount, payment.reason); }
+  const worth = landValues(c);
   for (const h of c.households) if (h.home !== null) {
-    transfer(c, h.wallet, 'landlord', 10_000, 'Monthly household rent');
+    // Rent follows the land: better-served, cleaner parcels cost more.
+    transfer(c, h.wallet, 'landlord', householdRent(worth(building(c, h.home).cell)), 'Monthly household rent');
     transfer(c, h.wallet, 'treasury', householdBill(svc, h.home), 'Monthly household water and power bill');
   }
   // The city buys what the gateway delivered and keeps its plants running.

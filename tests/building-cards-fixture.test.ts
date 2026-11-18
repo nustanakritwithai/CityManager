@@ -35,6 +35,11 @@ test('building-card acceptance preserves genuine day29/day59 migration snapshots
   serviceBills[0].amount += 18_000;
   oldRateReplay.accounts.treasury -= 18_000;
   oldRateReplay.accounts.upkeep += 18_000;
+  // Rent now follows land value (10,000 at land value 50). Put each day-30 rent back to the flat 10,000 the
+  // frozen witness was recorded with; nothing else in the 30 days depends on it.
+  for (const e of oldRateReplay.ledger.filter(e => e.reason === 'Monthly household rent' && e.amount !== 10_000)) {
+    const delta = 10_000 - e.amount; e.amount = 10_000; oldRateReplay.accounts[e.from] -= delta; oldRateReplay.accounts.landlord += delta;
+  }
   assert.equal(hash(serialize(oldRateReplay)), '5e62befe3e6becad5fdd0fd651c59eaef174185288815c3d1941adc768efa8d4');
   assert.equal(deserialize(replay.legacyInput).tick, 29);
   for (const city of [replay.fixture, replay.later]) {

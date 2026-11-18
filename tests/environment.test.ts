@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, step, buildPark, serialize, deserialize, landValues, access, type City } from '../src/sim.ts';
-import { POLLUTION, POLLUTION_HAPPINESS_CAP, landValue, pollutionAt, pollutionHappinessPoints, pollutionMap, pollutionReader } from '../src/environment.ts';
+import { POLLUTION, POLLUTION_HAPPINESS_CAP, RENT_BASE, householdRent, landValue, pollutionAt, pollutionHappinessPoints, pollutionMap, pollutionReader } from '../src/environment.ts';
 import { happinessTarget, happinessTargets, homeAmenities } from '../src/resident-happiness.ts';
 import { mapOverlay, TOOL_OVERLAY } from '../src/map-overlay.ts';
 import { expandedCellCoordinate } from '../src/expanded-map-grid.ts';
@@ -64,4 +64,15 @@ test('the park tool shows pollution and service tools show land value; both laye
 test('the land value reader agrees with the formula for every parcel it is asked about', () => {
   const c = grown(), read = landValues(c), air = pollutionReader(c);
   for (const cell of [0, ...c.buildings.map(b => b.cell)]) assert.equal(read(cell), landValue(homeAmenities(c, cell).points, access(c, cell), air(cell)));
+});
+
+test('rent follows land value: 10,000 at 50, from 7,000 to 13,000, and each home pays its own at month end', () => {
+  assert.equal(householdRent(50), RENT_BASE); assert.equal(householdRent(0), 7_000); assert.equal(householdRent(100), 13_000);
+  assert.equal(householdRent(-5), 7_000); assert.equal(householdRent(140), 13_000);
+  const c = createCity(61025); for (let i = 0; i < 59; i++) step(c);
+  const worth = landValues(c), homes = new Map(c.households.map(h => [h.wallet, h.home]));
+  step(c); // day 60 is a month end
+  const rents = c.ledger.filter(e => e.tick === 60 && e.reason === 'Monthly household rent');
+  assert.ok(rents.length > 0);
+  for (const e of rents) assert.equal(e.amount, householdRent(worth(c.buildings.find(b => b.id === homes.get(e.from))!.cell)), e.from);
 });
