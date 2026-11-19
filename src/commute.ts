@@ -45,26 +45,29 @@ export type Trip = {
   householdId: number; person: number; workplace: { kind: WorkplaceKind; id: number };
   from: number | null; to: number | null; route: number[] | null; distanceM: number;
   mode: CommuteMode; vehicleId: number | null; minutes: number | null;
+  /** The job earns a day's work credit when worked, so missing it costs that day's pay. */
+  wage: boolean;
   bus?: { lineId: number; fromStopId: number; toStopId: number; walkCells: number };
 };
 
-type Job = { householdId: number; workplace: Trip['workplace']; footprint: number[]; workers: number };
+/** `wage`: the job earns a day's work credit when worked (employees, park staff, staff of a city-run venue). */
+type Job = { householdId: number; workplace: Trip['workplace']; footprint: number[]; workers: number; wage: boolean };
 /** Everyone who goes to work today, one row per workplace a household sends people to. */
 function jobs(c: City): Job[] {
   const cellOf = new Map(c.buildings.map(b => [b.id, b.cell])), out: Job[] = [];
   const homes = new Set(c.households.filter(h => h.home !== null).map(h => h.id));
-  const add = (householdId: number, workplace: Trip['workplace'], footprint: (number | undefined)[], workers: number) => {
+  const add = (householdId: number, workplace: Trip['workplace'], footprint: (number | undefined)[], workers: number, wage: boolean) => {
     const cells = footprint.filter((x): x is number => x !== undefined);
-    if (homes.has(householdId) && workers > 0 && cells.length) out.push({ householdId, workplace, footprint: cells, workers });
+    if (homes.has(householdId) && workers > 0 && cells.length) out.push({ householdId, workplace, footprint: cells, workers, wage });
   };
   const firms = new Map(c.firms.map(f => [f.id, f]));
-  for (const a of c.employment) { const f = firms.get(a.firmId); add(a.householdId, { kind: 'firm', id: a.firmId }, [f && cellOf.get(f.building)], a.workers); }
-  for (const a of c.ownerLabor) { const f = firms.get(a.firmId); add(a.householdId, { kind: 'firm', id: a.firmId }, [f && cellOf.get(f.building)], a.workers); }
-  for (const p of c.parks) for (const a of p.staffing?.allocations ?? []) add(a.householdId, { kind: 'park', id: p.id }, [p.cell], a.workers);
-  for (const s of c.civic?.sites ?? []) for (const a of s.staffing?.allocations ?? []) add(a.householdId, { kind: 'venue', id: s.id }, s.cells ?? [s.cell], a.workers);
+  for (const a of c.employment) { const f = firms.get(a.firmId); add(a.householdId, { kind: 'firm', id: a.firmId }, [f && cellOf.get(f.building)], a.workers, true); }
+  for (const a of c.ownerLabor) { const f = firms.get(a.firmId); add(a.householdId, { kind: 'firm', id: a.firmId }, [f && cellOf.get(f.building)], a.workers, false); }
+  for (const p of c.parks) for (const a of p.staffing?.allocations ?? []) add(a.householdId, { kind: 'park', id: p.id }, [p.cell], a.workers, true);
+  for (const s of c.civic?.sites ?? []) for (const a of s.staffing?.allocations ?? []) add(a.householdId, { kind: 'venue', id: s.id }, s.cells ?? [s.cell], a.workers, !s.operator);
   for (const p of c.education?.people ?? []) if (p.campusId !== null) {
     const campus = c.education!.campuses.find(x => x.id === p.campusId);
-    add(p.householdId, { kind: 'campus', id: p.campusId }, [campus?.cell], p.teacher + p.professor);
+    add(p.householdId, { kind: 'campus', id: p.campusId }, [campus?.cell], p.teacher + p.professor, false);
   }
   return out;
 }
@@ -108,7 +111,7 @@ export function planCommutes(c: City): Trip[] {
     const from = home === undefined ? null : drive([home]), to = drive(job.footprint);
     const path = from === null || to === null ? null : route(from, to);
     const distanceM = path ? (path.length - 1) * TILE_LENGTH_M : 0;
-    for (let k = 0; k < job.workers; k++) trips.push({ householdId: job.householdId, person: 0, workplace: job.workplace, from, to, route: path, distanceM, mode: path ? 'walk' : 'unreachable', vehicleId: null, minutes: null });
+    for (let k = 0; k < job.workers; k++) trips.push({ householdId: job.householdId, person: 0, workplace: job.workplace, from, to, route: path, distanceM, mode: path ? 'walk' : 'unreachable', vehicleId: null, minutes: null, wage: job.wage });
   }
   const pathMinutes = (path: number[]) => { let s = 0; for (let k = 1; k < path.length; k++) s += times.get(`${path[k - 1]}>${path[k]}`) ?? 0; return s / 60; };
   const fleet = c.vehicles?.fleet ?? [], owned = new Map<number, Vehicle[]>();
@@ -164,7 +167,7 @@ function openVehicles(c: City): VehicleState {
   for (const key of ['happiness', 'taxPolicy'] as const) if (key in c) { const value = c[key]; delete c[key]; Object.assign(c, { [key]: value }); }
   return c.vehicles;
 }
-export type CommuteDay = { tick: number; key: string; trips: Trip[]; bought: Vehicle[] };
+export type CommuteDay = { tick: number; key: string; trips: Trip[]; bought: Vehicle[]; /** Work days lost because the worker had no route there. */ missed: number };
 const days = new WeakMap<City, CommuteDay>();
 type Pay = (from: string, to: string, amount: number, reason: string) => number;
 
@@ -208,7 +211,15 @@ export function runCommutes(c: City, pay: Pay): CommuteDay {
     const v: Vehicle = { id, householdId, kind, bought: c.tick, fuelMl: VEHICLE[kind].tankMl, odometerM: 0 };
     state.fleet.push(v); state.nextId++; bought.push(v);
   }
-  const day = { tick: c.tick, key: dayKey(c), trips, bought };
+  // Nobody can work where they cannot get to: a worker with no route there loses today's work credit.
+  let missed = 0;
+  // Park and venue staff need no road to their post (their rules never did), so only firm jobs are lost this way.
+  for (const t of trips) if (t.mode === 'unreachable' && t.wage && t.workplace.kind === 'firm') {
+    const wallet = households.get(t.householdId)!.wallet;
+    const days = c.firms.find(f => f.id === t.workplace.id)?.workDays;
+    if (days && (days[wallet] ?? 0) > 0) { days[wallet]--; if (!days[wallet]) delete days[wallet]; missed++; }
+  }
+  const day = { tick: c.tick, key: dayKey(c), trips, bought, missed };
   days.set(c, day);
   return day;
 }
@@ -219,9 +230,25 @@ export function runCommutes(c: City, pay: Pay): CommuteDay {
 export function commutesToday(c: City): Trip[] {
   const day = days.get(c), key = dayKey(c);
   if (day && day.tick === c.tick && day.key === key) return day.trips;
-  const planned = { tick: c.tick, key, trips: planCommutes(c), bought: [] };
+  const planned = { tick: c.tick, key, trips: planCommutes(c), bought: [], missed: 0 };
   days.set(c, planned);
   return planned.trips;
+}
+
+/**
+ * The road route a delivery truck takes between two places: from the driveway of one footprint (or a road
+ * parcel itself, such as the city gateway) to the driveway of the other, on the class-aware network. Null
+ * when no legal route links them, in which case nothing can be delivered between them today.
+ */
+export function freightRoute(c: City, from: readonly number[], to: readonly number[]): number[] | null {
+  const end = (cells: readonly number[]) => cells.length === 1 && c.cells[cells[0]]?.road ? cells[0] : driveway(c, cells);
+  const a = end(from), b = end(to);
+  if (a === null || b === null) return null;
+  if (a === b) return [a];
+  const { net, times, trees } = roadsOf(c);
+  let tree = trees.get(a); if (!tree) { tree = shortestTree(net, times, a); trees.set(a, tree); }
+  if (!tree.has(b)) return null;
+  const path = [b]; while (path[0] !== a) path.unshift(tree.get(path[0])!); return path;
 }
 
 /** The fleet as it should be saved: vehicles whose household has left the city went with it. */
