@@ -23,6 +23,9 @@ export {trafficModelEnabled} from './flag.ts';
  * The model hard-caps 128 actors; a camera-independent spatial sample draws at
  * most 64, so panning does not leave stale viewport-only selection. Mobile frame
  * cost and visual coverage still require browser testing. */
+/** The last RECENT_TIMINGS durations, oldest first, so a check can look at a measured window apart from startup. */
+export const RECENT_TIMINGS=128;
+const recent=(list:number[],ms:number)=>{list.push(ms);if(list.length>RECENT_TIMINGS)list.shift();};
 export class TrafficLayer {
  /** Bus on #126's worker game (only when busEnabled(): BUS_ENABLED or ?bus=1). Null = unchanged game.
   * Renderer contract: `bus.engine` → snapshot()/waitingAt(); drainEvents() only via presentBuses. */
@@ -41,7 +44,7 @@ export class TrafficLayer {
  private workCancellations:{id:number;before:{owner:string;active:boolean;entered:boolean}[];after:{owner:string;active:boolean;entered:boolean}[]}[]=[];
  private workStalls=new WorkStallTracker();
  private presenter=new TrafficPresentation();private drawn:CitizenVehiclePose[]=[];
- private timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
+ private timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0,recentFrameMs:[] as number[],recentProjectionMs:[] as number[]};
  private anchor:number|null=null;private paused=true;private visible=true;private dirty=false;private renderDirty=true;private failure:string|null=null;
  constructor(private readonly app:AppBase,_onScreen:(cell:number)=>boolean=()=>true,private readonly onFailure:(message:string)=>void=()=>{},
    private readonly makeWorker:()=>Worker=()=>new Worker(new URL('./game-worker-entry.ts',import.meta.url),{type:'module'}),
@@ -51,7 +54,7 @@ export class TrafficLayer {
   this.signalDisplay.clear();try{this.signalScene?.sync([]);}catch{/* lost graphics */}try{this.signalScene?.setEnabled(false);}catch{/* lost graphics */}try{this.cars.setEnabled(false);}catch{/* graphics may be unavailable */}try{this.onFailure(this.failure);}catch{/* never disrupt city simulation */}
  }
  private reset(city:City):void {
-  this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0};
+  this.timing={samples:0,lastCaptureSubmitMs:0,maxCaptureSubmitMs:0,lastInputMs:0,maxInputMs:0,lastPostMs:0,maxPostMs:0,frames:0,lastFrameMs:0,maxFrameMs:0,projections:0,lastProjectionMs:0,maxProjectionMs:0,recentFrameMs:[] as number[],recentProjectionMs:[] as number[]};
   this.client?.dispose();this.client=null;this.city=city;this.latest=null;this.presenter=new TrafficPresentation();this.workStalls=new WorkStallTracker();this.crossedWorkDay=null;this.drawn=[];this.anchor=null;this.dirty=false;this.renderDirty=true;this.failure=null;this.workExpiryAck=0;this.workCancel.clear();this.workRetired.clear();this.workCancellations=[];this.cars.setEnabled(this.visible);this.cars.sync([]);
   this.signalDisplay.reset(city);this.signalScene?.sync([]);this.signalScene?.setEnabled(this.visible);
   this.bus=null;this.minute=7*60; // rebuilt in frame() on the fresh bus clock
@@ -63,7 +66,7 @@ export class TrafficLayer {
     this.presenter.expire(expired.map(x=>`game:${x.id}`));
     const outstanding=new Set((frame.workTrips??[]).map(t=>t.id));for(const id of this.workRetired)if(!outstanding.has(id))this.workRetired.delete(id);
     const cars=frame.cars.filter(c=>!this.workCancel.has(c.id));const signalHeads=this.signalDisplay.accept(frame.signals);this.signalScene?.sync(signalHeads);try{this.bus?.onFrame(frame.bus,this.minute);}catch(error){this.fail(error);}const poses=gamePoseSets(cars,frame.groups);this.presenter.update(poses.full,poses.preferred,cars.filter(c=>!gameCarIsTaxi(c)).map(c=>`game:${c.id}`),cars);this.renderDirty=true;
-    const ms=performance.now()-start;this.timing.projections++;this.timing.lastProjectionMs=ms;this.timing.maxProjectionMs=Math.max(this.timing.maxProjectionMs,ms);
+    const ms=performance.now()-start;this.timing.projections++;this.timing.lastProjectionMs=ms;this.timing.maxProjectionMs=Math.max(this.timing.maxProjectionMs,ms);recent(this.timing.recentProjectionMs,ms);
    },onFailure:message=>this.fail(message)});
    this.submit(city,false,this.paused);
   } catch(error){this.fail(error);}
@@ -111,7 +114,7 @@ export class TrafficLayer {
    if(this.reconcileWorkTrips(paused?0:dt)){this.drawn=this.presenter.frame(0,true);if(this.client)this.submit(city,false,paused);}
    if(this.visible)this.cars.sync(this.drawn);this.renderDirty=false;
   }
-  }catch(error){this.fail(error);}finally{const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);}
+  }catch(error){this.fail(error);}finally{const ms=performance.now()-frameStart;this.timing.frames++;this.timing.lastFrameMs=ms;this.timing.maxFrameMs=Math.max(this.timing.maxFrameMs,ms);recent(this.timing.recentFrameMs,ms);}
  }
  /** Use sustained lack of physical progress and a full-car-length reset; a car
   * must also be blocked now. Paused frames accumulate no time. */
