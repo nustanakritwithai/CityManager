@@ -97,6 +97,8 @@ import { incidentMarks } from './incident-marks.ts';
 import { venueSounds } from './venue-life.ts';
 import { isTense } from './music-mood.ts';
 import { FESTIVAL_LABELS, festivalAt, type FestivalKind } from './festivals.ts';
+import { CELEBRATION_SECONDS, milestoneCrossed } from './milestones.ts';
+import { cityPopulation } from './unlocks.ts';
 import { treasuryForecast } from './treasury-forecast.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
@@ -150,6 +152,19 @@ let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined, audioPanel: 
 let marketPanel: ReturnType<typeof installMarketPanel> | undefined;
 const audio = new AudioEngine(BASE + 'assets/audio/'), cueLimiter = new CueLimiter();
 const sound = (name: SoundName) => audio.play(name);
+/** Photo mode: hide every control and let the camera circle the city; C, Esc or a tap ends it. */
+function setPhotoMode(on: boolean) {
+  if (on === view.photoMode) return;
+  if (!document.getElementById('photo-hint')) {
+    const hint = document.createElement('button'); hint.id = 'photo-hint'; hint.type = 'button'; hint.textContent = 'โหมดถ่ายรูป · แตะ กด C หรือ Esc เพื่อออก';
+    hint.addEventListener('click', () => setPhotoMode(false)); document.body.append(hint);
+  }
+  document.body.classList.toggle('photo-mode', on); view.setPhotoMode(on);
+  // A tap on the map also ends it, so a phone needs no keyboard.
+  if (on) document.getElementById('city-canvas')?.addEventListener('pointerdown', () => setPhotoMode(false), { once: true });
+  sound(on ? 'ui-open' : 'ui-close');
+}
+document.addEventListener('city-photo', () => setPhotoMode(true));
 // Panels without a handle on the engine ask for a sound with this event.
 document.addEventListener('city-sound', event => { const name = (event as CustomEvent<SoundName>).detail; if (typeof name === 'string') sound(name); });
 /** A map command's result gets its own sound: the action on success, a soft refusal otherwise. */
@@ -1076,7 +1091,10 @@ async function boot() {
 
   document.addEventListener('keydown', e => {
     if (blocksGameShortcuts(e) || document.querySelector('dialog[open]')) return;
+    // Esc leaves photo mode before it cancels a tool.
+    if (e.key === 'Escape' && view.photoMode) { e.preventDefault(); setPhotoMode(false); return; }
     if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+    if (e.key.toLowerCase() === 'c' && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]'))) { e.preventDefault(); setPhotoMode(!view.photoMode); return; }
     if (e.key.toLowerCase() === 'u' && !(e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]'))) { audio.change({ muted: !audio.settings.muted }); audioPanel?.sync(); status(audio.settings.muted ? 'ปิดเสียงแล้ว (U)' : 'เปิดเสียงแล้ว (U)'); return; }
     if (route) return;
     if (e.key === ' ' && !(e.target instanceof Element && e.target.closest('button, summary, a, select, input, textarea, [contenteditable]'))) { e.preventDefault(); paused = !paused; render(); }
@@ -1174,6 +1192,9 @@ async function boot() {
     railUi?.sync();
     if (monthEnded(tickBefore, city.tick)) sound('ev-month');
     if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
+    // A population milestone: fireworks over the city, a short note and a chime.
+    const milestone = days && before ? milestoneCrossed(before.population, cityPopulation(city)) : null;
+    if (milestone) { status(`🎉 ประชากรถึง ${milestone.toLocaleString('th-TH')} คนแล้ว!`); sound('ev-unlock'); view.celebrate(CELEBRATION_SECONDS); }
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
     if (days && moneyBefore !== null) { mapMarkers?.showMoney(moneyPops(city, moneyBefore)); view.showIncidents(incidentMarks(city, moneyBefore)); }

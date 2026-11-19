@@ -84,6 +84,11 @@ export class CityView {
   private festivalParts: { entity: Entity; t: number; delay: number; origin: [number, number, number]; pieces: Entity[] }[] = [];
   private festivalT = 0;
   private lastNight = 0;
+  /** Seconds of milestone fireworks left (shown day or night), and the festival to return to afterwards. */
+  private celebrationLeft = 0;
+  private festivalAfterCelebration: FestivalKind | null = null;
+  /** Photo mode: the camera circles the city slowly while the page hides its controls. */
+  private photo = false;
   private faded = new Map<StandardMaterial, StandardMaterial>();
   private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private highway = new Entity('Decorative highway');
@@ -428,7 +433,8 @@ export class CityView {
     const festive = this.festival !== null && this.festivalParts.length > 0;
     // Anything that moved at the start of this frame needs one more draw, even if it finishes now.
     const busy = this.animations.size > 0 || this.dust.length > 0 || this.paving.length > 0 || this.incidentFx.length > 0;
-    if (!busy && !festive) { this.fxClock = null; return; }
+    if (!busy && !festive && !this.photo) { this.fxClock = null; return; }
+    if (this.photo && !this.reducedMotion.matches) { this.yaw += Math.min(.5, Math.max(1 / 60, wall)) * .12; this.updateCamera(); }
     // The engine caps dt at 0.1 s, so on a slow device a capped step would stretch every effect over many real
     // seconds of redrawing. Work effects run on the wall clock instead (at least a 60th of a second a frame, at most
     // half a second), so they always end on time; the grow-in keeps its capped step as before.
@@ -450,6 +456,10 @@ export class CityView {
       return true;
     });
     const festivalShowing = this.animateFestival(step);
+    if (this.celebrationLeft > 0) {
+      this.celebrationLeft -= step;
+      if (this.celebrationLeft <= 0) { this.celebrationLeft = 0; if (this.festivalAfterCelebration !== 'newyear') this.setFestival(this.festivalAfterCelebration); }
+    }
     this.paving = this.paving.filter(sweep => {
       sweep.t += step;
       const u = sweep.t / PAVE_SECONDS;
@@ -464,7 +474,7 @@ export class CityView {
       if (done) this.animations.delete(cell);
     }
     // Draw again only while something moves; a festival waiting for its hour (fireworks by day) costs nothing.
-    if (festivalShowing || busy) this.app.renderNextFrame = true;
+    if (festivalShowing || busy || this.photo) this.app.renderNextFrame = true;
     else this.fxClock = null;
   }
   get animating() { return this.animations.size + this.dust.length + this.paving.length + this.incidentFx.length; }
@@ -925,7 +935,7 @@ export class CityView {
       for (let b = 0; b < (this.quality === 'low' ? 2 : 4); b++) {
         const burst = new Entity('Firework'), material = glow(`Firework ${b}`, colours[b % colours.length]);
         const pieces = Array.from({ length: 20 }, () => piece(burst, 'sphere', material, .3));
-        this.festivalRoot.addChild(burst); this.festivalParts.push({ entity: burst, t: 0, delay: b * .6, origin: [0, 0, 0], pieces });
+        this.festivalRoot.addChild(burst); this.festivalParts.push({ entity: burst, t: 0, delay: b * .6, origin: this.fireworkSpot(hashCell(b * 97 + 5)), pieces });
       }
     } else if (kind === 'loykrathong') {
       // Krathongs float on the sea just off the coast: sample a ring round the city for water.
@@ -955,10 +965,23 @@ export class CityView {
     }
     this.app.renderNextFrame = true;
   }
+  /** Fireworks over the city for a few seconds, by day or night, then back to whatever festival was on. */
+  celebrate(seconds: number) {
+    if (this.reducedMotion.matches) return;
+    if (this.celebrationLeft <= 0) { this.festivalAfterCelebration = this.festival; if (this.festival !== 'newyear') this.setFestival('newyear'); }
+    this.celebrationLeft = Math.max(this.celebrationLeft, seconds); this.app.renderNextFrame = true;
+  }
+  /** A burst point above where the camera is looking, so fireworks are always over the part of the city on screen. */
+  private fireworkSpot(h: number): [number, number, number] {
+    return [this.target.x + (h % 25) - 12, 9 + (h >> 6) % 5, this.target.z + ((h >> 3) % 25) - 12];
+  }
+  /** Photo mode on or off: a slow orbit round the city, so a screenshot can catch it from any side. */
+  setPhotoMode(on: boolean) { this.photo = on; this.app.renderNextFrame = true; }
+  get photoMode() { return this.photo; }
   /** Moves the festival decoration; returns whether it is showing (so the scene keeps drawing). */
   private animateFestival(step: number): boolean {
     if (!this.festival || !this.festivalParts.length) return false;
-    const showing = this.festival === 'songkran' ? this.lastNight < .5 : this.lastNight > (this.festival === 'newyear' ? .5 : .3);
+    const showing = this.celebrationLeft > 0 || (this.festival === 'songkran' ? this.lastNight < .5 : this.lastNight > (this.festival === 'newyear' ? .5 : .3));
     this.festivalRoot.enabled = showing;
     if (!showing) return false;
     this.festivalT += step;
@@ -983,7 +1006,7 @@ export class CityView {
         // Start the next burst or splash somewhere new.
         part.t = 0; part.delay = .2 + (hashCell(n * 977 + Math.floor(this.festivalT * 10)) % 100) / 100 * (this.festival === 'newyear' ? 1.2 : .6); u = 0;
         const h = hashCell(n * 31 + Math.floor(this.festivalT * 7));
-        if (this.festival === 'newyear') part.origin = [((h % 41) - 20), 9 + (h >> 6) % 5, (((h >> 3) % 41) - 20)];
+        if (this.festival === 'newyear') part.origin = this.fireworkSpot(h);
         else if (roads.length) { const p = this.position(roads[h % roads.length]); part.origin = [p.x, .2, p.z]; }
         part.entity.enabled = false; continue;
       }
