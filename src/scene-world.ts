@@ -7,7 +7,8 @@ import { hash, noise, smooth, mix, worldEdgeDistance, worldOnHighway, playableWo
  * hills to the north/east, beaches and a shallow sea to the south. The north strip
  * is prepared separately for the appended playable land; the surroundings remain visual only.
  */
-const EXTENT = 112, STEP = 1.6, WATER_Y = -.32;
+const EXTENT = 112, STEP = 1.6;
+export const WATER_Y = -.32;
 
 type Rgb = [number, number, number];
 const hex = (h: string): Rgb => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
