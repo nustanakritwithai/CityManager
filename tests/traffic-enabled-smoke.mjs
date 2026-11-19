@@ -9,12 +9,14 @@ import { createParkRuntime, serializeParkSession } from '../src/park-runtime.ts'
 import { trafficPlan } from '../src/traffic-plan.ts';
 import { FADE_SECONDS } from '../src/traffic/fleet.ts';
 import { reachTouch } from './touch-reach.mjs';
+import { withCommuterVehicles } from './commuter-vehicles.ts';
 
 // A real replayed, strictly migrated city with earned employment/deliveries, not fabricated traffic.
 const legacy = legacyCity(61025); for (let d = 0; d < 29; d++) legacyStep(legacy);
 const fixture = deserialize(legacySerialize(legacy)); adoptSavedEducation(fixture); step(fixture);
 let plan = trafficPlan(fixture);
-for (let d = 0; d < 60 && !(plan.cars.length && plan.trucks.length && plan.smoke.length); d++) { step(fixture); plan = trafficPlan(fixture); }
+// Cars are households' own vehicles: long-walking households own motorcycles, as their savings would buy in time.
+for (let d = 0; d < 60 && !(plan.cars.length && plan.trucks.length && plan.smoke.length); d++) { step(fixture); if (!plan.cars.length) withCommuterVehicles(fixture); plan = trafficPlan(fixture); }
 assert.ok(plan.cars.length && plan.trucks.length && plan.smoke.length, 'Nonempty cars, trucks and factory smoke fixture');
 const raw = serializeParkSession(fixture, createParkRuntime(fixture)), cityRaw = serialize(fixture);
 const expected = deserialize(cityRaw); for (let d = 0; d < 3; d++) step(expected);

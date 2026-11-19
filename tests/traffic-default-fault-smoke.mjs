@@ -12,18 +12,21 @@ import {createParkRuntime,serializeParkSession,deserializeParkSession} from '../
 import {trafficPlan,keyHash,commuteGoal} from '../src/traffic-plan.ts';
 import {trafficFaultCase} from './traffic-game-cases.mjs';
 import {populationFixture} from './population-capacity-fixture.ts';
+import {withCommuterVehicles} from './commuter-vehicles.ts';
+import {START_HOUR,LOCKED_HOURS} from '../src/atmosphere.ts';
 import {createTrafficServerFixture,reachTrafficControl,createTrafficNetworkAudit,startTrafficHttpFixture,installTrafficNetworkFence,loadedTrafficSession} from './traffic-server-entry-fixture.mjs';
 
-const city=populationFixture(32,true);step(city);const session=serializeParkSession(city,createParkRuntime(city)),cityRaw=serialize(loadedTrafficSession(session).city);
+const city=populationFixture(32,true);step(city);withCommuterVehicles(city);const session=serializeParkSession(city,createParkRuntime(city)),cityRaw=serialize(loadedTrafficSession(session).city);
 assert.deepEqual(deserializeParkSession(session).city,city);const decorativeCars=trafficPlan(city).cars;assert.ok(decorativeCars.length>0,'fixture must have decorative cars for the fallback check');
-const noonCruisers=decorativeCars.filter(a=>commuteGoal(12.5,keyHash(`${a.key}:depart`),keyHash(`${a.key}:errand`))==='cruise').length;assert.ok(noonCruisers>0,'fixture must have noon cruising cars');
+// Commuters only drive to work and home: a car parked at work when the scene starts (07:30) drives home at the evening preset (17:24).
+const eveningDrivers=decorativeCars.filter(a=>{const d=keyHash(`${a.key}:depart`);return commuteGoal(START_HOUR,d,1)==='work'&&commuteGoal(LOCKED_HOURS.evening,d,1)==='home';}).length;assert.ok(eveningDrivers>0,'fixture must have a commuter who drives home in the evening');
 const expected=deserialize(cityRaw);for(let i=0;i<3;i++)step(expected);const expectedThreeDays=serialize(expected);
 const market=JSON.stringify({version:10,rulesVersion:'chain-5',guestId:null,cityId:'00000000-0000-4000-8000-000000000001',operations:[],escrow:[],receipts:{},seq:'0'});
 const recoveryStorageMode='isolated-server-ack-no-browser-city-copies';
 const recoveryCoverage='Real loopback server service acknowledges the synthetic city. Faults never activate local recovery or write browser city copies; this is not a native IDB recovery test.';
 const recoveryEvidence=[];const testPlan=trafficFaultCase(process.env.TRAFFIC_FAULT_CASE||'full');
 const protectedKeys={'citymanager.market.v10':market};
-if(process.argv.includes('--preflight')){const fixture=createTrafficServerFixture('http://127.0.0.1:4195/CityManager/');const ack=await fixture.seed(session);fixture.assertDurable(session,ack.revision);assert.equal(serialize(loadedTrafficSession(ack.raw).city),cityRaw);console.log(JSON.stringify({testPlan,recoveryStorageMode,recoveryCoverage,cars:decorativeCars.length,noonCruisers,cityBytes:cityRaw.length,sessionBytes:session.length,threeDayTick:expected.tick}));process.exit(0);}
+if(process.argv.includes('--preflight')){const fixture=createTrafficServerFixture('http://127.0.0.1:4195/CityManager/');const ack=await fixture.seed(session);fixture.assertDurable(session,ack.revision);assert.equal(serialize(loadedTrafficSession(ack.raw).city),cityRaw);console.log(JSON.stringify({testPlan,recoveryStorageMode,recoveryCoverage,cars:decorativeCars.length,eveningDrivers,cityBytes:cityRaw.length,sessionBytes:session.length,threeDayTick:expected.tick}));process.exit(0);}
 assert.ok(['0','1'].includes(process.env.TRAFFIC_GAME_EXPECT_DEFAULT??''),'Explicit TRAFFIC_GAME_EXPECT_DEFAULT=0 or 1 is required');
 const expectDefault=process.env.TRAFFIC_GAME_EXPECT_DEFAULT==='1',httpFixture=await startTrafficHttpFixture(process.env.CITYMANAGER_URL||'http://127.0.0.1:4195/CityManager/'),base=new URL(httpFixture.url);
 assert.equal(base.protocol,'http:');assert.equal(base.hostname,'127.0.0.1');assert.equal(base.search,'');assert.equal(base.hash,'');
@@ -100,15 +103,15 @@ async function literalReload(){
  assert.equal(server.active.raw,navigation.lifecycleSaves ? outgoing : before.raw,'Reload retains the exact acknowledged baseline or captured outgoing bytes, no reseed');assert.equal(server.active.cityId,before.cityId);assert.equal(navigation.beforeRevision,before.revision,'Any lifecycle revision is verified by the exact POST/ACK chain');
  assert.equal(await evaluate('window.cityManager.snapshot()'),cityRaw);await preserved();
 }
-/** Creation can happen at START_HOUR before noon is applied: cars begin parked.
- * Advance a few visual frames at citizen speed to let noon errands depart, while
+/** Creation can happen at START_HOUR before the evening is applied: cars begin parked.
+ * Advance a few visual frames at citizen speed to let evening commuters drive home, while
  * asserting the economic City and all durable bytes remain untouched. */
 async function revealDecorativeCars(){
  assert.equal(await evaluate('window.cityManager.parks().paused'),true);
- // Visual preferences are page-memory only; select noon through the real UI
+ // Visual preferences are page-memory only; select the evening through the real UI
  // rather than relying on the obsolete localStorage seed.
- await button('#atmosphere-toggle');await button('input[name="atmosphere-time"][value="noon"]');await button('#atmosphere-toggle');
- await until('window.cityManager.atmosphere().hour===12.5');
+ await button('#atmosphere-toggle');await button('input[name="atmosphere-time"][value="evening"]');await button('#atmosphere-toggle');
+ await until(`window.cityManager.atmosphere().hour===${LOCKED_HOURS.evening}`);
  await button('#toggle-inspector');await until('document.querySelector("#inspector").dataset.page==="city"');await button('#park-recreation button[data-speed]');await button('#close-inspector');
  assert.equal(await evaluate('window.cityManager.parks().speed'),1/1440);await button('#pause');
  try{await until('window.cityManager.atmosphere().traffic.cars>0',15000);}finally{if(!await evaluate('window.cityManager.parks().paused'))await button('#pause');}
