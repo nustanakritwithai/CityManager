@@ -12,10 +12,10 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicOpen, civicReach, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import { validateDistricts, type DistrictState } from './districts.ts';
-import { runCommutes, liveVehicles, validateVehicles, freightRoute, type VehicleState } from './commute.ts';
+import { runCommutes, liveVehicles, validateVehicles, freightRoute, canWalk, careTrip, outsideCareTrip, recordCareTrip, type VehicleState } from './commute.ts';
 import { ROAD_CLASS, forgetRoadClass, roadClassAt, roadClassUpgradeCost, roadUpgradeReason, roadUpkeep, setRoadClass, validateRoadClasses, type RoadClass, type RoadClassState } from './road-classes.ts';
 import { UNLOCK_POPULATION, cityPopulation, newlyUnlocked, peopleToUnlock, validateUnlocks, type UnlockState } from './unlocks.ts';
 import { BURGLARY_REASON, INCIDENT, INCIDENT_LABELS, INCIDENT_MIN_POPULATION, MEDICAL_REASON, fireReason, incidentRoll, type IncidentKind } from './incidents.ts';
@@ -1191,8 +1191,11 @@ function trade(c: City) {
     const shops = active.filter(f => firmWorkerCount(c, f.id) > 0 && (isCommercial(f) && (f.inventory > 0 || f.cropInventory > 0 && (sellable.get(f.id) ?? 0) > 0)));
     // Rotate sellers without repeatedly picking an empty or unaffordable business.
     if (shops.length) { const start = Math.floor(random(c) * shops.length); shops.push(...shops.splice(0, start)); }
+    const homeCell = building(c, h.home!).cell;
     for (const shop of shops) {
       if (purchased >= h.members || balance(c, h.wallet) < 800) break;
+      // Shopping is a real trip: only a shop the family can get to along linked streets (on foot at least) sells to it.
+      if (!canWalk(c, [homeCell], [building(c, shop.building).cell])) continue;
       {
         // Preferences select the order, not a one-product limit: a family can fill its one
         // daily basket from the remaining stocked products without inventing demand or credit.
@@ -1601,8 +1604,14 @@ export function runIncidents(c: City): Record<IncidentKind, number> {
     const cell = building(c, h.home).cell;
     if (incidentRoll(c.seed, c.tick, h.id, 'burglary') < INCIDENT.burglary.chance && !guarded(cell, INCIDENT.burglary.guards)
       && transfer(c, h.wallet, 'outside', INCIDENT.burglary.cost, BURGLARY_REASON) > 0) happened.burglary++;
-    if (incidentRoll(c.seed, c.tick, h.id, 'illness') < INCIDENT.illness.chance && !guarded(cell, INCIDENT.illness.guards)
-      && transfer(c, h.wallet, 'outside', INCIDENT.illness.cost, MEDICAL_REASON) > 0) happened.illness++;
+    if (incidentRoll(c.seed, c.tick, h.id, 'illness') < INCIDENT.illness.chance) {
+      // Someone falls ill and travels for care: to a clinic or hospital whose area covers the home and that they can
+      // actually get to along the streets (treated in the city, no bill), or else out to a hospital beyond the gateway.
+      const covering = (c.civic?.sites ?? []).filter(site => INCIDENT.illness.guards.includes(site.kind) && civicOpen(site) && (site.cells ?? [site.cell]).some(part => civicCellDistance(cell, part) <= civicReach(c, site.kind)));
+      const care = covering.length ? careTrip(c, h.id, cell, covering) : null;
+      if (care) recordCareTrip(c, care);
+      else if (transfer(c, h.wallet, 'outside', INCIDENT.illness.cost, MEDICAL_REASON) > 0) { happened.illness++; const out = outsideCareTrip(c, h.id, cell, GATEWAY); if (out) recordCareTrip(c, out); }
+    }
   }
   const news = (Object.keys(happened) as IncidentKind[]).filter(kind => happened[kind]).map(kind => `${INCIDENT_LABELS[kind]} ${happened[kind]}`);
   if (news.length) c.lastEvent = `เหตุการณ์วันนี้: ${news.join(' · ')} · สร้างสถานีดับเพลิง ตำรวจ หรืออนามัยให้ถึงเพื่อป้องกัน`;
