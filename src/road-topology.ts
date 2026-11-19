@@ -1,10 +1,11 @@
+import type { RoadClassState } from './road-classes.ts';
 import { expandedCellNeighbors, EXPANDED_MAP_CELLS } from './expanded-map-grid.ts';
 import { expandedRoadLinked, expandedRoadDriveAllowed, validateExpandedRoadTopology, setExpandedRoadJunction, configureExpandedRoadPath, forgetExpandedRoadTopology, type ExpandedRoadTopology } from './expanded-road-topology.ts';
 /** Physical road junctions are distinct from vehicle direction. Legacy maps have all adjacent links. */
 const SIZE = 24, CELLS = SIZE * SIZE;
 export type LegacyRoadTopology = { version: 1; blocked: number[]; oneWay: Record<string, number> };
 export type RoadTopology = LegacyRoadTopology | ExpandedRoadTopology;
-export type RoadMap = { cells: { road: boolean }[]; roadTopology?: RoadTopology };
+export type RoadMap = { cells: { road: boolean }[]; roadTopology?: RoadTopology; roadClasses?: RoadClassState };
 export const roadNeighbors = (i: number) => [i % SIZE ? i - 1 : -1, i % SIZE < SIZE - 1 ? i + 1 : -1, i >= SIZE ? i - SIZE : -1, i < CELLS - SIZE ? i + SIZE : -1].filter(n => n >= 0);
 /** Geometry based on the actual map footprint; legacy callers stay frozen. */
 export const roadNeighborsFor = (map: Pick<RoadMap,'cells'>, i: number) => map.cells.length === EXPANDED_MAP_CELLS ? expandedCellNeighbors(i) : roadNeighbors(i);

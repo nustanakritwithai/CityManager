@@ -15,6 +15,7 @@ import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
 import { civicCells, civicFootprint, civicOpen, type CivicKind } from './civic/sites.ts';
 import { venueCrowds } from './venue-life.ts';
 import { roadClassAt } from './road-classes.ts';
+import { driveway } from './parking.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, diffRoads, dustPuff, placeList, buildScale, DUST_SECONDS, type BuildingState, type BuildEvent } from './build-events.ts';
 import { INCIDENT_SECONDS, flameHeight, lightLit, markFade, smokePuff, type IncidentMark } from './incident-marks.ts';
@@ -184,6 +185,12 @@ export class CityView {
     material.diffuse = new Color().fromString(hex); material.gloss = .2;
     material.opacity = built ? .28 : .55; material.blendType = BLEND_NORMAL; material.depthWrite = false; material.update();
     this.materials.set(key, material); return material;
+  }
+  /** A concrete apron across the kerb on the side that faces the building's driveway road. */
+  private driveApron(tile: Entity, cell: number, road: number) {
+    const from = this.position(cell), to = this.position(road), dx = Math.sign(Math.round(to.x - from.x)), dz = Math.sign(Math.round(to.z - from.z));
+    if (!dx === !dz) return;
+    this.box(tile, dx * .74, .1, dz * .74, dx ? .4 : .46, .014, dz ? .4 : .46, '#cfccc3', false);
   }
   box(parent: Entity, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string | StandardMaterial, castShadows = sy > .12) {
     const entity = new Entity('Original primitive');
@@ -598,7 +605,9 @@ export class CityView {
       const civic = civicByCell?.get(i);
       // Open venues light up at night and show today's crowd; both live only on the parcel that draws the site.
       const civicLife = civic && i === civic.cell ? `${civicOpen(civic)}/${crowds.get(civic.id) ?? 0}` : '';
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${roadClassAt(city, i)}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${civic?.cells?.length ?? 1}:${civicLife}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      // Where the building meets its road: every trip to or from it turns in here.
+      const drive = b ? driveway(city, [i]) : null;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${roadClassAt(city, i)}:${drive}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${civic?.cells?.length ?? 1}:${civicLife}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -686,6 +695,7 @@ export class CityView {
         for (const dz of [-.86, .86]) this.box(tile, 0, .075, dz, 1.8, .03, .08, color, false);
         for (const dx of [-.86, .86]) this.box(tile, dx, .075, 0, .08, .03, 1.8, color, false);
         if (b) {
+          if (drive !== null) this.driveApron(tile, i, drive);
           if (b.zone === 'F') { this.farm(tile, city.resources.fertility[i], b.level); continue; }
           if (b.zone === 'C') { this.commercial(tile, b.level, commercialLit); continue; }
           this.box(tile, 0, .086, 0, 1.63, .018, 1.63, b.zone === 'R' ? this.ground.lawnMaterial : b.zone === 'I' ? this.ground.soilMaterial : '#afb5a8');

@@ -21,14 +21,21 @@ export type RoadClassSpec = {
   dailyUpkeep: number;
 };
 export const ROAD_CLASS: Readonly<Record<RoadClass, RoadClassSpec>> = Object.freeze({
-  local: { label: 'ซอย', lanes: 1, speedKmh: 30, laneCapacityPerHour: 600, upgradeCost: 0, dailyUpkeep: 10 },
+  local: { label: 'ซอย', lanes: 1, speedKmh: 40, laneCapacityPerHour: 600, upgradeCost: 0, dailyUpkeep: 10 },
   collector: { label: 'ถนนรอง', lanes: 1, speedKmh: 50, laneCapacityPerHour: 900, upgradeCost: 4_000, dailyUpkeep: 20 },
   arterial: { label: 'ถนนหลัก', lanes: 2, speedKmh: 60, laneCapacityPerHour: 1_000, upgradeCost: 10_000, dailyUpkeep: 40 },
 });
+/** A local street matches the road network's earlier fixed figures (40 km/h, 600 vehicles a lane an hour), so a city that never upgrades a road routes exactly as before. */
 export type RoadClassState = { version: 1; cells: Record<string, UpgradedRoadClass> };
 type Host = { roadClasses?: RoadClassState; cells: readonly { road: boolean }[] };
 
 export const roadClassAt = (c: Pick<Host, 'roadClasses'>, cell: number): RoadClass => c.roadClasses?.cells[cell] ?? 'local';
+const RANK: Record<RoadClass, number> = { local: 0, collector: 1, arterial: 2 };
+/** The class a link between two road parcels drives at: the lower of its two ends, since the slower end limits it. */
+export function linkRoadClass(c: Pick<Host, 'roadClasses'>, a: number, b: number): RoadClass {
+  const x = roadClassAt(c, a), y = roadClassAt(c, b);
+  return RANK[x] <= RANK[y] ? x : y;
+}
 /** Satang to move one parcel from `from` to `to`: the difference when raising, nothing when lowering. */
 export const roadClassUpgradeCost = (from: RoadClass, to: RoadClass) => Math.max(0, ROAD_CLASS[to].upgradeCost - ROAD_CLASS[from].upgradeCost);
 export const roadUpgradeReason = (cell: number, to: UpgradedRoadClass) => `Upgrade road cell @${cell} to ${to}`;
