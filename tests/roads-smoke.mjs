@@ -106,9 +106,9 @@ async function failedSaveThenRetry(){
 async function selectRoad(mode) { await button('[data-tool="road"]');await until('!document.querySelector("#road-submenu").hidden');
  const layout=await evaluate('(()=>{const a=document.querySelector("[data-tool=road]").getBoundingClientRect(),m=document.querySelector("#road-submenu").getBoundingClientRect();return {a:{x:a.x,y:a.y,w:a.width,h:a.height},m:{x:m.x,y:m.y,b:m.bottom},buttons:[...document.querySelectorAll("#road-submenu button")].map(b=>{const r=b.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}})}})()');
  assert.ok(layout.m.b<=layout.a.y&&layout.m.y>=0,'Submenu above unchanged road button and on screen');
- assert.equal(layout.buttons.length,3,'Only normal, one-way and disconnect tools remain');
+ assert.equal(layout.buttons.length,5,'Normal, one-way, disconnect, and the two road-class upgrades');
  const masks=await evaluate('[...document.querySelectorAll("#road-submenu .road-asset-icon")].map(e=>({mask:getComputedStyle(e).maskImage,w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height}))');
- assert.equal(masks.length,3);for(const [i,name]of ['road','arrows-up','unlink'].entries()){assert.ok(masks[i].mask.endsWith(`/assets/tabler-roads/${name}.svg")`));assert.ok(masks[i].w>=20&&masks[i].h>=20,JSON.stringify(masks[i]));}
+ assert.equal(masks.length,5);for(const [i,name]of ['road','arrows-up','unlink','road','road'].entries()){assert.ok(masks[i].mask.endsWith(`/assets/tabler-roads/${name}.svg")`));assert.ok(masks[i].w>=20&&masks[i].h>=20,JSON.stringify(masks[i]));}
 
  for(const b of layout.buttons){assert.ok(Math.abs(b.x-layout.a.x)<1);assert.ok(Math.abs(b.w-layout.a.w)<1&&Math.abs(b.h-layout.a.h)<1,'Same size as original road button');}
  await button(`[data-road-mode="${mode}"]`);assert.equal(await evaluate('document.querySelector("#road-submenu").hidden'),true);

@@ -271,3 +271,16 @@ html[data-touch-ui=true] .kpi strong { font-size: calc(13 * var(--reader-unit, 1
 .map-legend-item.d3::before { background: #59a14f; } .map-legend-item.d4::before { background: #e15759; }
 .map-legend-item.d5::before { background: #b07aa1; } .map-legend-item.d6::before { background: #76b7b2; }
 .map-legend-item.d7::before { background: #edc948; } .map-legend-item.d8::before { background: #ff9da7; }
+
+/* Photo mode: only the map stays; a small pill at the bottom says how to leave. */
+.atmosphere-photo { width: 100%; min-height: 44px; margin: 8px 0; border: 1px solid rgba(243, 196, 107, .5); border-radius: 10px; background: rgba(243, 196, 107, .14); color: #f3c46b; font-weight: 700; cursor: pointer; }
+#photo-hint { display: none; }
+body.photo-mode > :not(#city-canvas):not(#photo-hint) { display: none !important; }
+body.photo-mode #photo-hint {
+  display: block; position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50;
+  min-height: 40px; padding: 8px 16px; border: 1px solid rgba(255, 255, 255, .25); border-radius: 999px;
+  background: rgba(18, 28, 44, .55); color: rgba(255, 255, 255, .9); font-size: 13px; cursor: pointer;
+  animation: photo-hint-fade 4s ease forwards;
+}
+@keyframes photo-hint-fade { 0%, 70% { opacity: 1; } 100% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { body.photo-mode #photo-hint { animation: none; } }

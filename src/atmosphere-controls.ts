@@ -106,7 +106,10 @@ export class AtmosphereController {
     this.qualityNote.className = 'atmosphere-note'; quality.append(this.qualityNote);
     const note = document.createElement('p'); note.className = 'atmosphere-note';
     note.textContent = 'เวลาในวัน ฤดูกาล และฝนเป็นภาพบรรยากาศเท่านั้น ไม่มีผลต่อการจำลองหรือเซฟ · 1 tick ยังเท่ากับ 1 วัน';
-    this.menu.replaceChildren(heading, this.status, time, quality,
+    // Photo mode is run by the page (it hides the controls), so the button only asks for it.
+    const photo = document.createElement('button'); photo.type = 'button'; photo.className = 'atmosphere-photo'; photo.textContent = '📷 โหมดถ่ายรูป (C)';
+    photo.addEventListener('click', () => document.dispatchEvent(new CustomEvent('city-photo')));
+    this.menu.replaceChildren(heading, this.status, time, quality, photo,
       toggle('ฤดูกาลตามเดือนในเกม', this.settings.seasons, value => this.change({ seasons: value })),
       toggle('ฝนตามฤดู (ภาพตกแต่ง)', this.settings.rain, value => this.change({ rain: value })),
       toggle('แสดงรถ คนเดิน และควันโรงงาน (คงจำนวนเมื่อปรับคุณภาพภาพ)', this.settings.traffic, value => this.change({ traffic: value })),

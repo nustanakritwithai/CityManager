@@ -15,6 +15,7 @@ import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from '.
 import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import { validateDistricts, type DistrictState } from './districts.ts';
+import { ROAD_CLASS, forgetRoadClass, roadClassAt, roadClassUpgradeCost, roadUpgradeReason, roadUpkeep, setRoadClass, validateRoadClasses, type RoadClass, type RoadClassState } from './road-classes.ts';
 import { UNLOCK_POPULATION, cityPopulation, newlyUnlocked, peopleToUnlock, validateUnlocks, type UnlockState } from './unlocks.ts';
 import { BURGLARY_REASON, INCIDENT, INCIDENT_LABELS, INCIDENT_MIN_POPULATION, MEDICAL_REASON, fireReason, incidentRoll, type IncidentKind } from './incidents.ts';
 import { BUDGET_LABELS, DEPARTMENT_OF, MAX_BUDGET_LEVEL, budgetLevel, funded, isBudgetLevel, setBudgetLevel, validateBudget, type BudgetDepartment, type BudgetLevel, type BudgetState } from './budget.ts';
@@ -103,6 +104,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   /** Present only in cities started with progression: larger places open as the population grows. */
   unlocks?: UnlockState;
   districts?: DistrictState;
+  /** Upgraded road parcels (collector or arterial); absent means every road is a local street. */
+  roadClasses?: RoadClassState;
   /** Optional bus depots/stops/lines (PR B2). Absent = no bus data; saves stay byte-identical. */
   bus?: BusState;
 };
@@ -621,6 +624,24 @@ export function buildRoad(c: City, a: number, b: number): Result {
   c.lastEvent = message;
   return { ok: true, message };
 }
+/**
+ * Raise or lower the class of the road parcels along a drag. Only existing road parcels change; raising pays the
+ * difference per parcel into roadworks (not refunded on demolition), lowering is free.
+ */
+export function setRoadClassAlong(c: City, a: number, b: number, to: RoadClass): Result {
+  const path = roadPath(a, b);
+  if (!path.length || path.some(i => !validIndex(i, c))) return { ok: false, message: 'Road is outside the bounded map.' };
+  const roads = path.filter(i => c.cells[i].road && roadClassAt(c, i) !== to);
+  if (!path.some(i => c.cells[i].road)) return { ok: false, message: 'ลากบนถนนที่มีอยู่เพื่อเปลี่ยนระดับถนน' };
+  if (!roads.length) return { ok: true, message: `ถนนช่วงนี้เป็น${ROAD_CLASS[to].label}อยู่แล้ว` };
+  const cost = roads.reduce((n, i) => n + roadClassUpgradeCost(roadClassAt(c, i), to), 0);
+  if (treasurySpendable(c) < cost) return { ok: false, message: `ต้องใช้ ${(cost / 100).toLocaleString('th-TH')} เครดิตเพื่อยกระดับถนนช่วงนี้` };
+  for (const i of roads) { const pay = roadClassUpgradeCost(roadClassAt(c, i), to); if (pay && to !== 'local') transfer(c, 'treasury', 'roadworks', pay, roadUpgradeReason(i, to)); }
+  setRoadClass(c, roads, to);
+  const spec = ROAD_CLASS[to];
+  c.lastEvent = `เปลี่ยน ${roads.length} ช่องเป็น${spec.label} · ${spec.lanes} เลนต่อทิศ · ${spec.speedKmh} กม./ชม.${cost ? ` · จ่าย ${(cost / 100).toLocaleString('th-TH')} เครดิต` : ''}`;
+  return { ok: true, message: c.lastEvent };
+}
 /** Selected parallel paths do not join every adjacent side. Existing roads remain legacy until explicitly edited. */
 export function buildParallelRoad(c: City, a: number, b: number, oneWay = false): Result {
   const path=roadPath(a,b);
@@ -736,7 +757,7 @@ export function bulldoze(c: City, i: number): Result {
   }
   const wasRoad = cell.road;
   if (wasRoad) refund();
-  forgetRoadTopology(c, i);
+  forgetRoadTopology(c, i); forgetRoadClass(c, i);
   cell.road = false; cell.zone = null; cell.building = null;
   const lostStops = reconcileBusStops(c, SIZE);
   c.lastEvent = lostStops.length ? `Parcel cleared. Bus stop #${lostStops.join(', #')} removed with the road.` : 'Parcel cleared. Disconnected buildings stop recruiting, trading and growing.';
@@ -1711,7 +1732,7 @@ function advanceToReview(c: City): void {
   const opened = newlyUnlocked(c, peopleBefore, cityPopulation(c));
   if (opened.length) c.lastEvent = `ปลดล็อกแล้ว: ${opened.map(kind => CIVIC[kind].label).join(' · ')} · เมืองมีประชากร ${cityPopulation(c)} คน`;
   c.happiness = advanceHappiness(c, c.happiness);
-  transfer(c, 'treasury', 'upkeep', c.cells.filter(cell => cell.road).length * 10, 'Daily road upkeep');
+  transfer(c, 'treasury', 'upkeep', roadUpkeep(c), 'Daily road upkeep'); // 10 per local street, more for upgraded roads
   if (c.tick % MONTH === 0) { settleMonth(c); takeOver(c); }
 }
 /**
@@ -1828,6 +1849,7 @@ export function serialize(c: City, market?: City['market']): string {
   if (c.budget !== undefined) validateBudget(c.budget);
   if (c.unlocks !== undefined) validateUnlocks(c.unlocks);
   if (c.districts !== undefined) validateDistricts(c.districts, c.cells.length);
+  if (c.roadClasses !== undefined) validateRoadClasses(c.roadClasses, c);
   if (c.bus !== undefined) validateBus(c.bus, busValidationView(c));
   const envelope = { ...c, commercialUnifiedStartTick: c.commercialUnifiedStartTick ?? c.tick, commercialUnifiedBaseline: c.commercialUnifiedBaseline ?? {moneyEntries:moneyJournalLength(c),cropEntries:cropJournalLength(c),goodsEntries:goodsJournalLength(c)}, ...(expanded ? {populationCapacityVersion: 1} : {}), ...(businesses ? {businessCapacityVersion: 1} : {}), foodDemandStartTick: c.foodDemandStartTick ?? c.tick, factoryProgressionStartTick: c.factoryProgressionStartTick ?? c.tick, farmLevelStartTick: c.farmLevelStartTick ?? c.tick, version: businesses ? 23 : educated ? 22 : expanded ? 21 : c.roadTopology ? 20 : 19, rulesVersion: businesses ? 'chain-18' : educated ? 'chain-17' : expanded ? 'chain-16' : c.roadTopology ? 'chain-15' : 'chain-14', ...(market ? { market } : {}) };
   const inner = c.history ? {...envelope, historyBaseVersion:envelope.version, version:24, rulesVersion:'chain-19'} : envelope;
@@ -2314,6 +2336,7 @@ export function deserialize(json: string): City {
   if ('budget' in city) validateBudget(city.budget);
   if ('unlocks' in city) validateUnlocks(city.unlocks);
   if ('districts' in city) validateDistricts(city.districts, city.cells.length);
+  if ('roadClasses' in city) validateRoadClasses(city.roadClasses, city);
   if ('bus' in city) { validateBus(city.bus, busValidationView(city)); reconcileBusStops(city, SIZE); }
   if (city.foodDemandStartTick === undefined) city.foodDemandStartTick = city.tick;
   if (city.factoryProgressionStartTick === undefined) city.factoryProgressionStartTick = city.tick;
