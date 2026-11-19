@@ -1,6 +1,9 @@
 import { sessionMemory } from '../session-memory.ts';
-/** This independent game layer is enabled only after integration acceptance. */
-export const TRAFFIC_GAME_DEFAULT = true;
+/**
+ * The allocation traffic game draws vehicles from aggregate demand. Off by default: the city's traffic is
+ * now each household's own vehicle on its real trip (see commute.ts). It stays available with ?traffic=1.
+ */
+export const TRAFFIC_GAME_DEFAULT = false;
 export const TRAFFIC_STORAGE_KEY = 'citymanager.traffic';
 type TrafficStorage = Pick<Storage, 'getItem' | 'setItem'>;
 function defaultStorage():TrafficStorage|undefined { return sessionMemory; }

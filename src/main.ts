@@ -812,7 +812,7 @@ async function boot() {
   parkScene = new SceneParkActivity(view);
   railUi=installRailManagement({view,city:()=>city,runtime:()=>parkRuntime,selectTool:()=>{setTool('select');inspector(false);},changed:()=>render(),repaint:()=>render(),status,enabled:true});
   view.app.once('destroy',()=>railUi?.destroy());
-  view.traffic.setWalkersEnabled(false);
+  // Walkers on the street are residents really walking to work, beside the park scene's real visitors.
   let trafficEnabled=trafficModelEnabled();
   const trafficSection=document.createElement('section');trafficSection.id='traffic-game-status';trafficSection.className='growth-section';
   const trafficTitle=document.createElement('h3');trafficTitle.textContent='การจราจรจำลอง';
