@@ -12,7 +12,8 @@ import { commercialVisualPlan } from './commercial-visuals.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
-import { civicCells, civicFootprint, type CivicKind } from './civic/sites.ts';
+import { civicCells, civicFootprint, civicOpen, type CivicKind } from './civic/sites.ts';
+import { venueCrowds } from './venue-life.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, diffRoads, dustPuff, placeList, buildScale, DUST_SECONDS, type BuildingState, type BuildEvent } from './build-events.ts';
 import { INCIDENT_SECONDS, flameHeight, lightLit, markFade, smokePuff, type IncidentMark } from './incident-marks.ts';
@@ -31,6 +32,16 @@ const UNIT = 2;
 /** At most this many dust clouds at once; the oldest goes first. */
 const MAX_DUST = 8;
 const PAVE_SECONDS = .45;
+/** Where today's visitors stand at each kind of venue, as [x, z, ground height] in the venue's own space. */
+const CROWD_SPOTS: Partial<Record<CivicKind, readonly (readonly [number, number, number?])[]>> = {
+  stadium: [[-.55, -.62, .35], [.25, .62, .35], [-.2, -.62, .35], [.55, .62, .35], [.15, -.62, .35], [-.5, .62, .35], [.5, -.62, .35], [-.15, .62, .35]],
+  concert: [[-.55, .1], [0, .12], [.5, .05], [-.3, .3], [.3, .32], [-.6, .5], [.05, .5], [.55, .55]],
+  amusement: [[-.2, .2], [.1, -.05], [-.75, .25], [0, .5], [.8, -.15], [.2, -.3], [-.1, .78], [.78, .82]],
+  nightmarket: [[-.7, .02], [-.4, -.08], [-.15, .06], [.1, -.06], [.35, .08], [.6, -.04], [-.55, .12], [.75, .1]],
+  cinema: [[-.5, .64], [-.25, .72], [0, .62], [.25, .7], [.5, .64], [-.7, .78], [.7, .76], [.05, .84]],
+  restaurant: [[.5, .78], [.7, .82], [.9, .72], [.45, .38], [.95, .4], [-.6, .7], [-.3, .76], [0, .8]],
+};
+const CROWD_COLOURS = ['#e07bb5', '#5aa9e6', '#f3c46b', '#7bd389', '#c8452f', '#8a6fc4', '#f4efe4', '#3f7fc4'];
 /** Incident marks alive at once; the oldest goes first. */
 const MAX_INCIDENT_FX = 10;
 const hashCell = (n: number) => ((Math.imul(n >>> 0, 2654435761) >>> 13) & 0xffff);
@@ -532,6 +543,7 @@ export class CityView {
     // One lookup table per refresh: a city without services pays nothing per parcel.
     const civicByCell = city.civic?.sites.length ? new Map(city.civic.sites.flatMap(site => civicCells(site).map(cell => [cell, site] as const))) : undefined;
     const fadeLater: Entity[] = [];
+    const crowds = venueCrowds(city);
     for (let i = 0; i < city.cells.length; i++) {
       const cell = city.cells[i], b = city.buildings.find(b => b.cell === i);
       const coord=expandedCellCoordinate(i); const neighbor=(dx:number,dz:number)=>expandedCellAt(coord.x+dx,coord.z+dz);
@@ -551,7 +563,9 @@ export class CityView {
       const campus = city.education?.campuses.find(item => item.cell === i);
       const stand = this.taxiDepots.find(d => d.cell === i);
       const civic = civicByCell?.get(i);
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${civic?.cells?.length ?? 1}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      // Open venues light up at night and show today's crowd; both live only on the parcel that draws the site.
+      const civicLife = civic && i === civic.cell ? `${civicOpen(civic)}/${crowds.get(civic.id) ?? 0}` : '';
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${civic?.cells?.length ?? 1}:${civicLife}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -604,8 +618,9 @@ export class CityView {
         // A larger site is drawn once, from its top-left parcel, stretched over its footprint; its other parcels stay bare.
         if (i === civic.cell) {
           const [columns, rows] = civic.cells ? civicFootprint(civic.kind) : [1, 1];
-          if (columns * rows === 1) this.civic(tile, civic.kind);
-          else { const piece = new Entity('Civic set piece'); piece.setLocalPosition((columns - 1) * UNIT / 2, 0, (rows - 1) * UNIT / 2); piece.setLocalScale(columns * 1.06, Math.min(columns, rows), rows * 1.06); tile.addChild(piece); this.civic(piece, civic.kind); }
+          const open = civicOpen(civic), crowd = crowds.get(civic.id) ?? 0;
+          if (columns * rows === 1) this.civic(tile, civic.kind, open, crowd);
+          else { const piece = new Entity('Civic set piece'); piece.setLocalPosition((columns - 1) * UNIT / 2, 0, (rows - 1) * UNIT / 2); piece.setLocalScale(columns * 1.06, Math.min(columns, rows), rows * 1.06); tile.addChild(piece); this.civic(piece, civic.kind, open, crowd); }
         }
       } else if (plant) {
         this.plant(tile, plant.kind, plantOn, plantLevel(plant));
@@ -733,14 +748,33 @@ export class CityView {
   }
   /** The complete garden stays inside one 2-unit tile, independently of roads. */
   /** A city service or place: one small set piece per kind, in its own colour, that reads from above. */
-  private civic(tile: Entity, kind: CivicKind) {
+  /** A lamp colour that glows after dark; cached per colour and strength, and dimmed by day with the window lights. */
+  private lamp(hex: string, strength: number) {
+    const key = `lamp:${hex}:${strength}`, cached = this.materials.get(key); if (cached) return cached;
+    const material = this.material(hex).clone() as StandardMaterial; material.emissive = new Color().fromString(hex); material.update();
+    this.atmosphere.registerGlow(material, strength); this.materials.set(key, material); return material;
+  }
+  /** Today's visitors as small figures on the spots each kind of venue keeps for them. */
+  private crowd(tile: Entity, kind: CivicKind, count: number) {
+    const spots = CROWD_SPOTS[kind]; if (!spots || !count) return;
+    for (let k = 0; k < Math.min(count, spots.length); k++) {
+      const [x, z, y = .1] = spots[k], colour = CROWD_COLOURS[(k * 3 + kind.length) % CROWD_COLOURS.length];
+      this.box(tile, x, y + .09, z, .07, .18, .07, colour, false); this.box(tile, x, y + .21, z, .06, .06, .06, '#f1d3b3', false);
+    }
+  }
+  private civic(tile: Entity, kind: CivicKind, open = false, crowd = 0) {
+    this.civicModel(tile, kind, open);
+    this.crowd(tile, kind, crowd);
+  }
+  private civicModel(tile: Entity, kind: CivicKind, open: boolean) {
+    const glow = (hex: string, strength: number) => open ? this.lamp(hex, strength) : hex;
     if (kind === 'stadium') {
       // Pitch with two stands and floodlight masts.
       this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#9aa19a', false);
       this.box(tile, 0, .1, 0, 1.2, .04, .78, '#4fb06a', false);
       this.box(tile, 0, .125, 0, .02, .005, .78, '#f2f5ee', false);
       for (const z of [-.66, .66]) { this.box(tile, 0, .22, z, 1.5, .26, .24, '#d9dde3'); this.box(tile, 0, .4, z * 1.08, 1.5, .1, .12, '#c8452f'); }
-      for (const [x, z] of [[-.8, -.8], [.8, -.8], [-.8, .8], [.8, .8]]) { this.box(tile, x, .55, z, .05, 1, .05, '#8b929c'); this.box(tile, x, 1.08, z, .2, .1, .08, '#f6f1c7'); }
+      for (const [x, z] of [[-.8, -.8], [.8, -.8], [-.8, .8], [.8, .8]]) { this.box(tile, x, .55, z, .05, 1, .05, '#8b929c'); this.box(tile, x, 1.08, z, .2, .1, .08, glow('#f6f1c7', 2.4)); }
       return;
     }
     if (kind === 'airport') {
@@ -771,7 +805,7 @@ export class CityView {
       this.box(tile, 0, .05, 0, 1.8, .08, 1.8, '#c9d7a8', false);
       for (const x of [-.62, -.18]) this.box(tile, x, .5, -.4, .05, .9, .05, '#8b929c');
       this.box(tile, -.4, .95, -.4, .5, .05, .05, '#8b929c');
-      for (const [x, y] of [[-.4, 1.32], [-.4, .58], [-.77, .95], [-.03, .95], [-.66, 1.21], [-.14, 1.21], [-.66, .69], [-.14, .69]]) this.box(tile, x, y, -.4, .13, .13, .1, ['#e07bb5', '#f3c46b', '#5aa9e6', '#7bd389'][Math.round((x + y) * 10) & 3]);
+      for (const [x, y] of [[-.4, 1.32], [-.4, .58], [-.77, .95], [-.03, .95], [-.66, 1.21], [-.14, 1.21], [-.66, .69], [-.14, .69]]) this.box(tile, x, y, -.4, .13, .13, .1, glow(['#e07bb5', '#f3c46b', '#5aa9e6', '#7bd389'][Math.round((x + y) * 10) & 3], 1.2));
       this.box(tile, .45, .3, .35, .7, .4, .7, '#f4efe4'); this.box(tile, .45, .58, .35, .78, .16, .78, '#c8452f'); this.box(tile, .45, .74, .35, .46, .14, .46, '#f3c46b'); this.box(tile, .45, .9, .35, .16, .16, .16, '#c8452f');
       this.box(tile, -.5, .22, .5, .3, .28, .3, '#5aa9e6');
       return;
@@ -784,7 +818,7 @@ export class CityView {
       }
       for (const x of [-.8, .8]) this.box(tile, x, .45, 0, .04, .8, .04, '#5b6068');
       this.box(tile, 0, .84, 0, 1.6, .02, .02, '#5b6068');
-      for (const x of [-.6, -.3, 0, .3, .6]) this.box(tile, x, .78, 0, .07, .07, .07, '#ffe9a3');
+      for (const x of [-.6, -.3, 0, .3, .6]) this.box(tile, x, .78, 0, .07, .07, .07, glow('#ffe9a3', 2));
       return;
     }
     if (kind === 'concert') {
@@ -793,7 +827,7 @@ export class CityView {
       this.box(tile, 0, .2, -.55, 1.3, .22, .5, '#3a3f4a');
       for (const x of [-.62, .62]) { this.box(tile, x, .62, -.55, .06, .9, .06, '#8b929c'); this.box(tile, x * 1.25, .36, -.4, .2, .5, .2, '#22262d'); }
       this.box(tile, 0, 1.08, -.55, 1.4, .08, .6, '#3f6fd8');
-      for (const x of [-.4, 0, .4]) this.box(tile, x, 1, -.3, .1, .08, .08, ['#f3c46b', '#e07bb5', '#7bd389'][Math.round(x * 2.5) + 1]);
+      for (const x of [-.4, 0, .4]) this.box(tile, x, 1, -.3, .1, .08, .08, glow(['#f3c46b', '#e07bb5', '#7bd389'][Math.round(x * 2.5) + 1], 2.2));
       for (const [x, z] of [[-.5, .2], [-.15, .35], [.2, .2], [.5, .4], [-.3, .6], [.1, .65]]) this.box(tile, x, .16, z, .08, .16, .08, '#e9eef5');
       return;
     }
@@ -806,7 +840,7 @@ export class CityView {
     if (kind === 'clinic') { this.box(tile, -.1, .95, -.15, .5, .06, .16, trim); this.box(tile, -.1, .95, -.15, .16, .06, .5, trim); }
     else if (kind === 'police') { this.box(tile, -.1, .95, -.15, .3, .16, .3, trim); this.box(tile, .62, .62, .6, .05, 1.1, .05, '#8b929c'); this.box(tile, .72, 1.08, .6, .22, .14, .02, trim); }
     else if (kind === 'hospital') { this.box(tile, .5, .62, -.5, .5, 1.1, .5, wall); this.box(tile, .5, 1.2, -.5, .56, .06, .56, trim); this.box(tile, -.3, .95, -.15, .46, .06, .14, trim); this.box(tile, -.3, .95, -.15, .14, .06, .46, trim); }
-    else if (kind === 'cinema') { this.box(tile, -.1, 1.02, .2, .9, .34, .1, '#22262d'); this.box(tile, -.1, 1.02, .26, .78, .24, .02, '#ffe9a3'); this.box(tile, -.1, .6, .44, .7, .1, .16, trim); }
+    else if (kind === 'cinema') { this.box(tile, -.1, 1.02, .2, .9, .34, .1, '#22262d'); this.box(tile, -.1, 1.02, .26, .78, .24, .02, glow('#ffe9a3', 1.8)); this.box(tile, -.1, .6, .44, .7, .1, .16, trim); }
     else if (kind === 'restaurant') { this.box(tile, -.1, .62, .5, 1.2, .06, .3, trim); for (const x of [.6, .78]) { this.box(tile, x, .2, .55, .12, .2, .12, '#f4efe4'); this.box(tile, x, .38, .55, .22, .04, .22, trim); } this.box(tile, .3, 1, -.4, .14, .4, .14, '#8b929c'); }
     else if (kind === 'museum') { for (const x of [-.56, -.33, -.1, .13, .36]) this.box(tile, x, .42, .42, .07, .7, .07, '#f7f9f7'); this.box(tile, -.1, .92, .3, 1.1, .16, .3, trim); this.box(tile, -.1, 1.04, .3, .6, .1, .2, trim); }
     else if (kind === 'fire') { this.box(tile, .68, .7, -.5, .34, 1.3, .34, wall); this.box(tile, .68, 1.38, -.5, .4, .08, .4, trim); this.box(tile, -.32, .3, .39, .6, .46, .04, trim); }

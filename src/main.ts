@@ -94,6 +94,7 @@ import { installAudioPanel } from './audio-panel.ts';
 import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from './audio-cues.ts';
 import { moneyMark, moneyPops } from './money-pops.ts';
 import { incidentMarks } from './incident-marks.ts';
+import { venueSounds } from './venue-life.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
@@ -1133,7 +1134,8 @@ async function boot() {
       traffic = Math.min(1, city.households.reduce((n, h) => n + h.members, 0) / 40);
       factories = Math.min(1, new Set(city.cropLedger.filter(e => e.kind === 'process' && e.tick === city.tick).map(e => e.from)).size / 3);
     }
-    audio.updateAmbience({ ...visual.soundscape, traffic, factories, closeness: Math.min(1, Math.max(0, (130 - view.radius) / 100)) });
+    const closeness = Math.min(1, Math.max(0, (130 - view.radius) / 100)), soundscape = visual.soundscape;
+    audio.updateAmbience({ ...soundscape, traffic, factories, closeness, venues: venueSounds(city.civic?.sites ?? [], view.target, i => view.position(i), soundscape.phase, closeness) });
     if (taxiFeature && trafficOn && trafficLayer) {
       if (!taxiView) taxiView = new SceneTaxiVehicles(view.app);
       const fleet = trafficLayer.taxiFleet();

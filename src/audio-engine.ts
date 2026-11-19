@@ -22,7 +22,9 @@ export const TRACKS = [
   { file: 'music-apple-cider.mp3', title: 'Apple Cider', artist: 'Zane Little Music' },
 ] as const;
 /** What the ambience follows, each 0–1 except the phase. */
-export type AmbienceState = { phase: 'night' | 'dawn' | 'day' | 'dusk'; rain: number; traffic: number; factories: number; closeness: number };
+/** Venue layers near the camera (see venue-life.ts), each 0–1; absent means none. */
+export type VenueAmbience = { crowd: number; chatter: number; temple: number; airport: number };
+export type AmbienceState = { phase: 'night' | 'dawn' | 'day' | 'dusk'; rain: number; traffic: number; factories: number; closeness: number; venues?: VenueAmbience };
 
 const busOf = (name: SoundName): AudioBus => name.startsWith('ui-') ? 'ui' : 'events';
 
@@ -34,7 +36,9 @@ export class AudioEngine {
   private readonly buffers = new Map<EffectName, AudioBuffer>();
   private music: HTMLAudioElement | null = null;
   private track = Math.floor(Math.random() * TRACKS.length);
-  private ambience: { rain: GainNode; wind: GainNode; city: GainNode; factory: GainNode; birds: GainNode; crickets: GainNode } | null = null;
+  private ambience: { rain: GainNode; wind: GainNode; city: GainNode; factory: GainNode; birds: GainNode; crickets: GainNode; crowd: GainNode; chatter: GainNode; venue: GainNode } | null = null;
+  private nextBell = 0;
+  private nextPlane = 0;
   private nextChirp = 0;
   private readonly played: { name: string; at: number }[] = [];
   private failed = '';
@@ -93,6 +97,11 @@ export class AudioEngine {
     glide(a.crickets, (1 - day) * (1 - state.rain) * .05);
     a.birds.gain.value = day * (1 - state.rain) * (.25 + state.closeness * .35);
     if (day > 0 && state.rain < .5 && t >= this.nextChirp) { this.chirp(ctx, a.birds, t); this.nextChirp = t + 1.5 + Math.random() * 5; }
+    // Venues near the camera: a crowd swelling at a stadium or concert, chatter at a market, a temple bell, a passing plane.
+    const v = state.venues ?? { crowd: 0, chatter: 0, temple: 0, airport: 0 }, dry = 1 - state.rain * .5;
+    glide(a.crowd, v.crowd * .22 * dry); glide(a.chatter, v.chatter * .12 * dry);
+    if (v.temple > .05 && t >= this.nextBell) { this.bell(ctx, a.venue, t, v.temple); this.nextBell = t + 9 + Math.random() * 7; }
+    if (v.airport > .05 && t >= this.nextPlane) { this.plane(ctx, a.venue, t, v.airport); this.nextPlane = t + 25 + Math.random() * 20; }
   }
 
   diagnostics() {
@@ -148,7 +157,15 @@ export class AudioEngine {
     const chirpTone = ctx.createOscillator(), am = ctx.createGain(), pulse = ctx.createOscillator(), pulseDepth = ctx.createGain();
     chirpTone.frequency.value = 4700; pulse.type = 'square'; pulse.frequency.value = 26; pulseDepth.gain.value = .5; am.gain.value = .5;
     pulse.connect(pulseDepth).connect(am.gain); chirpTone.connect(am).connect(crickets); chirpTone.start(); pulse.start();
-    this.ambience = { rain, wind, city, factory, birds, crickets };
+    // Venue layers: brown noise around 700 Hz swelling slowly for a crowd; a fast-pulsed 1.4 kHz band for chatter.
+    const crowd = layer(), chatter = layer(), venue = ctx.createGain(); venue.connect(out);
+    const crowdSwell = ctx.createGain(), swellLfo = ctx.createOscillator(), swellDepth = ctx.createGain();
+    crowdSwell.gain.value = .75; swellLfo.frequency.value = .23; swellDepth.gain.value = .25; swellLfo.connect(swellDepth).connect(crowdSwell.gain); swellLfo.start();
+    this.noise(ctx, true).connect(filter('bandpass', 700, .8)).connect(crowdSwell).connect(crowd);
+    const babble = ctx.createGain(), babbleLfo = ctx.createOscillator(), babbleDepth = ctx.createGain();
+    babble.gain.value = .6; babbleLfo.type = 'triangle'; babbleLfo.frequency.value = 6.5; babbleDepth.gain.value = .4; babbleLfo.connect(babbleDepth).connect(babble.gain); babbleLfo.start();
+    this.noise(ctx, false).connect(filter('bandpass', 1400, 1.5)).connect(babble).connect(chatter);
+    this.ambience = { rain, wind, city, factory, birds, crickets, crowd, chatter, venue };
   }
 
   /** One synthesised cue, at most about 1.5 s, through its bus. */
@@ -174,6 +191,24 @@ export class AudioEngine {
       env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(.18, t + .03); env.gain.exponentialRampToValueAtTime(.0001, t + length);
       src.connect(band).connect(env).connect(out); src.start(t); src.stop(t + length);
     }
+  }
+
+  /** One temple bell strike: three inharmonic sine partials ringing out over about four seconds. */
+  private bell(ctx: AudioContext, out: GainNode, at: number, level: number) {
+    for (const [ratio, peak, length] of [[1, .12, 4], [2.4, .05, 2.6], [4.1, .025, 1.6]] as const) {
+      const osc = ctx.createOscillator(), env = ctx.createGain(); osc.frequency.value = 392 * ratio;
+      env.gain.setValueAtTime(0, at); env.gain.linearRampToValueAtTime(peak * level, at + .01); env.gain.exponentialRampToValueAtTime(.0001, at + length);
+      osc.connect(env).connect(out); osc.start(at); osc.stop(at + length + .05);
+    }
+  }
+  /** A plane passing over: a band of low noise rising and falling in pitch and loudness over five seconds. */
+  private plane(ctx: AudioContext, out: GainNode, at: number, level: number) {
+    const length = 5, buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * length), ctx.sampleRate), data = buffer.getChannelData(0);
+    let last = 0; for (let i = 0; i < data.length; i++) { last = (last + .02 * (Math.random() * 2 - 1)) / 1.02; data[i] = last * 3.5; }
+    const src = ctx.createBufferSource(), band = ctx.createBiquadFilter(), env = ctx.createGain(); src.buffer = buffer;
+    band.type = 'bandpass'; band.Q.value = .9; band.frequency.setValueAtTime(260, at); band.frequency.linearRampToValueAtTime(820, at + length * .5); band.frequency.linearRampToValueAtTime(320, at + length);
+    env.gain.setValueAtTime(0, at); env.gain.linearRampToValueAtTime(.3 * level, at + length * .5); env.gain.linearRampToValueAtTime(0, at + length);
+    src.connect(band).connect(env).connect(out); src.start(at); src.stop(at + length);
   }
 
   /** A short bird phrase: two to four rising sine chirps. */
