@@ -44,7 +44,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, setRoadClassAlong, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import { INCIDENT, INCIDENT_MIN_POPULATION } from './incidents.ts';
 import { UNLOCK_POPULATION, peopleToUnlock } from './unlocks.ts';
 import { paintDistrict } from './districts.ts';
@@ -96,6 +96,7 @@ import { moneyMark, moneyPops } from './money-pops.ts';
 import { incidentMarks } from './incident-marks.ts';
 import { venueSounds } from './venue-life.ts';
 import { isTense } from './music-mood.ts';
+import { ROAD_CLASS } from './road-classes.ts';
 import { FESTIVAL_LABELS, festivalAt, type FestivalKind } from './festivals.ts';
 import { CELEBRATION_SECONDS, milestoneCrossed } from './milestones.ts';
 import { cityPopulation } from './unlocks.ts';
@@ -321,10 +322,15 @@ function cancel() {
   inspector(false); status('กลับสู่แผนที่เมือง');
 }
 function roadHelp() {
+  if (roadMode === 'collector' || roadMode === 'arterial') {
+    const spec = ROAD_CLASS[roadMode];
+    return `ยกเป็น${spec.label} ฿${spec.upgradeCost / 100}/ช่อง · ${spec.lanes} เลนต่อทิศ ${spec.speedKmh} กม./ชม. · ลากบนถนนที่มีอยู่ · ลดระดับไม่เสียเงิน`;
+  }
   return roadMode === 'split' ? 'ตัดทางเชื่อม · แตะถนน 2 ช่องติดกัน · อาจทำให้ถนนหรือน้ำไฟขาด' : roadMode === 'oneway' ? '2 เลนวันเวย์ ฿50/ช่องใหม่ · ลากตรงตามทิศรถ · ใช้ถนนปกติลากเชื่อมทางแยก' : 'ถนนปกติ ฿50/ช่องใหม่ · ด้านข้างแยกเป็นคู่ขนาน · ลากจากถนนเส้นหนึ่งถึงอีกเส้นเพื่อเชื่อมแยก';
 }
 function roadCommand(a: number, b: number) {
   if (roadMode === 'split') return editRoadJunction(city, a, b, false);
+  if (roadMode === 'collector' || roadMode === 'arterial') return setRoadClassAlong(city, a, b, roadMode);
   return buildParallelRoad(city, a, b, roadMode === 'oneway');
 }
 async function activate(index: number) {

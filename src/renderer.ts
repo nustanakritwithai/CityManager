@@ -14,6 +14,7 @@ import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
 import { civicCells, civicFootprint, civicOpen, type CivicKind } from './civic/sites.ts';
 import { venueCrowds } from './venue-life.ts';
+import { roadClassAt } from './road-classes.ts';
 import { pocketPark } from './scene-decor.ts';
 import { diffBuildings, diffRoads, dustPuff, placeList, buildScale, DUST_SECONDS, type BuildingState, type BuildEvent } from './build-events.ts';
 import { INCIDENT_SECONDS, flameHeight, lightLit, markFade, smokePuff, type IncidentMark } from './incident-marks.ts';
@@ -597,7 +598,7 @@ export class CityView {
       const civic = civicByCell?.get(i);
       // Open venues light up at night and show today's crowd; both live only on the parcel that draws the site.
       const civicLife = civic && i === civic.cell ? `${civicOpen(civic)}/${crowds.get(civic.id) ?? 0}` : '';
-      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${civic?.cells?.length ?? 1}:${civicLife}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
+      const signature = `${cell.road}:${cell.zone}:${b?.id}:${b?.level}:${connected.has(i)}:${links}:${city.roadTopology?.oneWay[i] ?? 0}:${roadClassAt(city, i)}:${this.visualRevision}:${fertility}:${lit}:${reach}:${factoryActive}:${factoryPowered}:${commercialLit}:${park}:${municipalPark?.id}:${municipalPark?.level}:${civic?.id}:${civic?.kind}:${civic?.cells?.length ?? 1}:${civicLife}:${plant?.kind}:${plant?.level ?? 1}:${plantOn}:${campus?.id}:${campus?.kind}:${campus?.level}:${campus?.open}${stand ? `:taxi${stand.level}${stand.open ? 1 : 0}` : ''}`;
       if (this.tiles.get(i)?.signature === signature) continue;
       this.tiles.get(i)?.entity.destroy();
       const tile = new Entity(`Parcel ${i}`); const { x, z } = this.position(i); tile.setLocalPosition(x, 0, z); this.app.root.addChild(tile);
@@ -617,6 +618,17 @@ export class CityView {
           this.box(tile, 0, .065, 0, 1.98, .1, 1.98, '#bcc4b8');
           this.box(tile, 0, .12, 0, vertical && !horizontal ? 1.48 : 1.98, .035, horizontal && !vertical ? 1.48 : 1.98, connected.has(i) ? '#46535b' : '#a86155');
           if (!(horizontal && vertical)) this.box(tile, 0, .145, 0, vertical ? .09 : .5, .012, vertical ? .5 : .09, connected.has(i) ? '#eee5bd' : '#ffc7a0');
+        }
+        // Upgraded roads carry their markings on straight runs: a double yellow centre line on a collector,
+        // a yellow median with dashed lane lines either side on an arterial.
+        const roadClass = roadClassAt(city, i);
+        if (roadClass !== 'local' && horizontal !== vertical) {
+          const marks = new Entity(`Road markings ${roadClass}`); tile.addChild(marks); if (vertical) marks.setLocalEulerAngles(0, 90, 0);
+          if (roadClass === 'collector') for (const z of [-.05, .05]) this.box(marks, 0, .178, z, 1.9, .01, .035, '#f2c94c', false);
+          else {
+            this.box(marks, 0, .178, 0, 1.9, .012, .1, '#f2c94c', false);
+            for (const z of [-.46, .46]) for (const x of [-.65, 0, .65]) this.box(marks, x, .178, z, .34, .01, .04, '#f4f6f8', false);
+          }
         }
         const direction = city.roadTopology?.oneWay[i];
         if (direction) {
