@@ -156,6 +156,8 @@ function tripMode(city: City, t: Trip): string {
   const v = t.vehicleId === null ? undefined : city.vehicles?.fleet.find(x => x.id === t.vehicleId);
   if (v && t.mode === 'drive') return `ขับ${VEHICLE[v.kind].label}`;
   if (v && t.mode === 'passenger') return v.kind === 'motorcycle' ? 'ซ้อนมอเตอร์ไซค์คนในบ้าน' : 'นั่งรถยนต์คนในบ้าน';
+  // A firm job with no route there is a day not worked and not paid.
+  if (t.mode === 'unreachable' && t.wage && t.workplace.kind === 'firm') return `${MODE_LABEL.unreachable} · ขาดงานวันนี้ ไม่ได้ค่าแรง`;
   return MODE_LABEL[t.mode];
 }
 function workplaceName(city: City, t: Trip): string {

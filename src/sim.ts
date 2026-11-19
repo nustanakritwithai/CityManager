@@ -15,7 +15,7 @@ import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from '.
 import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import { validateDistricts, type DistrictState } from './districts.ts';
-import { runCommutes, liveVehicles, validateVehicles, type VehicleState } from './commute.ts';
+import { runCommutes, liveVehicles, validateVehicles, freightRoute, type VehicleState } from './commute.ts';
 import { ROAD_CLASS, forgetRoadClass, roadClassAt, roadClassUpgradeCost, roadUpgradeReason, roadUpkeep, setRoadClass, validateRoadClasses, type RoadClass, type RoadClassState } from './road-classes.ts';
 import { UNLOCK_POPULATION, cityPopulation, newlyUnlocked, peopleToUnlock, validateUnlocks, type UnlockState } from './unlocks.ts';
 import { BURGLARY_REASON, INCIDENT, INCIDENT_LABELS, INCIDENT_MIN_POPULATION, MEDICAL_REASON, fireReason, incidentRoll, type IncidentKind } from './incidents.ts';
@@ -1146,27 +1146,38 @@ function agricultureHooks(c: City) {
   const roads = connectedRoads(c), svc = utilityService(c, roads);
   return { served: (buildingId: number) => svc.ok(buildingId), connected: (cell: number) => validIndex(cell, c) && neighbors(cell, c).some(n => roads.has(n)), workers: (f: Firm) => firmWorkerCount(c, f.id),
     spendable: (f: Firm) => spendable(c, f), transfer: (from: string, to: string, amount: number, reason: string, book = false) => transfer(c, from, to, amount, reason, book),
-    goodsTransfer: (from: string, to: string, quantity: number, reason: string, product: ProductId) => goodsTransfer(c, from, to, quantity, reason, product) };
+    goodsTransfer: (from: string, to: string, quantity: number, reason: string, product: ProductId) => goodsTransfer(c, from, to, quantity, reason, product),
+    reachable: freightReach(c) };
 }
 export function economicSignals(c: City) {
   const hooks = agricultureHooks(c);
   return c.firms.map(f => ({ firmId: f.id, ...agricultureDiagnostic(c, f, hooks) }));
 }
+/** Whether a delivery truck has a legal road route from one place to another today (the gateway stands for outside). */
+function freightReach(c: City) {
+  const cell = (f: Firm) => building(c, f.building).cell, memo = new Map<string, boolean>();
+  return (from: Firm | 'gateway', to: Firm | 'gateway') => {
+    const a = from === 'gateway' ? [GATEWAY] : [cell(from)], b = to === 'gateway' ? [GATEWAY] : [cell(to)], key = `${a}>${b}`;
+    let ok = memo.get(key); if (ok === undefined) { ok = freightRoute(c, a, b) !== null; memo.set(key, ok); }
+    return ok;
+  };
+}
 function trade(c: City) {
   const active = c.firms.filter(f => access(c, building(c, f.building).cell));
-  const hooks = agricultureHooks(c), sellable = runAgriculture(c, hooks);
+  const hooks = agricultureHooks(c), sellable = runAgriculture(c, hooks), reach = freightReach(c);
   // Shops stock every product the city makes, an even share of the shelf each, local wholesale first.
   const made = PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
   for (const shop of active.filter(f => isCommercial(f) && firmWorkerCount(c, f.id) > 0)) {
     const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id)).stock, Math.max(4, c.households.reduce((n, h) => n + h.members, 0) * 2)), share = Math.ceil(target / Math.max(1, made.length));
     for (const product of made) {
-      for (const producer of active.filter(f => f.zone === 'I' && f.products[product] > 0)) {
+      // Goods go by truck: only a factory with a road route to the shop can deliver to it.
+      for (const producer of active.filter(f => f.zone === 'I' && f.products[product] > 0 && reach(f, shop))) {
         const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 350));
         if (qty <= 0) continue;
         transfer(c, shop.wallet, producer.wallet, qty * 350, 'Local wholesale goods', true);
         moveProduct(c, producer, shop, product, qty); goodsTransfer(c, producer.wallet, shop.wallet, qty, 'Wholesale stock delivery', product);
       }
-      const imported = Math.min(share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 450));
+      const imported = reach('gateway', shop) ? Math.min(share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 450)) : 0;
       if (imported > 0) {
         transfer(c, shop.wallet, 'outside', imported * 450, 'Outside goods import', true);
         moveProduct(c, null, shop, product, imported); c.goods.imported += imported; goodsTransfer(c, 'outside', shop.wallet, imported, 'Imported shop stock', product);
@@ -1198,7 +1209,7 @@ function trade(c: City) {
     }
     h.needs = purchased === h.members ? 0 : unmetDays;
   }
-  for (const f of active.filter(f => f.zone === 'I' && firmWorkerCount(c, f.id) > 0)) {
+  for (const f of active.filter(f => f.zone === 'I' && firmWorkerCount(c, f.id) > 0 && reach(f, 'gateway'))) {
     const exported = takeLargest(f.products, PRODUCTS, Math.min(f.inventory, firmWorkerCount(c, f.id) * 8));
     for (const product of PRODUCTS) {
       const n = exported[product]; if (!n) continue;

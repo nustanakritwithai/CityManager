@@ -14,6 +14,8 @@ import {
 /** Hooks append only their stated journal and change only named cash accounts. */
 export type AgricultureHooks = {
   connected(cell: number): boolean;
+  /** Whether a truck has a road route from the seller to the buyer today; crops cannot travel without one. */
+  reachable?(from: Firm, to: Firm): boolean;
   /** Whether the building has the water and power it draws today. */
   served(buildingId: number): boolean;
   workers(firm: Firm): number;
@@ -174,13 +176,19 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
     const crop = RECIPE[factory.recipe].crop, sellers = sellersFor.get(crop)!; let source = sourceFor.get(crop)!;
     const b = c.buildings.find(b => b.id === factory.building); if (!b) continue;
     let target: number; try { target = cappedProduct(workers(factory, hooks)!, 4, factoryCropCapacity(b.level)); } catch { continue; }
-    while (source < sellers.length && factory.cropInventory < target) {
-      const { firm: seller, price } = sellers[source], available = Math.min(seller.crops[crop], isCommercial(seller) ? Math.min(seller.cropInventory, sellable.get(seller.id) ?? 0) : seller.cropInventory);
-      if (!isSafeCount(available, 1)) { source++; continue; }
+    // `source` is the first seller any factory may still buy from; a seller this factory cannot reach by road
+    // is passed over for this factory alone (`at`), and stays in line for the next.
+    let at = source;
+    const done = () => { if (at === source) source++; at++; };
+    while (at < sellers.length && factory.cropInventory < target) {
+      const { firm: seller, price } = sellers[at];
+      if (hooks.reachable && !hooks.reachable(seller, factory)) { at++; continue; }
+      const available = Math.min(seller.crops[crop], isCommercial(seller) ? Math.min(seller.cropInventory, sellable.get(seller.id) ?? 0) : seller.cropInventory);
+      if (!isSafeCount(available, 1)) { done(); continue; }
       const budget = hooks.spendable(factory); if (!isSafeCount(budget) || budget < price) break;
       const qty = Math.min(available, target - factory.cropInventory, Math.floor(budget / price));
-      if (!exchange(c, seller, factory, crop, qty, sellable, hooks)) { source++; continue; }
-      if (qty === available) source++;
+      if (!exchange(c, seller, factory, crop, qty, sellable, hooks)) { done(); continue; }
+      if (qty === available) done();
     }
     sourceFor.set(crop, source);
   }
