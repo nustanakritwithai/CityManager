@@ -62,7 +62,9 @@ test('midmonth expansion preserves all earned wages, tax/rent/working reserves a
   assert.equal(c.accounts[child.wallet], 260_000); assert.equal(c.accounts.construction, old.accounts.construction + 40_000); const exports=(x:City|ReturnType<typeof oldCity>)=>x.ledger.filter(e=>e.tick===x.tick&&e.reason==='Outside market goods export').reduce((n,e)=>n+e.amount,0);
   const wholesale=(x:City|ReturnType<typeof oldCity>)=>x.ledger.filter(e=>e.tick===x.tick&&e.reason==='Local wholesale goods').reduce((n,e)=>n+e.amount,0);
   assert.equal(exports(old)-exports(c),wholesale(c)-wholesale(old),'lost exports became recorded local purchases at the same wholesale price');
-  assert.equal(c.accounts.outside+cropExports-(wholesale(c)-wholesale(old)),old.accounts.outside);
+  // Households now also buy their own vehicles and fuel from outside the city.
+  const vehicles = c.ledger.filter(e => e.tick === c.tick && e.to === 'outside' && /^Vehicle (bought|fuel) /.test(e.reason)).reduce((n, e) => n + e.amount, 0);
+  assert.equal(c.accounts.outside+cropExports-(wholesale(c)-wholesale(old))-vehicles,old.accounts.outside);
   for (const key of ['workDays', 'profit', 'lastMonthProfit', 'monthlyRevenue', 'monthlyExpense'] as const) assert.deepEqual(sponsor[key], prior[key]);
   const earned = Object.values(sponsor.workDays).reduce((n, days) => n + days * firmWage(sponsor) / 30, 0);
   const tax = Math.floor(Math.max(0, sponsor.monthlyRevenue - sponsor.monthlyExpense - earned) / 5);

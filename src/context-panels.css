@@ -314,3 +314,8 @@
 #venue-actions button { width: 100%; min-height: 44px; padding: 10px 14px; white-space: normal; overflow-wrap: anywhere; font-weight: 700; color: var(--amber); background: #f3c46b18; border-color: #f3c46b66; }
 #venue-actions button:hover { background: #f3c46b2a; }
 #venue-actions button[data-venue-action="end"] { color: var(--cream); background: #ffffff0d; border-color: #ffffff2e; }
+/* One row per person's real trip to work today: where to, then how, how far and how long. */
+.cx-commute-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cx-commute-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; padding: 7px 10px; border-radius: 10px; background: rgb(255 255 255 / .05); color: #e8efff; font-size: 14px; line-height: 1.45; }
+.cx-commute-how { color: #b2c6ef; }
+.cx-commute-row[data-commute-mode="walk-long"] .cx-commute-how, .cx-commute-row[data-commute-mode="unreachable"] .cx-commute-how { color: #ffd27a; }

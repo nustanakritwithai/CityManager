@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { BUS_FARE_REASON } from '../src/commute.ts';
 import { createCity, step, serialize, deserialize, bulldoze, buildRoad, buildParallelRoad, editRoadJunction, zoneCell, buildPark, connectedRoads, SIZE, type City } from '../src/sim.ts';
 import { configureRoadPath, type RoadMap } from '../src/road-topology.ts';
 import { busDepotAt, busStopAt, busStopSides, reconcileBusStops, BUS_STOP_SPACING } from '../src/bus/buildings.ts';
 import { buildBusDepot, buildBusStop, busDepotReason, busStopSiteReason, removeBusDepot, removeBusStop, toggleBusDepot, upgradeBusDepot, upgradeBusStop, defaultBusStopSide } from '../src/bus/placement.ts';
 import { buildTaxiDepot, taxiSiteReason } from '../src/taxi/placement.ts';
-import { BUS_LIMITS } from '../src/bus/types.ts';
+import { BUS_FARE_SATANG, BUS_LIMITS } from '../src/bus/types.ts';
 
 const grown = () => { const c = createCity(61025); for (let d = 0; d < 20; d++) step(c); return c; };
 const nb = (i: number) => [i - 1, i + 1, i - SIZE, i + SIZE].filter(n => n >= 0 && n < SIZE * SIZE && Math.abs((n % SIZE) - (i % SIZE)) <= 1);
@@ -139,9 +140,13 @@ test('validator rejects bad bus data', () => {
   bad((b, j) => { const t = { version: 1, rules: 'taxi-1', depots: [{ id: j.nextId - 1, cell: b.depots[0].cell, tick: 0, level: 1, open: true }] }; j.taxi = t; j.nextId += 1; b.depots[0].id = j.nextId - 1; }, /bus|taxi/i); // taxi depot on bus depot cell
   assert.doesNotThrow(() => deserialize(JSON.stringify(good)));
 });
-test('economy unchanged over N days with bus sites present', () => {
+test('a running bus line changes the economy only by the fares its riders really pay', () => {
   const a = grown(), b = withBus();
-  const strip = (c: City) => { const j = JSON.parse(serialize(c)); return JSON.stringify({ treasury: j.accounts.treasury, ledger: j.ledger.length }); };
   for (let d = 0; d < 30; d++) { step(a); step(b); }
-  assert.equal(strip(b), strip(a));
+  const fares = b.ledger.filter(e => e.reason === BUS_FARE_REASON), ja = JSON.parse(serialize(a)), jb = JSON.parse(serialize(b));
+  assert.ok(fares.length > 0, 'someone without a vehicle rides the line');
+  assert.ok(fares.every(e => e.to === 'treasury' && e.from.startsWith('household:') && e.amount === 2 * BUS_FARE_SATANG), 'a fare there and back, to the city');
+  assert.equal(jb.accounts.treasury - ja.accounts.treasury, fares.reduce((n, e) => n + e.amount, 0));
+  const plain = (c: City) => c.ledger.filter(e => e.reason !== BUS_FARE_REASON).map(e => [e.tick, e.from, e.to, e.amount, e.reason].join('|'));
+  assert.deepEqual(plain(b), plain(a), 'every other money movement is the same');
 });

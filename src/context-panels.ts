@@ -23,6 +23,7 @@ import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { iconElement } from './ui-icons.ts';
 import { buildingAccess, totalSpaces } from './parking.ts';
+import { MODE_LABEL, VEHICLE, commutesToday, type Trip, type Vehicle } from './commute.ts';
 import { RECENT_ENTRIES, ledgerDigest, type DigestRow } from './ledger-summary.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
@@ -141,8 +142,48 @@ function travelAccess(city: City, building: Building): HTMLElement {
   ];
   if (p.visitor) cards.push(metric('parking-visitor', 'ที่จอดลูกค้า', `${count(p.visitor)} คัน`, p.visitor));
   if (p.loadingBays) cards.push(metric('loading-bays', 'ช่องขนของ', `${count(p.loadingBays)} ช่อง`, p.loadingBays));
+  if (building.zone === 'R') {
+    // Two motorcycles share a space; a car takes a whole one.
+    const homes = new Set(city.households.filter(h => h.home === building.id).map(h => h.id)), parked = (city.vehicles?.fleet ?? []).filter(v => homes.has(v.householdId));
+    const used = parked.reduce((n, v) => n + VEHICLE[v.kind].space, 0);
+    cards.push(metric('parking-used', 'รถที่จอดอยู่', parked.length ? `${count(parked.length)} คัน · ใช้ ${used} / ${count(p.residentOrStaff)} ช่อง` : 'ยังไม่มีรถ', parked.length));
+  }
   panel.append(cardKpis(cards));
   return cardSection(panel, 'travel-access');
+}
+const WORKPLACE_LABEL = { firm: 'ที่ทำงาน', park: 'สวนสาธารณะ', venue: 'สถานที่', campus: 'สถานศึกษา' } as const;
+function tripMode(city: City, t: Trip): string {
+  const v = t.vehicleId === null ? undefined : city.vehicles?.fleet.find(x => x.id === t.vehicleId);
+  if (v && t.mode === 'drive') return `ขับ${VEHICLE[v.kind].label}`;
+  if (v && t.mode === 'passenger') return v.kind === 'motorcycle' ? 'ซ้อนมอเตอร์ไซค์คนในบ้าน' : 'นั่งรถยนต์คนในบ้าน';
+  return MODE_LABEL[t.mode];
+}
+function workplaceName(city: City, t: Trip): string {
+  if (t.workplace.kind === 'firm') {
+    const firm = city.firms.find(f => f.id === t.workplace.id), zone = firm?.zone;
+    return `${zone === 'I' ? 'โรงงาน' : zone === 'F' ? 'ฟาร์ม' : zone === 'C' ? 'ร้านค้า' : WORKPLACE_LABEL.firm} #${t.workplace.id}`;
+  }
+  if (t.workplace.kind === 'venue') { const site = city.civic?.sites.find(x => x.id === t.workplace.id); return site ? `${CIVIC[site.kind].label} #${site.id}` : `${WORKPLACE_LABEL.venue} #${t.workplace.id}`; }
+  return `${WORKPLACE_LABEL[t.workplace.kind]} #${t.workplace.id}`;
+}
+const km = (metres: number) => `${(metres / 1000).toLocaleString('th-TH', { maximumFractionDigits: 1 })} กม.`;
+/** Each working member's real trip today and the household's own vehicles. */
+function householdCommute(city: City, householdId: number): HTMLElement {
+  const trips = commutesToday(city).filter(t => t.householdId === householdId), fleet: Vehicle[] = (city.vehicles?.fleet ?? []).filter(v => v.householdId === householdId);
+  const panel = section('การเดินทางไปทำงานวันนี้', trips.length ? `${count(trips.length)} คน` : 'ไม่มีคนออกไปทำงาน');
+  panel.dataset.householdCommute = String(householdId);
+  // The trips are the data itself, so they stay in view rather than folding behind the ⓘ.
+  const list = el('ul', 'cx-commute-list');
+  for (const t of trips) {
+    const row = el('li', 'cx-commute-row'), where = el('span', 'cx-commute-where', `คนที่ ${t.person} → ${workplaceName(city, t)}`);
+    const how = el('span', 'cx-commute-how', `${tripMode(city, t)}${t.mode === 'unreachable' ? '' : ` · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes ?? 0)))} นาที`}`);
+    Object.assign(row.dataset, { commuteMode: t.mode, distance: String(t.distanceM) }); row.append(where, how); list.append(row);
+  }
+  if (!trips.length) list.append(el('li', 'cx-commute-row', 'วันนี้ไม่มีสมาชิกที่ต้องเดินทางไปทำงาน'));
+  panel.append(list);
+  const cards = fleet.map(v => metric(`vehicle-${v.id}`, `${VEHICLE[v.kind].label} #${v.id}`, `น้ำมัน ${Math.round(v.fuelMl / VEHICLE[v.kind].tankMl * 100)}% · วิ่งแล้ว ${km(v.odometerM)}`, v.odometerM));
+  panel.append(cards.length ? cardKpis(cards) : el('p', 'cx-detail-note', 'ครัวเรือนนี้ยังไม่มีรถ คนที่ทำงานไกลจะซื้อมอเตอร์ไซค์หรือรถยนต์เมื่อเงินเก็บพอ'));
+  return cardSection(panel, 'household-commute');
 }
 function empty(title: string, description: string): HTMLElement {
   const body = el('div', 'cx-empty'); body.setAttribute('role', 'status'); body.append(symbol('empty'), el('h3', '', title), el('p', '', description)); return body;
@@ -805,7 +846,7 @@ export function renderContext(city: City, selection: ContextSelection, onHouseho
   host.dataset.scope = selection.kind;
   if (selection.kind === 'household') {
     host.dataset.entityId = String(selection.id); const household = city.households.find(value => value.id === selection.id); if (household) host.dataset.wallet = household.wallet;
-    const data = householdCardData(city, selection.id), nodes = renderHousehold(city, selection); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
+    const data = householdCardData(city, selection.id), nodes = renderHousehold(city, selection); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes), ...(household ? [householdCommute(city, household.id)] : []));
   } else {
     const place = resolvePlace(city, selection.cell); host.dataset.cell = String(selection.cell);
     if (!place.building) { host.replaceChildren(); return; }
