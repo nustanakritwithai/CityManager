@@ -1,4 +1,5 @@
 import { roadDriveAllowed, roadNeighborsFor, type RoadMap } from '../road-topology.ts';
+import { ROAD_CLASS, linkRoadClass } from '../road-classes.ts';
 /**
  * Directed link graph for the aggregate traffic model, built strictly from road-topology rules:
  * a link a→b exists iff roadDriveAllowed(a,b) — so parallel non-junction roads stay separate,
@@ -23,8 +24,9 @@ export const linkKey = (a: number, b: number) => `${a}>${b}`;
 function makeLink(c: RoadMap, a: number, b: number, capacity = LANE_CAPACITY_VPH): Link {
   // This forward link is legal. Only a forbidden reverse movement makes this segment one-way;
   // an endpoint's perpendicular arrow must not widen a bidirectional junction branch.
-  const lanes = roadDriveAllowed(c, b, a) ? 1 : 2;
-  return { from: a, to: b, length: TILE_LENGTH_M, freeFlowKmh: FREE_FLOW_KMH, lanes, capacityPerHour: lanes * capacity };
+  // The road class sets lanes each way, the speed limit and how much more a lane carries than a local street.
+  const spec = ROAD_CLASS[linkRoadClass(c, a, b)], lanes = (roadDriveAllowed(c, b, a) ? 1 : 2) * spec.lanes;
+  return { from: a, to: b, length: TILE_LENGTH_M, freeFlowKmh: spec.speedKmh, lanes, capacityPerHour: lanes * capacity * spec.laneCapacityPerHour / ROAD_CLASS.local.laneCapacityPerHour };
 }
 function addCell(c: RoadMap, net: LinkNetwork, a: number) {
   for (const b of roadNeighborsFor(c,a)) if (roadDriveAllowed(c, a, b)) net.links.set(linkKey(a, b), makeLink(c, a, b, net.capacityPerLane));

@@ -22,6 +22,7 @@ import { buildingCardData, householdCardData } from './building-card-data.ts';
 import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { iconElement } from './ui-icons.ts';
+import { buildingAccess, totalSpaces } from './parking.ts';
 import { RECENT_ENTRIES, ledgerDigest, type DigestRow } from './ledger-summary.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
@@ -129,6 +130,19 @@ function status(city: City, cell: number): HTMLElement {
 }
 function section(title: string, description?: string): HTMLElement {
   const body = el('section', 'cx-section'), head = el('div', 'cx-section-head'); head.append(el('h3', '', title)); if (description) head.append(el('span', 'cx-count', description)); body.append(head); return body;
+}
+/** Where this building meets the road and what it can park: where every real trip to or from it starts and ends. */
+function travelAccess(city: City, building: Building): HTMLElement {
+  const report = buildingAccess(city, building), p = report.parking, panel = section('ทางเข้าออกและที่จอดรถ', `${count(totalSpaces(p))} ช่องจอด`);
+  panel.dataset.travelAccess = String(building.id);
+  const cards = [
+    metric('driveway', 'ทางเข้าออก', report.driveway === null ? 'ยังไม่ติดถนน' : `${report.roadLabel} · ช่อง ${report.driveway}`, report.driveway ?? 'none'),
+    metric('parking-own', building.zone === 'R' ? 'ที่จอดของผู้อยู่อาศัย' : 'ที่จอดพนักงาน', `${count(p.residentOrStaff)} คัน`, p.residentOrStaff),
+  ];
+  if (p.visitor) cards.push(metric('parking-visitor', 'ที่จอดลูกค้า', `${count(p.visitor)} คัน`, p.visitor));
+  if (p.loadingBays) cards.push(metric('loading-bays', 'ช่องขนของ', `${count(p.loadingBays)} ช่อง`, p.loadingBays));
+  panel.append(cardKpis(cards));
+  return cardSection(panel, 'travel-access');
 }
 function empty(title: string, description: string): HTMLElement {
   const body = el('div', 'cx-empty'); body.setAttribute('role', 'status'); body.append(symbol('empty'), el('h3', '', title), el('p', '', description)); return body;
@@ -797,13 +811,13 @@ export function renderContext(city: City, selection: ContextSelection, onHouseho
     if (!place.building) { host.replaceChildren(); return; }
     host.dataset.entityId = String(place.building.id); host.dataset.buildingId = String(place.building.id);
     if (place.building.zone === 'R') {
-      const data = buildingCardData(city, place.building.id), nodes = renderHouse(city, place.building, place.households, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
+      const data = buildingCardData(city, place.building.id), nodes = renderHouse(city, place.building, place.households, navigateHousehold); if (data) host.dataset.cardKind = data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes), travelAccess(city, place.building));
     } else if (place.firm) {
       // The flow strip names this firm's own crop and product instead of generic "crops/goods".
       const recipe = place.firm.recipe ? RECIPE[place.firm.recipe] : null;
       if (recipe) Object.assign(host.dataset, { goodsIn: CROP_LABELS[recipe.crop], goodsOut: PRODUCT_LABELS[recipe.product] });
       else if (place.firm.zone === 'F') host.dataset.goodsIn = CROP_LABELS[farmCrop(city, place.firm)];
-      host.dataset.wallet = place.firm.wallet; const data = buildingCardData(city, place.building.id), nodes = renderFirm(city, place.building, place.firm, navigateHousehold); if (data) host.dataset.cardKind = place.building.zone === 'C' ? place.building.level <= 3 ? 'market' : 'shop' : data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes));
+      host.dataset.wallet = place.firm.wallet; const data = buildingCardData(city, place.building.id), nodes = renderFirm(city, place.building, place.firm, navigateHousehold); if (data) host.dataset.cardKind = place.building.zone === 'C' ? place.building.level <= 3 ? 'market' : 'shop' : data.kind; host.replaceChildren(...(data ? cardInterior(data, nodes, city) : nodes), travelAccess(city, place.building));
     }
     else host.replaceChildren(empty('ไม่พบข้อมูลบริษัท', 'อาคารนี้ไม่มีบริษัทที่อ้างอิงอยู่ในข้อมูลเมืองปัจจุบัน'));
   }
