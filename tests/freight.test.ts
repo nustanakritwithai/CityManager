@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, buildParallelRoad, access, GATEWAY, SIZE, type City } from '../src/sim.ts';
-import { freightRoute, planCommutes } from '../src/commute.ts';
+import { freightRoute, planCommutes, runCommutes } from '../src/commute.ts';
 
 const grown = () => { const c = createCity(61025); for (let i = 0; i < 60; i++) step(c); return c; };
 const distance = (a: number, b: number) => Math.abs(a % SIZE - b % SIZE) + Math.abs(Math.floor(a / SIZE) - Math.floor(b / SIZE));
@@ -27,16 +27,36 @@ test('a delivery route follows the roads as they can legally be driven, in each 
   assert.ok(freightRoute(c, [firm], [GATEWAY]), 'but it can drive out');
 });
 
-test('a worker with no route to work loses exactly that day’s work credit', () => {
+test('a one-way street binds drivers, but people still walk to work against it and no work day is lost', () => {
   const base = grown(), blocked = oneWayOut(deserialize(serialize(base))), twin = deserialize(serialize(base));
-  const lost = planCommutes(blocked).filter(t => t.mode === 'unreachable' && t.wage && t.workplace.kind === 'firm');
-  assert.ok(lost.length > 0, 'the one-way street cuts some people off from work');
+  assert.equal(planCommutes(blocked).filter(t => t.mode === 'unreachable').length, 0, 'on foot every linked street can be walked either way');
   step(blocked); step(twin);
   const credited = (c: City) => c.firms.reduce((n, f) => n + Object.values(f.workDays).reduce((m, d) => m + d, 0), 0);
-  const unreachable = planCommutes(blocked).filter(t => t.mode === 'unreachable' && t.wage && t.workplace.kind === 'firm').length;
-  assert.equal(blocked.employment.reduce((n, a) => n + a.workers, 0), twin.employment.reduce((n, a) => n + a.workers, 0), 'the same jobs are held');
-  assert.equal(credited(twin) - credited(blocked), unreachable, 'one day less for each person who could not get there');
-  assert.equal(Object.values(blocked.accounts).reduce((n, v) => n + v, 0), 0);
+  assert.equal(credited(blocked), credited(twin), 'the same work days are earned');
+  for (const t of planCommutes(blocked).filter(t => t.mode === 'drive')) {
+    assert.ok(freightRoute(blocked, [t.from!], [t.to!]) && freightRoute(blocked, [t.to!], [t.from!]), 'a driver needs a legal route there and back');
+  }
+});
+
+test('a worker with no linked street to work that day loses exactly that day’s work credit', () => {
+  // Five days into a month, so the day's credit sits on top of earlier unpaid days.
+  const c = grown(); for (let i = 0; i < 5; i++) step(c);
+  const pay = (from: string, to: string, amount: number, reason: string) => {
+    const paid = Math.min(amount, from === 'outside' ? amount : c.accounts[from] ?? 0);
+    c.accounts[from] = (c.accounts[from] ?? 0) - paid; c.accounts[to] = (c.accounts[to] ?? 0) + paid; c.ledger.push({ tick: c.tick, from, to, amount: paid, reason }); return paid;
+  };
+  // Today's jobs are already held and credited; then the street between home and work is dug up.
+  const trip = planCommutes(c).find(t => t.wage && t.workplace.kind === 'firm' && t.route && t.route.length >= 3)!;
+  assert.ok(trip, 'someone walks along the street to work');
+  const cut = trip.route![1];
+  c.cells[cut].road = false;
+  const wallet = c.households.find(h => h.id === trip.householdId)!.wallet, firm = c.firms.find(f => f.id === trip.workplace.id)!;
+  const lost = planCommutes(c).filter(t => t.mode === 'unreachable' && t.wage && t.workplace.kind === 'firm');
+  assert.ok(lost.length > 0, 'cutting the street leaves no way there');
+  const before = firm.workDays[wallet] ?? 0, mine = lost.filter(t => t.householdId === trip.householdId && t.workplace.id === firm.id).length;
+  const day = runCommutes(c, pay);
+  assert.equal(day.missed, lost.length, 'one lost day per person who could not get there');
+  assert.equal(firm.workDays[wallet] ?? 0, Math.max(0, before - mine));
 });
 
 test('goods and crops only travel where a truck can drive', () => {

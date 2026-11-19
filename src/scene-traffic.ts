@@ -4,7 +4,7 @@ import { roadTopologyKey } from './road-topology.ts';
 import { decorativePlan } from './traffic/flag.ts';
 import { Entity, Mesh, MeshInstance, StandardMaterial, Color, BLEND_NORMAL, type AppBase } from 'playcanvas';
 import type { CityView } from './renderer.ts';
-import { MAX_CARS, MAX_TRUCKS, commuteGoal, keyHash, leaderAhead, overlapping, trafficPlan, type CommuteGoal, type Mover, type TrafficPlan } from './traffic-plan.ts';
+import { MAX_CARS, MAX_TRUCKS, commuteGoal, shopGoal, keyHash, leaderAhead, overlapping, trafficPlan, type CommuteGoal, type Mover, type TrafficPlan } from './traffic-plan.ts';
 import { TRAFFIC_SPACING, followingTargetSpeed } from './traffic/spacing.ts';
 import type { City } from './sim.ts';
 import { START_HOUR } from './atmosphere.ts';
@@ -20,7 +20,7 @@ const WAIT_LIMIT = 3, GHOST = 1.2;
 const DWELL = 3;
 type Actor = {
   outbound?: number[]; inbound?: number[]; leg?: 'home' | 'work';
-  key: string; kind: 'car' | 'truck' | 'walker'; small: boolean; entity: Entity; route: number[]; p: number; dir: 1 | -1; speed: number; v: number;
+  key: string; kind: 'car' | 'truck' | 'walker'; small: boolean; shopping: boolean; entity: Entity; route: number[]; p: number; dir: 1 | -1; speed: number; v: number;
   rank: number; depart: number; errand: number; retire: boolean; parked: boolean; dwell: number; waited: number; ghost: number;
   x: number; z: number; hx: number; hz: number;
 };
@@ -132,9 +132,9 @@ export class SceneTraffic {
       if (!route) actor.retire = true;
       else if (route.join() !== (actor.outbound ?? actor.route).join()) { actor.entity.destroy(); this.actors.delete(actor.key); }
     }
-    for (const car of plan.cars) this.add(car.key, 'car', car.route, car.colour, car.returnRoute, car.body === 'motorcycle' ? car.passengers ?? 0 : null);
+    for (const car of plan.cars) this.add(car.key, 'car', car.route, car.colour, car.returnRoute, car.body === 'motorcycle' ? car.passengers ?? 0 : null, !!car.shopping);
     for (const truck of plan.trucks) this.add(truck.key, 'truck', truck.route, truck.colour, truck.returnRoute);
-    for (const walker of plan.walkers) this.add(walker.key, 'walker', walker.route, walker.colour, walker.returnRoute);
+    for (const walker of plan.walkers) this.add(walker.key, 'walker', walker.route, walker.colour, walker.returnRoute, null, !!walker.shopping);
     // Keep the screen within the caps: over them, leaving vehicles go at once (parked ones first).
     for (const [kind, cap] of [['car', MAX_CARS], ['truck', MAX_TRUCKS]] as const) {
       const own = [...this.actors.values()].filter(a => a.kind === kind), leaving = own.filter(a => a.retire).sort((a, b) => Number(b.parked) - Number(a.parked));
@@ -147,7 +147,7 @@ export class SceneTraffic {
   }
 
   /** `motorcycle` is the number of passengers riding pillion, or null for anything but a motorcycle. */
-  private add(key: string, kind: Actor['kind'], route: number[], colour: number, returnRoute?: number[], motorcycle: number | null = null) {
+  private add(key: string, kind: Actor['kind'], route: number[], colour: number, returnRoute?: number[], motorcycle: number | null = null, shopping = false) {
     const existing = this.actors.get(key);
     if (existing) { existing.retire = false; return; }
     const entity = new Entity(`${kind} ${key}`), view = this.view, box = (x: number, y: number, z: number, sx: number, sy: number, sz: number, c: string | StandardMaterial) => view.box(entity, x, y, z, sx, sy, sz, c, false);
@@ -171,7 +171,7 @@ export class SceneTraffic {
     const seed = keyHash(key), pace = keyHash(`${key}:pace`);
     const speed = kind === 'walker' ? .45 + pace * .2 : kind === 'truck' ? 1.5 + pace * .3 : 2 + pace * .6;
     const actor: Actor = {
-      key, kind, small: motorcycle !== null, entity, route, p: seed * Math.max(0, route.length - 1), dir: seed < .5 ? 1 : -1, speed, v: speed, rank: seed,
+      key, kind, small: motorcycle !== null, shopping, entity, route, p: seed * Math.max(0, route.length - 1), dir: seed < .5 ? 1 : -1, speed, v: speed, rank: seed,
       // Commuters only go to work and home: no made-up errands.
       depart: keyHash(`${key}:depart`), errand: 1, retire: false, parked: false, dwell: 0, waited: 0, ghost: 0, x: 0, z: 0, hx: 0, hz: 1,
     };
@@ -182,7 +182,7 @@ export class SceneTraffic {
     this.actors.set(key, actor); if (actor.parked) this.placeParked(actor); else this.move(actor, 0); // placed at once, even while the game is paused
   }
 
-  private goal(actor: Actor): CommuteGoal { return commuteGoal(this.view.atmosphere.hour ?? START_HOUR, actor.depart, actor.errand); }
+  private goal(actor: Actor): CommuteGoal { const hour = this.view.atmosphere.hour ?? START_HOUR; return actor.shopping ? shopGoal(hour, actor.depart) : commuteGoal(hour, actor.depart, actor.errand); }
 
   private parkDirected(actor: Actor, reached: 'home' | 'work') {
     actor.leg = reached === 'home' ? 'work' : 'home';

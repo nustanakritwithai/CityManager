@@ -13,6 +13,7 @@ import type { City } from './sim.ts';
 import { buildNetwork, TILE_LENGTH_M } from './traffic/network.ts';
 import { linkTimes, shortestTree } from './traffic/routing.ts';
 import { driveway } from './parking.ts';
+import { roadLinked, roadNeighborsFor } from './road-topology.ts';
 import { busAccess } from './bus/mode-share.ts';
 import { BUS_CAPACITY, BUS_FARE_SATANG } from './bus/types.ts';
 
@@ -52,6 +53,23 @@ export type Trip = {
 
 /** `wage`: the job earns a day's work credit when worked (employees, park staff, staff of a city-run venue). */
 type Job = { householdId: number; workplace: Trip['workplace']; footprint: number[]; workers: number; wage: boolean };
+/** The walking route between two road parcels (fewest parcels, then lowest parcel numbers), or null when no linked street joins them. */
+function walkRoute(c: City, from: number, to: number): number[] | null {
+  if (from === to) return [from];
+  const roads = roadsOf(c);
+  let tree = roads.walks.get(from);
+  if (!tree) {
+    tree = new Map([[from, -1]]);
+    for (let q = [from], i = 0; i < q.length; i++) for (const n of roadNeighborsFor(c, q[i]).sort((a, b) => a - b)) {
+      if (tree.has(n) || !c.cells[n]?.road || !roadLinked(c, q[i], n)) continue;
+      tree.set(n, q[i]); q.push(n);
+    }
+    roads.walks.set(from, tree);
+  }
+  if (!tree.has(to)) return null;
+  const path = [to]; while (path[0] !== from) path.unshift(tree.get(path[0])!); return path;
+}
+
 /** Everyone who goes to work today, one row per workplace a household sends people to. */
 function jobs(c: City): Job[] {
   const cellOf = new Map(c.buildings.map(b => [b.id, b.cell])), out: Job[] = [];
@@ -73,7 +91,8 @@ function jobs(c: City): Job[] {
 }
 
 const minutesAt = (metres: number, kmh: number) => metres / 1000 / kmh * 60;
-type Roads = { key: string; net: ReturnType<typeof buildNetwork>; times: Map<string, number>; trees: Map<number, Map<number, number>> };
+/** `walks` are walking-route trees: on foot a person follows any linked street, whichever way its one-way arrows point. */
+type Roads = { key: string; net: ReturnType<typeof buildNetwork>; times: Map<string, number>; trees: Map<number, Map<number, number>>; walks: Map<number, Map<number, number>> };
 const roadCache = new WeakMap<City, Roads>();
 /** The road network and its route trees, rebuilt only when a road, a junction, a direction or a road class changes. */
 const roadKey = (c: City) => `${c.cells.map(cell => (cell.road ? 1 : 0)).join('')}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.roadClasses ?? null)}`;
@@ -83,7 +102,7 @@ function roadsOf(c: City): Roads {
   const key = roadKey(c);
   const hit = roadCache.get(c);
   if (hit && hit.key === key) return hit;
-  const net = buildNetwork(c), roads = { key, net, times: linkTimes(net, new Map()), trees: new Map<number, Map<number, number>>() };
+  const net = buildNetwork(c), roads = { key, net, times: linkTimes(net, new Map()), trees: new Map<number, Map<number, number>>(), walks: new Map<number, Map<number, number>>() };
   roadCache.set(c, roads);
   return roads;
 }
@@ -109,7 +128,8 @@ export function planCommutes(c: City): Trip[] {
   for (const job of work) {
     const h = households.get(job.householdId)!, home = cellOf.get(h.home!);
     const from = home === undefined ? null : drive([home]), to = drive(job.footprint);
-    const path = from === null || to === null ? null : route(from, to);
+    // Everyone can at least walk the linked streets; a vehicle below needs a legal driving route there and back.
+    const path = from === null || to === null ? null : walkRoute(c, from, to);
     const distanceM = path ? (path.length - 1) * TILE_LENGTH_M : 0;
     for (let k = 0; k < job.workers; k++) trips.push({ householdId: job.householdId, person: 0, workplace: job.workplace, from, to, route: path, distanceM, mode: path ? 'walk' : 'unreachable', vehicleId: null, minutes: null, wage: job.wage });
   }
@@ -126,12 +146,13 @@ export function planCommutes(c: City): Trip[] {
     for (const t of list) {
       if (t.mode !== 'walk' || !t.route) continue;
       if (t.distanceM <= WALK_MAX_M) { t.minutes = minutesAt(t.distanceM, WALK_KMH); continue; }
-      const vehicle = free.shift();
-      if (vehicle) {
-        Object.assign(t, { mode: 'drive', vehicleId: vehicle.id, minutes: pathMinutes(t.route) });
+      const there = free.length ? route(t.from!, t.to!) : null, back = there ? route(t.to!, t.from!) : null;
+      const vehicle = there && back ? free.shift() : undefined;
+      if (vehicle && there) {
+        Object.assign(t, { mode: 'drive', vehicleId: vehicle.id, route: there, distanceM: (there.length - 1) * TILE_LENGTH_M, minutes: pathMinutes(there) });
         let seats = VEHICLE[vehicle.kind].seats - 1;
         for (const other of list) if (seats > 0 && other !== t && other.mode === 'walk' && other.vehicleId === null && other.to === t.to && other.distanceM > WALK_MAX_M) {
-          Object.assign(other, { mode: 'passenger', vehicleId: vehicle.id, minutes: t.minutes }); seats--;
+          Object.assign(other, { mode: 'passenger', vehicleId: vehicle.id, route: t.route, distanceM: t.distanceM, minutes: t.minutes }); seats--;
         }
         continue;
       }
@@ -249,6 +270,52 @@ export function freightRoute(c: City, from: readonly number[], to: readonly numb
   let tree = trees.get(a); if (!tree) { tree = shortestTree(net, times, a); trees.set(a, tree); }
   if (!tree.has(b)) return null;
   const path = [b]; while (path[0] !== a) path.unshift(tree.get(path[0])!); return path;
+}
+
+/** Whether someone can walk between two places on the linked streets (a road parcel stands for itself). */
+export function canWalk(c: City, from: readonly number[], to: readonly number[]): boolean {
+  const end = (cells: readonly number[]) => cells.length === 1 && c.cells[cells[0]]?.road ? cells[0] : driveway(c, cells);
+  const a = end(from), b = end(to);
+  return a !== null && b !== null && walkRoute(c, a, b) !== null;
+}
+
+export type ShoppingTrip = { householdId: number; shopFirmId: number; from: number; to: number; route: number[]; distanceM: number; mode: 'walk' | 'drive'; vehicleId: number | null; minutes: number };
+const PURCHASE = /^Household #([1-9]\d*) purchase$/;
+/**
+ * Today's real shopping trips: one per household and shop it bought from today (goods or market crops), from
+ * the home driveway to the shop's. A household drives its own vehicle when the shop is beyond walking distance
+ * and the vehicle can legally drive there and back; otherwise it walks.
+ */
+export function shoppingTrips(c: City): ShoppingTrip[] {
+  const firmByWallet = new Map(c.firms.map(f => [f.wallet, f])), byWallet = new Map(c.households.map(h => [h.wallet, h]));
+  const visits = new Set<string>();
+  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick === c.tick; i--) {
+    const e = c.ledger[i], m = PURCHASE.exec(e.reason), h = byWallet.get(e.from), shop = firmByWallet.get(e.to);
+    if (m && h && shop) visits.add(`${h.id}:${shop.id}`);
+  }
+  for (let i = c.cropLedger.length - 1; i >= 0 && c.cropLedger[i].tick === c.tick; i--) {
+    const e = c.cropLedger[i], h = byWallet.get(e.to), shop = firmByWallet.get(e.from);
+    if (e.kind === 'consumption' && h && shop) visits.add(`${h.id}:${shop.id}`);
+  }
+  if (!visits.size) return [];
+  const { net, times, trees } = roadsOf(c);
+  const drive = (from: number, to: number) => { if (from === to) return [from]; let tree = trees.get(from); if (!tree) { tree = shortestTree(net, times, from); trees.set(from, tree); } if (!tree.has(to)) return null; const p = [to]; while (p[0] !== from) p.unshift(tree.get(p[0])!); return p; };
+  const cellOf = new Map(c.buildings.map(b => [b.id, b.cell])), households = new Map(c.households.map(h => [h.id, h])), firms = new Map(c.firms.map(f => [f.id, f]));
+  const out: ShoppingTrip[] = [];
+  for (const key of [...visits].sort()) {
+    const [householdId, shopId] = key.split(':').map(Number), h = households.get(householdId)!, shop = firms.get(shopId)!;
+    const home = h.home === null ? undefined : cellOf.get(h.home), at = cellOf.get(shop.building);
+    const from = home === undefined ? null : driveway(c, [home]), to = at === undefined ? null : driveway(c, [at]);
+    const walk = from === null || to === null ? null : walkRoute(c, from, to);
+    if (!walk || from === null || to === null) continue;
+    const distanceM = (walk.length - 1) * TILE_LENGTH_M, vehicle = (c.vehicles?.fleet ?? []).filter(v => v.householdId === householdId).sort((a, b) => kindOrder(a) - kindOrder(b) || a.id - b.id)[0];
+    const there = vehicle && distanceM > WALK_MAX_M ? drive(from, to) : null, back = there ? drive(to, from) : null;
+    if (vehicle && there && back) {
+      let seconds = 0; for (let k = 1; k < there.length; k++) seconds += times.get(`${there[k - 1]}>${there[k]}`) ?? 0;
+      out.push({ householdId, shopFirmId: shopId, from, to, route: there, distanceM: (there.length - 1) * TILE_LENGTH_M, mode: 'drive', vehicleId: vehicle.id, minutes: seconds / 60 });
+    } else out.push({ householdId, shopFirmId: shopId, from, to, route: walk, distanceM, mode: 'walk', vehicleId: null, minutes: minutesAt(distanceM, WALK_KMH) });
+  }
+  return out;
 }
 
 /** The fleet as it should be saved: vehicles whose household has left the city went with it. */

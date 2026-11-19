@@ -7,7 +7,7 @@ import { roadDriveAllowed, roadTopologyKey } from './road-topology.ts';
  * Read-only over City; no sim RNG, no mutation, nothing enters a save.
  */
 import { GATEWAY, SIZE, connectedRoads, economicSignals, firmWorkerCount, type City } from './sim.ts';
-import { commutesToday } from './commute.ts';
+import { commutesToday, shoppingTrips } from './commute.ts';
 
 export const MAX_CARS = 40, MAX_TRUCKS = 12, MAX_WALKERS = 60;
 /**
@@ -19,9 +19,9 @@ const TRUCKED = ['Wholesale stock delivery', 'Imported shop stock', 'Exported go
 /** Truck cargo, in paint order: the three crops, then the three products. */
 export const CARGO = ['rice', 'vegetables', 'sugarcane', 'milled-rice', 'canned-food', 'sugar'] as const;
 /** `colour` is the paint for cars; for trucks it is the index in CARGO of what the route mostly carries. */
-export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; returnRoute?: number[]; colour: number; body?: 'motorcycle' | 'car'; passengers?: number };
+export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; returnRoute?: number[]; colour: number; body?: 'motorcycle' | 'car'; passengers?: number; shopping?: boolean };
 /** `returnRoute` marks a commuter: out to work in the morning, home in the evening, indoors between. */
-export type Walker = { key: string; route: number[]; colour: number; returnRoute?: number[] };
+export type Walker = { key: string; route: number[]; colour: number; returnRoute?: number[]; shopping?: boolean };
 export type TrafficPlan = { cars: Vehicle[]; trucks: Vehicle[]; walkers: Walker[]; smoke: number[]; signature: string };
 
 const neighbours = (i:number) => expandedCellNeighbors(i);
@@ -57,6 +57,15 @@ export function commuteGoal(hour: number, depart: number, errand: number): Commu
   if (h >= 9.5 && h < 16.5 && errand < .25) return 'cruise';
   if ((h >= 21 || h < 5.5) && errand < .06) return 'cruise';
   return h >= leave && h < back ? 'work' : 'home';
+}
+
+/**
+ * Where a shopper wants to be at a visual hour: out to the shop after work, between 16:30 and 19:30 spread by
+ * `depart` (0–1), for about forty minutes, then home again.
+ */
+export function shopGoal(hour: number, depart: number): 'home' | 'work' {
+  const h = ((hour % 24) + 24) % 24, leave = 16.5 + depart * 2.3;
+  return h >= leave && h < leave + .7 ? 'work' : 'home';
 }
 
 export type Mover = { x: number; z: number; hx: number; hz: number; length: number; width: number; rank: number };
@@ -153,6 +162,15 @@ export function trafficPlan(city: City): TrafficPlan {
       const route = roadRoute(roads, from, to, city), returnRoute = city.roadTopology ? roadRoute(roads, to, from, city) : undefined;
       if (returnRoute && returnRoute.length < 2) continue;
       for (let k = 0; route.length > 1 && k < (f.quantity >= TRUCK_LOAD ? 2 : 1) && trucks.length < MAX_TRUCKS; k++) trucks.push({ key: `truck:${key}:${k}`, kind: 'truck', route, ...(returnRoute ? { returnRoute } : {}), colour: f.loads.indexOf(Math.max(...f.loads)) });
+    }
+    // Shoppers: households going to the shops they really bought from today, on foot or in a vehicle not used for work.
+    const driven = new Set(cars.map(v => v.key));
+    for (const t of shoppingTrips(city)) {
+      if (!onRoads(t.route)) continue;
+      if (t.mode === 'drive' && t.vehicleId !== null && !driven.has(`car:v${t.vehicleId}`) && cars.length < MAX_CARS) {
+        const vehicle = fleet.get(t.vehicleId), returnRoute = back(t.route);
+        if (vehicle && returnRoute) cars.push({ key: `car:v${vehicle.id}:shop`, kind: 'car', route: t.route, ...(city.roadTopology ? { returnRoute } : {}), colour: Math.floor(visualHash(vehicle.id, vehicle.householdId) * 6), body: vehicle.kind, passengers: 0, shopping: true });
+      } else if (t.mode === 'walk' && walkers.length < MAX_WALKERS) walkers.push({ key: `shop:${t.householdId}:${t.shopFirmId}`, route: t.route, returnRoute: [...t.route].reverse(), colour: Math.floor(visualHash(t.householdId, t.shopFirmId + 17) * 6), shopping: true });
     }
     // Walkers: residents who really walk to work today, along their route there and back on the pavement.
     for (const t of trips) {

@@ -23,7 +23,7 @@ import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { iconElement } from './ui-icons.ts';
 import { buildingAccess, totalSpaces } from './parking.ts';
-import { MODE_LABEL, VEHICLE, commutesToday, type Trip, type Vehicle } from './commute.ts';
+import { MODE_LABEL, VEHICLE, commutesToday, shoppingTrips, type Trip, type Vehicle } from './commute.ts';
 import { RECENT_ENTRIES, ledgerDigest, type DigestRow } from './ledger-summary.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
@@ -172,7 +172,7 @@ const km = (metres: number) => `${(metres / 1000).toLocaleString('th-TH', { maxi
 /** Each working member's real trip today and the household's own vehicles. */
 function householdCommute(city: City, householdId: number): HTMLElement {
   const trips = commutesToday(city).filter(t => t.householdId === householdId), fleet: Vehicle[] = (city.vehicles?.fleet ?? []).filter(v => v.householdId === householdId);
-  const panel = section('การเดินทางไปทำงานวันนี้', trips.length ? `${count(trips.length)} คน` : 'ไม่มีคนออกไปทำงาน');
+  const panel = section('การเดินทางวันนี้', trips.length ? `ไปทำงาน ${count(trips.length)} คน` : 'ไม่มีคนออกไปทำงาน');
   panel.dataset.householdCommute = String(householdId);
   // The trips are the data itself, so they stay in view rather than folding behind the ⓘ.
   const list = el('ul', 'cx-commute-list');
@@ -182,6 +182,13 @@ function householdCommute(city: City, householdId: number): HTMLElement {
     Object.assign(row.dataset, { commuteMode: t.mode, distance: String(t.distanceM) }); row.append(where, how); list.append(row);
   }
   if (!trips.length) list.append(el('li', 'cx-commute-row', 'วันนี้ไม่มีสมาชิกที่ต้องเดินทางไปทำงาน'));
+  // Shopping is a real trip too: to each shop the household bought from today.
+  for (const t of shoppingTrips(city).filter(x => x.householdId === householdId)) {
+    const v = t.vehicleId === null ? undefined : city.vehicles?.fleet.find(x => x.id === t.vehicleId);
+    const row = el('li', 'cx-commute-row'), how = t.mode === 'drive' && v ? `ขับ${VEHICLE[v.kind].label}` : 'เดิน';
+    row.append(el('span', 'cx-commute-where', `ไปซื้อของ → ร้านค้า #${t.shopFirmId}`), el('span', 'cx-commute-how', `${how} · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes)))} นาที`));
+    row.dataset.commuteMode = `shop-${t.mode}`; row.dataset.distance = String(t.distanceM); list.append(row);
+  }
   panel.append(list);
   const cards = fleet.map(v => metric(`vehicle-${v.id}`, `${VEHICLE[v.kind].label} #${v.id}`, `น้ำมัน ${Math.round(v.fuelMl / VEHICLE[v.kind].tankMl * 100)}% · วิ่งแล้ว ${km(v.odometerM)}`, v.odometerM));
   panel.append(cards.length ? cardKpis(cards) : el('p', 'cx-detail-note', 'ครัวเรือนนี้ยังไม่มีรถ คนที่ทำงานไกลจะซื้อมอเตอร์ไซค์หรือรถยนต์เมื่อเงินเก็บพอ'));
