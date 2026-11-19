@@ -96,6 +96,7 @@ import { moneyMark, moneyPops } from './money-pops.ts';
 import { incidentMarks } from './incident-marks.ts';
 import { venueSounds } from './venue-life.ts';
 import { isTense } from './music-mood.ts';
+import { FESTIVAL_LABELS, festivalAt, type FestivalKind } from './festivals.ts';
 import { treasuryForecast } from './treasury-forecast.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
@@ -1112,7 +1113,7 @@ async function boot() {
   audioPanel = installAudioPanel(audio, $('#atmosphere-menu'));
   const adviceButton = document.createElement('button'); adviceButton.type = 'button'; adviceButton.id = 'open-city-advice'; adviceButton.textContent = 'คำแนะนำเมือง · ฟังเสียง'; adviceButton.addEventListener('click', () => { guide?.showAdvice(city); $('#atmosphere-toggle').click(); }); $('#atmosphere-menu').append(adviceButton);
   // Ambience follows what the screen shows; the city-wide levels only change once a day.
-  let soundTick = -1, traffic = 0, factories = 0, tense = false;
+  let soundTick = -1, traffic = 0, factories = 0, tense = false, festival: FestivalKind | null = null;
   view.app.on('update', (dt: number) => {
     const quickVisible = quickSelection !== null && tool === 'select' && $('#inspector').dataset.open !== 'true'
       && !cityStatsPanel?.open && !cityNetwork?.open && !minimap?.mapOpen && !dashboard?.modalOpen
@@ -1138,6 +1139,12 @@ async function boot() {
       // Tense: the treasury runs dry within 90 days at this pace, or a building burned today.
       let fireToday = false; for (let i = city.ledger.length - 1; i >= 0 && city.ledger[i].tick === city.tick; i--) if (/^Fire damage repair #/.test(city.ledger[i].reason)) { fireToday = true; break; }
       tense = isTense(treasuryForecast(city, 0, 0).runwayDays, fireToday);
+      // Festivals by game date: decoration on the map, and a short note and chime on the day one begins.
+      const today = festivalAt(city.tick);
+      if (today !== festival) {
+        if (today && !paused) { status(`🎉 วันนี้มีเทศกาล${FESTIVAL_LABELS[today]}`); sound('ev-unlock'); }
+        festival = today; view.setFestival(today);
+      }
     }
     const closeness = Math.min(1, Math.max(0, (130 - view.radius) / 100)), soundscape = visual.soundscape;
     audio.setMood({ night: soundscape.phase === 'night' || soundscape.phase === 'dusk', tense });

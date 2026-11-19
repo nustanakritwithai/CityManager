@@ -23,7 +23,8 @@ import { roadTileFor, type Side } from './road-tiles.ts';
 import { CityGround } from './terrain.ts';
 import { SceneAtmosphere } from './scene-atmosphere.ts';
 import { SceneTraffic } from './scene-traffic.ts';
-import { CityWorld } from './scene-world.ts';
+import { CityWorld, WATER_Y } from './scene-world.ts';
+import type { FestivalKind } from './festivals.ts';
 import type { Atmosphere, Quality } from './atmosphere.ts';
 import type { Overlay, Tone } from './map-overlay.ts';
 import { CanvasSelectionClickGuard } from './canvas-selection-click.ts';
@@ -77,6 +78,12 @@ export class CityView {
   private readonly puddles = new Entity('Puddles');
   private puddleMaterial: StandardMaterial | null = null;
   private puddleKey = '';
+  /** Festival decoration: fireworks at New Year, krathongs on the sea at Loy Krathong, water splashes at Songkran. */
+  private festival: FestivalKind | null = null;
+  private readonly festivalRoot = new Entity('Festival');
+  private festivalParts: { entity: Entity; t: number; delay: number; origin: [number, number, number]; pieces: Entity[] }[] = [];
+  private festivalT = 0;
+  private lastNight = 0;
   private faded = new Map<StandardMaterial, StandardMaterial>();
   private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private highway = new Entity('Decorative highway');
@@ -265,6 +272,7 @@ export class CityView {
     this.app.root.addChild(this.markers);
     this.app.root.addChild(this.overlayRoot);
     this.app.root.addChild(this.effects);
+    this.app.root.addChild(this.festivalRoot);
     this.puddleMaterial = new StandardMaterial(); this.puddleMaterial.name = 'Rain puddles';
     this.puddleMaterial.diffuse = new Color(.32, .4, .5); this.puddleMaterial.specular = new Color(.6, .65, .7); this.puddleMaterial.gloss = .9;
     this.puddleMaterial.opacity = 0; this.puddleMaterial.blendType = BLEND_NORMAL; this.puddleMaterial.depthWrite = false; this.puddleMaterial.update();
@@ -417,7 +425,10 @@ export class CityView {
   /** Short grow/bounce for parcels that just gained a building or a level. */
   private animate(dt: number) {
     const now = performance.now(), wall = this.fxClock === null ? 0 : (now - this.fxClock) / 1000; this.fxClock = now;
-    if (!this.animations.size && !this.dust.length && !this.paving.length && !this.incidentFx.length) { this.fxClock = null; return; }
+    const festive = this.festival !== null && this.festivalParts.length > 0;
+    // Anything that moved at the start of this frame needs one more draw, even if it finishes now.
+    const busy = this.animations.size > 0 || this.dust.length > 0 || this.paving.length > 0 || this.incidentFx.length > 0;
+    if (!busy && !festive) { this.fxClock = null; return; }
     // The engine caps dt at 0.1 s, so on a slow device a capped step would stretch every effect over many real
     // seconds of redrawing. Work effects run on the wall clock instead (at least a 60th of a second a frame, at most
     // half a second), so they always end on time; the grow-in keeps its capped step as before.
@@ -438,6 +449,7 @@ export class CityView {
       fx.lights.forEach((light, k) => { light.enabled = lightLit(fx.t) === k; });
       return true;
     });
+    const festivalShowing = this.animateFestival(step);
     this.paving = this.paving.filter(sweep => {
       sweep.t += step;
       const u = sweep.t / PAVE_SECONDS;
@@ -451,7 +463,9 @@ export class CityView {
       tile?.setLocalScale(1, done ? 1 : buildScale(animation.kind, animation.t), 1);
       if (done) this.animations.delete(cell);
     }
-    this.app.renderNextFrame = true;
+    // Draw again only while something moves; a festival waiting for its hour (fireworks by day) costs nothing.
+    if (festivalShowing || busy) this.app.renderNextFrame = true;
+    else this.fxClock = null;
   }
   get animating() { return this.animations.size + this.dust.length + this.paving.length + this.incidentFx.length; }
   /** A ring of dust at a parcel (or a multi-parcel site's middle); fewer puffs on low quality. */
@@ -890,9 +904,103 @@ export class CityView {
   }
   setAtmosphere(atmosphere: Atmosphere) {
     this.atmosphere.apply(atmosphere); this.world.apply(atmosphere); this.ground.setTint(atmosphere.groundTint);
+    this.lastNight = atmosphere.night;
     // Puddles fade in with the wet and out as it dries; one shared material, so this is a single update.
     const opacity = Math.round(atmosphere.wetness * .55 * 100) / 100;
     if (this.puddleMaterial && this.puddleMaterial.opacity !== opacity) { this.puddleMaterial.opacity = opacity; this.puddleMaterial.update(); this.puddles.enabled = opacity > .01; this.app.renderNextFrame = true; }
+  }
+  /** Start or stop a festival's decoration; the same festival again changes nothing. Off with reduced motion. */
+  setFestival(kind: FestivalKind | null) {
+    if (kind === this.festival) return;
+    this.festival = kind; this.festivalT = 0;
+    for (const child of [...this.festivalRoot.children]) child.destroy();
+    this.festivalParts = [];
+    if (!kind || this.reducedMotion.matches) return;
+    const city = this.lastScene?.city, glow = (name: string, c: [number, number, number], opacity = 1) => this.fxMaterial(name, c, opacity);
+    const piece = (parent: Entity, type: 'sphere' | 'cylinder', material: StandardMaterial, size: number) => {
+      const e = new Entity('Festival piece'); e.addComponent('render', { type, material, castShadows: false, receiveShadows: false }); e.setLocalScale(size, size, size); parent.addChild(e); return e;
+    };
+    if (kind === 'newyear') {
+      const colours: [number, number, number][] = [[1, .35, .3], [1, .85, .3], [.4, .8, 1], [.6, 1, .5], [1, .5, .9]];
+      for (let b = 0; b < (this.quality === 'low' ? 2 : 4); b++) {
+        const burst = new Entity('Firework'), material = glow(`Firework ${b}`, colours[b % colours.length]);
+        const pieces = Array.from({ length: 20 }, () => piece(burst, 'sphere', material, .3));
+        this.festivalRoot.addChild(burst); this.festivalParts.push({ entity: burst, t: 0, delay: b * .6, origin: [0, 0, 0], pieces });
+      }
+    } else if (kind === 'loykrathong') {
+      // Krathongs float on the sea just off the coast: sample a ring round the city for water.
+      const base = glow('Krathong leaf', [.25, .55, .3]), flame = glow('Krathong candle', [1, .8, .35]);
+      for (let k = 0, tries = 0; k < 18 && tries < 900; tries++) {
+        const angle = tries * 2.39996, r = SIZE * UNIT / 2 + 8 + (tries % 30) * 3, x = Math.cos(angle) * r, z = Math.sin(angle) * r;
+        if (this.world.height(x, z) > WATER_Y - .15) continue;
+        const boat = new Entity('Krathong'); boat.setLocalPosition(x, WATER_Y + .05, z);
+        piece(boat, 'cylinder', base, .55).setLocalScale(.55, .08, .55); const c = piece(boat, 'sphere', flame, .16); c.setLocalPosition(0, .18, 0);
+        this.festivalRoot.addChild(boat); this.festivalParts.push({ entity: boat, t: 0, delay: k * .37, origin: [x, WATER_Y + .05, z], pieces: [] }); k++;
+      }
+      // Sky lanterns (khom loi) rise slowly over the city and drift, looping back from the ground.
+      const paper = glow('Sky lantern', [1, .62, .28]);
+      for (let k = 0; k < (this.quality === 'low' ? 8 : 14); k++) {
+        const h = hashCell(k * 53 + 11), lantern = new Entity('Sky lantern');
+        piece(lantern, 'cylinder', paper, .34).setLocalScale(.3, .42, .3);
+        this.festivalRoot.addChild(lantern);
+        this.festivalParts.push({ entity: lantern, t: (h % 100) / 100 * 14, delay: -1, origin: [(h % 37) - 18 - 4, 0, ((h >> 4) % 37) - 18], pieces: [] });
+      }
+    } else {
+      const water = glow('Songkran water', [.55, .8, 1], .7), roads = city ? city.cells.flatMap((cell, i) => cell.road ? [i] : []) : [];
+      for (let s = 0; s < Math.min(8, roads.length); s++) {
+        const splash = new Entity('Splash'), pieces = Array.from({ length: 8 }, () => piece(splash, 'sphere', water, 0));
+        const { x, z } = this.position(roads[hashCell(s * 131 + 7) % roads.length]);
+        this.festivalRoot.addChild(splash); this.festivalParts.push({ entity: splash, t: 0, delay: s * .3, origin: [x, .2, z], pieces });
+      }
+    }
+    this.app.renderNextFrame = true;
+  }
+  /** Moves the festival decoration; returns whether it is showing (so the scene keeps drawing). */
+  private animateFestival(step: number): boolean {
+    if (!this.festival || !this.festivalParts.length) return false;
+    const showing = this.festival === 'songkran' ? this.lastNight < .5 : this.lastNight > (this.festival === 'newyear' ? .5 : .3);
+    this.festivalRoot.enabled = showing;
+    if (!showing) return false;
+    this.festivalT += step;
+    const roads = this.festival === 'songkran' ? (this.lastScene?.city.cells.flatMap((cell, i) => cell.road ? [i] : []) ?? []) : [];
+    for (const [n, part] of this.festivalParts.entries()) {
+      if (this.festival === 'loykrathong') {
+        if (part.delay < 0) {
+          // A sky lantern: 14 s from rooftop height to well above the city, swaying, then it starts again.
+          part.t = (part.t + step) % 14; const u = part.t / 14;
+          part.entity.setLocalPosition(part.origin[0] + Math.sin(part.t * .6 + n) * .6 + u * 3, 2 + u * 16, part.origin[2] + Math.cos(part.t * .5 + n) * .6);
+          const s = u > .85 ? (1 - u) / .15 : 1; part.entity.setLocalScale(s, s, s);
+        } else {
+          const t = this.festivalT + part.delay; part.entity.setLocalPosition(part.origin[0] + Math.sin(t * .3) * .8, part.origin[1] + Math.sin(t * 1.7) * .03, part.origin[2] + Math.cos(t * .23) * .8);
+        }
+        continue;
+      }
+      part.t += step;
+      const life = this.festival === 'newyear' ? 1.6 : .9;
+      if (part.t < part.delay) { part.entity.enabled = false; continue; }
+      let u = (part.t - part.delay) / life;
+      if (u >= 1) {
+        // Start the next burst or splash somewhere new.
+        part.t = 0; part.delay = .2 + (hashCell(n * 977 + Math.floor(this.festivalT * 10)) % 100) / 100 * (this.festival === 'newyear' ? 1.2 : .6); u = 0;
+        const h = hashCell(n * 31 + Math.floor(this.festivalT * 7));
+        if (this.festival === 'newyear') part.origin = [((h % 41) - 20), 9 + (h >> 6) % 5, (((h >> 3) % 41) - 20)];
+        else if (roads.length) { const p = this.position(roads[h % roads.length]); part.origin = [p.x, .2, p.z]; }
+        part.entity.enabled = false; continue;
+      }
+      part.entity.enabled = true; part.entity.setLocalPosition(...part.origin);
+      part.pieces.forEach((p, k, all) => {
+        if (this.festival === 'newyear') {
+          const phi = Math.acos(1 - 2 * (k + .5) / all.length), theta = k * 2.39996, r = 4.6 * (1 - (1 - u) ** 2);
+          p.setLocalPosition(Math.sin(phi) * Math.cos(theta) * r, Math.cos(phi) * r - 1.5 * u * u, Math.sin(phi) * Math.sin(theta) * r);
+          const size = .5 * (1 - u * .8); p.setLocalScale(size, size, size);
+        } else {
+          const angle = k / all.length * Math.PI * 2, out = .3 + 1.3 * u;
+          p.setLocalPosition(Math.cos(angle) * out, 2 * u - 2.2 * u * u, Math.sin(angle) * out);
+          const size = .26 * (1 - u * .6); p.setLocalScale(size, size, size);
+        }
+      });
+    }
+    return true;
   }
   /** A flat puddle on one road parcel in four: the ones with the lowest hash, so even a short road gets some. Rebuilt only when the roads change. */
   private syncPuddles(city: City) {
