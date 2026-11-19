@@ -298,25 +298,63 @@ export function shoppingTrips(c: City): ShoppingTrip[] {
     if (e.kind === 'consumption' && h && shop) visits.add(`${h.id}:${shop.id}`);
   }
   if (!visits.size) return [];
-  const { net, times, trees } = roadsOf(c);
-  const drive = (from: number, to: number) => { if (from === to) return [from]; let tree = trees.get(from); if (!tree) { tree = shortestTree(net, times, from); trees.set(from, tree); } if (!tree.has(to)) return null; const p = [to]; while (p[0] !== from) p.unshift(tree.get(p[0])!); return p; };
   const cellOf = new Map(c.buildings.map(b => [b.id, b.cell])), households = new Map(c.households.map(h => [h.id, h])), firms = new Map(c.firms.map(f => [f.id, f]));
   const out: ShoppingTrip[] = [];
   for (const key of [...visits].sort()) {
     const [householdId, shopId] = key.split(':').map(Number), h = households.get(householdId)!, shop = firms.get(shopId)!;
     const home = h.home === null ? undefined : cellOf.get(h.home), at = cellOf.get(shop.building);
     const from = home === undefined ? null : driveway(c, [home]), to = at === undefined ? null : driveway(c, [at]);
-    const walk = from === null || to === null ? null : walkRoute(c, from, to);
-    if (!walk || from === null || to === null) continue;
-    const distanceM = (walk.length - 1) * TILE_LENGTH_M, vehicle = (c.vehicles?.fleet ?? []).filter(v => v.householdId === householdId).sort((a, b) => kindOrder(a) - kindOrder(b) || a.id - b.id)[0];
-    const there = vehicle && distanceM > WALK_MAX_M ? drive(from, to) : null, back = there ? drive(to, from) : null;
-    if (vehicle && there && back) {
-      let seconds = 0; for (let k = 1; k < there.length; k++) seconds += times.get(`${there[k - 1]}>${there[k]}`) ?? 0;
-      out.push({ householdId, shopFirmId: shopId, from, to, route: there, distanceM: (there.length - 1) * TILE_LENGTH_M, mode: 'drive', vehicleId: vehicle.id, minutes: seconds / 60 });
-    } else out.push({ householdId, shopFirmId: shopId, from, to, route: walk, distanceM, mode: 'walk', vehicleId: null, minutes: minutesAt(distanceM, WALK_KMH) });
+    const trip = from === null || to === null ? null : personalTrip(c, householdId, from, to);
+    if (trip && from !== null && to !== null) out.push({ householdId, shopFirmId: shopId, from, to, ...trip });
   }
   return out;
 }
+
+/** A household's own trip between two road parcels: walked, or driven in its own vehicle when beyond walking distance and legal there and back. */
+function personalTrip(c: City, householdId: number, from: number, to: number) {
+  const walk = walkRoute(c, from, to);
+  if (!walk) return null;
+  const { net, times, trees } = roadsOf(c);
+  const drive = (a: number, b: number) => { if (a === b) return [a]; let tree = trees.get(a); if (!tree) { tree = shortestTree(net, times, a); trees.set(a, tree); } if (!tree.has(b)) return null; const p = [b]; while (p[0] !== a) p.unshift(tree.get(p[0])!); return p; };
+  const distanceM = (walk.length - 1) * TILE_LENGTH_M, vehicle = (c.vehicles?.fleet ?? []).filter(v => v.householdId === householdId).sort((a, b) => kindOrder(a) - kindOrder(b) || a.id - b.id)[0];
+  const there = vehicle && distanceM > WALK_MAX_M ? drive(from, to) : null, back = there ? drive(to, from) : null;
+  if (vehicle && there && back) {
+    let seconds = 0; for (let k = 1; k < there.length; k++) seconds += times.get(`${there[k - 1]}>${there[k]}`) ?? 0;
+    return { route: there, distanceM: (there.length - 1) * TILE_LENGTH_M, mode: 'drive' as const, vehicleId: vehicle.id, minutes: seconds / 60 };
+  }
+  return { route: walk, distanceM, mode: 'walk' as const, vehicleId: null, minutes: minutesAt(distanceM, WALK_KMH) };
+}
+
+/** A sick person's trip: to a clinic or hospital in the city (`siteId`), or out through the gateway to one outside (null). */
+export type CareTrip = { householdId: number; siteId: number | null; from: number; to: number; route: number[]; distanceM: number; mode: 'walk' | 'drive'; vehicleId: number | null; minutes: number };
+/**
+ * The trip someone taken ill makes from home: to the nearest of `sites` (the clinics and hospitals whose service
+ * area covers the home) they can actually get to along linked streets, or null when none can be reached.
+ */
+export function careTrip(c: City, householdId: number, homeCell: number, sites: readonly { id: number; cell: number; cells?: number[] }[]): CareTrip | null {
+  const from = driveway(c, [homeCell]); if (from === null) return null;
+  let best: CareTrip | null = null;
+  for (const site of [...sites].sort((a, b) => a.id - b.id)) {
+    const to = driveway(c, site.cells ?? [site.cell]); if (to === null) continue;
+    const trip = personalTrip(c, householdId, from, to);
+    if (trip && (!best || trip.distanceM < best.distanceM)) best = { householdId, siteId: site.id, from, to, ...trip };
+  }
+  return best;
+}
+/** The trip out through the city gateway to a hospital outside, or null when home has no street out. */
+export function outsideCareTrip(c: City, householdId: number, homeCell: number, gateway: number): CareTrip | null {
+  const from = driveway(c, [homeCell]); if (from === null || !c.cells[gateway]?.road) return null;
+  const trip = personalTrip(c, householdId, from, gateway);
+  return trip && { householdId, siteId: null, from, to: gateway, ...trip };
+}
+const careDays = new WeakMap<City, { tick: number; trips: CareTrip[] }>();
+/** Remember a sick person's trip for today's screen. */
+export function recordCareTrip(c: City, trip: CareTrip) {
+  const day = careDays.get(c);
+  if (day && day.tick === c.tick) day.trips.push(trip); else careDays.set(c, { tick: c.tick, trips: [trip] });
+}
+/** Today's trips to the doctor, as they happened when the city last stepped. */
+export const careTripsToday = (c: City): CareTrip[] => { const day = careDays.get(c); return day && day.tick === c.tick ? day.trips : []; };
 
 /** The fleet as it should be saved: vehicles whose household has left the city went with it. */
 export function liveVehicles(c: Pick<City, 'vehicles' | 'households'>): VehicleState | undefined {
