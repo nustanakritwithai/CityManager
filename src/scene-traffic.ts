@@ -20,17 +20,18 @@ const WAIT_LIMIT = 3, GHOST = 1.2;
 const DWELL = 3;
 type Actor = {
   outbound?: number[]; inbound?: number[]; leg?: 'home' | 'work';
-  key: string; kind: 'car' | 'truck' | 'walker'; entity: Entity; route: number[]; p: number; dir: 1 | -1; speed: number; v: number;
+  key: string; kind: 'car' | 'truck' | 'walker'; small: boolean; entity: Entity; route: number[]; p: number; dir: 1 | -1; speed: number; v: number;
   rank: number; depart: number; errand: number; retire: boolean; parked: boolean; dwell: number; waited: number; ghost: number;
   x: number; z: number; hx: number; hz: number;
 };
 
 /**
- * Decorative traffic. Counts and routes come from trafficPlan() (real employment, deliveries,
- * residents, producing factories); movement is purely visual and never touches the simulation.
- * Commuters drive to work in the morning rush and home in the evening rush of the visual day and
- * park in between; each delivery route keeps its own truck, which stops to load at both ends; and
- * vehicles keep their distance in a lane, queueing instead of driving through each other.
+ * City traffic. Who moves and where comes from trafficPlan(): each household's own motorcycle or car
+ * on its driver's real route to work, each resident who really walks to work, the week's real
+ * deliveries and the factories that produce. Movement is visual and never touches the simulation.
+ * Commuters go to work in the morning rush and home in the evening rush of the visual day, parked (or,
+ * on foot, indoors) between; nobody drives round on made-up errands. Each delivery route keeps its own
+ * truck, which stops to load at both ends; and vehicles keep their distance in a lane.
  */
 export class SceneTraffic {
   private readonly root = new Entity('Decorative city life');
@@ -131,9 +132,9 @@ export class SceneTraffic {
       if (!route) actor.retire = true;
       else if (route.join() !== (actor.outbound ?? actor.route).join()) { actor.entity.destroy(); this.actors.delete(actor.key); }
     }
-    for (const car of plan.cars) this.add(car.key, 'car', car.route, car.colour, car.returnRoute);
+    for (const car of plan.cars) this.add(car.key, 'car', car.route, car.colour, car.returnRoute, car.body === 'motorcycle' ? car.passengers ?? 0 : null);
     for (const truck of plan.trucks) this.add(truck.key, 'truck', truck.route, truck.colour, truck.returnRoute);
-    for (const walker of plan.walkers) this.add(walker.key, 'walker', walker.route, walker.colour);
+    for (const walker of plan.walkers) this.add(walker.key, 'walker', walker.route, walker.colour, walker.returnRoute);
     // Keep the screen within the caps: over them, leaving vehicles go at once (parked ones first).
     for (const [kind, cap] of [['car', MAX_CARS], ['truck', MAX_TRUCKS]] as const) {
       const own = [...this.actors.values()].filter(a => a.kind === kind), leaving = own.filter(a => a.retire).sort((a, b) => Number(b.parked) - Number(a.parked));
@@ -145,11 +146,18 @@ export class SceneTraffic {
     this.view.app.renderNextFrame = true;
   }
 
-  private add(key: string, kind: Actor['kind'], route: number[], colour: number, returnRoute?: number[]) {
+  /** `motorcycle` is the number of passengers riding pillion, or null for anything but a motorcycle. */
+  private add(key: string, kind: Actor['kind'], route: number[], colour: number, returnRoute?: number[], motorcycle: number | null = null) {
     const existing = this.actors.get(key);
     if (existing) { existing.retire = false; return; }
     const entity = new Entity(`${kind} ${key}`), view = this.view, box = (x: number, y: number, z: number, sx: number, sy: number, sz: number, c: string | StandardMaterial) => view.box(entity, x, y, z, sx, sy, sz, c, false);
-    if (kind === 'car' || kind === 'truck') {
+    if (motorcycle !== null) {
+      // A motorcycle: wheels and frame, the tank in the household's colour, a rider and a pillion passenger when there is one.
+      const paint = CAR_COLOURS[colour % CAR_COLOURS.length], shirt = WALKER_COLOURS[colour % WALKER_COLOURS.length];
+      box(0, .05, .1, .04, .09, .09, '#1f2430'); box(0, .05, -.1, .04, .09, .09, '#1f2430'); box(0, .1, 0, .07, .05, .3, '#3b4258');
+      box(0, .14, .06, .09, .06, .12, paint); box(0, .2, -.02, .09, .12, .08, shirt); box(0, .3, -.02, .075, .07, .075, '#f2f2f2');
+      if (motorcycle > 0) { box(0, .19, -.11, .085, .11, .07, WALKER_COLOURS[(colour + 2) % WALKER_COLOURS.length]); box(0, .28, -.11, .07, .065, .07, '#e8a53a'); }
+    } else if (kind === 'car' || kind === 'truck') {
       const paint = kind === 'car' ? CAR_COLOURS[colour % CAR_COLOURS.length] : '#e8e0cf';
       addVehicleDetail(entity, view, kind === 'truck' ? 'truck' : vehicleVariant(key), paint,
         CARGO_COLOURS[colour % CARGO_COLOURS.length],
@@ -163,12 +171,13 @@ export class SceneTraffic {
     const seed = keyHash(key), pace = keyHash(`${key}:pace`);
     const speed = kind === 'walker' ? .45 + pace * .2 : kind === 'truck' ? 1.5 + pace * .3 : 2 + pace * .6;
     const actor: Actor = {
-      key, kind, entity, route, p: seed * Math.max(0, route.length - 1), dir: seed < .5 ? 1 : -1, speed, v: speed, rank: seed,
-      depart: keyHash(`${key}:depart`), errand: keyHash(`${key}:errand`), retire: false, parked: false, dwell: 0, waited: 0, ghost: 0, x: 0, z: 0, hx: 0, hz: 1,
+      key, kind, small: motorcycle !== null, entity, route, p: seed * Math.max(0, route.length - 1), dir: seed < .5 ? 1 : -1, speed, v: speed, rank: seed,
+      // Commuters only go to work and home: no made-up errands.
+      depart: keyHash(`${key}:depart`), errand: 1, retire: false, parked: false, dwell: 0, waited: 0, ghost: 0, x: 0, z: 0, hx: 0, hz: 1,
     };
     if (returnRoute) { actor.outbound = route; actor.inbound = returnRoute; actor.leg = seed < .5 ? 'work' : 'home'; actor.route = actor.leg === 'work' ? route : returnRoute; actor.dir = 1; actor.p = seed * Math.max(0, actor.route.length - 1); }
     // A commuter appears where the hour puts it: parked at home or at work, or out on an errand.
-    if (kind === 'car') { const goal = this.goal(actor); if (goal !== 'cruise') { if (actor.outbound) this.parkDirected(actor, goal); else this.park(actor, goal === 'work' ? route.length - 1 : 0); } }
+    if (kind === 'car' || (kind === 'walker' && actor.outbound)) { const goal = this.goal(actor); if (goal !== 'cruise') { if (actor.outbound) this.parkDirected(actor, goal); else this.park(actor, goal === 'work' ? route.length - 1 : 0); } }
     if (kind === 'car' && !this.carsEnabled && !actor.parked) { entity.destroy(); return; }
     this.actors.set(key, actor); if (actor.parked) this.placeParked(actor); else this.move(actor, 0); // placed at once, even while the game is paused
   }
@@ -193,7 +202,8 @@ export class SceneTraffic {
     let hx = to.x - from.x, hz = to.z - from.z; const len = Math.hypot(hx, hz);
     if (len) { hx /= len; hz /= len; } else { hx = 0; hz = 1; }
     const along = (actor.rank - .5) * 1.1, x = from.x + hx * along + hz * PARK, z = from.z + hz * along - hx * PARK;
-    actor.x = x; actor.z = z; actor.hx = hx; actor.hz = hz; actor.entity.enabled = true;
+    // A walker who has arrived is indoors, at home or at work.
+    actor.x = x; actor.z = z; actor.hx = hx; actor.hz = hz; actor.entity.enabled = actor.kind !== 'walker';
     actor.entity.setLocalPosition(x, .14, z); actor.entity.setLocalEulerAngles(0, Math.atan2(hx, hz) * 180 / Math.PI, 0);
   }
 
@@ -232,7 +242,7 @@ export class SceneTraffic {
     this.view.app.renderNextFrame = true;
   }
 
-  private mover(a: Actor): Mover { return { x: a.x, z: a.z, hx: a.hx, hz: a.hz, length: a.kind === 'truck' ? TRAFFIC_SPACING.lengths.truck : TRAFFIC_SPACING.lengths.decorativeCar, width: a.kind === 'truck' ? .36 : .3, rank: a.rank }; }
+  private mover(a: Actor): Mover { return { x: a.x, z: a.z, hx: a.hx, hz: a.hz, length: a.kind === 'truck' ? TRAFFIC_SPACING.lengths.truck : a.small ? .34 : TRAFFIC_SPACING.lengths.decorativeCar, width: a.kind === 'truck' ? .36 : a.small ? .12 : .3, rank: a.rank }; }
 
   /** Each vehicle slows behind the one ahead in its lane and stops short of it, so lines queue instead of overlapping. */
   private follow(dt: number) {

@@ -11,7 +11,7 @@ test('traffic acceptance partitions bounded cases and gates every result',()=>{
  assert.match(browser,/needs: checks/);assert.match(browser,/fail-fast: false/);for(const [mode,cases] of [['normal',['lifecycle','economy','bypass','dense','work-expiry']],['fallback',['lifecycle','economy','bypass','dense']]])for(const name of cases)assert.ok(browser.includes(`- name: ${mode}-${name}\n            case: ${name}\n            blocked: '${mode==='fallback'?'1':'0'}'\n            software: '${mode==='fallback'?'1':'0'}'`));assert.equal((browser.match(/- name: (normal|fallback)-/g)??[]).length,9); assert.doesNotMatch(browser,/- name: normal-peak/);
  assert.match(browser,/TRAFFIC_GAME_CASE: \$\{\{ matrix\.case \}\}/);assert.match(browser,/traffic-game-\$\{\{ matrix\.name \}\}-evidence/);assert.match(browser,/traffic-game-smoke\.mjs/);
  assert.match(gate,/needs: \[checks, fault, browser\]/);assert.match(gate,/if: always\(\)/);for(const name of ['checks','fault','browser'])assert.match(gate,new RegExp(`needs\\.${name}\\.result.*'success'`));
- assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '1'/g)??[]).length,1);
+ assert.match(text,/permissions:\s+contents: read/);assert.equal((text.match(/TRAFFIC_GAME_EXPECT_DEFAULT: '0'/g)??[]).length,1,'the allocation game is off by default: traffic is households\' real trips');
 });
 
 test('exact scoped routing propagates to downstream traffic jobs and aggregate without accepting failed checks',()=>{

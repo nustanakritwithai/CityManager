@@ -1,11 +1,13 @@
 import { expandedCellNeighbors } from './expanded-map-grid.ts';
-import { roadLinked, roadDriveAllowed, roadTopologyKey } from './road-topology.ts';
+import { roadDriveAllowed, roadTopologyKey } from './road-topology.ts';
 /**
- * Decorative city life: which cars, trucks, walkers and smoke plumes to show.
- * Read-only over City; no sim RNG, no mutation, nothing enters a save. Quantities follow
- * real data (employment, population, today's goods/crop journals, producing factories).
+ * City life on screen: which cars, trucks, walkers and smoke plumes to show. Every car is a household's
+ * own vehicle driven to work today, on its driver's real route; every walker is a resident really walking
+ * to work. Trucks follow the last full week's real deliveries and smoke the factories that produce.
+ * Read-only over City; no sim RNG, no mutation, nothing enters a save.
  */
 import { GATEWAY, SIZE, connectedRoads, economicSignals, firmWorkerCount, type City } from './sim.ts';
+import { commutesToday } from './commute.ts';
 
 export const MAX_CARS = 40, MAX_TRUCKS = 12, MAX_WALKERS = 60;
 /**
@@ -17,8 +19,9 @@ const TRUCKED = ['Wholesale stock delivery', 'Imported shop stock', 'Exported go
 /** Truck cargo, in paint order: the three crops, then the three products. */
 export const CARGO = ['rice', 'vegetables', 'sugarcane', 'milled-rice', 'canned-food', 'sugar'] as const;
 /** `colour` is the paint for cars; for trucks it is the index in CARGO of what the route mostly carries. */
-export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; returnRoute?: number[]; colour: number };
-export type Walker = { key: string; route: number[]; colour: number };
+export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; returnRoute?: number[]; colour: number; body?: 'motorcycle' | 'car'; passengers?: number };
+/** `returnRoute` marks a commuter: out to work in the morning, home in the evening, indoors between. */
+export type Walker = { key: string; route: number[]; colour: number; returnRoute?: number[] };
 export type TrafficPlan = { cars: Vehicle[]; trucks: Vehicle[]; walkers: Walker[]; smoke: number[]; signature: string };
 
 const neighbours = (i:number) => expandedCellNeighbors(i);
@@ -123,17 +126,16 @@ export function trafficPlan(city: City): TrafficPlan {
   const roads = connectedRoads(city), cars: Vehicle[] = [], trucks: Vehicle[] = [], walkers: Walker[] = [], smoke: number[] = [];
   const buildingCell = (id: number) => city.buildings.find(b => b.id === id)?.cell ?? null;
   if (roads.size > 1) {
-    // Commuters: one car per real employment allocation (household home → firm), plus self-employed owners.
-    const jobs = [...city.employment.map(e => ({ h: e.householdId, f: e.firmId })), ...city.ownerLabor.map(e => ({ h: e.householdId, f: e.firmId }))];
-    for (const job of jobs.sort((a, b) => a.f - b.f || a.h - b.h)) {
+    // Commuters: each household vehicle driven to work today, on its driver's real route there and back.
+    const trips = commutesToday(city), onRoads = (route: number[] | null): route is number[] => !!route && route.length > 1 && route.every(cell => roads.has(cell));
+    const back = (route: number[]) => { if (!city.roadTopology) return [...route].reverse(); const r = roadRoute(roads, route[route.length - 1], route[0], city); return r.length > 1 ? r : null; };
+    const fleet = new Map((city.vehicles?.fleet ?? []).map(v => [v.id, v]));
+    for (const t of trips.filter(t => t.mode === 'drive').sort((a, b) => a.vehicleId! - b.vehicleId!)) {
       if (cars.length >= MAX_CARS) break;
-      const home = city.households.find(h => h.id === job.h)?.home, firm = city.firms.find(f => f.id === job.f);
-      const homeCell = home == null ? null : buildingCell(home), workCell = firm ? buildingCell(firm.building) : null;
-      const from = homeCell == null ? null : accessCell(roads, homeCell), to = workCell == null ? null : accessCell(roads, workCell);
-      if (from == null || to == null || from === to) continue;
-      const route = roadRoute(roads, from, to, city), returnRoute = city.roadTopology ? roadRoute(roads, to, from, city) : undefined;
-      if (returnRoute && returnRoute.length < 2) continue;
-      if (route.length > 1) cars.push({ key: `car:${job.h}:${job.f}`, kind: 'car', route, ...(returnRoute ? { returnRoute } : {}), colour: Math.floor(visualHash(job.h, job.f) * 6) });
+      const vehicle = fleet.get(t.vehicleId!), returnRoute = onRoads(t.route) ? back(t.route) : null;
+      if (!vehicle || !onRoads(t.route) || !returnRoute) continue;
+      const passengers = trips.filter(o => o.mode === 'passenger' && o.vehicleId === vehicle.id).length;
+      cars.push({ key: `car:v${vehicle.id}`, kind: 'car', route: t.route, ...(city.roadTopology ? { returnRoute } : {}), colour: Math.floor(visualHash(vehicle.id, vehicle.householdId) * 6), body: vehicle.kind, passengers });
     }
     // Trucks: one per real delivery route of the last full week (goods wholesale/import/export, crop
     // trades and crop exports to the gateway), two on a busy route. Keys carry no day, so a route keeps its truck.
@@ -152,17 +154,10 @@ export function trafficPlan(city: City): TrafficPlan {
       if (returnRoute && returnRoute.length < 2) continue;
       for (let k = 0; route.length > 1 && k < (f.quantity >= TRUCK_LOAD ? 2 : 1) && trucks.length < MAX_TRUCKS; k++) trucks.push({ key: `truck:${key}:${k}`, kind: 'truck', route, ...(returnRoute ? { returnRoute } : {}), colour: f.loads.indexOf(Math.max(...f.loads)) });
     }
-    // Walkers: residents of connected homes stroll a short stretch of their street.
-    const people = new Map<number, number>();
-    for (const h of city.households) if (h.home != null) people.set(h.home, (people.get(h.home) ?? 0) + h.members);
-    for (const [home, count] of [...people].sort((a, b) => a[0] - b[0])) {
-      const cell = buildingCell(home), start = cell == null ? null : accessCell(roads, cell);
-      if (start == null) continue;
-      const out = neighbours(start).filter(n => roads.has(n) && roadLinked(city,start,n)).sort((a, b) => a - b);
-      for (let k = 0; k < Math.min(2, Math.ceil(count / 3)) && walkers.length < MAX_WALKERS; k++) {
-        const far = out.length ? out[Math.floor(visualHash(home, k) * out.length)] : start;
-        walkers.push({ key: `walk:${home}:${k}`, route: far === start ? [start] : [start, far], colour: Math.floor(visualHash(home, k + 9) * 6) });
-      }
+    // Walkers: residents who really walk to work today, along their route there and back on the pavement.
+    for (const t of trips) {
+      if ((t.mode !== 'walk' && t.mode !== 'walk-long') || !onRoads(t.route) || walkers.length >= MAX_WALKERS) continue;
+      walkers.push({ key: `walk:${t.householdId}:${t.person}`, route: t.route, returnRoute: [...t.route].reverse(), colour: Math.floor(visualHash(t.householdId, t.person + 9) * 6) });
     }
     // Smoke: factories that really produce today.
     for (const s of economicSignals(city)) {

@@ -57,7 +57,7 @@ test('four disjoint fault jobs preserve all seven assertions exactly once with u
  for(const i of [1,2,3,4,7,8,9,10])assert.throws(()=>verifyReload(reload.replace(sequence[i],'')),/Missing or out-of-order reload proof/);
  const unpaused=reload.replace(sequence[1],'').replace(sequence[2],`${sequence[2]}${sequence[1]}`);assert.throws(()=>verifyReload(unpaused),/Missing or out-of-order reload proof/);
 
- assert.match(source,/button\('#atmosphere-toggle'\);await button\('input\[name="atmosphere-time"\]\[value="noon"\]'\)/,'Decorative fallback sets noon through the current page-memory UI');
+ assert.match(source,/button\('#atmosphere-toggle'\);await button\('input\[name="atmosphere-time"\]\[value="evening"\]'\)/,'Decorative fallback sets the evening rush through the current page-memory UI');
  assert.match(source,/server\.active\.raw,await evaluate\('window\.cityManager\.sessionSnapshot\(\)'\)/,'Paused revealed session must receive an exact server ACK');assert.match(source,/await revealDecorativeCars\(\);await acknowledgeRevealedSession\(\);await literalReload\(\)/);
 });
 

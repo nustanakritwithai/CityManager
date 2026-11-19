@@ -73,8 +73,11 @@ const minutesAt = (metres: number, kmh: number) => metres / 1000 / kmh * 60;
 type Roads = { key: string; net: ReturnType<typeof buildNetwork>; times: Map<string, number>; trees: Map<number, Map<number, number>> };
 const roadCache = new WeakMap<City, Roads>();
 /** The road network and its route trees, rebuilt only when a road, a junction, a direction or a road class changes. */
+const roadKey = (c: City) => `${c.cells.map(cell => (cell.road ? 1 : 0)).join('')}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.roadClasses ?? null)}`;
+/** What a stored day depends on besides the date: roads, who works where, and the vehicles there are. */
+const dayKey = (c: City) => `${roadKey(c)}|${c.employment.map(a => `${a.householdId}>${a.firmId}x${a.workers}`).join(',')}|${c.ownerLabor.map(a => `${a.householdId}>${a.firmId}`).join(',')}|${(c.vehicles?.fleet ?? []).map(v => `${v.id}:${v.householdId}`).join(',')}|${c.households.map(h => `${h.id}@${h.home}`).join(',')}`;
 function roadsOf(c: City): Roads {
-  const key = `${c.cells.map(cell => (cell.road ? 1 : 0)).join('')}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.roadClasses ?? null)}`;
+  const key = roadKey(c);
   const hit = roadCache.get(c);
   if (hit && hit.key === key) return hit;
   const net = buildNetwork(c), roads = { key, net, times: linkTimes(net, new Map()), trees: new Map<number, Map<number, number>>() };
@@ -161,7 +164,7 @@ function openVehicles(c: City): VehicleState {
   for (const key of ['happiness', 'taxPolicy'] as const) if (key in c) { const value = c[key]; delete c[key]; Object.assign(c, { [key]: value }); }
   return c.vehicles;
 }
-export type CommuteDay = { tick: number; trips: Trip[]; bought: Vehicle[] };
+export type CommuteDay = { tick: number; key: string; trips: Trip[]; bought: Vehicle[] };
 const days = new WeakMap<City, CommuteDay>();
 type Pay = (from: string, to: string, amount: number, reason: string) => number;
 
@@ -205,14 +208,20 @@ export function runCommutes(c: City, pay: Pay): CommuteDay {
     const v: Vehicle = { id, householdId, kind, bought: c.tick, fuelMl: VEHICLE[kind].tankMl, odometerM: 0 };
     state.fleet.push(v); state.nextId++; bought.push(v);
   }
-  const day = { tick: c.tick, trips, bought };
+  const day = { tick: c.tick, key: dayKey(c), trips, bought };
   days.set(c, day);
   return day;
 }
-/** Today's trips as they happened when the city last stepped, or as planned now (after a load or an edit). */
+/**
+ * Today's trips as they happened when the city last stepped, or as planned now after a load or after an edit to
+ * roads, jobs, homes or vehicles (a plan made now is kept until the next change, so the screen can ask every frame).
+ */
 export function commutesToday(c: City): Trip[] {
-  const day = days.get(c);
-  return day && day.tick === c.tick ? day.trips : planCommutes(c);
+  const day = days.get(c), key = dayKey(c);
+  if (day && day.tick === c.tick && day.key === key) return day.trips;
+  const planned = { tick: c.tick, key, trips: planCommutes(c), bought: [] };
+  days.set(c, planned);
+  return planned.trips;
 }
 
 /** The fleet as it should be saved: vehicles whose household has left the city went with it. */
