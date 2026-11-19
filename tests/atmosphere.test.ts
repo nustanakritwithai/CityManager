@@ -75,3 +75,21 @@ test('atmosphere evaluation never changes simulation state or RNG', () => {
   for (let period = 0; period < 50; period++) isRaining(city.seed, period, seasonWeights(city.tick));
   assert.equal(serialize(city), before);
 });
+
+test('cool-season mornings have mist that burns off, and only then', () => {
+  const cool = { hot: 0, rainy: 0, cool: 1 }, hot = { hot: 1, rainy: 0, cool: 0 };
+  const dawn = atmosphereAt(6.5, cool), noon = atmosphereAt(12.5, cool), hotDawn = atmosphereAt(6.5, hot);
+  assert.ok(dawn.mist > .9, `dawn mist ${dawn.mist}`); assert.ok(noon.mist < .01); assert.equal(hotDawn.mist, 0);
+  assert.ok(dawn.haze > noon.haze * 1.5, 'mist thickens the haze');
+  assert.ok(dawn.fogColor.every((v, i) => v >= atmosphereAt(6.5, { hot: 0, rainy: 0, cool: 0 }).fogColor[i] - 1e-9), 'and whitens it');
+});
+
+test('the ground dries in the hot season, greens in the rainy one, and puddles follow the rain cloud', () => {
+  const plain = atmosphereAt(12, { hot: 0, rainy: 0, cool: 1 }).groundTint;
+  assert.deepEqual(plain, [1, 1, 1]);
+  const dry = atmosphereAt(12, { hot: 1, rainy: 0, cool: 0 }).groundTint, lush = atmosphereAt(12, { hot: 0, rainy: 1, cool: 0 }).groundTint;
+  assert.ok(dry[0] > 1 && dry[2] < .85, `dry ${dry}`); assert.ok(lush[1] > 1 && lush[0] < 1, `lush ${lush}`);
+  assert.equal(atmosphereAt(12, { hot: 0, rainy: 0, cool: 1 }, 0).wetness, 0);
+  const wet = atmosphereAt(12, { hot: 0, rainy: 1, cool: 0 }, .8).wetness, hotWet = atmosphereAt(12, { hot: 1, rainy: 0, cool: 0 }, .8).wetness;
+  assert.ok(wet > .9, `wet ${wet}`); assert.ok(hotWet < wet, 'the hot season dries puddles faster');
+});

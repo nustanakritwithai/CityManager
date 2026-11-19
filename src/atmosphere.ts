@@ -18,6 +18,12 @@ export type Atmosphere = {
   /** 0 by day, 1 at full night: lit windows, street lamps and bloom. */
   night: number;
   overcast: number; saturation: number; contrast: number; brightness: number; tint: Rgb;
+  /** Multiplier on grass and soil colour: dry straw in the hot season, lusher green in the rainy one. */
+  groundTint: Rgb;
+  /** 0–1 low morning mist, mostly in the cool season around dawn. */
+  mist: number;
+  /** 0–1 how wet the ground looks, for puddles: rises with rain cloud, drier in the hot season. */
+  wetness: number;
 };
 
 /** Real seconds for one full visual day at 1× speed. */
@@ -139,11 +145,16 @@ export function atmosphereAt(hour: number, weights: SeasonWeights = { hot: 0, ra
   ambient = mixRgb(ambient, hex('#d9c3a4'), warm * .12 * (1 - night));
   const sunGlow = sunUp ? scaleRgb(lightColor, (1 - overcast) * (.25 + low * .6)) : [0, 0, 0] as Rgb;
   const golden = smooth(0, 1, low) * (sunUp ? 1 : 0) * (1 - overcast);
+  // Ground-level seasons. Mist gathers in cool-season mornings (peaking near 6:30) and burns off by mid-morning.
+  const mist = clamp(weights.cool * Math.exp(-(((h - 6.5) / 1.4) ** 2)) * (1 - overcast * .5));
+  const wetness = clamp((overcast - .25) * 1.8) * (1 - warm * .5);
+  const groundTint = mixRgb(mixRgb([1, 1, 1], [1.1, 1.02, .76], warm * .75), [.88, 1.05, .9], weights.rainy * .6);
   return {
+    groundTint, mist, wetness,
     hour: h, phase: phaseOf(h), lightDirection: [-direction[0], -direction[1], -direction[2]],
     lightColor, lightIntensity, sunUp, ambient, skyZenith: zenith, skyHorizon: horizon, sunGlow,
-    fogColor: mixRgb(mixRgb(horizon, ambient, .4), zenith, .12),
-    haze: 1 + warm * .35 + overcast * 1.4 - weights.cool * .15 + night * .2,
+    fogColor: mixRgb(mixRgb(mixRgb(horizon, ambient, .4), zenith, .12), hex('#e3e9ec'), mist * .65 * (1 - night)),
+    haze: (1 + warm * .35 + overcast * 1.4 - weights.cool * .15 + night * .2) * (1 + mist * 1.8),
     night, overcast,
     saturation: 1.06 + weights.cool * .05 - warm * .04 - overcast * .2 - night * .2,
     contrast: 1.04 + golden * .05 - overcast * .06,

@@ -21,12 +21,23 @@ function noise(x: number, y: number, scale: number, salt: number): number {
 
 /** Original baked ground and a separate construction overlay; no terrain simulation. */
 export class CityGround {
+  /** Season colour for the ground (grass, lawn pads, verges and soil), as a multiplier on each one's own colour. */
+  setTint(tint: readonly [number, number, number]) {
+    const key = tint.map(v => v.toFixed(3)).join();
+    if (key === this.tintKey) return;
+    this.tintKey = key;
+    for (const { material, base } of this.tinted) { material.diffuse.set(base.r * tint[0], base.g * tint[1], base.b * tint[2]); material.update(); }
+    this.app.renderNextFrame = true;
+  }
   readonly root = new Entity('Original textured city ground');
   readonly vergeMaterial: StandardMaterial;
   readonly soilMaterial: StandardMaterial;
   readonly lawnMaterial: StandardMaterial;
   private readonly grid = new Entity('Construction grid');
   private textureCount = 0;
+  /** Grass and soil materials with their own colour, so a season tint always multiplies the original. */
+  private readonly tinted: { material: StandardMaterial; base: Color }[] = [];
+  private tintKey = '';
 
   constructor(private readonly app: AppBase, size: number, unit: number) {
     const grass = this.bake(512, 'grass');
@@ -38,6 +49,7 @@ export class CityGround {
     if (lawn) this.vergeMaterial.diffuse = new Color(.91, .95, .89);
     this.vergeMaterial.update();
     this.soilMaterial = this.material('Warm soil pads', soil, '#a3926f');
+    for (const material of [groundMaterial, this.lawnMaterial, this.vergeMaterial, this.soilMaterial]) this.tinted.push({ material, base: material.diffuse.clone() });
 
     const extent = size * unit / 2;
     const floor = new Mesh(app.graphicsDevice);

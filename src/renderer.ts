@@ -74,6 +74,9 @@ export class CityView {
   /** Incidents on the map: flames and smoke on a fire, a pair of warning lights for police or an ambulance. */
   private incidentFx: { cell: number; kind: IncidentKind; entity: Entity; t: number; roof: number; flames: Entity[]; smoke: Entity[]; lights: Entity[] }[] = [];
   private readonly fxMaterials = new Map<string, StandardMaterial>();
+  private readonly puddles = new Entity('Puddles');
+  private puddleMaterial: StandardMaterial | null = null;
+  private puddleKey = '';
   private faded = new Map<StandardMaterial, StandardMaterial>();
   private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private highway = new Entity('Decorative highway');
@@ -262,6 +265,10 @@ export class CityView {
     this.app.root.addChild(this.markers);
     this.app.root.addChild(this.overlayRoot);
     this.app.root.addChild(this.effects);
+    this.puddleMaterial = new StandardMaterial(); this.puddleMaterial.name = 'Rain puddles';
+    this.puddleMaterial.diffuse = new Color(.32, .4, .5); this.puddleMaterial.specular = new Color(.6, .65, .7); this.puddleMaterial.gloss = .9;
+    this.puddleMaterial.opacity = 0; this.puddleMaterial.blendType = BLEND_NORMAL; this.puddleMaterial.depthWrite = false; this.puddleMaterial.update();
+    this.puddles.enabled = false; this.app.root.addChild(this.puddles);
     this.dustMaterial = new StandardMaterial(); this.dustMaterial.name = 'Construction dust';
     this.dustMaterial.diffuse = new Color(.95, .91, .84); this.dustMaterial.emissive = new Color(.97, .93, .86); this.dustMaterial.useLighting = false;
     this.dustMaterial.opacity = .92; this.dustMaterial.blendType = BLEND_NORMAL; this.dustMaterial.depthWrite = false; this.dustMaterial.update();
@@ -539,6 +546,7 @@ export class CityView {
     this.ground.setBuildGrid(['road', 'R', 'C', 'I', 'F', 'power', 'water', 'park', 'clinic', 'police', 'fire', 'library', 'temple', 'stadium', 'airport', 'hospital', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert', 'school', 'university', 'bulldoze', 'bus-depot', 'bus-stop'].includes(this.mode));
     this.lastScene = { city, selected, preview: [...preview] };
     this.updateGroundEdges(city);
+    this.syncPuddles(city);
     const connected = connectedRoads(city), services = utilityService(city, connected), online = services.online;
     // One lookup table per refresh: a city without services pays nothing per parcel.
     const civicByCell = city.civic?.sites.length ? new Map(city.civic.sites.flatMap(site => civicCells(site).map(cell => [cell, site] as const))) : undefined;
@@ -880,7 +888,27 @@ export class CityView {
       this.box(tile, .45, .2, .5, .58, .02, .44, on ? this.material('#59c3ec', true) : '#7a8b92', false);
     }
   }
-  setAtmosphere(atmosphere: Atmosphere) { this.atmosphere.apply(atmosphere); this.world.apply(atmosphere); }
+  setAtmosphere(atmosphere: Atmosphere) {
+    this.atmosphere.apply(atmosphere); this.world.apply(atmosphere); this.ground.setTint(atmosphere.groundTint);
+    // Puddles fade in with the wet and out as it dries; one shared material, so this is a single update.
+    const opacity = Math.round(atmosphere.wetness * .55 * 100) / 100;
+    if (this.puddleMaterial && this.puddleMaterial.opacity !== opacity) { this.puddleMaterial.opacity = opacity; this.puddleMaterial.update(); this.puddles.enabled = opacity > .01; this.app.renderNextFrame = true; }
+  }
+  /** A flat puddle on one road parcel in four: the ones with the lowest hash, so even a short road gets some. Rebuilt only when the roads change. */
+  private syncPuddles(city: City) {
+    const all = city.cells.flatMap((cell, i) => cell.road ? [i] : []);
+    const roads = all.map(i => [i, hashCell(i * 7919 + 17) ^ hashCell(i)] as const).sort((a, b) => a[1] - b[1] || a[0] - b[0]).slice(0, Math.ceil(all.length / 4)).map(([i]) => i).sort((a, b) => a - b), key = roads.join();
+    if (key === this.puddleKey) return;
+    this.puddleKey = key;
+    for (const child of [...this.puddles.children]) child.destroy();
+    for (const i of roads) {
+      const { x, z } = this.position(i), h = hashCell(i * 7 + 3), puddle = new Entity('Puddle');
+      puddle.addComponent('render', { type: 'cylinder', material: this.puddleMaterial ?? undefined, castShadows: false, receiveShadows: false });
+      puddle.setLocalPosition(x + ((h % 7) - 3) * .12, .145, z + (((h >> 3) % 7) - 3) * .12);
+      const size = .45 + (h % 5) * .08; puddle.setLocalScale(size, .006, size * (.6 + ((h >> 5) % 4) * .12));
+      this.puddles.addChild(puddle);
+    }
+  }
   setQuality(quality: Quality) { this.atmosphere.setQuality(quality); if (quality !== this.quality) { this.quality = quality; this.visualRevision++; } }
 
   private updateGroundEdges(city: City) {
