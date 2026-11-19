@@ -31,6 +31,8 @@ import { MAX_TAX_RATES, nextTaxDay, scheduleCityTaxes, taxRatesAt, type TaxRates
 import { taxHappinessPoints } from './resident-happiness.ts';
 
 const SVG = 'http://www.w3.org/2000/svg';
+/** The page plays it; panels only ask, so they work (silently) without an audio engine. */
+const citySound = (name: string) => document.dispatchEvent(new CustomEvent('city-sound', { detail: name }));
 const money = (satang: number) => Math.round(satang / 100).toLocaleString('th-TH') + ' ฿';
 const signed = (satang: number) => (satang > 0 ? '+' : satang < 0 ? '−' : '±') + money(Math.abs(satang));
 const points = new Intl.NumberFormat('th-TH', { signDisplay: 'exceptZero' });
@@ -190,7 +192,8 @@ export class OverviewDashboard {
     this.budget.addEventListener('click', event => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-budget-level]');
       if (!button || !this.city) return;
-      setCityBudget(this.city, button.dataset.department as BudgetDepartment, Number(button.dataset.budgetLevel) as BudgetLevel);
+      const result = setCityBudget(this.city, button.dataset.department as BudgetDepartment, Number(button.dataset.budgetLevel) as BudgetLevel);
+      citySound(result.ok ? 'ui-toggle' : 'ui-error');
       this.renderBudget(this.city);
     });
     this.finance.append(this.financeHead, taxForm, this.budget, this.financeCharts);
@@ -204,6 +207,7 @@ export class OverviewDashboard {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-district-action]');
       if (!button || !this.city) return;
       const id = Number(button.dataset.districtId) || null, action = button.dataset.districtAction;
+      citySound('ui-select');
       if (action === 'paint') { this.onPaintDistrict?.(id); return; }
       if (action === 'erase') { this.onPaintDistrict?.(null); return; }
       if (action === 'create') { const name = prompt('ชื่อย่านใหม่', `ย่าน ${(this.city.districts?.list.length ?? 0) + 1}`); const made = name ? createDistrict(this.city, name) : null; if (made) this.onPaintDistrict?.(made.id); else this.renderDistricts(this.city); return; }

@@ -89,9 +89,11 @@ import './panel-theme.css';
 import './panel-polish.css';
 import { GoalPill, WinWatch, cityGoals } from './goals-panel.ts';
 import { advancedEnabled, storeAdvanced } from './advanced.ts';
-import { AudioEngine, type EffectName } from './audio-engine.ts';
+import { AudioEngine, type SoundName } from './audio-engine.ts';
 import { installAudioPanel } from './audio-panel.ts';
 import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } from './audio-cues.ts';
+import { moneyMark, moneyPops } from './money-pops.ts';
+import { incidentMarks } from './incident-marks.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
@@ -143,9 +145,11 @@ let atmosphere: AtmosphereController | undefined, mapMarkers: MapMarkers | undef
 let goalPill: GoalPill | undefined, winWatch: WinWatch | undefined, audioPanel: { sync(): void } | undefined;
 let marketPanel: ReturnType<typeof installMarketPanel> | undefined;
 const audio = new AudioEngine(BASE + 'assets/audio/'), cueLimiter = new CueLimiter();
-const sound = (name: EffectName) => audio.play(name);
+const sound = (name: SoundName) => audio.play(name);
+// Panels without a handle on the engine ask for a sound with this event.
+document.addEventListener('city-sound', event => { const name = (event as CustomEvent<SoundName>).detail; if (typeof name === 'string') sound(name); });
 /** A map command's result gets its own sound: the action on success, a soft refusal otherwise. */
-const resultSound = <T extends { ok: boolean }>(result: T, success: EffectName): T => { sound(result.ok ? success : 'ui-error'); return result; };
+const resultSound = <T extends { ok: boolean }>(result: T, success: SoundName): T => { sound(result.ok ? success : 'ui-error'); return result; };
 const mapInfo = { overlayKey: '', overlayTick: -1, overlayAt: 0, issueLayout: '', issueTick: -1, issueAt: 0 };
 let view: CityView;
 let roadMode: RoadMode = 'normal', roadMenu: ReturnType<typeof installRoadMenu> | undefined;
@@ -320,7 +324,7 @@ async function activate(index: number) {
   else if (tool === 'district') {
     // A small brush: the tapped parcel and its four neighbours.
     const brush = [index, ...expandedCellNeighbors(index)], name = districtBrush === null ? null : city.districts?.list.find(d => d.id === districtBrush)?.name;
-    const changed = paintDistrict(city, districtBrush, brush);
+    const changed = paintDistrict(city, districtBrush, brush); sound(changed ? 'ui-brush' : 'ui-click');
     status(changed ? (name ? `ระบายย่าน ${name} ${changed} แปลง` : `เอาออกจากย่าน ${changed} แปลง`) : 'แปลงเหล่านี้อยู่ในย่านนี้แล้ว');
   }
   else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
@@ -910,7 +914,7 @@ async function boot() {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-venue-action]'), id = Number(venueActions.dataset.siteId);
     if (!button || !id) return;
     const result = button.dataset.venueAction === 'lease' ? leaseVenue(city, id) : endVenueLease(city, id);
-    status(resultSound(result, 'ui-select').message); render();
+    status(resultSound(result, button.dataset.venueAction === 'lease' ? 'ev-coin' : 'ui-select').message); render();
   });
   plantPanel = installPlantPanel(plantActions, (quotedCity, id, level) => {
     if (quotedCity !== city || route?.page !== 'place' || plantAt(city, route.cell)?.id !== id) return;
@@ -1140,6 +1144,7 @@ async function boot() {
     const minutes = Math.min(dt, 0.25) * speed * 1440;
     const tickBefore = city.tick;
     const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
+    const moneyBefore = before ? moneyMark(city) : null;
     let days = 0;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
     const frameStarted = performance.now(), frameDeadline = frameStarted + 8;
@@ -1156,6 +1161,7 @@ async function boot() {
     if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
     if (days) render();
     else if (route?.page === 'city') renderParkPanel();
+    if (days && moneyBefore !== null) { mapMarkers?.showMoney(moneyPops(city, moneyBefore)); view.showIncidents(incidentMarks(city, moneyBefore)); }
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
   Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });

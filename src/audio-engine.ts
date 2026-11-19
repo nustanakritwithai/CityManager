@@ -1,7 +1,8 @@
 /**
  * Web Audio for the game: four buses (ui, events, ambience, music) under one master, short
  * CC0 effects decoded once, three CC0 music tracks streamed in turn, and a procedural ambience
- * (rain, wind, city, factory, birds, crickets) shaped by what the city shows. Presentation only:
+ * (rain, wind, city, factory, birds, crickets) shaped by what the city shows. A few short cues
+ * (sirens, a coin, an unlock chime, a brush) are synthesised on the spot, so they need no file. Presentation only:
  * it reads state and never touches the simulation, its RNG or the save.
  */
 import { AUDIO_BUSES, busGain, loadAudioSettings, saveAudioSettings, type AudioBus, type AudioSettings } from './audio-settings.ts';
@@ -10,6 +11,11 @@ export type EffectName = 'ui-click' | 'ui-select' | 'ui-place' | 'ui-road' | 'ui
   | 'ev-build-home' | 'ev-build-business' | 'ev-build-farm' | 'ev-arrival' | 'ev-month' | 'ev-shop' | 'ev-issue' | 'ev-broke' | 'jingle-level' | 'jingle-win';
 export const EFFECTS: readonly EffectName[] = ['ui-click', 'ui-select', 'ui-place', 'ui-road', 'ui-bulldoze', 'ui-error', 'ui-save', 'ui-open', 'ui-close', 'ui-toggle',
   'ev-build-home', 'ev-build-business', 'ev-build-farm', 'ev-arrival', 'ev-month', 'ev-shop', 'ev-issue', 'ev-broke', 'jingle-level', 'jingle-win'];
+/** Cues built from oscillators and noise when played; listed apart because they have no file to fetch. */
+export type SynthName = 'ev-fire' | 'ev-alarm' | 'ev-medical' | 'ev-unlock' | 'ev-coin' | 'ui-brush';
+export const SYNTHS: readonly SynthName[] = ['ev-fire', 'ev-alarm', 'ev-medical', 'ev-unlock', 'ev-coin', 'ui-brush'];
+export type SoundName = EffectName | SynthName;
+const isSynth = (name: string): name is SynthName => (SYNTHS as readonly string[]).includes(name);
 export const TRACKS = [
   { file: 'music-another-august.mp3', title: 'Another August', artist: 'The Cynic Project' },
   { file: 'music-vaporware.mp3', title: 'Vaporware', artist: 'The Cynic Project' },
@@ -18,7 +24,7 @@ export const TRACKS = [
 /** What the ambience follows, each 0–1 except the phase. */
 export type AmbienceState = { phase: 'night' | 'dawn' | 'day' | 'dusk'; rain: number; traffic: number; factories: number; closeness: number };
 
-const busOf = (name: EffectName): AudioBus => name.startsWith('ui-') ? 'ui' : 'events';
+const busOf = (name: SoundName): AudioBus => name.startsWith('ui-') ? 'ui' : 'events';
 
 export class AudioEngine {
   readonly settings: AudioSettings = loadAudioSettings();
@@ -62,10 +68,12 @@ export class AudioEngine {
     Object.assign(this.settings, patch); saveAudioSettings(this.settings); this.applyGains(); this.syncMusic();
   }
 
-  play(name: EffectName, options: { gain?: number; rate?: number } = {}): void {
-    const ctx = this.ctx, buffer = this.buffers.get(name), bus = this.buses.get(busOf(name));
+  play(name: SoundName, options: { gain?: number; rate?: number } = {}): void {
+    const ctx = this.ctx, bus = this.buses.get(busOf(name));
     this.remember(name);
-    if (!ctx || !buffer || !bus || this.settings.muted || ctx.state !== 'running') return;
+    if (!ctx || !bus || this.settings.muted || ctx.state !== 'running') return;
+    if (isSynth(name)) { this.synth(ctx, name, bus, options.gain ?? 1); return; }
+    const buffer = this.buffers.get(name); if (!buffer) return;
     const source = ctx.createBufferSource(), gain = ctx.createGain();
     source.buffer = buffer; source.playbackRate.value = options.rate ?? 1; gain.gain.value = options.gain ?? 1;
     source.connect(gain).connect(bus); source.start();
@@ -141,6 +149,31 @@ export class AudioEngine {
     chirpTone.frequency.value = 4700; pulse.type = 'square'; pulse.frequency.value = 26; pulseDepth.gain.value = .5; am.gain.value = .5;
     pulse.connect(pulseDepth).connect(am.gain); chirpTone.connect(am).connect(crickets); chirpTone.start(); pulse.start();
     this.ambience = { rain, wind, city, factory, birds, crickets };
+  }
+
+  /** One synthesised cue, at most about 1.5 s, through its bus. */
+  private synth(ctx: AudioContext, name: SynthName, bus: GainNode, level: number) {
+    const t = ctx.currentTime + .01, out = ctx.createGain(); out.gain.value = level; out.connect(bus);
+    const tone = (type: OscillatorType, freq: number, start: number, length: number, peak: number, glideTo?: number) => {
+      const osc = ctx.createOscillator(), env = ctx.createGain(); osc.type = type; osc.frequency.setValueAtTime(freq, start);
+      if (glideTo) osc.frequency.linearRampToValueAtTime(glideTo, start + length);
+      env.gain.setValueAtTime(0, start); env.gain.linearRampToValueAtTime(peak, start + .012); env.gain.setValueAtTime(peak, start + Math.max(.012, length - .06)); env.gain.exponentialRampToValueAtTime(.0001, start + length);
+      osc.connect(env).connect(out); osc.start(start); osc.stop(start + length + .02);
+    };
+    const soften = (cutoff: number) => { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; out.disconnect(); out.connect(f).connect(bus); };
+    if (name === 'ev-coin') { tone('sine', 1320, t, .09, .22); tone('sine', 1760, t + .07, .28, .2); tone('triangle', 2640, t + .07, .18, .05); }
+    else if (name === 'ev-unlock') [1047, 1319, 1568, 2093].forEach((f, i) => { tone('triangle', f, t + i * .09, .5 - i * .05, .16); tone('sine', f * 2, t + i * .09, .2, .03); });
+    else if (name === 'ev-fire') { soften(1800); tone('triangle', 650, t, .7, .13, 960); tone('triangle', 960, t + .7, .7, .13, 650); }
+    else if (name === 'ev-alarm') { soften(2200); [960, 770, 960, 770].forEach((f, i) => tone('square', f, t + i * .16, .15, .05)); }
+    else if (name === 'ev-medical') { soften(2400); [880, 660, 880, 660].forEach((f, i) => tone('sine', f, t + i * .24, .23, .12)); }
+    else {
+      const length = .2, buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * length), ctx.sampleRate), data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const src = ctx.createBufferSource(), band = ctx.createBiquadFilter(), env = ctx.createGain(); src.buffer = buffer;
+      band.type = 'bandpass'; band.Q.value = 1.2; band.frequency.setValueAtTime(1400, t); band.frequency.exponentialRampToValueAtTime(3600, t + length);
+      env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(.18, t + .03); env.gain.exponentialRampToValueAtTime(.0001, t + length);
+      src.connect(band).connect(env).connect(out); src.start(t); src.stop(t + length);
+    }
   }
 
   /** A short bird phrase: two to four rising sine chirps. */
