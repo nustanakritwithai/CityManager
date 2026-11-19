@@ -812,8 +812,9 @@ async function boot() {
   parkScene = new SceneParkActivity(view);
   railUi=installRailManagement({view,city:()=>city,runtime:()=>parkRuntime,selectTool:()=>{setTool('select');inspector(false);},changed:()=>render(),repaint:()=>render(),status,enabled:true});
   view.app.once('destroy',()=>railUi?.destroy());
-  // Walkers on the street are residents really walking to work, beside the park scene's real visitors.
   let trafficEnabled=trafficModelEnabled();
+  // Walkers on the street are residents really walking to work. The opt-in allocation game keeps its own picture, without them.
+  view.traffic.setWalkersEnabled(!trafficEnabled);
   const trafficSection=document.createElement('section');trafficSection.id='traffic-game-status';trafficSection.className='growth-section';
   const trafficTitle=document.createElement('h3');trafficTitle.textContent='การจราจรจำลอง';
   const trafficInfo=document.createElement('p');trafficInfo.textContent='กำลังเตรียมแบบจำลอง';trafficInfo.setAttribute('role','status');
@@ -830,7 +831,7 @@ async function boot() {
   const trafficControlNote=document.createElement('small');trafficControlNote.textContent='รถจำลองเริ่มใหม่เมื่อโหลดเมือง';
   trafficControl.append(trafficControlTitle,trafficButton,trafficControlNote);$('#game-content .game-menu').prepend(trafficControl);
   const setTrafficEnabled=(enabled:boolean,persist=false)=>{
-    trafficEnabled=enabled;trafficOn=enabled;trafficLayer?.destroy();trafficLayer=null;view.traffic.setCarsEnabled(!enabled);
+    trafficEnabled=enabled;trafficOn=enabled;trafficLayer?.destroy();trafficLayer=null;view.traffic.setCarsEnabled(!enabled);view.traffic.setWalkersEnabled(!enabled);
     if(enabled){try{const canvas=$('#city-canvas') as HTMLCanvasElement;trafficLayer=new TrafficLayer(view.app,screenCull(i=>view.project(i),()=>({width:canvas.clientWidth,height:canvas.clientHeight})),()=>{view.traffic.setCarsEnabled(true);status('แบบจำลองจราจรไม่พร้อม · กลับไปใช้รถตกแต่ง โดยไม่กระทบเซฟ');});}catch{view.traffic.setCarsEnabled(true);trafficInfo.textContent='แบบจำลองไม่พร้อม · แสดงรถตกแต่งแทน';}}
     trafficState.textContent=enabled?'เปิด':'ปิด';trafficButton.setAttribute('aria-label',enabled?'ปิดการจราจรจำลอง':'เปิดการจราจรจำลอง');trafficButton.setAttribute('aria-pressed',String(enabled));
     trafficSection.hidden=!enabled;
