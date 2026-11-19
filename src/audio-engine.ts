@@ -43,6 +43,7 @@ export class AudioEngine {
   private mood: MusicMood = { night: false, tense: false };
   private duck: GainNode | null = null;
   private tension: GainNode | null = null;
+  private readonly venueLayers = new Set<'crowd' | 'chatter'>();
   private nextPlane = 0;
   private nextChirp = 0;
   private readonly played: { name: string; at: number }[] = [];
@@ -97,7 +98,19 @@ export class AudioEngine {
     this.mood = { ...mood };
     // Before the music starts, begin on a track that suits the hour; once playing, the change waits for the track to end.
     if (!this.music && TRACK_TIME[this.track] !== (mood.night ? 'night' : 'day')) this.track = nextTrackFor(this.track, mood.night);
-    const ctx = this.ctx; if (ctx && this.tension) this.tension.gain.setTargetAtTime(mood.tense ? .05 : 0, ctx.currentTime, 1.5);
+    const ctx = this.ctx; if (!ctx) return;
+    if (mood.tense) this.startTension(ctx);
+    this.tension?.gain.setTargetAtTime(mood.tense ? .05 : 0, ctx.currentTime, 1.5);
+  }
+
+  /** The tense undertone: two slightly detuned low saws under a slowly breathing low-pass. Built the first time the city turns tense, never before. */
+  private startTension(ctx: AudioContext) {
+    if (this.tension || !this.buses.get('music')) return;
+    const tension = ctx.createGain(), low = ctx.createBiquadFilter(), breath = ctx.createOscillator(), depth = ctx.createGain();
+    tension.gain.value = 0; low.type = 'lowpass'; low.frequency.value = 240; breath.frequency.value = .08; depth.gain.value = 90;
+    breath.connect(depth).connect(low.frequency); breath.start();
+    for (const f of [55, 55.6]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(low); o.start(); }
+    low.connect(tension).connect(this.buses.get('music')!); this.tension = tension;
   }
 
   private playTrack(index: number) { this.track = index; if (this.music) { this.music.src = this.base + TRACKS[this.track].file; this.syncMusic(); } }
@@ -123,6 +136,8 @@ export class AudioEngine {
     if (day > 0 && state.rain < .5 && t >= this.nextChirp) { this.chirp(ctx, a.birds, t); this.nextChirp = t + 1.5 + Math.random() * 5; }
     // Venues near the camera: a crowd swelling at a stadium or concert, chatter at a market, a temple bell, a passing plane.
     const v = state.venues ?? { crowd: 0, chatter: 0, temple: 0, airport: 0 }, dry = 1 - state.rain * .5;
+    if (v.crowd > 0) this.startVenueLayer(ctx, 'crowd', a.crowd);
+    if (v.chatter > 0) this.startVenueLayer(ctx, 'chatter', a.chatter);
     glide(a.crowd, v.crowd * .22 * dry); glide(a.chatter, v.chatter * .12 * dry);
     if (v.temple > .05 && t >= this.nextBell) { this.bell(ctx, a.venue, t, v.temple); this.nextBell = t + 9 + Math.random() * 7; }
     if (v.airport > .05 && t >= this.nextPlane) { this.plane(ctx, a.venue, t, v.airport); this.nextPlane = t + 25 + Math.random() * 20; }
@@ -155,13 +170,8 @@ export class AudioEngine {
       el.addEventListener('ended', () => { setTimeout(() => this.playTrack(nextTrackFor(this.track, this.mood.night)), 6000); });
       const duck = ctx.createGain(); duck.connect(this.buses.get('music')!); this.duck = duck;
       try { ctx.createMediaElementSource(el).connect(duck); } catch { /* falls back to the element's own output */ }
-      // The tense undertone: two slightly detuned low saws under a slowly breathing low-pass, silent until needed.
-      const tension = ctx.createGain(), low = ctx.createBiquadFilter(), breath = ctx.createOscillator(), depth = ctx.createGain();
-      tension.gain.value = this.mood.tense ? .05 : 0; low.type = 'lowpass'; low.frequency.value = 240; breath.frequency.value = .08; depth.gain.value = 90;
-      breath.connect(depth).connect(low.frequency); breath.start();
-      for (const f of [55, 55.6]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(low); o.start(); }
-      low.connect(tension).connect(this.buses.get('music')!); this.tension = tension;
       this.music = el;
+      if (this.mood.tense) this.startTension(ctx);
     }
     const audible = busGain(this.settings, 'music') > 0 && !document.hidden;
     if (audible && this.music.paused) void this.music.play().catch(() => undefined);
@@ -188,15 +198,22 @@ export class AudioEngine {
     const chirpTone = ctx.createOscillator(), am = ctx.createGain(), pulse = ctx.createOscillator(), pulseDepth = ctx.createGain();
     chirpTone.frequency.value = 4700; pulse.type = 'square'; pulse.frequency.value = 26; pulseDepth.gain.value = .5; am.gain.value = .5;
     pulse.connect(pulseDepth).connect(am.gain); chirpTone.connect(am).connect(crickets); chirpTone.start(); pulse.start();
-    // Venue layers: brown noise around 700 Hz swelling slowly for a crowd; a fast-pulsed 1.4 kHz band for chatter.
+    // Venue layers get their sound sources only when a venue is first heard (see startVenueLayer), so a city
+    // without venues never runs them.
     const crowd = layer(), chatter = layer(), venue = ctx.createGain(); venue.connect(out);
-    const crowdSwell = ctx.createGain(), swellLfo = ctx.createOscillator(), swellDepth = ctx.createGain();
-    crowdSwell.gain.value = .75; swellLfo.frequency.value = .23; swellDepth.gain.value = .25; swellLfo.connect(swellDepth).connect(crowdSwell.gain); swellLfo.start();
-    this.noise(ctx, true).connect(filter('bandpass', 700, .8)).connect(crowdSwell).connect(crowd);
-    const babble = ctx.createGain(), babbleLfo = ctx.createOscillator(), babbleDepth = ctx.createGain();
-    babble.gain.value = .6; babbleLfo.type = 'triangle'; babbleLfo.frequency.value = 6.5; babbleDepth.gain.value = .4; babbleLfo.connect(babbleDepth).connect(babble.gain); babbleLfo.start();
-    this.noise(ctx, false).connect(filter('bandpass', 1400, 1.5)).connect(babble).connect(chatter);
     this.ambience = { rain, wind, city, factory, birds, crickets, crowd, chatter, venue };
+  }
+
+  /** Crowd: brown noise around 700 Hz swelling slowly. Chatter: a fast-pulsed 1.4 kHz band. Built once, on first need. */
+  private startVenueLayer(ctx: AudioContext, kind: 'crowd' | 'chatter', out: GainNode) {
+    if (this.venueLayers.has(kind)) return;
+    this.venueLayers.add(kind);
+    const band = ctx.createBiquadFilter(), shape = ctx.createGain(), lfo = ctx.createOscillator(), depth = ctx.createGain();
+    band.type = 'bandpass';
+    if (kind === 'crowd') { band.frequency.value = 700; band.Q.value = .8; shape.gain.value = .75; lfo.frequency.value = .23; depth.gain.value = .25; }
+    else { band.frequency.value = 1400; band.Q.value = 1.5; shape.gain.value = .6; lfo.type = 'triangle'; lfo.frequency.value = 6.5; depth.gain.value = .4; }
+    lfo.connect(depth).connect(shape.gain); lfo.start();
+    this.noise(ctx, kind === 'crowd').connect(band).connect(shape).connect(out);
   }
 
   /** One synthesised cue, at most about 1.5 s, through its bus. */
