@@ -95,6 +95,8 @@ import { CueLimiter, cityCues, cueSnapshot, dayBoundaryReached, monthEnded } fro
 import { moneyMark, moneyPops } from './money-pops.ts';
 import { incidentMarks } from './incident-marks.ts';
 import { venueSounds } from './venue-life.ts';
+import { isTense } from './music-mood.ts';
+import { treasuryForecast } from './treasury-forecast.ts';
 import { createOwnerDecisionSession } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
@@ -1110,7 +1112,7 @@ async function boot() {
   audioPanel = installAudioPanel(audio, $('#atmosphere-menu'));
   const adviceButton = document.createElement('button'); adviceButton.type = 'button'; adviceButton.id = 'open-city-advice'; adviceButton.textContent = 'คำแนะนำเมือง · ฟังเสียง'; adviceButton.addEventListener('click', () => { guide?.showAdvice(city); $('#atmosphere-toggle').click(); }); $('#atmosphere-menu').append(adviceButton);
   // Ambience follows what the screen shows; the city-wide levels only change once a day.
-  let soundTick = -1, traffic = 0, factories = 0;
+  let soundTick = -1, traffic = 0, factories = 0, tense = false;
   view.app.on('update', (dt: number) => {
     const quickVisible = quickSelection !== null && tool === 'select' && $('#inspector').dataset.open !== 'true'
       && !cityStatsPanel?.open && !cityNetwork?.open && !minimap?.mapOpen && !dashboard?.modalOpen
@@ -1133,8 +1135,12 @@ async function boot() {
       soundTick = city.tick;
       traffic = Math.min(1, city.households.reduce((n, h) => n + h.members, 0) / 40);
       factories = Math.min(1, new Set(city.cropLedger.filter(e => e.kind === 'process' && e.tick === city.tick).map(e => e.from)).size / 3);
+      // Tense: the treasury runs dry within 90 days at this pace, or a building burned today.
+      let fireToday = false; for (let i = city.ledger.length - 1; i >= 0 && city.ledger[i].tick === city.tick; i--) if (/^Fire damage repair #/.test(city.ledger[i].reason)) { fireToday = true; break; }
+      tense = isTense(treasuryForecast(city, 0, 0).runwayDays, fireToday);
     }
     const closeness = Math.min(1, Math.max(0, (130 - view.radius) / 100)), soundscape = visual.soundscape;
+    audio.setMood({ night: soundscape.phase === 'night' || soundscape.phase === 'dusk', tense });
     audio.updateAmbience({ ...soundscape, traffic, factories, closeness, venues: venueSounds(city.civic?.sites ?? [], view.target, i => view.position(i), soundscape.phase, closeness) });
     if (taxiFeature && trafficOn && trafficLayer) {
       if (!taxiView) taxiView = new SceneTaxiVehicles(view.app);

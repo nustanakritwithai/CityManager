@@ -5,6 +5,7 @@
  * (sirens, a coin, an unlock chime, a brush) are synthesised on the spot, so they need no file. Presentation only:
  * it reads state and never touches the simulation, its RNG or the save.
  */
+import { DUCK_LEVEL, DUCK_SECONDS, TRACK_TIME, nextTrackFor, type MusicMood } from './music-mood.ts';
 import { AUDIO_BUSES, busGain, loadAudioSettings, saveAudioSettings, type AudioBus, type AudioSettings } from './audio-settings.ts';
 
 export type EffectName = 'ui-click' | 'ui-select' | 'ui-place' | 'ui-road' | 'ui-bulldoze' | 'ui-error' | 'ui-save' | 'ui-open' | 'ui-close' | 'ui-toggle'
@@ -38,6 +39,10 @@ export class AudioEngine {
   private track = Math.floor(Math.random() * TRACKS.length);
   private ambience: { rain: GainNode; wind: GainNode; city: GainNode; factory: GainNode; birds: GainNode; crickets: GainNode; crowd: GainNode; chatter: GainNode; venue: GainNode } | null = null;
   private nextBell = 0;
+  /** Hour and tension the music follows; set every frame, acted on only when it changes. */
+  private mood: MusicMood = { night: false, tense: false };
+  private duck: GainNode | null = null;
+  private tension: GainNode | null = null;
   private nextPlane = 0;
   private nextChirp = 0;
   private readonly played: { name: string; at: number }[] = [];
@@ -76,6 +81,7 @@ export class AudioEngine {
     const ctx = this.ctx, bus = this.buses.get(busOf(name));
     this.remember(name);
     if (!ctx || !bus || this.settings.muted || ctx.state !== 'running') return;
+    const duck = DUCK_SECONDS[name]; if (duck) this.duckMusic(ctx, duck);
     if (isSynth(name)) { this.synth(ctx, name, bus, options.gain ?? 1); return; }
     const buffer = this.buffers.get(name); if (!buffer) return;
     const source = ctx.createBufferSource(), gain = ctx.createGain();
@@ -83,7 +89,25 @@ export class AudioEngine {
     source.connect(gain).connect(bus); source.start();
   }
 
-  nextTrack(): void { this.track = (this.track + 1) % TRACKS.length; if (this.music) { this.music.src = this.base + TRACKS[this.track].file; this.syncMusic(); } }
+  nextTrack(): void { this.playTrack((this.track + 1) % TRACKS.length); }
+
+  /** Follow the hour and the city's tension: the next track suits the hour, and a low undertone plays while tense. */
+  setMood(mood: MusicMood): void {
+    if (mood.night === this.mood.night && mood.tense === this.mood.tense) return;
+    this.mood = { ...mood };
+    // Before the music starts, begin on a track that suits the hour; once playing, the change waits for the track to end.
+    if (!this.music && TRACK_TIME[this.track] !== (mood.night ? 'night' : 'day')) this.track = nextTrackFor(this.track, mood.night);
+    const ctx = this.ctx; if (ctx && this.tension) this.tension.gain.setTargetAtTime(mood.tense ? .05 : 0, ctx.currentTime, 1.5);
+  }
+
+  private playTrack(index: number) { this.track = index; if (this.music) { this.music.src = this.base + TRACKS[this.track].file; this.syncMusic(); } }
+
+  /** Lower the music for a moment under an important cue, then let it come back. */
+  private duckMusic(ctx: AudioContext, seconds: number) {
+    if (!this.duck) return;
+    const g = this.duck.gain, t = ctx.currentTime;
+    g.cancelScheduledValues(t); g.setTargetAtTime(DUCK_LEVEL, t, .08); g.setTargetAtTime(1, t + seconds, .5);
+  }
 
   /** Called every frame with what the screen shows; gains glide, chirps are scheduled ahead. */
   updateAmbience(state: AmbienceState): void {
@@ -128,8 +152,15 @@ export class AudioEngine {
     const ctx = this.ctx; if (!ctx) return;
     if (!this.music) {
       const el = new Audio(); el.preload = 'none'; el.crossOrigin = 'anonymous'; el.src = this.base + TRACKS[this.track].file;
-      el.addEventListener('ended', () => { setTimeout(() => this.nextTrack(), 6000); });
-      try { ctx.createMediaElementSource(el).connect(this.buses.get('music')!); } catch { /* falls back to the element's own output */ }
+      el.addEventListener('ended', () => { setTimeout(() => this.playTrack(nextTrackFor(this.track, this.mood.night)), 6000); });
+      const duck = ctx.createGain(); duck.connect(this.buses.get('music')!); this.duck = duck;
+      try { ctx.createMediaElementSource(el).connect(duck); } catch { /* falls back to the element's own output */ }
+      // The tense undertone: two slightly detuned low saws under a slowly breathing low-pass, silent until needed.
+      const tension = ctx.createGain(), low = ctx.createBiquadFilter(), breath = ctx.createOscillator(), depth = ctx.createGain();
+      tension.gain.value = this.mood.tense ? .05 : 0; low.type = 'lowpass'; low.frequency.value = 240; breath.frequency.value = .08; depth.gain.value = 90;
+      breath.connect(depth).connect(low.frequency); breath.start();
+      for (const f of [55, 55.6]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(low); o.start(); }
+      low.connect(tension).connect(this.buses.get('music')!); this.tension = tension;
       this.music = el;
     }
     const audible = busGain(this.settings, 'music') > 0 && !document.hidden;
