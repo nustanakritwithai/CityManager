@@ -5,6 +5,7 @@ import { TAXI_ENABLED, MAX_TAXI_DEPOTS, TAXI_DEPOT, taxiAt, taxiEnabled, taxiUni
 import * as placement from '../src/taxi/placement.ts';
 import * as buildings from '../src/taxi/buildings.ts';
 import { buildTaxiDepot, taxiSiteReason, upgradeTaxiDepot, toggleTaxiDepot } from '../src/taxi/placement.ts';
+import { TAXI_FARE_REASON } from '../src/commute.ts';
 
 const grown = () => { const c = createCity(61025); for (let d = 0; d < 20; d++) step(c); return c; };
 const nb = (i: number) => [i - 1, i + 1, i - SIZE, i + SIZE].filter(n => n >= 0 && n < SIZE * SIZE && (Math.abs((n % SIZE) - (i % SIZE)) <= 1));
@@ -88,14 +89,17 @@ test('bulldoze removes a taxi depot for free', () => {
   assert.deepEqual(c.accounts, accounts); assert.equal(c.ledger.length, ledger);
   assert.ok(buildTaxiDepot(c, cell, true).ok); deserialize(serialize(c));
 });
-test('economy unchanged over N days with taxi sites present', () => {
+test('taxi depots change the economy only by the fares their riders really pay', () => {
   const a = grown(), b = grown(), s = sites(b);
   buildTaxiDepot(b, s[0], true); buildTaxiDepot(b, s[1], true);
-  const strip = (c: City) => { const j = JSON.parse(serialize(c)); delete j.taxi; delete j.lastEvent; delete j.nextId; return j; };
   for (let d = 0; d < 30; d++) { step(a); step(b); }
-  // Taxi sites take ids from nextId (like parks), so later entity ids shift by 2; money must not.
-  const norm = (j: any) => JSON.stringify({ accounts: Object.entries(j.accounts).map(([k, v]) => [k.replace(/\d+/g, '#'), v]).sort(), ledger: j.ledger.map((e: any) => ({ ...e, from: e.from.replace(/\d+/g, '#'), to: e.to.replace(/\d+/g, '#'), reason: e.reason.replace(/#\d+/g, '#') })), goods: j.goods, crops: j.crops, households: j.households.length, firms: j.firms.length });
-  assert.equal(norm(strip(b)), norm(strip(a)));
+  const fares = b.ledger.filter(e => e.reason === TAXI_FARE_REASON);
+  assert.ok(fares.length > 0, 'someone with no vehicle and no bus takes a taxi to work');
+  assert.ok(fares.every(e => e.to === 'treasury' && e.from.startsWith('household:') && e.amount > 0), 'the fare there and back goes to the city that runs the depots');
+  assert.equal(b.accounts.treasury - a.accounts.treasury, fares.reduce((n, e) => n + e.amount, 0));
+  // Taxi sites take ids from nextId (like parks), so later entity ids shift by 2; every other money movement must not.
+  const plain = (c: City) => c.ledger.filter(e => e.reason !== TAXI_FARE_REASON).map(e => [e.tick, e.from.replace(/\d+/g, '#'), e.to.replace(/\d+/g, '#'), e.amount, e.reason.replace(/\d+/g, '#')].join('|'));
+  assert.deepEqual(plain(b), plain(a));
 });
 
 test('taxi site types come from the shared sites module', async () => {
