@@ -20,6 +20,7 @@ import { trafficTaxiPoses } from './taxi/game-visual.ts';
 import { trafficGameStatus } from './traffic/game-status.ts';
 import { screenCull, storeTrafficModel } from './traffic/flag.ts';
 import { busEnabled } from './bus/types.ts';
+import { LiveBusService } from './bus/live-service.ts';
 import { BusPresentation } from './bus/presentation.ts';
 import { createAutosave, installAutosave, describeAutosave } from './autosave.ts';
 import { roadTopologyKey } from './road-topology.ts';
@@ -143,6 +144,8 @@ let parkRuntime: ParkRuntime;
 let trafficLayer: TrafficLayer | null = null;
 /** Bus drawings (`?bus=1`). Still draws nothing until `trafficLayer.bus` exists (traffic on too). */
 let busView: BusPresentation | null = null;
+/** The buses running on their own (with real riders) whenever the opt-in allocation traffic game is off. */
+let liveBus: LiveBusService | null = null;
 let parkScene: SceneParkActivity | undefined;
 let railUi:ReturnType<typeof installRailManagement>|undefined;
 let parkPanel: HTMLElement;
@@ -1155,7 +1158,11 @@ async function boot() {
     if(trafficLayer){const d=trafficLayer.diagnostics;view.traffic.setCarsEnabled(Boolean(d.failure));const text=trafficGameStatus(d);if(text!==trafficText){trafficText=text;trafficInfo.textContent=text;}const hotspot=d.loadByCell.reduce<typeof d.loadByCell[number]|null>((best,row)=>row.queued>0&&(!best||row.queued>best.queued)?row:best,null);bottleneckCell=hotspot?.cell??null;trafficFocus.hidden=bottleneckCell===null;}
 
     // `trafficLayer.bus` stays null on integrate/transport until bus is re-wired onto the #126 worker game.
-    busView?.frame(city, trafficLayer);
+    if (busView && !trafficLayer && city.bus?.lines.length) {
+      if (liveBus?.city !== city) liveBus = new LiveBusService(city);
+      liveBus.tick(dt, !paused && !document.hidden);
+      busView.frame(city, liveBus);
+    } else { liveBus = null; busView?.frame(city, trafficLayer); }
     minimap?.redraw();
     if (city.tick !== soundTick) {
       soundTick = city.tick;
@@ -1207,7 +1214,7 @@ async function boot() {
     if (days && moneyBefore !== null) { mapMarkers?.showMoney(moneyPops(city, moneyBefore)); view.showIncidents(incidentMarks(city, moneyBefore)); }
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });
+  Object.defineProperty(window, 'cityManager', { value: { liveBuses: () => liveBus ? { now: liveBus.engine.now, submitted: liveBus.submitted, released: liveBus.released, buses: liveBus.engine.snapshot().length, ledger: liveBus.engine.ledger() } : null, snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });
