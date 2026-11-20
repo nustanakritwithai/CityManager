@@ -18,7 +18,7 @@ const CELL = 2, LANE = .36, SIDEWALK = .8, PARK = .68;
 const WAIT_LIMIT = 3, GHOST = 1.2;
 /** Seconds a truck spends loading or unloading at each end of its delivery route. */
 const DWELL = 3;
-type Errand = 'shop' | 'care';
+type Errand = 'shop' | 'care' | 'outing';
 type Actor = {
   outbound?: number[]; inbound?: number[]; leg?: 'home' | 'work';
   key: string; kind: 'car' | 'truck' | 'walker'; small: boolean; errand: Errand | null; entity: Entity; route: number[]; p: number; dir: 1 | -1; speed: number; v: number;

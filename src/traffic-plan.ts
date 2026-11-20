@@ -7,7 +7,7 @@ import { roadDriveAllowed, roadTopologyKey } from './road-topology.ts';
  * Read-only over City; no sim RNG, no mutation, nothing enters a save.
  */
 import { GATEWAY, SIZE, connectedRoads, economicSignals, firmWorkerCount, type City } from './sim.ts';
-import { careTripsToday, commutesToday, shoppingTrips } from './commute.ts';
+import { careTripsToday, commutesToday, leisureTrips, shoppingTrips } from './commute.ts';
 
 export const MAX_CARS = 40, MAX_TRUCKS = 12, MAX_WALKERS = 60;
 /**
@@ -21,8 +21,8 @@ export const CARGO = ['rice', 'vegetables', 'sugarcane', 'milled-rice', 'canned-
 /** `colour` is the paint for cars; for trucks it is the index in CARGO of what the route mostly carries. */
 export type Vehicle = { key: string; kind: 'car' | 'truck'; route: number[]; returnRoute?: number[]; colour: number; body?: 'motorcycle' | 'car'; passengers?: number; errand?: Errand };
 /** `returnRoute` marks a commuter: out to work in the morning, home in the evening, indoors between. */
-/** An errand away from the usual commute: to the shops after work, or to the doctor in the morning. */
-export type Errand = 'shop' | 'care';
+/** An errand away from the usual commute: to the shops after work, to the doctor in the morning, or an evening out. */
+export type Errand = 'shop' | 'care' | 'outing';
 export type Walker = { key: string; route: number[]; colour: number; returnRoute?: number[]; errand?: Errand };
 export type TrafficPlan = { cars: Vehicle[]; trucks: Vehicle[]; walkers: Walker[]; smoke: number[]; signature: string };
 
@@ -66,9 +66,13 @@ export function commuteGoal(hour: number, depart: number, errand: number): Commu
  * `depart` (0–1), for about forty minutes, then home again.
  */
 export function shopGoal(hour: number, depart: number): 'home' | 'work' { return errandGoal('shop', hour, depart); }
-/** Where someone on an errand wants to be: at the shops after work (16:30–19:30, about 40 minutes), or at the doctor in the morning (08:30–10:00 out, about an hour and a half). */
+/**
+ * Where someone on an errand wants to be: at the shops after work (16:30–19:30, about 40 minutes), at the doctor in
+ * the morning (08:30–10:00 out, about an hour and a half), or out for the evening (18:30–20:30 out, about two hours).
+ */
 export function errandGoal(errand: Errand, hour: number, depart: number): 'home' | 'work' {
-  const h = ((hour % 24) + 24) % 24, leave = errand === 'shop' ? 16.5 + depart * 2.3 : 8.5 + depart * 1.5, stay = errand === 'shop' ? .7 : 1.5;
+  const h = ((hour % 24) + 24) % 24;
+  const leave = errand === 'shop' ? 16.5 + depart * 2.3 : errand === 'care' ? 8.5 + depart * 1.5 : 18.5 + depart * 2, stay = errand === 'shop' ? .7 : errand === 'care' ? 1.5 : 2;
   return h >= leave && h < leave + stay ? 'work' : 'home';
 }
 
@@ -170,7 +174,8 @@ export function trafficPlan(city: City): TrafficPlan {
     // Shoppers: households going to the shops they really bought from today, on foot or in a vehicle not used for work.
     const driven = new Set(cars.map(v => v.key));
     // and people taken ill going to the doctor this morning.
-    const errands = [...careTripsToday(city).map(t => ({ ...t, errand: 'care' as const, place: t.siteId ?? 0 })), ...shoppingTrips(city).map(t => ({ ...t, errand: 'shop' as const, place: t.shopFirmId }))];
+    const errands = [...careTripsToday(city).map(t => ({ ...t, errand: 'care' as const, place: t.siteId ?? 0 })), ...shoppingTrips(city).map(t => ({ ...t, errand: 'shop' as const, place: t.shopFirmId })),
+      ...leisureTrips(city).map(t => ({ ...t, errand: 'outing' as const, place: t.siteId }))];
     for (const t of errands) {
       if (!onRoads(t.route)) continue;
       if (t.mode === 'drive' && t.vehicleId !== null && !driven.has(`car:v${t.vehicleId}`) && cars.length < MAX_CARS) {

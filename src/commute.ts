@@ -17,6 +17,7 @@ import { roadLinked, roadNeighborsFor } from './road-topology.ts';
 import { busAccess } from './bus/mode-share.ts';
 import { BUS_CAPACITY, BUS_FARE_SATANG } from './bus/types.ts';
 import { TAXI_DEPOT_UNITS } from './taxi/sites.ts';
+import { civicFeeReason, type CivicKind } from './civic/sites.ts';
 import { taxiFareSatang } from './taxi/mode-share.ts';
 
 /** Anyone whose route is this short walks, as people do for a few minutes' trip. */
@@ -346,6 +347,27 @@ function personalTrip(c: City, householdId: number, from: number, to: number) {
     return { route: there, distanceM: (there.length - 1) * TILE_LENGTH_M, mode: 'drive' as const, vehicleId: vehicle.id, minutes: seconds / 60 };
   }
   return { route: walk, distanceM, mode: 'walk' as const, vehicleId: null, minutes: minutesAt(distanceM, WALK_KMH) };
+}
+
+/** A household's evening out: to a cinema, restaurant, night market or concert it paid to visit today. */
+export type LeisureTrip = { householdId: number; siteId: number; kind: CivicKind; from: number; to: number; route: number[]; distanceM: number; mode: 'walk' | 'drive'; vehicleId: number | null; minutes: number };
+/** Today's real outings, one per household and venue it paid an entry fee to today, from home to the venue and back. */
+export function leisureTrips(c: City): LeisureTrip[] {
+  const sites = (c.civic?.sites ?? []), byReason = new Map(sites.map(site => [civicFeeReason(site.kind, site.id), site])), byWallet = new Map(c.households.map(h => [h.wallet, h]));
+  if (!sites.length) return [];
+  const visits = new Map<string, { householdId: number; site: typeof sites[number] }>();
+  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick === c.tick; i--) {
+    const e = c.ledger[i], site = byReason.get(e.reason), h = byWallet.get(e.from);
+    if (site && h) visits.set(`${h.id}:${site.id}`, { householdId: h.id, site });
+  }
+  const cellOf = new Map(c.buildings.map(b => [b.id, b.cell])), out: LeisureTrip[] = [];
+  for (const [, { householdId, site }] of [...visits].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const h = c.households.find(x => x.id === householdId)!, home = h.home === null ? undefined : cellOf.get(h.home);
+    const from = home === undefined ? null : driveway(c, [home]), to = driveway(c, site.cells ?? [site.cell]);
+    const trip = from === null || to === null ? null : personalTrip(c, householdId, from, to);
+    if (trip && from !== null && to !== null) out.push({ householdId, siteId: site.id, kind: site.kind, from, to, ...trip });
+  }
+  return out;
 }
 
 /** A sick person's trip: to a clinic or hospital in the city (`siteId`), or out through the gateway to one outside (null). */

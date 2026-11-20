@@ -23,7 +23,7 @@ import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { iconElement } from './ui-icons.ts';
 import { buildingAccess, totalSpaces } from './parking.ts';
-import { MODE_LABEL, VEHICLE, careTripsToday, commutesToday, shoppingTrips, type Trip, type Vehicle } from './commute.ts';
+import { MODE_LABEL, VEHICLE, careTripsToday, commutesToday, leisureTrips, shoppingTrips, type Trip, type Vehicle } from './commute.ts';
 import { RECENT_ENTRIES, ledgerDigest, type DigestRow } from './ledger-summary.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
@@ -189,6 +189,13 @@ function householdCommute(city: City, householdId: number): HTMLElement {
     const row = el('li', 'cx-commute-row'), how = t.mode === 'drive' && v ? `ขับ${VEHICLE[v.kind].label}` : 'เดิน';
     row.append(el('span', 'cx-commute-where', site ? `ไปหาหมอ → ${CIVIC[site.kind].label} #${site.id}` : 'ไปหาหมอ → โรงพยาบาลนอกเมือง'), el('span', 'cx-commute-how', `${how} · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes)))} นาที${site ? '' : ' · จ่ายค่ารักษาเอง'}`));
     row.dataset.commuteMode = `care-${t.mode}`; row.dataset.distance = String(t.distanceM); list.append(row);
+  }
+  // An evening out at a venue the household paid to visit today.
+  for (const t of leisureTrips(city).filter(x => x.householdId === householdId)) {
+    const v = t.vehicleId === null ? undefined : city.vehicles?.fleet.find(x => x.id === t.vehicleId);
+    const row = el('li', 'cx-commute-row'), how = t.mode === 'drive' && v ? `ขับ${VEHICLE[v.kind].label}` : 'เดิน';
+    row.append(el('span', 'cx-commute-where', `ไปเที่ยว → ${CIVIC[t.kind].label} #${t.siteId}`), el('span', 'cx-commute-how', `${how} · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes)))} นาที`));
+    row.dataset.commuteMode = `outing-${t.mode}`; row.dataset.distance = String(t.distanceM); list.append(row);
   }
   // Shopping is a real trip too: to each shop the household bought from today.
   for (const t of shoppingTrips(city).filter(x => x.householdId === householdId)) {

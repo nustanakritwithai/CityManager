@@ -1133,7 +1133,8 @@ function visitVenues(c: City): void {
   for (const site of sites) {
     const spec = civicSpec(site.kind), fee = spec.staff!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
     const payee = operatorWallet(site) ?? 'treasury';
-    const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && h.wallet !== payee && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius));
+    // An outing is a real trip: only a household that can get there along linked streets comes.
+    const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && h.wallet !== payee && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius) && canWalk(c, [homes.get(h.home!)!], parts));
     // Start from a different home each day so the same households are not always the ones served.
     const start = guests.length ? (c.tick + site.id) % guests.length : 0;
     for (let n = 0; n < guests.length && left > 0; n++) {
