@@ -178,6 +178,12 @@ export function trafficPlan(city: City): TrafficPlan {
         if (vehicle && returnRoute) { cars.push({ key: `car:v${vehicle.id}:${t.errand}`, kind: 'car', route: t.route, ...(city.roadTopology ? { returnRoute } : {}), colour: Math.floor(visualHash(vehicle.id, vehicle.householdId) * 6), body: vehicle.kind, passengers: 0, errand: t.errand }); driven.add(`car:v${vehicle.id}`); }
       } else if (t.mode === 'walk' && walkers.length < MAX_WALKERS) walkers.push({ key: `${t.errand}:${t.householdId}:${t.place}`, route: t.route, returnRoute: [...t.route].reverse(), colour: Math.floor(visualHash(t.householdId, t.place + 17) * 6), errand: t.errand });
     }
+    // Taxis: a depot's taxi carrying someone with no vehicle and no bus to work today, there and back.
+    for (const t of trips) {
+      if (t.mode !== 'taxi' || !t.taxi || !onRoads(t.route) || cars.length >= MAX_CARS) continue;
+      const returnRoute = back(t.route); if (!returnRoute) continue;
+      cars.push({ key: `taxi:${t.householdId}:${t.person}`, kind: 'car', route: t.route, ...(city.roadTopology ? { returnRoute } : {}), colour: 1, passengers: 1 });
+    }
     // Walkers: residents who really walk to work today, along their route there and back on the pavement.
     for (const t of trips) {
       if ((t.mode !== 'walk' && t.mode !== 'walk-long') || !onRoads(t.route) || walkers.length >= MAX_WALKERS) continue;

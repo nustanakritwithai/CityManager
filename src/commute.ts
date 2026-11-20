@@ -16,10 +16,14 @@ import { driveway } from './parking.ts';
 import { roadLinked, roadNeighborsFor } from './road-topology.ts';
 import { busAccess } from './bus/mode-share.ts';
 import { BUS_CAPACITY, BUS_FARE_SATANG } from './bus/types.ts';
+import { TAXI_DEPOT_UNITS } from './taxi/sites.ts';
+import { taxiFareSatang } from './taxi/mode-share.ts';
 
 /** Anyone whose route is this short walks, as people do for a few minutes' trip. */
 export const WALK_MAX_M = 500;
 export const WALK_KMH = 5, BUS_KMH = 25, BUS_WAIT_MIN = 5;
+/** Trips one taxi can make in a morning rush: a depot's cars are shared out this many times. */
+export const TAXI_TRIPS_PER_CAR = 3;
 /** Satang a litre: about 35 baht in real life, scaled by the game's wages (a factory job pays 600 a month). */
 export const FUEL_SATANG_PER_LITRE = 150;
 export const VEHICLE_KINDS = ['motorcycle', 'car'] as const;
@@ -37,9 +41,9 @@ export const VEHICLE: Readonly<Record<VehicleKind, VehicleSpec>> = Object.freeze
 export type Vehicle = { id: number; householdId: number; kind: VehicleKind; bought: number; fuelMl: number; odometerM: number };
 export type VehicleState = { version: 1; nextId: number; fleet: Vehicle[] };
 
-export type CommuteMode = 'walk' | 'drive' | 'passenger' | 'bus' | 'walk-long' | 'unreachable';
+export type CommuteMode = 'walk' | 'drive' | 'passenger' | 'bus' | 'taxi' | 'walk-long' | 'unreachable';
 export const MODE_LABEL: Readonly<Record<CommuteMode, string>> = Object.freeze({
-  walk: 'เดิน', drive: 'ขับรถของบ้าน', passenger: 'นั่งรถคนในบ้าน', bus: 'รถเมล์', 'walk-long': 'เดินไกล (ไม่มีรถ)', unreachable: 'ไม่มีทางไปถึง',
+  walk: 'เดิน', drive: 'ขับรถของบ้าน', passenger: 'นั่งรถคนในบ้าน', bus: 'รถเมล์', taxi: 'แท็กซี่', 'walk-long': 'เดินไกล (ไม่มีรถ)', unreachable: 'ไม่มีทางไปถึง',
 });
 export type WorkplaceKind = 'firm' | 'park' | 'venue' | 'campus';
 export type Trip = {
@@ -49,6 +53,8 @@ export type Trip = {
   /** The job earns a day's work credit when worked, so missing it costs that day's pay. */
   wage: boolean;
   bus?: { lineId: number; fromStopId: number; toStopId: number; walkCells: number };
+  /** The depot whose taxi picks this person up at home, drives them there and back, and the fare one way in satang. */
+  taxi?: { depotId: number; depotCell: number; fare: number };
 };
 
 /** `wage`: the job earns a day's work credit when worked (employees, park staff, staff of a city-run venue). */
@@ -96,8 +102,8 @@ type Roads = { key: string; net: ReturnType<typeof buildNetwork>; times: Map<str
 const roadCache = new WeakMap<City, Roads>();
 /** The road network and its route trees, rebuilt only when a road, a junction, a direction or a road class changes. */
 const roadKey = (c: City) => `${c.cells.map(cell => (cell.road ? 1 : 0)).join('')}|${JSON.stringify(c.roadTopology ?? null)}|${JSON.stringify(c.roadClasses ?? null)}`;
-/** What a stored day depends on besides the date: roads, who works where, and the vehicles there are. */
-const dayKey = (c: City) => `${roadKey(c)}|${c.employment.map(a => `${a.householdId}>${a.firmId}x${a.workers}`).join(',')}|${c.ownerLabor.map(a => `${a.householdId}>${a.firmId}`).join(',')}|${(c.vehicles?.fleet ?? []).map(v => `${v.id}:${v.householdId}`).join(',')}|${c.households.map(h => `${h.id}@${h.home}`).join(',')}`;
+/** What a stored day depends on besides the date: roads, who works where, homes, the vehicles there are, and the taxis and bus lines that run. */
+const dayKey = (c: City) => `${roadKey(c)}|${c.employment.map(a => `${a.householdId}>${a.firmId}x${a.workers}`).join(',')}|${c.ownerLabor.map(a => `${a.householdId}>${a.firmId}`).join(',')}|${(c.vehicles?.fleet ?? []).map(v => `${v.id}:${v.householdId}`).join(',')}|${c.households.map(h => `${h.id}@${h.home}`).join(',')}|${JSON.stringify(c.taxi?.depots ?? null)}|${JSON.stringify(c.bus?.lines ?? null)}|${(c.bus?.stops ?? []).map(x => `${x.id}@${x.cell}`).join(',')}`;
 function roadsOf(c: City): Roads {
   const key = roadKey(c);
   const hit = roadCache.get(c);
@@ -139,6 +145,9 @@ export function planCommutes(c: City): Trip[] {
   const byHousehold = new Map<number, Trip[]>();
   for (const t of trips) { const list = byHousehold.get(t.householdId); if (list) list.push(t); else byHousehold.set(t.householdId, [t]); }
   const busy = new Map<number, number>(); // riders per bus line
+  // Open taxi depots, nearest-first per trip is not needed: in ID order, each with its morning's trips.
+  const taxis = (c.taxi?.depots ?? []).filter(d => d.open).sort((a, b) => a.id - b.id).flatMap(d => { const drive = driveway(c, [d.cell]); return drive === null ? [] : [{ id: d.id, drive, trips: TAXI_DEPOT_UNITS[d.level] * TAXI_TRIPS_PER_CAR }]; });
+  const taken = new Map<number, number>();
   for (const [householdId, list] of [...byHousehold].sort((a, b) => a[0] - b[0])) {
     list.sort((a, b) => b.distanceM - a.distanceM || (a.to ?? -1) - (b.to ?? -1) || a.workplace.id - b.workplace.id);
     list.forEach((t, k) => { t.person = k + 1; });
@@ -163,6 +172,15 @@ export function planCommutes(c: City): Trip[] {
         Object.assign(t, { mode: 'bus', minutes: access.walkMinutes + BUS_WAIT_MIN + minutesAt(t.distanceM, BUS_KMH), bus: { lineId: access.lineId, fromStopId: access.fromStopId, toStopId: access.toStopId, walkCells: access.walkCells } });
         continue;
       }
+      // No vehicle and no bus: a taxi from the nearest open depot whose cars still have a trip free this morning.
+      const there2 = route(t.from!, t.to!), back2 = there2 ? route(t.to!, t.from!) : null;
+      const depot = there2 && back2 ? taxis.find(d => (taken.get(d.id) ?? 0) < d.trips && route(d.drive, t.from!)) : undefined;
+      if (depot && there2) {
+        taken.set(depot.id, (taken.get(depot.id) ?? 0) + 1);
+        const km = (there2.length - 1) * TILE_LENGTH_M / 1000, minutes = pathMinutes(there2);
+        Object.assign(t, { mode: 'taxi', route: there2, distanceM: (there2.length - 1) * TILE_LENGTH_M, minutes, taxi: { depotId: depot.id, depotCell: depot.drive, fare: taxiFareSatang(km, minutes) } });
+        continue;
+      }
       Object.assign(t, { mode: 'walk-long', minutes: minutesAt(t.distanceM, WALK_KMH) });
     }
   }
@@ -180,6 +198,7 @@ function monthlySpending(c: City, wallet: string): number {
 export const vehiclePurchaseReason = (kind: VehicleKind, id: number) => `Vehicle bought ${kind} #${id}`;
 export const fuelReason = (id: number) => `Vehicle fuel #${id}`;
 export const BUS_FARE_REASON = 'Bus fare';
+export const TAXI_FARE_REASON = 'Taxi fare';
 const spaceUsed = (fleet: readonly Vehicle[], householdId: number) => fleet.filter(v => v.householdId === householdId).reduce((n, v) => n + VEHICLE[v.kind].space, 0);
 
 /** Start the vehicle section, keeping the key order a reload gives (household wellbeing and tax policy stay last). */
@@ -215,11 +234,15 @@ export function runCommutes(c: City, pay: Pay): CommuteDay {
     if (v.fuelMl < need) { for (const o of trips) if (o.vehicleId === v.id) strand(o); continue; }
     v.fuelMl -= need; v.odometerM += 2 * t.distanceM;
   }
+  for (const t of trips) if (t.mode === 'taxi' && t.taxi) {
+    const fare = 2 * t.taxi.fare;
+    if (balance(t.householdId) < fare || pay(wallet.get(t.householdId)!, 'treasury', fare, TAXI_FARE_REASON) !== fare) { delete t.taxi; strand(t); }
+  }
   for (const t of trips) if (t.mode === 'bus') {
     const fare = 2 * BUS_FARE_SATANG;
     if (balance(t.householdId) < fare || pay(wallet.get(t.householdId)!, 'treasury', fare, BUS_FARE_REASON) !== fare) { delete t.bus; strand(t); }
   }
-  const needing = [...new Set(trips.filter(t => t.mode === 'walk-long' || t.mode === 'bus').map(t => t.householdId))].sort((a, b) => a - b);
+  const needing = [...new Set(trips.filter(t => t.mode === 'walk-long' || t.mode === 'bus' || t.mode === 'taxi').map(t => t.householdId))].sort((a, b) => a - b);
   for (const householdId of needing) {
     const fleet = c.vehicles?.fleet ?? [], room = 1 - spaceUsed(fleet, householdId), h = households.get(householdId)!;
     const spare = balance(householdId) - monthlySpending(c, h.wallet);

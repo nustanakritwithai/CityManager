@@ -160,7 +160,9 @@ export class SceneTraffic {
       if (motorcycle > 0) { box(0, .19, -.11, .085, .11, .07, WALKER_COLOURS[(colour + 2) % WALKER_COLOURS.length]); box(0, .28, -.11, .07, .065, .07, '#e8a53a'); }
     } else if (kind === 'car' || kind === 'truck') {
       const paint = kind === 'car' ? CAR_COLOURS[colour % CAR_COLOURS.length] : '#e8e0cf';
-      addVehicleDetail(entity, view, kind === 'truck' ? 'truck' : vehicleVariant(key), paint,
+      // A taxi carrying a commuter wears the taxi body and livery.
+      const taxi = key.startsWith('taxi:');
+      addVehicleDetail(entity, view, kind === 'truck' ? 'truck' : taxi ? 'taxi' : vehicleVariant(key), taxi ? '#f2c230' : paint,
         CARGO_COLOURS[colour % CARGO_COLOURS.length],
         kind === 'car' ? .3 / .28 : 1, kind === 'car' ? .6 / .42 : 1);
     } else {

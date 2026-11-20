@@ -77,6 +77,8 @@ const reasonLabels: Record<string, string> = {
   'Outside residential height investment': 'เงินลงทุนเพิ่มชั้นบ้านจากภายนอก',
   'Profitable firm height investment': 'เงินลงทุนเพิ่มชั้นอาคารบริษัท',
   'Taxi fares': 'ค่าโดยสารแท็กซี่ (รายการเดิม)',
+  'Taxi fare': 'ค่าแท็กซี่ไปทำงาน ไป-กลับ',
+  'Bus fare': 'ค่ารถเมล์ไปทำงาน ไป-กลับ',
   'Daily road upkeep': 'ค่าบำรุงถนนประจำวัน',
   'Monthly municipal services': 'ค่าบริการพื้นฐานเมืองรายเดือน',
   'Daily worker production': 'สินค้าที่คนงานผลิต',
@@ -94,6 +96,8 @@ const reasonLabels: Record<string, string> = {
 
 export function reasonLabel(reason: string): string {
   if (Object.hasOwn(reasonLabels, reason)) return reasonLabels[reason];
+  const vehicle = /^Vehicle (bought (motorcycle|car)|fuel) #(\d+)$/.exec(reason);
+  if (vehicle) return vehicle[1] === 'fuel' ? `เติมน้ำมันรถ #${vehicle[3]}` : `ซื้อ${vehicle[2] === 'car' ? 'รถยนต์' : 'มอเตอร์ไซค์'} #${vehicle[3]}`;
   const industryCapital = /^Industry expansion capital #(\d+)$/.exec(reason);
   if (industryCapital) return `ทุนขยายโรงงาน #${industryCapital[1]} (ไม่ใช่ยอดขาย)`;
   const industryReturn = /^Industry expansion residual return #(\d+)$/.exec(reason);
