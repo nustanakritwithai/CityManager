@@ -23,7 +23,7 @@ import { growthChecklist } from './overview-data.ts';
 import { buildingIssues } from './map-overlay.ts';
 import { iconElement } from './ui-icons.ts';
 import { buildingAccess, totalSpaces } from './parking.ts';
-import { MODE_LABEL, VEHICLE, careTripsToday, commutesToday, shoppingTrips, type Trip, type Vehicle } from './commute.ts';
+import { MODE_LABEL, VEHICLE, careTripsToday, commutesToday, leisureTrips, shoppingTrips, type Trip, type Vehicle } from './commute.ts';
 import { RECENT_ENTRIES, ledgerDigest, type DigestRow } from './ledger-summary.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
@@ -179,8 +179,10 @@ function householdCommute(city: City, householdId: number): HTMLElement {
   const list = el('ul', 'cx-commute-list');
   for (const t of trips) {
     const row = el('li', 'cx-commute-row'), where = el('span', 'cx-commute-where', `คนที่ ${t.person} → ${workplaceName(city, t)}`);
-    const how = el('span', 'cx-commute-how', `${tripMode(city, t)}${t.mode === 'unreachable' ? '' : ` · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes ?? 0)))} นาที`}`);
-    Object.assign(row.dataset, { commuteMode: t.mode, distance: String(t.distanceM) }); row.append(where, how); list.append(row);
+    // Minutes lost to real traffic on the way (the same route on empty roads is `freeMinutes`).
+    const jam = t.freeMinutes == null || t.minutes == null ? 0 : Math.round(t.minutes - t.freeMinutes);
+    const how = el('span', 'cx-commute-how', `${tripMode(city, t)}${t.mode === 'unreachable' ? '' : ` · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes ?? 0)))} นาที`}${jam > 0 ? ` · รถติด ${count(jam)} นาที` : ''}`);
+    Object.assign(row.dataset, { commuteMode: t.mode, distance: String(t.distanceM), jamMinutes: String(Math.max(0, jam)) }); row.append(where, how); list.append(row);
   }
   if (!trips.length) list.append(el('li', 'cx-commute-row', 'วันนี้ไม่มีสมาชิกที่ต้องเดินทางไปทำงาน'));
   // Someone taken ill today travels to a clinic or hospital in the city, or out to one beyond the gateway.
@@ -189,6 +191,13 @@ function householdCommute(city: City, householdId: number): HTMLElement {
     const row = el('li', 'cx-commute-row'), how = t.mode === 'drive' && v ? `ขับ${VEHICLE[v.kind].label}` : 'เดิน';
     row.append(el('span', 'cx-commute-where', site ? `ไปหาหมอ → ${CIVIC[site.kind].label} #${site.id}` : 'ไปหาหมอ → โรงพยาบาลนอกเมือง'), el('span', 'cx-commute-how', `${how} · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes)))} นาที${site ? '' : ' · จ่ายค่ารักษาเอง'}`));
     row.dataset.commuteMode = `care-${t.mode}`; row.dataset.distance = String(t.distanceM); list.append(row);
+  }
+  // An evening out at a venue the household paid to visit today.
+  for (const t of leisureTrips(city).filter(x => x.householdId === householdId)) {
+    const v = t.vehicleId === null ? undefined : city.vehicles?.fleet.find(x => x.id === t.vehicleId);
+    const row = el('li', 'cx-commute-row'), how = t.mode === 'drive' && v ? `ขับ${VEHICLE[v.kind].label}` : 'เดิน';
+    row.append(el('span', 'cx-commute-where', `ไปเที่ยว → ${CIVIC[t.kind].label} #${t.siteId}`), el('span', 'cx-commute-how', `${how} · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes)))} นาที`));
+    row.dataset.commuteMode = `outing-${t.mode}`; row.dataset.distance = String(t.distanceM); list.append(row);
   }
   // Shopping is a real trip too: to each shop the household bought from today.
   for (const t of shoppingTrips(city).filter(x => x.householdId === householdId)) {

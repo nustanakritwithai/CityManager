@@ -1,8 +1,9 @@
-/** Provisional household wellbeing model. Commutes are planning estimates, not
- * observed journeys; amenity access is distance to a facility, not service use. */
+/** Household wellbeing. Commutes are each member's real trip today, in the traffic the city's own vehicles make;
+ * amenity access is distance to a facility, not service use. */
 import type { City } from './sim.ts';
 import { expandedCellCoordinate } from './expanded-map-grid.ts';
-import { estimateHouseholdCommutes, type CommuteEstimate } from './resident-commute.ts';
+import { householdCommutes } from './commute.ts';
+import type { CommuteEstimate } from './resident-commute.ts';
 import { DEFAULT_TAX_RATES, taxRatesAt, type TaxRates } from './city-tax-policy.ts';
 import { civicCoverage, civicPoints, type CivicKind } from './civic/sites.ts';
 import { pollutionHappinessPoints, pollutionReader } from './environment.ts';
@@ -10,6 +11,8 @@ import { budgetLevel, funded, fundedReach } from './budget.ts';
 
 export const HAPPINESS_BASE = 80, HAPPINESS_DISTRESS = 30, HAPPINESS_DEPARTURE_DAYS = 30;
 export const HAPPINESS_UNEMPLOYED_POINTS = 25;
+/** A commute over 20 minutes on average costs 10 points, over 40 minutes 20; each minute lost in traffic costs 1 more, up to 30. */
+export const COMMUTE_LONG_SECONDS = 20 * 60, COMMUTE_VERY_LONG_SECONDS = 40 * 60, COMMUTE_DELAY_POINTS_PER_MINUTE = 1, COMMUTE_DELAY_CAP = 30;
 export type HappinessRow = { householdId:number; score:number; distressDays:number };
 export type HappinessState = { version:1; day:number; rows:HappinessRow[] };
 export type HomeAmenity = { parkNearby:boolean; schoolNearby:boolean; services?:Record<CivicKind,boolean>; points:number };
@@ -51,14 +54,14 @@ export function taxHappinessPoints(rates: TaxRates) {
 }
 export function happinessTarget(amenities:HomeAmenity, commute?:CommuteEstimate, taxPoints = 0, unemploymentPoints = 0, pollutionPoints = 0) {
   const inaccessible=commute?.workers ? Math.round(60*commute.unreachableWorkers/commute.workers):0;
-  // Link costs assume 100 m tiles and 40 km/h. Long trips and congestion use
-  // the same estimated seconds; no unsupported claim of actual failure.
-  const long=(commute?.averageSeconds??0)>300?10:0;
-  const delay=commute?.averageSeconds != null && commute.freeFlowSeconds != null && commute.averageSeconds - commute.freeFlowSeconds >= 10 && commute.averageSeconds >= commute.freeFlowSeconds * 1.02 ? 10 : 0;
+  // Real door-to-door minutes: a long trip to work costs wellbeing, and so does every minute lost in jams.
+  const seconds=commute?.averageSeconds??0, long=seconds>COMMUTE_VERY_LONG_SECONDS?20:seconds>COMMUTE_LONG_SECONDS?10:0;
+  const lost=commute?.averageSeconds != null && commute.freeFlowSeconds != null ? Math.max(0, commute.averageSeconds - commute.freeFlowSeconds) : 0;
+  const delay=Math.min(COMMUTE_DELAY_CAP, Math.floor(lost/60)*COMMUTE_DELAY_POINTS_PER_MINUTE);
   return Math.max(0,Math.min(100,60+amenities.points-inaccessible-long-delay+taxPoints-unemploymentPoints-pollutionPoints));
 }
 export function happinessTargets(city: City): Map<number, HappinessTarget> {
-  const commutes = new Map(estimateHouseholdCommutes(city).map(row => [row.householdId, row]));
+  const commutes = new Map(householdCommutes(city).map(row => [row.householdId, row]));
   const homes = new Map(city.buildings.map(b => [b.id, b.cell]));
   const education = new Map(city.education?.people.map(person => [person.householdId, person]));
   const tax = taxHappinessPoints(taxRatesAt(city.taxPolicy, city.tick));

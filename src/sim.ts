@@ -1,4 +1,4 @@
-import { prepareCommuteEstimates } from './resident-commute.ts';
+import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
@@ -15,7 +15,7 @@ import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from '.
 import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicOpen, civicReach, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import { validateDistricts, type DistrictState } from './districts.ts';
-import { runCommutes, liveVehicles, validateVehicles, freightRoute, canWalk, careTrip, outsideCareTrip, recordCareTrip, type VehicleState } from './commute.ts';
+import { runCommutes, liveVehicles, validateVehicles, freightRoute, canWalk, careTrip, outsideCareTrip, recordCareTrip, congestionReader, type VehicleState } from './commute.ts';
 import { ROAD_CLASS, forgetRoadClass, roadClassAt, roadClassUpgradeCost, roadUpgradeReason, roadUpkeep, setRoadClass, validateRoadClasses, type RoadClass, type RoadClassState } from './road-classes.ts';
 import { UNLOCK_POPULATION, cityPopulation, newlyUnlocked, peopleToUnlock, validateUnlocks, type UnlockState } from './unlocks.ts';
 import { BURGLARY_REASON, INCIDENT, INCIDENT_LABELS, INCIDENT_MIN_POPULATION, MEDICAL_REASON, fireReason, incidentRoll, type IncidentKind } from './incidents.ts';
@@ -1133,7 +1133,8 @@ function visitVenues(c: City): void {
   for (const site of sites) {
     const spec = civicSpec(site.kind), fee = spec.staff!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
     const payee = operatorWallet(site) ?? 'treasury';
-    const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && h.wallet !== payee && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius));
+    // An outing is a real trip: only a household that can get there along linked streets comes.
+    const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && h.wallet !== payee && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius) && canWalk(c, [homes.get(h.home!)!], parts));
     // Start from a different home each day so the same households are not always the ones served.
     const start = guests.length ? (c.tick + site.id) % guests.length : 0;
     for (let n = 0; n < guests.length && left > 0; n++) {
@@ -1493,8 +1494,11 @@ export function rebalanceHousing(c: City): number {
     commute ??= prepareCommuteEstimates(c);
     // Jobs and taxes follow the household to either address. Compare location effects alone.
     const air = pollutionReader(c);
-    const current = happinessTarget(homeAmenities(c, source.cell), commute.estimates.get(h.id), 0, 0, pollutionHappinessPoints(air(source.cell)));
-    const proposed = happinessTarget(homeAmenities(c, destination.cell), commute.atHome(h.id, destination.cell), 0, 0, pollutionHappinessPoints(air(destination.cell)));
+    // Only the route length counts here: the estimate's assumed peak loads are not real traffic. Real jams reach
+    // this decision through land value (see landValues), which the candidate list above already compares.
+    const route = (e: CommuteEstimate | undefined) => e && { ...e, averageSeconds: e.freeFlowSeconds };
+    const current = happinessTarget(homeAmenities(c, source.cell), route(commute.estimates.get(h.id)), 0, 0, pollutionHappinessPoints(air(source.cell)));
+    const proposed = happinessTarget(homeAmenities(c, destination.cell), route(commute.atHome(h.id, destination.cell)), 0, 0, pollutionHappinessPoints(air(destination.cell)));
     if (proposed < current || !moveHousehold(c, h.id, destination.id).ok) continue;
     // Earlier moves change modeled link loads. Update the reusable graph before the next decision.
     commute.moved(h.id, destination.cell);
@@ -1618,9 +1622,14 @@ export function runIncidents(c: City): Record<IncidentKind, number> {
   return happened;
 }
 /** A cached reader for land value on this city as it stands now. */
+/** A street fuller than this share of its capacity in the morning rush starts to cost the land beside it. */
+export const CONGESTION_LAND_THRESHOLD = .6;
+/** Land value lost per whole capacity above the threshold, and the most a jam can take. */
+export const CONGESTION_LAND_POINTS = 50, CONGESTION_LAND_CAP = 40;
 export function landValues(c: City): (cell: number) => number {
-  const air = pollutionReader(c), seen = new Map<number, number>();
-  return cell => { let v = seen.get(cell); if (v === undefined) { v = landValue(homeAmenities(c, cell).points, access(c, cell), air(cell)); seen.set(cell, v); } return v; };
+  const air = pollutionReader(c), jam = congestionReader(c), seen = new Map<number, number>();
+  // A jammed street outside the door costs the parcel: arrivals settle elsewhere and the weekly move takes people out.
+  return cell => { let v = seen.get(cell); if (v === undefined) { v = Math.max(0, landValue(homeAmenities(c, cell).points, access(c, cell), air(cell)) - Math.min(CONGESTION_LAND_CAP, Math.round(Math.max(0, jam(cell) - CONGESTION_LAND_THRESHOLD) * CONGESTION_LAND_POINTS))); seen.set(cell, v); } return v; };
 }
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }

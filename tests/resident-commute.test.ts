@@ -40,26 +40,6 @@ test('real daily simulation and save reload produce the same estimates over mult
   assert.ok(observed,'the real simulation produced assigned commuters');
 });
 
-test('a valid 2000-person city can experience estimated peak congestion', async()=>{
-  const { population2000Fixture }=await import('./population-capacity-fixture.ts');
-  const { happinessTargets }=await import('../src/resident-happiness.ts');
-  const c=population2000Fixture();
-  // Put the same 64 permitted firms beyond a shared road spine. No workers,
-  // accounts, road links or jobs are fabricated, and both saves validate.
-  const firms=c.firms.map(f=>c.buildings.find(b=>b.id===f.building)!);
-  for(const b of firms)c.cells[b.cell]={road:false,zone:null,building:null};
-  const cells=[16,19,22].flatMap(row=>Array.from({length:23},(_,x)=>row*SIZE+x+1));
-  firms.forEach((b,i)=>{b.cell=cells[i];c.cells[b.cell]={road:false,zone:'I',building:b.id};});
-  assert.doesNotThrow(()=>deserialize(serialize(c)));step(c);assert.doesNotThrow(()=>deserialize(serialize(c)));
-  const rows=estimateHouseholdCommutes(c), crowded=rows.find(r=>r.averageSeconds!==null && r.freeFlowSeconds!==null && r.averageSeconds-r.freeFlowSeconds>=10 && r.averageSeconds>=r.freeFlowSeconds*1.02)!;
-  assert.ok(crowded,'valid assigned workers congest the modeled shared spine');
-  const baseline=happinessTargets(c).get(crowded.householdId)!;
-  const quiet=structuredClone(c);quiet.employment=quiet.employment.filter(row=>row.householdId===crowded.householdId);
-  assert.doesNotThrow(()=>deserialize(serialize(quiet)));
-  const after=happinessTargets(quiet).get(crowded.householdId)!;
-  assert.ok(baseline.target<after.target);assert.equal(crowded.unreachableWorkers,0);
-});
-
 test('hypothetical move matches a full recomputation without mutating the live city',()=>{
   const c=sample(), cell=11*SIZE+5;
   c.cells[cell]={road:false,zone:'R',building:11};c.buildings.push({id:11,cell,zone:'R',level:1,age:3});

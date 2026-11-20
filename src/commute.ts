@@ -11,12 +11,14 @@
  */
 import type { City } from './sim.ts';
 import { buildNetwork, TILE_LENGTH_M } from './traffic/network.ts';
-import { linkTimes, shortestTree } from './traffic/routing.ts';
+import { bprTime, linkTimes, shortestTree } from './traffic/routing.ts';
 import { driveway } from './parking.ts';
 import { roadLinked, roadNeighborsFor } from './road-topology.ts';
+import { parkPedestrianRoute } from './park-activity.ts';
 import { busAccess } from './bus/mode-share.ts';
 import { BUS_CAPACITY, BUS_FARE_SATANG } from './bus/types.ts';
 import { TAXI_DEPOT_UNITS } from './taxi/sites.ts';
+import { civicFeeReason, type CivicKind } from './civic/sites.ts';
 import { taxiFareSatang } from './taxi/mode-share.ts';
 
 /** Anyone whose route is this short walks, as people do for a few minutes' trip. */
@@ -24,6 +26,8 @@ export const WALK_MAX_M = 500;
 export const WALK_KMH = 5, BUS_KMH = 25, BUS_WAIT_MIN = 5;
 /** Trips one taxi can make in a morning rush: a depot's cars are shared out this many times. */
 export const TAXI_TRIPS_PER_CAR = 3;
+/** Commuters leave over the three-hour morning rush (06:30–09:30, as on the map), so a road carries a third of its rush in an hour. */
+export const RUSH_HOURS = 3;
 /** Satang a litre: about 35 baht in real life, scaled by the game's wages (a factory job pays 600 a month). */
 export const FUEL_SATANG_PER_LITRE = 150;
 export const VEHICLE_KINDS = ['motorcycle', 'car'] as const;
@@ -49,7 +53,11 @@ export type WorkplaceKind = 'firm' | 'park' | 'venue' | 'campus';
 export type Trip = {
   householdId: number; person: number; workplace: { kind: WorkplaceKind; id: number };
   from: number | null; to: number | null; route: number[] | null; distanceM: number;
-  mode: CommuteMode; vehicleId: number | null; minutes: number | null;
+  mode: CommuteMode; vehicleId: number | null;
+  /** Door-to-door minutes today, in whatever traffic the city's own vehicles make on the route. */
+  minutes: number | null;
+  /** The same trip on empty roads, so `minutes - freeMinutes` is the time lost in jams. Set only for trips by car, motorcycle or taxi. */
+  freeMinutes?: number | null;
   /** The job earns a day's work credit when worked, so missing it costs that day's pay. */
   wage: boolean;
   bus?: { lineId: number; fromStopId: number; toStopId: number; walkCells: number };
@@ -135,7 +143,9 @@ export function planCommutes(c: City): Trip[] {
     const h = households.get(job.householdId)!, home = cellOf.get(h.home!);
     const from = home === undefined ? null : drive([home]), to = drive(job.footprint);
     // Everyone can at least walk the linked streets; a vehicle below needs a legal driving route there and back.
-    const path = from === null || to === null ? null : walkRoute(c, from, to);
+    let path = from === null || to === null ? null : walkRoute(c, from, to);
+    // Park and venue staff need no road to their post: they walk the park footpaths across open ground, as park visitors do.
+    if (!path && home !== undefined && (job.workplace.kind === 'park' || job.workplace.kind === 'venue')) { const foot = parkPedestrianRoute(c, home, job.footprint[0]); if (foot.length) path = foot; }
     const distanceM = path ? (path.length - 1) * TILE_LENGTH_M : 0;
     for (let k = 0; k < job.workers; k++) trips.push({ householdId: job.householdId, person: 0, workplace: job.workplace, from, to, route: path, distanceM, mode: path ? 'walk' : 'unreachable', vehicleId: null, minutes: null, wage: job.wage });
   }
@@ -184,7 +194,51 @@ export function planCommutes(c: City): Trip[] {
       Object.assign(t, { mode: 'walk-long', minutes: minutesAt(t.distanceM, WALK_KMH) });
     }
   }
+  // Real congestion: every vehicle driven to work today (household vehicles and taxis; passengers ride along) loads each
+  // link of its route, and the extra time a full road takes follows the standard BPR curve on that link's real capacity
+  // (on top of the empty-road time, junction waits included).
+  const load = rushVehicles(trips), hourly = (key: string) => (load.get(key) ?? 0) / RUSH_HOURS;
+  for (const t of trips) if ((t.mode === 'drive' || t.mode === 'passenger' || t.mode === 'taxi') && t.route) {
+    let jammed = 0;
+    for (let k = 1; k < t.route.length; k++) { const key = `${t.route[k - 1]}>${t.route[k]}`, link = net.links.get(key); jammed += (times.get(key) ?? 0) + (link ? bprTime(link, hourly(key)) - bprTime(link, 0) : 0); }
+    t.freeMinutes = pathMinutes(t.route); t.minutes = jammed / 60;
+    // The meter runs on the minutes actually spent, jams included.
+    if (t.taxi) t.taxi.fare = taxiFareSatang(t.distanceM / 1000, t.minutes);
+  }
   return trips;
+}
+
+/** Vehicles on each link over the morning rush: one per household vehicle or taxi driven to work (passengers add none). */
+function rushVehicles(trips: readonly Trip[]): Map<string, number> {
+  const load = new Map<string, number>();
+  for (const t of trips) if ((t.mode === 'drive' || t.mode === 'taxi') && t.route) for (let k = 1; k < t.route.length; k++) {
+    const key = `${t.route[k - 1]}>${t.route[k]}`; load.set(key, (load.get(key) ?? 0) + 1);
+  }
+  return load;
+}
+/** Each road link's load in the busiest hour today as a share of its capacity (1 = full), from the real trips. */
+export function rushLoad(c: City): Map<string, number> {
+  const { net } = roadsOf(c), out = new Map<string, number>();
+  for (const [key, vehicles] of rushVehicles(commutesToday(c))) { const link = net.links.get(key); if (link) out.set(key, vehicles / RUSH_HOURS / link.capacityPerHour); }
+  return out;
+}
+/** How jammed the street outside each parcel is in the morning rush: the fullest link at its driveway, 0 when empty. */
+export function congestionReader(c: City): (cell: number) => number {
+  const load = rushLoad(c), atRoad = new Map<number, number>();
+  for (const [key, ratio] of load) for (const cell of key.split('>').map(Number)) atRoad.set(cell, Math.max(atRoad.get(cell) ?? 0, ratio));
+  const memo = new Map<number, number>();
+  return cell => { let v = memo.get(cell); if (v === undefined) { const road = c.cells[cell]?.road ? cell : driveway(c, [cell]); v = road === null ? 0 : atRoad.get(road) ?? 0; memo.set(cell, v); } return v; };
+}
+/** Each household's real commute today, in the shape the wellbeing model reads: average door-to-door seconds in traffic and on empty roads. */
+export function householdCommutes(c: City): { householdId: number; workers: number; reachableWorkers: number; unreachableWorkers: number; averageSeconds: number | null; freeFlowSeconds: number | null }[] {
+  const by = new Map<number, Trip[]>();
+  for (const t of commutesToday(c)) { const list = by.get(t.householdId); if (list) list.push(t); else by.set(t.householdId, [t]); }
+  return [...by].map(([householdId, trips]) => {
+    const reached = trips.filter(t => t.mode !== 'unreachable' && t.minutes !== null);
+    const avg = (f: (t: Trip) => number) => reached.length ? Math.round(reached.reduce((n, t) => n + f(t), 0) / reached.length * 60) : null;
+    return { householdId, workers: trips.length, reachableWorkers: reached.length, unreachableWorkers: trips.length - reached.length,
+      averageSeconds: avg(t => t.minutes!), freeFlowSeconds: avg(t => t.freeMinutes ?? t.minutes!) };
+  });
 }
 
 /** Satang this wallet paid out over the last 30 days, other than for vehicles: what it keeps back before buying one. */
@@ -346,6 +400,27 @@ function personalTrip(c: City, householdId: number, from: number, to: number) {
     return { route: there, distanceM: (there.length - 1) * TILE_LENGTH_M, mode: 'drive' as const, vehicleId: vehicle.id, minutes: seconds / 60 };
   }
   return { route: walk, distanceM, mode: 'walk' as const, vehicleId: null, minutes: minutesAt(distanceM, WALK_KMH) };
+}
+
+/** A household's evening out: to a cinema, restaurant, night market or concert it paid to visit today. */
+export type LeisureTrip = { householdId: number; siteId: number; kind: CivicKind; from: number; to: number; route: number[]; distanceM: number; mode: 'walk' | 'drive'; vehicleId: number | null; minutes: number };
+/** Today's real outings, one per household and venue it paid an entry fee to today, from home to the venue and back. */
+export function leisureTrips(c: City): LeisureTrip[] {
+  const sites = (c.civic?.sites ?? []), byReason = new Map(sites.map(site => [civicFeeReason(site.kind, site.id), site])), byWallet = new Map(c.households.map(h => [h.wallet, h]));
+  if (!sites.length) return [];
+  const visits = new Map<string, { householdId: number; site: typeof sites[number] }>();
+  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick === c.tick; i--) {
+    const e = c.ledger[i], site = byReason.get(e.reason), h = byWallet.get(e.from);
+    if (site && h) visits.set(`${h.id}:${site.id}`, { householdId: h.id, site });
+  }
+  const cellOf = new Map(c.buildings.map(b => [b.id, b.cell])), out: LeisureTrip[] = [];
+  for (const [, { householdId, site }] of [...visits].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const h = c.households.find(x => x.id === householdId)!, home = h.home === null ? undefined : cellOf.get(h.home);
+    const from = home === undefined ? null : driveway(c, [home]), to = driveway(c, site.cells ?? [site.cell]);
+    const trip = from === null || to === null ? null : personalTrip(c, householdId, from, to);
+    if (trip && from !== null && to !== null) out.push({ householdId, siteId: site.id, kind: site.kind, from, to, ...trip });
+  }
+  return out;
 }
 
 /** A sick person's trip: to a clinic or hospital in the city (`siteId`), or out through the gateway to one outside (null). */
