@@ -41,7 +41,7 @@ export function cityStats(city: City): CityStats {
     const firms = city.firms.filter(f => kindOf(f, f.zone, city.buildings.find(b=>b.id===f.building)?.level) === kind);
     const buildings = firms.map(f => city.buildings.find(b => b.id === f.building)!).filter(Boolean);
     return {
-      kind, firms: firms.length, capacity: buildings.reduce((n, b) => n + firmCapacity(b, firms.find(f => f.building === b.id)), 0),
+      kind, firms: firms.length, capacity: buildings.reduce((n, b) => n + firmCapacity(b, firms.find(f => f.building === b.id), city), 0),
       workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: WAGES[kind === 'shop' || kind === 'market' ? 'C' : kind],
     };
   });

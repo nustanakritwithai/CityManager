@@ -1,7 +1,8 @@
 import { farmProductionFertility, FARM_YIELD_PER_WORKER } from './farm-production.ts';
 import { isCanonicalExpandedResourceMap } from './expanded-map-migration.ts';
 import type { CityHistory } from './city-history-types.ts';
-import { FACTORY_MAX_WORKERS, factoryCropCapacity, factoryLevel } from './factory-levels.ts';
+import { FACTORY_MAX_WORKERS } from './factory-levels.ts';
+import { factoryCrops, factoryJobs, farmStaff, farmStock, realIndustry, REAL_FACTORY_JOBS, FARM_STAFF_PER_LEVEL } from './industry-scale.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { MONTH, WAGES, isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
@@ -50,7 +51,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   const households = new Map(c.households.map(h => [h.id, h]));
   const ownerIds = new Set<number>();
   for (const f of c.firms) {
-    const capacity = unified && f.zone === 'C' ? CROP_STOCK_CAPS.T : isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'F' && withFarmLevels ? farmStockCapacity(c.buildings.find(b => b.id === f.building)!.level) : f.zone === 'I' && extendedFactories ? factoryCropCapacity(c.buildings.find(b => b.id === f.building)!.level) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
+    const capacity = unified && f.zone === 'C' ? CROP_STOCK_CAPS.T : isRetail(f) ? 0 : isMarket(f) ? CROP_STOCK_CAPS.T : f.zone === 'F' && withFarmLevels ? farmStock(c.buildings.find(b => b.id === f.building)!.level, c) : f.zone === 'I' && extendedFactories ? factoryCrops(c.buildings.find(b => b.id === f.building)!.level, c) : CROP_STOCK_CAPS[f.zone as 'F' | 'I'];
     requireThat(isSafeCount(f.cropInventory) && f.cropInventory <= capacity && isSafeCount(f.cropCost) && (f.cropInventory > 0 || f.cropCost === 0));
     requireThat(isSafeCount(f.productionTick) && f.productionTick >= c.agricultureStartTick && f.productionTick <= c.tick);
     if (!unified && isRetail(f)) requireThat(f.cropCost === 0);
@@ -181,7 +182,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   const receive = (wallet: string, qty: number, value: number) => {
     const h = holding(wallet); h.quantity = safeAdd(h.quantity, qty); h.value = safeAdd(h.value, value);
     const known = role(wallet), f = firms.get(wallet), b = f && c.buildings.find(b => b.id === f.building);
-    if (known) requireThat(h.quantity <= (known === 'F' && withFarmLevels ? farmStockCapacity(b?.level ?? FARM_MAX_LEVEL) : known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? factoryCropCapacity(b?.level ?? 9) : CROP_STOCK_CAPS[known]));
+    if (known) requireThat(h.quantity <= (known === 'F' && withFarmLevels ? farmStock(b?.level ?? FARM_MAX_LEVEL, c) : known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? factoryCrops(b?.level ?? 9, c) : CROP_STOCK_CAPS[known]));
     // A deleted market-receipt recipient may not have left enough history to
     // distinguish a market from a factory. Both are bounded by 48 lots.
     else if (extendedFactories) requireThat(h.quantity <= CROP_STOCK_CAPS.T);
@@ -222,15 +223,15 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     postCrop = unifiedEvent(c,e.tick,'cropEntries',e.id - 1);
     if (day !== e.tick) { day = e.tick; sellable = new Map([...holdings].map(([wallet, h]) => [wallet, h.quantity])); }
     if (e.kind === 'harvest') {
-      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? FARM_MAX_LEVEL : 3) && e.batches === 0 && e.outputQuantity === 0);
+      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? farmStaff(FARM_MAX_LEVEL, c) : 3) && e.batches === 0 && e.outputQuantity === 0);
       role(e.to, 'F'); const before = holding(e.to), current = firms.get(e.to), b = current && c.buildings.find(b => b.id === current.building);
-      if (b) requireThat(e.workers <= b.level);
+      if (b) requireThat(e.workers <= farmStaff(b.level, c));
       const oldRules = !withFarmLevels || e.tick <= (c.farmLevelStartTick ?? 0);
       const maxLevel = Math.min(b?.level ?? FARM_MAX_LEVEL, oldRules ? 3 : FARM_MAX_LEVEL);
-      const minLevel = Math.max(e.workers, farmMinimumLevels.get(e.to) ?? 1);
+      const minLevel = Math.max(Math.ceil(e.workers / (realIndustry(c) ? FARM_STAFF_PER_LEVEL : 1)), farmMinimumLevels.get(e.to) ?? 1);
       let feasible = 0;
       for (let level = minLevel; level <= maxLevel; level++) {
-        const room = FARM_STOCK_BY_LEVEL[level] - before.quantity;
+        const room = farmStock(level, c) - before.quantity;
         if (room < 0) continue;
         // Removed farms have no remaining cell; preserve historical v15 validation,
         // while new events must be possible at some actual effective fertility.
@@ -260,9 +261,9 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       const index = cash(e, e.to, e.from); release(e); totals.consumed = safeAdd(totals.consumed, 1);
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
     } else if (e.kind === 'process') {
-      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= (extendedFactories && e.tick > (c.factoryProgressionStartTick ?? c.tick) ? FACTORY_MAX_WORKERS : 6) && e.batches >= 1 && e.batches <= e.workers && e.quantity === 2 * e.batches && e.outputQuantity === 8 * e.batches);
+      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= (extendedFactories && e.tick > (c.factoryProgressionStartTick ?? c.tick) ? (realIndustry(c) ? REAL_FACTORY_JOBS[REAL_FACTORY_JOBS.length - 1] : FACTORY_MAX_WORKERS) : 6) && e.batches >= 1 && e.batches <= e.workers && e.quantity === 2 * e.batches && e.outputQuantity === 8 * e.batches);
       role(e.from, 'I'); release(e);
-      const current = firms.get(e.from), b = current && c.buildings.find(b => b.id === current.building); if (b) requireThat(e.workers <= factoryLevel(b.level).jobs);
+      const current = firms.get(e.from), b = current && c.buildings.find(b => b.id === current.building); if (b) requireThat(e.workers <= factoryJobs(b.level, c));
       const key = e.tick + ':' + e.from; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);
       const matches = goodsReasons.get(e.reason) ?? []; requireThat(matches.length === 1);
       const index = matches[0], output = c.goodsLedger[index];

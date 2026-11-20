@@ -7,10 +7,10 @@ import { requestOwnerDecision } from '../src/owner-decision-client.ts';
 import { buildOwnerDecisionResponse } from '../server/city-advisor/src/owner-contract.mjs';
 import type { OwnerDecisionRequest } from '../server/city-advisor/src/owner-contract.mjs';
 import { stressOwnerCash } from './owner-decision-fixture.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 test('a provider-selected half-safe transfer crosses the client and journal boundary once, then replays without another request', async () => {
-  const city = legacyHousing(createCity(61025));
+  const city = legacySizes(createCity(61025));
   for (let day = 0; day < 209; day++) step(city);
   stressOwnerCash(city);
 

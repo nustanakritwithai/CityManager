@@ -6,11 +6,11 @@ import { ownerDecisionCandidates } from '../src/owner-contract.mjs';
 import { buildOwnerDecisionReport } from '../src/owner-report.mjs';
 import { configFromEnv, createAdvisorServer } from '../src/server.mjs';
 import { ENTITY_MODEL, ENTITY_UPSTREAM } from '../src/entity-report.mjs';
-import { legacyHousing } from '../../../tests/legacy-housing.ts';
+import { legacySizes } from '../../../tests/legacy-sizes.ts';
 
 const fixture = (days = 215) => {
-  // The recorded month-end figures follow the seeded city's growth on the old smaller homes (see tests/legacy-housing.ts).
-  const city = legacyHousing(createCity(61025));
+  // The recorded month-end figures follow the seeded city's growth on the old smaller homes (see tests/legacy-sizes.ts).
+  const city = legacySizes(createCity(61025));
   for (let day = 0; day < days; day++) step(city);
   const firm = city.firms.find(row => row.zone === 'C' && row.owner !== null);
   assert(firm);

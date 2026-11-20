@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { MONTH, OUTSIDE_INDUSTRY_CROPS, OUTSIDE_INDUSTRY_POPULATION, SIZE, buildRoad, createCity, deserialize, industryGrowthStatus, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS } from '../src/agriculture.ts';
 import { keepSupplied } from './plants.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 /** The sample city on day 200, plus a big new block the player zones in one go. */
 function zonedBlock(): City {
-  const c = legacyHousing(createCity(61025)); for (let d = 0; d < 200; d++) step(c);
+  const c = legacySizes(createCity(61025)); for (let d = 0; d < 200; d++) step(c);
   buildRoad(c, 12 * SIZE + 11, 18 * SIZE + 11); buildRoad(c, 18 * SIZE + 2, 18 * SIZE + 20); buildRoad(c, 15 * SIZE + 11, 15 * SIZE + 20);
   for (let x = 2; x <= 10; x++) { zoneCell(c, 17 * SIZE + x, 'R'); zoneCell(c, 19 * SIZE + x, 'R'); }
   for (let x = 12; x <= 19; x++) { zoneCell(c, 16 * SIZE + x, x < 16 ? 'I' : 'C'); zoneCell(c, 14 * SIZE + x, 'F'); zoneCell(c, 19 * SIZE + x, 'F'); }

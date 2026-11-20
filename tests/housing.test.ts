@@ -7,7 +7,7 @@ test('real sizes: a house is one household, an apartment block 40 rooms, a condo
     ['cottage', 1], ['cottage', 1], ['cottage', 1], ['apartment', 40], ['apartment', 40], ['apartment', 40], ['condo', 200], ['condo', 200], ['condo', 200],
   ]);
   // Within a type the rooms get bigger (more people to a household), never more households.
-  assert.deepEqual(HOUSING_LEVELS.map(l => l.persons), [4, 8, 12, 80, 120, 160, 400, 600, 800]);
+  assert.deepEqual(HOUSING_LEVELS.map(l => l.persons), [4, 8, 12, 120, 160, 200, 600, 800, 1000]);
   assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8, 9].filter(redevelopsAt), [3, 6], 'house → block and block → tower are the two rebuilds');
   const changed = getHousingCapacity('cottage', 1); changed.households = 99; changed.persons = 99;
   assert.deepEqual(getHousingCapacity('cottage', 1), { households: 1, persons: 4 });

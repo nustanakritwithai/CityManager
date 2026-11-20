@@ -6,6 +6,10 @@ export const FERTILITY_THRESHOLD = 50;
 export const CROP_STOCK_CAPS = Object.freeze({ F: 96, T: 48, I: 24 } as const);
 export const FARM_STOCK_BY_LEVEL = [0, 96, 96, 96, 120, 144, 168] as const;
 export const FARM_MAX_LEVEL = 6;
+/** Real-size farms (industry-scale.ts) employ ten a level and store ten times the lots. */
+export const FARM_REAL_STOCK_FACTOR = 10;
+/** The largest real factory's store: 1,000 workers × 4 lots (industry-scale.ts). */
+export const MAX_REAL_FACTORY_CROPS = 4_000;
 export const farmStockCapacity = (level: number): number => FARM_STOCK_BY_LEVEL[level] ?? 0;
 export const CROP_PRICES = Object.freeze({ farmToTrader: 150, traderToFactory: 300, farmToFactory: 350, householdCrop: 800 } as const);
 export type CropPrices = { readonly farmToTrader: number; readonly traderToFactory: number; readonly farmToFactory: number; readonly householdCrop: number };
@@ -100,9 +104,11 @@ function dailyInput(state: HarvestState, options: { tick: number; workers: numbe
  * An invalid, duplicate or stale attempt returns unchanged copied state.
  * The stock cap truncates harvest using BigInt even for huge safe worker counts.
  */
+/** A farm's store: the level's lots, or ten times as many on a real-size farm (industry-scale.ts). */
+const farmStore = (x: number) => FARM_STOCK_BY_LEVEL.includes(x as typeof FARM_STOCK_BY_LEVEL[number]) || (x % FARM_REAL_STOCK_FACTOR === 0 && FARM_STOCK_BY_LEVEL.includes(x / FARM_REAL_STOCK_FACTOR as typeof FARM_STOCK_BY_LEVEL[number]));
 export function proposeHarvest(state: HarvestState, options: { tick: number; workers: number; fertility: number; operational: boolean; capacity?: number }): DailyProposal<HarvestState> {
   const capacity = options?.capacity ?? CROP_STOCK_CAPS.F;
-  const failure = !FARM_STOCK_BY_LEVEL.includes(capacity as typeof FARM_STOCK_BY_LEVEL[number]) || capacity === 0 ? 'invalid-input' : dailyInput(state, options, capacity);
+  const failure = !farmStore(capacity) || capacity === 0 ? 'invalid-input' : dailyInput(state, options, capacity);
   if (failure || !isSafeCount(options.fertility) || options.fertility > 100) return daily({ ...state }, false, failure ?? 'invalid-input');
   const next = { ...state, productionTick: options.tick };
   if (!options.operational) return daily(next, true, 'not-operational');
@@ -117,7 +123,7 @@ export function proposeHarvest(state: HarvestState, options: { tick: number; wor
 }
 export function proposeRecipe(state: RecipeState, options: { tick: number; workers: number; operational: boolean; cropCapacity?: number }): DailyProposal<RecipeState> {
   const capacity = options.cropCapacity ?? CROP_STOCK_CAPS.I;
-  if (!isSafeCount(capacity) || capacity < 24 || capacity > factoryCropCapacity(9)) return daily({ ...state }, false, 'invalid-input');
+  if (!isSafeCount(capacity) || capacity < 24 || capacity > Math.max(factoryCropCapacity(9), MAX_REAL_FACTORY_CROPS)) return daily({ ...state }, false, 'invalid-input');
   const failure = dailyInput(state, options, capacity);
   if (failure || !isSafeCount(state.inventory)) return daily({ ...state }, false, failure ?? 'invalid-input');
   const next = { ...state, productionTick: options.tick };
@@ -136,7 +142,7 @@ function walletValid(wallet: unknown, kind: 'firm' | 'household'): wallet is str
   return isSafeCount(Number(wallet.slice(kind.length + 1)), 1);
 }
 export function validCropAccount(value: unknown): value is CropAccount {
-  return record(value) && walletValid(value.wallet, 'firm') && isSafeCount(value.cash) && isSafeCount(value.reservedCash) && value.reservedCash <= value.cash && (value.zone === 'F' || value.zone === 'T' || value.zone === 'I') && (value.cropCapacity === undefined || value.zone === 'I' && isSafeCount(value.cropCapacity) && value.cropCapacity >= 24 && value.cropCapacity <= factoryCropCapacity(9)) && (value.capacity === undefined || value.zone === 'F' && isSafeCount(value.capacity, 1) && FARM_STOCK_BY_LEVEL.includes(value.capacity as typeof FARM_STOCK_BY_LEVEL[number])) && validCropHolding(value, value.capacity ?? value.cropCapacity ?? CROP_STOCK_CAPS[value.zone]);
+  return record(value) && walletValid(value.wallet, 'firm') && isSafeCount(value.cash) && isSafeCount(value.reservedCash) && value.reservedCash <= value.cash && (value.zone === 'F' || value.zone === 'T' || value.zone === 'I') && (value.cropCapacity === undefined || value.zone === 'I' && isSafeCount(value.cropCapacity) && value.cropCapacity >= 24 && value.cropCapacity <= Math.max(factoryCropCapacity(9), MAX_REAL_FACTORY_CROPS)) && (value.capacity === undefined || value.zone === 'F' && isSafeCount(value.capacity, 1) && farmStore(value.capacity)) && validCropHolding(value, value.capacity ?? value.cropCapacity ?? CROP_STOCK_CAPS[value.zone]);
 }
 export function cropPrice(from: CropZone, to: CropZone, prices: CropPrices = CROP_PRICES): number | null {
   if ((from === 'F' || from === 'I') && to === 'T') return prices.farmToTrader;

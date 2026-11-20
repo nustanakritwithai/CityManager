@@ -1,6 +1,6 @@
 import { farmProductionFertility } from './farm-production.ts';
 import { cropJournalLength } from './city-history.ts';
-import { factoryCropCapacity } from './factory-levels.ts';
+import { factoryCrops, farmStock } from './industry-scale.ts';
 /** Canonical crop operations. Proposals are checked before synchronous commits. */
 import { farmCrop, isCommercial, type City, type Firm, type Household, type CropEntry } from './sim.ts';
 import { CROPS, RECIPE, emptyCrops, freshPreference, type CropId } from './goods.ts';
@@ -47,7 +47,7 @@ function cropAccount(c: City, f: Firm, hooks: AgricultureHooks): CropAccount | n
   if (!isSafeCount(cash) || !isSafeCount(available) || available > cash) return null;
   const b = c.buildings.find(b => b.id === f.building);
   if (!b) return null;
-  const account: CropAccount = { ...(f.zone === 'I' ? { cropCapacity: factoryCropCapacity(b.level) } : f.zone === 'F' ? { capacity: farmStockCapacity(b.level) } : {}), wallet: f.wallet, zone: isCommercial(f) ? 'T' : f.zone as 'F' | 'I', cropInventory: f.cropInventory, cropCost: f.cropCost, cash, reservedCash: cash - available };
+  const account: CropAccount = { ...(f.zone === 'I' ? { cropCapacity: factoryCrops(b.level, c) } : f.zone === 'F' ? { capacity: farmStock(b.level, c) } : {}), wallet: f.wallet, zone: isCommercial(f) ? 'T' : f.zone as 'F' | 'I', cropInventory: f.cropInventory, cropCost: f.cropCost, cash, reservedCash: cash - available };
   return validCropAccount(account) ? account : null;
 }
 function nextEntry(c: City): number {
@@ -111,7 +111,7 @@ function exchange(c: City, seller: Firm, buyer: Firm, crop: CropId, quantity: nu
 function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
   const building = c.buildings.find(b => b.id === f.building), count = workers(f, hooks);
   if (!building || count === null) return;
-  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: farmProductionFertility(c, building.cell), operational: operational(c, f, hooks), capacity: farmStockCapacity(building.level) });
+  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: farmProductionFertility(c, building.cell), operational: operational(c, f, hooks), capacity: farmStock(building.level, c) });
   if (!proposal.ok) return;
   if (!proposal.quantity) { f.productionTick = proposal.next.productionTick; return; }
   let event: CropEntry, harvested: number;
@@ -125,7 +125,7 @@ function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
 function process(c: City, f: Firm, hooks: AgricultureHooks): void {
   const count = workers(f, hooks), b = c.buildings.find(b => b.id === f.building); if (count === null || !f.recipe || !b) return;
   const recipe = RECIPE[f.recipe];
-  const proposal = proposeRecipe({ cropInventory: f.cropInventory, cropCost: f.cropCost, inventory: f.inventory, productionTick: f.productionTick }, { tick: c.tick, workers: Math.min(count, Math.floor(f.crops[recipe.crop] / 2)), operational: operational(c, f, hooks), cropCapacity: factoryCropCapacity(b.level) });
+  const proposal = proposeRecipe({ cropInventory: f.cropInventory, cropCost: f.cropCost, inventory: f.inventory, productionTick: f.productionTick }, { tick: c.tick, workers: Math.min(count, Math.floor(f.crops[recipe.crop] / 2)), operational: operational(c, f, hooks), cropCapacity: factoryCrops(b.level, c) });
   if (!proposal.ok) return;
   if (!proposal.quantity) { f.productionTick = proposal.next.productionTick; return; }
   let event: CropEntry, processed: number, produced: number, expense: number;
@@ -175,7 +175,7 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
     if (!isSafeCount(factory.productionTick) || factory.productionTick >= c.tick || !factory.recipe) continue;
     const crop = RECIPE[factory.recipe].crop, sellers = sellersFor.get(crop)!; let source = sourceFor.get(crop)!;
     const b = c.buildings.find(b => b.id === factory.building); if (!b) continue;
-    let target: number; try { target = cappedProduct(workers(factory, hooks)!, 4, factoryCropCapacity(b.level)); } catch { continue; }
+    let target: number; try { target = cappedProduct(workers(factory, hooks)!, 4, factoryCrops(b.level, c)); } catch { continue; }
     // `source` is the first seller any factory may still buy from; a seller this factory cannot reach by road
     // is passed over for this factory alone (`at`), and stays in line for the next.
     let at = source;
@@ -268,7 +268,7 @@ export function writeOffCrops(c: City, firm: Firm, _hooks: AgricultureHooks): bo
   if (!c.firms.includes(firm)) return false;
   const b = c.buildings.find(b => b.id === firm.building);
   if (!b) return false;
-  const cap = isCommercial(firm) ? CROP_STOCK_CAPS.T : firm.zone === 'I' ? factoryCropCapacity(b.level) : farmStockCapacity(b.level);
+  const cap = isCommercial(firm) ? CROP_STOCK_CAPS.T : firm.zone === 'I' ? factoryCrops(b.level, c) : farmStock(b.level, c);
   if (!validCropHolding(firm, cap)) return false;
   if (!firm.cropInventory) return true;
   let event: CropEntry, writtenOff: number, expense: number;
@@ -290,7 +290,7 @@ export function agricultureDiagnostic(c: City, f: Firm, hooks: AgricultureHooks)
   if (f.zone === 'F') {
     const fertility = farmProductionFertility(c, b.cell, c.tick + 1);
     if (!isViableFarmland(fertility)) return result('agriculture.unsuitable-fertility');
-    const cap = farmStockCapacity(b.level);
+    const cap = farmStock(b.level, c);
     if (f.cropInventory >= cap) return result('agriculture.stock-cap');
     return result('agriculture.harvest-ready', Math.min(cap - f.cropInventory, harvestYield(fertility, workers(f, hooks)!)));
   }

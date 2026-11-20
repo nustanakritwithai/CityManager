@@ -25,6 +25,7 @@ import { iconElement } from './ui-icons.ts';
 import { buildingAccess, totalSpaces } from './parking.ts';
 import { MODE_LABEL, VEHICLE, careTripsToday, commutesToday, leisureTrips, shoppingTrips, type Trip, type Vehicle } from './commute.ts';
 import { RECENT_ENTRIES, ledgerDigest, type DigestRow } from './ledger-summary.ts';
+import { factoryCrops, farmStock } from './industry-scale.ts';
 
 export type ContextSelection = { kind: 'place'; cell: number } | { kind: 'household'; id: number; sourceBuildingId: number; sourceCell: number } | null;
 type HouseholdAction = (id: number, sourceBuildingId: number, sourceCell: number) => void;
@@ -365,7 +366,7 @@ function renderHouse(city: City, building: Building, households: Household[], on
   ]), residents, (() => { const panel = section('ระดับที่อยู่อาศัยและการเติบโต'); panel.dataset.buildingProgression = String(building.id); return progression(panel); })(), facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือน', ...conditions, el('p', '', `ความจุระดับใหม่เป็นค่าทดลอง ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
-  const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building);
+  const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building, undefined, city);
   const labor = firmLabor(city, firm.id)!, workers = labor.workers;
   const lastSettlement = city.tick - city.tick % MONTH, hasClosedMonth = lastSettlement > 0 && city.tick - building.age < lastSettlement;
   const employees = section('แรงงานที่รับจากแต่ละครัวเรือน', `${workers} คน · ${labor.householdCount} บัญชีครัวเรือน`), list = el('div', 'cx-household-list');
@@ -406,7 +407,7 @@ export function renderFirmCredentials(city: City, firmId: number): HTMLElement {
   return el('p', 'cx-detail-note', `ตำแหน่งที่มีวุฒิพื้นฐาน ${basic} คน · วุฒิขั้นสูง ${higher} คน · ระดับสูงบางช่วงต้องการอย่างน้อย 1 คน ไม่บังคับทุกคน และคนมีวุฒิยังทำงานพื้นฐานได้`);
 }
 export function renderAgriculture(city: City, building: Building, firm: Firm, workers: number): HTMLElement[] {
-  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : firm.zone === 'C' ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = firm.zone === 'I' ? factoryCropCapacity(building.level) : firm.zone === 'C' ? CROP_STOCK_CAPS.T : farmStockCapacity(building.level);
+  const body = section(firm.zone === 'F' ? 'พื้นที่และผลผลิตการเกษตร' : firm.zone === 'C' ? 'พืชผลซื้อขายจริง' : 'วัตถุดิบและการแปรรูป'), cap = firm.zone === 'I' ? factoryCrops(building.level, city) : firm.zone === 'C' ? CROP_STOCK_CAPS.T : farmStock(building.level, city);
   body.classList.add('cx-agriculture'); body.dataset.firmId = String(firm.id);
   const cards = [capacityMetric('crop-stock', 'พืชผลคงคลัง / เก็บได้', firm.cropInventory, cap, 'ล็อต'), metric('crop-cost', 'มูลค่าพืชผลตามบัญชี', cash(firm.cropCost), firm.cropCost, true), metric('production-tick', 'วันประมวลผลล่าสุด', String(firm.productionTick), firm.productionTick)];
   if (firm.zone === 'F') {
@@ -768,12 +769,12 @@ export function renderCommercialProgression(city: City, firm: Firm): HTMLElement
 export function renderProductionProgression(city: City, firm: Firm): HTMLElement {
   const s = productionUpgradeStatus(city, firm), b = city.buildings.find(b => b.id === firm.building)!;
   const panel = section('ระดับอาคารและการขยาย'); panel.dataset.buildingProgression = String(b.id);
-  const capacity = (level: number) => firm.zone === 'I' ? factoryCropCapacity(level) : farmStockCapacity(level);
-  const now = `คนทำงาน ${s.workers}/${firmCapacity(b)} คน · คลังวัตถุดิบ ${capacity(s.level)} ล็อต · พื้นที่ 1 ช่อง`;
+  const capacity = (level: number) => firm.zone === 'I' ? factoryCrops(level, city) : farmStock(level, city);
+  const now = `คนทำงาน ${s.workers}/${firmCapacity(b, undefined, city)} คน · คลังวัตถุดิบ ${capacity(s.level)} ล็อต · พื้นที่ 1 ช่อง`;
   if (s.nextLevel === null) return progressionBody(panel, { level: s.level, maximum: s.maximum, label: now, blocked: [], more: [] });
-  const workers = firmCapacity({ ...b, level: s.nextLevel });
+  const workers = firmCapacity({ ...b, level: s.nextLevel }, undefined, city);
   return progressionBody(panel, { level: s.level, maximum: s.maximum, label: now,
-    next: { level: s.nextLevel, gains: [`คนทำงาน ${firmCapacity(b)} → ${workers} คน`, `คลัง ${capacity(s.level)} → ${capacity(s.nextLevel)} ล็อต`] }, blocked: s.reasons,
+    next: { level: s.nextLevel, gains: [`คนทำงาน ${firmCapacity(b, undefined, city)} → ${workers} คน`, `คลัง ${capacity(s.level)} → ${capacity(s.nextLevel)} ล็อต`] }, blocked: s.reasons,
     ready: 'เงื่อนไขปัจจุบันครบ รอตรวจอัตโนมัติสิ้นเดือน', cost: `ค่าก่อสร้าง ${s.cost / 100} เครดิตจากเงินกิจการ · พ้นสำรองตอนนี้ ${cash(s.spendable)}`,
     more: [`เงินกิจการ ${cash(s.cash)} · พ้นสำรองค่าจ้าง ${cash(s.spendable)}`,
       s.requiredSpendable ? `เงินพ้นสำรองที่ต้องมี ${cash(s.requiredSpendable)} รวมค่าก่อสร้างและเงินหมุนเวียน` : 'ต้องมีเงินกิจการอย่างน้อย 200 เครดิตตามกติกาปัจจุบัน',

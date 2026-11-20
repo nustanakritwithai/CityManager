@@ -15,8 +15,8 @@ function fixture() {
 test('all residential levels have explicit monotonic dual capacities and strict type pairings', () => {
   assert.deepEqual(HOUSING_LEVELS.map(x => [x.type, x.tierLevel, x.households, x.persons]), [
     ['cottage', 1, 1, 4], ['cottage', 2, 1, 8], ['cottage', 3, 1, 12],
-    ['apartment', 1, 40, 80], ['apartment', 2, 40, 120], ['apartment', 3, 40, 160],
-    ['condo', 1, 200, 400], ['condo', 2, 200, 600], ['condo', 3, 200, 800],
+    ['apartment', 1, 40, 120], ['apartment', 2, 40, 160], ['apartment', 3, 40, 200],
+    ['condo', 1, 200, 600], ['condo', 2, 200, 800], ['condo', 3, 200, 1000],
   ]);
   for (const [i, x] of HOUSING_LEVELS.entries()) assert.deepEqual(getHousingCapacity(x.type, i + 1), { households: x.households, persons: x.persons });
   assert.throws(() => getHousingCapacity('cottage', 4)); assert.throws(() => getHousingCapacity('apartment', 7));

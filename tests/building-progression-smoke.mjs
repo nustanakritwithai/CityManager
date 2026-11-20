@@ -93,7 +93,7 @@ const findUpgrade = (day, zone, predicate = () => true) => {
 };
 const home = findUpgrade(120, 'R'), factory = findUpgrade(120, 'I'), farm = findUpgrade(120, 'F'), shop = findUpgrade(150, 'C', f => f && isRetail(f));
 assert.deepEqual([home.previous.level,home.building.level,factory.previous.level,factory.building.level,farm.previous.level,farm.building.level,shop.previous.level,shop.building.level], [3,4,3,4,3,4,4,5]);
-assert.deepEqual(housingCapacity(home.building, snapshots.get(120).after), { households: 40, persons: 80 }); // the house was rebuilt as a 40-room block
+assert.deepEqual(housingCapacity(home.building, snapshots.get(120).after), { households: 40, persons: 120 }); // the house was rebuilt as a 40-room block
 // Occupancy gate: from level 3 a house only rises after every household slot is taken.
 assert.equal(HOUSING_OCCUPANCY_GATE_LEVEL, 3);
 { const { before } = snapshots.get(120); assert.ok(home.previous.level >= HOUSING_OCCUPANCY_GATE_LEVEL);

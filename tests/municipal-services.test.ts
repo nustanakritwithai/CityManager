@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createCity, deserialize, serialize, step, MUNICIPAL_SERVICE_PER_RESIDENT } from '../src/sim.ts';
 import { treasuryBudget } from '../src/overview-data.ts';
 import { keepSupplied } from './plants.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 const bill = 'Monthly municipal services';
 test('municipal services are charged only at settlement, itemized and preserve save round trips', () => {
@@ -40,7 +40,7 @@ test('a low treasury cannot go negative or create service debt', () => {
 
 test('seeded mature cities maintain positive, more accessible operating surplus', { timeout: 120_000 }, () => {
   for (const seed of [61025, 2026, 42]) {
-    const c = legacyHousing(createCity(seed));
+    const c = legacySizes(createCity(seed));
     for (let i = 0; i < 720; i++) { step(c); keepSupplied(c); }
     const budget = treasuryBudget(c), cost = budget.expense.find(e => e.key === 'municipal-services')?.amount ?? 0;
     assert.equal(cost, 84_000);
