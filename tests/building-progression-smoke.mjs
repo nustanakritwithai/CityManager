@@ -17,6 +17,7 @@ import { reachTrafficControl, installTrafficNetworkFence } from './traffic-serve
 import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
 import { keepSupplied } from './plants.ts';
 import { EDUCATION_SUSTAIN_DAYS } from '../src/education.ts';
+import { legacyIndustry } from './legacy-sizes.ts';
 
 const output = resolve('.test-output/building-progression'), debugPort = 9364;
 const upstreamUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -50,7 +51,8 @@ function keepEducationGatesOpen(city) {
     else education.sustain.push({ buildingId: building.id, days: EDUCATION_SUSTAIN_DAYS });
   }
 }
-const snapshots = new Map(), city = expandValidatedParkSession(deserializeParkSession(serialize(createCity(61025)))).city;
+// Real homes with the old factories and farms: the day-120 factory and farm upgrades below follow the old workplace rules.
+const snapshots = new Map(), city = expandValidatedParkSession(deserializeParkSession(serialize(legacyIndustry(createCity(61025))))).city;
 for (let day = 1; day <= 180; day++) {
   // Education is on for every city. Hold only its credential counters so day 120
   // still measures the real full-house and paid upgrade.
