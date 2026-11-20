@@ -28,7 +28,7 @@ export { MONTH } from './city-tax-policy.ts';
 export { OWNER_DEVELOPMENT_SHARE_DENOMINATOR } from './owner-profit.ts';
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
 import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
-import { HOUSING_LEVELS, housingLevel, getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
+import { HOUSING_LEVELS, housingLevel, getHousingCapacity, legacyHousingCapacity, redevelopsAt, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
 import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type LaborOffer, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
 import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RECIPE, FARM_MAX_LEVEL, farmStockCapacity, type ResourceMap } from './agriculture.ts';
@@ -78,6 +78,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   /** Versioned daily household wellbeing; older saves start neutrally on their next simulated day. */
   happiness?: HappinessState;
   populationCapacityVersion?: 1;
+  /** Homes hold real numbers of households (house 1, apartment 40, condo 200). Absent on cities saved before, which keep the old smaller homes. */
+  housingScale?: 1;
   businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
   foodDemandStartTick?: number;
@@ -206,15 +208,32 @@ export const employmentForHousehold = (c: City, id: number): EmploymentAllocatio
 export const employmentForFirm = (c: City, id: number): EmploymentAllocation[] => c.employment.filter(e => e.firmId === id);
 export const firmWorkerCount = (c: City, id: number): number => employmentForFirm(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.firmId === id).length;
 export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length + parkEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + venueEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + educationOccupied(c.education, id);
-export const housingCapacity = (b: Building): HousingCapacity => b.zone === 'R' ? getHousingCapacity(b.housingType!, b.level) : { households: 0, persons: 0 };
+/** Rooms in a home under its city's rules: real sizes, or the old smaller ones a city saved before them keeps. */
+export const housingCapacity = (b: Building, c: { housingScale?: 1 }): HousingCapacity => b.zone !== 'R' ? { households: 0, persons: 0 } : c.housingScale === 1 ? getHousingCapacity(b.housingType!, b.level) : legacyHousingCapacity(b.housingType!, b.level);
 export const homeOccupancy = (c: City, id: number): HousingCapacity => buildOccupancyIndex(c.households).get(id) ?? { households: 0, persons: 0 };
 /**
  * Cottage levels 1–3 keep their legacy growth. From cottage 3 upward (apartment and condo tiers) a home
  * grows only once every household slot at its current level is taken, so height follows real demand.
  */
 export const HOUSING_OCCUPANCY_GATE_LEVEL = 3;
-const homeFull = (c: City, b: Building) => b.level < HOUSING_OCCUPANCY_GATE_LEVEL || homeOccupancy(c, b.id).households >= housingCapacity(b).households;
+const homeFull = (c: City, b: Building) => b.level < HOUSING_OCCUPANCY_GATE_LEVEL || homeOccupancy(c, b.id).households >= housingCapacity(b, c).households;
 const residentialInvestorEligible = (c: City, h: Household) => householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && balance(c, h.wallet) >= 20_000;
+/** Building one more household room costs an outside developer this much (a whole apartment block or tower is many rooms). */
+export const RESIDENTIAL_ROOM_COST = 20_000;
+/** Real-size cities rebuild a house as a block and a block as a tower; a city saved before keeps growing its homes one level at a time as it always did. */
+const rebuilds = (c: City, b: Building) => c.housingScale === 1 && redevelopsAt(b.level);
+export const residentialGrowthCost = (level: number) => RESIDENTIAL_ROOM_COST * Math.max(1, HOUSING_LEVELS[level].households - HOUSING_LEVELS[level - 1].households);
+/**
+ * People need homes the city does not have: a household is without one, or employers are hiring with no one out of
+ * work and not a single room free. Only then does a developer replace a house with an apartment block, or a block with a tower.
+ */
+export function housingShortage(c: City): boolean {
+  if (c.households.some(h => h.home === null)) return true;
+  const facts = admissionFacts(c);
+  if (facts.vacancies < 1 || facts.existingUnemployed > 0) return false;
+  const svc = utilities(c), occupied = buildOccupancyIndex(c.households);
+  return !vacantHomes(c).some(b => homeSupplied(c, b, svc) && canAccommodate(housingCapacity(b, c), occupied.get(b.id) ?? { households: 0, persons: 0 }, 1));
+}
 /** Uses the same conditions as autonomous residential growth. */
 export function housingUpgradeStatus(live: City, liveBuilding: Building) {
   if (liveBuilding.zone !== 'R') throw new Error('Not a residential building.');
@@ -226,8 +245,9 @@ export function housingUpgradeStatus(live: City, liveBuilding: Building) {
     if (b.age < minAge) blocked.push(`อาคารต้องมีอายุอย่างน้อย ${minAge} วัน${minAge < MONTH ? ' (ที่ดินดี จึงเร็วกว่าปกติ)' : ''}`);
     if (!access(c, b.cell)) blocked.push('ต้องมีถนนเชื่อมถึงประตูเมือง');
     if (!utilities(c).ok(b.id)) blocked.push('ต้องมีน้ำและไฟเพียงพอสำหรับผู้อยู่อาศัยปัจจุบัน');
-    if (!homeFull(c, b)) blocked.push(`ต้องมีครัวเรือนเต็มทุกช่องก่อน (${homeOccupancy(c, b.id).households}/${housingCapacity(b).households} ครัวเรือน)`);
+    if (!homeFull(c, b)) blocked.push(`ต้องมีครัวเรือนเต็มทุกช่องก่อน (${homeOccupancy(c, b.id).households}/${housingCapacity(b, c).households} ครัวเรือน)`);
     if (!c.households.some(h => h.home === b.id && residentialInvestorEligible(c, h))) blocked.push('ต้องมีครัวเรือนที่ทำงาน ซื้อสินค้าใน 3 วัน และมีเงินอย่างน้อย 200 เครดิต');
+    if (rebuilds(c, b) && !housingShortage(c)) blocked.push(`จะสร้าง${next.type === 'condo' ? 'คอนโด' : 'อพาร์ตเมนต์'} ${next.households} ห้อง เมื่อมีคนรอที่อยู่จริง: มีครัวเรือนไร้บ้าน หรือมีงานว่างแต่ไม่เหลือห้องว่างเลย`);
     blocked.push(...educationBlocked(c, b));
   }
   if (next && !blocked.length && reviewGrows(live, b) === false) blocked.push(SPARE_TAKEN);
@@ -382,7 +402,7 @@ export function industryGrowthStatus(c: City) {
   if (!c.cells.some((p, i) => p.zone === 'I' && p.building === null && access(c, i))) return result('growth.no-industrial-parcel', 'Zone an empty connected industrial parcel before commissioning paid jobs.');
   if (bootstrap) return result('growth.bootstrap', 'Only the first factory uses the existing named outside-equity bootstrap; no workers are fabricated.', true);
   if (fundedVacancies > 0) return result('growth.vacancies-remain', `Fill ${fundedVacancies} existing funded paid vacancies before another factory is commissioned.`);
-  const room = vacantHomes(c).some(b => canAccommodate(housingCapacity(b), homeOccupancy(c, b.id), 3));
+  const room = vacantHomes(c).some(b => canAccommodate(housingCapacity(b, c), homeOccupancy(c, b.id), 3));
   const residentialSite = c.cells.some((p, i) => p.zone === 'R' && p.building === null && access(c, i));
   const availableManufacturing = c.households.some(h => householdAccess(c, h) && (['general', 'manufacturing'] as const).some(skill => h.workerSkills[skill] > c.employment.filter(e => e.householdId === h.id && e.skill === skill).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length));
   if (!room && !residentialSite && !availableManufacturing) return result('growth.housing-unavailable', 'New paid jobs need an available home, a connected residential parcel, or an eligible existing unemployed worker.');
@@ -950,7 +970,7 @@ function summarize(c: City) {
   // Every catalog profile has at most 3 members and every slot provides 4-person capacity.
   // Count usable existing slots before commissioning more houses, including a newly built empty home.
   const vacantSlots = homes.filter(b => access(c, b.cell)).reduce((n, b) => {
-    const room = housingCapacity(b), used = occupied.get(b.id) ?? { households: 0, persons: 0 };
+    const room = housingCapacity(b, c), used = occupied.get(b.id) ?? { households: 0, persons: 0 };
     return n + Math.max(0, Math.min(room.households - used.households, Math.floor((room.persons - used.persons) / 3)));
   }, 0);
   const homeless = c.households.filter(h => h.home === null).length;
@@ -967,8 +987,8 @@ function summarize(c: City) {
     CROPS.some(crop => !farms.some(f => farmCrop(c, f) === crop));
   return { population: c.households.reduce((n, h) => n + h.members, 0), households: c.households.length, workforce, openJobs: admission.vacancies + c.parks.reduce((n, p) => n + parkStaffingStatus(c, p).fundedVacancies, 0), unfundedJobs: Math.max(0, seats - admission.vacancies) + c.parks.reduce((n, p) => n + parkStaffingStatus(c, p).unfundedVacancies, 0),
     dependents: c.households.reduce((n, h) => n + h.dependents, 0), jobs, employed, unemployed: workforce - employed,
-    homeless, homeSlots: homes.reduce((n, b) => n + housingCapacity(b).households, 0),
-    personCapacity: homes.reduce((n, b) => n + housingCapacity(b).persons, 0), treasury: balance(c, 'treasury'), net,
+    homeless, homeSlots: homes.reduce((n, b) => n + housingCapacity(b, c).households, 0),
+    personCapacity: homes.reduce((n, b) => n + housingCapacity(b, c).persons, 0), treasury: balance(c, 'treasury'), net,
     demand: { R: Math.max(0, homeless + incoming - vacantSlots), C: retailDemand(c),
       I: industryGrowthStatus(c).ready ? 1 : 0,
       F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || missingCropForBuyers ||
@@ -1012,7 +1032,7 @@ export function explainCell(c: City, i: number): string[] {
   if (!svc.ok(b.id)) output.push(`No ${UTILITY_KINDS.filter(k => !supplied[k]).join(' or ')}: the network is short or this parcel is off it. Work, production, move-ins and growth here wait until a plant adds capacity.`);
   else output.push(`Water and power: draws ${draws.power} power and ${draws.water} water unit(s); bills ${(buildingBill(svc, b.id) / 100).toFixed(2)} credits/month.`);
   if (b.zone === 'R') {
-    const used = homeOccupancy(c, b.id), room = housingCapacity(b);
+    const used = homeOccupancy(c, b.id), room = housingCapacity(b, c);
     output.push(`Actual occupancy: ${used.households}/${room.households} households, ${used.persons}/${room.persons} persons. Upgrades add capacity only.`, ...explainMigration(c, b.id));
     for (const h of residents) output.push(`Household #${h.id}: ${h.members} members, ${h.workforce} workforce, ${householdWorkerCount(c, h.id)} allocated workers; wallet ${(balance(c, h.wallet) / 100).toFixed(2)} credits.${h.origin === 'legacy-v1' ? ' Composition is an explicit minimum assumption from v1.' : ''}`);
   }
@@ -1426,7 +1446,7 @@ export function moveHousehold(c: City, householdId: number, destinationId: numbe
   if (!h || !destination) return { ok: false, message: 'Household or destination home does not exist.' };
   if (h.home === destinationId) return { ok: true, message: 'Household already lives here; no transfer or population change.' };
   if (destination.age < 1 || !access(c, destination.cell)) return { ok: false, message: 'Destination needs a later daily tick and a connected road.' };
-  if (!canAccommodate(housingCapacity(destination), homeOccupancy(c, destinationId), h.members)) return { ok: false, message: 'Destination lacks household slots or person capacity.' };
+  if (!canAccommodate(housingCapacity(destination, c), homeOccupancy(c, destinationId), h.members)) return { ok: false, message: 'Destination lacks household slots or person capacity.' };
   // Moving an existing resident releases the old home's utility demand. Evaluate
   // the resulting network, without mutating live state or requiring spare supply
   // twice. Never take either utility away from a building that has it now.
@@ -1450,7 +1470,7 @@ function rehouse(c: City) {
   for (const h of [...c.households].filter(h => h.home === null).sort((a, b) => a.id - b.id)) {
     const service = utilities(c);
     if (!fits(service.spare, HOUSEHOLD_NEED)) return;
-    for (const home of vacantHomes(c)) if (homeSupplied(c, home, service) && canAccommodate(housingCapacity(home), homeOccupancy(c, home.id), h.members) && moveHousehold(c, h.id, home.id).ok) break;
+    for (const home of vacantHomes(c)) if (homeSupplied(c, home, service) && canAccommodate(housingCapacity(home, c), homeOccupancy(c, home.id), h.members) && moveHousehold(c, h.id, home.id).ok) break;
   }
 }
 /** A bounded weekly review moves whole households, never synthetic residents. */
@@ -1487,7 +1507,7 @@ export function rebalanceHousing(c: City): number {
     // quality reduces the sum of squared occupancies, preventing oscillation.
     const improvement = quality.get(destination.id)! - quality.get(source.id)!;
     if (improvement < 10 && (improvement < 0 || sourceUsed.households < used.households + 2)) continue;
-    const eligible = residents.get(source.id)?.filter(h => !moved.has(h.id) && canAccommodate(housingCapacity(destination), used, h.members)) ?? [];
+    const eligible = residents.get(source.id)?.filter(h => !moved.has(h.id) && canAccommodate(housingCapacity(destination, c), used, h.members)) ?? [];
     // Rotate who gets evaluated so an unsuitable first household cannot starve others.
     const h = eligible[(Math.floor(c.tick / HOUSING_RELOCATION_INTERVAL) + attempt) % eligible.length];
     if (!h) continue;
@@ -1551,7 +1571,7 @@ function arrivalProfile(c: City, facts: ReturnType<typeof admissionFacts>) {
 export function explainMigration(c: City, buildingId: number): string[] {
   const b = c.buildings.find(b => b.id === buildingId && b.zone === 'R');
   if (!b) return ['ไม่พบบ้านพักที่เลือก'];
-  const used = homeOccupancy(c, b.id), room = housingCapacity(b), facts = admissionFacts(c), reasons = [
+  const used = homeOccupancy(c, b.id), room = housingCapacity(b, c), facts = admissionFacts(c), reasons = [
     `พักจริง ${used.households}/${room.households} ครัวเรือน และ ${used.persons}/${room.persons} คน ตามความจุระดับปัจจุบัน`,
     `มีตำแหน่งว่างที่สำรองค่าจ้างได้ ${facts.vacancies} ตำแหน่ง และแรงงานเดิมที่ยังไม่ได้งาน ${facts.existingUnemployed} คน`,
   ];
@@ -1636,25 +1656,38 @@ function admitHousehold(c: City) {
   // A severely unhappy city does not immediately replace every departure.
   const happiness = averageHouseholdHappiness(c.happiness);
   if (happiness !== null && happiness < 35) return;
-  if (c.households.length >= MAX_CITY_HOUSEHOLDS || c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
+  if (c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
   const facts = admissionFacts(c);
   if (!facts.bootstrap && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
-  const { members, workforce, workerSkills, affordable } = arrivalProfile(c, facts);
-  if (!affordable) return;
   // A new household takes the best land it fits into; ties keep the usual order.
-  const svc = utilities(c), worth = landValues(c), fitting = vacantHomes(c).filter(b => canAccommodate(housingCapacity(b), homeOccupancy(c, b.id), members) && homeSupplied(c, b, svc));
-  const home = fitting.reduce<Building | undefined>((best, b) => !best || worth(b.cell) > worth(best.cell) ? b : best, undefined);
-  if (!home) return;
-  const id = c.nextId, wallet = `household:${id}`;
-  // Outside is an explicit source. No existing family wallet or earned claim is duplicated.
-  if (transfer(c, 'outside', wallet, 150_000, 'New household arrival savings') !== 150_000) return;
-  c.nextId++;
-  // Proposed entry capability profile: one flexible worker plus one specialist
-  // in a currently funded role. Counts are disjoint; no per-person agents exist.
-  c.households.push({ id, home: home.id, members, workforce, dependents: members - workforce, workerSkills, skillSource: 'arrival-profile', profile: members > 1 ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
-  if (c.households.length > 128) c.populationCapacityVersion = 1;
-  c.migration.arrivals++;
-  c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}`;
+  const worth = landValues(c), batch = 1;
+  for (let n = 0; n < batch; n++) {
+    if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
+    if (c.households.length >= MAX_CITY_HOUSEHOLDS || (!facts.bootstrap && facts.vacancies < 1)) return;
+    const { members, workforce, workerSkills, affordable } = arrivalProfile(c, facts);
+    if (!affordable) return;
+    const svc = utilities(c), occupied = buildOccupancyIndex(c.households);
+    const fitting = vacantHomes(c).filter(b => canAccommodate(housingCapacity(b, c), occupied.get(b.id) ?? { households: 0, persons: 0 }, members) && homeSupplied(c, b, svc));
+    const home = fitting.reduce<Building | undefined>((best, b) => !best || worth(b.cell) > worth(best.cell) ? b : best, undefined);
+    if (!home) return;
+    const id = c.nextId, wallet = `household:${id}`;
+    // Outside is an explicit source. No existing family wallet or earned claim is duplicated.
+    if (transfer(c, 'outside', wallet, 150_000, 'New household arrival savings') !== 150_000) return;
+    c.nextId++;
+    // Proposed entry capability profile: one flexible worker plus one specialist
+    // in a currently funded role. Counts are disjoint; no per-person agents exist.
+    c.households.push({ id, home: home.id, members, workforce, dependents: members - workforce, workerSkills, skillSource: 'arrival-profile', profile: members > 1 ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
+    if (c.households.length > 128) c.populationCapacityVersion = 1;
+    c.migration.arrivals++;
+    c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}`;
+    if (facts.bootstrap) return;
+    // The jobs this household will take tomorrow are no longer open to the next arrival today.
+    for (const job of allocateEmployment([{ id, workforce, workerSkills, accessible: true }], facts.offers, [])) {
+      const offer = facts.offers.find(o => o.id === job.firmId)!;
+      offer.slots -= job.workers; offer.budgetWorkers -= job.workers; facts.vacancies -= job.workers; if (offer.zone === 'I' || offer.zone === 'C') facts.vacanciesByZone[offer.zone] -= job.workers;
+    }
+    facts.offers = facts.offers.filter(o => o.slots > 0);
+  }
 }
 /** The lowest-index vacant C parcel a shop could use: road frontage, utilities and the usual caps. */
 export function shopSite(c: City): number | null {
@@ -1727,20 +1760,32 @@ function openShop(c: City) {
   if(retailDemand(c)<=0)return;
   const site=shopSite(c);if(site!==null)createBuilding(c,site,true);
 }
+/** Where a developer builds next when people need homes: the full house or block on the most valuable land that could grow. */
+function redevelopmentSite(c: City, svc: Service): number | null {
+  if (!housingShortage(c)) return null;
+  const worth = landValues(c);
+  const ready = c.buildings.filter(b => b.zone === 'R' && rebuilds(c, b) && b.age >= homeGrowthAge(c, b) && access(c, b.cell) && svc.ok(b.id) && homeFull(c, b)
+    && c.households.some(h => h.home === b.id && residentialInvestorEligible(c, h)) && !(c.education && educationBlocked(c, { id: b.id, zone: b.zone, level: b.level, firmId: null }).length));
+  ready.sort((a, b) => worth(b.cell) - worth(a.cell) || a.id - b.id);
+  return ready[0]?.id ?? null;
+}
 function grow(c: City) {
   const eligible = c.cells.map((cell, i) => cell.zone && cell.building === null && !blockers(c, i).length ? i : -1).filter(i => i >= 0);
   if (eligible.length) createBuilding(c, eligible[Math.floor(random(c) * eligible.length)]);
   if (c.tick % MONTH !== 0) return;
   // A taller building draws more water and power; it grows only while the network can supply it.
   const svc = utilities(c), spare = { ...svc.spare };
+  // At most one house becomes an apartment block (or a block a tower) a month, and only where people are waiting for homes.
+  let site: number | null | undefined;
   for (const b of c.buildings) {
     if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : b.zone === 'F' ? FARM_MAX_LEVEL : 3) || b.age < (b.zone === 'R' ? homeGrowthAge(c, b) : MONTH) || !access(c, b.cell) || !svc.ok(b.id)) continue;
     const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1, c.households.filter(h => h.home === b.id).length), extra = { power: after.power - before.power, water: after.water - before.water };
     if (!fits(spare, extra)) continue;
     const residents = c.households.filter(h => h.home === b.id), f = c.firms.find(f => f.building === b.id);
     if (c.education && educationBlocked(c, { id: b.id, zone: b.zone, level: b.level, firmId: f?.id ?? null }).length) continue;
-    if (b.zone === 'R' && homeFull(c, b) && residents.some(h => residentialInvestorEligible(c, h))) {
-      transfer(c, 'outside', 'construction', 20_000, 'Outside residential height investment'); b.level++; b.housingType = HOUSING_LEVELS[b.level - 1].type; spare.power -= extra.power; spare.water -= extra.water;
+    if (b.zone === 'R' && homeFull(c, b) && residents.some(h => residentialInvestorEligible(c, h)) && (!rebuilds(c, b) || b.id === (site === undefined ? (site = redevelopmentSite(c, svc)) : site))) {
+      if (rebuilds(c, b)) site = null;
+      transfer(c, 'outside', 'construction', c.housingScale === 1 ? residentialGrowthCost(b.level) : 20_000, 'Outside residential height investment'); b.level++; b.housingType = HOUSING_LEVELS[b.level - 1].type; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && isCommercial(f) && !commercialGrowthReasons(c, f).length) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && !isCommercial(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f) / MONTH + 2 * 350))) {
@@ -1840,7 +1885,7 @@ function stepWithRoads(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { housingScale: 1, farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -2069,7 +2114,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   const occupied = buildOccupancyIndex(c.households);
   for (const b of c.buildings) {
     if (b.zone !== 'R') { if (!c.firms.some(f => f.building === b.id)) fail(); }
-    else { const used = occupied.get(b.id) ?? { households: 0, persons: 0 }, room = housingCapacity(b); if (used.households > room.households || used.persons > room.persons) fail(); }
+    else { const used = occupied.get(b.id) ?? { households: 0, persons: 0 }, room = housingCapacity(b, c); if (used.households > room.households || used.persons > room.persons) fail(); }
   }
   const pairs = new Set<string>();
   for (const e of c.employment) {
@@ -2364,6 +2409,8 @@ export function deserialize(json: string): City {
     throw Error('Tax policy requires save v29.');
   }
   const city = deserializeVersioned(baseJson);
+  // A city saved before real building sizes keeps its smaller homes; only new cities are built to real sizes.
+  if (city.housingScale !== undefined && city.housingScale !== 1) throw new Error('Invalid housing scale.');
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.

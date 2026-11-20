@@ -111,7 +111,7 @@ export function captureCitySignals(city: City): SignalCapture {
   const population = city.households.reduce((total, household) => total + household.members, 0);
   const workforce = city.households.reduce((total, household) => total + household.workforce, 0);
   const employed = city.households.reduce((total, household) => total + householdWorkerCount(city, household.id), 0);
-  const personCapacity = city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0);
+  const personCapacity = city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building, city).persons, 0);
   const happiness = averageHouseholdHappiness(city.happiness);
   // Pollution where households actually live, averaged per household; absent while nobody has a home.
   const air = pollutionReader(city), homes = new Map(city.buildings.map(building => [building.id, building.cell]));

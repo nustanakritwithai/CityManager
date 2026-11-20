@@ -345,7 +345,7 @@ function legacyAssumption(household: Household): HTMLElement | null {
   Object.assign(note.dataset, { origin: household.origin, profile: household.profile, members: String(household.members), workforce: String(household.workforce), dependents: String(household.dependents) }); return note;
 }
 function renderHouse(city: City, building: Building, households: Household[], onHousehold: HouseholdAction): HTMLElement[] {
-  const occupied = homeOccupancy(city, building.id), capacity = housingCapacity(building);
+  const occupied = homeOccupancy(city, building.id), capacity = housingCapacity(building, city);
   const upgrade = housingUpgradeStatus(city, building), labels = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' } as const;
   const residents = section('ครัวเรือนที่พักอาศัย', `${households.length} ครัวเรือน · ${occupied.persons} คน`), list = el('div', 'cx-household-list');
   residents.classList.add('bc-residents-source');

@@ -24,6 +24,7 @@ test('retail growth profit blocker states the threshold', () => {
 
 import { spareShortfall, utilityUpgradeBlocks, productionUpgradeStatus, MONTH } from '../src/sim.ts';
 import { cityOverview } from '../src/context-data.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 test('utility shortfall names needed vs spare units and what to build', () => {
   assert.equal(spareShortfall({ power: 1, water: 1 }, { power: 1, water: 1 }), null);
@@ -33,7 +34,7 @@ test('utility shortfall names needed vs spare units and what to build', () => {
 });
 
 test('a utility-capped city tells the player which upgrades wait for water or power', () => {
-  const live = createCity(61025); for (let d = 0; d < 400; d++) step(live);
+  const live = legacyHousing(createCity(61025)); for (let d = 0; d < 400; d++) step(live);
   const blocks = utilityUpgradeBlocks(live);
   assert.ok(blocks.count > 0, 'the default contract caps some upgrade');
   const warning = cityOverview(live).warnings.find(w => w.includes('รออัปเกรดเพราะน้ำไฟสำรองไม่พอ'));

@@ -1,5 +1,5 @@
 /** Pure household/establishment simulation: one tick is one day; money is integer satang. */
-import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
+import { legacyHousingCapacity as getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
 import { allocateEmployment, type EmploymentAllocation, type WorkerSkills } from './labor.ts';
 import { deserializeV1, type City as LegacyCityV1 } from './legacy-v1.ts';
 import { deserializeV2, type CityV2 } from './legacy-v2.ts';

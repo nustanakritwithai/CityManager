@@ -5,11 +5,14 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createCity, step, deserialize, serialize, summary, bulldoze, moveHousehold, housingCapacity, homeOccupancy, employmentForHousehold, firmWorkerCount, householdWorkerCount, explainCell, GATEWAY, WAGES, MONTH, type City, type Household } from '../src/sim.ts';
 import { deserializeV1 } from '../src/legacy-v1.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 const frozen = readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 const frozenV3 = (day: number) => readFileSync(new URL(`./fixtures/legacy-v3-day${day}.json`, import.meta.url), 'utf8');
 const advance = (c: City, days: number) => { for (let i = 0; i < days; i++) step(c); return c; };
 const populated = (day = 180) => advance(createCity(61025), day);
+/** The same city on the old smaller homes, for moves and rehousing that need a spare household slot in a shared home. */
+const sharedHomes = (day = 180) => advance(legacyHousing(createCity(61025)), day);
 
 test('frozen v1 migration preserves history, clocks, claims and IDs with explicit minimum legacy composition', () => {
   assert.equal(createHash('sha256').update(frozen).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
@@ -60,13 +63,13 @@ test('an actual home upgrade increases room without adding members or households
   step(c);
   assert.equal(home.level, 2);
   assert.deepEqual(c.households.filter(h => h.home === home.id).map(h => [h.id, h.members]), before);
-  assert.deepEqual(housingCapacity(home), { households: 2, persons: 8 });
+  assert.deepEqual(housingCapacity(home, c), { households: 1, persons: 8 }, 'a bigger house: room for a larger family, still one household');
 });
 
 test('moves enforce both capacities and preserve household identity, savings, claims and admission count', () => {
-  const c = populated(185); keepSupplied(c);
+  const c = sharedHomes(185); keepSupplied(c);
   const h = c.households.find(h => h.profile === 'family')!;
-  const destination = c.buildings.find(b => b.zone === 'R' && b.id !== h.home && housingCapacity(b).households > homeOccupancy(c, b.id).households && housingCapacity(b).persons - homeOccupancy(c, b.id).persons >= h.members)!;
+  const destination = c.buildings.find(b => b.zone === 'R' && b.id !== h.home && housingCapacity(b, c).households > homeOccupancy(c, b.id).households && housingCapacity(b, c).persons - homeOccupancy(c, b.id).persons >= h.members)!;
   const before = { ...h }, accounts = JSON.stringify(c.accounts), ledger = JSON.stringify(c.ledger), claims = JSON.stringify(c.firms.map(f => f.workDays)), arrivals = c.migration.arrivals;
   assert.equal(moveHousehold(c, h.id, destination.id).ok, true);
   assert.deepEqual({ ...h, home: before.home }, before);
@@ -82,7 +85,7 @@ test('moves enforce both capacities and preserve household identity, savings, cl
 });
 
 test('home demolition displaces families without deleting savings or earned claims, then rehouses before immigration', () => {
-  const c = populated(185), home = c.buildings.find(b => b.zone === 'R' && homeOccupancy(c, b.id).households > 0)!;
+  const c = sharedHomes(185), home = c.buildings.find(b => b.zone === 'R' && homeOccupancy(c, b.id).households > 0)!;
   const affected = c.households.filter(h => h.home === home.id), identities = affected.map(h => h.id), funds = affected.map(h => c.accounts[h.wallet]);
   const count = c.households.length, persons = summary(c).population, claims = JSON.stringify(c.firms.map(f => f.workDays)), arrivals = c.migration.arrivals;
   assert.equal(bulldoze(c, home.cell).ok, true);

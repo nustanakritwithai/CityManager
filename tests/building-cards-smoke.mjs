@@ -94,7 +94,7 @@ async function card(city, kind, target) {
   for (const section of required) assert.ok(dom.sections.includes(section), `${kind} semantic section ${section}`); signatures[kind] = dom.sections.join('|');
   let wallets;
   if (kind === 'house') {
-    const residents = city.households.filter(h => h.home === target.id), used = homeOccupancy(city, target.id), cap = housingCapacity(target);
+    const residents = city.households.filter(h => h.home === target.id), used = homeOccupancy(city, target.id), cap = housingCapacity(target, city);
     wallets = residents.map(h => h.wallet); await metrics({ households: used.households, persons: used.persons, 'vacant-households': cap.households - used.households, 'vacant-persons': cap.persons - used.persons });
     assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].filter(e=>e.tagName==="BUTTON").map(e=>Number(e.dataset.householdId))'), residents.map(h => h.id));
   } else if (kind === 'household') {

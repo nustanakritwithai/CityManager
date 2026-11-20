@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEducation, educationGate, initialCampusReport, stepEducation, withdrawCampus, forgetHouseholdEducation, type Campus, type EducationBuilding, type EducationPeople, type EducationView } from '../src/education.ts';
-import { createCity, step, type City } from '../src/sim.ts';
+import { createCity, step, housingShortage, type City } from '../src/sim.ts';
 
 const person = (changes: Partial<EducationPeople> = {}): EducationPeople => ({ householdId: 1, basic: 1, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0, ...changes });
 const campus = (id: number, kind: Campus['kind']): Campus => ({ id, kind, cell: id, level: 1, tick: 0, open: true, contract: 0, workDays: {}, report: initialCampusReport(kind, 1) });
@@ -96,13 +96,10 @@ test('demolition withdraws unfinished study but preserves resident diplomas; dep
 test('only changing resident diplomas changes real month-end home and farm upgrades, not jobs or economic flows', () => {
   const ready = createCity(61025);
   for (let day = 0; day < 119; day++) step(ready);
-  // Balanced admissions no longer concentrate enough residents in the first
-  // cottage by default. Fill one with existing families to isolate diplomas.
-  const home = ready.buildings.find(b => b.zone === 'R' && b.level === 3)!;
+  // A full house (one household) in a city where people wait for homes: only diplomas stand between it and a 40-room block.
+  const home = ready.buildings.find(b => b.zone === 'R' && b.level === 3 && ready.households.some(h => h.home === b.id))!;
   assert.ok(home);
-  const residents = [...ready.households.filter(h => h.home === home.id), ...ready.households.filter(h => h.home !== home.id)].slice(0, 3);
-  assert.equal(residents.length, 3);
-  for (const h of residents) h.home = home.id;
+  assert.equal(housingShortage(ready), true);
   ready.education!.people = ready.households.map(h => person({ householdId: h.id, basic: h.workforce }));
   ready.education!.residentBasic = ready.households.reduce((sum, h) => sum + h.workforce, 0);
   ready.education!.schoolReadyDays = 30;

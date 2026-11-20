@@ -187,7 +187,7 @@ export function cityOverview(city: City, current = summary(city)): CityOverview 
   }
   let homeSlots = 0, personCapacity = 0, occupiedHomeSlots = 0, occupiedPersons = 0;
   for (const building of city.buildings.filter(building => building.zone === 'R')) {
-    const capacity = housingCapacity(building), occupied = homeOccupancy(city, building.id);
+    const capacity = housingCapacity(building, city), occupied = homeOccupancy(city, building.id);
     homeSlots += capacity.households; personCapacity += capacity.persons;
     occupiedHomeSlots += occupied.households; occupiedPersons += occupied.persons;
   }

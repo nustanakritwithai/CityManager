@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEPARTURE_FLOOR, DEPARTURE_MONTHS, MONTH, bulldoze, departureDay, createCity, deserialize, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
 import { retrainingMoves } from '../src/labor.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 const closeIndustry = (c: City) => {
   const cells = c.firms.filter(f => f.zone === 'I' || f.zone === 'F').map(f => ({ cell: c.buildings.find(b => b.id === f.building)!.cell, zone: f.zone }));
@@ -28,7 +29,7 @@ test('a healthy city keeps everyone: no household leaves in two years', { timeou
 });
 
 test('households with no paid work for two months leave gradually with their savings, down to a floor', { timeout: 120_000 }, () => {
-  let c = createCity(61025); for (let d = 0; d < 400; d++) step(c);
+  let c = legacyHousing(createCity(61025)); for (let d = 0; d < 400; d++) step(c);
   const outside = c.accounts.outside;
   closeIndustry(c);
   const months: [number, number][] = [], predicted = new Map<number, number>();

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, adoptSavedEducation, housingUpgradeStatus, productionUpgradeStatus, retailGrowthStatus, isMarket, isRetail, zoneCell, access, type Building } from '../src/sim.ts';
+import { createCity, step, serialize, deserialize, adoptSavedEducation, housingUpgradeStatus, housingShortage, homeOccupancy, residentialGrowthCost, productionUpgradeStatus, retailGrowthStatus, isMarket, isRetail, zoneCell, access, type Building } from '../src/sim.ts';
 import { factoryLevel } from '../src/factory-levels.ts';
 import { RETAIL_MAX_LEVEL } from '../src/retail-capacity.ts';
 import { farmStockCapacity, proposeHarvest, proposeRecipe } from '../src/agriculture.ts';
-import { HOUSING_LEVELS } from '../src/housing.ts';
+import { HOUSING_LEVELS, redevelopsAt } from '../src/housing.ts';
 import { populationFixture } from './population-capacity-fixture.ts';
 import { holdEducationReady } from './education-ready.ts';
 
@@ -13,7 +13,7 @@ const maximum = (b: Building) => b.zone === 'R' || b.zone === 'I' ? 9 : b.zone =
 test('filled apartment and condo tiers upgrade once on the same tile, while absent credentials still block them', () => {
   // Reconciled synthetic census: enough real household records to fill the upper tiers.
   // Normal daily labor, paid retail and migration establish the residents' financial gates.
-  const source = populationFixture(24);
+  const source = populationFixture(240);
   for (let cell = 0; cell < source.cells.length; cell++) {
     const item = source.cells[cell];
     if (!item.road && !item.zone && item.building === null && access(source, cell)) {
@@ -25,9 +25,16 @@ test('filled apartment and condo tiers upgrade once on the same tile, while abse
   // isolates the credential/occupancy upgrade gate rather than moving out first.
   while (source.tick < 449) step(source);
   for (let level = 4; level < 9; level++) {
-    const city = structuredClone(source), [home, spareHome] = city.buildings.filter(b => b.zone === 'R');
+    // Replacing a block with a tower also waits for people needing homes: see the next test.
+    if (redevelopsAt(level)) continue;
+    const city = structuredClone(source), [home, ...others] = city.buildings.filter(b => b.zone === 'R');
     home.level = level; home.housingType = HOUSING_LEVELS[level - 1].type;
-    for (const [i, h] of city.households.entries()) h.home = i < HOUSING_LEVELS[level - 1].households ? home.id : spareHome.id;
+    // Fill this home's rooms; everyone else lives in the other towers, each up to its own rooms.
+    const room = new Map(others.map(b => [b.id, HOUSING_LEVELS[b.level - 1].households]));
+    for (const [i, h] of city.households.entries()) {
+      if (i < HOUSING_LEVELS[level - 1].households) { h.home = home.id; continue; }
+      const spare = others.find(b => room.get(b.id)! > 0)!; room.set(spare.id, room.get(spare.id)! - 1); h.home = spare.id;
+    }
     holdEducationReady(city);
     assert.deepEqual(deserialize(serialize(city)), city);
     assert.deepEqual(housingUpgradeStatus(city, home).blocked, []);
@@ -43,9 +50,31 @@ test('filled apartment and condo tiers upgrade once on the same tile, while abse
     assert.deepEqual({ id: home.id, cell: home.cell }, identity); assert.equal(city.cells[home.cell].building, home.id);
     assert.deepEqual(city.households.filter(h => h.home === home.id).map(h => [h.id, h.members, h.wallet]), residents);
     const investment = city.ledger.filter(e => e.tick === city.tick && e.reason === 'Outside residential height investment');
-    assert.equal(investment.length, 1); assert.equal(investment[0].amount, 20_000);
+    assert.equal(investment.length, 1); assert.equal(investment[0].amount, residentialGrowthCost(level));
     assert.deepEqual(deserialize(serialize(city)), city);
   }
+});
+
+test('a full 40-room block becomes a 200-room tower when every room in the city is taken and jobs are open', () => {
+  const city = populationFixture(40), [home, ...others] = city.buildings.filter(b => b.zone === 'R');
+  home.level = 6; home.housingType = 'apartment';
+  for (const h of city.households) h.home = home.id;
+  // The city's only home: tear down the empty towers.
+  for (const b of others) { city.cells[b.cell] = { road: false, zone: null, building: null }; city.buildings.splice(city.buildings.indexOf(b), 1); }
+  // Shops for the residents to buy from, as above, then the same month-end.
+  for (let cell = 0; cell < city.cells.length && city.cells.filter(item => item.zone === 'C').length < 4; cell++) {
+    const item = city.cells[cell];
+    if (!item.road && !item.zone && item.building === null && access(city, cell)) assert.equal(zoneCell(city, cell, 'C').ok, true);
+  }
+  while (city.tick < 449) step(city);
+  holdEducationReady(city);
+  assert.equal(homeOccupancy(city, home.id).households, 40);
+  assert.equal(housingShortage(city), true, 'hiring, no one idle, not one room free');
+  assert.deepEqual(housingUpgradeStatus(city, home).blocked, []);
+  const before = city.tick; step(city);
+  assert.equal(home.level, 7); assert.equal(home.housingType, 'condo');
+  assert.deepEqual(city.ledger.filter(e => e.tick > before && e.reason === 'Outside residential height investment').map(e => e.amount), [160 * 20_000]);
+  assert.deepEqual(deserialize(serialize(city)), city);
 });
 
 test('all maximum levels survive education adoption and monthly review without another upgrade charge', () => {

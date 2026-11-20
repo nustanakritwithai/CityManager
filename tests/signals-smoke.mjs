@@ -124,7 +124,7 @@ try {
     incomePerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.to === 'treasury').reduce((n,e) => n+e.amount,0)/100,
     expensesPerTick: fixture.ledger.filter(e => e.tick === fixture.tick && e.from === 'treasury').reduce((n,e) => n+e.amount,0)/100,
     averageHappiness: fixture.happiness.rows.reduce((sum, row) => sum + row.score, 0) / fixture.households.length,
-    housingCapacity: fixture.buildings.reduce((n,b) => n+housingCapacity(b).persons,0),
+    housingCapacity: fixture.buildings.reduce((n,b) => n+housingCapacity(b, fixture).persons,0),
     // Average pollution at the homes households live in, to one decimal.
     pollution: Math.round(fixture.households.filter(h => h.home !== null).reduce((n,h) => n + pollutionAt(fixture, fixture.buildings.find(b => b.id === h.home).cell), 0) / fixture.households.filter(h => h.home !== null).length * 10) / 10,
   });

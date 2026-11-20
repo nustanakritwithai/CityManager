@@ -62,7 +62,7 @@ for (let day = 1; day <= 180; day++) {
     const beforeFixture = structuredClone(city);
     const residence = city.buildings.find(b => b.zone === 'R' && b.level === 3);
     assert.ok(residence, 'A mature cottage is available for the full-home gate');
-    const capacity = housingCapacity(residence);
+    const capacity = housingCapacity(residence, city);
     for (const household of city.households) {
       const occupied = homeOccupancy(city, residence.id);
       if (occupied.households === capacity.households) break;
@@ -70,7 +70,7 @@ for (let day = 1; day <= 180; day++) {
     }
     assert.equal(homeOccupancy(city, residence.id).households, capacity.households);
     for (const building of city.buildings.filter(b => b.zone === 'R')) {
-      const occupied = homeOccupancy(city, building.id), limit = housingCapacity(building);
+      const occupied = homeOccupancy(city, building.id), limit = housingCapacity(building, city);
       assert.ok(occupied.households <= limit.households && occupied.persons <= limit.persons, 'Fixture preserves both housing limits');
     }
     const withoutHomes = value => ({ ...value, households: value.households.map(({ home: _home, ...household }) => household) });
@@ -93,11 +93,11 @@ const findUpgrade = (day, zone, predicate = () => true) => {
 };
 const home = findUpgrade(120, 'R'), factory = findUpgrade(120, 'I'), farm = findUpgrade(120, 'F'), shop = findUpgrade(150, 'C', f => f && isRetail(f));
 assert.deepEqual([home.previous.level,home.building.level,factory.previous.level,factory.building.level,farm.previous.level,farm.building.level,shop.previous.level,shop.building.level], [3,4,3,4,3,4,4,5]);
-assert.deepEqual(housingCapacity(home.building), { households: 5, persons: 20 });
+assert.deepEqual(housingCapacity(home.building, snapshots.get(120).after), { households: 40, persons: 80 }); // the house was rebuilt as a 40-room block
 // Occupancy gate: from level 3 a house only rises after every household slot is taken.
 assert.equal(HOUSING_OCCUPANCY_GATE_LEVEL, 3);
 { const { before } = snapshots.get(120); assert.ok(home.previous.level >= HOUSING_OCCUPANCY_GATE_LEVEL);
-  assert.equal(homeOccupancy(before, home.previous.id).households, housingCapacity(home.previous).households, 'House 3->4 upgrade needs full household occupancy first'); }
+  assert.equal(homeOccupancy(before, home.previous.id).households, housingCapacity(home.previous, before).households, 'House 3->4 upgrade needs full household occupancy first'); }
 assert.equal(firmCapacity(factory.building), 7); assert.equal(factoryCropCapacity(factory.building.level), 28);
 assert.equal(firmCapacity(farm.building), 4); assert.equal(farmStockCapacity(farm.building.level), 120);
 assert.equal(firmCapacity(shop.building), 4); assert.equal(retailCapacity(shop.building.level).stock, 48);
@@ -258,7 +258,7 @@ try {
   await runBoundary(120,[home,factory,farm]);
   await inspect(farm.building,'farm'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=crop-stock]").dataset.capacity'),'120'); assert.match(await evaluate('document.querySelector("#entity-content [data-building-progression]").textContent'), /ระดับ 4\/6[\s\S]*ระดับถัดไป 5/); await screenshot('desktop-farm.png');
   await inspect(factory.building,'factory'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=crop-stock]").dataset.capacity'),'28'); assert.match(await evaluate('document.querySelector("#entity-content [data-building-progression]").textContent'), /ระดับ 4\/9[\s\S]*ระดับถัดไป 5/);
-  await inspect(home.building,'house'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=households]").dataset.capacity'),'5');
+  await inspect(home.building,'house'); assert.equal(await evaluate('document.querySelector("#entity-content [data-context-metric=households]").dataset.capacity'),'40');
   assert.match(await evaluate('document.querySelector("#entity-content .bc-type-label").textContent'), /อพาร์ตเมนต์ ระดับ 1/);
   assert.equal(await evaluate('!!document.querySelector("#entity-content [data-building-progression]").closest("details")'), false, 'Housing progression is not hidden in collapsed details');
   await screenshot('desktop-apartment-details.png');

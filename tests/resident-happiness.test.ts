@@ -6,6 +6,7 @@ import { scheduleCityTaxes } from '../src/city-tax-policy.ts';
 import { peopleOf } from '../src/education.ts';
 
 import { keepSupplied } from './plants.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 const advance=(c:City,n:number)=>{for(let i=0;i<n;i++)step(c);};
 // Severe route loss: every junction split, so no street links to the next. (One-way arrows alone no longer cut anyone
@@ -34,7 +35,7 @@ test('wellbeing starts only when old saves advance and rejects corrupt or mismat
 });
 
 test('new rates move wage earners and business owners gradually from the effective day, including after reload', () => {
-  const neutral = createCity(42);
+  const neutral = legacyHousing(createCity(42));
   advance(neutral, 89);
   const higher = deserialize(serialize(neutral)), lower = deserialize(serialize(neutral));
   const owner = neutral.firms.find(firm => firm.owner)!.owner!.householdId;
@@ -137,7 +138,7 @@ test('losing a wage job to a disconnected road does not raise happiness at maxim
 });
 
 test('arrival affordability uses the funded occupation and the wage tax on its first pay day', () => {
-  const industry = createCity(42);
+  const industry = legacyHousing(createCity(42)); // arrivals on these days need the old shared homes' spare slots
   scheduleCityTaxes(industry, { wage: 30, profit: 20 });
   advance(industry, 91);
   const first = industry.migration.arrivals;
@@ -148,7 +149,7 @@ test('arrival affordability uses the funded occupation and the wage tax on its f
   const placement = industry.employment.find(job => job.householdId === entrant.id)!;
   assert.equal(industry.firms.find(firm => firm.id === placement.firmId)!.zone, 'I');
 
-  const neutral = createCity(42);
+  const neutral = legacyHousing(createCity(42));
   advance(neutral, 120);
   const before = neutral.migration.arrivals;
   for (const [wage, arrivals] of [[17, before + 1], [18, before]] as const) {
@@ -161,7 +162,7 @@ test('arrival affordability uses the funded occupation and the wage tax on its f
 
 test('three-person arrivals must cover three food portions and an affordable single can still enter', () => {
   for (const [wage, members, grossWages] of [[18, 3, [42_000, 60_000]], [19, 1, [60_000]], [30, 1, [60_000]]] as const) {
-    const city = createCity(42);
+    const city = legacyHousing(createCity(42));
     scheduleCityTaxes(city, { wage, profit: 20 });
     advance(city, 90);
     const previousArrivals = city.migration.arrivals;
@@ -227,7 +228,7 @@ test('save validation rejects low scores with impossible distress streaks and pr
 });
 
 test('save validation bounds wellbeing by the arrival receipt in both live and compacted ledgers', () => {
-  const city = createCity(42);
+  const city = legacyHousing(createCity(42));
   advance(city, 121);
   const receipt = city.ledger.find(entry => entry.tick === 121 && entry.reason === 'New household arrival savings')!;
   assert.ok(receipt);

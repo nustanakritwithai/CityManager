@@ -162,7 +162,7 @@ try {
   const home = grown.buildings.find(item => item.zone === 'R');
   assert(await evaluate(`Array.from(document.querySelector('#city-question-entity').options).some(o=>o.value===${JSON.stringify(String(home.id))})`), 'House option updates on ordinary growth without city reload');
   await ask('house.detail', home.id);
-  await expectFact('house.id', home.id, 'รหัส'); await expectFact('house.capacity-people', housingCapacity(home).persons, 'คน');
+  await expectFact('house.id', home.id, 'รหัส'); await expectFact('house.capacity-people', housingCapacity(home, grown).persons, 'คน');
   checks.push('Empty entity selector becomes usable when actual houses grow on the same city object; no phantom entity or mutation');
 
   // Preserve real legacy-retail and market fact coverage beside the merged C taxonomy.

@@ -48,7 +48,7 @@ test('version-five mapping includes owner labour and distinguishes people, house
   assert.notEqual(metric(capture, 'unemployed').value, actual.population - actual.employed, 'dependents are not unemployed workforce');
   assert.equal(metric(capture, 'housingCapacity').value, actual.personCapacity);
   assert.equal(metric(capture, 'housingCapacity').unit, 'people');
-  assert.equal(metric(capture, 'housingCapacity').value, city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building).persons, 0));
+  assert.equal(metric(capture, 'housingCapacity').value, city.buildings.filter(building => building.zone === 'R').reduce((total, building) => total + housingCapacity(building, city).persons, 0));
   const report = buildLocalSignalReport(requestForCapture(capture));
   assert.equal(metric(capture, 'averageHappiness').value, city.happiness!.rows.reduce((sum, row) => sum + row.score, 0) / city.households.length);
   assert.equal(metric(capture, 'averageHappiness').unit, 'index_0_100');

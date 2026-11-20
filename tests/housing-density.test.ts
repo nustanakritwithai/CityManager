@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { HOUSING_LEVELS, getHousingCapacity } from '../src/housing.ts';
-import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount } from '../src/sim.ts';
+import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount, housingShortage, residentialGrowthCost, landValues, connectedRoads, SIZE, type City } from '../src/sim.ts';
 import { advanceParkRuntime, createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { holdEducationReady } from './education-ready.ts';
 
@@ -14,9 +14,9 @@ function fixture() {
 
 test('all residential levels have explicit monotonic dual capacities and strict type pairings', () => {
   assert.deepEqual(HOUSING_LEVELS.map(x => [x.type, x.tierLevel, x.households, x.persons]), [
-    ['cottage', 1, 1, 4], ['cottage', 2, 2, 8], ['cottage', 3, 3, 12],
-    ['apartment', 1, 5, 20], ['apartment', 2, 8, 32], ['apartment', 3, 12, 48],
-    ['condo', 1, 16, 64], ['condo', 2, 24, 96], ['condo', 3, 32, 128],
+    ['cottage', 1, 1, 4], ['cottage', 2, 1, 8], ['cottage', 3, 1, 12],
+    ['apartment', 1, 40, 80], ['apartment', 2, 40, 120], ['apartment', 3, 40, 160],
+    ['condo', 1, 200, 400], ['condo', 2, 200, 600], ['condo', 3, 200, 800],
   ]);
   for (const [i, x] of HOUSING_LEVELS.entries()) assert.deepEqual(getHousingCapacity(x.type, i + 1), { households: x.households, persons: x.persons });
   assert.throws(() => getHousingCapacity('cottage', 4)); assert.throws(() => getHousingCapacity('apartment', 7));
@@ -50,7 +50,10 @@ test('each autonomous upgrade keeps the same parcel, identity, households and ac
     assert.deepEqual(city.households.filter(h => h.home === id).map(h => [h.id, h.members, h.wallet]), residents);
     const investment = city.ledger.filter(e => e.tick > beforeTick && e.reason === 'Outside residential height investment');
     assert.ok(investment.length >= 1, 'at least one real height investment occurred');
-    assert.ok(investment.every(e => e.from === 'outside' && e.to === 'construction' && e.amount === 20_000));
+    // A developer pays for every room added: one for a bigger house, 39 for a 40-room block on a house's plot.
+    const costs = new Set([1, 2, 3, 4, 5, 6, 7, 8].map(residentialGrowthCost));
+    assert.ok(investment.every(e => e.from === 'outside' && e.to === 'construction' && costs.has(e.amount)));
+    assert.ok(investment.some(e => e.amount === residentialGrowthCost(level)), 'this home paid for its own new rooms');
     assert.equal(Object.values(city.accounts).reduce((a, b) => a + b, 0), 0);
     assert.deepEqual(deserialize(serialize(city)), city);
   }
@@ -58,13 +61,45 @@ test('each autonomous upgrade keeps the same parcel, identity, households and ac
 });
 
 test('apartment and condo tiers upgrade only when every household slot is taken', () => {
-  const { city, home } = fixture(); home.level = 3; home.housingType = 'cottage';
-  assert.ok(homeOccupancy(city, home.id).households < 3);
-  assert.ok(housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง')));
-  const vacant = structuredClone(city); step(vacant); assert.equal(vacant.buildings.find(b => b.id === home.id)!.level, 3);
-  assert.equal(fill(city, home), true); assert.equal(homeOccupancy(city, home.id).households, 3);
-  assert.ok(!housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง')));
-  holdEducationReady(city); step(city); assert.equal(home.level, 4); assert.equal(home.housingType, 'apartment');
+  const { city, home } = fixture(); home.level = 4; home.housingType = 'apartment';
+  assert.ok(homeOccupancy(city, home.id).households < 40);
+  assert.ok(housingUpgradeStatus(city, home).blocked.some(r => r.includes('เต็มทุกช่อง') && r.includes('/40')));
+  holdEducationReady(city); step(city); assert.equal(home.level, 4, 'a block with empty rooms is not built higher');
+});
+
+/** A free room: an empty house on a lot by a connected road, so no one is waiting for a home. */
+function emptyHouse(city: City) {
+  const roads = connectedRoads(city), next = (i: number) => [i - 1, i + 1, i - SIZE, i + SIZE];
+  const cell = city.cells.findIndex((x, i) => !x.road && x.zone === null && x.building === null && next(i).some(n => roads.has(n)) && !city.parks.some(p => p.cell === i) && !city.plants.some(p => p.cell === i) && !city.education?.campuses.some(k => k.cell === i));
+  const id = city.nextId++; city.cells[cell] = { road: false, zone: 'R', building: id };
+  city.buildings.push({ id, cell, zone: 'R', level: 1, age: 30, housingType: 'cottage' });
+}
+
+test('a full house becomes a 40-room apartment block only while people are waiting for homes', () => {
+  const waiting = fixture(), quiet = fixture();
+  for (const { city, home } of [waiting, quiet]) { home.level = 3; home.housingType = 'cottage'; holdEducationReady(city); }
+  emptyHouse(quiet.city);
+  assert.equal(housingShortage(waiting.city), true, 'jobs are open and every room is taken');
+  assert.equal(housingShortage(quiet.city), false);
+  assert.ok(housingUpgradeStatus(quiet.city, quiet.home).blocked.some(r => r.includes('อพาร์ตเมนต์ 40 ห้อง')));
+  const before = waiting.city.tick;
+  step(waiting.city); step(quiet.city);
+  assert.equal(quiet.home.level, 3, 'no shortage, no rebuild');
+  const rebuilt = waiting.city.buildings.filter(b => b.zone === 'R' && b.level === 4);
+  assert.equal(rebuilt.length, 1, 'one rebuild a month');
+  const investment = waiting.city.ledger.filter(e => e.tick > before && e.reason === 'Outside residential height investment' && e.amount === residentialGrowthCost(3));
+  assert.equal(investment.length, 1); assert.equal(investment[0].amount, 39 * 20_000);
+});
+
+test('the developer builds on the most valuable full plot', () => {
+  const { city } = fixture();
+  const houses = city.buildings.filter(b => b.zone === 'R' && homeOccupancy(city, b.id).households === 1 && city.households.some(h => h.home === b.id && householdWorkerCount(city, h.id) > 0 && city.tick - h.lastPurchaseTick <= 3));
+  assert.ok(houses.length >= 2);
+  for (const b of houses) { b.level = 3; b.housingType = 'cottage'; }
+  holdEducationReady(city);
+  const worth = landValues(city), best = [...houses].sort((a, b) => worth(b.cell) - worth(a.cell) || a.id - b.id)[0];
+  step(city);
+  assert.deepEqual(city.buildings.filter(b => b.zone === 'R' && b.level === 4).map(b => b.id), [best.id]);
 });
 
 test('upgrade explains and respects road, utility and resident financial conditions', () => {

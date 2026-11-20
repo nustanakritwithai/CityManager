@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { auditMoney } from '../src/city-history.ts';
 import { bulldoze, createCity, deserialize, serialize, step, zoneCell } from '../src/sim.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 const cityWithFundedFactory = () => {
-  const c = createCity(61025);
+  const c = legacyHousing(createCity(61025));
   for (let day = 0; day < 400; day++) step(c);
   const funded = c.firms.find(f => f.zone === 'I' && f.fundedBy); assert.ok(funded);
   return { c, funded };

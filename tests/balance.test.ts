@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { createCity, deserialize, serialize, step, summary } from '../src/sim.ts';
 import { cityGoals } from '../src/city-goals.ts';
 import { keepSupplied } from './plants.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 test('legacy seeded cities that win stay self-reliant for three years: farms pay their wages and no firm runs dry', { timeout: 120_000 }, () => {
   for (const seed of [61025, 2026]) {
-    let c = createCity(seed), wonAt = 0; delete c.goalRulesVersion;
+    let c = legacyHousing(createCity(seed)), wonAt = 0; delete c.goalRulesVersion;
     for (let d = 1; d <= 1080; d++) {
       step(c); keepSupplied(c);
       if (!wonAt && cityGoals(c).won) wonAt = d;
@@ -36,7 +37,7 @@ test('legacy seeded cities that win stay self-reliant for three years: farms pay
 
 test('a business left with no cash and no workers is taken over at month end: new owner, same premises, chain back', { timeout: 120_000 }, async () => {
   const { bulldoze, zoneCell, deadFirm, factoryTakeoverRecipe, utilities, access } = await import('../src/sim.ts');
-  const c = createCity(61025); for (let d = 0; d < 300; d++) { step(c); keepSupplied(c); }
+  const c = legacyHousing(createCity(61025)); for (let d = 0; d < 300; d++) { step(c); keepSupplied(c); }
   const farmCell = c.buildings.find(b => b.id === c.firms.find(f => f.zone === 'F')!.building)!.cell, premises = new Map(c.firms.map(f => [f.building, f.id]));
   assert.equal(bulldoze(c, farmCell).ok, true);
   const takeovers: string[] = [], observed = [...c.ledger];

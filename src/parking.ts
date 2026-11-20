@@ -5,13 +5,13 @@
  * Nothing is stored: the answer follows the city's roads and buildings as they are now.
  */
 import { civicSpec, type CivicKind, type CivicSite } from './civic/sites.ts';
-import { getHousingCapacity } from './housing.ts';
+import { getHousingCapacity, legacyHousingCapacity } from './housing.ts';
 import { ROAD_CLASS, roadClassAt, type RoadClass } from './road-classes.ts';
 import { roadNeighborsFor, type RoadMap } from './road-topology.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { retailCapacity } from './retail-capacity.ts';
 
-type Host = RoadMap & { cells: { road: boolean; building: number | null }[] };
+type Host = RoadMap & { cells: { road: boolean; building: number | null }[]; housingScale?: 1 };
 type BuildingLike = { id: number; cell: number; zone: 'R' | 'C' | 'I' | 'F'; level: number; housingType?: 'cottage' | 'apartment' | 'condo' };
 
 export type Parking = {
@@ -50,8 +50,9 @@ export function driveway(c: Host, footprint: readonly number[]): number | null {
  * - a factory has a space per job and a loading bay for every two levels (at least one);
  * - a farm has a space per worker and one loading bay where crops leave.
  */
-export function buildingParking(b: BuildingLike): Parking {
-  if (b.zone === 'R') return { residentOrStaff: getHousingCapacity(b.housingType ?? 'cottage', b.level).households, visitor: 0, loadingBays: 0 };
+/** `rules` is the building's city: one saved before real building sizes keeps its smaller homes, and so fewer bays. */
+export function buildingParking(b: BuildingLike, rules: { housingScale?: 1 } = { housingScale: 1 }): Parking {
+  if (b.zone === 'R') return { residentOrStaff: (rules.housingScale === 1 ? getHousingCapacity : legacyHousingCapacity)(b.housingType ?? 'cottage', b.level).households, visitor: 0, loadingBays: 0 };
   if (b.zone === 'C') { const staff = b.level === 1 ? 1 : retailCapacity(b.level).workers; return { residentOrStaff: staff, visitor: staff * 2, loadingBays: 1 }; }
   if (b.zone === 'I') return { residentOrStaff: factoryLevel(b.level).jobs, visitor: 0, loadingBays: Math.max(1, Math.floor(b.level / 2)) };
   return { residentOrStaff: b.level, visitor: 0, loadingBays: 1 };
@@ -78,5 +79,5 @@ export type AccessReport = { driveway: number | null; roadClass: RoadClass | nul
 /** One building's driveway and parking, for the building card. */
 export function buildingAccess(c: Host, b: BuildingLike): AccessReport {
   const road = driveway(c, [b.cell]), cls = road === null ? null : roadClassAt(c, road);
-  return { driveway: road, roadClass: cls, roadLabel: cls === null ? null : ROAD_CLASS[cls].label, parking: buildingParking(b) };
+  return { driveway: road, roadClass: cls, roadLabel: cls === null ? null : ROAD_CLASS[cls].label, parking: buildingParking(b, c) };
 }

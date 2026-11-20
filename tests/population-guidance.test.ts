@@ -7,10 +7,11 @@ import { cityChallenges } from '../src/city-challenges.ts';
 import { cityGoals } from '../src/city-goals.ts';
 import { GATEWAY, SIZE, access, buildPlant, buildRoad, createCity, industryGrowthStatus, plantAt, serialize, deserialize, editRoadJunction, step, zoneCell } from '../src/sim.ts';
 import { guideState } from '../src/guide-steps.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 /** Follow the existing empty-map guide test's real layout; no economy is forged. */
 function guidedCity(seed: number) {
-  const c = createCity(seed, { starter: false });
+  const c = legacyHousing(createCity(seed, { starter: false }));
   assert.ok(buildRoad(c, GATEWAY, GATEWAY + 10).ok);
   for (const x of [2, 3, 5, 6]) assert.ok(zoneCell(c, 11 * SIZE + x, 'R').ok);
   const reserved = [4, 7, 9, 10].map(x => 13 * SIZE + x);

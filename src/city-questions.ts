@@ -62,8 +62,8 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
     fact('city.housing.buildings', 'อาคารที่อยู่อาศัย', homes.length, 'อาคาร', 'buildings[zone=R]');
     fact('city.housing.households', 'ครัวเรือนทั้งหมด', city.households.length, 'ครัวเรือน', 'households.length');
     fact('city.housing.population', 'ประชากรทั้งหมด', countPeople(), 'คน', 'sum(households.members)');
-    fact('city.housing.capacity-households', 'ความจุรวมด้านครัวเรือน', sum(homes, item => housingCapacity(item).households), 'ครัวเรือน', 'sum(housingCapacity(buildings[zone=R]).households)');
-    fact('city.housing.capacity-people', 'ความจุรวมด้านคน', sum(homes, item => housingCapacity(item).persons), 'คน', 'sum(housingCapacity(buildings[zone=R]).persons)');
+    fact('city.housing.capacity-households', 'ความจุรวมด้านครัวเรือน', sum(homes, item => housingCapacity(item, city).households), 'ครัวเรือน', 'sum(housingCapacity(buildings[zone=R]).households)');
+    fact('city.housing.capacity-people', 'ความจุรวมด้านคน', sum(homes, item => housingCapacity(item, city).persons), 'คน', 'sum(housingCapacity(buildings[zone=R]).persons)');
     fact('city.housing.unhoused-households', 'ครัวเรือนที่ไม่มีบ้านอ้างอิง', unhoused.length, 'ครัวเรือน', 'households[home=null].length');
     fact('city.housing.unhoused-people', 'คนในครัวเรือนที่ไม่มีบ้านอ้างอิง', sum(unhoused, item => item.members), 'คน', 'sum(households[home=null].members)');
     answer.limitations.push('ความจุรวมไม่รับรองว่าทุกครัวเรือนย้ายเข้าได้ การจัดสรรยังขึ้นกับความจุของแต่ละบ้านและกติกาเกม');
@@ -99,7 +99,7 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
       answer.status = 'missing'; answer.summary = `ไม่พบบ้านรหัส ${question.entityId} ในภาพนี้`;
       missing('missing.house.entity', 'รหัสอาจไม่มีอยู่ เป็นอาคารประเภทอื่น หรือถูกนำออกจากเมืองแล้ว'); return answer;
     }
-    const refs = [`building:${home.id}`], residents = city.households.filter(item => item.home === home.id), capacity = housingCapacity(home);
+    const refs = [`building:${home.id}`], residents = city.households.filter(item => item.home === home.id), capacity = housingCapacity(home, city);
     answer.summary = `บ้านรหัส ${home.id}: แสดงความจุและผู้อยู่อาศัยตามรหัสบ้านจริง`;
     fact('house.id', 'รหัสอาคาร', home.id, 'รหัส', 'buildings.id', refs);
     fact('house.cell', 'ช่องแผนที่', home.cell, 'ช่อง (เริ่มที่ 0)', 'buildings.cell', refs);
