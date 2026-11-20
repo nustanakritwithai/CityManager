@@ -1,20 +1,36 @@
-/** Proposed household-1 game balance; these capacities are not CSII facts. */
+/**
+ * Real building sizes. A house is one household; an apartment block has 40 rooms and a condominium tower 200, one
+ * household to a room. Levels within a type are the same building with larger rooms (more people per household
+ * room), so a household can grow without moving. Absolute levels 1–9 keep the cottage → apartment → condo order.
+ */
 export type HousingType = 'cottage' | 'apartment' | 'condo';
 export type HousingCapacity = { households: number; persons: number };
 
-// Absolute building levels preserve v1–v15 cottage levels. New capacities are
-// provisional balance values, not existing rules or a promise of immigration.
 export const HOUSING_LEVELS = Object.freeze([
   { type: 'cottage', tierLevel: 1, households: 1, persons: 4 },
-  { type: 'cottage', tierLevel: 2, households: 2, persons: 8 },
-  { type: 'cottage', tierLevel: 3, households: 3, persons: 12 },
-  { type: 'apartment', tierLevel: 1, households: 5, persons: 20 },
-  { type: 'apartment', tierLevel: 2, households: 8, persons: 32 },
-  { type: 'apartment', tierLevel: 3, households: 12, persons: 48 },
-  { type: 'condo', tierLevel: 1, households: 16, persons: 64 },
-  { type: 'condo', tierLevel: 2, households: 24, persons: 96 },
-  { type: 'condo', tierLevel: 3, households: 32, persons: 128 },
+  { type: 'cottage', tierLevel: 2, households: 1, persons: 8 },
+  { type: 'cottage', tierLevel: 3, households: 1, persons: 12 },
+  { type: 'apartment', tierLevel: 1, households: 40, persons: 80 },
+  { type: 'apartment', tierLevel: 2, households: 40, persons: 120 },
+  { type: 'apartment', tierLevel: 3, households: 40, persons: 160 },
+  { type: 'condo', tierLevel: 1, households: 200, persons: 400 },
+  { type: 'condo', tierLevel: 2, households: 200, persons: 600 },
+  { type: 'condo', tierLevel: 3, households: 200, persons: 800 },
 ].map(item => Object.freeze(item))) as readonly Readonly<{ type: HousingType; tierLevel: number; households: number; persons: number }>[];
+
+/** The capacities saves were written under before real sizes (a cottage then held up to three households). Read only to accept and convert those saves. */
+export const LEGACY_HOUSING_LEVELS = Object.freeze([
+  { households: 1, persons: 4 }, { households: 2, persons: 8 }, { households: 3, persons: 12 },
+  { households: 5, persons: 20 }, { households: 8, persons: 32 }, { households: 12, persons: 48 },
+  { households: 16, persons: 64 }, { households: 24, persons: 96 }, { households: 32, persons: 128 },
+].map(item => Object.freeze(item)));
+export function legacyHousingCapacity(type: HousingType, level: number): HousingCapacity {
+  housingLevel(type, level);
+  const { households, persons } = LEGACY_HOUSING_LEVELS[level - 1];
+  return { households, persons };
+}
+/** True when going up one level replaces the building with a bigger type (house → apartment, apartment → condo). */
+export const redevelopsAt = (level: number) => level < HOUSING_LEVELS.length && HOUSING_LEVELS[level].type !== HOUSING_LEVELS[level - 1].type;
 
 export function housingLevel(type: HousingType, level: number) {
   safeCount(level, 'Housing level', 1);

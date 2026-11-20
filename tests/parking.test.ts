@@ -62,7 +62,8 @@ test('a building’s driveway is its smallest neighbouring road, then the lowest
 
 test('parking follows what the building holds: homes per dwelling, workplaces per post, plus customers and loading', () => {
   assert.deepEqual(buildingParking({ id: 1, cell: 0, zone: 'R', level: 1, housingType: 'cottage' }), { residentOrStaff: 1, visitor: 0, loadingBays: 0 });
-  assert.equal(buildingParking({ id: 1, cell: 0, zone: 'R', level: 6, housingType: 'apartment' }).residentOrStaff, 12);
+  assert.equal(buildingParking({ id: 1, cell: 0, zone: 'R', level: 6, housingType: 'apartment' }).residentOrStaff, 40, 'a bay for each of the block’s 40 rooms');
+  assert.equal(buildingParking({ id: 1, cell: 0, zone: 'R', level: 6, housingType: 'apartment' }, {}).residentOrStaff, 12, 'a city saved before real sizes keeps its 12-household block');
   assert.deepEqual(buildingParking({ id: 2, cell: 0, zone: 'C', level: 1 }), { residentOrStaff: 1, visitor: 2, loadingBays: 1 });
   const factory = buildingParking({ id: 3, cell: 0, zone: 'I', level: 4 });
   assert.deepEqual(factory, { residentOrStaff: factoryLevel(4).jobs, visitor: 0, loadingBays: 2 });

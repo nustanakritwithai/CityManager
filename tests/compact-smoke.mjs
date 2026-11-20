@@ -188,7 +188,7 @@ async function candidateAssertions() {
   for (const job of companyJobs) employerRows.set(job.householdId, (employerRows.get(job.householdId) ?? 0) + job.workers);
   await preservedMetrics({ cash: city.accounts[company.wallet], reserved, spendable: city.accounts[company.wallet] - reserved, stock: company.inventory, workers: firmWorkerCount(city, company.id), 'household-count': employerRows.size, profit: company.lastMonthProfit }, firmBuilding.id);
   await linkedHouseholds(firmBuilding, [...employerRows].map(([id, workers]) => ({ id, workers })));
-  await place(home); const used = homeOccupancy(city, home.id), capacity = housingCapacity(home);
+  await place(home); const used = homeOccupancy(city, home.id), capacity = housingCapacity(home, city);
   await preservedMetrics({ households: used.households, persons: used.persons, 'vacant-households': capacity.households - used.households, 'vacant-persons': capacity.persons - used.persons, level: home.level, age: home.age }, home.id);
   await linkedHouseholds(home, city.households.filter(h => h.home === home.id).map(h => ({ id: h.id, workers: null })));
   checks.push('Frozen artifact-admitted d40 baseline and v1 bytes remain intact with increased global ledger rows; approved type-specific first screens replace generic all-KPI density while native44px secondary disclosures preserve exact original7 firm/6 house/10 household values once and actual resident/employer navigation');

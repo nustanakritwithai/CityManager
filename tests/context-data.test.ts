@@ -169,7 +169,7 @@ test('people, workforce and multiple employers are counted separately from house
 });
 
 test('same-tick household moves update both housing limits without creating transactions or people', () => {
-  const city = populated(), home = city.buildings.find(building => building.zone === 'R' && housingCapacity(building).households >= 2)!;
+  const city = populated(), home = city.buildings.find(building => building.zone === 'R' && housingCapacity(building, city).households >= 2)!;
   assert.ok(home, 'Frozen legacy fixture has a home with a second household slot');
   const household = city.households.find(value => value.home !== home.id)!;
   const before = cityOverview(city), history = JSON.stringify({ accounts: city.accounts, ledger: city.ledger, goodsLedger: city.goodsLedger, goods: city.goods, claims: city.firms.map(firm => firm.workDays) });
@@ -189,7 +189,7 @@ test('same-tick household moves update both housing limits without creating tran
 
 test('displaced families remain in population but not housing occupancy or employed-worker totals', () => {
   const city = populated(), home = city.buildings.find(building => building.zone === 'R')!, occupants = resolvePlace(city, home.cell).households;
-  const before = cityOverview(city), removedCapacity = housingCapacity(home), displacedPersons = occupants.reduce((total, household) => total + household.members, 0);
+  const before = cityOverview(city), removedCapacity = housingCapacity(home, city), displacedPersons = occupants.reduce((total, household) => total + household.members, 0);
   assert.equal(bulldoze(city, home.cell).ok, true);
   const overview = cityOverview(city);
   assert.equal(overview.population, before.population);

@@ -141,7 +141,7 @@ export function buildingCardData(city: City, buildingId: number): BuildingCardDa
     const residents = city.households.filter(h => h.home === building.id), children = residents.map(h => household(context, h));
     const data = common(context, 'house', { buildingId: building.id, firmId: null, householdId: null, cell: building.cell }, residents.every(h => typeof h.wallet === 'string') ? residents.map(h => h.wallet) : null, residents, null);
     let householdCapacity: number | null = null, personCapacity: number | null = null;
-    try { const capacity = housingCapacity(building); householdCapacity = currentCount(capacity.households); personCapacity = currentCount(capacity.persons); } catch { data.missing.push('occupancy.capacity'); }
+    try { const capacity = housingCapacity(building, city); householdCapacity = currentCount(capacity.households); personCapacity = currentCount(capacity.persons); } catch { data.missing.push('occupancy.capacity'); }
     return { ...data, kind: 'house', scope: 'current-linked-household-wallets', households: children, occupancy: { households: residents.length, persons: total(residents.map(h => h.members)), householdCapacity, personCapacity } };
   }
   const firm = city.firms.find(f => f.building === building.id && f.zone === building.zone) ?? null;

@@ -6,17 +6,18 @@ import { HOUSEHOLD_BILL, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, TARIFF, building
 import { previewPlacement } from '../src/placement-preview.ts';
 import { cityGoals } from '../src/city-goals.ts';
 import { keepSupplied } from './plants.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
 const site = (c: City, skip = 0) => c.cells.map((cell, i) => !cell.road && !cell.zone && cell.building === null && !plantAt(c, i) && access(c, i) ? i : -1).filter(i => i >= 0)[skip];
 const run = (c: City, days: number) => { for (let d = 0; d < days; d++) step(c); };
 
 test('the gateway contract caps growth until the city builds plants; plants lift it', { timeout: 120_000 }, () => {
-  const capped = createCity(61025); run(capped, 720);
+  const capped = legacyHousing(createCity(61025)); run(capped, 720); // grows into the cap along the old shared-home path
   const svc = utilities(capped);
   assert.deepEqual(svc.capacity, OUTSIDE_SUPPLY, 'a new city has only the gateway contract');
   assert.ok(svc.used.power <= OUTSIDE_SUPPLY.power && svc.used.water <= OUTSIDE_SUPPLY.water);
   assert.equal(cityGoals(capped).won, false, 'without plants the sample city cannot win');
-  const supplied = createCity(61025); delete supplied.goalRulesVersion; let won = 0;
+  const supplied = legacyHousing(createCity(61025)); delete supplied.goalRulesVersion; let won = 0;
   for (let d = 1; d <= 720; d++) { step(supplied); keepSupplied(supplied); if (!won && cityGoals(supplied).won) won = d; }
   assert.ok(supplied.plants.length >= 2 && won > 0, `with plants the city wins (day ${won})`);
   assert.ok(summary(supplied).population > summary(capped).population);
@@ -44,7 +45,7 @@ test('a plant needs an empty connected parcel and the treasury, and journals its
 });
 
 test('supply follows roads: the farthest buildings go dark first and their work stops', { timeout: 120_000 }, () => {
-  const c = createCity(61025); run(c, 120); keepSupplied(c, 40); run(c, 240);
+  const c = legacyHousing(createCity(61025)); run(c, 120); keepSupplied(c, 40); run(c, 240);
   const svc = utilities(c);
   assert.ok(c.buildings.every(b => !access(c, b.cell) || svc.ok(b.id)), 'a supplied network serves everyone');
   // Remove the plants: the gateway contract cannot cover the city any more.

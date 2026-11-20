@@ -164,7 +164,7 @@ async function household(h, source, city = fixture) {
   else assert.ok(happiness.text.includes('ความสุขเริ่มคำนวณหลังผ่านหนึ่งวันจำลอง'));
 }
 async function home(city, b) {
-  await place(b); const used = homeOccupancy(city, b.id), cap = housingCapacity(b);
+  await place(b); const used = homeOccupancy(city, b.id), cap = housingCapacity(b, city);
   await metrics({ households: used.households, persons: used.persons, 'vacant-households': cap.households - used.households, 'vacant-persons': cap.persons - used.persons, level: b.level, age: b.age });
   assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'), city.households.filter(h => h.home === b.id).map(h => h.id));
   for (const [metric, value] of [['households', cap.households], ['persons', cap.persons]]) assert.equal(await evaluate(`Number(document.querySelector('#entity-content [data-context-metric="${metric}"]').dataset.capacity)`), value);

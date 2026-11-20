@@ -1,13 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getHousingCapacity, buildOccupancyIndex, canAccommodate, type HousingCapacity } from '../src/housing.ts';
+import { getHousingCapacity, legacyHousingCapacity, HOUSING_LEVELS, redevelopsAt, buildOccupancyIndex, canAccommodate, type HousingCapacity } from '../src/housing.ts';
 
-test('cottage levels expose the proposed household-1 dual capacities as independent objects', () => {
-  assert.deepEqual([1, 2, 3].map(level => getHousingCapacity('cottage', level)), [
-    { households: 1, persons: 4 }, { households: 2, persons: 8 }, { households: 3, persons: 12 },
+test('real sizes: a house is one household, an apartment block 40 rooms, a condominium tower 200', () => {
+  assert.deepEqual(HOUSING_LEVELS.map(l => [l.type, l.households]), [
+    ['cottage', 1], ['cottage', 1], ['cottage', 1], ['apartment', 40], ['apartment', 40], ['apartment', 40], ['condo', 200], ['condo', 200], ['condo', 200],
   ]);
+  // Within a type the rooms get bigger (more people to a household), never more households.
+  assert.deepEqual(HOUSING_LEVELS.map(l => l.persons), [4, 8, 12, 80, 120, 160, 400, 600, 800]);
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8, 9].filter(redevelopsAt), [3, 6], 'house → block and block → tower are the two rebuilds');
   const changed = getHousingCapacity('cottage', 1); changed.households = 99; changed.persons = 99;
   assert.deepEqual(getHousingCapacity('cottage', 1), { households: 1, persons: 4 });
+});
+
+test('cities saved before real sizes keep the old capacities, as independent objects', () => {
+  assert.deepEqual([1, 2, 3].map(level => legacyHousingCapacity('cottage', level)), [
+    { households: 1, persons: 4 }, { households: 2, persons: 8 }, { households: 3, persons: 12 },
+  ]);
+  assert.deepEqual(legacyHousingCapacity('condo', 9), { households: 32, persons: 128 });
+  const changed = legacyHousingCapacity('cottage', 1); changed.households = 99;
+  assert.deepEqual(legacyHousingCapacity('cottage', 1), { households: 1, persons: 4 });
+  assert.throws(() => legacyHousingCapacity('condo', 1), 'type and level still pair strictly');
 });
 
 test('housing catalog rejects unsupported types and noncanonical levels', () => {
@@ -26,7 +39,7 @@ test('vacant and shared homes count households separately from their members', (
 });
 
 test('admission independently enforces household slots and person capacity', () => {
-  const cottage = getHousingCapacity('cottage', 2);
+  const cottage = legacyHousingCapacity('cottage', 2); // a home with two household slots
   assert.equal(canAccommodate(cottage, { households: 0, persons: 0 }, 3), true);
   assert.equal(canAccommodate(cottage, { households: 1, persons: 4 }, 4), true);
   assert.equal(canAccommodate(cottage, { households: 2, persons: 2 }, 1), false, 'Free person capacity does not create a household slot');
@@ -57,7 +70,7 @@ test('occupancy and admission read frozen inputs without mutation or shared outp
   first.get(5)!.persons = 100;
   assert.deepEqual(second.get(5), { households: 1, persons: 3 });
   assert.deepEqual(first.get(6), { households: 1, persons: 1 });
-  const capacity = Object.freeze(getHousingCapacity('cottage', 2)), occupied = Object.freeze({ households: 1, persons: 3 });
+  const capacity = Object.freeze(legacyHousingCapacity('cottage', 2)), occupied = Object.freeze({ households: 1, persons: 3 });
   assert.equal(canAccommodate(capacity, occupied, 3), true);
   assert.equal(JSON.stringify(households), original);
   assert.deepEqual(occupied, { households: 1, persons: 3 });

@@ -75,7 +75,7 @@ export function mapOverlay(city: City, mode: OverlayMode): Overlay {
       if (cell.zone !== 'R') continue;
       const b = cell.building === null ? null : city.buildings.find(v => v.id === cell.building);
       if (!b) { cells.push({ cell: i, tone: eligible(city, i) ? 'good' : 'bad', strength: .45 }); continue; }
-      const used = homeOccupancy(city, b.id), room = housingCapacity(b);
+      const used = homeOccupancy(city, b.id), room = housingCapacity(b, city);
       cells.push({ cell: i, tone: used.households === 0 ? 'bad' : used.households >= room.households || used.persons >= room.persons ? 'warn' : 'good', strength: .65 });
     }
   }

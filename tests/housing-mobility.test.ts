@@ -22,7 +22,7 @@ function withoutAddresses(city: City) {
 }
 function validOccupancy(city: City) {
   for (const home of city.buildings.filter(b => b.zone === 'R')) {
-    const used = homeOccupancy(city, home.id), room = housingCapacity(home);
+    const used = homeOccupancy(city, home.id), room = housingCapacity(home, city);
     assert.ok(used.households <= room.households); assert.ok(used.persons <= room.persons);
   }
 }

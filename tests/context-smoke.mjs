@@ -238,7 +238,7 @@ try {
   checks.push('Two mouse and one trusted touch 200ms household-link holds preserve the same DOM through native activation during live 10x refreshes; Back returns to source home and frozen fixture is restored');
 
   for (const home of homes) {
-    await place(home); const occupied = homeOccupancy(fixture, home.id), capacity = housingCapacity(home);
+    await place(home); const occupied = homeOccupancy(fixture, home.id), capacity = housingCapacity(home, fixture);
     await metrics('#entity-content', { level: home.level, age: home.age, households: occupied.households, persons: occupied.persons, 'vacant-households': capacity.households - occupied.households, 'vacant-persons': capacity.persons - occupied.persons });
     assert.deepEqual(await evaluate('[...document.querySelectorAll("#entity-content [data-household-id]")].map(e=>Number(e.dataset.householdId))'), fixture.households.filter(h => h.home === home.id).map(h => h.id));
     assert.equal(await evaluate('Number(document.querySelector("#entity-content [data-context-metric=households]").dataset.capacity)'), capacity.households);

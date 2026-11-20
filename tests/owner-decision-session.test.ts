@@ -5,8 +5,9 @@ import { createCity as createLegacy, serialize as serializeLegacy, step as stepL
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 import { captureOwnerSnapshot, ownerProposalForCandidate } from '../src/owner-decision.ts';
 import { stressOwnerCash } from './owner-decision-fixture.ts';
+import { legacyHousing } from './legacy-housing.ts';
 
-function town(day = 215): City { const c = createCity(61025); for (let n = 0; n < day; n++) step(c); return c; }
+function town(day = 215): City { const c = legacyHousing(createCity(61025)); for (let n = 0; n < day; n++) step(c); return c; }
 function stressedMonthEve() { const c = town(209); stressOwnerCash(c); return c; }
 function market(c: City) { const f = c.firms.find(f=>f.zone==='C'&&f.owner!==null); assert(f?.owner); return f; }
 function replay(c: City, session: ReturnType<typeof createOwnerDecisionSession>) {

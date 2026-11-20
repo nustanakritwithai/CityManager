@@ -32,7 +32,7 @@ test('city housing separates people, households and capacity and preserves actua
   assert.equal(fact(answer, 'city.housing.households').value, city.households.length);
   assert.equal(fact(answer, 'city.housing.population').value, city.households.reduce((n, item) => n + item.members, 0));
   assert.notEqual(fact(answer, 'city.housing.population').value, fact(answer, 'city.housing.households').value);
-  assert.equal(fact(answer, 'city.housing.capacity-people').value, homes.reduce((n, item) => n + housingCapacity(item).persons, 0));
+  assert.equal(fact(answer, 'city.housing.capacity-people').value, homes.reduce((n, item) => n + housingCapacity(item, city).persons, 0));
   assert.equal(fact(answer, 'city.housing.unhoused-households').value, city.households.filter(item => item.home === null).length);
   assert(answer.limitations.some(text => text.includes('ไม่รับรอง')));
   const empty = ask(createCity(), 'city.housing'); assert.equal(fact(empty, 'city.housing.population').value, 0); assert.equal(empty.missingData.length, 0);
@@ -70,7 +70,7 @@ test('house detail follows the actual home ID and exposes copied numeric facts w
   const residents = city.households.filter(item => item.home === home.id);
   assert.equal(fact(answer, 'house.occupied-households').value, residents.length);
   assert.equal(fact(answer, 'house.occupied-people').value, residents.reduce((n, item) => n + item.members, 0));
-  assert.equal(fact(answer, 'house.capacity-people').value, housingCapacity(home).persons);
+  assert.equal(fact(answer, 'house.capacity-people').value, housingCapacity(home, city).persons);
   assert.equal(fact(answer, 'house.cell').value, home.cell);
   assert(answer.facts.every(item => item.source && item.entityRefs.includes(`building:${home.id}`)));
   assert.equal(serialize(city), before);
