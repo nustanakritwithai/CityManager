@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MarketClient, marketJournalForTest, MARKET_RULES } from '../src/market-client.ts';
 import { mergeMarketListings } from '../src/market-panel.ts';
-import { createCity, deserialize, serialize } from '../src/sim.ts';
+import { deserialize, serialize } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { useMarketStorage } from '../src/market-client.ts';
 
 test('market journal starts at v10/chain-5 and has no guest token field', () => {

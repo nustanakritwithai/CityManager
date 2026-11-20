@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { access, buildRoad, createCity, SIZE, zoneCell, type City } from '../src/sim.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 /** Two compact, distinct player-built layouts, with real zoned development on both axes. */
 export function expandedGoalCity(seed = 61025, layout: 'branches' | 'loop' = 'branches'): City {
-  const c = legacyHousing(createCity(seed)), ix = (x: number, z: number) => z * SIZE + x;
+  const c = legacySizes(createCity(seed)), ix = (x: number, z: number) => z * SIZE + x;
   const roads = layout === 'branches'
     ? [[10,12,17,12], [13,8,13,17], [16,8,16,17]]
     : [[10,12,17,12], [12,8,12,16], [16,8,16,16], [12,8,16,8], [12,16,16,16]];

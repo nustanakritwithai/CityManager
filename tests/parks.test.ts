@@ -6,7 +6,7 @@ import { GATEWAY, SIZE, MONTH, access, buildPark, parkAt, buildPlant, buildRoad,
 import { PARK, MAX_PARKS } from '../src/parks.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
 import { pocketPark } from '../src/scene-decor.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 const run = (c: City, days: number) => { for (let d = 0; d < days; d++) step(c); };
 const city = () => createCity(61025, { starter: false });
@@ -121,7 +121,7 @@ test('no-park cities keep accounting and owner distributions deterministic throu
     [20261023, { owner: 'household:2', amounts: [29310, 72720, 99570], hash: '1123995a145285345413c1a955f1a6872d10205324d25e46fa99faf28311cf4a' }],
   ]);
   for (const historicalSoil of [true, false]) for (const seed of [61025, 20261023]) {
-    const c = legacyHousing(createCity(seed)); // the recorded hashes follow the old smaller homes
+    const c = legacySizes(createCity(seed)); // the recorded hashes follow the old smaller homes
     if (historicalSoil) delete c.farmSoilIndependentStartTick; // Frozen pre-change trajectory is checked separately from current uniform production.
     run(c, 59); const loaded = deserialize(serialize(c));
     if (historicalSoil) delete loaded.farmSoilIndependentStartTick;

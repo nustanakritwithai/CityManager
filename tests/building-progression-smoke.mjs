@@ -17,6 +17,7 @@ import { reachTrafficControl, installTrafficNetworkFence } from './traffic-serve
 import { panelProviderDenials, isPanelProviderRequest } from './panel-network-denies.mjs';
 import { keepSupplied } from './plants.ts';
 import { EDUCATION_SUSTAIN_DAYS } from '../src/education.ts';
+import { legacyIndustry } from './legacy-sizes.ts';
 
 const output = resolve('.test-output/building-progression'), debugPort = 9364;
 const upstreamUrl = process.env.CITYMANAGER_URL || 'http://127.0.0.1:4173/CityManager/';
@@ -50,7 +51,8 @@ function keepEducationGatesOpen(city) {
     else education.sustain.push({ buildingId: building.id, days: EDUCATION_SUSTAIN_DAYS });
   }
 }
-const snapshots = new Map(), city = expandValidatedParkSession(deserializeParkSession(serialize(createCity(61025)))).city;
+// Real homes with the old factories and farms: the day-120 factory and farm upgrades below follow the old workplace rules.
+const snapshots = new Map(), city = expandValidatedParkSession(deserializeParkSession(serialize(legacyIndustry(createCity(61025))))).city;
 for (let day = 1; day <= 180; day++) {
   // Education is on for every city. Hold only its credential counters so day 120
   // still measures the real full-house and paid upgrade.
@@ -93,7 +95,7 @@ const findUpgrade = (day, zone, predicate = () => true) => {
 };
 const home = findUpgrade(120, 'R'), factory = findUpgrade(120, 'I'), farm = findUpgrade(120, 'F'), shop = findUpgrade(150, 'C', f => f && isRetail(f));
 assert.deepEqual([home.previous.level,home.building.level,factory.previous.level,factory.building.level,farm.previous.level,farm.building.level,shop.previous.level,shop.building.level], [3,4,3,4,3,4,4,5]);
-assert.deepEqual(housingCapacity(home.building, snapshots.get(120).after), { households: 40, persons: 80 }); // the house was rebuilt as a 40-room block
+assert.deepEqual(housingCapacity(home.building, snapshots.get(120).after), { households: 40, persons: 120 }); // the house was rebuilt as a 40-room block
 // Occupancy gate: from level 3 a house only rises after every household slot is taken.
 assert.equal(HOUSING_OCCUPANCY_GATE_LEVEL, 3);
 { const { before } = snapshots.get(120); assert.ok(home.previous.level >= HOUSING_OCCUPANCY_GATE_LEVEL);

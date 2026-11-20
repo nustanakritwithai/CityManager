@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FARM_YIELD_PER_WORKER, farmProductionFertility, farmYieldPerWorker } from '../src/farm-production.ts';
 import { proposeHarvest } from '../src/agriculture.ts';
-import { createCity, step, zoneCell, access, serialize, deserialize } from '../src/sim.ts';
+import { step, zoneCell, access, serialize, deserialize } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 
 test('all soil values yield the same future harvest at every staffing level', () => {
   const city = { tick: 2, farmSoilIndependentStartTick: 1, resources: { fertility: [0, 20, 49, 50, 70, 84, 100] } };

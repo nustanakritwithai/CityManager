@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { MONTH, bulldoze, createCity, deserialize, serialize, step, summary } from '../src/sim.ts';
 import { cityGoals, cityRecord, treasuryAtMonthEnds, GOAL_GROWTH_MONTHS } from '../src/city-goals.ts';
 import { keepSupplied } from './plants.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 test('a fresh city starts at level 0 and the starter city climbs the stages in order', () => {
   const c = createCity(61025);
@@ -16,7 +16,7 @@ test('a fresh city starts at level 0 and the starter city climbs the stages in o
 });
 
 test('a legacy seeded city wins within 15 months, and reading goals never changes the city', () => {
-  const c = legacyHousing(createCity(61025)); delete c.goalRulesVersion; let wonAt = 0;
+  const c = legacySizes(createCity(61025)); delete c.goalRulesVersion; let wonAt = 0;
   for (let d = 1; d <= 450 && !wonAt; d++) { step(c); keepSupplied(c); const before = serialize(c); if (cityGoals(c).won) wonAt = d; assert.equal(serialize(c), before); }
   assert.ok(wonAt > 120 && wonAt <= 450, `won on day ${wonAt}`);
   const g = cityGoals(c); assert.equal(g.level, 5); assert.equal(g.next, null);
@@ -32,7 +32,7 @@ test('treasury month-end balances match the balance recorded while the city ran'
 });
 
 test('one import in the last 30 days or a shrinking treasury withholds the win', () => {
-  const c = legacyHousing(createCity(61025)); delete c.goalRulesVersion;
+  const c = legacySizes(createCity(61025)); delete c.goalRulesVersion;
   for (let d = 1; d <= 450 && !cityGoals(c).won; d++) { step(c); keepSupplied(c); }
   assert.ok(cityGoals(c).won);
   const imported = deserialize(serialize(c)), shop = imported.goodsLedger.find(e => e.reason === 'Wholesale stock delivery')!.to;

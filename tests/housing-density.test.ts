@@ -5,9 +5,11 @@ import { HOUSING_LEVELS, getHousingCapacity } from '../src/housing.ts';
 import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount, housingShortage, residentialGrowthCost, landValues, connectedRoads, SIZE, type City } from '../src/sim.ts';
 import { advanceParkRuntime, createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { holdEducationReady } from './education-ready.ts';
+import { legacyIndustry } from './legacy-sizes.ts';
 
 function fixture() {
-  const city = createCity(61025); for (let n = 0; n < 119; n++) step(city);
+  // Real homes; the old workplaces keep the seeded city's jobs, so its people wait for homes as before.
+  const city = legacyIndustry(createCity(61025)); for (let n = 0; n < 119; n++) step(city);
   const home = city.buildings.find(b => b.zone === 'R' && homeOccupancy(city, b.id).households === 1 && city.households.some(h => h.home === b.id && householdWorkerCount(city, h.id) > 0 && city.tick - h.lastPurchaseTick <= 3))!;
   assert.ok(home); return { city, home };
 }
@@ -15,8 +17,8 @@ function fixture() {
 test('all residential levels have explicit monotonic dual capacities and strict type pairings', () => {
   assert.deepEqual(HOUSING_LEVELS.map(x => [x.type, x.tierLevel, x.households, x.persons]), [
     ['cottage', 1, 1, 4], ['cottage', 2, 1, 8], ['cottage', 3, 1, 12],
-    ['apartment', 1, 40, 80], ['apartment', 2, 40, 120], ['apartment', 3, 40, 160],
-    ['condo', 1, 200, 400], ['condo', 2, 200, 600], ['condo', 3, 200, 800],
+    ['apartment', 1, 40, 120], ['apartment', 2, 40, 160], ['apartment', 3, 40, 200],
+    ['condo', 1, 200, 600], ['condo', 2, 200, 800], ['condo', 3, 200, 1000],
   ]);
   for (const [i, x] of HOUSING_LEVELS.entries()) assert.deepEqual(getHousingCapacity(x.type, i + 1), { households: x.households, persons: x.persons });
   assert.throws(() => getHousingCapacity('cottage', 4)); assert.throws(() => getHousingCapacity('apartment', 7));

@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createCity, step, ownerFinance, withdrawOwnerProfit, contributeOwnerCapital, serialize, deserialize, firmWage, type City, type Firm } from '../src/sim.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 const wages = (f: Firm) => sum(Object.values(f.workDays)) * firmWage(f) / 30;
-const seeded = (day: number) => { const c = legacyHousing(createCity(42)); for (let i = 0; i < day; i++) step(c); return c; };
+const seeded = (day: number) => { const c = legacySizes(createCity(42)); for (let i = 0; i < day; i++) step(c); return c; };
 function conserved(c: City) {
   const replay: Record<string, number> = {...c.history?.accounts};
   for (const e of c.ledger) { replay[e.from] = (replay[e.from] ?? 0) - e.amount; replay[e.to] = (replay[e.to] ?? 0) + e.amount; }

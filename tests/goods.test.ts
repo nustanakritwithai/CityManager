@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY, access, automaticFarmCrop, buildRoad, chooseRecipe, createCity, deserialize, farmCrop, selectFarmCrop, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
+import { GATEWAY, access, automaticFarmCrop, buildRoad, chooseRecipe, deserialize, farmCrop, selectFarmCrop, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { CROPS, CROP_BANDS, PRODUCTS, RECIPE, RECIPES, cropForFertility, freshPreference, mixTotal, productPreference, takeLargest } from '../src/goods.ts';
 import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '../src/legacy-v6.ts';
 import { untyped } from './untyped.ts';

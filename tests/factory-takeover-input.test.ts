@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, bulldoze, zoneCell, serialize, deserialize } from '../src/sim.ts';
+import { step, bulldoze, zoneCell, serialize, deserialize } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 
 test('factory takeover waits for usable crop supply and recovers when the farm returns', () => {
   for (const seed of [61025, 42, 2026]) {

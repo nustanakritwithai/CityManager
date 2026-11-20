@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, isRetail, isMarket, bulldoze, deserialize, serialize, firmWorkerCount, type City } from '../src/sim.ts';
+import { step, isRetail, isMarket, bulldoze, deserialize, serialize, firmWorkerCount, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { productPreference } from '../src/goods.ts';
 import { householdFoodToday } from '../src/food-demand.ts';
 

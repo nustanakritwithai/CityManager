@@ -10,8 +10,9 @@ import { ROAD_CLASS, roadClassAt, type RoadClass } from './road-classes.ts';
 import { roadNeighborsFor, type RoadMap } from './road-topology.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { retailCapacity } from './retail-capacity.ts';
+import { factoryJobs, farmStaff } from './industry-scale.ts';
 
-type Host = RoadMap & { cells: { road: boolean; building: number | null }[]; housingScale?: 1 };
+type Host = RoadMap & { cells: { road: boolean; building: number | null }[]; housingScale?: 1; industryScale?: 1 };
 type BuildingLike = { id: number; cell: number; zone: 'R' | 'C' | 'I' | 'F'; level: number; housingType?: 'cottage' | 'apartment' | 'condo' };
 
 export type Parking = {
@@ -50,12 +51,12 @@ export function driveway(c: Host, footprint: readonly number[]): number | null {
  * - a factory has a space per job and a loading bay for every two levels (at least one);
  * - a farm has a space per worker and one loading bay where crops leave.
  */
-/** `rules` is the building's city: one saved before real building sizes keeps its smaller homes, and so fewer bays. */
-export function buildingParking(b: BuildingLike, rules: { housingScale?: 1 } = { housingScale: 1 }): Parking {
+/** `rules` is the building's city: one saved before real building sizes keeps its smaller homes and workplaces, and so fewer bays. */
+export function buildingParking(b: BuildingLike, rules: { housingScale?: 1; industryScale?: 1 } = { housingScale: 1, industryScale: 1 }): Parking {
   if (b.zone === 'R') return { residentOrStaff: (rules.housingScale === 1 ? getHousingCapacity : legacyHousingCapacity)(b.housingType ?? 'cottage', b.level).households, visitor: 0, loadingBays: 0 };
   if (b.zone === 'C') { const staff = b.level === 1 ? 1 : retailCapacity(b.level).workers; return { residentOrStaff: staff, visitor: staff * 2, loadingBays: 1 }; }
-  if (b.zone === 'I') return { residentOrStaff: factoryLevel(b.level).jobs, visitor: 0, loadingBays: Math.max(1, Math.floor(b.level / 2)) };
-  return { residentOrStaff: b.level, visitor: 0, loadingBays: 1 };
+  if (b.zone === 'I') return { residentOrStaff: factoryJobs(b.level, rules), visitor: 0, loadingBays: Math.max(1, Math.floor(b.level / 2)) };
+  return { residentOrStaff: farmStaff(b.level, rules), visitor: 0, loadingBays: 1 };
 }
 
 /** Visitor spaces at a city service or venue that has no staff posts to size it by. */

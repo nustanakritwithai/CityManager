@@ -5,6 +5,8 @@ import { emptyCrops, emptyProducts } from '../src/goods.ts';
  * External utility contracts and initial business capital are explicit fixture inputs. */
 export function populationFixture(count: number, families = false, jobs = true): City {
   const c = createCity(1, {starter:false}); c.tick = Math.max(400,count+1);
+  // Level-nine factories here stand for 12 jobs each (the old workplace sizes); homes are real size.
+  delete c.industryScale;
   c.cells.forEach(cell=>{cell.road=false;cell.zone=null;cell.building=null;});
   // Joined comb supplies every test parcel, using at most 192 buildings.
   for(let row=0;row<24;row++){c.cells[row*24].road=true;if(row%3===0)for(let x=0;x<24;x++)c.cells[row*24+x].road=true;}

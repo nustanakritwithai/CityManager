@@ -5,9 +5,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { factoryCropCapacity, factoryLevel } from '../src/factory-levels.ts';
 import { proposeCropPurchase, proposeRecipe } from '../src/agriculture.ts';
-import { createCity, deserialize, serialize, step } from '../src/sim.ts';
+import { deserialize, serialize, step } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { holdEducationReady } from './education-ready.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 test('factory capacity retains old tiers and adds two days of input storage per funded job', () => {
   assert.deepEqual(Array.from({length:9}, (_, i) => factoryCropCapacity(i + 1)), [24,24,24,28,32,36,40,44,48]);
@@ -71,7 +73,7 @@ test('automatic monthly reviews upgrade same-cell factories through level nine u
 test('expanded factory processes actual allocated workers and replays history after demolition', async () => {
   const { bulldoze, firmWorkerCount } = await import('../src/sim.ts');
   const { RECIPE } = await import('../src/goods.ts');
-  const city = legacyHousing(createCity(61025)); for (let day=0; day<119; day++) step(city);
+  const city = legacySizes(createCity(61025)); for (let day=0; day<119; day++) step(city);
   const f = city.firms.find(f=>f.zone==='I')!, b = city.buildings.find(b=>b.id===f.building)!;
   b.level=9; city.utilities.outside={power:1000,water:1000};
   // Move already allocated workers: no worker or skill is invented.

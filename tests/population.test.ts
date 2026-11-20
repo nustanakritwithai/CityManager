@@ -5,14 +5,14 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createCity, step, deserialize, serialize, summary, bulldoze, moveHousehold, housingCapacity, homeOccupancy, employmentForHousehold, firmWorkerCount, householdWorkerCount, explainCell, GATEWAY, WAGES, MONTH, type City, type Household } from '../src/sim.ts';
 import { deserializeV1 } from '../src/legacy-v1.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes, legacyIndustry } from './legacy-sizes.ts';
 
 const frozen = readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 const frozenV3 = (day: number) => readFileSync(new URL(`./fixtures/legacy-v3-day${day}.json`, import.meta.url), 'utf8');
 const advance = (c: City, days: number) => { for (let i = 0; i < days; i++) step(c); return c; };
 const populated = (day = 180) => advance(createCity(61025), day);
 /** The same city on the old smaller homes, for moves and rehousing that need a spare household slot in a shared home. */
-const sharedHomes = (day = 180) => advance(legacyHousing(createCity(61025)), day);
+const sharedHomes = (day = 180) => advance(legacySizes(createCity(61025)), day);
 
 test('frozen v1 migration preserves history, clocks, claims and IDs with explicit minimum legacy composition', () => {
   assert.equal(createHash('sha256').update(frozen).digest('hex'), '4e358e66acdfb55dcfd434aaf67be51ccea99c69fc5a2b9b44343035c16166d0');
@@ -35,7 +35,8 @@ test('frozen v1 migration preserves history, clocks, claims and IDs with explici
 });
 
 test('homes are empty on construction day and admit at most one independently funded household per later day', () => {
-  const c = createCity(61025);
+  // One arrival a day is the old rule; under real workplace rules employers fill open jobs within a month.
+  const c = legacyIndustry(createCity(61025));
   let observedEmpty = false;
   for (let n = 0; n < 180; n++) {
     step(c);

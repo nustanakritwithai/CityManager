@@ -5,7 +5,7 @@ import { cityGoals } from '../src/city-goals.ts';
 import { GOAL_SERVED_ROADS, GOAL_SERVED_ROADS_PER_AXIS, mainGoalNetwork } from '../src/main-goal-network.ts';
 import { expandedGoalCity } from './main-goals-fixture.ts';
 import { keepSupplied } from './plants.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 test('a straight road, disconnected road, and unserved branch do not satisfy the network objective', () => {
   const c = createCity(61025);
@@ -37,7 +37,7 @@ test('branched and loop networks both support a real attainable revised victory'
 });
 
 test('legacy goals remain reversible and do not fabricate an achievement; marker validates', {timeout: 120_000}, () => {
-  const c = legacyHousing(createCity(61025)); delete c.goalRulesVersion;
+  const c = legacySizes(createCity(61025)); delete c.goalRulesVersion;
   for (let d = 0; d < 450 && !cityGoals(c).won; d++) { step(c); keepSupplied(c); }
   assert.ok(cityGoals(c).won); const saved = serialize(c); const old = deserialize(saved);
   assert.equal(old.goalRulesVersion, undefined); assert.equal(cityGoals(old).won, true);

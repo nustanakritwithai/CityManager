@@ -6,7 +6,7 @@ import { roadNeighborsFor, roadLinked } from './road-topology.ts';
  * (by road distance, then id) are served first, so the farthest go dark. Pure functions of the city.
  */
 import { GATEWAY, SIZE, type Building, type City } from './sim.ts';
-import { factoryLevel } from './factory-levels.ts';
+import { factoryUtilities, type IndustryRules } from './industry-scale.ts';
 
 export const UTILITY_KINDS = ['power', 'water'] as const;
 export type UtilityKind = typeof UTILITY_KINDS[number];
@@ -60,12 +60,12 @@ const none = (): Need => ({ power: 0, water: 0 });
 
 /**
  * Units a building draws. Homes: one of each per household living there. Markets and shops: power
- * by level, one water. Factories: level + 2 power, level + 1 water. Farms: water by level (irrigation).
+ * by level, one water. Factories: by size (industry-scale.ts). Farms: water by level (irrigation).
  */
-export function buildingNeed(zone: Building['zone'], level: number, households = 0): Need {
+export function buildingNeed(zone: Building['zone'], level: number, households = 0, rules?: IndustryRules): Need {
   if (zone === 'R') return { power: households * HOUSEHOLD_NEED.power, water: households * HOUSEHOLD_NEED.water };
   if (zone === 'C') return { power: level, water: 1 };
-  if (zone === 'I') { const { power, water } = factoryLevel(level); return { power, water }; }
+  if (zone === 'I') return factoryUtilities(level, rules);
   return { power: 0, water: level };
 }
 export const fits = (spare: Need, need: Need) => spare.power >= need.power && spare.water >= need.water;
@@ -106,7 +106,7 @@ export function utilityService(c: City, roads: ReadonlySet<number>): Service {
   for (const h of c.households) if (h.home !== null) households.set(h.home, (households.get(h.home) ?? 0) + 1);
   const distance = new Map<number, number>(), distanceByKind = { power: new Map<number, number>(), water: new Map<number, number>() }, need = new Map<number, Need>(), served = new Map<number, Record<UtilityKind, boolean>>();
   for (const b of c.buildings) {
-    need.set(b.id, buildingNeed(b.zone, b.level, households.get(b.id) ?? 0));
+    need.set(b.id, buildingNeed(b.zone, b.level, households.get(b.id) ?? 0, c));
     for (const kind of UTILITY_KINDS) {
       const roadDistance = roadsByKind[kind];
       const d = Math.min(...roadNeighborsFor(c,b.cell).map(n => roadDistance.get(n) ?? Infinity), roadDistance.get(b.cell) ?? Infinity);

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY, SIZE, buildRoad, createCity, deserialize, firmCapacity, firmWorkerCount, isRetail, ownerFinance, retailDemand, serialize, shopSite, step, withdrawOwnerProfit, zoneCell, type City, type Zone } from '../src/sim.ts';
+import { GATEWAY, SIZE, buildRoad, deserialize, firmCapacity, firmWorkerCount, isRetail, ownerFinance, retailDemand, serialize, shopSite, step, withdrawOwnerProfit, zoneCell, type City, type Zone } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 
 /** A strip of homes, farms, factories and commercial parcels along one road from the gateway. */
 function strip(withFactories: boolean): City {

@@ -6,7 +6,7 @@ import { MONTH, createCity, serialize, step } from '../src/sim.ts';
 import { keepSupplied } from './plants.ts';
 import { BURGLARY_REASON, MEDICAL_REASON, fireReason } from '../src/incidents.ts';
 import { SYNTHS, EFFECTS } from '../src/audio-engine.ts';
-import { legacyHousing } from './legacy-housing.ts';
+import { legacySizes } from './legacy-sizes.ts';
 
 test('sound settings default on at a low level, clamp every volume and survive bad storage', () => {
   assert.deepEqual(parseAudioSettings(null), AUDIO_DEFAULTS);
@@ -22,7 +22,7 @@ test('sound settings default on at a low level, clamp every volume and survive b
 });
 
 test('city cues follow real changes: new buildings, arrivals, month end, shops and goal levels', () => {
-  const c = legacyHousing(createCity(61025)), heard = new Set<string>(); delete c.goalRulesVersion;
+  const c = legacySizes(createCity(61025)), heard = new Set<string>(); delete c.goalRulesVersion;
   for (let d = 1; d <= 400; d++) {
     const before = cueSnapshot(c), bytes = serialize(c); step(c); keepSupplied(c);
     assert.notEqual(serialize(c), bytes);
@@ -66,7 +66,7 @@ test('the limiter keeps 10× speed calm but never drops a jingle or a month coin
 });
 
 test('incidents sound once each, worst first, and opening a place plays a chime only in a city with progression', () => {
-  const c = legacyHousing(createCity(61025)); for (let d = 0; d < 120; d++) step(c); // 15 people: police and fire stations open
+  const c = legacySizes(createCity(61025)); for (let d = 0; d < 120; d++) step(c); // 15 people: police and fire stations open
   const before = cueSnapshot(c); c.tick++;
   for (const reason of [MEDICAL_REASON, BURGLARY_REASON, fireReason(3), fireReason(4), MEDICAL_REASON]) c.ledger.push({ tick: c.tick, from: 'treasury', to: 'upkeep', amount: 1, reason });
   const cues = cityCues(before, c);

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, deserialize, selectFactoryRecipe, selectFarmCrop, serialize, step } from '../src/sim.ts';
+import { deserialize, selectFactoryRecipe, selectFarmCrop, serialize, step } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { RECIPE, RECIPES } from '../src/goods.ts';
 
 test('factory recipe can change without losing existing stocks and survives save and continued simulation', () => {

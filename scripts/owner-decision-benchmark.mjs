@@ -79,7 +79,10 @@ export function runOwnerDecisionBenchmark({ days = OWNER_BENCHMARK_DAYS, seeds =
     [name, createHash('sha256').update(readFileSync(new URL('../src/' + name, import.meta.url))).digest('hex')]));
   const started = performance.now(), rows = [];
   for (const seed of seeds) {
-    const baseline = createCity(seed), proposal = createCity(seed), execution = createCity(seed);
+    // The seeded owner benchmark keeps the old smaller buildings, its published baselines (growth past the old
+    // 10-person, 8-job plateau) come from them; real sizes are measured by their own tests.
+    const oldSizes = city => { delete city.housingScale; delete city.industryScale; return city; };
+    const baseline = oldSizes(createCity(seed)), proposal = oldSizes(createCity(seed)), execution = oldSizes(createCity(seed));
     const proposalSession = createOwnerDecisionSession(proposal), executionSession = createOwnerDecisionSession(execution);
     assert.equal(proposalSession.mode, 'proposal', 'A fresh session never starts autonomous');
     executionSession.setMode('auto');

@@ -6,7 +6,9 @@ import { assignPeriod, type OdDemand } from '../src/traffic/routing.ts';
 import { CAR_LENGTH, LANE_END } from '../src/citizen-road-queue.ts';
 import { overlappingPairs } from '../src/citizen-road-queue.ts';
 import { configureRoadPath, forgetRoadTopology, type RoadMap } from '../src/road-topology.ts';
-import { createCity, step, serialize } from '../src/sim.ts';
+import { step, serialize } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { TrafficClock, gameMinute } from '../src/traffic/clock.ts';
 import { cityDemandInput } from '../src/traffic/snapshot.ts';
 import { changedRoadCells, trafficModelEnabled, decorativePlan, screenCull, TRAFFIC_STORAGE_KEY } from '../src/traffic/flag.ts';
