@@ -8,11 +8,13 @@ import { peopleOf } from '../src/education.ts';
 import { keepSupplied } from './plants.ts';
 
 const advance=(c:City,n:number)=>{for(let i=0;i<n;i++)step(c);};
-const oneWay=(c:City)=>{c.roadTopology={version:1,blocked:[],oneWay:Object.fromEntries(c.cells.flatMap((v,i)=>v.road?[[i,1]]:[]))};};
+// Severe route loss: every junction split, so no street links to the next. (One-way arrows alone no longer cut anyone
+// off: people walk either way along a linked street.)
+const cutJunctions=(c:City)=>{const blocked:number[]=[];c.cells.forEach((v,i)=>{if(!v.road)return;for(const n of [i+1,i+SIZE])if(n<c.cells.length&&c.cells[n].road&&(n===i+SIZE||Math.floor(n/SIZE)===Math.floor(i/SIZE)))blocked.push(Math.min(i,n)*c.cells.length+Math.max(i,n));});c.roadTopology={version:1,blocked:blocked.sort((a,b)=>a-b),oneWay:{}};};
 test('severe route loss causes slow, capped decline; restoring routes lets remaining households recover',()=>{
  const c=createCity(61025); advance(c,120); const initial=c.households.length;
  assert.ok(initial>4); assert.equal(c.migration.departures??0,0);
- oneWay(c); const before=c.households.length; advance(c,29);
+ cutJunctions(c); const before=c.households.length; advance(c,29);
  assert.ok(c.households.length>=before,'no immediate unhappy departures');
  advance(c,61); assert.ok((c.migration.departures??0)>0); assert.ok(c.households.length<initial,'not immediately backfilled');
  const retained=c.households.map(h=>h.id), old=new Map(c.happiness!.rows.map(r=>[r.householdId,r.score]));
@@ -21,7 +23,7 @@ test('severe route loss causes slow, capped decline; restoring routes lets remai
  assert.doesNotThrow(()=>deserialize(serialize(c)));
 });
 test('a persistent severe city can decline to its protected floor, with deterministic save replay',()=>{
- const a=createCity(61025); advance(a,120); oneWay(a); const b=deserialize(serialize(a));
+ const a=createCity(61025); advance(a,120); cutJunctions(a); const b=deserialize(serialize(a));
  for(let i=0;i<150;i++){step(a);step(b);if(i===74){const x=deserialize(serialize(b));Object.assign(b,x);}}
  assert.equal(a.households.length,2); assert.deepEqual(b,a); assert.deepEqual(deserialize(serialize(a)),a);
 });
@@ -113,7 +115,8 @@ test('a funded park job with a walking route does not require road frontage', ()
   assert.equal(employed.unreachableWorkers, 0);
   assert.equal(employed.commuteSeconds, 432);
   assert.equal(employed.delaySeconds, 0);
-  assert.equal(employed.target, 60);
+  // A seven-minute walk is no long commute (that starts past 20 minutes), so only the park nearby adds: 60 + 10.
+  assert.equal(employed.target, 70);
 });
 
 test('losing a wage job to a disconnected road does not raise happiness at maximum wage tax', () => {
@@ -193,7 +196,8 @@ test('a nearby park cannot lure an employee into a home with an unreachable comm
  c.households=[{id:30,home:10,members:1,workforce:1,dependents:0,workerSkills:{general:1,manufacturing:0,retail:0},skillSource:'arrival-profile',profile:'single-worker',origin:'arrival',wallet:'household:30',lastPurchaseTick:0,needs:0}];
  c.firms=[{id:50,building:12,zone:'C',crops:{rice:0,vegetables:0,sugarcane:0},products:{'milled-rice':0,'canned-food':0,sugar:0},wallet:'firm:50',workDays:{},inventory:0,cropInventory:0,cropCost:0,productionTick:0,owner:null,profit:0,lastMonthProfit:0,monthlyRevenue:0,monthlyExpense:0}];
  c.employment=[{householdId:30,firmId:50,occupation:'retail',rank:'entry',skill:'general',workers:1}];
- c.parks=[{id:40,cell:10*SIZE+9,tick:0,level:1}];c.tick=7;oneWay(c);
+ // The street is broken between the two homes: the far home has no way to work at all.
+ c.parks=[{id:40,cell:10*SIZE+9,tick:0,level:1}];c.tick=7;c.roadTopology={version:1,blocked:[(12*SIZE+4)*c.cells.length+12*SIZE+5],oneWay:{}};
  assert.equal(happinessTargets(c).get(30)!.unreachableWorkers,0);
  const hypothetical=structuredClone(c);hypothetical.households[0].home=11;
  assert.equal(happinessTargets(hypothetical).get(30)!.unreachableWorkers,1);

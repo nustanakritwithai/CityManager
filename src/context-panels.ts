@@ -179,8 +179,10 @@ function householdCommute(city: City, householdId: number): HTMLElement {
   const list = el('ul', 'cx-commute-list');
   for (const t of trips) {
     const row = el('li', 'cx-commute-row'), where = el('span', 'cx-commute-where', `คนที่ ${t.person} → ${workplaceName(city, t)}`);
-    const how = el('span', 'cx-commute-how', `${tripMode(city, t)}${t.mode === 'unreachable' ? '' : ` · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes ?? 0)))} นาที`}`);
-    Object.assign(row.dataset, { commuteMode: t.mode, distance: String(t.distanceM) }); row.append(where, how); list.append(row);
+    // Minutes lost to real traffic on the way (the same route on empty roads is `freeMinutes`).
+    const jam = t.freeMinutes == null || t.minutes == null ? 0 : Math.round(t.minutes - t.freeMinutes);
+    const how = el('span', 'cx-commute-how', `${tripMode(city, t)}${t.mode === 'unreachable' ? '' : ` · ${km(t.distanceM)} · ${count(Math.max(1, Math.round(t.minutes ?? 0)))} นาที`}${jam > 0 ? ` · รถติด ${count(jam)} นาที` : ''}`);
+    Object.assign(row.dataset, { commuteMode: t.mode, distance: String(t.distanceM), jamMinutes: String(Math.max(0, jam)) }); row.append(where, how); list.append(row);
   }
   if (!trips.length) list.append(el('li', 'cx-commute-row', 'วันนี้ไม่มีสมาชิกที่ต้องเดินทางไปทำงาน'));
   // Someone taken ill today travels to a clinic or hospital in the city, or out to one beyond the gateway.
