@@ -6,10 +6,10 @@ export const FERTILITY_THRESHOLD = 50;
 export const CROP_STOCK_CAPS = Object.freeze({ F: 96, T: 48, I: 24 } as const);
 export const FARM_STOCK_BY_LEVEL = [0, 96, 96, 96, 120, 144, 168] as const;
 export const FARM_MAX_LEVEL = 6;
-/** The largest real rice mill's store (industry-scale.ts): two days of 100 tonnes. */
-export const MAX_REAL_FACTORY_CROPS = 20_000;
-/** A real 100-rai rice farm's yard by level 1–6 (industry-scale.ts riceFarmStore). */
-export const REAL_RICE_FARM_STORES = Object.freeze([679, 1358, 2037, 2466, 2959, 3453] as const);
+/** The largest real mill's store (industry-scale.ts): two days of a 10,000 t sugar mill's 56 kg lots. */
+export const MAX_REAL_FACTORY_CROPS = 357_142;
+/** Real 100-rai farm yards by level 1–6 (industry-scale.ts realFarmStore): rice, then sugarcane. */
+export const REAL_FARM_STORES: readonly number[] = Object.freeze([679, 1358, 2037, 2466, 2959, 3453, 118, 133, 147, 177, 206, 235]);
 export const farmStockCapacity = (level: number): number => FARM_STOCK_BY_LEVEL[level] ?? 0;
 export const CROP_PRICES = Object.freeze({ farmToTrader: 150, traderToFactory: 300, farmToFactory: 350, householdCrop: 800 } as const);
 export type CropPrices = { readonly farmToTrader: number; readonly traderToFactory: number; readonly farmToFactory: number; readonly householdCrop: number };
@@ -104,8 +104,8 @@ function dailyInput(state: HarvestState, options: { tick: number; workers: numbe
  * An invalid, duplicate or stale attempt returns unchanged copied state.
  * The stock cap truncates harvest using BigInt even for huge safe worker counts.
  */
-/** A farm's store: the level's lots, or a real rice farm's sixty days of harvest (industry-scale.ts). */
-const farmStore = (x: number) => FARM_STOCK_BY_LEVEL.includes(x as typeof FARM_STOCK_BY_LEVEL[number]) || REAL_RICE_FARM_STORES.includes(x as typeof REAL_RICE_FARM_STORES[number]);
+/** A farm's store: the level's lots, or a real farm's yard (industry-scale.ts). */
+const farmStore = (x: number) => FARM_STOCK_BY_LEVEL.includes(x as typeof FARM_STOCK_BY_LEVEL[number]) || REAL_FARM_STORES.includes(x);
 /** `realYield`: today's lots on a real 100-rai rice farm (industry-scale.ts riceHarvest), instead of lots a worker. */
 export function proposeHarvest(state: HarvestState, options: { tick: number; workers: number; fertility: number; operational: boolean; capacity?: number; realYield?: number }): DailyProposal<HarvestState> {
   const capacity = options?.capacity ?? CROP_STOCK_CAPS.F;
