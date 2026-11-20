@@ -49,7 +49,8 @@ try{
  await until(`(()=>{const b=window.cityManager.bus();return b&&b.poles+b.shelters===${expectedStops}&&b.depots===${expectedDepots}})()`);
  assert.equal(await evaluate(`(()=>{const e=document.querySelector('#bus-tool'),r=e.getBoundingClientRect();return !e.hidden&&r.width>0&&r.height>0})()`),true,'Bus tool remains available');
  await button('#toggle-game-menu');await button('#traffic-game-toggle');
- await until(`(()=>{const b=window.cityManager.bus();return window.cityManager.traffic()===null&&b&&b.poles+b.shelters===${expectedStops}&&b.depots===${expectedDepots}&&b.buses===0})()`);
+ // With the allocation game off the city's own bus service takes over: buses keep running with real riders.
+ await until(`(()=>{const b=window.cityManager.bus();return window.cityManager.traffic()===null&&b&&b.poles+b.shelters===${expectedStops}&&b.depots===${expectedDepots}&&window.cityManager.liveBuses()!==null})()`);
  assert.equal(await evaluate('window.cityManager.snapshot()'),baseline,'Traffic off does not change the city');
  await button('#close-inspector');
  const offShot=await send('Page.captureScreenshot',{format:'png'});await writeFile(output+'/traffic-off-stops.png',Buffer.from(offShot.data,'base64'));
