@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, productionUpgradeStatus, type Firm } from '../src/sim.ts';
+import { step, productionUpgradeStatus, type Firm } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { factoryCropCapacity } from '../src/factory-levels.ts';
 import { farmStockCapacity } from '../src/agriculture.ts';
 import { registerHooks } from 'node:module';

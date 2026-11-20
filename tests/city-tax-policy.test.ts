@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_TAX_RATES, scheduleCityTaxes, taxRatesAt, taxSatang } from '../src/city-tax-policy.ts';
-import { buildPark, bulldoze, createCity, deserialize, firmWage, ownerFinance, serialize, step, withdrawOwnerProfit, type City } from '../src/sim.ts';
+import { buildPark, bulldoze, deserialize, firmWage, ownerFinance, serialize, step, withdrawOwnerProfit, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 
 const advance = (city: City, day: number) => { while (city.tick < day) step(city); };
 const wageTax = 'Monthly household wage tax';

@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, deserialize, serialize, step, farmCrop, selectFarmCrop, firmCapacity, firmWorkerCount, bulldoze } from '../src/sim.ts';
+import { deserialize, serialize, step, farmCrop, selectFarmCrop, firmCapacity, firmWorkerCount, bulldoze } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { farmStockCapacity, harvestYield, proposeHarvest } from '../src/agriculture.ts';
 import { buildingNeed } from '../src/utilities.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';

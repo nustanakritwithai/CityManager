@@ -1,7 +1,7 @@
 import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
-import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, type IndustryRules } from './industry-scale.ts';
+import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, isRealRiceMill, riceBagsToday, RICE_PRICE, REAL_RICE_RECIPE, MILL_LOTS_PER_WORKER, type IndustryRules } from './industry-scale.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
@@ -79,7 +79,7 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   /** Versioned daily household wellbeing; older saves start neutrally on their next simulated day. */
   happiness?: HappinessState;
   populationCapacityVersion?: 1;
-  /** Workplaces employ real numbers of people (factories 50/200/1,000, farms ten a level). Absent on cities saved before. */
+  /** Real rice (industry-scale.ts): 100-rai paddies, mills by tonnage, rice sold by the kilo; jobs filled within a month. Absent on cities saved before. */
   industryScale?: 1;
   /** Homes hold real numbers of households (house 1, apartment 40, condo 200). Absent on cities saved before, which keep the old smaller homes. */
   housingScale?: 1;
@@ -197,9 +197,16 @@ export function parkStaffingStatus(c: City, p: Park) {
 export const isCommercial = (f: Pick<Firm, 'zone'>): boolean => f.zone === 'C';
 export const isMarket = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'market';
 export const isRetail = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'retail';
-/** Jobs at a workplace under its city's rules (see industry-scale.ts); without a city, the old small sizes. */
-export const firmCapacity = (b: Building, _f?: Firm, c?: IndustryRules) => b.zone === 'I' ? factoryJobs(b.level, c) : b.zone === 'F' ? farmStaff(b.level, c) : b.zone === 'C' ? b.level === 1 ? 1 : retailCapacity(b.level).workers : 0;
+/** Jobs at a workplace under its city's rules (see industry-scale.ts); without a city, the old sizes. */
+export const firmCapacity = (b: Building, f?: Firm, c?: City) => b.zone === 'I' ? factoryJobs(b.level, c, f ?? c?.firms.find(x => x.building === b.id)) : b.zone === 'F' ? farmStaff(b.level, c, workplaceCrop(b, f, c)) : b.zone === 'C' ? b.level === 1 ? 1 : retailCapacity(b.level).workers : 0;
 const capacity = firmCapacity;
+/** The crop a farm grows, when its city is known (sizes depend on it under real rice rules). */
+function workplaceCrop(b: Building, f: Firm | undefined, c: City | undefined): CropId | undefined {
+  const firm = f ?? c?.firms.find(x => x.building === b.id);
+  return firm && c && b.zone === 'F' ? farmCrop(c, firm) : undefined;
+}
+/** Crop lots a farm or factory can store, under its city's rules. */
+export const firmCropStore = (b: Building, f: Firm, c: City): number => b.zone === 'I' ? factoryCrops(b.level, c, f) : farmStock(b.level, c, workplaceCrop(b, f, c));
 export const firmWage = (f: Firm) => WAGES[f.zone];
 export const firmRent = (f: Firm) => 10_000;
 const payroll = (f: Firm) => Object.values(f.workDays).reduce((n, days) => n + days * firmWage(f) / MONTH, 0);
@@ -576,7 +583,7 @@ export function selectFarmCrop(c: City, firmId: number, choice: CropId | 'auto')
 /** Lots a day a new four-worker factory needs. */
 const NEW_FACTORY_LOTS = 8;
 /** Spare crop lots a day before outside investors open a factory: under real sizes, enough to feed a small factory's 50 workers. */
-const newFactoryLots = (c: City) => realIndustry(c) ? factoryJobs(1, c) * CROP_RECIPE.crop : NEW_FACTORY_LOTS;
+const newFactoryLots = (_c: City) => NEW_FACTORY_LOTS;
 /**
  * The recipe for a new factory. Spare supply is each crop's farm harvest at full staffing minus
  * what factories already running its recipe use. Among crops that can feed a new factory, the
@@ -585,7 +592,7 @@ const newFactoryLots = (c: City) => realIndustry(c) ? factoryJobs(1, c) * CROP_R
  */
 export function chooseRecipe(c: City, factories: readonly Firm[] = c.firms.filter(f => f.zone === 'I' && f.recipe)): RecipeId {
   const spare = emptyCrops(), making = emptyCrops();
-  for (const f of c.firms) if (f.zone === 'F' && access(c, building(c, f.building).cell)) spare[farmCrop(c, f)] += farmYieldPerWorker(c, building(c, f.building).cell) * farmStaff(building(c, f.building).level, c);
+  for (const f of c.firms) if (f.zone === 'F' && access(c, building(c, f.building).cell)) spare[farmCrop(c, f)] += farmYieldPerWorker(c, building(c, f.building).cell) * farmStaff(building(c, f.building).level, c, farmCrop(c, f));
   for (const f of factories) if (f.recipe) { spare[RECIPE[f.recipe].crop] -= capacity(building(c, f.building), f, c) * 2; making[RECIPE[f.recipe].crop]++; }
   const order = (a: CropId, b: CropId) => spare[b] - spare[a] || CROPS.indexOf(a) - CROPS.indexOf(b);
   const fed = CROPS.filter(k => spare[k] >= newFactoryLots(c)).sort((a, b) => making[a] - making[b] || order(a, b));
@@ -1193,20 +1200,21 @@ function trade(c: City) {
   const active = c.firms.filter(f => access(c, building(c, f.building).cell));
   const hooks = agricultureHooks(c), sellable = runAgriculture(c, hooks), reach = freightReach(c);
   // Shops stock every product the city makes, an even share of the shelf each, local wholesale first.
-  const made = PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
+  // Under real rice rules a shop carries every product, bringing in from outside what the town does not make.
+  const made = realIndustry(c) ? [...PRODUCTS] : PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
   for (const shop of active.filter(f => isCommercial(f) && firmWorkerCount(c, f.id) > 0)) {
     const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id)).stock, Math.max(4, c.households.reduce((n, h) => n + h.members, 0) * 2)), share = Math.ceil(target / Math.max(1, made.length));
     for (const product of made) {
       // Goods go by truck: only a factory with a road route to the shop can deliver to it.
       for (const producer of active.filter(f => f.zone === 'I' && f.products[product] > 0 && reach(f, shop))) {
-        const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 350));
+        const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / goodsUnit(c, product, 'wholesale')));
         if (qty <= 0) continue;
-        transfer(c, shop.wallet, producer.wallet, qty * 350, 'Local wholesale goods', true);
+        transfer(c, shop.wallet, producer.wallet, qty * goodsUnit(c, product, 'wholesale'), 'Local wholesale goods', true);
         moveProduct(c, producer, shop, product, qty); goodsTransfer(c, producer.wallet, shop.wallet, qty, 'Wholesale stock delivery', product);
       }
-      const imported = reach('gateway', shop) ? Math.min(share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / 450)) : 0;
+      const imported = reach('gateway', shop) ? Math.min(share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / goodsUnit(c, product, 'import'))) : 0;
       if (imported > 0) {
-        transfer(c, shop.wallet, 'outside', imported * 450, 'Outside goods import', true);
+        transfer(c, shop.wallet, 'outside', imported * goodsUnit(c, product, 'import'), 'Outside goods import', true);
         moveProduct(c, null, shop, product, imported); c.goods.imported += imported; goodsTransfer(c, 'outside', shop.wallet, imported, 'Imported shop stock', product);
       }
     }
@@ -1219,6 +1227,21 @@ function trade(c: City) {
     // Rotate sellers without repeatedly picking an empty or unaffordable business.
     if (shops.length) { const start = Math.floor(random(c) * shops.length); shops.push(...shops.splice(0, start)); }
     const homeCell = building(c, h.home!).cell;
+    // Real rice: the family buys the kilos of milled rice it eats today (whole bags), by the kilo, at the nearest
+    // shop it can walk to that has some; the day's other shopping follows.
+    let riceDue = realIndustry(c) ? riceBagsToday(h.members, c.tick) : 0;
+    const riceKg = realIndustry(c);
+    for (const shop of riceDue ? shops : []) {
+      if (!riceDue) break;
+      if (!shop.products['milled-rice'] || !canWalk(c, [homeCell], [building(c, shop.building).cell])) continue;
+      const kg = Math.min(riceDue, shop.products['milled-rice'], Math.floor(balance(c, h.wallet) / RICE_PRICE.retail));
+      if (!kg) continue;
+      transfer(c, h.wallet, shop.wallet, RICE_PRICE.retail * kg, `Household #${h.id} purchase`, true);
+      moveProduct(c, shop, null, 'milled-rice', kg); c.goods.consumed += kg; h.lastPurchaseTick = c.tick;
+      goodsTransfer(c, shop.wallet, h.wallet, kg, 'Household final consumption', 'milled-rice'); riceDue -= kg;
+    }
+    // Other food the family's shops could sell it today; with none in town, rice alone is the day's food.
+    const otherFood = shops.some(f => PRODUCTS.some(p => p !== 'milled-rice' && f.products[p] > 0) || f.cropInventory > 0 && (sellable.get(f.id) ?? 0) > 0);
     for (const shop of shops) {
       if (purchased >= h.members || balance(c, h.wallet) < 800) break;
       // Shopping is a real trip: only a shop the family can get to along linked streets (on foot at least) sells to it.
@@ -1227,6 +1250,7 @@ function trade(c: City) {
         // Preferences select the order, not a one-product limit: a family can fill its one
         // daily basket from the remaining stocked products without inventing demand or credit.
         for (const product of productPreference(h.id, c.tick)) {
+          if (riceKg && product === 'milled-rice') continue;
           if (purchased >= h.members || balance(c, h.wallet) < 800) break;
           const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
           if (!quantity) continue;
@@ -1237,17 +1261,22 @@ function trade(c: City) {
         while (purchased < h.members && balance(c, h.wallet) >= 800 && consumeMarketCrop(c, h, shop, sellable, hooks, true)) purchased++;
       }
     }
-    h.needs = purchased === h.members ? 0 : unmetDays;
+    h.needs = (riceKg ? riceDue === 0 && (purchased === h.members || !otherFood) : purchased === h.members) ? 0 : unmetDays;
   }
   for (const f of active.filter(f => f.zone === 'I' && firmWorkerCount(c, f.id) > 0 && reach(f, 'gateway'))) {
-    const exported = takeLargest(f.products, PRODUCTS, Math.min(f.inventory, firmWorkerCount(c, f.id) * 8));
+    // A day's output a worker: 8 goods, or 1,300 kg of milled rice at a real rice mill.
+    const perWorker = isRealRiceMill(f, c) ? REAL_RICE_RECIPE.goods * MILL_LOTS_PER_WORKER / REAL_RICE_RECIPE.crop : 8;
+    const exported = takeLargest(f.products, PRODUCTS, Math.min(f.inventory, firmWorkerCount(c, f.id) * perWorker));
     for (const product of PRODUCTS) {
       const n = exported[product]; if (!n) continue;
-      transfer(c, 'outside', f.wallet, n * 350, 'Outside market goods export', true);
+      transfer(c, 'outside', f.wallet, n * goodsUnit(c, product, 'export'), 'Outside market goods export', true);
       moveProduct(c, f, null, product, n); c.goods.exported += n; goodsTransfer(c, f.wallet, 'outside', n, 'Exported goods', product);
     }
   }
 }
+/** Satang a unit of a product: a basket of goods, or a kilo of milled rice under real rice rules (industry-scale.ts). */
+export const goodsUnit = (c: IndustryRules, product: string, kind: 'wholesale' | 'import' | 'export' | 'retail'): number =>
+  realIndustry(c) && product === 'milled-rice' ? RICE_PRICE[kind] : ({ wholesale: 350, import: 450, export: 350, retail: 800 } as const)[kind];
 function withholdWageTax(c: City, wallet: string, wage: number): void {
   const tax = taxSatang(wage, taxRatesAt(c.taxPolicy, c.tick).wage);
   if (transfer(c, wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Wage tax invariant violated.');
@@ -1748,7 +1777,7 @@ export function productionUpgradeStatus(live: City, liveFirm: Firm) {
   const extra = { power: after.power - before.power, water: after.water - before.water };
   const profitThreshold = f.owner || f.zone === 'F' ? firmWage(f) : 0;
   const requiredSpendable = nextLevel === null ? 0 : f.zone === 'F' && b.level >= 3 ? 40_000
-    : f.zone === 'I' && b.level >= 3 ? 20_000 + INDUSTRY_WORKING_RESERVE + factoryJobs(nextLevel, c) * (firmWage(f) / MONTH + 2 * 350) : 0;
+    : f.zone === 'I' && b.level >= 3 ? 20_000 + INDUSTRY_WORKING_RESERVE + factoryJobs(nextLevel, c, f) * (firmWage(f) / MONTH + 2 * 350) : 0;
   if (nextLevel !== null) {
     if (b.age < MONTH) reasons.push(`อายุอาคาร ${b.age}/${MONTH} วัน`);
     if (!access(c, b.cell)) reasons.push('ต้องมีถนนเชื่อมถึงเมือง');
@@ -1798,7 +1827,9 @@ function grow(c: City) {
       transfer(c, 'outside', 'construction', c.housingScale === 1 ? residentialGrowthCost(b.level) : 20_000, 'Outside residential height investment'); b.level++; b.housingType = HOUSING_LEVELS[b.level - 1].type; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && isCommercial(f) && !commercialGrowthReasons(c, f).length) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
-    } else if (f && !isCommercial(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f) / MONTH + 2 * 350))) {
+    } else if (f && !isCommercial(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f) / MONTH + 2 * 350))
+      // A real rice mill grows only while paddy waits for it: its store at least half full of the rice it cannot mill in time.
+      && (!isRealRiceMill(f, c) || f.cropInventory * 2 >= factoryCrops(b.level, c, f))) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
     }
   }

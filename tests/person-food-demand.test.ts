@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step } from '../src/sim.ts';
+import { step } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 
 test('a small city with two people buys food and its shop does not falsely show no buyers', async () => {
   const { buildRoad, zoneCell, GATEWAY, SIZE, isCommercial } = await import('../src/sim.ts');

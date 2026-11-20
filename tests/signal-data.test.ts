@@ -2,7 +2,9 @@ import test from 'node:test';
 import { pollutionAt } from '../src/environment.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createCity, housingCapacity, serialize, step, summary } from '../src/sim.ts';
+import { housingCapacity, serialize, step, summary } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import {
   captureCitySignals, requestForCapture, buildLocalSignalReport, acceptRemoteSignalReport,
   validateSignalRequest, type SignalRequest, type SignalReport, type MetricId,

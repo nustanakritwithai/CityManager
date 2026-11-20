@@ -1,10 +1,9 @@
 /** Read-only, current-state explanations shared by the map and the existing place panel. */
-import { access, buildingEducationStatus, economicSignals, firmCapacity, firmWorkerCount, homeOccupancy, housingUpgradeStatus, isCommercial, commercialGrowthStatus, parkStaffingStatus, productionUpgradeStatus, reviewIsTomorrow, utilities, withRoadScope, withGrowthReviewScope, type City } from './sim.ts';
+import { access, firmCropStore, buildingEducationStatus, economicSignals, firmCapacity, firmWorkerCount, homeOccupancy, housingUpgradeStatus, isCommercial, commercialGrowthStatus, parkStaffingStatus, productionUpgradeStatus, reviewIsTomorrow, utilities, withRoadScope, withGrowthReviewScope, type City } from './sim.ts';
 import { contextRevision } from './context-data.ts';
 import { CROP_RECIPE, farmStockCapacity } from './agriculture.ts';
 import { CROP_LABELS, RECIPE } from './goods.ts';
 import { educationLevel, educationUtilityAvailability } from './education.ts';
-import { farmStock } from './industry-scale.ts';
 
 export type IssueKind = 'no-road' | 'no-power' | 'no-water' | 'no-utilities' | 'no-workers' | 'no-input' | 'stock-cap' | 'no-buyer' | 'no-stock' | 'unsuitable-fertility' | 'empty-home' | 'importing' | 'broke' | 'paused' | 'education' | 'upgrade' | 'missing-data';
 export type IssueTone = 'bad' | 'warn' | 'inactive' | 'upgrade';
@@ -65,13 +64,13 @@ function collect(city: City): Issue[] {
     else {
       const workers = firmWorkerCount(city, f.id), cash = city.accounts[f.wallet];
       if (cash === 0 && workers === 0) add(b.cell, 'broke', 'เงินกิจการ 0 เครดิต และคนทำงาน 0 คน · ดูเงินทุนและการรับช่วงกิจการในแผงอาคาร');
-      if (workers === 0) numeric(b.cell, 'no-workers', 'คนทำงานจริง', workers, 1, 'คนขั้นต่ำ', `เต็มอัตรา ${firmCapacity(b, undefined, city)} คน · ตรวจเจ้าของ แรงงาน และเงินสำรองค่าจ้าง`);
+      if (workers === 0) numeric(b.cell, 'no-workers', 'คนทำงานจริง', workers, 1, 'คนขั้นต่ำ', `เต็มอัตรา ${firmCapacity(b, f, city)} คน · ตรวจเจ้าของ แรงงาน และเงินสำรองค่าจ้าง`);
       if (f.zone === 'I') {
         const recipe = f.recipe && RECIPE[f.recipe], have = recipe ? f.crops?.[recipe.crop] : undefined;
         if (!recipe || !Number.isFinite(have)) add(b.cell, 'missing-data', 'ไม่มีข้อมูลสูตรหรือพืชผลที่ใช้ จึงไม่เดาว่าขาดวัตถุดิบชนิดใด', 'warn');
         else if (have! < CROP_RECIPE.crop) numeric(b.cell, 'no-input', CROP_LABELS[recipe.crop], have!, CROP_RECIPE.crop, 'ล็อตต่อรอบผลิต', 'ตรวจฟาร์ม/ตลาดที่ส่งพืชผลชนิดนี้และเงินซื้อวัตถุดิบ');
       }
-      if (f.zone === 'F' && f.cropInventory >= farmStock(b.level, city)) numeric(b.cell, 'stock-cap', 'พืชผลในคลัง', f.cropInventory, farmStock(b.level, city), 'ล็อต', 'ต้องระบายสต็อกก่อนเก็บเกี่ยวเพิ่ม', 'warn');
+      if (f.zone === 'F' && f.cropInventory >= firmCropStore(b, f, city)) numeric(b.cell, 'stock-cap', 'พืชผลในคลัง', f.cropInventory, firmCropStore(b, f, city), 'ล็อต', 'ต้องระบายสต็อกก่อนเก็บเกี่ยวเพิ่ม', 'warn');
       if (isCommercial(f)) {
         if (f.inventory === 0 && f.cropInventory === 0) numeric(b.cell,'no-stock','พืชผลและสินค้าพร้อมขาย',0,1,'หน่วยขั้นต่ำ','ตรวจเงินซื้อสินค้า ฟาร์ม และโรงงาน','warn');
         if(city.goodsLedger.some(e=>e.reason==='Imported shop stock'&&e.to===f.wallet&&e.tick>city.tick-3))add(b.cell,'importing','มีรายการนำเข้าสินค้าใน 3 วันที่ผ่านมา · เป็นประวัติการซื้อ ไม่ใช่หลักฐานว่าขณะนี้โรงงานหยุดผลิต','warn');

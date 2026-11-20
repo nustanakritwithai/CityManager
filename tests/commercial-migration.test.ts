@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as legacy from '../src/legacy-v4.ts';
-import { createCity, deserialize, serialize, step, zoneCell, firmCapacity, firmWage, firmRent, firmWorkerCount, isCommercial, isMarket, isRetail, summary, ownerFinance, contributeOwnerCapital, withdrawOwnerProfit, type City } from '../src/sim.ts';
+import { deserialize, serialize, step, zoneCell, firmCapacity, firmWage, firmRent, firmWorkerCount, isCommercial, isMarket, isRetail, summary, ownerFinance, contributeOwnerCapital, withdrawOwnerProfit, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 
 function oldCity(day = 179) {
   const c = legacy.createCity();

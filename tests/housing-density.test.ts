@@ -5,9 +5,11 @@ import { HOUSING_LEVELS, getHousingCapacity } from '../src/housing.ts';
 import { buildPark, createCity, deserialize, serialize, step, housingUpgradeStatus, homeOccupancy, householdWorkerCount, housingShortage, residentialGrowthCost, landValues, connectedRoads, SIZE, type City } from '../src/sim.ts';
 import { advanceParkRuntime, createParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { holdEducationReady } from './education-ready.ts';
+import { legacyIndustry } from './legacy-sizes.ts';
 
 function fixture() {
-  const city = createCity(61025); for (let n = 0; n < 119; n++) step(city);
+  // Real homes; the old workplaces keep the seeded city's jobs, so its people wait for homes as before.
+  const city = legacyIndustry(createCity(61025)); for (let n = 0; n < 119; n++) step(city);
   const home = city.buildings.find(b => b.zone === 'R' && homeOccupancy(city, b.id).households === 1 && city.households.some(h => h.home === b.id && householdWorkerCount(city, h.id) > 0 && city.tick - h.lastPurchaseTick <= 3))!;
   assert.ok(home); return { city, home };
 }

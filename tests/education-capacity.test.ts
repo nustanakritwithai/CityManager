@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCampus, createCity, deserialize, householdWorkerCount, serialize, step, toggleCampus, upgradeCampus, type City } from '../src/sim.ts';
+import { buildCampus, deserialize, householdWorkerCount, serialize, step, toggleCampus, upgradeCampus, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { assertEducationInvariants, createEducation, EDUCATION_COST, educationOccupied, initialCampusReport, stepEducation, withdrawCampus, type CampusKind, type EducationPeople, type EducationView } from '../src/education.ts';
 import { marketJournalForTest } from '../src/market-client.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';

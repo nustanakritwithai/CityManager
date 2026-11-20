@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEducation, educationGate, initialCampusReport, stepEducation, withdrawCampus, forgetHouseholdEducation, type Campus, type EducationBuilding, type EducationPeople, type EducationView } from '../src/education.ts';
-import { createCity, step, housingShortage, type City } from '../src/sim.ts';
+import { step, housingShortage, createCity as createRealCity, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity, legacyIndustry } from './legacy-sizes.ts';
 
 const person = (changes: Partial<EducationPeople> = {}): EducationPeople => ({ householdId: 1, basic: 1, higher: 0, school: 0, university: 0, teacher: 0, professor: 0, campusId: null, progress: 0, ...changes });
 const campus = (id: number, kind: Campus['kind']): Campus => ({ id, kind, cell: id, level: 1, tick: 0, open: true, contract: 0, workDays: {}, report: initialCampusReport(kind, 1) });
@@ -94,7 +96,8 @@ test('demolition withdraws unfinished study but preserves resident diplomas; dep
 });
 
 test('only changing resident diplomas changes real month-end home and farm upgrades, not jobs or economic flows', () => {
-  const ready = createCity(61025);
+  // Real homes (a full house waits on diplomas to become a block) with the old workplaces.
+  const ready = legacyIndustry(createRealCity(61025));
   for (let day = 0; day < 119; day++) step(ready);
   // A full house (one household) in a city where people wait for homes: only diplomas stand between it and a 40-room block.
   const home = ready.buildings.find(b => b.zone === 'R' && b.level === 3 && ready.households.some(h => h.home === b.id))!;

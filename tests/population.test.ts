@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createCity, step, deserialize, serialize, summary, bulldoze, moveHousehold, housingCapacity, homeOccupancy, employmentForHousehold, firmWorkerCount, householdWorkerCount, explainCell, GATEWAY, WAGES, MONTH, type City, type Household } from '../src/sim.ts';
 import { deserializeV1 } from '../src/legacy-v1.ts';
-import { legacySizes } from './legacy-sizes.ts';
+import { legacySizes, legacyIndustry } from './legacy-sizes.ts';
 
 const frozen = readFileSync(new URL('./fixtures/legacy-v1-day65.json', import.meta.url), 'utf8');
 const frozenV3 = (day: number) => readFileSync(new URL(`./fixtures/legacy-v3-day${day}.json`, import.meta.url), 'utf8');
@@ -35,7 +35,8 @@ test('frozen v1 migration preserves history, clocks, claims and IDs with explici
 });
 
 test('homes are empty on construction day and admit at most one independently funded household per later day', () => {
-  const c = createCity(61025);
+  // One arrival a day is the old rule; under real workplace rules employers fill open jobs within a month.
+  const c = legacyIndustry(createCity(61025));
   let observedEmpty = false;
   for (let n = 0; n < 180; n++) {
     step(c);

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { runOwnerDecisionBenchmark, OWNER_BENCHMARK_SEEDS } from '../scripts/owner-decision-benchmark.mjs';
-import { createCity, deserialize, serialize } from '../src/sim.ts';
+import { deserialize, serialize } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { createCity as oldCity, step as oldStep, serialize as oldSerialize } from '../src/legacy-v5.ts';
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 

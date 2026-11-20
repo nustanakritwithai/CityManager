@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bulldoze, contributeOwnerCapital, createCity, deserialize, ownerFinance, serialize, step, type City } from '../src/sim.ts';
+import { bulldoze, contributeOwnerCapital, deserialize, ownerFinance, serialize, step, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { captureOwnerSnapshot, executeOwnerProposal, ownerStateHash, proposeOwnerDecision, validateOwnerProposal, type OwnerProposal } from '../src/owner-decision.ts';
 import { ownerDecisionCandidates, validateOwnerDecisionSelection } from '../server/city-advisor/src/owner-contract.mjs';
 

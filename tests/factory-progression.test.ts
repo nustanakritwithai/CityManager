@@ -5,7 +5,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { factoryCropCapacity, factoryLevel } from '../src/factory-levels.ts';
 import { proposeCropPurchase, proposeRecipe } from '../src/agriculture.ts';
-import { createCity, deserialize, serialize, step } from '../src/sim.ts';
+import { deserialize, serialize, step } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { holdEducationReady } from './education-ready.ts';
 import { legacySizes } from './legacy-sizes.ts';
 

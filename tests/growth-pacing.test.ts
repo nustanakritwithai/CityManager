@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MONTH, OUTSIDE_INDUSTRY_CROPS, OUTSIDE_INDUSTRY_POPULATION, SIZE, buildRoad, createCity, deserialize, industryGrowthStatus, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
+import { MONTH, OUTSIDE_INDUSTRY_CROPS, OUTSIDE_INDUSTRY_POPULATION, SIZE, buildRoad, deserialize, industryGrowthStatus, serialize, step, summary, zoneCell, type City } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS } from '../src/agriculture.ts';
 import { keepSupplied } from './plants.ts';
 import { legacySizes } from './legacy-sizes.ts';

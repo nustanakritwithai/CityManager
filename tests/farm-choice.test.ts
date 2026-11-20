@@ -1,7 +1,9 @@
 import test from 'node:test';
 import { farmYieldPerWorker } from '../src/farm-production.ts';
 import assert from 'node:assert/strict';
-import { access, automaticFarmCrop, createCity, deserialize, farmCrop, firmWorkerCount, isMarket, selectFarmCrop, serialize, step, summary, zoneCell } from '../src/sim.ts';
+import { access, automaticFarmCrop, deserialize, farmCrop, firmWorkerCount, isMarket, selectFarmCrop, serialize, step, summary, zoneCell } from '../src/sim.ts';
+// Every city here keeps the old smaller buildings (see legacy-sizes.ts): these tests follow the old workplace sizes.
+import { createLegacyCity as createCity } from './legacy-sizes.ts';
 import { CROPS } from '../src/goods.ts';
 
 test('farm demand retains published accounting before any farm reaches a new tier', () => {
