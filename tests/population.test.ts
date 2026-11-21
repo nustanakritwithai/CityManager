@@ -58,7 +58,7 @@ test('homes are empty on construction day and admit at most one independently fu
 
 test('an actual home upgrade increases room without adding members or households to that home', () => {
   const c = populated(119);
-  const home = c.buildings.find(b => b.zone === 'R' && homeOccupancy(c, b.id).households === 1 && c.households.some(h => h.home === b.id && householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && c.accounts[h.wallet] >= 20_000))!;
+  const home = c.buildings.find(b => b.zone === 'R' && homeOccupancy(c, b.id).households === 1 && c.households.some(h => h.home === b.id && householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && c.accounts[h.wallet] >= 50_000))!; // well above the 200 an investor needs after the month's rent and bills
   assert.ok(home); home.level = 1;
   const before = c.households.filter(h => h.home === home.id).map(h => [h.id, h.members]);
   step(c);

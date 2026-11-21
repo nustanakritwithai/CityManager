@@ -81,7 +81,8 @@ test('after an exodus, rebuilding work brings new households back', { timeout: 1
 
 test('saves: old saves without a departure count load; forged departures are rejected', () => {
   const c = createCity(61025); for (let d = 0; d < 400; d++) step(c);
-  closeIndustry(c); for (let d = 0; d < 120; d++) step(c);
+  // Stop on the day people leave, while their emigration savings are still in the recent ledger.
+  closeIndustry(c); for (let d = 0; d < 120 && !c.migration.departures; d++) step(c);
   assert.ok((c.migration.departures ?? 0) > 0);
   const raw = JSON.parse(serialize(c));
   const old = JSON.parse(serialize(createCity(61025))); delete old.migration.departures;

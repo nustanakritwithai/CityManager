@@ -5,6 +5,7 @@ import {
   KG_PER_LOT, RAI_PER_FARM_TILE, RICE_KG_PER_RAI, RICE_CROPS_PER_YEAR, riceLotsPerYear, riceHarvest, riceFarmHands, riceFarmStore,
   millJobs, MILL_TONNES_PER_DAY, MILL_LOTS_PER_WORKER, REAL_RICE_RECIPE, riceBagsToday, RICE_GRAMS_PER_PERSON_DAY, RICE_PRICE,
 } from '../src/industry-scale.ts';
+import { REAL_CROPS } from '../src/industry-scale.ts';
 import { keepSupplied } from './plants.ts';
 import { legacySizes } from './legacy-sizes.ts';
 
@@ -68,7 +69,7 @@ test('in a new city the rice farm, the mill and the households move real kilos a
   const paid = recent(c.ledger).filter(e => /^Household #\d+ purchase$/.test(e.reason) && eaten.some(g => g.tick === e.tick && g.to === e.from && g.from === e.to));
   assert.ok(paid.some(e => e.amount % RICE_PRICE.retail === 0));
   assert.equal(goodsUnit(c, 'milled-rice', 'retail'), RICE_PRICE.retail);
-  assert.equal(goodsUnit(c, 'canned-food', 'retail'), 800, 'other goods keep their basket price for now');
+  assert.equal(goodsUnit(c, 'canned-food', 'retail'), REAL_CROPS.vegetables.prices.retail, 'canned food is sold by the kilo too');
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
   assert.deepEqual(deserialize(serialize(c)), c, 'the save validates the real harvests, milling and kilo sales');
 });

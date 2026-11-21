@@ -66,6 +66,7 @@ const reasonLabels: Record<string, string> = {
   'Outside water supply': 'ซื้อน้ำจากประตูเมือง',
   'Local wholesale goods': 'ซื้อสินค้าขายส่งในเมือง',
   'Outside goods import': 'นำเข้าสินค้าจากภายนอก',
+  'Other goods bought in': 'ซื้อของใช้และบริการอื่นจากภายนอกมาขาย',
   'Outside market goods export': 'รายรับจากการส่งออกสินค้า',
   'Monthly wages': 'จ่ายค่าจ้างตามวันทำงานจริง',
   'Monthly household wage tax': 'ภาษีจากค่าจ้างครัวเรือน',
@@ -138,6 +139,8 @@ export function reasonLabel(reason: string): string {
   if (road) return `สร้างถนน ${road[1]} ช่อง`;
   const purchase = /^Household #(\d+) purchase$/.exec(reason);
   if (purchase) return `ครัวเรือน #${purchase[1]} ซื้อสินค้า`;
+  const other = /^Household #(\d+) other spending$/.exec(reason);
+  if (other) return `ครัวเรือน #${other[1]} ซื้อของใช้และบริการอื่น`;
   const cropPurchase = /^Fresh crop purchase #(\d+)$/.exec(reason);
   if (cropPurchase) return `ครัวเรือนซื้อพืชผล · รายการ #${cropPurchase[1]}`;
   const cropExchange = /^Crop exchange #(\d+)$/.exec(reason);

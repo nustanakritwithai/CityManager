@@ -4,7 +4,7 @@ import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS } from './factory-levels.ts';
 import { factoryCrops, factoryJobs, farmStaff, farmStock, realCrop, realIndustry, realProduct, realHarvest, millJobsFor, millLotsPerWorker, bagsToday, REAL_CROPS } from './industry-scale.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
-import { MONTH, WAGES, farmCrop, goodsUnit, isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
+import { MONTH, WAGES, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, type City, type CropEntry, type Firm } from './sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
@@ -121,9 +121,19 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       requireThat((realIndustry(c) || e.amount % unit === 0) && (imported ? e.to === 'outside' : /^firm:[1-9]\d*$/.test(e.to)));
       const key = saleKey(e.tick,e.from,e.to); cashPurchases.set(key,safeAdd(cashPurchases.get(key) ?? 0,e.amount));
     }
+    // Real rules: a household's other spending at a shop (whole people at OTHER_SPENDING.price) matches what the shop bought
+    // in from outside for them that day (the same people at OTHER_SPENDING.boughtIn). Markets sell none.
+    const otherSold = new Map<string, number>(), otherBought = new Map<string, number>();
+    for (const [i,e] of c.ledger.entries()) if (unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i) && firms.get(e.from)?.zone === 'C' && e.reason === OTHER_GOODS_BOUGHT_IN) {
+      requireThat(realIndustry(c) && e.to === 'outside' && !isMarket(firms.get(e.from)!) && e.amount % OTHER_SPENDING.boughtIn === 0);
+      const key = saleKey(e.tick,e.from,'outside'); otherBought.set(key,safeAdd(otherBought.get(key) ?? 0,e.amount / OTHER_SPENDING.boughtIn));
+    }
     for (const [i,e] of c.ledger.entries()) if (unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i) && firms.get(e.to)?.zone === 'C') {
-      const m = /^Household #([1-9]\d*) purchase$/.exec(e.reason);
-      if (m) {
+      const m = /^Household #([1-9]\d*) purchase$/.exec(e.reason), other = OTHER_SPENDING_REASON.exec(e.reason);
+      if (other) {
+        requireThat(realIndustry(c) && e.from === `household:${other[1]}` && !isMarket(firms.get(e.to)!) && e.amount % OTHER_SPENDING.price === 0);
+        const key = saleKey(e.tick,e.to,'outside'); otherSold.set(key,safeAdd(otherSold.get(key) ?? 0,e.amount / OTHER_SPENDING.price));
+      } else if (m) {
         requireThat(e.from === `household:${m[1]}` && (realIndustry(c) || e.amount % 800 === 0));
         const key = saleKey(e.tick,e.to,e.from);
         cashSales.set(key,safeAdd(cashSales.get(key) ?? 0,e.amount));
@@ -135,6 +145,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       }
     }
     for (const key of new Set([...goodsSales.keys(),...cashSales.keys()])) requireThat(goodsSales.get(key) === cashSales.get(key));
+    for (const key of new Set([...otherSold.keys(),...otherBought.keys()])) requireThat(otherSold.get(key) === otherBought.get(key));
     for (const key of new Set([...goodsPurchases.keys(),...cashPurchases.keys()])) requireThat(goodsPurchases.get(key) === cashPurchases.get(key));
   }
   const roles = new Map<string, Role>(Object.entries(history?.roles ?? {})), holdings = new Map<string, Holding>(Object.entries(history?.cropHoldings ?? {}).map(([w,h]) => [w, {...h}])), operating = new Map<string, Operating[]>();
@@ -220,6 +231,10 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       requireThat(!household || kg <= bagsToday(spec, household.members, e.tick)); riceKilos.set(key, kg);
       latestPurchase.set(e.to, Math.max(e.tick, latestPurchase.get(e.to) ?? -1));
     } else basket(e.tick, e.to, e.quantity);
+  }
+  // Real rules: a household's other spending counts its people against the day's basket, as goods and market crops do.
+  for (const e of c.ledger) if (e.tick > c.agricultureStartTick && (captureTick === undefined || e.tick <= captureTick) && OTHER_SPENDING_REASON.test(e.reason)) {
+    requireThat(e.amount % OTHER_SPENDING.price === 0); basket(e.tick, e.from, e.amount / OTHER_SPENDING.price);
   }
   let previousTick = history?.throughTick ?? c.agricultureStartTick, day = -1, postCrop = false;
   let sellable = new Map<string, number>();
@@ -394,7 +409,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified 
   c.ledger.forEach((e, i) => {
     if (e.from === f.wallet && e.reason === 'Monthly firm rent') { requireThat(e.to === 'landlord'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
     // Unified firms account for finished goods and paid employee wages as well.
-    if (unified && (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import' || e.reason === 'Outside market goods export' || /^Household #\d+ purchase$/.test(e.reason) || e.reason === 'Monthly wages')) {
+    if (unified && (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import' || e.reason === 'Outside market goods export' || /^Household #\d+ purchase$/.test(e.reason) || e.reason === 'Monthly wages' || e.reason === OTHER_GOODS_BOUGHT_IN || OTHER_SPENDING_REASON.test(e.reason))) {
       if (e.from === f.wallet) rows.push({ tick:e.tick, revenue:0, expense:e.amount, moneyIndex:i });
       else if (e.to === f.wallet) rows.push({ tick:e.tick, revenue:e.amount, expense:0, moneyIndex:i });
     }

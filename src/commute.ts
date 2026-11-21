@@ -357,7 +357,7 @@ export function canWalk(c: City, from: readonly number[], to: readonly number[])
 }
 
 export type ShoppingTrip = { householdId: number; shopFirmId: number; from: number; to: number; route: number[]; distanceM: number; mode: 'walk' | 'drive'; vehicleId: number | null; minutes: number };
-const PURCHASE = /^Household #([1-9]\d*) purchase$/;
+const PURCHASE = /^Household #([1-9]\d*) (?:purchase|other spending)$/;
 /**
  * Today's real shopping trips: one per household and shop it bought from today (goods or market crops), from
  * the home driveway to the shop's. A household drives its own vehicle when the shop is beyond walking distance
