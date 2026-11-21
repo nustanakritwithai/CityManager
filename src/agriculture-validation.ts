@@ -2,7 +2,7 @@ import { farmProductionFertility, FARM_YIELD_PER_WORKER } from './farm-productio
 import { isCanonicalExpandedResourceMap } from './expanded-map-migration.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS } from './factory-levels.ts';
-import { factoryCrops, factoryJobs, farmStaff, farmStock, isRealRiceFarm, riceHarvest, millJobs, MILL_LOTS_PER_WORKER, REAL_RICE_RECIPE, realIndustry, riceBagsToday } from './industry-scale.ts';
+import { factoryCrops, factoryJobs, farmStaff, farmStock, realCrop, realIndustry, realProduct, realHarvest, millJobsFor, millLotsPerWorker, bagsToday, REAL_CROPS } from './industry-scale.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { MONTH, WAGES, farmCrop, goodsUnit, isMarket, isRetail, type City, type CropEntry, type Firm } from './sim.ts';
 import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
@@ -181,8 +181,8 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   };
   // A firm's crop store under the city's rules; for one no longer here, the larger of the stores it could have had.
   const storeOf = (zone: 'F' | 'I', level: number, f?: Firm): number => zone === 'F'
-    ? (f ? farmStock(level, c, farmCrop(c, f)) : Math.max(farmStock(level, c), farmStock(level, c, 'rice')))
-    : (f ? factoryCrops(level, c, f) : Math.max(factoryCrops(level, c), factoryCrops(level, c, { zone: 'I', recipe: 'rice-mill' })));
+    ? (f ? farmStock(level, c, farmCrop(c, f)) : Math.max(farmStock(level, c), ...Object.keys(REAL_CROPS).map(crop => farmStock(level, c, crop))))
+    : (f ? factoryCrops(level, c, f) : Math.max(factoryCrops(level, c), ...Object.values(REAL_CROPS).map(spec => factoryCrops(level, c, { zone: 'I', recipe: spec.recipe }))));
   const holding = (wallet: string): Holding => { const value = holdings.get(wallet) ?? { quantity: 0, value: 0 }; holdings.set(wallet, value); return value; };
   const receive = (wallet: string, qty: number, value: number) => {
     const h = holding(wallet); h.quantity = safeAdd(h.quantity, qty); h.value = safeAdd(h.value, value);
@@ -211,12 +211,13 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     requireThat(count <= limit); baskets.set(key, count);
     latestPurchase.set(wallet, Math.max(tick, latestPurchase.get(wallet) ?? -1));
   };
-  // Under real rice rules milled rice is bought by the kilo outside the daily basket: at most the day's ration (industry-scale.ts).
+  // Under real crop rules rice and sugar are bought by the kilo outside the daily basket: at most the day's ration (industry-scale.ts).
   const riceKilos = new Map<string, number>();
   for (const e of c.goodsLedger) if (e.tick > c.agricultureStartTick && (captureTick === undefined || e.tick <= captureTick) && e.to.startsWith('household:')) {
-    if (realIndustry(c) && e.product === 'milled-rice') {
-      requireThat(isSafeCount(e.quantity, 1)); const key = e.tick + ':' + e.to, kg = (riceKilos.get(key) ?? 0) + e.quantity, household = households.get(Number(e.to.slice(10)));
-      requireThat(!household || kg <= riceBagsToday(household.members, e.tick)); riceKilos.set(key, kg);
+    const spec = e.product !== undefined ? realProduct(e.product, c) : undefined;
+    if (spec) {
+      requireThat(isSafeCount(e.quantity, 1)); const key = e.tick + ':' + e.to + ':' + e.product, kg = (riceKilos.get(key) ?? 0) + e.quantity, household = households.get(Number(e.to.slice(10)));
+      requireThat(!household || kg <= bagsToday(spec, household.members, e.tick)); riceKilos.set(key, kg);
       latestPurchase.set(e.to, Math.max(e.tick, latestPurchase.get(e.to) ?? -1));
     } else basket(e.tick, e.to, e.quantity);
   }
@@ -238,7 +239,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     if (e.kind === 'harvest') {
       requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? farmStaff(FARM_MAX_LEVEL, c, e.crop) : 3) && e.batches === 0 && e.outputQuantity === 0);
       role(e.to, 'F'); const before = holding(e.to), current = firms.get(e.to), b = current && c.buildings.find(b => b.id === current.building);
-      const realRice = e.crop !== undefined && isRealRiceFarm(e.crop, c);
+      const farmSpec = realCrop(e.crop, c), realRice = farmSpec !== undefined;
       if (b) requireThat(e.workers <= farmStaff(b.level, c, e.crop));
       const oldRules = !withFarmLevels || e.tick <= (c.farmLevelStartTick ?? 0);
       const maxLevel = Math.min(b?.level ?? FARM_MAX_LEVEL, oldRules ? 3 : FARM_MAX_LEVEL);
@@ -251,7 +252,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
         // while new events must be possible at some actual effective fertility.
         const independent = c.farmSoilIndependentStartTick !== undefined && e.tick > c.farmSoilIndependentStartTick;
         // A real 100-rai rice farm harvests its level's share of the year (industry-scale.ts), whatever the soil.
-        const matches = realRice ? e.quantity === Math.min(room, riceHarvest(level, e.tick, e.workers)) : independent ? e.quantity === Math.min(room, FARM_YIELD_PER_WORKER * e.workers) : b ? e.quantity === Math.min(room, harvestYield(farmProductionFertility(c, b.cell, e.tick), e.workers)) : oldRules
+        const matches = farmSpec ? e.quantity === Math.min(room, realHarvest(farmSpec, level, e.tick, e.workers)) : independent ? e.quantity === Math.min(room, FARM_YIELD_PER_WORKER * e.workers) : b ? e.quantity === Math.min(room, harvestYield(farmProductionFertility(c, b.cell, e.tick), e.workers)) : oldRules
           ? e.quantity <= Math.min(room, 24 * e.workers)
           : Array.from({ length: 51 }, (_, i) => 50 + i).some(fertility => e.quantity === Math.min(room, harvestYield(fertility, e.workers)));
         if (matches) { feasible = level; break; }
@@ -276,9 +277,9 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       const index = cash(e, e.to, e.from); release(e); totals.consumed = safeAdd(totals.consumed, 1);
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
     } else if (e.kind === 'process') {
-      // A real rice mill (industry-scale.ts) mills 100 batches a worker, 2 lots of paddy to 13 kg of rice each.
-      const realMill = realIndustry(c) && e.crop === 'rice';
-      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= (extendedFactories && e.tick > (c.factoryProgressionStartTick ?? c.tick) ? (realMill ? millJobs(9) : FACTORY_MAX_WORKERS) : 6) && e.batches >= 1 && e.batches <= e.workers * (realMill ? MILL_LOTS_PER_WORKER / REAL_RICE_RECIPE.crop : 1) && e.quantity === (realMill ? REAL_RICE_RECIPE.crop : 2) * e.batches && e.outputQuantity === (realMill ? REAL_RICE_RECIPE.goods : 8) * e.batches);
+      // A real mill (industry-scale.ts) processes its crop's batches a worker a day, two lots each.
+      const millSpec = realCrop(e.crop, c), realMill = millSpec !== undefined;
+      requireThat(e.to === 'processing' && e.reason === `Crop recipe #${e.id}` && e.cash === 0 && e.toValue === 0 && e.workers >= 1 && e.workers <= (extendedFactories && e.tick > (c.factoryProgressionStartTick ?? c.tick) ? (millSpec ? millJobsFor(millSpec, 9) : FACTORY_MAX_WORKERS) : 6) && e.batches >= 1 && e.batches <= e.workers * (millSpec ? Math.floor(millLotsPerWorker(millSpec) / 2) : 1) && e.quantity === 2 * e.batches && e.outputQuantity === (millSpec ? millSpec.batchGoods : 8) * e.batches);
       role(e.from, 'I'); release(e);
       const current = firms.get(e.from), b = current && c.buildings.find(b => b.id === current.building); if (b) requireThat(e.workers <= factoryJobs(b.level, c, current));
       const key = e.tick + ':' + e.from; requireThat(!dailyProduction.has(key)); dailyProduction.add(key);

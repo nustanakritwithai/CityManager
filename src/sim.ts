@@ -1,7 +1,7 @@
 import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
-import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, isRealRiceMill, riceBagsToday, RICE_PRICE, REAL_RICE_RECIPE, MILL_LOTS_PER_WORKER, type IndustryRules } from './industry-scale.ts';
+import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, bagsToday, millLotsPerWorker, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
@@ -241,7 +241,7 @@ export const residentialGrowthCost = (level: number) => RESIDENTIAL_ROOM_COST * 
 export function housingShortage(c: City): boolean {
   if (c.households.some(h => h.home === null)) return true;
   const facts = admissionFacts(c);
-  if (facts.vacancies < 1 || facts.existingUnemployed > 0) return false;
+  if (!jobSeekersComing(c, facts) && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return false;
   const svc = utilities(c), occupied = buildOccupancyIndex(c.households);
   return !vacantHomes(c).some(b => homeSupplied(c, b, svc) && canAccommodate(housingCapacity(b, c), occupied.get(b.id) ?? { households: 0, persons: 0 }, 1));
 }
@@ -987,7 +987,8 @@ function summarize(c: City) {
     return n + Math.max(0, Math.min(room.households - used.households, Math.floor((room.persons - used.persons) / 3)));
   }, 0);
   const homeless = c.households.filter(h => h.home === null).length;
-  const incoming = Math.min(MAX_CITY_HOUSEHOLDS - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2)));
+  // People coming to look for work (real rules) need homes too, a household a day.
+  const incoming = Math.min(MAX_CITY_HOUSEHOLDS - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2), jobSeekersComing(c, admission) ? JOB_SEEKERS_PER_DAY : 0));
   // Open jobs people can take now (a seat and a wage the firm can pay) vs seats a firm cannot fund.
   const seats = c.firms.filter(f => access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + Math.max(0, capacity(building(c, f.building), f, c) - firmWorkerCount(c, f.id)), 0);
   const farms = c.firms.filter(f => f.zone === 'F');
@@ -1199,20 +1200,27 @@ function freightReach(c: City) {
 function trade(c: City) {
   const active = c.firms.filter(f => access(c, building(c, f.building).cell));
   const hooks = agricultureHooks(c), sellable = runAgriculture(c, hooks), reach = freightReach(c);
-  // Shops stock every product the city makes, an even share of the shelf each, local wholesale first.
-  // Under real rice rules a shop carries every product, bringing in from outside what the town does not make.
+  // Shops stock every product the city makes, local wholesale first.
+  // Under real crop rules a shop carries every product, bringing in from outside what the town does not make.
   const made = realIndustry(c) ? [...PRODUCTS] : PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
   for (const shop of active.filter(f => isCommercial(f) && firmWorkerCount(c, f.id) > 0)) {
-    const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id)).stock, Math.max(4, c.households.reduce((n, h) => n + h.members, 0) * 2)), share = Math.ceil(target / Math.max(1, made.length));
+    const people = c.households.reduce((n, h) => n + h.members, 0);
+    const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id)).stock, Math.max(4, people * 2));
+    // Products sold by the kilo (real rice and sugar) keep about a week of what the town eats; the shelf is shared out
+    // evenly between the products sold in daily baskets.
+    const baskets = made.filter(p => !realProduct(p, c)).length;
     for (const product of made) {
+      const spec = realProduct(product, c), share = spec ? Math.max(1, Math.ceil(people * spec.gramsPerPersonDay * 7 / 1000)) : Math.ceil(target / Math.max(1, baskets));
+      // Kilos have their own small shelf: only baskets count against the shop's stock limit.
+      const room = () => spec ? share : target + PRODUCTS.reduce((n, p) => n + (realProduct(p, c) ? shop.products[p] : 0), 0) - shop.inventory;
       // Goods go by truck: only a factory with a road route to the shop can deliver to it.
       for (const producer of active.filter(f => f.zone === 'I' && f.products[product] > 0 && reach(f, shop))) {
-        const qty = Math.min(producer.products[product], share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / goodsUnit(c, product, 'wholesale')));
+        const qty = Math.min(producer.products[product], share - shop.products[product], room(), Math.floor(spendable(c, shop) / goodsUnit(c, product, 'wholesale')));
         if (qty <= 0) continue;
         transfer(c, shop.wallet, producer.wallet, qty * goodsUnit(c, product, 'wholesale'), 'Local wholesale goods', true);
         moveProduct(c, producer, shop, product, qty); goodsTransfer(c, producer.wallet, shop.wallet, qty, 'Wholesale stock delivery', product);
       }
-      const imported = reach('gateway', shop) ? Math.min(share - shop.products[product], target - shop.inventory, Math.floor(spendable(c, shop) / goodsUnit(c, product, 'import'))) : 0;
+      const imported = reach('gateway', shop) ? Math.min(share - shop.products[product], room(), Math.floor(spendable(c, shop) / goodsUnit(c, product, 'import'))) : 0;
       if (imported > 0) {
         transfer(c, shop.wallet, 'outside', imported * goodsUnit(c, product, 'import'), 'Outside goods import', true);
         moveProduct(c, null, shop, product, imported); c.goods.imported += imported; goodsTransfer(c, 'outside', shop.wallet, imported, 'Imported shop stock', product);
@@ -1227,21 +1235,26 @@ function trade(c: City) {
     // Rotate sellers without repeatedly picking an empty or unaffordable business.
     if (shops.length) { const start = Math.floor(random(c) * shops.length); shops.push(...shops.splice(0, start)); }
     const homeCell = building(c, h.home!).cell;
-    // Real rice: the family buys the kilos of milled rice it eats today (whole bags), by the kilo, at the nearest
-    // shop it can walk to that has some; the day's other shopping follows.
-    let riceDue = realIndustry(c) ? riceBagsToday(h.members, c.tick) : 0;
+    // Real crops: the family buys the kilos of rice and sugar it eats today (whole bags), by the kilo, at the shops it
+    // can walk to that have some; the day's other shopping follows.
     const riceKg = realIndustry(c);
-    for (const shop of riceDue ? shops : []) {
-      if (!riceDue) break;
-      if (!shop.products['milled-rice'] || !canWalk(c, [homeCell], [building(c, shop.building).cell])) continue;
-      const kg = Math.min(riceDue, shop.products['milled-rice'], Math.floor(balance(c, h.wallet) / RICE_PRICE.retail));
-      if (!kg) continue;
-      transfer(c, h.wallet, shop.wallet, RICE_PRICE.retail * kg, `Household #${h.id} purchase`, true);
-      moveProduct(c, shop, null, 'milled-rice', kg); c.goods.consumed += kg; h.lastPurchaseTick = c.tick;
-      goodsTransfer(c, shop.wallet, h.wallet, kg, 'Household final consumption', 'milled-rice'); riceDue -= kg;
+    let kilosDue = 0;
+    for (const spec of riceKg ? Object.values(REAL_CROPS) : []) {
+      const product = spec.product as ProductId;
+      let due = bagsToday(spec, h.members, c.tick);
+      for (const shop of due ? shops : []) {
+        if (!due) break;
+        if (!shop.products[product] || !canWalk(c, [homeCell], [building(c, shop.building).cell])) continue;
+        const kg = Math.min(due, shop.products[product], Math.floor(balance(c, h.wallet) / spec.prices.retail));
+        if (!kg) continue;
+        transfer(c, h.wallet, shop.wallet, spec.prices.retail * kg, `Household #${h.id} purchase`, true);
+        moveProduct(c, shop, null, product, kg); c.goods.consumed += kg; h.lastPurchaseTick = c.tick;
+        goodsTransfer(c, shop.wallet, h.wallet, kg, 'Household final consumption', product); due -= kg;
+      }
+      kilosDue += due;
     }
     // Other food the family's shops could sell it today; with none in town, rice alone is the day's food.
-    const otherFood = shops.some(f => PRODUCTS.some(p => p !== 'milled-rice' && f.products[p] > 0) || f.cropInventory > 0 && (sellable.get(f.id) ?? 0) > 0);
+    const otherFood = shops.some(f => PRODUCTS.some(p => !realProduct(p, c) && f.products[p] > 0) || f.cropInventory > 0 && (sellable.get(f.id) ?? 0) > 0);
     for (const shop of shops) {
       if (purchased >= h.members || balance(c, h.wallet) < 800) break;
       // Shopping is a real trip: only a shop the family can get to along linked streets (on foot at least) sells to it.
@@ -1250,7 +1263,7 @@ function trade(c: City) {
         // Preferences select the order, not a one-product limit: a family can fill its one
         // daily basket from the remaining stocked products without inventing demand or credit.
         for (const product of productPreference(h.id, c.tick)) {
-          if (riceKg && product === 'milled-rice') continue;
+          if (realProduct(product, c)) continue;
           if (purchased >= h.members || balance(c, h.wallet) < 800) break;
           const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
           if (!quantity) continue;
@@ -1261,11 +1274,11 @@ function trade(c: City) {
         while (purchased < h.members && balance(c, h.wallet) >= 800 && consumeMarketCrop(c, h, shop, sellable, hooks, true)) purchased++;
       }
     }
-    h.needs = (riceKg ? riceDue === 0 && (purchased === h.members || !otherFood) : purchased === h.members) ? 0 : unmetDays;
+    h.needs = (riceKg ? kilosDue === 0 && (purchased === h.members || !otherFood) : purchased === h.members) ? 0 : unmetDays;
   }
   for (const f of active.filter(f => f.zone === 'I' && firmWorkerCount(c, f.id) > 0 && reach(f, 'gateway'))) {
-    // A day's output a worker: 8 goods, or 1,300 kg of milled rice at a real rice mill.
-    const perWorker = isRealRiceMill(f, c) ? REAL_RICE_RECIPE.goods * MILL_LOTS_PER_WORKER / REAL_RICE_RECIPE.crop : 8;
+    // A day's output a worker: 8 goods, or a real mill's kilos (1,300 kg of milled rice, 1,338 kg of sugar).
+    const millSpec = realMillCrop(f, c), perWorker = millSpec ? millSpec.batchGoods * Math.floor(millLotsPerWorker(millSpec) / 2) : 8;
     const exported = takeLargest(f.products, PRODUCTS, Math.min(f.inventory, firmWorkerCount(c, f.id) * perWorker));
     for (const product of PRODUCTS) {
       const n = exported[product]; if (!n) continue;
@@ -1274,9 +1287,9 @@ function trade(c: City) {
     }
   }
 }
-/** Satang a unit of a product: a basket of goods, or a kilo of milled rice under real rice rules (industry-scale.ts). */
+/** Satang a unit of a product: a basket of goods, or a kilo of milled rice or sugar under real crop rules (industry-scale.ts). */
 export const goodsUnit = (c: IndustryRules, product: string, kind: 'wholesale' | 'import' | 'export' | 'retail'): number =>
-  realIndustry(c) && product === 'milled-rice' ? RICE_PRICE[kind] : ({ wholesale: 350, import: 450, export: 350, retail: 800 } as const)[kind];
+  realProduct(product, c)?.prices[kind] ?? ({ wholesale: 350, import: 450, export: 350, retail: 800 } as const)[kind];
 function withholdWageTax(c: City, wallet: string, wage: number): void {
   const tax = taxSatang(wage, taxRatesAt(c.taxPolicy, c.tick).wage);
   if (transfer(c, wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Wage tax invariant violated.');
@@ -1621,6 +1634,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (!facts.bootstrap && facts.vacancies > 0 && facts.existingUnemployed === 0 && !arrivalProfile(c, facts).affordable) reasons.push('รายได้หลังหักภาษีจากงานที่ว่างยังไม่พอค่าอาหาร ค่าเช่า และค่าน้ำไฟตามเกณฑ์รับคนเข้าเมือง');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
+  if (realIndustry(c) && !facts.bootstrap) reasons.push(`คนนอกเมืองย้ายเข้ามาหางานวันละ ${JOB_SEEKERS_PER_DAY} ครัวเรือน แม้งานเต็มแล้ว ตราบที่คนว่างงานยังไม่ถึง ${JOB_SEEKER_UNEMPLOYMENT_LIMIT * 100}% ของแรงงาน (ตอนนี้ ${Math.round(unemploymentRate(c) * 100)}%) ${jobSeekersComing(c, facts) ? 'วันนี้ยังมีคนมา' : 'วันนี้ไม่มีคนมาเพิ่ม'}`);
   reasons.push('บ้านที่ว่างหรือมีครัวเรือนน้อยกว่าได้รับการจัดบ้านก่อนอาคารที่มีคนมาก');
   reasons.push(`ทุก ${HOUSING_RELOCATION_INTERVAL} วัน ย้ายครัวเรือนได้ไม่เกิน ${HOUSING_RELOCATION_LIMIT} ครัวเรือน ไปบ้านที่ใกล้สวนหรือโรงเรียนที่เปิดดีกว่า หรือกระจายจากบ้านที่มีมากกว่าปลายทางอย่างน้อย 2 ครัวเรือนโดยไม่ลดความใกล้สิ่งอำนวยความสะดวก ต้องมีที่ว่าง ถนน น้ำไฟ และไม่ตัดบริการอาคารอื่น`);
   reasons.push('ความสุขค่อย ๆ ปรับตามภาษี การมีงานทำ ความใกล้สวนและโรงเรียน และเส้นทางไปทำงานที่ประมาณจากถนน');
@@ -1686,6 +1700,18 @@ export function landValues(c: City): (cell: number) => number {
   // A jammed street outside the door costs the parcel: arrivals settle elsewhere and the weekly move takes people out.
   return cell => { let v = seen.get(cell); if (v === undefined) { v = Math.max(0, landValue(homeAmenities(c, cell).points, access(c, cell), air(cell)) - Math.min(CONGESTION_LAND_CAP, Math.round(Math.max(0, jam(cell) - CONGESTION_LAND_THRESHOLD) * CONGESTION_LAND_POINTS))); seen.set(cell, v); } return v; };
 }
+/**
+ * Under real rules people keep coming to look for work, even with every job taken, while few in town are out of work:
+ * one household a day while unemployment is under 10% of the workforce (both assumed). Those who find nothing in two
+ * months leave again (see departures), so a town settles with some people out of work, and the newcomers who need homes
+ * are what get houses built.
+ */
+export const JOB_SEEKERS_PER_DAY = 1, JOB_SEEKER_UNEMPLOYMENT_LIMIT = .1;
+export function unemploymentRate(c: City): number {
+  const working = c.households.filter(h => householdAccess(c, h)), workforce = working.reduce((n, h) => n + h.workforce, 0);
+  return workforce ? working.reduce((n, h) => n + Math.max(0, h.workforce - householdWorkerCount(c, h.id)), 0) / workforce : 0;
+}
+const jobSeekersComing = (c: City, facts: { bootstrap: boolean }) => realIndustry(c) && !facts.bootstrap && unemploymentRate(c) < JOB_SEEKER_UNEMPLOYMENT_LIMIT;
 /** Days in which a city's employers fill their open jobs with people from outside (real workplace sizes). */
 export const ARRIVAL_FILL_DAYS = 30;
 function admitHousehold(c: City) {
@@ -1694,16 +1720,20 @@ function admitHousehold(c: City) {
   const happiness = averageHouseholdHappiness(c.happiness);
   if (happiness !== null && happiness < 35) return;
   if (c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
-  const facts = admissionFacts(c);
-  if (!facts.bootstrap && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
+  const facts = admissionFacts(c), seekers = jobSeekersComing(c, facts);
+  if (!facts.bootstrap && !seekers && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
   // A new household takes the best land it fits into; ties keep the usual order.
-  // Under real workplace sizes employers fill their open jobs from outside over about a month, as real hiring takes;
-  // a city saved before keeps its one new household a day.
-  const worth = landValues(c), batch = facts.bootstrap || !realIndustry(c) ? 1 : Math.ceil(facts.vacancies / ARRIVAL_FILL_DAYS);
+  // Under real rules employers fill their open jobs from outside over about a month, as real hiring takes, and
+  // people come looking for work even when every job is taken (one household a day while few are out of work);
+  // a city saved before keeps its one new household a day for an open job.
+  const hiring = facts.existingUnemployed > 0 ? 0 : Math.ceil(facts.vacancies / ARRIVAL_FILL_DAYS);
+  const worth = landValues(c), batch = facts.bootstrap || !realIndustry(c) ? 1 : Math.max(seekers ? JOB_SEEKERS_PER_DAY : 0, hiring);
   for (let n = 0; n < batch; n++) {
     if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
-    if (c.households.length >= MAX_CITY_HOUSEHOLDS || (!facts.bootstrap && facts.vacancies < 1)) return;
-    const { members, workforce, workerSkills, affordable } = arrivalProfile(c, facts);
+    if (c.households.length >= MAX_CITY_HOUSEHOLDS || (!facts.bootstrap && !seekers && facts.vacancies < 1)) return;
+    // With no job open, the newcomer is a single person come to look for work on their savings.
+    const searching = seekers && (facts.vacancies < 1 || facts.existingUnemployed > 0);
+    const { members, workforce, workerSkills, affordable } = searching ? { members: 1, workforce: 1, workerSkills: { general: 1, manufacturing: 0, retail: 0 }, affordable: true } : arrivalProfile(c, facts);
     if (!affordable) return;
     const svc = utilities(c), occupied = buildOccupancyIndex(c.households);
     const fitting = vacantHomes(c).filter(b => canAccommodate(housingCapacity(b, c), occupied.get(b.id) ?? { households: 0, persons: 0 }, members) && homeSupplied(c, b, svc));
@@ -1828,8 +1858,8 @@ function grow(c: City) {
     } else if (f && isCommercial(f) && !commercialGrowthReasons(c, f).length) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && !isCommercial(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f) / MONTH + 2 * 350))
-      // A real rice mill grows only while paddy waits for it: its store at least half full of the rice it cannot mill in time.
-      && (!isRealRiceMill(f, c) || f.cropInventory * 2 >= factoryCrops(b.level, c, f))) {
+      // A real mill grows only while crop waits for it: its store at least half full of what it cannot process in time.
+      && (!realMillCrop(f, c) || f.cropInventory * 2 >= factoryCrops(b.level, c, f))) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
     }
   }

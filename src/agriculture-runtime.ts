@@ -1,6 +1,6 @@
 import { farmProductionFertility } from './farm-production.ts';
 import { cropJournalLength } from './city-history.ts';
-import { isRealRiceMill, isRealRiceFarm, riceHarvest, MILL_LOTS_PER_WORKER, REAL_RICE_RECIPE } from './industry-scale.ts';
+import { realCrop, realMillCrop, realHarvest, realRecipe, millLotsPerWorker } from './industry-scale.ts';
 /** Canonical crop operations. Proposals are checked before synchronous commits. */
 import { farmCrop, firmCropStore, isCommercial, type City, type Firm, type Household, type CropEntry } from './sim.ts';
 import { CROPS, RECIPE, emptyCrops, freshPreference, type CropId } from './goods.ts';
@@ -111,7 +111,7 @@ function exchange(c: City, seller: Firm, buyer: Firm, crop: CropId, quantity: nu
 function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
   const building = c.buildings.find(b => b.id === f.building), count = workers(f, hooks);
   if (!building || count === null) return;
-  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: farmProductionFertility(c, building.cell), operational: operational(c, f, hooks), capacity: firmCropStore(building, f, c), ...(isRealRiceFarm(farmCrop(c, f), c) ? { realYield: riceHarvest(building.level, c.tick, count) } : {}) });
+  const proposal = proposeHarvest({ cropInventory: f.cropInventory, cropCost: f.cropCost, productionTick: f.productionTick }, { tick: c.tick, workers: count, fertility: farmProductionFertility(c, building.cell), operational: operational(c, f, hooks), capacity: firmCropStore(building, f, c), ...(realCrop(farmCrop(c, f), c) ? { realYield: realHarvest(realCrop(farmCrop(c, f), c)!, building.level, c.tick, count) } : {}) });
   if (!proposal.ok) return;
   if (!proposal.quantity) { f.productionTick = proposal.next.productionTick; return; }
   let event: CropEntry, harvested: number;
@@ -125,8 +125,8 @@ function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
 function process(c: City, f: Firm, hooks: AgricultureHooks): void {
   const count = workers(f, hooks), b = c.buildings.find(b => b.id === f.building); if (count === null || !f.recipe || !b) return;
   const recipe = RECIPE[f.recipe];
-  const mill = isRealRiceMill(f, c), batch = mill ? REAL_RICE_RECIPE : undefined;
-  const proposal = proposeRecipe({ cropInventory: f.cropInventory, cropCost: f.cropCost, inventory: f.inventory, productionTick: f.productionTick }, { tick: c.tick, workers: mill ? count : Math.min(count, Math.floor(f.crops[recipe.crop] / 2)), operational: operational(c, f, hooks), cropCapacity: firmCropStore(b, f, c), ...(batch ? { recipe: batch, batchesPerWorker: MILL_LOTS_PER_WORKER / batch.crop } : {}) });
+  const spec = realMillCrop(f, c), mill = spec !== undefined, batch = spec ? realRecipe(spec) : undefined;
+  const proposal = proposeRecipe({ cropInventory: f.cropInventory, cropCost: f.cropCost, inventory: f.inventory, productionTick: f.productionTick }, { tick: c.tick, workers: mill ? count : Math.min(count, Math.floor(f.crops[recipe.crop] / 2)), operational: operational(c, f, hooks), cropCapacity: firmCropStore(b, f, c), ...(batch && spec ? { recipe: batch, batchesPerWorker: Math.floor(millLotsPerWorker(spec) / batch.crop) } : {}) });
   if (!proposal.ok) return;
   if (!proposal.quantity) { f.productionTick = proposal.next.productionTick; return; }
   let event: CropEntry, processed: number, produced: number, expense: number;
@@ -176,7 +176,7 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
     if (!isSafeCount(factory.productionTick) || factory.productionTick >= c.tick || !factory.recipe) continue;
     const crop = RECIPE[factory.recipe].crop, sellers = sellersFor.get(crop)!; let source = sourceFor.get(crop)!;
     const b = c.buildings.find(b => b.id === factory.building); if (!b) continue;
-    let target: number; try { target = cappedProduct(workers(factory, hooks)!, isRealRiceMill(factory, c) ? MILL_LOTS_PER_WORKER * 2 : 4, firmCropStore(b, factory, c)); } catch { continue; }
+    let target: number; try { target = cappedProduct(workers(factory, hooks)!, realMillCrop(factory, c) ? millLotsPerWorker(realMillCrop(factory, c)!) * 2 : 4, firmCropStore(b, factory, c)); } catch { continue; }
     // `source` is the first seller any factory may still buy from; a seller this factory cannot reach by road
     // is passed over for this factory alone (`at`), and stays in line for the next.
     let at = source;

@@ -3,7 +3,7 @@ import { keepSupplied } from './plants.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { createCity, step, deserialize, serialize, summary, bulldoze, moveHousehold, housingCapacity, homeOccupancy, employmentForHousehold, firmWorkerCount, householdWorkerCount, explainCell, GATEWAY, WAGES, MONTH, type City, type Household } from '../src/sim.ts';
+import { createCity, step, deserialize, serialize, summary, bulldoze, moveHousehold, housingCapacity, homeOccupancy, employmentForHousehold, firmWorkerCount, householdWorkerCount, explainCell, unemploymentRate, JOB_SEEKERS_PER_DAY, JOB_SEEKER_UNEMPLOYMENT_LIMIT, GATEWAY, WAGES, MONTH, type City, type Household } from '../src/sim.ts';
 import { deserializeV1 } from '../src/legacy-v1.ts';
 import { legacySizes, legacyIndustry } from './legacy-sizes.ts';
 
@@ -58,7 +58,7 @@ test('homes are empty on construction day and admit at most one independently fu
 
 test('an actual home upgrade increases room without adding members or households to that home', () => {
   const c = populated(119);
-  const home = c.buildings.find(b => b.zone === 'R' && homeOccupancy(c, b.id).households === 1 && c.households.some(h => h.home === b.id && householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3))!;
+  const home = c.buildings.find(b => b.zone === 'R' && homeOccupancy(c, b.id).households === 1 && c.households.some(h => h.home === b.id && householdWorkerCount(c, h.id) > 0 && c.tick - h.lastPurchaseTick <= 3 && c.accounts[h.wallet] >= 20_000))!;
   assert.ok(home); home.level = 1;
   const before = c.households.filter(h => h.home === home.id).map(h => [h.id, h.members]);
   step(c);
@@ -149,7 +149,10 @@ test('usable vacant capacity suppresses extra development and the household admi
   assert.doesNotThrow(() => deserialize(serialize(c)));
   const stable = populated();
   for (const f of stable.firms) { stable.accounts.outside += stable.accounts[f.wallet]; stable.accounts[f.wallet] = 0; }
-  assert.equal(summary(stable).demand.R, 0); // Unfunded vacancies cannot commission endless empty housing.
+  // Unfunded vacancies cannot commission endless empty housing: what is left is the steady trickle of people
+  // coming to look for work, which stops once a tenth of the workforce is out of work.
+  assert.equal(summary(stable).demand.R, unemploymentRate(stable) < JOB_SEEKER_UNEMPLOYMENT_LIMIT ? JOB_SEEKERS_PER_DAY : 0);
+  assert.equal(summary(legacyIndustry(stable)).demand.R, 0, 'a city saved before keeps homes for open jobs only');
 });
 
 test('v2 reader rejects overcapacity, duplicate worker authority, invalid composition and forged allocation totals', () => {
