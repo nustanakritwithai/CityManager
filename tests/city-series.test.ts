@@ -34,8 +34,11 @@ test('population and building history match what the city looked like on earlier
   const city = grown(120, c => snapshots.set(c.tick, { population: c.households.reduce((n, h) => n + h.members, 0), households: c.households.length, buildings: c.buildings.length }));
   const s = dailySeries(city, Infinity);
   assert.equal(s.ticks[0], city.history ? city.tick-89 : 0);
+  // The series counts the households still in town from their arrival (city-series.ts): days before the last departure
+  // of a newcomer who found no work are not compared.
+  const lastDeparture = Math.max(-1, ...city.ledger.filter(e => e.reason === 'Emigration savings').map(e => e.tick));
   for (const [tick, snap] of snapshots) {
-    const i = s.ticks.indexOf(tick); if (i < 0) continue;
+    const i = s.ticks.indexOf(tick); if (i < 0 || tick < lastDeparture) continue;
     assert.equal(s.population[i], snap.population, `population on day ${tick}`);
     assert.equal(s.households[i], snap.households, `households on day ${tick}`);
     assert.equal(BUILDING_ORDER.reduce((n, k) => n + s.buildings[k][i], 0), snap.buildings, `buildings on day ${tick}`);

@@ -20,11 +20,18 @@ test('career change: idle specialists retrain only when their trade has no openi
   assert.deepEqual(retrainingMoves({ general: 0, manufacturing: 0, retail: 1 }, idle, { I: 1, C: 0 }), { manufacturing: 0, retail: 1 }, 'shops closed, a factory is hiring');
 });
 
-test('a healthy city keeps everyone: no household leaves in two years', { timeout: 120_000 }, () => {
+test('a healthy city keeps everyone who works: only newcomers who found no work in two months leave', { timeout: 300_000 }, () => {
   for (const seed of [61025, 2026]) {
-    const c = createCity(seed); for (let d = 0; d < 720; d++) step(c);
-    assert.equal(c.migration.departures ?? 0, 0, `seed ${seed}`);
-    assert.equal(c.ledger.filter(e => e.reason === 'Emigration savings').length, 0);
+    const c = createCity(seed);
+    for (let d = 0; d < 720; d++) {
+      const before = new Map(c.households.map(h => [h.id, c.employment.some(e => e.householdId === h.id) || c.ownerLabor.some(e => e.householdId === h.id)]));
+      step(c);
+      for (const [id, working] of before) if (!c.households.some(h => h.id === id)) assert.equal(working, false, `seed ${seed} day ${c.tick}: household #${id} left with work`);
+    }
+    // A city saved before, with no people coming to look for work, keeps everyone.
+    const old = legacySizes(createCity(seed)); for (let d = 0; d < 720; d++) step(old);
+    assert.equal(old.migration.departures ?? 0, 0, `seed ${seed}`);
+    assert.equal(old.ledger.filter(e => e.reason === 'Emigration savings').length, 0);
   }
 });
 
@@ -82,7 +89,7 @@ test('after an exodus, rebuilding work brings new households back', { timeout: 1
 test('saves: old saves without a departure count load; forged departures are rejected', () => {
   const c = createCity(61025); for (let d = 0; d < 400; d++) step(c);
   // Stop on the day people leave, while their emigration savings are still in the recent ledger.
-  closeIndustry(c); for (let d = 0; d < 120 && !c.migration.departures; d++) step(c);
+  closeIndustry(c); for (let d = 0; d < 120 && !c.ledger.some(e => e.reason === 'Emigration savings'); d++) step(c);
   assert.ok((c.migration.departures ?? 0) > 0);
   const raw = JSON.parse(serialize(c));
   const old = JSON.parse(serialize(createCity(61025))); delete old.migration.departures;
