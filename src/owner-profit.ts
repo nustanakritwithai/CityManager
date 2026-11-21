@@ -29,7 +29,7 @@ function profitMonths(c: City, f: Firm, throughTick = c.tick) {
     if (!outgoing && !incoming) continue;
     const row = month(e.tick), amount = BigInt(e.amount);
     if (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import'
-      || e.reason === 'Outside market goods export' || /^Household #\d+ purchase$/.test(e.reason)
+      || e.reason === 'Outside market goods export' || /^Household #\d+ (?:purchase|other spending)$/.test(e.reason) || e.reason === 'Other goods bought in'
       || e.reason === 'Monthly wages' || e.reason === 'Monthly firm rent' || e.reason === 'Monthly water and power bill') {
       row.profit += incoming ? amount : -amount;
     }

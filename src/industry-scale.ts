@@ -25,7 +25,20 @@
  *   as Mitr Amnat Charoen employs some hundreds).
  * - People eat 30 kg of sugar a year (Ministry of Public Health, 2015), 82 g a day.
  *
- * Products of real crops are sold by the kilo, in 1 kg bags. Vegetables and canned food keep the old rules for now.
+ * Vegetables
+ * - A lot is 4 kg of leafy vegetables: 16 baht a kilo at the farm gate (assumed; Chinese kale and morning glory sell for
+ *   about 15–20).
+ * - A farm tile stands for 100 rai. Chinese kale yields about 1,200 kg a rai a crop in the field (National Statistical
+ *   Office). Levels 1–3 grow three, four and five crops a year (a crop takes 45–60 days); levels 4–6 keep five crops at
+ *   1,500, 2,000 and 2,500 kg a rai on better land (assumed).
+ * - Leafy vegetables are worked by hand: about 25 days of work a rai a crop over a 300-day working year, so about eight
+ *   hands for each crop a year on 100 rai (assumed). Cut vegetables keep three days.
+ * - A cannery's level sets its capacity from 2 t of vegetables a day to 500 t; a worker prepares half a tonne a day
+ *   (assumed: canning is hand work). Two 4 kg lots fill 10 kg of cans, net weight with the brine (assumed).
+ * - People eat 10 g of canned vegetables a day, under 4 kg a year (assumed: Thais eat vegetables fresh). Fresh
+ *   vegetables are part of the household's other spending (sim.ts, OTHER_SPENDING).
+ *
+ * Products of real crops are sold by the kilo, in 1 kg bags.
  */
 import { factoryLevel, FACTORY_MAX_LEVEL } from './factory-levels.ts';
 import { farmStockCapacity, REAL_FARM_STORES, MAX_REAL_FACTORY_CROPS } from './agriculture.ts';
@@ -54,6 +67,13 @@ export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
     batchGoods: 12, gramsPerPersonDay: 82,
     // About 22 baht a kilo wholesale, 25 retail, 24 imported and 18 for export (assumed).
     prices: Object.freeze({ wholesale: 119, retail: 135, import: 130, export: 97 }),
+  }),
+  vegetables: Object.freeze({
+    kgPerLot: 4, kgPerRai: [1200, 1200, 1200, 1500, 2000, 2500], cropsPerYear: [3, 4, 5, 5, 5, 5], hands: [25, 33, 42, 42, 42, 42], storeDays: 3,
+    recipe: 'cannery', product: 'canned-food', millTonnesPerDay: [2, 5, 10, 20, 50, 100, 200, 300, 500], millTonnesPerWorker: .5,
+    batchGoods: 10, gramsPerPersonDay: 10,
+    // A 425 g can of vegetables sells for about 25 baht: 59 a kilo retail, 50 wholesale, 55 imported and 44 for export (assumed).
+    prices: Object.freeze({ wholesale: 270, retail: 319, import: 297, export: 238 }),
   }),
 });
 const cropOfRecipe = new Map(Object.entries(REAL_CROPS).map(([crop, spec]) => [spec.recipe, crop]));

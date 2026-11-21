@@ -1206,11 +1206,12 @@ function trade(c: City) {
   for (const shop of active.filter(f => isCommercial(f) && firmWorkerCount(c, f.id) > 0)) {
     const people = c.households.reduce((n, h) => n + h.members, 0);
     const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id)).stock, Math.max(4, people * 2));
-    // Products sold by the kilo (real rice and sugar) keep about a week of what the town eats; the shelf is shared out
-    // evenly between the products sold in daily baskets.
+    // Products sold by the kilo (real rice, sugar and canned food) keep about a week of what the town eats, and at least a
+    // bag for each household, since a food bought rarely comes due for many on one day; the shelf is shared out evenly
+    // between the products sold in daily baskets.
     const baskets = made.filter(p => !realProduct(p, c)).length;
     for (const product of made) {
-      const spec = realProduct(product, c), share = spec ? Math.max(1, Math.ceil(people * spec.gramsPerPersonDay * 7 / 1000)) : Math.ceil(target / Math.max(1, baskets));
+      const spec = realProduct(product, c), share = spec ? Math.max(1, c.households.length, Math.ceil(people * spec.gramsPerPersonDay * 7 / 1000)) : Math.ceil(target / Math.max(1, baskets));
       // Kilos have their own small shelf: only baskets count against the shop's stock limit.
       const room = () => spec ? share : target + PRODUCTS.reduce((n, p) => n + (realProduct(p, c) ? shop.products[p] : 0), 0) - shop.inventory;
       // Goods go by truck: only a factory with a road route to the shop can deliver to it.
@@ -1255,6 +1256,19 @@ function trade(c: City) {
     }
     // Other food the family's shops could sell it today; with none in town, rice alone is the day's food.
     const otherFood = shops.some(f => PRODUCTS.some(p => !realProduct(p, c) && f.products[p] > 0) || f.cropInventory > 0 && (sellable.get(f.id) ?? 0) > 0);
+    // Real rules: the rest of a day's spending (fresh food, meals out, clothes, phone and the like) goes to a shop the family
+    // can walk to, which buys those goods in from outside. Every staffed shop sells it, stocked or not.
+    let otherShop = false;
+    for (const shop of riceKg ? active.filter(f => isCommercial(f) && !isMarket(f) && firmWorkerCount(c, f.id) > 0) : []) {
+      if (purchased >= h.members) break;
+      if (!canWalk(c, [homeCell], [building(c, shop.building).cell])) continue;
+      otherShop = true;
+      const people = Math.min(h.members - purchased, Math.floor(balance(c, h.wallet) / OTHER_SPENDING.price), Math.floor(spendable(c, shop) / OTHER_SPENDING.boughtIn));
+      if (people <= 0) continue;
+      transfer(c, shop.wallet, 'outside', people * OTHER_SPENDING.boughtIn, OTHER_GOODS_BOUGHT_IN, true);
+      transfer(c, h.wallet, shop.wallet, people * OTHER_SPENDING.price, otherSpendingReason(h.id), true);
+      purchased += people; h.lastPurchaseTick = c.tick;
+    }
     for (const shop of shops) {
       if (purchased >= h.members || balance(c, h.wallet) < 800) break;
       // Shopping is a real trip: only a shop the family can get to along linked streets (on foot at least) sells to it.
@@ -1274,7 +1288,7 @@ function trade(c: City) {
         while (purchased < h.members && balance(c, h.wallet) >= 800 && consumeMarketCrop(c, h, shop, sellable, hooks, true)) purchased++;
       }
     }
-    h.needs = (riceKg ? kilosDue === 0 && (purchased === h.members || !otherFood) : purchased === h.members) ? 0 : unmetDays;
+    h.needs = (riceKg ? kilosDue === 0 && (purchased === h.members || !otherFood && !otherShop) : purchased === h.members) ? 0 : unmetDays;
   }
   for (const f of active.filter(f => f.zone === 'I' && firmWorkerCount(c, f.id) > 0 && reach(f, 'gateway'))) {
     // A day's output a worker: 8 goods, or a real mill's kilos (1,300 kg of milled rice, 1,338 kg of sugar).
@@ -1287,6 +1301,18 @@ function trade(c: City) {
     }
   }
 }
+/**
+ * Real rules: what a household spends a day for each person beyond the rice, sugar and canned food it buys by the kilo,
+ * its rent, water and power, and its travel. The 2023 Household Socio-Economic Survey (National Statistical Office)
+ * puts a household's consumption at 21,262 baht a month (first half of 2023), of which housing is 5,295 and travel
+ * 3,880; the rest, about 12,100, over about 2.9 people (assumed) is 139 baht a person a day, or 7.50 at the game's
+ * wage scale (18.5 real baht to one). Less the 0.50 the kilo foods cost, 7.00 is left. A shop buys those goods in
+ * from outside for 3.50 of it, keeping the 3.50 a person a day the old daily basket left it (assumed).
+ */
+export const OTHER_SPENDING = Object.freeze({ price: 700, boughtIn: 350 } as const);
+export const OTHER_GOODS_BOUGHT_IN = 'Other goods bought in';
+export const otherSpendingReason = (householdId: number) => `Household #${householdId} other spending`;
+export const OTHER_SPENDING_REASON = /^Household #([1-9]\d*) other spending$/;
 /** Satang a unit of a product: a basket of goods, or a kilo of milled rice or sugar under real crop rules (industry-scale.ts). */
 export const goodsUnit = (c: IndustryRules, product: string, kind: 'wholesale' | 'import' | 'export' | 'retail'): number =>
   realProduct(product, c)?.prices[kind] ?? ({ wholesale: 350, import: 450, export: 350, retail: 800 } as const)[kind];

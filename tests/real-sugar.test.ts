@@ -60,12 +60,13 @@ test('in a new city cane goes from the field to the sugar mill, and households b
   assert.deepEqual(deserialize(serialize(c)), c, 'the save validates real cane harvests, crushing and kilo sales');
 });
 
-test('a shop keeps about a week of the kilos the town eats and shelves its baskets with the rest', { timeout: 300_000 }, () => {
+test('a shop keeps about a week of the kilos the town eats, and at least a bag for each household', { timeout: 300_000 }, () => {
   const c = createCity(61025); for (let d = 0; d < 120; d++) { step(c); keepSupplied(c); }
-  const people = c.households.reduce((n, h) => n + h.members, 0), week = (g: number) => Math.max(1, Math.ceil(people * g * 7 / 1000));
+  const people = c.households.reduce((n, h) => n + h.members, 0), week = (g: number) => Math.max(1, c.households.length, Math.ceil(people * g * 7 / 1000));
   for (const shop of c.firms.filter(f => f.zone === 'C')) {
     assert.ok(shop.products['milled-rice'] <= week(REAL_CROPS.rice.gramsPerPersonDay));
     assert.ok(shop.products.sugar <= week(CANE.gramsPerPersonDay));
+    assert.ok(shop.products['canned-food'] <= week(REAL_CROPS.vegetables.gramsPerPersonDay));
   }
   assert.equal(c.migration.departures ?? 0, 0, 'the shop pays its way and nobody leaves');
 });

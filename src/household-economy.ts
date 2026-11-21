@@ -21,7 +21,7 @@ export function incomeKind(reason: string): IncomeKind {
   return 'other';
 }
 export function spendingKind(reason: string): SpendingKind {
-  if (/^Household #[1-9]\d* purchase$/.test(reason)) return 'shopping';
+  if (/^Household #[1-9]\d* (?:purchase|other spending)$/.test(reason)) return 'shopping';
   if (reason === 'Monthly household rent') return 'rent';
   if (/ tax$/.test(reason)) return 'tax';
   if (reason === 'Monthly household water and power bill') return 'utilities';
