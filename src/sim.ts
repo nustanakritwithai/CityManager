@@ -1,7 +1,7 @@
 import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
-import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, bagsToday, millLotsPerWorker, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
+import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
@@ -565,8 +565,24 @@ export const farmCropMode = (f: Pick<Firm, 'cropMode'>): 'auto' | 'manual' => f.
 export function farmCrop(c: City, f: Pick<Firm, 'building'> & Partial<Pick<Firm, 'cropChoices'>>): CropId {
   return f.cropChoices?.at(-1)?.crop ?? cropForFertility(c.resources.fertility[building(c, f.building).cell]) ?? 'rice';
 }
-/** Choose the least represented crop, ties resolved in catalog order; never mutate the city. */
+/**
+ * Real rules: lots a day each crop's mills could process with the workers they have, less what the town's farms of that
+ * crop harvest a day fully staffed (industry-scale.ts). A real mill draws on many farms: a 2 t a day rice mill takes the
+ * paddy of about 18 of the town's 100-rai fields, so farms keep coming on zoned land while the mills are short.
+ */
+export function realCropShortage(c: City, excludeFirmId?: number): Record<CropId, number> {
+  const svc = utilities(c), short = emptyCrops();
+  const working = (f: Firm) => access(c, building(c, f.building).cell) && svc.ok(f.building);
+  for (const f of c.firms) if (f.zone === 'I' && f.recipe && working(f)) { const spec = realMillCrop(f, c); if (spec) short[RECIPE[f.recipe].crop] += firmWorkerCount(c, f.id) * millLotsPerWorker(spec); }
+  for (const f of c.firms) if (f.zone === 'F' && f.id !== excludeFirmId && working(f)) { const crop = farmCrop(c, f), spec = realCrop(crop, c); if (spec) short[crop] -= realLotsPerYear(spec, building(c, f.building).level) / 365; }
+  return short;
+}
+/** Choose the crop the mills are shortest of under real rules, else the least represented crop, ties in catalog order; never mutate the city. */
 export function automaticFarmCrop(c: City, excludeFirmId?: number): CropId {
+  if (realIndustry(c)) {
+    const short = realCropShortage(c, excludeFirmId), most = [...CROPS].sort((a, b) => short[b] - short[a] || CROPS.indexOf(a) - CROPS.indexOf(b))[0];
+    if (short[most] > 0) return most;
+  }
   const counts = Object.fromEntries(CROPS.map(crop => [crop, 0])) as Record<CropId, number>;
   for (const f of c.firms) if (f.zone === 'F' && f.id !== excludeFirmId) counts[farmCrop(c, f)]++;
   return [...CROPS].sort((a, b) => counts[a] - counts[b] || CROPS.indexOf(a) - CROPS.indexOf(b))[0];
@@ -1005,9 +1021,10 @@ function summarize(c: City) {
     personCapacity: homes.reduce((n, b) => n + housingCapacity(b, c).persons, 0), treasury: balance(c, 'treasury'), net,
     demand: { R: Math.max(0, homeless + incoming - vacantSlots), C: retailDemand(c),
       I: industryGrowthStatus(c).ready ? 1 : 0,
-      F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || missingCropForBuyers ||
+      // Real rules: a new farm while any crop's mills can process more than the town's farms harvest.
+      F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || (realIndustry(c) ? Object.values(realCropShortage(c)).some(n => n > 0) : missingCropForBuyers ||
         c.households.reduce((n, h) => n + h.members, 0) + c.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(c, f.id) * 2, 0) >
-        farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0)) ? 1 : 0 } };
+        farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0))) ? 1 : 0 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
 function blockers(c: City, i: number): string[] {
