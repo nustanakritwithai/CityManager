@@ -13,11 +13,17 @@ function farmland(count: number, prepare: (c: City) => City = c => c) {
   return { c, lots };
 }
 
-test('a real mill short of crop wants the paddy of many 100-rai fields: farms go up on zoned land and grow its crop', { timeout: 300_000 }, () => {
+test('a real mill short of crop wants the paddy of many 100-rai fields: its farms grow first, then farms go up on zoned land', { timeout: 300_000 }, () => {
   const { c, lots } = farmland(6);
+  const level = (f: { building: number }) => c.buildings.find(b => b.id === f.building)!.level;
   for (let d = 0; d < 60; d++) { step(c); keepSupplied(c); }
+  assert.ok(lots.filter(i => c.cells[i].building !== null).length < lots.length, 'farms that can still grow hold the land back');
+  assert.ok(c.firms.some(f => f.zone === 'F' && level(f) >= 2), 'the farms grow instead');
+  // At level 3 a farm needs a worker with a diploma to grow on; the land is then taken for new farms.
+  for (let d = 0; d < 90; d++) { step(c); keepSupplied(c); }
   const built = lots.filter(i => c.cells[i].building !== null);
   assert.equal(built.length, lots.length, 'every zoned lot has a farm');
+  assert.ok(c.firms.filter(f => f.zone === 'F').some(f => level(f) === 3));
   const mill = c.firms.find(f => f.zone === 'I')!, farms = c.firms.filter(f => f.zone === 'F');
   assert.equal(mill.recipe, 'rice-mill');
   assert.ok(farms.every(f => farmCrop(c, f) === 'rice'), 'new farms grow what the mill mills');

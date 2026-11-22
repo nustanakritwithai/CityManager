@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createCity, buildRoad, buildCampus, buildPark, buildPlant, GATEWAY, SIZE, toggleCampus, type City } from '../src/sim.ts';
 import { buildingIssues, buildingIssueRevision, issuePlaceRoute, ISSUE_PRIORITY } from '../src/building-issues.ts';
 import { RETAIL_MAX_LEVEL } from '../src/retail-capacity.ts';
+import { farmMaxLevel } from '../src/industry-scale.ts';
 import { initialCampusReport, educationLevel } from '../src/education.ts';
 import { visibleIssueCells } from '../src/building-issue-layout.ts';
 import { bindIssueInput, issueGesture } from '../src/building-issue-input.ts';
@@ -152,7 +153,7 @@ test('education badges share the canonical one-holder allocator, rather than cop
 
 test('maximum tiers never invent a further education/upgrade gate', () => {
   for (const zone of ['I', 'F', 'C', 'R'] as const) {
-    const c = fixture(zone), b = c.buildings[0]; b.age = 60; b.level = zone === 'F' ? 6 : zone === 'C' ? RETAIL_MAX_LEVEL : 9; if (zone === 'R') b.housingType = 'condo';
+    const c = fixture(zone), b = c.buildings[0]; b.age = 60; b.level = zone === 'F' ? farmMaxLevel(c) : zone === 'C' ? RETAIL_MAX_LEVEL : 9; if (zone === 'R') b.housingType = 'condo';
     assert.ok(!facts(c).some(f => f.kind === 'education' || f.kind === 'upgrade'), zone);
   }
 });

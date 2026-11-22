@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, serialize, deserialize, adoptSavedEducation, housingUpgradeStatus, housingShortage, homeOccupancy, residentialGrowthCost, productionUpgradeStatus, retailGrowthStatus, isMarket, isRetail, zoneCell, access, type Building } from '../src/sim.ts';
+import { createCity, step, serialize, deserialize, adoptSavedEducation, housingUpgradeStatus, housingShortage, homeOccupancy, residentialGrowthCost, productionUpgradeStatus, retailGrowthStatus, isMarket, isRetail, zoneCell, access, type Building, type City } from '../src/sim.ts';
 import { factoryLevel } from '../src/factory-levels.ts';
+import { farmMaxLevel } from '../src/industry-scale.ts';
 import { RETAIL_MAX_LEVEL } from '../src/retail-capacity.ts';
 import { farmStockCapacity, proposeHarvest, proposeRecipe } from '../src/agriculture.ts';
 import { HOUSING_LEVELS, redevelopsAt } from '../src/housing.ts';
 import { populationFixture } from './population-capacity-fixture.ts';
 import { holdEducationReady } from './education-ready.ts';
 
-const maximum = (b: Building) => b.zone === 'R' || b.zone === 'I' ? 9 : b.zone === 'F' ? 6 : RETAIL_MAX_LEVEL;
+// Real-crop farms grow to the high-tech level 9; a city saved before stops its farms at 6.
+const maximum = (b: Building, c: City) => b.zone === 'R' || b.zone === 'I' ? 9 : b.zone === 'F' ? farmMaxLevel(c) : RETAIL_MAX_LEVEL;
 
 test('filled apartment and condo tiers upgrade once on the same tile, while absent credentials still block them', () => {
   // Reconciled synthetic census: enough real household records to fill the upper tiers.
@@ -83,7 +85,7 @@ test('all maximum levels survive education adoption and monthly review without a
   delete source.education;
   for (const b of source.buildings) {
     if (b.zone === 'C' && source.firms.some(f => f.building === b.id && isMarket(f))) continue;
-    b.level = maximum(b); if (b.zone === 'R') b.housingType = 'condo';
+    b.level = maximum(b, source); if (b.zone === 'R') b.housingType = 'condo';
   }
   const raw = serialize(source), envelope = JSON.parse(raw);
   assert.equal(envelope.version, 28); assert.equal(envelope.rulesVersion, 'chain-23');
@@ -119,7 +121,7 @@ test('every building class rejects invalid level boundaries and unknown envelope
   for (const zone of ['R', 'F', 'I', 'C'] as const) {
     const b = city.buildings.find(b => b.zone === zone && (zone !== 'C' || city.firms.some(f => f.building === b.id && isRetail(f))))!;
     assert.ok(b);
-    for (const level of [0, -1, 1.5, maximum(b) + 1]) {
+    for (const level of [0, -1, 1.5, maximum(b, city) + 1]) {
       const parsed = JSON.parse(original); parsed.buildings.find((item: Building) => item.id === b.id).level = level;
       assert.throws(() => deserialize(JSON.stringify(parsed)), `${zone} ${level}`);
     }
