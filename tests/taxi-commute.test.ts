@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { createCity, step, serialize, connectedRoads, SIZE, type City } from '../src/sim.ts';
 import { buildTaxiDepot } from '../src/taxi/placement.ts';
 import { TAXI_DEPOT_UNITS } from '../src/taxi/sites.ts';
-import { taxiFareSatang } from '../src/taxi/mode-share.ts';
-import { TAXI_FARE_REASON, TAXI_TRIPS_PER_CAR, WALK_MAX_M, planCommutes, runCommutes } from '../src/commute.ts';
+import { TAXI_FARE_REASON, TAXI_TRIPS_PER_CAR, WALK_MAX_M, planCommutes, runCommutes, taxiFare } from '../src/commute.ts';
 import { trafficPlan } from '../src/traffic-plan.ts';
 import { TILE_LENGTH_M } from '../src/traffic/network.ts';
 
@@ -29,7 +28,7 @@ test('someone with no vehicle and no bus for a long trip takes a taxi there and 
     assert.ok(t.distanceM > WALK_MAX_M, 'only beyond walking distance');
     assert.equal(t.distanceM, (t.route!.length - 1) * TILE_LENGTH_M);
     const minutes = t.minutes!, km = t.distanceM / 1000;
-    assert.equal(t.taxi!.fare, taxiFareSatang(km, minutes), 'the meter: flag fall, per km and per minute');
+    assert.equal(t.taxi!.fare, taxiFare(c, km, minutes, t.freeMinutes!), 'the meter: the first kilometre, each one after it and the minutes lost in jams');
   }
   assert.equal(trips.filter(t => t.mode === 'walk-long').length, 0, 'nobody is left to walk a long way while a taxi is free');
 });
