@@ -137,7 +137,8 @@ export function deriveWorkforceSummary(city: City): WorkforceSummary {
   for (const allocation of city.ownerLabor) {
     const role = firmRole(allocation.firmId, allocation.householdId);
     if (role === null) continue;
-    if (role !== 'retail' || firms.get(allocation.firmId)?.owner?.householdId !== allocation.householdId || allocation.workers !== 1) issue('role-mismatch', `firm:${allocation.firmId}.ownerLabor`, allocation.householdId);
+    // Owners run their own shop or, under real rules, their own factory.
+    if ((role !== 'retail' && role !== 'manufacturing') || firms.get(allocation.firmId)?.owner?.householdId !== allocation.householdId || allocation.workers !== 1) issue('role-mismatch', `firm:${allocation.firmId}.ownerLabor`, allocation.householdId);
     add({ householdId: allocation.householdId, workplace: `firm:${allocation.firmId}`, count: allocation.workers, role, relationship: 'owner-worker', skill: allocation.skill });
   }
   for (const park of city.parks) for (const allocation of park.staffing?.allocations ?? []) {

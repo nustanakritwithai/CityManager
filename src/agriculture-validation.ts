@@ -4,7 +4,7 @@ import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS } from './factory-levels.ts';
 import { factoryCrops, factoryJobs, farmMaxLevel, farmStaff, farmStock, realCrop, realIndustry, realProduct, realHarvest, millJobsFor, millLotsPerWorker, bagsToday, REAL_CROPS } from './industry-scale.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
-import { MONTH, wagesFor, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, type City, type CropEntry, type Firm } from './sim.ts';
+import { MONTH, wagesFor, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, INDUSTRY_STARTUP_CAPITAL, type City, type CropEntry, type Firm } from './sim.ts';
 import { CHAIN_CROP_PRICES, CROP_EXPORT, CROP_STOCK_CAPS, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
@@ -60,6 +60,14 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       const b = c.buildings.find(b => b.id === f.building);
       requireThat(b && f.cropCost === 0);
     }
+    if (f.zone === 'I' && f.owner !== null) {
+      // Under real rules a household that opened a factory owns it; one business a household.
+      const owner = f.owner;
+      requireThat(realIndustry(c) && object(owner) && isSafeCount(owner.householdId, 1) && households.has(owner.householdId) && !ownerIds.has(owner.householdId));
+      requireThat(['capitalContributed', 'capitalReturned', 'withdrawn', 'taxPaid'].every(key => isSafeCount(owner[key as keyof typeof owner])));
+      requireThat(owner.capitalContributed === INDUSTRY_STARTUP_CAPITAL && owner.capitalReturned === 0);
+      ownerIds.add(owner.householdId); continue;
+    }
     if (!isMarket(f) && !(isRetail(f) && f.owner !== null)) { requireThat(f.owner === null); continue; }
     const owner = f.owner;
     requireThat(object(owner) && isSafeCount(owner.householdId, 1) && households.has(owner.householdId) && !ownerIds.has(owner.householdId));
@@ -75,9 +83,12 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   }
   const ownerFirms = new Set<number>();
   for (const e of c.ownerLabor) {
-    requireThat(object(e) && isSafeCount(e.householdId, 1) && isSafeCount(e.firmId, 1) && e.workers === 1 && (e.skill === 'general' || e.skill === 'retail') && !ownerFirms.has(e.firmId));
+    requireThat(object(e) && isSafeCount(e.householdId, 1) && isSafeCount(e.firmId, 1) && e.workers === 1 && !ownerFirms.has(e.firmId));
     const h = households.get(e.householdId), f = c.firms.find(f => f.id === e.firmId);
-    requireThat(h && h.home !== null && f && (isMarket(f) || isRetail(f)) && f.owner?.householdId === h.id);
+    // A shop's owner works with general or retail skill; a factory's owner with general or manufacturing skill.
+    requireThat(h && h.home !== null && f && f.owner?.householdId === h.id && (f.zone === 'I'
+      ? e.skill === 'general' || e.skill === 'manufacturing'
+      : (isMarket(f) || isRetail(f)) && (e.skill === 'general' || e.skill === 'retail')));
     ownerFirms.add(e.firmId);
   }
   for (const h of c.households) {
@@ -372,6 +383,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   c.goodsLedger.forEach((e, i) => { if ((e.tick > c.agricultureStartTick && e.from === 'production') || /^Crop recipe #/.test(e.reason)) requireThat(matchedGoods.has(i)); });
   for (const h of c.households) { const tick = latestPurchase.get(h.wallet); if (tick !== undefined || h.lastPurchaseTick > c.agricultureStartTick) requireThat(h.lastPurchaseTick === tick); }
 
+  for (const f of c.firms.filter(f => f.zone === 'I' && f.owner)) validateFactoryOwner(c, f);
   if (!unified) {
     for (const f of c.firms.filter(f => isMarket(f))) validateOwnerFinance(c, f, operating.get(f.wallet) ?? []);
     for (const f of c.firms.filter(f => isRetail(f) && f.owner)) validateShopOwner(c, f);
@@ -384,6 +396,22 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       requireThat(ownerProfitHistory(c, f, 0n).reconciled);
     }
   }
+}
+
+/** A household-owned factory: its owner paid the opening capital from its own wallet, and every payout and tax is in the ledger. */
+function validateFactoryOwner(c: City, f: Firm): void {
+  const owner = f.owner!, wallet = `household:${owner.householdId}`, seed = c.history?.ownerFinance[f.wallet];
+  const opening = [...(c.history?.structuralProofs ?? []), ...c.ledger].filter(e => e.reason === `Owner industry capital #${f.id}`);
+  requireThat(opening.length === 1 && opening[0].from === wallet && opening[0].to === f.wallet && opening[0].amount === owner.capitalContributed);
+  let withdrawn = BigInt(seed?.withdrawn ?? 0), taxPaid = BigInt(seed?.taxPaid ?? 0);
+  requireThat((seed?.contributed ?? 0) === 0);
+  for (const e of c.ledger) {
+    if (e.from !== f.wallet && e.to !== f.wallet) continue;
+    requireThat(!e.reason.startsWith('Closing owner ') && e.reason !== 'Owner capital contribution');
+    if (e.reason === 'Owner profit distribution') { requireThat(e.from === f.wallet && e.to === wallet); withdrawn += BigInt(e.amount); }
+    if (e.reason === 'Monthly firm profit tax') { requireThat(e.from === f.wallet && e.to === 'treasury'); taxPaid += BigInt(e.amount); }
+  }
+  requireThat(withdrawn === BigInt(owner.withdrawn) && taxPaid === BigInt(owner.taxPaid));
 }
 
 /** A household-owned shop: its owner paid the opening capital and every owner movement is in the ledger. */

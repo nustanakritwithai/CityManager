@@ -134,6 +134,8 @@ export function growthChecklist(code: string): { label: string; state: CheckStat
   if (code === 'growth.ready') return GROWTH_STEPS.map(([, label]) => ({ label, state: 'pass' }));
   // The first factory only needs utilities and a parcel; later checks do not apply to it.
   if (code === 'growth.bootstrap') return GROWTH_STEPS.map(([, label], i) => ({ label, state: i < 2 ? 'pass' : 'skip' }));
+  // A household opening its own factory works in it, so it waits on neither vacancies, homes, crops nor a sponsor.
+  if (code === 'growth.household-investor') return GROWTH_STEPS.map(([, label], i) => ({ label, state: i < 2 ? 'pass' : 'skip' }));
   // Outside investors stand in for a saving sponsor when farms keep exporting idle crops.
   if (code === 'growth.outside-investor') return GROWTH_STEPS.map(([, label], i) => ({ label, state: i < 5 ? 'pass' : 'skip' }));
   const at = GROWTH_STEPS.findIndex(([step]) => step === code);
