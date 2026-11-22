@@ -378,6 +378,7 @@ function renderFirm(city: City, building: Building, firm: Firm, onHousehold: Hou
   if (!labor.householdCount) list.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานที่มีความสามารถตรงกับงานและสำรองค่าจ้างได้'));
   employees.append(list);
   if (city.education) employees.append(renderFirmCredentials(city, firm.id));
+  if (firm.zone === 'I' && firm.owner) employees.append(el('p', 'cx-detail-note', `โรงงานของครัวเรือน #${firm.owner.householdId} · ลงทุนจากเงินเก็บ ${cash(firm.owner.capitalContributed)} · เจ้าของทำงานเอง 1 คน ไม่มีเงินเดือน รับปันผลจากกำไรทุกสิ้นเดือน (ปันผลแล้ว ${cash(firm.owner.withdrawn)}) จ้างลูกจ้างได้อีก ${Math.max(0, capacity - 1)} คน`));
   if (firm.zone === 'C') employees.append(el('p', 'cx-detail-note', firm.owner
     ? `ร้านค้าของครัวเรือน #${firm.owner.householdId} · พาณิชย์ระดับ ${building.level} · เจ้าของยืนร้านเอง 1 คน ไม่มีเงินเดือน จ้างลูกจ้างได้อีก ${Math.max(0, capacity - 1)} คน`
     : `กิจการพาณิชย์ · ระดับ ${building.level} · ทุนจากนักลงทุนภายนอก ตำแหน่งงานทั้งหมดเป็นลูกจ้าง`));
@@ -452,7 +453,7 @@ function employmentRow(city: City, allocation: ReturnType<typeof employmentForHo
 function ownerLaborRow(allocation: City['ownerLabor'][number]): HTMLElement {
   const row = el('div', 'cx-owner-labor-row');
   Object.assign(row.dataset, { householdId: String(allocation.householdId), firmId: String(allocation.firmId), skill: allocation.skill, workers: String(allocation.workers), incomeRole: 'self-employed' });
-  row.append(el('strong', '', `ทำกิจการเอง ${allocation.workers} คน → พาณิชย์ #${allocation.firmId}`), el('span', '', `ทักษะ${WORKER_SKILL_LABELS[allocation.skill]} · ไม่มีเงินเดือนเจ้าของ · เงินกิจการแยกบัญชี`)); return row;
+  row.append(el('strong', '', `ทำกิจการเอง ${allocation.workers} คน → กิจการ #${allocation.firmId}`), el('span', '', `ทักษะ${WORKER_SKILL_LABELS[allocation.skill]} · ไม่มีเงินเดือนเจ้าของ · เงินกิจการแยกบัญชี`)); return row;
 }
 function renderWorkerSkills(city: City, household: Household): HTMLElement {
   const data = householdLabor(city, household.id)!, body = section('กลุ่มความสามารถของแรงงาน', `${data.workforce} คน · ไม่รวมผู้พึ่งพิง`), list = el('div', 'cx-skill-list');

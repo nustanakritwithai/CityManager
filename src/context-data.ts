@@ -73,6 +73,7 @@ export function growthStatusText(city: City) {
   const labels: Record<string, string> = {
     'growth.outside-investor': `ฟาร์มส่งออกพืชผลที่โรงงานในเมืองใช้ไม่ทัน ${status.exportedCrops} ล็อตใน 30 วัน ผู้ลงทุนภายนอกพร้อมเปิดโรงงานใหม่ในแปลงที่ผ่านเงื่อนไข (เดือนละไม่เกิน 1 แห่ง)`,
     'growth.bootstrap': 'โรงงานแรกเริ่มได้ด้วยทุนภายนอกที่บันทึกคู่บัญชี ก่อนรับแรงงานตามกติกาเริ่มเมือง',
+    'growth.household-investor': `ครัวเรือน #${status.investorHouseholdId} มีเงินเก็บพอ พร้อมลงทุน ${formatGrowthCash(status.requiredCapital)} บาทเปิดโรงงานของตัวเองในแปลงที่ผ่านเงื่อนไข สมาชิก 1 คนเลิกงานลูกจ้างมาเป็นเจ้าของ`,
     'growth.ready': `กิจการ #${status.sponsorFirmId} มีทุนที่ใช้ขยายได้ ${formatGrowthCash(status.availableCapital)} บาท พร้อมเปิดโรงงานในแปลงที่ผ่านเงื่อนไข`,
     'growth.utilities-unavailable': 'น้ำหรือไฟภายนอกยังไม่พร้อม การเปิดกิจการเพิ่มถูกระงับ',
     'growth.no-industrial-parcel': 'ยังไม่มีแปลง I ว่างที่เชื่อมถนนถึงทางออกเมือง วางโซนโรงงานข้างถนนก่อน',
@@ -82,7 +83,12 @@ export function growthStatusText(city: City) {
     'growth.no-profitable-sponsor': 'ยังไม่มีโรงงานที่ทำกำไรและผ่านเงื่อนไขลงทุนเพิ่ม ตรวจการผลิต ยอดขาย แรงงาน และภาระกิจการเดิม',
     'growth.saving-capital': `โรงงานกำลังสะสมทุนขยาย: ใช้ได้ ${formatGrowthCash(status.availableCapital)} / ต้องมี ${formatGrowthCash(status.requiredCapital)} บาท หลังกันภาระและเงินหมุนเวียน`,
   };
-  return { status, message: labels[status.code] ?? 'ยังไม่ผ่านเงื่อนไขขยายโรงงาน ตรวจข้อมูลจริงในรายละเอียดเงินทุน' };
+  const message = labels[status.code] ?? 'ยังไม่ผ่านเงื่อนไขขยายโรงงาน ตรวจข้อมูลจริงในรายละเอียดเงินทุน';
+  // Under real rules a household with a home also opens a factory once it has saved the capital and three months of its own spending.
+  const s = status.saver, saver = status.ready || !s || status.code === 'growth.utilities-unavailable' || status.code === 'growth.no-industrial-parcel' ? ''
+    : s.savings < s.needed ? ` · หรือครัวเรือน #${s.householdId} จะลงทุนเปิดโรงงานเองเมื่อเงินเก็บครบ ${formatGrowthCash(s.savings)} / ${formatGrowthCash(s.needed)} บาท (ทุนเปิดโรงงานบวกค่าใช้จ่ายของตัวเอง 3 เดือน)`
+    : ` · ครัวเรือน #${s.householdId} มีเงินเก็บพอเปิดโรงงานเองแล้ว รอให้โรงงานในเมืองมีกำไรในเดือนก่อน และเปิดได้เดือนละ 1 แห่ง`;
+  return { status, message: message + saver };
 }
 const formatGrowthCash = (amount: number) => (amount / 100).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 

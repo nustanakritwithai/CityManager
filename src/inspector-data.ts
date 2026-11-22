@@ -114,6 +114,8 @@ export function reasonLabel(reason: string): string {
   if (takeover) return `ค่าปรับปรุงอาคารเมื่อเจ้าใหม่รับช่วงกิจการ #${takeover[1]}`;
   const outsideEquity = /^Outside industry equity #(\d+)$/.exec(reason);
   if (outsideEquity) return `ทุนผู้ลงทุนภายนอกเปิดโรงงาน #${outsideEquity[1]}`;
+  const ownerIndustry = /^Owner industry capital #(\d+)$/.exec(reason);
+  if (ownerIndustry) return `ครัวเรือนลงทุนเปิดโรงงานของตัวเอง #${ownerIndustry[1]} (เงินเก็บของครัวเรือน ไม่ใช่ยอดขาย)`;
   const park = /^(Build|Demolish) park #(\d+)$/.exec(reason);
   if (park) return `${park[1] === 'Build' ? 'สร้าง' : 'รื้อ'}สวนสาธารณะ #${park[2]}`;
   const parkWage = /^Monthly park wages #(\d+)$/.exec(reason);
