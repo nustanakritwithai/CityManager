@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, type City } from '../src/sim.ts';
 import { TILE_LENGTH_M } from '../src/traffic/network.ts';
 import { driveway } from '../src/parking.ts';
-import { VEHICLE, WALK_MAX_M, commutesToday, liveVehicles, planCommutes, runCommutes, validateVehicles, vehiclePurchaseReason, fuelReason, type Trip } from '../src/commute.ts';
+import { VEHICLE, WALK_MAX_M, busFare, commutesToday, fuelPrice, liveVehicles, planCommutes, runCommutes, validateVehicles, vehiclePrice, vehiclePurchaseReason, fuelReason, type Trip } from '../src/commute.ts';
 
 const grown = (days = 60) => { const c = createCity(61025); for (let i = 0; i < days; i++) step(c); return c; };
 /** Move money in from outside, as an arrival's savings would, keeping every account summing to zero. */
@@ -39,12 +39,12 @@ test('a household with a long trip buys a motorcycle once its savings cover the 
   // Strip the fleet so the purchase is this test's own.
   delete c.vehicles;
   const before = c.accounts[h.wallet];
-  give(c, h.wallet, VEHICLE.motorcycle.price * 3);
+  give(c, h.wallet, vehiclePrice('motorcycle', c) * 3);
   const day = runCommutes(c, pay(c));
   const mine = day.bought.filter(v => v.householdId === h.id);
   assert.equal(mine.length, 1); assert.equal(mine[0].kind, 'motorcycle'); assert.equal(mine[0].fuelMl, VEHICLE.motorcycle.tankMl, 'sold with a full tank');
-  assert.ok(c.ledger.some(e => e.from === h.wallet && e.to === 'outside' && e.amount === VEHICLE.motorcycle.price && e.reason === vehiclePurchaseReason('motorcycle', mine[0].id)));
-  assert.ok(c.accounts[h.wallet] >= before + VEHICLE.motorcycle.price * 3 - VEHICLE.motorcycle.price - 2 * 30, 'only the vehicle (and at most a bus fare) left the wallet');
+  assert.ok(c.ledger.some(e => e.from === h.wallet && e.to === 'outside' && e.amount === vehiclePrice('motorcycle', c) && e.reason === vehiclePurchaseReason('motorcycle', mine[0].id)));
+  assert.ok(c.accounts[h.wallet] >= before + vehiclePrice('motorcycle', c) * 3 - vehiclePrice('motorcycle', c) - 2 * busFare(c), 'only the vehicle (and at most a bus fare) left the wallet');
   assert.equal(total(c), 0);
   // The next day the longest trip of that household is driven.
   const next = planCommutes(c).filter(t => t.householdId === h.id && t.distanceM > WALK_MAX_M);
@@ -54,22 +54,22 @@ test('a household with a long trip buys a motorcycle once its savings cover the 
 test('a household that can only just cover the price keeps a month of its spending back and buys nothing', () => {
   const c = grown(), trip = longTrip(c)!, h = c.households.find(x => x.id === trip.householdId)!;
   delete c.vehicles;
-  c.accounts.outside += c.accounts[h.wallet]; c.accounts[h.wallet] = 0; give(c, h.wallet, VEHICLE.motorcycle.price);
+  c.accounts.outside += c.accounts[h.wallet]; c.accounts[h.wallet] = 0; give(c, h.wallet, vehiclePrice('motorcycle', c));
   const spent = c.ledger.filter(e => e.from === h.wallet && e.tick > c.tick - 30).reduce((n, e) => n + e.amount, 0);
   const day = runCommutes(c, pay(c));
-  if (spent > 2 * 30) assert.equal(day.bought.filter(v => v.householdId === h.id).length, 0);
+  if (spent > 2 * busFare(c)) assert.equal(day.bought.filter(v => v.householdId === h.id).length, 0);
   assert.equal(total(c), 0);
 });
 
 test('home parking holds one car or two motorcycles, and a rich household buys a car', () => {
   const c = grown(), trip = longTrip(c)!, h = c.households.find(x => x.id === trip.householdId)!;
   delete c.vehicles;
-  give(c, h.wallet, VEHICLE.car.price * 3);
+  give(c, h.wallet, vehiclePrice('car', c) * 3);
   assert.equal(runCommutes(c, pay(c)).bought.find(v => v.householdId === h.id)?.kind, 'car');
   for (let k = 0; k < 3; k++) assert.equal(runCommutes(c, pay(c)).bought.filter(v => v.householdId === h.id).length, 0, 'no room for another');
   const d = grown(), t2 = longTrip(d)!, h2 = d.households.find(x => x.id === t2.householdId)!;
   d.vehicles = { version: 1, nextId: 2, fleet: [{ id: 1, householdId: h2.id, kind: 'motorcycle', bought: d.tick, fuelMl: 0, odometerM: 0 }] };
-  give(d, h2.wallet, VEHICLE.car.price * 3);
+  give(d, h2.wallet, vehiclePrice('car', d) * 3);
   const extra = runCommutes(d, pay(d)).bought.filter(v => v.householdId === h2.id);
   assert.ok(extra.every(v => v.kind === 'motorcycle'), 'beside a motorcycle there is room only for a second one');
 });
@@ -82,7 +82,7 @@ test('driving burns fuel by distance, a dry tank is refilled and paid for, and t
   assert.ok(driven);
   const v = c.vehicles!.fleet[0], spec = VEHICLE.motorcycle, need = Math.round(2 * driven.distanceM * spec.mlPerKm / 1000);
   assert.equal(v.fuelMl, spec.tankMl - need); assert.equal(v.odometerM, 2 * driven.distanceM);
-  assert.ok(c.ledger.some(e => e.reason === fuelReason(1) && e.from === h.wallet && e.to === 'outside' && e.amount === Math.round(spec.tankMl / 1000 * 150)));
+  assert.ok(c.ledger.some(e => e.reason === fuelReason(1) && e.from === h.wallet && e.to === 'outside' && e.amount === Math.round(spec.tankMl / 1000 * fuelPrice(c))));
   assert.equal(total(c), 0);
 });
 

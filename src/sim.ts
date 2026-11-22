@@ -40,7 +40,7 @@ import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkStaff, parkWorkers, type 
 import { EDUCATION_COST, educationWages, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
-import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, plantLevel, plantLevelSpec, plantSpec, plantUpgradeReason, type PlantLevel, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
+import { HOUSEHOLD_NEED, billPayee, householdMonthlyBill, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, plantLevel, plantLevelSpec, plantSpec, plantUpgradeReason, type PlantLevel, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
 export type { Plant, UtilityKind } from './utilities.ts';
 export type { EmploymentAllocation } from './labor.ts';
 export const SIZE = 24;
@@ -95,6 +95,9 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   housingScale?: 1;
   /** Firms pay real average wages by industry (REAL_WAGES). Absent on cities saved before, which keep the old wages. */
   wageScale?: 1;
+  /** Households pay real prices for fuel, vehicles, bus rides and taxis (commute.ts), and homes and shops pay real electricity and
+   * water bills to the authorities outside the town (utilities.ts). Absent on cities saved before, which keep the old prices. */
+  priceScale?: 1;
   businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
   foodDemandStartTick?: number;
@@ -1094,7 +1097,7 @@ export function explainCell(c: City, i: number): string[] {
   const output = [`${({ R: 'Home', C: 'Commercial', I: 'Factory', F: 'Farm' } as const)[b.zone]} #${b.id} · level ${b.level} · age ${b.age} days`, access(c, i) ? 'Connected road frontage.' : 'Disconnected: employment, purchases, production and height growth are suspended.'];
   const svc = utilities(c), supplied = svc.served.get(b.id)!, draws = svc.need.get(b.id)!;
   if (!svc.ok(b.id)) output.push(`No ${UTILITY_KINDS.filter(k => !supplied[k]).join(' or ')}: the network is short or this parcel is off it. Work, production, move-ins and growth here wait until a plant adds capacity.`);
-  else output.push(`Water and power: draws ${draws.power} power and ${draws.water} water unit(s); bills ${(buildingBill(svc, b.id) / 100).toFixed(2)} credits/month.`);
+  else output.push(`Water and power: draws ${draws.power} power and ${draws.water} water unit(s); bills ${(buildingBill(svc, b.id, b.zone, c) / 100).toFixed(2)} credits/month.`);
   if (b.zone === 'R') {
     const used = homeOccupancy(c, b.id), room = housingCapacity(b, c);
     output.push(`Actual occupancy: ${used.households}/${room.households} households, ${used.persons}/${room.persons} persons. Upgrades add capacity only.`, ...explainMigration(c, b.id));
@@ -1478,7 +1481,7 @@ function settleMonth(c: City) {
   for (const f of c.firms) {
     payWages(c, f);
     transfer(c, f.wallet, 'landlord', firmRent(f), 'Monthly firm rent', true);
-    transfer(c, f.wallet, 'treasury', buildingBill(svc, f.building), 'Monthly water and power bill', true);
+    transfer(c, f.wallet, billPayee(c), buildingBill(svc, f.building, building(c, f.building).zone, c), 'Monthly water and power bill', true);
     f.lastMonthProfit = f.monthlyRevenue - f.monthlyExpense;
     f.profit += f.lastMonthProfit;
     const taxPaid = transfer(c, f.wallet, 'treasury', taxSatang(f.lastMonthProfit, profitRate), 'Monthly firm profit tax');
@@ -1504,10 +1507,11 @@ function settleMonth(c: City) {
   for (const h of c.households) if (h.home !== null) {
     // Rent follows the land: better-served, cleaner parcels cost more.
     transfer(c, h.wallet, 'landlord', householdRent(worth(building(c, h.home).cell)), 'Monthly household rent');
-    transfer(c, h.wallet, 'treasury', householdBill(svc, h.home), 'Monthly household water and power bill');
+    transfer(c, h.wallet, billPayee(c), householdBill(svc, h.home, c), 'Monthly household water and power bill');
   }
   // The city buys what the gateway delivered and keeps its plants running.
-  for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
+  // Under real prices the authorities sell to homes and shops themselves; the town buys nothing at the gateway.
+  if (c.priceScale !== 1) for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
   for (const p of c.plants) transfer(c, 'treasury', 'upkeep', plantSpec(p).upkeep, `Monthly ${PLANT_NAMES[p.kind]} upkeep #${p.id}`);
   for (const p of c.parks) transfer(c, 'treasury', 'upkeep', funded(PARK.upkeep, budgetLevel(c, 'parks')), `Monthly park upkeep #${p.id}`);
   // A leased venue's operator pays rent instead of the city paying upkeep; a short wallet pays what it has.
@@ -1727,7 +1731,7 @@ function arrivalProfile(c: City, facts: ReturnType<typeof admissionFacts>) {
       const gross = facts.offers.find(offer => offer.id === job.firmId)!.wage * job.workers;
       return sum + gross - taxSatang(gross, rate);
     }, 0);
-    const affordable = net >= members * MONTH * 800 + 10_000 + HOUSEHOLD_BILL;
+    const affordable = net >= members * MONTH * 800 + 10_000 + householdMonthlyBill(c);
     return { members, workforce, workerSkills, affordable };
   };
   if (facts.vacancies >= 2 && facts.existingUnemployed === 0) {
@@ -2081,7 +2085,7 @@ function stepWithRoads(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { housingScale: 1, industryScale: 1, wageScale: 1, farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { housingScale: 1, industryScale: 1, wageScale: 1, priceScale: 1, farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -2618,6 +2622,7 @@ export function deserialize(json: string): City {
   // A city saved before real building sizes keeps its smaller homes; only new cities are built to real sizes.
   if (city.housingScale !== undefined && city.housingScale !== 1) throw new Error('Invalid housing scale.');
   if (city.wageScale !== undefined && city.wageScale !== 1) throw new Error('Invalid wage scale.');
+  if (city.priceScale !== undefined && city.priceScale !== 1) throw new Error('Invalid price scale.');
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.

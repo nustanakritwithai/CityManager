@@ -54,7 +54,7 @@ type RealCrop = Readonly<{
   /** Two lots of crop give `goods` kg of product. */ batchGoods: number; gramsPerPersonDay: number; prices: Prices;
   /** Real baht a rai a crop the farm spends on what is not labour or land: seed, fertilizer, chemicals, fuel, machine hire. */
   inputsPerRai: number;
-  /** Satang a kilo of product the mill spends running: packaging, energy, upkeep, net of what its by-products bring. */
+  /** Satang a kilo of product the mill spends running: packaging, energy and water, upkeep, net of what its by-products bring. */
   millCostPerKg: number;
 }>;
 export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({

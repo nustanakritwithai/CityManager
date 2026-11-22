@@ -420,7 +420,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified 
       else if (e.to === f.wallet) rows.push({ tick:e.tick, revenue:e.amount, expense:0, moneyIndex:i });
     }
     // Water and power bills (chain-4) are operating costs too.
-    if (e.from === f.wallet && e.reason === 'Monthly water and power bill') { requireThat(e.to === 'treasury'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
+    if (e.from === f.wallet && e.reason === 'Monthly water and power bill') { requireThat(e.to === (c.priceScale === 1 ? 'outside' : 'treasury')); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
   });
   const earnings = (endTick: number, endIndex = Infinity, fromTick = -1) => (fromTick < (c.history?.throughTick ?? -1) ? BigInt(unified ? (c.history?.ownerProfit[f.wallet]?.profit ?? seed?.profit ?? 0) : (seed?.profit ?? 0)) : 0n) + rows.filter(e => e.tick > fromTick && e.tick <= endTick && (e.moneyIndex === undefined || e.moneyIndex < endIndex)).reduce((n, e) => n + BigInt(e.revenue) - BigInt(e.expense), 0n);
   // Reconstruct the W=0 upper bound at the precise ledger prefix. Actual

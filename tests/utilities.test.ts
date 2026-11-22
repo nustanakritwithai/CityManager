@@ -6,7 +6,7 @@ import { HOUSEHOLD_BILL, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, TARIFF, building
 import { previewPlacement } from '../src/placement-preview.ts';
 import { cityGoals } from '../src/city-goals.ts';
 import { keepSupplied } from './plants.ts';
-import { legacySizes } from './legacy-sizes.ts';
+import { legacyPrices, legacySizes } from './legacy-sizes.ts';
 
 const site = (c: City, skip = 0) => c.cells.map((cell, i) => !cell.road && !cell.zone && cell.building === null && !plantAt(c, i) && access(c, i) ? i : -1).filter(i => i >= 0)[skip];
 const run = (c: City, days: number) => { for (let d = 0; d < days; d++) step(c); };
@@ -63,7 +63,8 @@ test('supply follows roads: the farthest buildings go dark first and their work 
 });
 
 test('monthly bills: users pay the city, the city pays outside units and plant upkeep', () => {
-  const c = createCity(61025); run(c, 59); const cell = site(c);
+  // A town that sells its own water and power (cities saved before real prices); real bills are in real-bills.test.ts.
+  const c = legacyPrices(createCity(61025)); run(c, 59); const cell = site(c);
   assert.equal(buildPlant(c, cell, 'water').ok, true); run(c, 1); assert.equal(c.tick % 30, 0);
   const month = c.ledger.filter(e => e.tick === c.tick), svc = utilities(c);
   const household = month.filter(e => e.reason === 'Monthly household water and power bill');
