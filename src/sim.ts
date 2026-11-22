@@ -1,7 +1,7 @@
 import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
-import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, farmInputs, millRunningCost, FARM_INPUTS_REASON, MILL_COSTS_REASON, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
+import { factoryJobs, factoryUtilities, farmMaxLevel, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, farmInputs, millRunningCost, FARM_INPUTS_REASON, MILL_COSTS_REASON, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
@@ -32,8 +32,8 @@ import { FACTORY_MAX_LEVEL, factoryLevel } from './factory-levels.ts';
 import { HOUSING_LEVELS, housingLevel, getHousingCapacity, legacyHousingCapacity, redevelopsAt, buildOccupancyIndex, canAccommodate, type HousingType, type HousingCapacity } from './housing.ts';
 import { allocateEmployment, retrainingMoves, type EmploymentAllocation, type LaborOffer, type WorkerSkills } from './labor.ts';
 import { deserialize as deserializeV6, type City as CityV6 } from './legacy-v6.ts';
-import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RECIPE, FARM_MAX_LEVEL, farmStockCapacity, type ResourceMap } from './agriculture.ts';
-import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
+import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RECIPE, farmStockCapacity, type ResourceMap } from './agriculture.ts';
+import { CROPS, CROP_LABELS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
 import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkStaff, parkWorkers, type Park } from './parks.ts';
@@ -613,6 +613,35 @@ export function realCropShortage(c: City, excludeFirmId?: number): Record<CropId
   for (const f of c.firms) if (f.zone === 'F' && f.id !== excludeFirmId && working(f)) { const crop = farmCrop(c, f), spec = realCrop(crop, c); if (spec) short[crop] -= realLotsPerYear(spec, building(c, f.building).level) / 365; }
   return short;
 }
+/**
+ * Under real crops a farm grows a level when the town's mills want more of its crop and it has the money: 200 baht up to
+ * level 3; from level 4, income to invest of at least 400 baht beyond its wage reserve; from the high-tech level 7, at
+ * least 1,000 (assumed). Levels 4–6 also need a farm worker with a school diploma and 7–9 one with a university degree
+ * (education.ts). Why it cannot grow now; nothing means it grows at the month's review.
+ */
+export const REAL_FARM_GROWTH_FUNDS = Object.freeze({ field: 20_000, improved: 40_000, highTech: 100_000 });
+function realFarmGrowthReasons(c: City, f: Firm, b: Building, svc: Service, spare: Need, short: Record<CropId, number>): string[] {
+  if (b.level >= farmMaxLevel(c)) return ['ถึงระดับสูงสุดแล้ว'];
+  const next = b.level + 1, reasons: string[] = [], crop = farmCrop(c, f);
+  if (b.age < MONTH) reasons.push(`อายุอาคาร ${b.age}/${MONTH} วัน`);
+  if (!access(c, b.cell)) reasons.push('ต้องมีถนนเชื่อมถึงเมือง');
+  if (!svc.ok(b.id)) reasons.push('น้ำและไฟของอาคารปัจจุบันยังไม่พร้อม');
+  const before = buildingNeed(b.zone, b.level, 0, c), after = buildingNeed(b.zone, next, 0, c);
+  const gap = spareShortfall({ power: after.power - before.power, water: after.water - before.water }, spare); if (gap) reasons.push(gap);
+  if (firmWorkerCount(c, f.id) === 0) reasons.push('ต้องมีคนทำงานจริงอย่างน้อย 1 คน');
+  if (short[crop] <= 0) reasons.push(`โรงงานในเมืองยังไม่ต้องการ${CROP_LABELS[crop]}เพิ่ม`);
+  const funds = realFarmGrowthFunds(next);
+  if (next <= 3 ? balance(c, f.wallet) < funds : spendable(c, f) < funds) reasons.push(next <= 3 ? `เงินกิจการต้องมีอย่างน้อย ${funds / 100} เครดิต` : `เงินพ้นสำรองค่าจ้างต้องมี ${funds / 100} เครดิต`);
+  reasons.push(...educationBlocked(c, { id: b.id, zone: b.zone, level: b.level, firmId: f.id }));
+  return reasons;
+}
+const realFarmGrowthFunds = (next: number) => next <= 3 ? REAL_FARM_GROWTH_FUNDS.field : next <= 6 ? REAL_FARM_GROWTH_FUNDS.improved : REAL_FARM_GROWTH_FUNDS.highTech;
+/** Under real crops new farmland is cleared only for a crop the mills are short of that no farm already growing it can
+ * supply by growing a level at the month's review: farms grow before more land is taken. */
+function realFarmDemand(c: City, svc: Service): boolean {
+  const short = realCropShortage(c);
+  return CROPS.some(crop => short[crop] > 0 && !c.firms.some(f => f.zone === 'F' && farmCrop(c, f) === crop && !realFarmGrowthReasons(c, f, building(c, f.building), svc, svc.spare, short).length));
+}
 /** Choose the crop the mills are shortest of under real rules, else the least represented crop, ties in catalog order; never mutate the city. */
 export function automaticFarmCrop(c: City, excludeFirmId?: number): CropId {
   if (realIndustry(c)) {
@@ -1058,7 +1087,7 @@ function summarize(c: City) {
     demand: { R: Math.max(0, homeless + incoming - vacantSlots), C: retailDemand(c),
       I: industryGrowthStatus(c).ready ? 1 : 0,
       // Real rules: a new farm while any crop's mills can process more than the town's farms harvest.
-      F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || (realIndustry(c) ? Object.values(realCropShortage(c)).some(n => n > 0) : missingCropForBuyers ||
+      F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || (realIndustry(c) ? realFarmDemand(c, svc) : missingCropForBuyers ||
         c.households.reduce((n, h) => n + h.members, 0) + c.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(c, f.id) * 2, 0) >
         farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0))) ? 1 : 0 } };
 }
@@ -1926,15 +1955,16 @@ export function retailGrowthStatus(live: City, f: Firm) {
 export function productionUpgradeStatus(live: City, liveFirm: Firm) {
   if (liveFirm.zone !== 'I' && liveFirm.zone !== 'F') throw new TypeError('Expected factory or farm');
   const view = reviewView(live), found = view.firms.find(x => x.id === liveFirm.id && x.zone === liveFirm.zone && x.commercialKind === liveFirm.commercialKind), c = found ? view : live, f = found ?? liveFirm;
-  const b = building(c, f.building), maximum = f.zone === 'I' ? FACTORY_MAX_LEVEL : FARM_MAX_LEVEL;
+  const b = building(c, f.building), maximum = f.zone === 'I' ? FACTORY_MAX_LEVEL : farmMaxLevel(c), realFarm = f.zone === 'F' && realIndustry(c);
   const nextLevel = b.level < maximum ? b.level + 1 : null, reasons: string[] = [];
   const svc = utilities(c), before = buildingNeed(b.zone, b.level, 0, c);
   const after = nextLevel === null ? before : buildingNeed(b.zone, nextLevel, 0, c);
   const extra = { power: after.power - before.power, water: after.water - before.water };
-  const profitThreshold = f.owner || f.zone === 'F' ? firmWage(f, c) : 0;
-  const requiredSpendable = nextLevel === null ? 0 : f.zone === 'F' && b.level >= 3 ? 40_000
+  const profitThreshold = realFarm ? 0 : f.owner || f.zone === 'F' ? firmWage(f, c) : 0;
+  const requiredSpendable = nextLevel === null ? 0 : realFarm ? (nextLevel <= 3 ? 0 : realFarmGrowthFunds(nextLevel)) : f.zone === 'F' && b.level >= 3 ? 40_000
     : f.zone === 'I' && b.level >= 3 ? 20_000 + INDUSTRY_WORKING_RESERVE + factoryJobs(nextLevel, c, f) * (firmWage(f, c) / MONTH + 2 * 350) : 0;
-  if (nextLevel !== null) {
+  if (nextLevel !== null && realFarm) reasons.push(...realFarmGrowthReasons(c, f, b, svc, svc.spare, realCropShortage(c)));
+  else if (nextLevel !== null) {
     if (b.age < MONTH) reasons.push(`อายุอาคาร ${b.age}/${MONTH} วัน`);
     if (!access(c, b.cell)) reasons.push('ต้องมีถนนเชื่อมถึงเมือง');
     if (!svc.ok(b.id)) reasons.push('น้ำและไฟของอาคารปัจจุบันยังไม่พร้อม');
@@ -1971,9 +2001,9 @@ function grow(c: City) {
   // A taller building draws more water and power; it grows only while the network can supply it.
   const svc = utilities(c), spare = { ...svc.spare };
   // At most one house becomes an apartment block (or a block a tower) a month, and only where people are waiting for homes.
-  let site: number | null | undefined;
+  let site: number | null | undefined, short: Record<CropId, number> | undefined;
   for (const b of c.buildings) {
-    if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : b.zone === 'F' ? FARM_MAX_LEVEL : 3) || b.age < (b.zone === 'R' ? homeGrowthAge(c, b) : MONTH) || !access(c, b.cell) || !svc.ok(b.id)) continue;
+    if (b.level >= (b.zone === 'R' ? HOUSING_LEVELS.length : b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : b.zone === 'F' ? farmMaxLevel(c) : 3) || b.age < (b.zone === 'R' ? homeGrowthAge(c, b) : MONTH) || !access(c, b.cell) || !svc.ok(b.id)) continue;
     const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1, c.households.filter(h => h.home === b.id).length, c), extra = { power: after.power - before.power, water: after.water - before.water };
     if (!fits(spare, extra)) continue;
     const residents = c.households.filter(h => h.home === b.id), f = c.firms.find(f => f.building === b.id);
@@ -1983,6 +2013,14 @@ function grow(c: City) {
       transfer(c, 'outside', 'construction', c.housingScale === 1 ? residentialGrowthCost(b.level) : 20_000, 'Outside residential height investment'); b.level++; b.housingType = HOUSING_LEVELS[b.level - 1].type; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && isCommercial(f) && !commercialGrowthReasons(c, f).length) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
+    } else if (f && f.zone === 'F' && realIndustry(c)) {
+      // A real farm grows while the mills want more of its crop (realFarmGrowthReasons); each step takes that much off the shortage.
+      if (!realFarmGrowthReasons(c, f, b, svc, spare, short ??= realCropShortage(c)).length) {
+        const crop = farmCrop(c, f), spec = realCrop(crop, c)!;
+        transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment');
+        short[crop] -= (realLotsPerYear(spec, b.level + 1) - realLotsPerYear(spec, b.level)) / 365;
+        b.level++; spare.power -= extra.power; spare.water -= extra.water;
+      }
     } else if (f && !isCommercial(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f, c) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f, c) / MONTH + 2 * 350))
       // A real mill grows only while crop waits for it: its store at least half full of what it cannot process in time.
       && (!realMillCrop(f, c) || f.cropInventory * 2 >= factoryCrops(b.level, c, f))) {
@@ -2066,7 +2104,7 @@ export function utilityUpgradeBlocks(c: City) {
   const svc = utilities(c), need = { power: 0, water: 0 }; let count = 0;
   for (const b of c.buildings) {
     if (b.zone === 'R') continue;
-    const max = b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : FARM_MAX_LEVEL;
+    const max = b.zone === 'C' ? RETAIL_MAX_LEVEL : b.zone === 'I' ? FACTORY_MAX_LEVEL : farmMaxLevel(c);
     if (b.level >= max || b.age < MONTH || !access(c, b.cell) || !svc.ok(b.id)) continue;
     const before = svc.need.get(b.id)!, after = buildingNeed(b.zone, b.level + 1, 0, c), extra = { power: after.power - before.power, water: after.water - before.water };
     if (fits(svc.spare, extra)) continue;
@@ -2208,7 +2246,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   if (!c.cells[GATEWAY].road) fail();
   const ids = new Set<number>();
   for (const b of c.buildings) {
-    if (!b || !int(b.id, 1) || ids.has(b.id) || !validIndex(b.cell, c) || !['R', 'C', 'I', 'F'].includes(b.zone) || !int(b.level, 1) || b.level > (b.zone === 'R' && withDensity ? HOUSING_LEVELS.length : b.zone === 'C' ? retailMaxLevel : b.zone === 'I' && extendedFactories ? FACTORY_MAX_LEVEL : b.zone === 'F' && withFarmLevels ? FARM_MAX_LEVEL : 3) || !int(b.age) || b.age > c.tick || c.cells[b.cell].building !== b.id || c.cells[b.cell].zone !== b.zone || (b.zone === 'R' ? b.housingType !== (withDensity ? HOUSING_LEVELS[b.level - 1]?.type : 'cottage') : b.housingType !== undefined)) fail();
+    if (!b || !int(b.id, 1) || ids.has(b.id) || !validIndex(b.cell, c) || !['R', 'C', 'I', 'F'].includes(b.zone) || !int(b.level, 1) || b.level > (b.zone === 'R' && withDensity ? HOUSING_LEVELS.length : b.zone === 'C' ? retailMaxLevel : b.zone === 'I' && extendedFactories ? FACTORY_MAX_LEVEL : b.zone === 'F' && withFarmLevels ? farmMaxLevel(c) : 3) || !int(b.age) || b.age > c.tick || c.cells[b.cell].building !== b.id || c.cells[b.cell].zone !== b.zone || (b.zone === 'R' ? b.housingType !== (withDensity ? HOUSING_LEVELS[b.level - 1]?.type : 'cottage') : b.housingType !== undefined)) fail();
     ids.add(b.id);
   }
   for (let i = 0; i < c.cells.length; i++) if (c.cells[i].building !== null && !c.buildings.some(b => b.id === c.cells[i].building && b.cell === i)) fail();

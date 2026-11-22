@@ -8,6 +8,8 @@
  * - A lot is 10 kg of paddy: 6.5 baht a kilo, against a real 6.4–7.2 (Thai Rice Mills Association, November 2025).
  * - A farm tile stands for 100 rai. Thailand averages 413 kg a rai a crop (Office of Agricultural Economics). Levels
  *   1–3 plant one, two and three crops a year; levels 4–6 keep three crops at 500, 600 and 700 kg a rai.
+ *   Levels 7–9 are high-tech farms that need a worker with a university degree: 800, 900 and 1,000 kg a rai (assumed;
+ *   irrigated central-plains paddy averaged 604 kg a rai in 2025, NSO, and the best-managed farms reach about a tonne).
  * - A hand for each crop a year (assumed). The yard holds 60 days of harvest.
  * - A mill's level sets its capacity from 2 t a day (community) to 100 t (medium), after the Rice Department's size
  *   classes. A worker mills 2 t of paddy a day (assumed). Milled rice is 65% of paddy (assumed).
@@ -18,8 +20,10 @@
  *   March 2025).
  * - A farm tile stands for 100 rai harvested once a year: 8, 9 and 10 t a rai at levels 1–3 (about 9.6 t national in
  *   2022/23, a secondary figure; the Office of the Cane and Sugar Board publishes the official one), 12, 14 and 16 t
- *   on irrigated land at levels 4–6 (assumed). Four hands cut a tile (assumed). Cut cane spoils, so the yard holds
- *   three days.
+ *   on irrigated land at levels 4–6 (assumed). High-tech levels 7–9 grow 18 and 20 t, what farmers report from drip
+ *   irrigation with good soil care (Technology Chaoban, Khaosod), and 25 t, short of the 36 t of the Department of
+ *   Agriculture's drip-irrigation trial plots (assumed). Four hands cut a tile (assumed). Cut cane spoils, so the yard
+ *   holds three days.
  * - Sugar is 107 kg a tonne of cane (2023/24: 82.17 Mt of cane gave 8.80 Mt of sugar, Office of the Cane and Sugar
  *   Board). Mills crush 25 t to 10,000 t a day by level; a worker crushes 25 t a day (assumed: a 15,000 t mill such
  *   as Mitr Amnat Charoen employs some hundreds).
@@ -30,7 +34,11 @@
  *   about 15–20).
  * - A farm tile stands for 100 rai. Chinese kale yields about 1,200 kg a rai a crop in the field (National Statistical
  *   Office). Levels 1–3 grow three, four and five crops a year (a crop takes 45–60 days); levels 4–6 keep five crops at
- *   1,500, 2,000 and 2,500 kg a rai on better land (assumed).
+ *   1,500, 2,000 and 2,500 kg a rai on better land (assumed). High-tech levels 7–9 are a greenhouse (six crops of
+ *   3,000 kg, 11 kg a m² a year), a hydroponic greenhouse (eight of 5,000, 25 kg a m²) and a vertical farm (eight of
+ *   12,000, 60 kg a m² a year, the average of commercial vertical farms for lettuce, Agronomy for Sustainable
+ *   Development 2025; open fields give 3.3–3.9); the greenhouse steps are assumed. Their hands stay at level 6
+ *   (assumed: automation takes the extra work).
  * - Leafy vegetables are worked by hand: about 25 days of work a rai a crop over a 300-day working year, so about eight
  *   hands for each crop a year on 100 rai (assumed). Cut vegetables keep three days.
  * - A cannery's level sets its capacity from 2 t of vegetables a day to 500 t; a worker prepares half a tonne a day
@@ -41,7 +49,7 @@
  * Products of real crops are sold by the kilo, in 1 kg bags.
  */
 import { factoryLevel, FACTORY_MAX_LEVEL } from './factory-levels.ts';
-import { farmStockCapacity, REAL_FARM_STORES, MAX_REAL_FACTORY_CROPS } from './agriculture.ts';
+import { farmStockCapacity, FARM_MAX_LEVEL, REAL_FARM_MAX_LEVEL, REAL_FARM_STORES, MAX_REAL_FACTORY_CROPS } from './agriculture.ts';
 
 export type IndustryRules = { industryScale?: 1 };
 export const realIndustry = (c: IndustryRules | undefined): boolean => c?.industryScale === 1;
@@ -59,7 +67,7 @@ type RealCrop = Readonly<{
 }>;
 export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
   rice: Object.freeze({
-    kgPerLot: 10, kgPerRai: [413, 413, 413, 500, 600, 700], cropsPerYear: [1, 2, 3, 3, 3, 3], hands: [1, 2, 3, 3, 3, 3], storeDays: 60,
+    kgPerLot: 10, kgPerRai: [413, 413, 413, 500, 600, 700, 800, 900, 1000], cropsPerYear: [1, 2, 3, 3, 3, 3, 3, 3, 3], hands: [1, 2, 3, 3, 3, 3, 3, 3, 3], storeDays: 60,
     recipe: 'rice-mill', product: 'milled-rice', millTonnesPerDay: [2, 5, 10, 20, 30, 40, 60, 80, 100], millTonnesPerWorker: 2,
     batchGoods: 13, gramsPerPersonDay: 200,
     // White rice 5%: about 12.5 baht a kilo wholesale (Thai Rice Mills Association, 1,200–1,310 baht a 100 kg in 2025),
@@ -73,7 +81,7 @@ export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
     inputsPerRai: 1500, millCostPerKg: 6,
   }),
   sugarcane: Object.freeze({
-    kgPerLot: 56, kgPerRai: [8000, 9000, 10000, 12000, 14000, 16000], cropsPerYear: [1, 1, 1, 1, 1, 1], hands: [4, 4, 4, 4, 4, 4], storeDays: 3,
+    kgPerLot: 56, kgPerRai: [8000, 9000, 10000, 12000, 14000, 16000, 18000, 20000, 25000], cropsPerYear: [1, 1, 1, 1, 1, 1, 1, 1, 1], hands: [4, 4, 4, 4, 4, 4, 4, 4, 4], storeDays: 3,
     recipe: 'sugar-mill', product: 'sugar', millTonnesPerDay: [25, 50, 100, 250, 500, 1000, 2500, 5000, 10000], millTonnesPerWorker: 25,
     batchGoods: 12, gramsPerPersonDay: 82,
     // White sugar leaves the mill at 21 baht a kilo (Office of the Cane and Sugar Board, October 2025); about 25 retail,
@@ -86,7 +94,7 @@ export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
     inputsPerRai: 5000, millCostPerKg: 23,
   }),
   vegetables: Object.freeze({
-    kgPerLot: 4, kgPerRai: [1200, 1200, 1200, 1500, 2000, 2500], cropsPerYear: [3, 4, 5, 5, 5, 5], hands: [25, 33, 42, 42, 42, 42], storeDays: 3,
+    kgPerLot: 4, kgPerRai: [1200, 1200, 1200, 1500, 2000, 2500, 3000, 5000, 12000], cropsPerYear: [3, 4, 5, 5, 5, 5, 6, 8, 8], hands: [25, 33, 42, 42, 42, 42, 42, 42, 42], storeDays: 3,
     recipe: 'cannery', product: 'canned-food', millTonnesPerDay: [2, 5, 10, 20, 50, 100, 200, 300, 500], millTonnesPerWorker: .5,
     batchGoods: 10, gramsPerPersonDay: 10,
     // A 425 g can of vegetables sells for about 25 baht: 59 a kilo retail, 45 wholesale, 48 imported and 33 for export
@@ -101,6 +109,8 @@ export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
 const cropOfRecipe = new Map(Object.entries(REAL_CROPS).map(([crop, spec]) => [spec.recipe, crop]));
 const cropOfProduct = new Map(Object.entries(REAL_CROPS).map(([crop, spec]) => [spec.product, crop]));
 
+/** The highest level a farm reaches: 9 for real crops (7–9 high-tech), 6 under the old rules. */
+export const farmMaxLevel = (c: IndustryRules | undefined): number => realIndustry(c) ? REAL_FARM_MAX_LEVEL : FARM_MAX_LEVEL;
 /** The real crop a farm grows or a mill processes, under real rules; undefined for the old rules or other crops. */
 export const realCrop = (crop: string | undefined, c: IndustryRules | undefined): RealCrop | undefined => realIndustry(c) && crop !== undefined ? REAL_CROPS[crop] : undefined;
 export const realMillCrop = (f: FirmShape, c: IndustryRules | undefined): RealCrop | undefined => f.zone === 'I' && f.recipe !== undefined && realIndustry(c) ? REAL_CROPS[cropOfRecipe.get(f.recipe) ?? ''] : undefined;
@@ -121,9 +131,11 @@ export const millStoreFor = (spec: RealCrop, level: number): number => Math.floo
 export const realRecipe = (spec: RealCrop) => ({ crop: 2, goods: spec.batchGoods });
 /** The game's price scale: 18.5 real baht to one game baht, set when a factory day paid 20 against a real minimum wage of about 370. Real wages (sim.ts, REAL_WAGES) are converted at it too. */
 export const REAL_BAHT_PER_GAME_BAHT = 18.5;
-/** Satang a farm of this level pays for the inputs of `lots` lots it harvested: its per-rai inputs over the rai they grew on. */
+/** Satang a farm of this level pays for the inputs of `lots` lots it harvested: its per-rai inputs over the rai they grew on.
+ * A high-tech farm (levels 7–9) spends on climate control, nutrients and energy in step with its extra yield, so a kilo
+ * costs it what it costs at level 6 (assumed; a real vertical farm's lights cost far more). */
 export const farmInputs = (spec: RealCrop, level: number, lots: number): number =>
-  Math.round(lots * spec.kgPerLot * spec.inputsPerRai * 100 / (spec.kgPerRai[level - 1] * REAL_BAHT_PER_GAME_BAHT));
+  Math.round(lots * spec.kgPerLot * spec.inputsPerRai * 100 / (spec.kgPerRai[Math.min(level, 6) - 1] * REAL_BAHT_PER_GAME_BAHT));
 /** Satang a mill pays to run for `kg` kilos of product it made. */
 export const millRunningCost = (spec: RealCrop, kg: number): number => kg * spec.millCostPerKg;
 export const FARM_INPUTS_REASON = 'Farm inputs', MILL_COSTS_REASON = 'Mill running costs';
@@ -152,7 +164,7 @@ export const farmStock = (level: number, c: IndustryRules | undefined, crop?: st
 /** The most crop lots any real mill can hold (validation bound). */
 export const MAX_FACTORY_CROPS = Math.max(...Object.values(REAL_CROPS).map(spec => millStoreFor(spec, FACTORY_MAX_LEVEL)));
 // agriculture.ts validates stores without importing this module; keep its copies in step.
-const stores = Object.values(REAL_CROPS).flatMap(spec => [1, 2, 3, 4, 5, 6].map(level => realFarmStore(spec, level)));
+const stores = Object.values(REAL_CROPS).flatMap(spec => [1, 2, 3, 4, 5, 6, 7, 8, 9].map(level => realFarmStore(spec, level)));
 if (MAX_FACTORY_CROPS !== MAX_REAL_FACTORY_CROPS || stores.some(s => !REAL_FARM_STORES.includes(s)) || REAL_FARM_STORES.length !== stores.length) throw new Error('Real crop stores out of step with agriculture.ts');
 
 // Rice names kept for callers and tests written for the first real crop.

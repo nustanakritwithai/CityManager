@@ -1,4 +1,4 @@
-import { FARM_MAX_LEVEL } from './agriculture.ts';
+import { REAL_FARM_MAX_LEVEL } from './agriculture.ts';
 import type { City } from './sim.ts';
 import { CROPS, PRODUCTS, validMix } from './goods.ts';
 const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
@@ -25,7 +25,7 @@ export function validateCityHistory(c:City):void {
  for(const value of [h.latestPurchase,h.lastIncome,h.firstProduction])map(value,(k,v)=>wallet(k)&&integer(v)&&v<=h.throughTick);
  map(h.latestBasket,(k,v)=>wallet(k)&&object(v)&&Object.keys(v).sort().join()==='commodity,quantity,tick'&&['goods','crops'].includes(String(v.commodity))&&integer(v.tick)&&v.tick<=h.throughTick&&integer(v.quantity,1));
  map(h.roles,(k,v)=>wallet(k)&&['F','T','I'].includes(v));
- map(h.farmMinimumLevels,(k,v)=>wallet(k)&&integer(v,1)&&v<=FARM_MAX_LEVEL);
+ map(h.farmMinimumLevels,(k,v)=>wallet(k)&&integer(v,1)&&v<=REAL_FARM_MAX_LEVEL);
  for(const [values,keys,signed] of [[h.ownerFinance,['contributed','withdrawn','taxPaid','cash','profit'],['profit']],[h.ownerProfit,['profit','tax','invested','retained'],['profit']]] as const)
   map(values,(k,v)=>wallet(k)&&object(v)&&Object.keys(v).sort().join()===[...keys].sort().join()&&Object.entries(v).every(([key,n])=>integer(n,(signed as readonly string[]).includes(key)?Number.MIN_SAFE_INTEGER:0)));
  for(const [wallet,seed] of Object.entries(h.ownerFinance))if(seed.cash!==(h.accounts[wallet]??0))fail();

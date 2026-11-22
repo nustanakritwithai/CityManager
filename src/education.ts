@@ -378,13 +378,14 @@ function predicate(state: EducationState, view: EducationView, building: Educati
   if (building.zone === 'F' && next <= 3) return { ok: true, have: 0, need: 0, missing: '' };
   if (building.zone === 'I' && next <= 3) return { ok: true, have: 0, need: 0, missing: '' };
   if (building.zone === 'C' && next <= 4) return { ok: true, have: 0, need: 0, missing: '' };
-  if (building.zone === 'F' || (building.zone === 'I' && next <= 6) || (building.zone === 'C' && next <= 6)) {
+  if ((building.zone === 'F' && next <= 6) || (building.zone === 'I' && next <= 6) || (building.zone === 'C' && next <= 6)) {
     const have = credentialPosts(state, view, building.firmId, 'basic');
     const missing = building.zone === 'F' ? 'แรงงานฟาร์มที่ถือวุฒิพื้นฐาน 1 คน' : building.zone === 'I' ? 'แรงงานโรงงานที่ถือวุฒิพื้นฐาน 1 คน' : 'คนทำงานร้านที่ถือวุฒิพื้นฐาน 1 คน';
     return { ok: have >= 1, have, need: 1, missing };
   }
   const have = credentialPosts(state, view, building.firmId, 'higher');
-  return { ok: have >= 1, have, need: 1, missing: building.zone === 'I' ? 'แรงงานโรงงานที่ถือวุฒิขั้นสูง 1 คน' : 'คนทำงานร้านที่ถือวุฒิขั้นสูง 1 คน' };
+  // High-tech farms (levels 7–9) and the top factories and shops need someone with a university degree.
+  return { ok: have >= 1, have, need: 1, missing: building.zone === 'F' ? 'แรงงานฟาร์มที่ถือวุฒิขั้นสูง 1 คน' : building.zone === 'I' ? 'แรงงานโรงงานที่ถือวุฒิขั้นสูง 1 คน' : 'คนทำงานร้านที่ถือวุฒิขั้นสูง 1 คน' };
 }
 
 export function educationGate(state: EducationState | undefined, view: EducationView | null, building: EducationBuilding): EducationGate {
