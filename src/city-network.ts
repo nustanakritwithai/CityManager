@@ -65,7 +65,7 @@ export const EDGES: readonly NetEdge[] = Object.freeze([
   { from: 'access', to: 'homes', sign: 1, why: 'บ้านเกิดได้เฉพาะแปลงที่เข้าถึงได้' },
   { from: 'access', to: 'farms', sign: 1, why: 'ฟาร์มเกิดได้เฉพาะแปลงที่เข้าถึงได้' },
   { from: 'access', to: 'factories', sign: 1, why: 'โรงงานเกิดได้เฉพาะแปลงที่เข้าถึงได้' },
-  { from: 'access', to: 'markets', sign: 1, why: 'ตลาดเกิดได้เฉพาะแปลงที่เข้าถึงได้' },
+  { from: 'access', to: 'markets', sign: 1, why: 'พาณิชย์เกิดได้เฉพาะแปลงที่เข้าถึงได้' },
   { from: 'access', to: 'jobs', sign: 1, why: 'นับตำแหน่งงานเฉพาะกิจการที่เข้าถึงได้' },
   { from: 'utilities', to: 'homes', sign: 1, why: 'อาคารใหม่ทุกโซนต้องมีน้ำและไฟจากภายนอก' },
   { from: 'utilities', to: 'factories', sign: 1, why: 'โรงงานใหม่ต้องมีน้ำและไฟจากภายนอก' },

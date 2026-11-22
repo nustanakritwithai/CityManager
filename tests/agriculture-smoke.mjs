@@ -22,9 +22,9 @@ const output=resolve('.test-output'),shots=resolve(process.env.CITYMANAGER_SCREE
 const blocked=process.env.CITYMANAGER_BLOCK_MODELS==='1',skills=['general','manufacturing','retail'];
 // Rendering follows building zone and level, not the firm's trading role.
 function agricultureVisualExpectations(city){
- const commercialTiers={market:0,building:0,mall:0};
+ const commercialTiers={shop:0,market:0,mall:0};
  for(const b of city.buildings)if(b.zone==='C')commercialTiers[commercialPresentation(b.level).tier]++;
- return {farmPlots:city.buildings.filter(b=>b.zone==='F').length,marketStalls:commercialTiers.market,commercialTiers};
+ return {farmPlots:city.buildings.filter(b=>b.zone==='F').length,shopFronts:commercialTiers.shop,commercialTiers};
 }
 
 const hash=raw=>createHash('sha256').update(raw).digest('hex');
@@ -229,13 +229,13 @@ try {
   let commercialBefore,commercialAfter;const growing=deserialize(serialize(zonedMarket));for(let day=0;day<180;day++){const previous=deserialize(serialize(growing));step(growing);deserialize(serialize(growing));const created=growing.firms.find(f=>isRetail(f)&&!previous.firms.some(old=>old.id===f.id));if(created){commercialBefore=previous;commercialAfter=deserialize(serialize(growing));break;}}assert.ok(commercialBefore&&commercialAfter,'A fresh C parcel creates a real owner-funded commercial-L1 retail business');const expandedCommercial=live(commercialBefore);step(expandedCommercial);assert.equal(serialize(expandedCommercial),serialize(live(commercialAfter)),'expanded new-commerce transition parity');
   assert.ok(commercialAfter.cells.every(cell=>cell.zone!=='T'));for(const f of commercialAfter.firms.filter(isRetail)){const b=commercialAfter.buildings.find(b=>b.id===f.building);assert.equal(f.zone,'C');assert.equal(b.zone,'C');assert.equal(b.level,1);assert.equal(firmCapacity(b),1);assert.ok(f.owner);assert.ok(commercialAfter.ledger.some(e=>e.from==='household:'+f.owner.householdId&&e.to===f.wallet&&e.amount===60000));}
   await load(commercialBefore);await oneTick(commercialAfter);const newCommercial=commercialAfter.firms.find(f=>isRetail(f)&&!commercialBefore.firms.some(old=>old.id===f.id));assert.ok(newCommercial);const newBuilding=commercialAfter.buildings.find(b=>b.id===newCommercial.building);assert.ok(newBuilding);assert.equal(newBuilding.zone,'C');assert.equal(newBuilding.level,1);assert.ok(newCommercial.owner);await inspectBusiness(commercialAfter,newCommercial);await metrics({'owner-household':newCommercial.owner.householdId});
-  assert.equal(await evaluate('document.querySelector("#entity-content .bc-type-label").textContent.trim()'),'ตลาด · ระดับ 1/9','Selected level-1 commercial building displays its actual tier and level');
+  assert.equal(await evaluate('document.querySelector("#entity-content .bc-type-label").textContent.trim()'),'ร้านค้า · ระดับ 1/9','Selected level-1 commercial building displays its actual tier and level');
   const identity=await evaluate('document.querySelector("#entity-content .bc-identity").textContent');assert.ok(identity.includes(`อาคาร #${newBuilding.id}`));assert.ok(identity.includes(`กิจการ #${newCommercial.id}`));await screenshot('commercial-level-one.png');
   checks.push('One C tool actually zones and grows an owner-funded commercial-L1 retail business; no T zone/menu exists, live inspector shows real owner/cash/crop stock and current unified commercial identity');
   checks.push('Seeded fertility is stable through server save/reload and actual F/C tools pick and zone flat connected parcels without changing resources, accounts or construction-grid semantics');
 
   await load(chainBefore);await oneTick(chainAfter);await inspectBusiness(chainAfter,farm);await screenshot('agriculture-farm.png');await inspectBusiness(chainAfter,market);await screenshot('agriculture-market.png');await inspectBusiness(chainAfter,factory);await screenshot('agriculture-factory.png');
-  const rendered=await evaluate('window.cityManager.agriculture()'),expectedVisuals=agricultureVisualExpectations(live(chainAfter));assert.equal(rendered.farmPlots,expectedVisuals.farmPlots);assert.equal(rendered.marketStalls,expectedVisuals.marketStalls);assert.deepEqual(rendered.commercialTiers,expectedVisuals.commercialTiers);assert.deepEqual(await state(),live(chainAfter));
+  const rendered=await evaluate('window.cityManager.agriculture()'),expectedVisuals=agricultureVisualExpectations(live(chainAfter));assert.equal(rendered.farmPlots,expectedVisuals.farmPlots);assert.equal(rendered.shopFronts,expectedVisuals.shopFronts);assert.deepEqual(rendered.commercialTiers,expectedVisuals.commercialTiers);assert.deepEqual(await state(),live(chainAfter));
   await load(directBefore);await oneTick(direct);assert.ok(directSales.length);await load(chainAfter);
   checks.push('Separate authentic legacy-market replay includes direct crop sales and actual payments');
   checks.push('One actual seeded daily tick exactly matches F→T→I crop recipe→C→household; farm/market/factory real stock, book cost, fertility, workers and rendered facilities match state');

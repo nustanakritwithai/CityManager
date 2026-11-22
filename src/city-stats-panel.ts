@@ -6,9 +6,9 @@ import './city-stats.css';
 import { ICONS } from './ui-icons.ts';
 import { cityStats, BUILDING_KINDS, STATS_WINDOW, type BuildingKind, type CityStats, type SkillKey } from './city-stats.ts';
 
-const KIND_LABEL: Record<BuildingKind, string> = { R: 'บ้าน', market: 'ตลาด', shop: 'ร้าน', I: 'โรงงาน', F: 'ฟาร์ม' };
+const KIND_LABEL: Record<BuildingKind, string> = { R: 'บ้าน', shop: 'พาณิชย์', I: 'โรงงาน', F: 'ฟาร์ม' };
 const SKILL_LABEL: Record<SkillKey, string> = { general: 'ทั่วไป', manufacturing: 'การผลิต', retail: 'ค้าปลีก' };
-const JOB_LABEL = { park: 'สวนสาธารณะ', I: 'โรงงาน', F: 'ฟาร์ม', shop: 'ร้านค้า', market: 'ตลาด' } as const;
+const JOB_LABEL = { park: 'สวนสาธารณะ', I: 'โรงงาน', F: 'ฟาร์ม', shop: 'พาณิชย์' } as const;
 const n = (value: number) => value.toLocaleString('th-TH');
 const baht = (satang: number) => `${Math.round(satang / 100).toLocaleString('th-TH')} ฿`;
 const signedBaht = (satang: number) => (satang > 0 ? '+' : satang < 0 ? '−' : '') + baht(Math.abs(satang));
@@ -87,7 +87,7 @@ export class CityStatsPanel {
     for (const kind of BUILDING_KINDS) foot.append(el('td', '', n(s.buildings.totals[kind])));
     const tfoot = el('tfoot'); tfoot.append(foot); table.append(thead, tbody, tfoot);
     const wrap = el('div', 'st-table-wrap'); wrap.append(table);
-    return column(`อาคาร ${n(s.buildings.all)} หลัง`, 'buildings', wrap, el('p', 'st-note', 'แถวคือระดับอาคาร สูงขึ้นเมื่อเติบโต ตลาดคือพาณิชย์ระดับ 1 ที่ซื้อขายพืชผล'));
+    return column(`อาคาร ${n(s.buildings.all)} หลัง`, 'buildings', wrap, el('p', 'st-note', 'แถวคือระดับอาคาร สูงขึ้นเมื่อเติบโต · พาณิชย์ระดับ 1–3 เป็นร้านค้า 4–6 ตลาด 7–9 ห้าง'));
   }
   private people(s: CityStats) {
     const p = s.people, labour = el('div', 'st-grid'), jobs = el('div', 'st-jobs');
@@ -119,11 +119,11 @@ export class CityStatsPanel {
     return column('ทรัพยากรและสินค้า', 'stocks',
       el('h4', 'st-subtitle first', 'พืชผลคงคลัง (ล็อต)'),
       row('F', 'ที่ฟาร์ม', n(k.crops.farm), { tone: 'zone-F', key: 'crop-farm' }),
-      row('market', 'ที่ตลาด', n(k.crops.market), { tone: 'zone-market', key: 'crop-market' }),
+      row('market', 'ที่พาณิชย์', n(k.crops.market), { tone: 'zone-market', key: 'crop-market' }),
       row('I', 'รอแปรรูปที่โรงงาน', n(k.crops.factory), { tone: 'zone-I', key: 'crop-factory' }),
       el('h4', 'st-subtitle', 'สินค้าสำเร็จรูป (หน่วย)'),
       row('box', 'ที่โรงงาน', n(k.goods.factory), { tone: 'goods', key: 'goods-factory' }),
-      row('shop', 'บนชั้นร้านค้า', n(k.goods.shop), { tone: 'zone-shop', key: 'goods-shop' }),
+      row('shop', 'บนชั้นวางขาย', n(k.goods.shop), { tone: 'zone-shop', key: 'goods-shop' }),
       el('h4', 'st-subtitle', `การไหล ${STATS_WINDOW} วัน`),
       row('crop', 'เก็บเกี่ยว', `${n(k.harvested)} ล็อต`, { tone: 'zone-F', key: 'harvested' }),
       row('gear', 'แปรรูป', `${n(k.processed)} ล็อต`, { sub: `ได้สินค้า ${n(k.produced)} หน่วย`, tone: 'zone-I', key: 'processed' }),

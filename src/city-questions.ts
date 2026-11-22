@@ -88,9 +88,9 @@ export function answerCityFactQuestion(city: City, rawQuestion: unknown): CityFa
     fact('city.businesses.industrial', 'สถานประกอบการอุตสาหกรรม', city.firms.filter(item => item.zone === 'I').length, 'แห่ง', 'firms[zone=I].length');
     fact('city.businesses.farms', 'ฟาร์ม', city.firms.filter(item => item.zone === 'F').length, 'แห่ง', 'firms[zone=F].length');
     const commercialTierCount = (from:number,to:number) => city.firms.filter(f => f.zone === 'C' && city.buildings.some(b => b.id === f.building && b.level >= from && b.level <= to)).length;
-    fact('city.businesses.raw-markets', 'ตลาด · พาณิชย์ระดับ 1–3', commercialTierCount(1,3), 'แห่ง', 'firms[zone=C,building.level=1..3].length');
-    fact('city.businesses.commercial-buildings', 'อาคารพาณิชย์ · ระดับ 4–6', commercialTierCount(4,6), 'แห่ง', 'firms[zone=C,building.level=4..6].length');
-    fact('city.businesses.malls', 'Big Mall · ระดับ 7–9', commercialTierCount(7,9), 'แห่ง', 'firms[zone=C,building.level=7..9].length');
+    fact('city.businesses.shops', 'ร้านค้า · พาณิชย์ระดับ 1–3', commercialTierCount(1,3), 'แห่ง', 'firms[zone=C,building.level=1..3].length');
+    fact('city.businesses.markets', 'ตลาด · พาณิชย์ระดับ 4–6', commercialTierCount(4,6), 'แห่ง', 'firms[zone=C,building.level=4..6].length');
+    fact('city.businesses.malls', 'ห้าง · พาณิชย์ระดับ 7–9', commercialTierCount(7,9), 'แห่ง', 'firms[zone=C,building.level=7..9].length');
     fact('city.businesses.workers', 'แรงงานที่ได้รับจัดสรรงาน', countEmployed(), 'คน', 'sum(householdWorkerCount(city,households.id)) [employment + ownerLabor]');
     missing('missing.city.businesses.history', 'คำตอบนี้ไม่มีข้อมูลเปรียบเทียบก่อนหน้า จึงยังสรุปการเปิดเพิ่ม ปิดกิจการ หรือแนวโน้มไม่ได้');
   } else if (question.intent === 'house.detail') {

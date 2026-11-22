@@ -18,7 +18,7 @@ function fixture(b: EducationBuilding) {
 }
 
 test('all next-level education bands distinguish basic, higher and ungated entry buildings', () => {
-  for (const [zone, max, basicFrom, higherFrom] of [['R', 9, 4, 7], ['F', 6, 4, 7], ['I', 9, 4, 7], ['C', 7, 5, 7]] as const) {
+  for (const [zone, max, basicFrom, higherFrom] of [['R', 9, 4, 7], ['F', 9, 4, 7], ['I', 9, 4, 7], ['C', 7, 5, 7]] as const) {
     for (let next = 2; next <= max; next++) {
       const b = building(zone, next), { state, view } = fixture(b);
       const before = JSON.stringify(view), basic = educationGate(state, view, b);

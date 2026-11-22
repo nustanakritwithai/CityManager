@@ -200,7 +200,7 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
     row.dataset.ownerProposalId = proposal.proposalId; row.dataset.firmId = String(snapshot.firmId); row.dataset.actorId = String(snapshot.actorId);
     row.dataset.command = command.type; row.dataset.tick = String(snapshot.tick); row.dataset.amountSatang = String(command.amountSatang); row.dataset.stale = String(stale);
     row.dataset.status = processed.has(proposal.proposalId) ? 'processed' : stale ? 'stale' : 'pending';
-    row.append(element('h4', `ตลาด #${snapshot.firmId} · ครัวเรือนเจ้าของ #${snapshot.actorId}`));
+    row.append(element('h4', `กิจการพาณิชย์ #${snapshot.firmId} · ครัวเรือนเจ้าของ #${snapshot.actorId}`));
     row.append(element('p', `${commandLabels[command.type]}${command.type === 'hold' ? '' : ` ${money(command.amountSatang)}`} · ภาพวันที่ ${snapshot.tick}`, 'owner-command'));
     row.append(element('p', options.getSession().getProposalSource(proposal.proposalId) === 'typhoon' ? 'ผู้เลือก: Typhoon · ตรวจซ้ำด้วยกฎเกม' : 'ผู้เลือก: กฎในเกม', 'owner-source'));
     row.append(element('p', OWNER_REASON_TEXT[proposal.reason], 'owner-reason'));
@@ -273,7 +273,7 @@ export function createOwnerDecisionPanel(host: HTMLDetailsElement, options: Opti
     let currentHash: string | null = null;
     if (needsHash) { try { currentHash = ownerStateHash(city); } catch { /* Every unresolved capture stays non-executable. */ } }
     list.replaceChildren(...proposals.map(p => proposalRow(p, !processed.has(p.proposalId) && (p.snapshot.tick !== city.tick || p.snapshot.stateHash !== currentHash))));
-    if (!proposals.length) list.append(element('p', 'ยังไม่มีข้อเสนอในรอบนี้ ตลาดต้องมีครัวเรือนเจ้าของจริง แล้วรอรอบเดือนหรือกดประเมินตอนนี้', 'owner-empty'));
+    if (!proposals.length) list.append(element('p', 'ยังไม่มีข้อเสนอในรอบนี้ กิจการพาณิชย์ต้องมีครัวเรือนเจ้าของจริง แล้วรอรอบเดือนหรือกดประเมินตอนนี้', 'owner-empty'));
   }
   function reset() { if (activeAutoBatch) options.onTyphoonAutoPending?.(false); activeAutoBatch = false; activeRequest?.controller.abort(); activeRequest = null; monthlyBatch.reset(); revision++; busy = false; processed.clear(); signature = ''; resultText = ''; lastStatus = 'ready'; sync(); }
   function noteOutcomes(outcomes: OwnerExecutionOutcome[]) {

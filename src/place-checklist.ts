@@ -20,7 +20,7 @@ const RULES: readonly Rule[] = [
   { key: 'income', label: 'รายได้คาดหมายพอซื้อของและจ่ายค่าเช่า', zones: 'R', match: /^Expected income/, detail: () => 'รายได้คาดหมายยังไม่พอซื้อสินค้าและจ่ายค่าเช่า' },
   { key: 'crop-demand', label: 'มีผู้ซื้อพืชผลเพิ่ม', zones: 'F', match: /^No additional crop demand/, detail: () => 'ฟาร์มเดิมผลิตพอสำหรับโรงงานและครัวเรือนแล้ว' },
   { key: 'owner', label: 'มีครัวเรือนเจ้าของที่มีทุน 600 ฿ และแรงงานค้าปลีก', zones: 'C', match: /^Raw market needs a connected household owner/, detail: () => 'ยังไม่มีครัวเรือนที่เชื่อมถนน มีเงินทุนจริง 600 ฿ และสมาชิกทักษะทั่วไปหรือค้าปลีกว่าง' },
-  { key: 'market-demand', label: 'มีฟาร์มและผู้ซื้อที่เข้าถึงได้', zones: 'C', match: /^Raw market needs an actual farm|^No retail demand/, detail: r => /^No retail/.test(r) ? 'ร้านค้าที่มีอยู่รองรับความต้องการแล้ว' : 'ตลาดต้องมีฟาร์มจริง ผู้ซื้อที่เข้าถึงได้ และเจ้าของที่มีทุน' },
+  { key: 'market-demand', label: 'มีฟาร์มและผู้ซื้อที่เข้าถึงได้', zones: 'C', match: /^Raw market needs an actual farm|^No retail demand/, detail: r => /^No retail/.test(r) ? 'ร้านค้าที่มีอยู่รองรับความต้องการแล้ว' : 'ร้านค้าแรกต้องมีฟาร์มจริง ผู้ซื้อที่เข้าถึงได้ และเจ้าของที่มีทุน' },
   { key: 'industry', label: 'โอกาสลงทุนโรงงาน', zones: 'I', match: /^(?!No |Farm |Raw |Firm |Prototype |Entity |Expected )/, detail: r => /^A new factory needs /.test(r) ? 'เครือข่ายน้ำหรือไฟไม่พอสำหรับโรงงานใหม่ สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน' : 'ดูรายการตรวจทุนขยายโรงงานในภาพรวมเมือง' },
 ];
 
@@ -44,7 +44,7 @@ export function parcelChecklist(city: City, cell: number): ParcelChecklist | nul
     else if (rule.zones) checks.push({ key: rule.key, label: rule.label, state: 'pass' });
   }
   const note = zone === 'C'
-    ? 'ตลาดเริ่มจากครัวเรือนเจ้าของลงทุนเงินจริง 600 ฿ ค่าก่อสร้าง 100 ฿ ที่เหลือเป็นเงินกิจการ และกันสมาชิก 1 คนไว้ทำงานเอง'
+    ? 'ร้านค้าเริ่มจากครัวเรือนเจ้าของลงทุนเงินจริง 600 ฿ ค่าก่อสร้าง 100 ฿ ที่เหลือเป็นเงินกิจการ และกันสมาชิก 1 คนไว้ทำงานเอง'
     : 'โรงงานแรกเปิดได้โดยยังไม่มีคนงาน และ 2 ครัวเรือนแรกย้ายเข้าได้แม้ยังไม่มีงาน ทุนและเงินติดตัวมาจากบัญชีภายนอกที่ระบุชื่อ';
   return { checks, eligible: stopped.length === 0, nextReview: 3 - city.tick % 3, note };
 }

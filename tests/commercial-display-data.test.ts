@@ -26,7 +26,7 @@ test('display data includes both inventories, counts C once, and never groups by
   assert.equal(answer.facts.find(x=>x.id==='business.crop-inventory')?.value,2);
   assert.equal(answer.facts.find(x=>x.id==='business.inventory')?.value,3);
   for(const level of [1,3,4,6,7,9]){
-   b.level=level;assert.equal(firmGoodsName(c,f),level<=3?'ตลาด':level<=6?'อาคารพาณิชย์':'Big Mall');
+   b.level=level;assert.equal(firmGoodsName(c,f),level<=3?'ร้านค้า':level<=6?'ตลาด':'ห้าง');
    const card=buildingCardData(c,b.id)!;assert.equal(card.kind,level<=3?'market':'shop');assert.equal(card.stocks.crops,2);assert.equal(card.stocks.goods,3);
   }
   b.level=1; // construction-history grouping is independent of the current architectural tier

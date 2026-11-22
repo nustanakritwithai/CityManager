@@ -2,10 +2,10 @@ import { farmProductionFertility, FARM_YIELD_PER_WORKER } from './farm-productio
 import { isCanonicalExpandedResourceMap } from './expanded-map-migration.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS } from './factory-levels.ts';
-import { factoryCrops, factoryJobs, farmStaff, farmStock, realCrop, realIndustry, realProduct, realHarvest, millJobsFor, millLotsPerWorker, bagsToday, REAL_CROPS } from './industry-scale.ts';
+import { factoryCrops, factoryJobs, farmMaxLevel, farmStaff, farmStock, realCrop, realIndustry, realProduct, realHarvest, millJobsFor, millLotsPerWorker, bagsToday, REAL_CROPS } from './industry-scale.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
 import { MONTH, wagesFor, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, type City, type CropEntry, type Firm } from './sim.ts';
-import { CHAIN_CROP_PRICES, CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
+import { CHAIN_CROP_PRICES, CROP_EXPORT, CROP_STOCK_CAPS, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { taxAmount, taxRatesAt } from './city-tax-policy.ts';
@@ -199,7 +199,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   const receive = (wallet: string, qty: number, value: number) => {
     const h = holding(wallet); h.quantity = safeAdd(h.quantity, qty); h.value = safeAdd(h.value, value);
     const known = role(wallet), f = firms.get(wallet), b = f && c.buildings.find(b => b.id === f.building);
-    if (known) requireThat(h.quantity <= (known === 'F' && withFarmLevels ? storeOf('F', b?.level ?? FARM_MAX_LEVEL, f && b ? f : undefined) : known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? storeOf('I', b?.level ?? 9, f && b ? f : undefined) : CROP_STOCK_CAPS[known]));
+    if (known) requireThat(h.quantity <= (known === 'F' && withFarmLevels ? storeOf('F', b?.level ?? farmMaxLevel(c), f && b ? f : undefined) : known === 'I' && extendedFactories && day > (c.factoryProgressionStartTick ?? c.tick) ? storeOf('I', b?.level ?? 9, f && b ? f : undefined) : CROP_STOCK_CAPS[known]));
     // A deleted market-receipt recipient may not have left enough history to
     // distinguish a market from a factory. Both are bounded by 48 lots.
     else if (extendedFactories) requireThat(h.quantity <= CROP_STOCK_CAPS.T);
@@ -253,12 +253,12 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     postCrop = unifiedEvent(c,e.tick,'cropEntries',e.id - 1);
     if (day !== e.tick) { day = e.tick; sellable = new Map([...holdings].map(([wallet, h]) => [wallet, h.quantity])); }
     if (e.kind === 'harvest') {
-      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? farmStaff(FARM_MAX_LEVEL, c, e.crop) : 3) && e.batches === 0 && e.outputQuantity === 0);
+      requireThat(e.from === 'environment:crops' && e.reason === `Farm harvest #${e.id}` && e.fromValue === 0 && e.toValue === 0 && e.cash === 0 && e.workers >= 1 && e.workers <= (withFarmLevels ? farmStaff(farmMaxLevel(c), c, e.crop) : 3) && e.batches === 0 && e.outputQuantity === 0);
       role(e.to, 'F'); const before = holding(e.to), current = firms.get(e.to), b = current && c.buildings.find(b => b.id === current.building);
       const farmSpec = realCrop(e.crop, c), realRice = farmSpec !== undefined;
       if (b) requireThat(e.workers <= farmStaff(b.level, c, e.crop));
       const oldRules = !withFarmLevels || e.tick <= (c.farmLevelStartTick ?? 0);
-      const maxLevel = Math.min(b?.level ?? FARM_MAX_LEVEL, oldRules ? 3 : FARM_MAX_LEVEL);
+      const maxLevel = Math.min(b?.level ?? farmMaxLevel(c), oldRules ? 3 : farmMaxLevel(c));
       const minLevel = Math.max(realRice ? 1 : e.workers, farmMinimumLevels.get(e.to) ?? 1);
       let feasible = 0;
       for (let level = minLevel; level <= maxLevel; level++) {

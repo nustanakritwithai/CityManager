@@ -76,8 +76,9 @@ test('a park keeper is paid the real wage of support services, and a save paying
   const c = createCity(61025); for (let d = 0; d < 30; d++) { step(c); keepSupplied(c); }
   const cell = c.cells.findIndex((p, i) => !p.road && !p.zone && p.building === null && !c.plants.some(x => x.cell === i) && access(c, i));
   assert.equal(buildPark(c, cell).ok, true);
-  for (let d = 0; d < MONTH * 2; d++) { step(c); keepSupplied(c); }
-  const paid = c.ledger.filter(e => /^Monthly park wages #/.test(e.reason));
+  // Wait for the first month the park had a keeper: parks hire from the labour farms and firms leave.
+  let paid: typeof c.ledger = [];
+  for (let d = 0; d < MONTH * 4 && !paid.length; d++) { step(c); keepSupplied(c); paid = c.ledger.filter(e => e.tick === c.tick && /^Monthly park wages #/.test(e.reason)); }
   assert.ok(paid.length > 0, 'the park keeper was paid');
   for (const e of paid) assert.equal(e.amount % REAL_PARK_STAFF.dailyWage, 0);
   const raw = serialize(c); assert.deepEqual(deserialize(raw), c);

@@ -19,7 +19,8 @@ test('people come to work on the farms before there are houses for them, and wor
   assert.ok(homeless.length > 0, 'some households have no home yet');
   const working = homeless.filter(h => c.employment.some(e => e.householdId === h.id));
   assert.ok(working.length > 0, 'and they work');
-  assert.ok(working.some(h => c.firms.find(f => f.id === c.employment.find(e => e.householdId === h.id)!.firmId)!.zone === 'F'), 'on the farms');
+  // A household's workers may hold several jobs; one of them is on a farm.
+  assert.ok(working.some(h => c.employment.some(e => e.householdId === h.id && c.firms.find(f => f.id === e.firmId)?.zone === 'F')), 'on the farms');
   // They draw wages, buy food and pay no rent or bills.
   for (const h of working) {
     assert.ok(c.ledger.some(e => e.to === h.wallet && e.reason === 'Monthly wages'), `household #${h.id} was paid`);

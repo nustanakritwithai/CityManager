@@ -114,6 +114,9 @@ export type EducationView = {
   treasury: number;
   /** The city's education wages; the old ones when absent. */
   wages?: EducationWages;
+  /** New cities: the owner who runs a shop holds the diploma its next tier needs, a school diploma for the market levels 4–6
+   * and a university degree for the mall levels 7–9; a household's diploma goes to its own business before its other jobs. */
+  ownerTiers?: boolean;
 };
 export type EducationPayment = { amount: number; reason: string; kind: 'contract' | 'upkeep' };
 export type EducationGate = { have: number; need: number; sustainDays: number; requiredDays: number; missing: string; blocked: string[] };
@@ -348,24 +351,25 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
 }
 
 /** Shared by upgrade gates and inspectors: each available holder qualifies one real post. */
-export function credentialPosts(state: EducationState, view: Pick<EducationView, 'posts'>, firmId: number | null, rank: 'basic' | 'higher'): number {
+export function credentialPosts(state: EducationState, view: Pick<EducationView, 'posts' | 'ownerTiers'>, firmId: number | null, rank: 'basic' | 'higher', ownerOnly = false): number {
   if (firmId === null) return 0;
   // A higher holder also has a basic diploma, but occupies only one post.
-  // After education roles, allocate both ranks together in stable firm order;
+  // After education roles, allocate both ranks together in stable firm order (in new cities an owner's own business first);
   // querying a different firm's gate must not spend the same holder again.
   const pools = new Map(state.people.map(person => [person.householdId, {
     basicOnly: person.basic - person.higher - person.teacher - person.university,
     higher: person.higher - person.professor,
   }]));
   let total = 0;
-  for (const post of [...view.posts].sort((a, b) => a.firmId - b.firmId || a.householdId - b.householdId)) {
+  const first = (post: EducationPost) => view.ownerTiers && post.owner ? 0 : 1;
+  for (const post of [...view.posts].sort((a, b) => first(a) - first(b) || a.firmId - b.firmId || a.householdId - b.householdId)) {
     const pool = pools.get(post.householdId);
     if (!pool) continue;
     const workers = post.workers + (post.owner ? 1 : 0);
     const higher = Math.min(workers, pool.higher);
     const basicOnly = Math.min(workers - higher, pool.basicOnly);
     pool.higher -= higher; pool.basicOnly -= basicOnly;
-    if (post.firmId === firmId) total += rank === 'higher' ? higher : higher + basicOnly;
+    if (post.firmId === firmId && (!ownerOnly || post.owner)) total += rank === 'higher' ? higher : higher + basicOnly;
   }
   return total;
 }
@@ -377,14 +381,23 @@ function predicate(state: EducationState, view: EducationView, building: Educati
   if (building.zone === 'R') return { ok: state.residentHigher >= 1, have: state.residentHigher, need: 1, missing: 'ผู้ถือวุฒิขั้นสูงที่ยังอยู่ในเมือง' };
   if (building.zone === 'F' && next <= 3) return { ok: true, have: 0, need: 0, missing: '' };
   if (building.zone === 'I' && next <= 3) return { ok: true, have: 0, need: 0, missing: '' };
+  if (building.zone === 'C' && view.ownerTiers) {
+    // A shop (1–3) needs no diploma, a market (4–6) an owner with a school diploma and a mall (7–9) one with a university degree.
+    // A shop that outside investors own, with no owner working in it, goes by its staff.
+    if (next <= 3) return { ok: true, have: 0, need: 0, missing: '' };
+    const rank = next <= 6 ? 'basic' : 'higher', diploma = rank === 'basic' ? 'วุฒิพื้นฐาน' : 'วุฒิขั้นสูง';
+    const owner = view.posts.some(post => post.firmId === building.firmId && post.owner), have = credentialPosts(state, view, building.firmId, rank, owner);
+    return { ok: have >= 1, have, need: 1, missing: owner ? `เจ้าของกิจการที่ถือ${diploma}` : `คนทำงานร้านที่ถือ${diploma} 1 คน` };
+  }
   if (building.zone === 'C' && next <= 4) return { ok: true, have: 0, need: 0, missing: '' };
-  if (building.zone === 'F' || (building.zone === 'I' && next <= 6) || (building.zone === 'C' && next <= 6)) {
+  if ((building.zone === 'F' && next <= 6) || (building.zone === 'I' && next <= 6) || (building.zone === 'C' && next <= 6)) {
     const have = credentialPosts(state, view, building.firmId, 'basic');
     const missing = building.zone === 'F' ? 'แรงงานฟาร์มที่ถือวุฒิพื้นฐาน 1 คน' : building.zone === 'I' ? 'แรงงานโรงงานที่ถือวุฒิพื้นฐาน 1 คน' : 'คนทำงานร้านที่ถือวุฒิพื้นฐาน 1 คน';
     return { ok: have >= 1, have, need: 1, missing };
   }
   const have = credentialPosts(state, view, building.firmId, 'higher');
-  return { ok: have >= 1, have, need: 1, missing: building.zone === 'I' ? 'แรงงานโรงงานที่ถือวุฒิขั้นสูง 1 คน' : 'คนทำงานร้านที่ถือวุฒิขั้นสูง 1 คน' };
+  // High-tech farms (levels 7–9) and the top factories and shops need someone with a university degree.
+  return { ok: have >= 1, have, need: 1, missing: building.zone === 'F' ? 'แรงงานฟาร์มที่ถือวุฒิขั้นสูง 1 คน' : building.zone === 'I' ? 'แรงงานโรงงานที่ถือวุฒิขั้นสูง 1 คน' : 'คนทำงานร้านที่ถือวุฒิขั้นสูง 1 คน' };
 }
 
 export function educationGate(state: EducationState | undefined, view: EducationView | null, building: EducationBuilding): EducationGate {

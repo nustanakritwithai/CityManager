@@ -8,7 +8,7 @@ import {
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
-import { commercialVisualPlan } from './commercial-visuals.ts';
+import { COMMERCIAL_TIERS, commercialVisualPlan } from './commercial-visuals.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
@@ -209,12 +209,23 @@ export class CityView {
       const crop = this.box(plot, x, .15 + cropHeight / 2, .12, .17, cropHeight, 1.14, row % 2 ? '#86ad58' : '#b0bc61');
       crop.name = 'Renewable crop row';
     }
-    for (let tier = 4; tier <= level; tier++) {
+    for (let tier = 4; tier <= Math.min(level, 6); tier++) {
       const marker = this.box(plot, .4 + (tier - 4) * .15, .69, -.46, .1, .1, .1, '#e3bd55'); marker.name = `Farm level ${tier} marker`;
     }
-    const shed = this.box(plot, .55, .32, -.46, .5, .43, .48, '#d7dec9'); shed.name = 'Original farm shed';
-    this.box(plot, .55, .58, -.46, .6, .13, .57, '#4c7056');
-    this.box(plot, .55, .29, -.208, .14, .27, .025, '#536754');
+    // High-tech farms (levels 7–9): a greenhouse over the rows, then solar panels, then a vertical-farm tower for the shed.
+    if (level >= 7) {
+      const house = this.box(plot, -.2, .3, .12, 1.12, .36, 1.22, '#dcefe9'); house.name = 'High-tech farm greenhouse';
+      this.box(plot, -.2, .5, .12, 1.16, .04, 1.26, '#9cb8b1');
+    }
+    if (level >= 8) { const solar = this.box(plot, .55, .2, .45, .5, .04, .5, '#2f4b68'); solar.name = 'High-tech farm solar panels'; }
+    if (level >= 9) {
+      const tower = this.box(plot, .55, .9, -.46, .52, 1.3, .5, '#cde6d8'); tower.name = 'Vertical farm tower';
+      for (let floor = 0; floor < 5; floor++) this.box(plot, .55, .36 + floor * .25, -.205, .54, .05, .02, '#6dac68');
+    } else {
+      const shed = this.box(plot, .55, .32, -.46, .5, .43, .48, '#d7dec9'); shed.name = 'Original farm shed';
+      this.box(plot, .55, .58, -.46, .6, .13, .57, '#4c7056');
+      this.box(plot, .55, .29, -.208, .14, .27, .025, '#536754');
+    }
     this.box(plot, -.03, .28, .8, 1.5, .065, .045, '#b9ae87');
   }
   private commercial(tile: Entity, level: number, lit: boolean) {
@@ -230,8 +241,8 @@ export class CityView {
   agricultureDiagnostics() {
     const tiles = [...this.tiles.values()];
     return { farmPlots: tiles.filter(tile => tile.entity.findByName('Original farm plot')).length,
-      marketStalls: tiles.filter(tile => tile.entity.findByName('Commercial market')).length,
-      commercialTiers: Object.fromEntries(['market', 'building', 'mall'].map(tier => [tier, tiles.filter(tile => tile.entity.findByName(`Commercial ${tier}`)).length])),
+      shopFronts: tiles.filter(tile => tile.entity.findByName('Commercial shop')).length,
+      commercialTiers: Object.fromEntries(COMMERCIAL_TIERS.map(tier => [tier, tiles.filter(tile => tile.entity.findByName(`Commercial ${tier}`)).length])),
       buildGrid: this.ground.diagnostics.buildGrid };
   }
   setup() {

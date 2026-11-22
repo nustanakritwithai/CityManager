@@ -224,7 +224,7 @@ const help: Record<string, string> = {
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
   road: 'ถนน ฿50/ช่อง · ลากเส้น หรือแตะจุดเริ่มและจุดจบ · กลับเพื่อยกเลิก',
   R: 'โซนบ้านสร้างที่ว่างก่อน · ครัวเรือนย้ายเข้าเมื่อผ่านความจุ ถนน บริการ และงาน',
-  C: 'วางโซนพาณิชย์ · ตลาด 1–3 → อาคาร 4–6 → Big Mall 7–9 · ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว',
+  C: 'วางโซนพาณิชย์ · ร้านค้า 1–3 → ตลาด 4–6 → ห้าง 7–9 · ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว',
   I: 'วางโรงงานข้างถนนเชื่อมเมือง · โรงงานเพิ่มต้องมีทุนกิจการจริงและพืชผล · ดูเงื่อนไขในภาพรวมเมือง',
   F: 'วางฟาร์มบนแปลงว่างได้ทุกที่ · ดินไม่มีผลต่อการวางหรือผลผลิต · เก็บเกี่ยว 24 ล็อตต่อแรงงานต่อวัน · ยังต้องมีถนน น้ำ และผู้ซื้อ',
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
@@ -494,7 +494,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
   } else if (cell && cellIndex !== null) {
     const firm = building && city.firms.find(f => f.building === building.id);
     const plant = plantAt(city, cellIndex), park = parkAt(city, cellIndex), campus = campusAt(city, cellIndex), civic = civicAt(city, cellIndex);
-    const name = civic ? CIVIC[civic.kind].label : campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ตลาดระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
+    const name = civic ? CIVIC[civic.kind].label : campus ? (campus.kind === 'school' ? 'โรงเรียน' : 'มหาวิทยาลัย') : park ? 'สวนสาธารณะ' : plant ? PLANT_LABELS[plant.kind] : cell.road ? 'ถนน' : cell.zone === 'R' ? 'บ้านพัก' : cell.zone === 'C' ? building ? commercialPresentation(building.level).title : 'โซนพาณิชย์ · เริ่มที่ร้านค้าระดับ 1' : firm && (cell.zone === 'I' || cell.zone === 'F') ? firmGoodsName(city, firm) : cell.zone === 'I' ? 'โรงงาน' : cell.zone === 'F' ? 'ฟาร์มพืชผล' : 'ที่ดินว่าง';
     $('#selection-title').textContent = name + (building ? ' #' + building.id : '') + ' · ' + formatCellCoordinate(cellIndex);
     $('#place-subtitle').textContent = building ? 'เฉพาะสถานที่นี้ · ระดับ ' + building.level + ' · อายุ ' + building.age + ' วัน' : 'ข้อมูลเฉพาะแปลงนี้'; symbol(cell.zone, cell.road, cell.zone === 'C' && !!building && building.level <= 3, !!park);
     if (building?.zone === 'R') { const tier = housingLevel(building.housingType!, building.level); const label = { cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]; $('#selection-title').textContent = `${label} #${building.id} · ${formatCellCoordinate(cellIndex)}`; $('#place-subtitle').textContent = `${label} ระดับ ${tier.tierLevel} · อายุ ${building.age} วัน · พื้นที่ 1 ช่อง`; }

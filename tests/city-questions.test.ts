@@ -147,10 +147,10 @@ test('business overview counts commercial tiers once irrespective of legacy role
   }
   assert.equal(['commercial', 'industrial', 'farms'].reduce((n, id) => n + Number(fact(answer, `city.businesses.${id}`).value), 0), city.firms.length);
   const tierCount = (from:number,to:number) => city.firms.filter(f => f.zone === 'C' && city.buildings.some(b => b.id === f.building && b.level >= from && b.level <= to)).length;
-  for (const [id,from,to] of [['raw-markets',1,3],['commercial-buildings',4,6],['malls',7,9]] as const) assert.equal(fact(answer, `city.businesses.${id}`).value,tierCount(from,to));
-  assert.equal(['raw-markets','commercial-buildings','malls'].reduce((n,id)=>n+Number(fact(answer, `city.businesses.${id}`).value),0),city.firms.filter(f=>f.zone==='C').length);
-  assert.equal(fact(answer, 'city.businesses.raw-markets').source, 'firms[zone=C,building.level=1..3].length');
-  assert.ok(Number(fact(answer, 'city.businesses.raw-markets').value) <= Number(fact(answer, 'city.businesses.commercial').value), 'Markets are a subset, never added twice to city establishment totals');
+  for (const [id,from,to] of [['shops',1,3],['markets',4,6],['malls',7,9]] as const) assert.equal(fact(answer, `city.businesses.${id}`).value,tierCount(from,to));
+  assert.equal(['shops','markets','malls'].reduce((n,id)=>n+Number(fact(answer, `city.businesses.${id}`).value),0),city.firms.filter(f=>f.zone==='C').length);
+  assert.equal(fact(answer, 'city.businesses.shops').source, 'firms[zone=C,building.level=1..3].length');
+  assert.ok(Number(fact(answer, 'city.businesses.shops').value) <= Number(fact(answer, 'city.businesses.commercial').value), 'Shops are a subset, never added twice to city establishment totals');
   assert(!answer.facts.some(item => /profit|revenue|expense|balance/.test(item.id)));
   assert.equal(serialize(city), before);
 });
