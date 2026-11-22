@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createCity, deserialize, serialize, step, MUNICIPAL_SERVICE_PER_RESIDENT } from '../src/sim.ts';
 import { treasuryBudget } from '../src/overview-data.ts';
 import { keepSupplied } from './plants.ts';
-import { legacySizes } from './legacy-sizes.ts';
+import { legacyPrices, legacySizes } from './legacy-sizes.ts';
 
 const bill = 'Monthly municipal services';
 test('municipal services are charged only at settlement, itemized and preserve save round trips', () => {
@@ -60,12 +60,14 @@ test('an older saved city loads without a retroactive services charge', () => {
 });
 
 
-test('starter cities earn a small first-month surplus and can rebuild funds by month six', () => {
-  for (const seed of [61025, 2026, 42]) {
-    const c = createCity(seed);
+test('starter cities earn a small first-month surplus, or run near even under real prices, and can rebuild funds by month six', () => {
+  for (const seed of [61025, 2026, 42]) for (const prices of ['old', 'real'] as const) {
+    const c = prices === 'old' ? legacyPrices(createCity(seed)) : createCity(seed);
     for (let day = 1; day <= 180; day++) {
       step(c); keepSupplied(c);
-      if (day === 30) assert.ok(treasuryBudget(c).net > 0, `seed ${seed}: first-month surplus`);
+      // A town that sells water and power keeps a small surplus. Under real prices the authorities bill homes and shops
+      // themselves, so the town's first month runs near even: within 0.1% of its starting treasury.
+      if (day === 30) assert.ok(treasuryBudget(c).net > (prices === 'old' ? 0 : -3_000), `seed ${seed}, ${prices} prices: first month`);
     }
     // The pace of the month's running budget: a plant the fixture built for a growing town (keepSupplied) is an
     // investment, not a monthly cost.
