@@ -323,7 +323,7 @@ function educationPosts(c: City): EducationView['posts'] {
 /** Current allocated qualifications, not every diploma held by a worker's household. */
 export function firmCredentialCounts(c: City, firmId: number): { basic: number; higher: number } {
   if (!c.education) return { basic: 0, higher: 0 };
-  const view = { posts: educationPosts(c) };
+  const view = { posts: educationPosts(c), ownerTiers: realIndustry(c) };
   return { basic: credentialPosts(c.education, view, firmId, 'basic'), higher: credentialPosts(c.education, view, firmId, 'higher') };
 }
 function educationView(c: City): EducationView {
@@ -334,7 +334,7 @@ function educationView(c: City): EducationView {
     buildings: c.buildings.map(b => ({ id: b.id, zone: b.zone, level: b.level, firmId: c.firms.find(f => f.building === b.id)?.id ?? null })),
     posts: educationPosts(c),
     road: cell => neighbors(cell, c).some(n => roads.has(n)),
-    sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c), wages: educationWages(c),
+    sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c), wages: educationWages(c), ownerTiers: realIndustry(c),
   };
 }
 function educationBlocked(c: City, building: { id: number; zone: 'R' | 'C' | 'I' | 'F'; level: number; firmId?: number | null }): string[] {

@@ -80,7 +80,7 @@ try {
     await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     diagnostics.phase='semantic-assertions';const rows=await evaluate('window.commercialReview.inspect()');assert.equal(rows.length,9);
     for(const row of rows){
-      assert.equal(row.tier,row.level<=3?'market':row.level<=6?'building':'mall');
+      assert.equal(row.tier,row.level<=3?'shop':row.level<=6?'market':'mall');
       assert.equal(row.name,`Commercial ${row.tier}`);assert.ok(row.parts.length>=10&&row.parts.length<=32);
       assert.ok(row.width>0&&row.width<=1.71&&row.depth>0&&row.depth<=1.71&&row.height>0&&row.height<6,'Actual meshes stay within parcel');
       assert.equal(row.connected,!disconnected);assert.equal(row.powered,powered&&!disconnected);
@@ -92,7 +92,7 @@ try {
     if(name==='night-retail-tag'||name==='reconnected-night')assert.deepEqual(rows,original,'Historical commodity tag never changes actual meshes or lights; reconnect restores them');
     const controls=await evaluate('window.commercialReview.inspectControls()');assert.deepEqual(controls.map(c=>c.zone),['R','I','F']);
     for(const control of controls){assert.equal(control.commercial,false);assert.ok(control.renders>0,'Non-C geometry still present');}
-    assert.deepEqual((await evaluate('window.commercialReview.diagnostics()')).commercialTiers,{market:3,building:3,mall:3});
+    assert.deepEqual((await evaluate('window.commercialReview.diagnostics()')).commercialTiers,{shop:3,market:3,mall:3});
     results.push({name,rows,controls});await capture(name);
   }
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);

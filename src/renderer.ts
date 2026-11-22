@@ -8,7 +8,7 @@ import {
   Entity, Mesh, MeshInstance, StandardMaterial, Color, Vec3, type RenderComponent, FILLMODE_NONE, RESOLUTION_AUTO, ContainerHandler, TextureHandler, BLEND_NORMAL
 } from 'playcanvas';
 import { SIZE, GATEWAY, access, connectedRoads, firmWorkerCount, type City } from './sim.ts';
-import { commercialVisualPlan } from './commercial-visuals.ts';
+import { COMMERCIAL_TIERS, commercialVisualPlan } from './commercial-visuals.ts';
 import { factoryLevel } from './factory-levels.ts';
 import { FactoryVisuals, factoryWorking } from './factory-visuals.ts';
 import { utilityService, plantLevel, type UtilityKind } from './utilities.ts';
@@ -241,8 +241,8 @@ export class CityView {
   agricultureDiagnostics() {
     const tiles = [...this.tiles.values()];
     return { farmPlots: tiles.filter(tile => tile.entity.findByName('Original farm plot')).length,
-      marketStalls: tiles.filter(tile => tile.entity.findByName('Commercial market')).length,
-      commercialTiers: Object.fromEntries(['market', 'building', 'mall'].map(tier => [tier, tiles.filter(tile => tile.entity.findByName(`Commercial ${tier}`)).length])),
+      shopFronts: tiles.filter(tile => tile.entity.findByName('Commercial shop')).length,
+      commercialTiers: Object.fromEntries(COMMERCIAL_TIERS.map(tier => [tier, tiles.filter(tile => tile.entity.findByName(`Commercial ${tier}`)).length])),
       buildGrid: this.ground.diagnostics.buildGrid };
   }
   setup() {

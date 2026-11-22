@@ -574,7 +574,7 @@ function cardHero(data: CardData, city: City): HTMLElement {
   const selectedBuilding = city.buildings.find(b => b.id === data.identity.buildingId);
   if ((data.kind === 'market' || data.kind === 'shop') && selectedBuilding) labels[data.kind] = commercialPresentation(selectedBuilding.level).label;
   if (data.kind === 'house' && selectedBuilding) { const tier = housingLevel(selectedBuilding.housingType!, selectedBuilding.level); labels.house = `${{ cottage: 'บ้าน', apartment: 'อพาร์ตเมนต์', condo: 'คอนโดมิเนียม' }[tier.type]} ระดับ ${tier.tierLevel} · ระดับรวม ${selectedBuilding.level}/9`; }
-  const hero = el('div', 'bc-hero'), icon = el('span', 'bc-type-icon'), copy = el('div', 'bc-hero-copy'); icon.append(cardIcon((data.kind === 'market' || data.kind === 'shop') && selectedBuilding ? selectedBuilding.level <= 3 ? 'market' : 'shop' : data.kind));
+  const hero = el('div', 'bc-hero'), icon = el('span', 'bc-type-icon'), copy = el('div', 'bc-hero-copy'); icon.append(cardIcon((data.kind === 'market' || data.kind === 'shop') && selectedBuilding ? commercialPresentation(selectedBuilding.level).tier === 'market' ? 'market' : 'shop' : data.kind));
   if (data.kind === 'house' && selectedBuilding?.housingType !== 'cottage') { icon.innerHTML = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M15 58V6h34v52M8 58h48M23 16h5m8 0h5M23 26h5m8 0h5M23 36h5m8 0h5M27 58V46h10v12"/></svg>'; }
   const identity = data.kind === 'household'
     ? `${data.identity.householdId === null ? 'ยังไม่พบรหัสครัวเรือน' : `ครัวเรือน #${data.identity.householdId}`} · ${data.identity.buildingId === null ? 'ยังไม่มีบ้านพัก' : `บ้านพัก: อาคาร #${data.identity.buildingId}`}`

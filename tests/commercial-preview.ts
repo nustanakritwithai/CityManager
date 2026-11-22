@@ -4,7 +4,7 @@ import {createCity, SIZE, GATEWAY, access, connectedRoads, type Firm} from '../s
 import {emptyCrops,emptyProducts} from '../src/goods.ts';
 import {atmosphereAt} from '../src/atmosphere.ts';
 import {utilityService} from '../src/utilities.ts';
-import {commercialVisualPlan} from '../src/commercial-visuals.ts';
+import {COMMERCIAL_TIERS,commercialVisualPlan} from '../src/commercial-visuals.ts';
 // Synthetic visual input only. Never serialized, simulated, uploaded or installed as a playable city.
 const city=createCity(61031,{starter:false});
 city.cells.forEach(cell=>{cell.road=false;cell.zone=null;cell.building=null;});
@@ -48,5 +48,5 @@ function inspect(){const service=utilityService(city,connectedRoads(city));retur
  const windows=renders.filter(r=>plan.parts.find(p=>p.name===r.entity.name)?.window).map(r=>(()=>{const m=r.meshInstances[0].material as StandardMaterial;return m.emissiveIntensity*Math.max(m.emissive.r,m.emissive.g,m.emissive.b);})());
  return {level:b.level,tier:plan.tier,name:model.name,parts:renders.map(r=>r.entity.name),width:bounds!.halfExtents.x*2,depth:bounds!.halfExtents.z*2,height:bounds!.halfExtents.y*2,windows,connected:access(city,b.cell),powered:service.ok(b.id)};
 });}
-function inspectControls(){return city.buildings.filter(b=>b.zone!=='C').map(b=>({zone:b.zone,commercial:['market','building','mall'].some(t=>!!view.tiles.get(b.cell)!.entity.findByName(`Commercial ${t}`)),renders:view.tiles.get(b.cell)!.entity.findComponents('render').length}));}
+function inspectControls(){return city.buildings.filter(b=>b.zone!=='C').map(b=>({zone:b.zone,commercial:COMMERCIAL_TIERS.some(t=>!!view.tiles.get(b.cell)!.entity.findByName(`Commercial ${t}`)),renders:view.tiles.get(b.cell)!.entity.findComponents('render').length}));}
 show();Object.assign(window,{commercialReview:{get ready(){return !!view.assets&&view.assets.status.failed.length===0;},get status(){return view.assets?.status;},health:()=>({contextLost:contextLost||!!canvas.getContext('webgl2')?.isContextLost(),width:canvas.width,height:canvas.height}),show,inspect,inspectControls,get state(){return state;},diagnostics:()=>view.agricultureDiagnostics()}});

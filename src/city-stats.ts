@@ -2,12 +2,13 @@
  * One read-only snapshot for the city stats overlay: services, buildings by level and kind,
  * population and labour by skill, and crop and goods stocks. Nothing here mutates the city.
  */
-import { MONTH, wagesFor, access, connectedRoads, firmCapacity, firmWorkerCount, summary, utilityStatus, type City, type Firm } from './sim.ts';
+import { MONTH, wagesFor, access, connectedRoads, firmCapacity, firmWorkerCount, summary, utilityStatus, type City } from './sim.ts';
 import { PARK_STAFF, parkStaff, parkWorkers } from './parks.ts';
 import { cityOverview } from './context-data.ts';
 
-export type BuildingKind = 'R' | 'market' | 'shop' | 'I' | 'F';
-export const BUILDING_KINDS: readonly BuildingKind[] = Object.freeze(['R', 'market', 'shop', 'I', 'F']);
+/** One commercial kind: its level shows the tier, a shop at 1–3, a market at 4–6 and a mall at 7–9. */
+export type BuildingKind = 'R' | 'shop' | 'I' | 'F';
+export const BUILDING_KINDS: readonly BuildingKind[] = Object.freeze(['R', 'shop', 'I', 'F']);
 export type SkillKey = 'general' | 'manufacturing' | 'retail';
 export const SKILLS: readonly SkillKey[] = Object.freeze(['general', 'manufacturing', 'retail']);
 
@@ -17,18 +18,18 @@ export type CityStats = {
   buildings: { levels: number[]; rows: Record<number, Record<BuildingKind, number>>; totals: Record<BuildingKind, number>; all: number };
   people: { population: number; households: number; workforce: number; dependents: number; employed: number; unemployed: number; homeless: number; homelessPersons: number; occupiedPersons: number; personCapacity: number; occupiedHomes: number; homeSlots: number };
   labour: { skill: SkillKey; supply: number; employed: number; owners: number; idle: number }[];
-  jobs: { kind: 'I' | 'F' | 'shop' | 'market' | 'park'; firms: number; capacity: number; workers: number; wage: number }[];
+  jobs: { kind: 'I' | 'F' | 'shop' | 'park'; firms: number; capacity: number; workers: number; wage: number }[];
   stocks: { crops: { farm: number; market: number; factory: number }; goods: { factory: number; shop: number }; harvested: number; processed: number; produced: number; consumed: number; imported: number; exported: number };
 };
 
-const kindOf = (_firm: Firm | undefined, zone: string, level = 1): BuildingKind => zone === 'C' ? (level <= 3 ? 'market' : 'shop') : zone as BuildingKind;
-const zeroRow = (): Record<BuildingKind, number> => ({ R: 0, market: 0, shop: 0, I: 0, F: 0 });
+const kindOf = (zone: string): BuildingKind => zone === 'C' ? 'shop' : zone as BuildingKind;
+const zeroRow = (): Record<BuildingKind, number> => ({ R: 0, shop: 0, I: 0, F: 0 });
 
 export function cityStats(city: City): CityStats {
   const s = summary(city), o = cityOverview(city, s), connected = connectedRoads(city), roads = city.cells.filter(c => c.road).length;
   const rows: Record<number, Record<BuildingKind, number>> = {}, totals = zeroRow();
   for (const b of city.buildings) {
-    const kind = kindOf(city.firms.find(f => f.building === b.id), b.zone, b.level);
+    const kind = kindOf(b.zone);
     (rows[b.level] ??= zeroRow())[kind]++; totals[kind]++;
   }
   const labour = SKILLS.map(skill => {
@@ -37,12 +38,12 @@ export function cityStats(city: City): CityStats {
     const owners = city.ownerLabor.filter(e => e.skill === skill).length;
     return { skill, supply, employed, owners, idle: Math.max(0, supply - employed - owners) };
   });
-  const jobs: CityStats['jobs'] = (['I', 'F', 'shop', 'market'] as const).map(kind => {
-    const firms = city.firms.filter(f => kindOf(f, f.zone, city.buildings.find(b=>b.id===f.building)?.level) === kind);
+  const jobs: CityStats['jobs'] = (['I', 'F', 'shop'] as const).map(kind => {
+    const firms = city.firms.filter(f => kindOf(f.zone) === kind);
     const buildings = firms.map(f => city.buildings.find(b => b.id === f.building)!).filter(Boolean);
     return {
       kind, firms: firms.length, capacity: buildings.reduce((n, b) => n + firmCapacity(b, firms.find(f => f.building === b.id), city), 0),
-      workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: wagesFor(city)[kind === 'shop' || kind === 'market' ? 'C' : kind],
+      workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: wagesFor(city)[kind === 'shop' ? 'C' : kind],
     };
   });
   if (city.parks.length) jobs.push({ kind: 'park', firms: city.parks.length, capacity: city.parks.length * PARK_STAFF.slots, workers: city.parks.reduce((n, p) => n + parkWorkers(p), 0), wage: parkStaff(city).monthlyWage });

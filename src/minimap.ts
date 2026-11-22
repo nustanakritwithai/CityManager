@@ -21,7 +21,7 @@ type View = { target: { x: number; z: number }; yaw: number; radius: number };
 const UNIT = 2;
 const FILL: Record<string, string> = { R: '#8fd1a7', C: '#8cc3e6', I: '#e9b07c', F: '#c7dc8a' };
 const BUILT: Record<string, string> = { R: '#3f9c6b', C: '#3c84b8', I: '#c27a3a', F: '#8aa543', market: '#9cb85a' };
-const NAMES = { shop: 'ร้าน', market: 'ตลาด', I: 'โรงงาน', F: 'ฟาร์ม' } as const;
+const NAMES = { I: 'โรงงาน', F: 'ฟาร์ม' } as const;
 
 function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { view?: View; selected?: number | null; issues?: Set<number>; labels?: boolean }) {
   const expanded=city.cells.length===EXPANDED_MAP_CELLS, {cell,xOffset,yOffset}=mapLayout(size,expanded);
@@ -35,7 +35,7 @@ function draw(ctx: CanvasRenderingContext2D, city: City, size: number, opts: { v
     ctx.fillStyle = FILL[c.zone]; ctx.fillRect(x + .5, y + .5, cell - 1, cell - 1);
     if (c.building !== null) {
       const building = city.buildings.find(b => b.id === c.building);
-      ctx.fillStyle = c.zone === 'C' && building && building.level <= 3 ? BUILT.market : BUILT[c.zone];
+      ctx.fillStyle = c.zone === 'C' && building && commercialPresentation(building.level).tier === 'market' ? BUILT.market : BUILT[c.zone];
       const pad = Math.max(1, cell * .18); ctx.fillRect(x + pad, y + pad, cell - pad * 2, cell - pad * 2);
     }
   }

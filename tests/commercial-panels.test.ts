@@ -24,7 +24,7 @@ test('one commercial panel shows both stock types and identical growth across hi
     const panel=renderCommercialProgression(city,firm) as unknown as Element,body=text(panel);
     assert.equal(panel.dataset.commercialGrowth,String(firm.id),'Unified progression retains the exact selected firm identity');
     assert.match(body,new RegExp(`ระดับ ${level}/9`));assert.match(body,/ขายพืชผลและสินค้าสำเร็จรูปในกิจการเดียว/);assert.match(body,/ไม่ตัดสินค้าเดิมทิ้ง/);
-    assert.match(body,level<=3?/ตลาด/:level<=6?/อาคารพาณิชย์/:/Big Mall/);
+    assert.match(body,level<=3?/ร้านค้า/:level<=6?/ตลาด/:/ห้าง/);
     if(level===9)assert.match(body,/ถึงระดับสูงสุดแล้ว/);else for(const reason of status.reasons)assert.ok(body.includes(reason),reason);
     if(prior!==undefined)assert.equal(body,prior,'historical tag is not a separate current business');prior=body;
     const stock=renderAgriculture(city,building,{...firm,owner:undefined},status.workers)[0] as unknown as Element;

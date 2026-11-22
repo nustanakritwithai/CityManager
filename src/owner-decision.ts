@@ -41,10 +41,10 @@ export const OWNER_REASON_TEXT: Record<OwnerReason, string> = {
 export const OWNER_FACT_LABELS: Record<OwnerFactKey, string> = {
   householdCash: 'เงินครัวเรือนปัจจุบัน', householdFoodReserve: 'งบอาหารครัวเรือนที่กันไว้ 30 วัน',
   householdRentReserve: 'ค่าเช่าบ้านที่กันไว้หนึ่งเดือน', householdEssentialReserve: 'งบจำเป็นครัวเรือนที่กันไว้รวม',
-  householdSurplus: 'เงินครัวเรือนเหนือเงินกันไว้', firmCash: 'เงินตลาดปัจจุบัน',
-  earnedPayrollReserve: 'ค่าจ้างที่เกิดขึ้นแล้วและต้องกันไว้', firmTaxReserve: 'ภาษีตลาดที่กันไว้',
-  firmRentReserve: 'ค่าเช่าตลาดที่กันไว้หนึ่งเดือน', firmWorkingReserve: 'เงินหมุนเวียนตลาดขั้นต่ำ',
-  firmTotalReserve: 'ภาระและเงินหมุนเวียนตลาดที่กันไว้รวม', firmCashShortfall: 'เงินที่ตลาดขาดจากเงินกันไว้',
+  householdSurplus: 'เงินครัวเรือนเหนือเงินกันไว้', firmCash: 'เงินกิจการปัจจุบัน',
+  earnedPayrollReserve: 'ค่าจ้างที่เกิดขึ้นแล้วและต้องกันไว้', firmTaxReserve: 'ภาษีกิจการที่กันไว้',
+  firmRentReserve: 'ค่าเช่ากิจการที่กันไว้หนึ่งเดือน', firmWorkingReserve: 'เงินหมุนเวียนกิจการขั้นต่ำ',
+  firmTotalReserve: 'ภาระและเงินหมุนเวียนกิจการที่กันไว้รวม', firmCashShortfall: 'เงินที่กิจการขาดจากเงินกันไว้',
   contributeAvailable: 'เพดานเติมทุนของคำสั่งเดิม', withdrawAvailable: 'เพดานถอนกำไรของคำสั่งเดิม',
   distributableProfit: 'กำไรที่ผ่านเกณฑ์แจกจ่ายของคำสั่งเดิม', safeContribute: 'จำนวนเติมทุนที่ผ่านกฎรอบนี้',
   safeWithdraw: 'จำนวนถอนกำไรที่ผ่านกฎรอบนี้',
@@ -164,7 +164,7 @@ export function validateOwnerProposal(city: City, input: unknown): OwnerValidati
     if (!exact(input, ['schemaVersion', 'policyVersion', 'proposalId', 'snapshot', 'command', 'reason', 'evidenceIds']) || !record(input) || input.schemaVersion !== 1 || input.policyVersion !== OWNER_POLICY_VERSION || typeof input.proposalId !== 'string' || input.proposalId.length >= 100 || !validSnapshotShape(input.snapshot) || !exact(input.command, ['type', 'amountSatang']) || !record(input.command) || !['hold', 'contributeOwnerCapital', 'withdrawOwnerProfit'].includes(String(input.command.type)) || !money(input.command.amountSatang) || typeof input.reason !== 'string' || !Object.hasOwn(OWNER_REASON_TEXT, input.reason) || !Array.isArray(input.evidenceIds)) return invalid('invalid-proposal', 'รูปแบบข้อเสนอไม่ถูกต้อง');
     const proposal = input as unknown as OwnerProposal;
     const current = captureOwnerSnapshot(city, proposal.snapshot.firmId);
-    if (!current) return invalid('owner-unavailable', 'ไม่พบเจ้าของตลาดที่ตรงกับข้อเสนอ');
+    if (!current) return invalid('owner-unavailable', 'ไม่พบเจ้าของกิจการที่ตรงกับข้อเสนอ');
     if (canonical(current) !== canonical(proposal.snapshot)) return invalid('stale-snapshot', 'ข้อมูลเปลี่ยนแล้ว กรุณาประเมินใหม่');
     const raw = { schemaVersion: proposal.schemaVersion, policyVersion: proposal.policyVersion, snapshot: proposal.snapshot, command: proposal.command, reason: proposal.reason, evidenceIds: proposal.evidenceIds };
     if (proposal.proposalId !== proposalHash(raw)) return invalid('invalid-proposal-id', 'รหัสข้อเสนอไม่ตรงกับเนื้อหา');
