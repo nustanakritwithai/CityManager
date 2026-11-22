@@ -71,6 +71,7 @@ function replayTypes(c: City, captureTick?: number): TypedSeed | undefined {
     else if (e.kind === 'trade') { take(e.from); mills(e.to); give(e.to); }
     else if (e.kind === 'consumption') take(e.from);
     else if (e.kind === 'export') { take(e.from); }
+    else if (e.kind === 'import') { mills(e.to); give(e.to); }
     else if (e.kind === 'process') { mills(e.from); take(e.from); recipeCrop.set(e.reason, crop); }
     else if (e.kind === 'market-deposit') { if (e.from !== 'market-server') take(e.from); }
     else if (e.kind === 'market-refund' || e.kind === 'market-receipt') { if (e.to.startsWith('firm:')) give(e.to); }

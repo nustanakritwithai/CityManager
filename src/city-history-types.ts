@@ -22,7 +22,8 @@ export type CityHistory = {
   accounts: Record<string, number>;
   goodsBalances: Record<string, number>;
   goodsTotals: { produced: number; imported: number; consumed: number; exported: number };
-  cropTotals: { harvested: number; processed: number; consumed: number; writtenOff: number; exported: number };
+  /** `imported`: lots real mills bought from outside town, kept once there are any. */
+  cropTotals: { harvested: number; processed: number; consumed: number; writtenOff: number; exported: number; imported?: number };
   cropHoldings: Record<string, { quantity: number; value: number }>;
   typedCrops: Record<string, CropMix>; typedProducts: Record<string, ProductMix>;
   latestPurchase: Record<string, number>;

@@ -74,12 +74,18 @@ test('in a new city the rice farm, the mill and the households move real kilos a
   assert.deepEqual(deserialize(serialize(c)), c, 'the save validates the real harvests, milling and kilo sales');
 });
 
-test('a mill employs only what the paddy needs and grows only while paddy waits for it', { timeout: 300_000 }, () => {
+test('a mill short of the town\'s paddy buys the rest from outside at the farm price, and pays its way', { timeout: 300_000 }, () => {
   const c = grown(240), mill = c.firms.find(f => f.zone === 'I' && f.recipe === 'rice-mill')!, b = c.buildings.find(x => x.id === mill.building)!;
-  // One rice farm's paddy is a fraction of a two-tonne day: a community mill with one worker mills it all.
-  assert.equal(b.level, 1); assert.equal(firmWorkerCount(c, mill.id), 1);
-  assert.ok(mill.cropInventory * 2 < firmCropStore(b, mill, c));
+  // One rice farm's paddy is a fraction of a two-tonne day: the mill buys what it lacks from outside, after the town's.
+  const imports = c.cropLedger.filter(e => e.kind === 'import' && e.to === mill.wallet);
+  assert.ok(imports.length > 0);
+  for (const e of imports) { assert.equal(e.crop, 'rice'); assert.equal(e.cash, e.quantity * 350); assert.equal(e.toValue, e.cash); }
+  const bought = c.cropLedger.filter(e => e.kind === 'trade' && e.to === mill.wallet), farm = c.firms.find(f => f.zone === 'F')!;
+  assert.ok(bought.some(e => e.from === farm.wallet), 'the town farm still sells its paddy to the mill');
+  assert.ok(mill.cropInventory <= firmCropStore(b, mill, c));
+  assert.ok(firmWorkerCount(c, mill.id) <= millJobs(b.level));
   assert.ok((c.accounts[mill.wallet] ?? 0) > 0, 'and pays its way');
+  assert.equal(c.crops.imported, c.cropLedger.filter(e => e.kind === 'import').reduce((n, e) => n + e.quantity, 0) + (c.history?.cropTotals.imported ?? 0));
 });
 
 test('a city saved before real rice keeps its old farms, mills and basket prices', { timeout: 300_000 }, () => {

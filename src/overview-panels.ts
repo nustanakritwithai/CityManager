@@ -308,7 +308,7 @@ export class OverviewDashboard {
     const mix = el('div', 'dash-mix');
     mix.append(
       mixBar(INCOME_KINDS.map((k, i) => ({ key: k, label: INCOME_LABELS[k], value: r.income[k], slot: i + 1 })).filter(p => p.value > 0), money, 'รายได้ครัวเรือนตามแหล่ง'),
-      mixBar(SPENDING_KINDS.map((k, i) => ({ key: k, label: SPENDING_LABELS[k], value: r.spending[k], slot: i + 1 })).filter(p => p.value > 0), money, 'รายจ่ายครัวเรือนตามประเภท'),
+      mixBar(SPENDING_KINDS.map((k, i) => ({ key: k, label: SPENDING_LABELS[k], value: r.spending[k], slot: k === 'other' ? 0 : i + 1 })).filter(p => p.value > 0), money, 'รายจ่ายครัวเรือนตามประเภท'),
     );
     const risk = r.atRisk.length, tiles = el('div', 'dash-economy-tiles');
     tiles.append(

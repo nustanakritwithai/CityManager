@@ -2,7 +2,7 @@
  * One read-only snapshot for the city stats overlay: services, buildings by level and kind,
  * population and labour by skill, and crop and goods stocks. Nothing here mutates the city.
  */
-import { MONTH, WAGES, access, connectedRoads, firmCapacity, firmWorkerCount, summary, utilityStatus, type City, type Firm } from './sim.ts';
+import { MONTH, wagesFor, access, connectedRoads, firmCapacity, firmWorkerCount, summary, utilityStatus, type City, type Firm } from './sim.ts';
 import { PARK_STAFF, parkWorkers } from './parks.ts';
 import { cityOverview } from './context-data.ts';
 
@@ -42,7 +42,7 @@ export function cityStats(city: City): CityStats {
     const buildings = firms.map(f => city.buildings.find(b => b.id === f.building)!).filter(Boolean);
     return {
       kind, firms: firms.length, capacity: buildings.reduce((n, b) => n + firmCapacity(b, firms.find(f => f.building === b.id), city), 0),
-      workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: WAGES[kind === 'shop' || kind === 'market' ? 'C' : kind],
+      workers: firms.reduce((n, f) => n + firmWorkerCount(city, f.id), 0), wage: wagesFor(city)[kind === 'shop' || kind === 'market' ? 'C' : kind],
     };
   });
   if (city.parks.length) jobs.push({ kind: 'park', firms: city.parks.length, capacity: city.parks.length * PARK_STAFF.slots, workers: city.parks.reduce((n, p) => n + parkWorkers(p), 0), wage: PARK_STAFF.monthlyWage });

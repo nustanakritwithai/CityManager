@@ -16,7 +16,7 @@ export function validateCityHistory(c:City):void {
  map(h.accounts,(k,v)=>wallet(k)&&integer(v,k==='outside'?Number.MIN_SAFE_INTEGER:0));
  if(Object.values(h.accounts).reduce((a,b)=>a+b,0)!==0)fail();
  map(h.goodsBalances,(k,v)=>(wallet(k)||k==='production')&&integer(v,Number.MIN_SAFE_INTEGER));
- for(const [value,keys] of [[h.goodsTotals,'produced,imported,consumed,exported'],[h.cropTotals,'harvested,processed,consumed,writtenOff,exported'],[h.totals,'moneyCount,moneyAmount,cropCount,cropQuantity,goodsCount,goodsQuantity']] as const)if(!object(value)||Object.keys(value).sort().join()!==keys.split(',').sort().join())fail();
+ for(const [value,keys] of [[h.goodsTotals,'produced,imported,consumed,exported'],[h.cropTotals,'harvested,processed,consumed,writtenOff,exported'],[h.totals,'moneyCount,moneyAmount,cropCount,cropQuantity,goodsCount,goodsQuantity']] as const)if(!object(value)||Object.keys(value).filter(k=>!(value===h.cropTotals&&k==='imported')).sort().join()!==keys.split(',').sort().join())fail();
  for(const totals of [h.goodsTotals,h.cropTotals,h.totals])if(!object(totals)||Object.values(totals).some(v=>!integer(v)))fail();
  if(h.totals.moneyCount!==h.moneyCount||h.totals.cropCount!==h.cropOffset||h.totals.goodsCount!==h.goodsOffset)fail();
  map(h.cropHoldings,(k,v)=>(wallet(k)||k==='market-server')&&object(v)&&Object.keys(v).sort().join()==='quantity,value'&&integer(v.quantity)&&integer(v.value));

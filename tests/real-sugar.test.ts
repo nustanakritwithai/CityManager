@@ -53,9 +53,12 @@ test('in a new city cane goes from the field to the sugar mill, and households b
   for (const e of milled) { assert.equal(e.outputQuantity, e.batches * CANE.batchGoods); assert.ok(e.batches <= e.workers * Math.floor(millLotsPerWorker(CANE) / 2)); }
   const eaten = recent(c.goodsLedger).filter(e => e.reason === 'Household final consumption' && e.product === 'sugar');
   assert.ok(eaten.length > 0, 'households bought sugar');
-  for (const e of eaten) assert.ok(e.quantity <= bagsToday(CANE, c.households.find(h => h.wallet === e.to)!.members, e.tick));
+  // A household that has since left is not checked (its size is gone with it).
+  for (const e of eaten) { const h = c.households.find(h => h.wallet === e.to); if (h) assert.ok(e.quantity <= bagsToday(CANE, h.members, e.tick)); }
   assert.equal(goodsUnit(c, 'sugar', 'retail'), CANE.prices.retail);
-  assert.ok(firmWorkerCount(c, mill.id) === 1 && (c.accounts[mill.wallet] ?? 0) > 0, 'one worker crushes it all and the mill pays its way');
+  // The town's one field is a fraction of a mill's day: the mill buys the rest of its cane from outside and pays its way.
+  assert.ok(recent(c.cropLedger).some(e => e.kind === 'import' && e.to === mill.wallet), 'the mill buys cane from outside');
+  assert.ok(firmWorkerCount(c, mill.id) >= 1 && (c.accounts[mill.wallet] ?? 0) > 0, 'and pays its way');
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
   assert.deepEqual(deserialize(serialize(c)), c, 'the save validates real cane harvests, crushing and kilo sales');
 });

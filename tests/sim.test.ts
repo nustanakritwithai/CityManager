@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SIZE, GATEWAY, WAGES, MONTH, createCity, step, summary, connectedRoads, access, roadPath, buildRoad, zoneCell, bulldoze, explainCell, serialize, deserialize, employmentForHousehold, firmWorkerCount, isMarket, isRetail } from '../src/sim.ts';
+import { SIZE, GATEWAY, WAGES, wagesFor, MONTH, createCity, step, summary, connectedRoads, access, roadPath, buildRoad, zoneCell, bulldoze, explainCell, serialize, deserialize, employmentForHousehold, firmWorkerCount, isMarket, isRetail } from '../src/sim.ts';
 
 import { createCity as createV4, step as stepV4, serialize as serializeV4 } from '../src/legacy-v4.ts';
 const importedRetailCity = (seed: number, days: number) => { const old = createV4(seed); for (let day = 0; day < days; day++) stepV4(old); return deserialize(serializeV4(old)); };
@@ -77,22 +77,22 @@ test('monthly wages pay actual days worked and a cash-starved shop protects earn
   for (const f of c.firms) {
     const days = { ...f.workDays };
     for (const e of c.employment.filter(e => e.firmId === f.id)) { const h = c.households.find(h => h.id === e.householdId)!; days[h.wallet] = (days[h.wallet] ?? 0) + e.workers; }
-    for (const [wallet, n] of Object.entries(days)) expected.set(`${f.wallet}->${wallet}`, n * WAGES[f.zone] / MONTH);
+    for (const [wallet, n] of Object.entries(days)) expected.set(`${f.wallet}->${wallet}`, n * wagesFor(c)[f.zone] / MONTH);
   }
   assert.doesNotThrow(() => deserialize(serialize(c)));
   step(c);
   const payments = c.ledger.filter(e => e.tick === 30 && e.reason === 'Monthly wages');
   assert.equal(payments.length, expected.size);
   for (const e of payments) assert.equal(e.amount, expected.get(`${e.from}->${e.to}`));
-  assert.ok(payments.some(e => e.amount < WAGES.I));
+  assert.ok(payments.some(e => e.amount < wagesFor(c).I));
   assert.ok(c.firms.every(f => Object.keys(f.workDays).length === 0));
 
   const stressed = importedRetailCity(42, 140), shop = stressed.firms.find(isRetail)!;
-  const owed = () => Object.values(shop.workDays).reduce((n, days) => n + days * WAGES.C / MONTH, 0);
+  const owed = () => Object.values(shop.workDays).reduce((n, days) => n + days * wagesFor(stressed).C / MONTH, 0);
   assert.ok(firmWorkerCount(stressed, shop.id) > 0);
   // A controlled liquidity shock: no purchasing household can replenish the shop's cash.
   for (const h of stressed.households) stressed.accounts[h.wallet] = 0;
-  stressed.accounts[shop.wallet] = owed() + WAGES.C / MONTH;
+  stressed.accounts[shop.wallet] = owed() + wagesFor(stressed).C / MONTH;
   step(stressed); assert.equal(stressed.accounts[shop.wallet], owed());
   step(stressed); assert.equal(firmWorkerCount(stressed, shop.id), 0); assert.equal(stressed.accounts[shop.wallet], owed());
 });

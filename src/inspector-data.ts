@@ -67,6 +67,8 @@ const reasonLabels: Record<string, string> = {
   'Local wholesale goods': 'ซื้อสินค้าขายส่งในเมือง',
   'Outside goods import': 'นำเข้าสินค้าจากภายนอก',
   'Other goods bought in': 'ซื้อของใช้และบริการอื่นจากภายนอกมาขาย',
+  'Farm inputs': 'ค่าเมล็ด ปุ๋ย ยา น้ำมัน และค่าจ้างเครื่องจักรของฟาร์ม',
+  'Mill running costs': 'ค่าบรรจุภัณฑ์ พลังงาน และบำรุงรักษาของโรงงาน',
   'Outside market goods export': 'รายรับจากการส่งออกสินค้า',
   'Monthly wages': 'จ่ายค่าจ้างตามวันทำงานจริง',
   'Monthly household wage tax': 'ภาษีจากค่าจ้างครัวเรือน',
@@ -145,6 +147,8 @@ export function reasonLabel(reason: string): string {
   if (cropPurchase) return `ครัวเรือนซื้อพืชผล · รายการ #${cropPurchase[1]}`;
   const cropExchange = /^Crop exchange #(\d+)$/.exec(reason);
   if (cropExchange) return `ซื้อขายพืชผล · รายการ #${cropExchange[1]}`;
+  const cropImport = /^Crop import #(\d+)$/.exec(reason);
+  if (cropImport) return `โรงงานซื้อพืชผลจากนอกเมือง · รายการ #${cropImport[1]}`;
   const cropExport = /^Crop export #(\d+)$/.exec(reason);
   if (cropExport) return `ขายพืชผลส่งออก · รายการ #${cropExport[1]}`;
   const harvest = /^Farm harvest #(\d+)$/.exec(reason);
@@ -159,7 +163,7 @@ export function reasonLabel(reason: string): string {
 export function cropFlowRows(city: City): CropFlowRow[] {
   const labels: Record<City['cropLedger'][number]['kind'], string> = {
     'market-deposit': 'Market escrow deposit', 'market-refund': 'Market escrow refund', 'market-receipt': 'Market receipt',
-    harvest: 'เก็บเกี่ยวพืชผล', trade: 'ซื้อขายพืชผล', export: 'ส่งออกพืชผลส่วนเกิน', process: 'ใช้พืชผลแปรรูป', writeoff: 'ตัดพืชผลออกจากบัญชี', consumption: 'ครัวเรือนบริโภคพืชผล',
+    harvest: 'เก็บเกี่ยวพืชผล', trade: 'ซื้อขายพืชผล', export: 'ส่งออกพืชผลส่วนเกิน', import: 'โรงงานซื้อพืชผลจากนอกเมือง', process: 'ใช้พืชผลแปรรูป', writeoff: 'ตัดพืชผลออกจากบัญชี', consumption: 'ครัวเรือนบริโภคพืชผล',
   };
   return city.cropLedger.map((entry, index): CropFlowRow => ({
     index, kind: 'crops', id: entry.id, cropKind: entry.kind, tick: entry.tick, reason: entry.reason, from: entry.from, to: entry.to,

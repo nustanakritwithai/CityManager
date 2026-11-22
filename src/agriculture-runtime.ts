@@ -7,7 +7,7 @@ import { CROPS, RECIPE, emptyCrops, freshPreference, type CropId } from './goods
 import {
   CHAIN_CROP_PRICES as CROP_PRICES, CROP_STOCK_CAPS, farmStockCapacity, isSafeCount, isViableFarmland,
   proposeHarvest, proposeRecipe, proposeCropPurchase, proposeCropConsumption, proposeCropExport,
-  validCropAccount, validCropHolding, safeAdd, releaseCropCost, harvestYield,
+  validCropAccount, validCropHolding, safeAdd, safeMultiply, releaseCropCost, harvestYield,
   type CropAccount,
 } from './agriculture.ts';
 
@@ -16,6 +16,8 @@ export type AgricultureHooks = {
   connected(cell: number): boolean;
   /** Whether a truck has a road route from the seller to the buyer today; crops cannot travel without one. */
   reachable?(from: Firm, to: Firm): boolean;
+  /** Whether a truck can bring crops from outside town to this firm today. */
+  fromOutside?(to: Firm): boolean;
   /** Whether the building has the water and power it draws today. */
   served(buildingId: number): boolean;
   workers(firm: Firm): number;
@@ -108,6 +110,26 @@ function exchange(c: City, seller: Firm, buyer: Firm, crop: CropId, quantity: nu
   });
 }
 
+/** Real rules: a mill buys crop it still needs from outside town at the farm price (CROP_PRICES.farmToFactory). */
+function importCrop(c: City, factory: Firm, crop: CropId, quantity: number, hooks: AgricultureHooks): boolean {
+  if (!operational(c, factory, hooks)) return false;
+  const price = CROP_PRICES.farmToFactory, budget = hooks.spendable(factory);
+  if (!isSafeCount(budget)) return false;
+  const qty = Math.min(quantity, Math.floor(budget / price));
+  if (!isSafeCount(qty, 1)) return false;
+  let event: CropEntry;
+  try {
+    const id = nextEntry(c), cost = safeMultiply(qty, price);
+    event = entry(c, { kind: 'import', from: 'outside', to: factory.wallet, quantity: qty, fromValue: 0, toValue: cost, cash: cost, workers: 0, batches: 0, outputQuantity: 0, reason: `Crop import #${id}`, crop });
+    safeAdd(factory.cropInventory, qty); safeAdd(factory.cropCost, cost);
+  } catch { return false; }
+  return commit(c, [factory], null, null, () => {
+    cashPayment(hooks, factory.wallet, 'outside', event.cash, event.reason);
+    factory.cropInventory += event.quantity; factory.cropCost += event.toValue; factory.crops[crop] += event.quantity;
+    c.crops.imported = safeAdd(c.crops.imported ?? 0, event.quantity); c.cropLedger.push(event);
+  });
+}
+
 function harvest(c: City, f: Firm, hooks: AgricultureHooks): void {
   const building = c.buildings.find(b => b.id === f.building), count = workers(f, hooks);
   if (!building || count === null) return;
@@ -192,6 +214,8 @@ export function runAgriculture(c: City, hooks: AgricultureHooks): Map<number, nu
       if (qty === available) done();
     }
     sourceFor.set(crop, source);
+    // Real mills buy from many farms: what the town's own farms could not sell it comes in from outside at the farm price.
+    if (realMillCrop(factory, c) && factory.cropInventory < target && hooks.fromOutside?.(factory)) importCrop(c, factory, crop, target - factory.cropInventory, hooks);
   }
   // Bounded two-day crop target from actual active factory capacity and unmet,
   // affordable household baskets. No buyers means no speculative replenishment.

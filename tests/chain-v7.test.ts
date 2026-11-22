@@ -7,6 +7,7 @@ import { createCity as v6City, serialize as v6Serialize, step as v6Step } from '
 import { keepSupplied } from './plants.ts';
 import { holdEducationReady } from './education-ready.ts';
 import { FARM_MAX_LEVEL } from '../src/agriculture.ts';
+import { legacyIndustry } from './legacy-sizes.ts';
 
 test('a v6 growth-1 save loads as v8 chain-3 with only goods typing added, then keeps running', () => {
   const old = v6City(61025); for (let d = 0; d < 150; d++) v6Step(old);
@@ -18,7 +19,8 @@ test('a v6 growth-1 save loads as v8 chain-3 with only goods typing added, then 
 });
 
 test('farms grow from realised profit and each level is one more harvest worker', () => {
-  const c = createCity(61025);
+  // Old farm rules (legacyIndustry): a farm a level, paid from profit. Real farms are in real-rice.test.ts.
+  const c = legacyIndustry(createCity(61025));
   const investments: typeof c.ledger = [];
   for (let d = 1; d <= 540; d++) {
     holdEducationReady(c); step(c);
@@ -36,7 +38,7 @@ test('farms grow from realised profit and each level is one more harvest worker'
 });
 
 test('a save whose harvest used more workers than the farm level allows is rejected', () => {
-  const c = createCity(61025);
+  const c = legacyIndustry(createCity(61025));
   for (let d = 1; d <= 540; d++) { holdEducationReady(c); step(c); }
   const harvest = c.cropLedger.find(e => e.kind === 'harvest' && e.workers > 1)!;
   const raw = JSON.parse(serialize(c)), farm = raw.firms.find((f: { wallet: string }) => f.wallet === harvest.to);
@@ -97,6 +99,7 @@ test('new unified shops retain their identity and crops without conversion', () 
   assert.equal(marketToConvert(c), undefined);
   assert.deepEqual(conversions, [], 'no conversion was recorded, including before compaction');
   assert.equal(c.crops.writtenOff, 0, 'no crops were written off by conversion');
-  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0), c.firms.reduce((sum, f) => sum + f.cropInventory, 0));
+  // Real mills also buy crop from outside town (c.crops.imported).
+  assert.equal(c.crops.harvested + (c.crops.imported ?? 0) - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0), c.firms.reduce((sum, f) => sum + f.cropInventory, 0));
   assert.deepEqual(deserialize(serialize(c)), c);
 });

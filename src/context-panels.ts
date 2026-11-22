@@ -365,7 +365,7 @@ function renderHouse(city: City, building: Building, households: Household[], on
   ]), residents, (() => { const panel = section('ระดับที่อยู่อาศัยและการเติบโต'); panel.dataset.buildingProgression = String(building.id); return progression(panel); })(), facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือน', ...conditions, el('p', '', `ความจุระดับใหม่เป็นค่าทดลอง ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
-  const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building, undefined, city);
+  const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm, city) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building, undefined, city);
   const labor = firmLabor(city, firm.id)!, workers = labor.workers;
   const lastSettlement = city.tick - city.tick % MONTH, hasClosedMonth = lastSettlement > 0 && city.tick - building.age < lastSettlement;
   const employees = section('แรงงานที่รับจากแต่ละครัวเรือน', `${workers} คน · ${labor.householdCount} บัญชีครัวเรือน`), list = el('div', 'cx-household-list');

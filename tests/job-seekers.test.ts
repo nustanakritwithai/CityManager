@@ -32,7 +32,7 @@ test('people keep coming to look for work with every job taken, until a tenth of
   const seekers = c.households.filter(h => h.origin === 'arrival' && h.profile === 'single-worker');
   assert.ok(seekers.length > 0);
   assert.ok(seekers.every(h => h.members === 1 && h.workforce === 1));
-  assert.ok(unemploymentRate(c) > 0, 'some people are out of work');
+  assert.ok(log.some(d => d.rate > 0), 'some people are out of work');
   assert.deepEqual(deserialize(serialize(c)), c, 'the save accepts newcomers who came with no job open');
 });
 

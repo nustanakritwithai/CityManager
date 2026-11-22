@@ -4,8 +4,8 @@ import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS } from './factory-levels.ts';
 import { factoryCrops, factoryJobs, farmStaff, farmStock, realCrop, realIndustry, realProduct, realHarvest, millJobsFor, millLotsPerWorker, bagsToday, REAL_CROPS } from './industry-scale.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
-import { MONTH, WAGES, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, type City, type CropEntry, type Firm } from './sim.ts';
-import { CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
+import { MONTH, wagesFor, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, type City, type CropEntry, type Firm } from './sim.ts';
+import { CHAIN_CROP_PRICES, CROP_EXPORT, CROP_STOCK_CAPS, FARM_MAX_LEVEL, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { taxAmount, taxRatesAt } from './city-tax-policy.ts';
@@ -99,7 +99,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     // worker-days can be produced. Departed household wallets remain valid,
     // and closure/emigration may settle wages before month end.
     for (const [i,e] of c.ledger.entries()) if (e.reason === 'Monthly wages' && firms.get(e.from)?.zone === 'C' && unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i)) {
-      requireThat(isSafeCount(e.amount,1) && e.amount % (WAGES.C / MONTH) === 0 && /^household:[1-9]\d*$/.test(e.to) && Object.hasOwn(c.accounts,e.to));
+      requireThat(isSafeCount(e.amount,1) && e.amount % (wagesFor(c).C / MONTH) === 0 && /^household:[1-9]\d*$/.test(e.to) && Object.hasOwn(c.accounts,e.to));
     }
     const goodsSales = new Map<string, number>(), cashSales = new Map<string, number>();
     const goodsPurchases = new Map<string, number>(), cashPurchases = new Map<string, number>();
@@ -163,6 +163,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       else if (e.kind === 'export' || e.kind === 'market-deposit') remember(e.from, 'F');
       else if (e.kind === 'market-refund') remember(e.to, 'F');
       else if (e.kind === 'consumption') remember(e.from, 'T');
+      else if (e.kind === 'import') remember(e.to, 'I');
       else if (e.kind === 'trade' && e.quantity > 0) {
         const price = e.cash / e.quantity;
         if (price === 350) { remember(e.from, 'F'); remember(e.to, 'I'); }
@@ -242,7 +243,7 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   // Farms never lose levels; the smallest level compatible with the journal so far
   // must remain possible at every subsequent harvest for the same firm.
   const farmMinimumLevels = new Map<string, number>(Object.entries(history?.farmMinimumLevels ?? {}));
-  const totals = { ...(history?.cropTotals ?? { harvested: 0, processed: 0, consumed: 0, writtenOff: 0, exported: 0 }) };
+  const totals: CityHistory['cropTotals'] = { ...(history?.cropTotals ?? { harvested: 0, processed: 0, consumed: 0, writtenOff: 0, exported: 0 }) };
   for (let i = 0; i < c.cropLedger.length; i++) {
     const e = c.cropLedger[i];
     if (captureTick !== undefined && e.tick > captureTick) break;
@@ -308,6 +309,10 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       role(e.from, 'F'); requireThat(holding(e.from).quantity - e.quantity >= CROP_EXPORT.keep);
       const index = cash(e, 'outside', e.from); release(e); totals.exported = safeAdd(totals.exported, e.quantity);
       op(e.from, { tick: e.tick, revenue: e.cash, expense: e.fromValue, moneyIndex: index });
+    } else if (e.kind === 'import') {
+      // Real rules: a mill buys the crop its town could not sell it from outside, at the farm price.
+      requireThat(realIndustry(c) && realCrop(e.crop, c) !== undefined && e.from === 'outside' && e.reason === `Crop import #${e.id}` && e.cash === e.quantity * CHAIN_CROP_PRICES.farmToFactory && e.toValue === e.cash && e.fromValue === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
+      role(e.to, 'I'); cash(e, e.to, 'outside'); receive(e.to, e.quantity, e.toValue); totals.imported = safeAdd(totals.imported ?? 0, e.quantity);
     } else if (e.kind === 'market-deposit') {
       requireThat(e.to === 'market-server' && e.reason === `Market escrow deposit #${e.id}` && e.toValue === e.fromValue && e.cash === 0 && e.workers === 0 && e.batches === 0 && e.outputQuantity === 0);
       role(e.from, 'F'); release(e); const deposited = holding(e.to); deposited.quantity = safeAdd(deposited.quantity, e.quantity); deposited.value = safeAdd(deposited.value, e.toValue);
@@ -357,12 +362,13 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   }
   for (const key of ['harvested', 'processed', 'consumed', 'writtenOff'] as const) requireThat(totals[key] === c.crops[key]);
   requireThat(totals.exported === (c.crops.exported ?? 0) && (c.crops.exported === undefined || isSafeCount(c.crops.exported)));
+  requireThat((totals.imported ?? 0) === (c.crops.imported ?? 0) && (c.crops.imported === undefined || isSafeCount(c.crops.imported)));
   for (const [wallet, h] of holdings) {
     if (wallet === 'market-server') continue;
     const f = firms.get(wallet); requireThat(f ? f.cropInventory === h.quantity && f.cropCost === h.value : h.quantity === 0 && h.value === 0);
   }
   for (const f of c.firms) { const h = holdings.get(f.wallet); requireThat(f.cropInventory === (h?.quantity ?? 0) && f.cropCost === (h?.value ?? 0)); }
-  c.ledger.forEach((e, i) => { if (/^(?:Crop exchange|Fresh crop purchase|Crop export) #/.test(e.reason)) requireThat(matchedCash.has(i)); });
+  c.ledger.forEach((e, i) => { if (/^(?:Crop exchange|Fresh crop purchase|Crop export|Crop import) #/.test(e.reason)) requireThat(matchedCash.has(i)); });
   c.goodsLedger.forEach((e, i) => { if ((e.tick > c.agricultureStartTick && e.from === 'production') || /^Crop recipe #/.test(e.reason)) requireThat(matchedGoods.has(i)); });
   for (const h of c.households) { const tick = latestPurchase.get(h.wallet); if (tick !== undefined || h.lastPurchaseTick > c.agricultureStartTick) requireThat(h.lastPurchaseTick === tick); }
 
