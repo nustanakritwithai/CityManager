@@ -42,6 +42,29 @@ export const VEHICLE: Readonly<Record<VehicleKind, VehicleSpec>> = Object.freeze
   motorcycle: Object.freeze({ label: 'มอเตอร์ไซค์', seats: 2, price: 210_000, mlPerKm: 22, tankMl: 4_000, space: .5 }),
   car: Object.freeze({ label: 'รถยนต์', seats: 4, price: 1_500_000, mlPerKm: 70, tankMl: 40_000, space: 1 }),
 });
+/**
+ * Real prices (cities with `priceScale: 1`), at the game's 18.5 real baht to one:
+ * - gasohol 95 at 39.34 baht a litre (PTT, 15 November 2026);
+ * - a Honda Wave110 from 39,000 baht (Thai Honda, January 2026) and the cheapest new eco car about 519,000
+ *   (Toyota Yaris ATIV, March 2026);
+ * - a city bus ride 8 baht, the flat fare of Bangkok's BMTA buses;
+ * - the taxi meter at 35 baht for the first kilometre and 6.50 for each one after (Ministry of Transport, 2023; the
+ *   town lies within its first 10 km band), plus 2 baht for each minute lost in a jam (assumed).
+ * Cities saved before keep the old prices.
+ */
+export type PriceRules = { priceScale?: 1 };
+export const REAL_FUEL_SATANG_PER_LITRE = 213;
+export const REAL_VEHICLE_PRICE: Readonly<Record<VehicleKind, number>> = Object.freeze({ motorcycle: 210_811, car: 2_805_405 });
+export const REAL_BUS_FARE_SATANG = 43;
+export const REAL_TAXI_METER = Object.freeze({ firstKm: 189, perKm: 35, perJamMinute: 11 });
+export const fuelPrice = (c: PriceRules | undefined): number => c?.priceScale === 1 ? REAL_FUEL_SATANG_PER_LITRE : FUEL_SATANG_PER_LITRE;
+export const vehiclePrice = (kind: VehicleKind, c: PriceRules | undefined): number => c?.priceScale === 1 ? REAL_VEHICLE_PRICE[kind] : VEHICLE[kind].price;
+export const busFare = (c: PriceRules | undefined): number => c?.priceScale === 1 ? REAL_BUS_FARE_SATANG : BUS_FARE_SATANG;
+/** A taxi ride's fare: under real prices the meter, by distance and the minutes lost in jams; otherwise the old flag fall, kilometre and minute rates. */
+export function taxiFare(c: PriceRules | undefined, km: number, minutes: number, freeMinutes = minutes): number {
+  if (c?.priceScale !== 1) return taxiFareSatang(km, minutes);
+  return Math.round(REAL_TAXI_METER.firstKm + REAL_TAXI_METER.perKm * Math.max(0, km - 1) + REAL_TAXI_METER.perJamMinute * Math.max(0, minutes - freeMinutes));
+}
 export type Vehicle = { id: number; householdId: number; kind: VehicleKind; bought: number; fuelMl: number; odometerM: number };
 export type VehicleState = { version: 1; nextId: number; fleet: Vehicle[] };
 
@@ -188,7 +211,7 @@ export function planCommutes(c: City): Trip[] {
       if (depot && there2) {
         taken.set(depot.id, (taken.get(depot.id) ?? 0) + 1);
         const km = (there2.length - 1) * TILE_LENGTH_M / 1000, minutes = pathMinutes(there2);
-        Object.assign(t, { mode: 'taxi', route: there2, distanceM: (there2.length - 1) * TILE_LENGTH_M, minutes, taxi: { depotId: depot.id, depotCell: depot.drive, fare: taxiFareSatang(km, minutes) } });
+        Object.assign(t, { mode: 'taxi', route: there2, distanceM: (there2.length - 1) * TILE_LENGTH_M, minutes, taxi: { depotId: depot.id, depotCell: depot.drive, fare: taxiFare(c, km, minutes) } });
         continue;
       }
       Object.assign(t, { mode: 'walk-long', minutes: minutesAt(t.distanceM, WALK_KMH) });
@@ -203,7 +226,7 @@ export function planCommutes(c: City): Trip[] {
     for (let k = 1; k < t.route.length; k++) { const key = `${t.route[k - 1]}>${t.route[k]}`, link = net.links.get(key); jammed += (times.get(key) ?? 0) + (link ? bprTime(link, hourly(key)) - bprTime(link, 0) : 0); }
     t.freeMinutes = pathMinutes(t.route); t.minutes = jammed / 60;
     // The meter runs on the minutes actually spent, jams included.
-    if (t.taxi) t.taxi.fare = taxiFareSatang(t.distanceM / 1000, t.minutes);
+    if (t.taxi) t.taxi.fare = taxiFare(c, t.distanceM / 1000, t.minutes, t.freeMinutes);
   }
   return trips;
 }
@@ -282,7 +305,7 @@ export function runCommutes(c: City, pay: Pay): CommuteDay {
     if (t.mode !== 'drive') continue;
     const v = vehicle.get(t.vehicleId!)!, spec = VEHICLE[v.kind], need = Math.round(2 * t.distanceM * spec.mlPerKm / 1000);
     if (v.fuelMl < need) {
-      const cost = Math.round((spec.tankMl - v.fuelMl) / 1000 * FUEL_SATANG_PER_LITRE);
+      const cost = Math.round((spec.tankMl - v.fuelMl) / 1000 * fuelPrice(c));
       if (balance(t.householdId) >= cost && pay(wallet.get(t.householdId)!, 'outside', cost, fuelReason(v.id)) === cost) v.fuelMl = spec.tankMl;
     }
     if (v.fuelMl < need) { for (const o of trips) if (o.vehicleId === v.id) strand(o); continue; }
@@ -293,18 +316,19 @@ export function runCommutes(c: City, pay: Pay): CommuteDay {
     if (balance(t.householdId) < fare || pay(wallet.get(t.householdId)!, 'treasury', fare, TAXI_FARE_REASON) !== fare) { delete t.taxi; strand(t); }
   }
   for (const t of trips) if (t.mode === 'bus') {
-    const fare = 2 * BUS_FARE_SATANG;
+    const fare = 2 * busFare(c);
     if (balance(t.householdId) < fare || pay(wallet.get(t.householdId)!, 'treasury', fare, BUS_FARE_REASON) !== fare) { delete t.bus; strand(t); }
   }
   const needing = [...new Set(trips.filter(t => t.mode === 'walk-long' || t.mode === 'bus' || t.mode === 'taxi').map(t => t.householdId))].sort((a, b) => a - b);
   for (const householdId of needing) {
     const fleet = c.vehicles?.fleet ?? [], room = 1 - spaceUsed(fleet, householdId), h = households.get(householdId)!;
     const spare = balance(householdId) - monthlySpending(c, h.wallet);
-    const kind = fleet.every(v => v.householdId !== householdId) && room >= VEHICLE.car.space && spare >= VEHICLE.car.price ? 'car'
-      : room >= VEHICLE.motorcycle.space && spare >= VEHICLE.motorcycle.price ? 'motorcycle' : null;
+    const kind = fleet.every(v => v.householdId !== householdId) && room >= VEHICLE.car.space && spare >= vehiclePrice('car', c) ? 'car'
+      : room >= VEHICLE.motorcycle.space && spare >= vehiclePrice('motorcycle', c) ? 'motorcycle' : null;
     if (!kind) continue;
     const id = c.vehicles?.nextId ?? 1;
-    if (pay(h.wallet, 'outside', VEHICLE[kind].price, vehiclePurchaseReason(kind, id)) !== VEHICLE[kind].price) continue;
+    const price = vehiclePrice(kind, c);
+    if (pay(h.wallet, 'outside', price, vehiclePurchaseReason(kind, id)) !== price) continue;
     const state = c.vehicles ?? openVehicles(c);
     const v: Vehicle = { id, householdId, kind, bought: c.tick, fuelMl: VEHICLE[kind].tankMl, odometerM: 0 };
     state.fleet.push(v); state.nextId++; bought.push(v);

@@ -95,6 +95,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   housingScale?: 1;
   /** Firms pay real average wages by industry (REAL_WAGES). Absent on cities saved before, which keep the old wages. */
   wageScale?: 1;
+  /** Households pay real prices for fuel, vehicles, bus rides and taxis (commute.ts). Absent on cities saved before, which keep the old prices. */
+  priceScale?: 1;
   businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
   foodDemandStartTick?: number;
@@ -2081,7 +2083,7 @@ function stepWithRoads(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { housingScale: 1, industryScale: 1, wageScale: 1, farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { housingScale: 1, industryScale: 1, wageScale: 1, priceScale: 1, farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -2618,6 +2620,7 @@ export function deserialize(json: string): City {
   // A city saved before real building sizes keeps its smaller homes; only new cities are built to real sizes.
   if (city.housingScale !== undefined && city.housingScale !== 1) throw new Error('Invalid housing scale.');
   if (city.wageScale !== undefined && city.wageScale !== 1) throw new Error('Invalid wage scale.');
+  if (city.priceScale !== undefined && city.priceScale !== 1) throw new Error('Invalid price scale.');
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.
