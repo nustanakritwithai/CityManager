@@ -15,7 +15,7 @@ function zonedBlock(): City {
   for (let x = 12; x <= 19; x++) { zoneCell(c, 16 * SIZE + x, x < 16 ? 'I' : 'C'); zoneCell(c, 14 * SIZE + x, 'F'); zoneCell(c, 19 * SIZE + x, 'F'); }
   return c;
 }
-const crops = (c: City) => c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0);
+const crops = (c: City) => c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0) + (c.crops.imported ?? 0);
 
 test('farms sell only their surplus above the local reserve to outside, at the export price', { timeout: 120_000 }, () => {
   const c = createCity(61025); let exportDays = 0;

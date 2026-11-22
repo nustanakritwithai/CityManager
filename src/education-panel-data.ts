@@ -1,13 +1,14 @@
 /** Read-only facts for the campus inspector. No enrollment, spending or clock changes. */
-import { EDUCATION_COST, educationLevel, type Campus } from './education.ts';
+import { EDUCATION_COST, educationLevel, educationWages, type Campus } from './education.ts';
 import { treasurySpendable, type City } from './sim.ts';
 
 export function educationPanelData(city: City, campus: Campus) {
   const spec = EDUCATION_COST[campus.kind];
   const current = educationLevel(campus.kind, campus.level);
   const next = campus.level < 2 ? educationLevel(campus.kind, 2) : null;
-  const localDaily = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
-  const contractDaily = campus.kind === 'school' ? EDUCATION_COST.contractTeacherDaily : EDUCATION_COST.contractProfessorDaily;
+  const wages = educationWages(city);
+  const localDaily = campus.kind === 'school' ? wages.teacherDaily : wages.professorDaily;
+  const contractDaily = campus.kind === 'school' ? wages.contractTeacherDaily : wages.contractProfessorDaily;
   const cohorts = (city.education?.people ?? []).filter(person => person.campusId === campus.id)
     .flatMap(person => {
       const learners = campus.kind === 'school' ? person.school : person.university;

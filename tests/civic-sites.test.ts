@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { createCity, step, serialize, deserialize, buildCivic, civicSiteReason, buildPark, buildPlant, buildRoad, zoneCell, bulldoze, access, treasurySpendable, householdWorkerCount, venueEmploymentForHousehold, leaseVenue, endVenueLease, venueLeaseCandidate, MONTH, SIZE, type City } from '../src/sim.ts';
 import { CIVIC, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicBuildReason, civicCoverage, civicPoints, civicUpkeepReason, civicFeeReason, civicDailyWageReason, civicRentReason, civicPayroll, civicWageReason, civicWorkers } from '../src/civic/sites.ts';
 import { homeAmenities } from '../src/resident-happiness.ts';
+import { legacyWages } from './legacy-sizes.ts';
 
-const seeded = (days = 40) => { const c = createCity(61025); for (let i = 0; i < days; i++) step(c); return c; };
+const seeded = (days = 40) => { const c = legacyWages(createCity(61025)); for (let i = 0; i < days; i++) step(c); return c; };
 /** Empty, unzoned parcels with connected road frontage, nearest the map start first. */
 const sites = (c: City) => c.cells.map((_, i) => i).filter(i => { const cell = c.cells[i]; return !cell.road && cell.zone === null && cell.building === null && access(c, i) && !c.parks.some(p => p.cell === i) && !c.plants.some(p => p.cell === i) && !c.education?.campuses.some(p => p.cell === i) && !civicAt(c, i); });
 const none = Object.fromEntries(CIVIC_KINDS.map(kind => [kind, false]));

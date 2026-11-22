@@ -25,7 +25,7 @@ function sameOldState(c: City, raw: string) {
 function conservation(c: City) {
   assert.equal(Object.values(c.accounts).reduce((n, v) => n + v, 0), 0);
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((n, f) => n + f.inventory, 0));
-  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0), c.firms.reduce((n, f) => n + f.cropInventory, 0));
+  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0) + (c.crops.imported ?? 0), c.firms.reduce((n, f) => n + f.cropInventory, 0));
   assert.deepEqual(clone(c), c);
 }
 

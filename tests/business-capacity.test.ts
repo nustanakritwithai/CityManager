@@ -20,7 +20,7 @@ const historical=(version:22|23)=>readFileSync(new URL(`./fixtures/business-capa
 function reconcile(c: City) {
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
   assert.equal(c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported, c.firms.reduce((sum, f) => sum + f.inventory, 0));
-  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0), c.firms.reduce((sum, f) => sum + f.cropInventory, 0));
+  assert.equal(c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0) + (c.crops.imported ?? 0), c.firms.reduce((sum, f) => sum + f.cropInventory, 0));
   for (const h of c.households) assert.ok(householdWorkerCount(c, h.id) <= h.workforce);
   for (const f of c.firms) assert.ok(firmWorkerCount(c, f.id) <= firmCapacity(c.buildings.find(b => b.id === f.building)!));
   assert.deepEqual(deserialize(serialize(c)), c); // Includes ledger/typed stock/owner/occupancy reconciliation.

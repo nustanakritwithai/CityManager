@@ -97,7 +97,7 @@ export function captureOwnerSnapshot(city: City, firmId: number): OwnerSnapshot 
       if (!money(firm.monthlyRevenue) || !money(firm.monthlyExpense) || !Number.isSafeInteger(firm.profit) || ![firm.owner.capitalContributed, firm.owner.capitalReturned, firm.owner.withdrawn, firm.owner.taxPaid].every(money) || !record(firm.workDays) || !Object.values(firm.workDays).every(money)) {
         mark('invalid-firm-budget');
       } else {
-        const payroll = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0);
+        const payroll = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm, city) / MONTH, 0);
         const finance = ownerFinance(city, firm.id);
         if (!finance || ![finance.taxReserve, finance.workingCashFloor, finance.contributeAvailable, finance.withdrawAvailable, finance.distributable, payroll, firmRent(firm)].every(money)) mark('invalid-owner-finance');
         else {

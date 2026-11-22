@@ -16,7 +16,8 @@ type PlotOptions = {
 };
 
 const SVG = 'http://www.w3.org/2000/svg';
-const colour = (slot: number) => `var(--series-${Math.min(8, Math.max(1, slot))})`;
+/** Slots 1–8 are the categorical order; slot 0 is the neutral of an "other" remainder. */
+const colour = (slot: number) => slot <= 0 ? 'var(--chart-muted)' : `var(--series-${Math.min(8, slot)})`;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
 }

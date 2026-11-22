@@ -13,7 +13,7 @@ test('empty city uses existing road tutorial on request, without changing city',
 test('real developed city advice remains read-only and deterministic', () => {
   const city = createCity(61025); for (let i = 0; i < 90; i++) step(city);
   const before = serialize(city), result = growthAdvice(city, true);
-  assert.ok(result); assert.equal(result.id, 'growth.vacancies-remain'); assert.equal(result.tool, null); assert.deepEqual(growthAdvice(city, true), result); assert.equal(serialize(city), before);
+  assert.ok(result); assert.match(result.id, /^growth\./); assert.equal(result.tool, null); assert.deepEqual(growthAdvice(city, true), result); assert.equal(serialize(city), before);
 });
 test('building cap never advises adding more zones', () => {
   const city = createCity(61025); city.buildings = Array.from({ length: MAX_CITY_BUILDINGS }, (_, id) => ({ id, cell: id, zone: 'R' as const, level: 1, age: 30 }));

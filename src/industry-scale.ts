@@ -52,28 +52,50 @@ type RealCrop = Readonly<{
   kgPerLot: number; kgPerRai: readonly number[]; cropsPerYear: readonly number[]; hands: readonly number[]; storeDays: number;
   recipe: string; product: string; millTonnesPerDay: readonly number[]; millTonnesPerWorker: number;
   /** Two lots of crop give `goods` kg of product. */ batchGoods: number; gramsPerPersonDay: number; prices: Prices;
+  /** Real baht a rai a crop the farm spends on what is not labour or land: seed, fertilizer, chemicals, fuel, machine hire. */
+  inputsPerRai: number;
+  /** Satang a kilo of product the mill spends running: packaging, energy, upkeep, net of what its by-products bring. */
+  millCostPerKg: number;
 }>;
 export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
   rice: Object.freeze({
     kgPerLot: 10, kgPerRai: [413, 413, 413, 500, 600, 700], cropsPerYear: [1, 2, 3, 3, 3, 3], hands: [1, 2, 3, 3, 3, 3], storeDays: 60,
     recipe: 'rice-mill', product: 'milled-rice', millTonnesPerDay: [2, 5, 10, 20, 30, 40, 60, 80, 100], millTonnesPerWorker: 2,
     batchGoods: 13, gramsPerPersonDay: 200,
-    // About 22 baht a kilo wholesale, 30 retail, 26 imported and 20 for export (assumed).
-    prices: Object.freeze({ wholesale: 119, retail: 162, import: 140, export: 108 }),
+    // White rice 5%: about 12.5 baht a kilo wholesale (Thai Rice Mills Association, 1,200–1,310 baht a 100 kg in 2025),
+    // 11.6 for export (356 US$ a tonne, October 2025), 30 retail and 13.5 imported (assumed).
+    prices: Object.freeze({ wholesale: 68, retail: 162, import: 73, export: 63 }),
+    // Fertilizer, seed, chemicals and fuel come to about 700 baht a rai (Topphak et al., Int. J. Agric. Technol. 2023) and
+    // machine hire for ploughing and the combine about 800 more (assumed): half the 3,433 a rai the rice policy committee
+    // gives for all costs in 2022, labour and land included. A mill's bags, power, upkeep and the cost of its machines and
+    // capital come to about 2.10 a kilo of rice, net of what bran and broken rice bring back: 1.10, which leaves it the
+    // thin margin of a Thai rice miller, about 5% of what its rice sells for (assumed).
+    inputsPerRai: 1500, millCostPerKg: 6,
   }),
   sugarcane: Object.freeze({
     kgPerLot: 56, kgPerRai: [8000, 9000, 10000, 12000, 14000, 16000], cropsPerYear: [1, 1, 1, 1, 1, 1], hands: [4, 4, 4, 4, 4, 4], storeDays: 3,
     recipe: 'sugar-mill', product: 'sugar', millTonnesPerDay: [25, 50, 100, 250, 500, 1000, 2500, 5000, 10000], millTonnesPerWorker: 25,
     batchGoods: 12, gramsPerPersonDay: 82,
-    // About 22 baht a kilo wholesale, 25 retail, 24 imported and 18 for export (assumed).
-    prices: Object.freeze({ wholesale: 119, retail: 135, import: 130, export: 97 }),
+    // White sugar leaves the mill at 21 baht a kilo (Office of the Cane and Sugar Board, October 2025); about 25 retail,
+    // 22 imported and 16 for export (assumed).
+    prices: Object.freeze({ wholesale: 114, retail: 135, import: 119, export: 86 }),
+    // Growing cane costs about 10,000 baht a rai (Prachatai, 2024), of which half is assumed to be inputs and machines, as
+    // for rice, the rest labour and land. A mill's lime, power beyond its own bagasse, bags, upkeep and the cost of its
+    // machines and capital come to about 4.30 a kilo of sugar, which leaves it about 5% of its sugar's price, near the net
+    // margin of Thai sugar companies (assumed).
+    inputsPerRai: 5000, millCostPerKg: 23,
   }),
   vegetables: Object.freeze({
     kgPerLot: 4, kgPerRai: [1200, 1200, 1200, 1500, 2000, 2500], cropsPerYear: [3, 4, 5, 5, 5, 5], hands: [25, 33, 42, 42, 42, 42], storeDays: 3,
     recipe: 'cannery', product: 'canned-food', millTonnesPerDay: [2, 5, 10, 20, 50, 100, 200, 300, 500], millTonnesPerWorker: .5,
     batchGoods: 10, gramsPerPersonDay: 10,
-    // A 425 g can of vegetables sells for about 25 baht: 59 a kilo retail, 50 wholesale, 55 imported and 44 for export (assumed).
-    prices: Object.freeze({ wholesale: 270, retail: 319, import: 297, export: 238 }),
+    // A 425 g can of vegetables sells for about 25 baht: 59 a kilo retail, 45 wholesale, 48 imported and 33 for export
+    // (about 1,000 US$ a tonne) (assumed).
+    prices: Object.freeze({ wholesale: 243, retail: 319, import: 259, export: 178 }),
+    // Seed, fertilizer and sprays for leafy vegetables about 4 baht a kilo grown, 4,800 a rai a crop (assumed). The can
+    // itself is about 5 baht for 425 g, 12 a kilo, plus brine, power, upkeep and the cost of the line and its capital:
+    // about 18.30 a kilo, which leaves the cannery about 5% of its export price (assumed).
+    inputsPerRai: 4800, millCostPerKg: 99,
   }),
 });
 const cropOfRecipe = new Map(Object.entries(REAL_CROPS).map(([crop, spec]) => [spec.recipe, crop]));
@@ -97,6 +119,14 @@ export const millJobsFor = (spec: RealCrop, level: number): number => Math.ceil(
 /** A mill keeps two days of crop at full capacity. */
 export const millStoreFor = (spec: RealCrop, level: number): number => Math.floor(spec.millTonnesPerDay[level - 1] * 1000 / spec.kgPerLot) * 2;
 export const realRecipe = (spec: RealCrop) => ({ crop: 2, goods: spec.batchGoods });
+/** The game's price scale: 18.5 real baht to one game baht, set when a factory day paid 20 against a real minimum wage of about 370. Real wages (sim.ts, REAL_WAGES) are converted at it too. */
+export const REAL_BAHT_PER_GAME_BAHT = 18.5;
+/** Satang a farm of this level pays for the inputs of `lots` lots it harvested: its per-rai inputs over the rai they grew on. */
+export const farmInputs = (spec: RealCrop, level: number, lots: number): number =>
+  Math.round(lots * spec.kgPerLot * spec.inputsPerRai * 100 / (spec.kgPerRai[level - 1] * REAL_BAHT_PER_GAME_BAHT));
+/** Satang a mill pays to run for `kg` kilos of product it made. */
+export const millRunningCost = (spec: RealCrop, kg: number): number => kg * spec.millCostPerKg;
+export const FARM_INPUTS_REASON = 'Farm inputs', MILL_COSTS_REASON = 'Mill running costs';
 /** Kilos a household of `members` buys on `tick`: whole bags, so over time it buys exactly what it eats. */
 export function bagsToday(spec: RealCrop, members: number, tick: number): number {
   const grams = members * spec.gramsPerPersonDay;

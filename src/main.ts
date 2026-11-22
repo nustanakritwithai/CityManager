@@ -52,11 +52,11 @@ import { paintDistrict } from './districts.ts';
 import { expandedCellNeighbors } from './expanded-map-grid.ts';
 import { PRIME_LAND, householdRent, landValue, pollutionAt, pollutionHappinessPoints } from './environment.ts';
 import { homeAmenities } from './resident-happiness.ts';
-import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind, civicCoverage, civicReach, civicFundedPoints, civicFundedUpkeep, civicFunding } from './civic/sites.ts';
+import { CIVIC, CIVIC_KINDS, civicAt, civicCells, civicFootprint, civicSpec, civicUpkeepReason, civicOpen, civicVisitorIncome, isCivicKind, civicCoverage, civicReach, civicFundedPoints, civicFundedUpkeep, civicFunding, venueStaff, type CivicKind } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import './compact-layout.css';
 import './agriculture-tools.css';
-import { PARK, PARK_STAFF } from './parks.ts';
+import { PARK, PARK_STAFF, parkStaff } from './parks.ts';
 import { growthStatusText } from './context-data.ts';
 import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
@@ -217,6 +217,8 @@ function syncEducationTools() {
   }
 }
 const toolNames: Record<string, string> = { district: 'ระบายย่าน', select: 'เลือกสถานที่', road: 'ถนน', R: 'โซนบ้าน', C: 'โซนพาณิชย์', I: 'โซนโรงงาน', F: 'โซนฟาร์ม', power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ', park: 'สวนสาธารณะ', ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, CIVIC[kind].label])), school: 'โรงเรียน', university: 'มหาวิทยาลัย', bulldoze: 'รื้อถอน', 'bus-depot': 'อู่รถเมล์', 'bus-stop': 'ป้ายรถเมล์', 'bus-line': 'สายรถเมล์' };
+/** A civic tool's help line; a venue's fee follows the city's wage rules (civic/sites.ts, venueStaff). */
+const civicHelp = (kind: CivicKind, rules?: { wageScale?: 1 }): string => { const spec = civicSpec(kind), staff = venueStaff(kind, rules), [columns, rows] = civicFootprint(kind), size = columns * rows === 1 ? '1 ช่อง' : `${columns}×${rows} ช่อง`; return `${spec.label} ฿${(spec.cost / 100).toLocaleString('th-TH')} · ${size}ติดถนน · ${spec.visitors ? 'นักท่องเที่ยวจ่ายเข้าคลังทุกเดือนตามจำนวนสถานที่ท่องเที่ยว' : `${staff ? `จ้างคนในเมือง ${staff.slots} ตำแหน่ง · ครัวเรือนในระยะจ่ายค่าบริการ ฿${staff.fee / 100}/ครั้ง · ` : ''}บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}`} · บำรุง ฿${spec.upkeep / 100}/เดือน`; };
 const help: Record<string, string> = {
   district: 'แตะแปลงเพื่อระบายย่าน (แตะครั้งละ 5 แปลง) · กดกลับเมื่อเสร็จ',
   select: 'ลากเพื่อเลื่อนแผนที่ · แตะสถานที่เพื่อดูข้อมูลและเหตุผลการเติบโต',
@@ -228,7 +230,7 @@ const help: Record<string, string> = {
   power: 'โรงไฟฟ้า ฿5,000 · +40 หน่วย · บำรุง ฿120/เดือน · วางแปลงว่างริมถนน ไฟวิ่งตามถนน อาคารใกล้ได้ก่อน',
   water: 'โรงสูบน้ำ ฿3,000 · +40 หน่วย · บำรุง ฿60/เดือน · วางแปลงว่างริมถนน น้ำวิ่งตามถนน อาคารใกล้ได้ก่อน',
   park: `สวนสาธารณะ ฿${PARK.cost / 100} · เลเวล 1 · 1 ช่อง · ไม่ต้องติดถนน · บำรุง ฿${PARK.upkeep / 100}/เดือน`,
-  ...Object.fromEntries(CIVIC_KINDS.map(kind => { const spec = civicSpec(kind), [columns, rows] = civicFootprint(kind), size = columns * rows === 1 ? '1 ช่อง' : `${columns}×${rows} ช่อง`; return [kind, `${spec.label} ฿${(spec.cost / 100).toLocaleString('th-TH')} · ${size}ติดถนน · ${spec.visitors ? 'นักท่องเที่ยวจ่ายเข้าคลังทุกเดือนตามจำนวนสถานที่ท่องเที่ยว' : `${spec.staff ? `จ้างคนในเมือง ${spec.staff.slots} ตำแหน่ง · ครัวเรือนในระยะจ่ายค่าบริการ ฿${spec.staff.fee / 100}/ครั้ง · ` : ''}บ้านในระยะ ${spec.radius} ช่องได้ความสุข +${spec.points}`} · บำรุง ฿${spec.upkeep / 100}/เดือน`]; })),
+  ...Object.fromEntries(CIVIC_KINDS.map(kind => [kind, civicHelp(kind)])),
   school: 'โรงเรียน ฿2,000 · 1 ช่องติดถนน · ครูสัญญาภายนอกได้ไม่เกิน 2 คน · ที่เรียนลดเมื่อขาดครู น้ำ ไฟ ถนน หรืองบ',
   university: 'มหาวิทยาลัย ฿4,000 · รับผู้มีวุฒิพื้นฐาน · อาจารย์สัญญาภายนอกได้ 1 คน · ไม่แปลงทักษะอาชีพเป็นวุฒิ',
   bulldoze: 'รื้อถอน · คืน 80% ของค่าก่อสร้างและอัปเกรดที่เมืองจ่ายและมีหลักฐาน · อาคารเอกชนไม่คืนเงินและค่ารื้อ ฿20 · ดูยอดที่การ์ดสถานที่ก่อนรื้อ · ป้ายและอู่รถเมล์จะถามก่อนลบ · V/Esc เพื่อออก',
@@ -264,7 +266,7 @@ function setTool(next: string) {
   document.querySelectorAll<HTMLElement>('[data-tool]').forEach(button => {
     const active = button.dataset.tool === next; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
   });
-  $('#tool-help').textContent = next === 'road' ? roadHelp() : help[next] ?? '';
+  $('#tool-help').textContent = next === 'road' ? roadHelp() : (isCivicKind(next) ? civicHelp(next, city) : help[next]) ?? '';
   busController?.sync(next); status(`${toolNames[next] ?? next}พร้อมใช้งาน`); render();
 }
 function inspector(open: boolean) {
@@ -574,7 +576,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
         const venue = venueStatus(city, civic), op = venue.operator;
         metrics.push(metric('ผู้ดำเนินการ', op ? `ครัวเรือน #${op.householdId}` : 'เมือง', false, op ? `เช่าตั้งแต่วันที่ ${op.since} · รายได้เข้าครัวเรือน จ่ายค่าจ้างทุกวันและค่าเช่ารายเดือน` : venue.candidate ? `ครัวเรือน #${venue.candidate} พร้อมรับเช่า` : `ยังไม่มีครัวเรือนที่มีเงิน ${money(venue.leaseCapital)} พอรับเช่า`),
           metric('พนักงาน', `${venue.employed} / ${venue.slots} คน`, false, !venue.connected ? 'ถนนขาด รับคนไม่ได้' : venue.employed === venue.slots ? 'ครบทุกตำแหน่ง' : venue.employed ? 'กำลังรับคนเพิ่ม' : op ? 'ผู้ดำเนินการมีเงินไม่พอจ้าง หรือไม่มีคนว่างงาน' : 'รอคนว่างงานในเมืองหรือเงินคลังสำหรับค่าจ้าง', venue.employed),
-          metric('ลูกค้าวันนี้', `${venue.visitsToday} / ${venue.capacity} ครัวเรือน`, false, `ค่าบริการ ${money(spec.staff.fee)} ต่อครั้ง · ครัวเรือนจ่ายเมื่อมีเงินเหลือพอ`, venue.visitsToday),
+          metric('ลูกค้าวันนี้', `${venue.visitsToday} / ${venue.capacity} ครัวเรือน`, false, `ค่าบริการ ${money(venueStaff(civic.kind, city)!.fee)} ต่อครั้ง · ครัวเรือนจ่ายเมื่อมีเงินเหลือพอ`, venue.visitsToday),
           metric('รายได้ค่าบริการเดือนนี้', money(venue.monthIncome), true, op ? `เข้าครัวเรือน #${op.householdId}` : 'เข้าคลังเมือง'));
         if (op) metrics.push(metric('ค่าจ้างที่จ่ายเดือนนี้', money(op.wages), true, 'จ่ายทุกวันจากเงินผู้ดำเนินการ'), metric('ค่าเช่าที่จ่ายเมือง', money(op.rent), true, `${money(spec.upkeep)}/เดือน แทนค่าบำรุงที่เมืองเคยจ่าย`));
         else metrics.push(metric('ค่าจ้างที่ค้างจ่ายสิ้นเดือน', money(venue.earnedWages), true, `ครบทุกตำแหน่ง ${money(venue.monthlyWages)}/เดือน · จ่ายให้ครัวเรือนของพนักงาน`));
@@ -588,7 +590,7 @@ function renderPlace(goals: ReturnType<typeof cityGoals>) {
       const staff = parkStaffingStatus(city, park);
       metrics.push(metric('เจ้าหน้าที่สวน', `${staff.employed} / ${staff.slots} คน`, false, `ว่าง ${staff.vacancies} · ${staff.status === 'staffed' ? 'มีเจ้าหน้าที่' : staff.status === 'recruiting' ? 'รอจัดสรรวันถัดไป' : staff.status === 'no-applicants' ? 'ไม่มีผู้สมัครว่าง' : 'งบค่าจ้างไม่พอ'}`),
         metric('กำลังดูแลตามเจ้าหน้าที่', `${staff.staffedCapacity * 100}%`, false, 'ไม่ต้องมีถนน · ยังไม่มีรัศมีบริการ'),
-        metric('ค่าจ้างเมื่อครบอัตรา/เดือน', money(PARK_STAFF.slots * PARK_STAFF.monthlyWage), true, 'แยกจากค่าบำรุง · จ่ายเข้าครัวเรือนตามวันทำงาน'),
+        metric('ค่าจ้างเมื่อครบอัตรา/เดือน', money(PARK_STAFF.slots * parkStaff(city).monthlyWage), true, 'แยกจากค่าบำรุง · จ่ายเข้าครัวเรือนตามวันทำงาน'),
         metric('ค่าจ้างสะสมที่กันไว้', money(staff.earnedWages), true, `คลังใช้จ่ายได้ ${money(treasurySpendable(city))}`));
       const lastDue = Math.floor(city.tick / 30) * 30, billed = city.ledger.find(e => e.reason === `Monthly park upkeep #${park.id}` && e.tick === lastDue);
       metrics.push(metric('ค่าก่อสร้าง', money(PARK.cost), true), metric('ค่าบำรุงรายเดือน', money(PARK.upkeep), true),

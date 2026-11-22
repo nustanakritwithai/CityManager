@@ -1,5 +1,5 @@
 import { happinessTargets, homeAmenities, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
-import { CIVIC, CIVIC_KINDS, CIVIC_POINTS_CAP, civicSpec } from './civic/sites.ts';
+import { CIVIC, CIVIC_KINDS, CIVIC_POINTS_CAP, civicSpec, venueStaff } from './civic/sites.ts';
 import { POLLUTION_HAPPINESS_CAP, POLLUTION_HAPPINESS_STEP } from './environment.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
@@ -7,7 +7,7 @@ import { onExplicitActivation } from './explicit-activation.ts';
 import { housingLevel } from './housing.ts';
 import { buildingNeed } from './utilities.ts';
 import { factoryCropCapacity } from './factory-levels.ts';
-import { PARK_STAFF } from './parks.ts';
+import { PARK_STAFF, parkStaff } from './parks.ts';
 import './context-panels.css';
 import './building-cards.css';
 import { householdFoodToday } from './food-demand.ts';
@@ -365,7 +365,7 @@ function renderHouse(city: City, building: Building, households: Household[], on
   ]), residents, (() => { const panel = section('ระดับที่อยู่อาศัยและการเติบโต'); panel.dataset.buildingProgression = String(building.id); return progression(panel); })(), facts(`house:${building.id}`, 'เงื่อนไขรับครัวเรือน', ...conditions, el('p', '', `ความจุระดับใหม่เป็นค่าทดลอง ต้องเหลือทั้งช่องครัวเรือนและจำนวนคน การอัปเกรดเพิ่มความจุ ไม่ได้เพิ่มสมาชิกให้บ้านเอง`))];
 }
 function renderFirm(city: City, building: Building, firm: Firm, onHousehold: HouseholdAction): HTMLElement[] {
-  const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building, undefined, city);
+  const wallet = city.accounts[firm.wallet] ?? 0, reserved = Object.values(firm.workDays).reduce((sum, days) => sum + days * firmWage(firm, city) / MONTH, 0), spendable = Math.max(0, wallet - reserved), capacity = firmCapacity(building, undefined, city);
   const labor = firmLabor(city, firm.id)!, workers = labor.workers;
   const lastSettlement = city.tick - city.tick % MONTH, hasClosedMonth = lastSettlement > 0 && city.tick - building.age < lastSettlement;
   const employees = section('แรงงานที่รับจากแต่ละครัวเรือน', `${workers} คน · ${labor.householdCount} บัญชีครัวเรือน`), list = el('div', 'cx-household-list');
@@ -530,8 +530,8 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
   }
   const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
   jobs.classList.add('bc-employment-source');
-  rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow), ...labor.parkAllocations.map(a => { const row = el('div', 'cx-employment-row', `สวนสาธารณะ #${a.parkId} · ดูแลสวน ${a.workers} คน · ค่าจ้าง ${PARK_STAFF.monthlyWage / 100}/คน/เดือน`); Object.assign(row.dataset, { parkId: String(a.parkId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }),
-    ...labor.venueAllocations.map(a => { const row = el('div', 'cx-employment-row', `${CIVIC[a.kind].label} #${a.siteId} · พนักงานบริการ ${a.workers} คน · ค่าจ้าง ${(civicSpec(a.kind).staff?.dailyWage ?? 0) * 30 / 100}/คน/เดือน`); Object.assign(row.dataset, { venueId: String(a.siteId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }));
+  rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow), ...labor.parkAllocations.map(a => { const row = el('div', 'cx-employment-row', `สวนสาธารณะ #${a.parkId} · ดูแลสวน ${a.workers} คน · ค่าจ้าง ${parkStaff(city).monthlyWage / 100}/คน/เดือน`); Object.assign(row.dataset, { parkId: String(a.parkId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }),
+    ...labor.venueAllocations.map(a => { const row = el('div', 'cx-employment-row', `${CIVIC[a.kind].label} #${a.siteId} · พนักงานบริการ ${a.workers} คน · ค่าจ้าง ${(venueStaff(a.kind, city)?.dailyWage ?? 0) * 30 / 100}/คน/เดือน`); Object.assign(row.dataset, { venueId: String(a.siteId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }));
   if (!employed) rows.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง หรือทำกิจการของตนเอง'));
   if (departure) {
     const condition = departure.reason === 'happiness'

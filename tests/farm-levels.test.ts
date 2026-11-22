@@ -94,7 +94,7 @@ test('six actual allocations harvest once and replay survives later demolition',
   const events = c.cropLedger.filter(e => e.tick === c.tick && e.kind === 'harvest' && e.to === f.wallet);
   assert.equal(events.length, 1); assert.equal(events[0].workers, 6);
   assert.deepEqual(deserialize(serialize(c)), c);
-  const total = c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0);
+  const total = c.crops.harvested - c.crops.processed - c.crops.consumed - c.crops.writtenOff - (c.crops.exported ?? 0) + (c.crops.imported ?? 0);
   assert.equal(total, c.firms.reduce((n, firm) => n + firm.cropInventory, 0));
   assert.equal(Object.values(c.accounts).reduce((a, n) => a + n, 0), 0);
   assert.equal(bulldoze(c, b.cell).ok, true);
@@ -120,7 +120,7 @@ test('replay rejects a six-worker harvest truncated to the three-worker store', 
   bad.firms.find(item => item.id === f.id)!.monthlyRevenue -= difference;
   bad.crops.harvested -= 72; bad.crops.exported! -= 72;
   assert.equal(Object.values(bad.accounts).reduce((a, value) => a + value, 0), 0);
-  assert.equal(bad.crops.harvested - bad.crops.processed - bad.crops.consumed - bad.crops.writtenOff - (bad.crops.exported ?? 0), bad.firms.reduce((n, firm) => n + firm.cropInventory, 0));
+  assert.equal(bad.crops.harvested - bad.crops.processed - bad.crops.consumed - bad.crops.writtenOff - (bad.crops.exported ?? 0) + (bad.crops.imported ?? 0), bad.firms.reduce((n, firm) => n + firm.cropInventory, 0));
   assert.throws(() => validateAgriculture(bad));
   harvest.workers = 3; assert.doesNotThrow(() => validateAgriculture(bad));
   const earlier = structuredClone(c); earlier.farmLevelStartTick = earlier.tick;

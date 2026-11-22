@@ -7,11 +7,11 @@ import { MONTH, isWageReason, type City } from './sim.ts';
 import { isIncidentReason } from './incidents.ts';
 
 export const INCOME_KINDS = ['wages', 'business', 'other'] as const;
-export const SPENDING_KINDS = ['shopping', 'rent', 'tax', 'utilities', 'leisure', 'business', 'incidents', 'other'] as const;
+export const SPENDING_KINDS = ['shopping', 'rent', 'tax', 'utilities', 'travel', 'leisure', 'business', 'incidents', 'other'] as const;
 export type IncomeKind = typeof INCOME_KINDS[number];
 export type SpendingKind = typeof SPENDING_KINDS[number];
 export const INCOME_LABELS: Record<IncomeKind, string> = { wages: 'ค่าจ้าง', business: 'รายได้กิจการ', other: 'อื่น ๆ' };
-export const SPENDING_LABELS: Record<SpendingKind, string> = { shopping: 'ซื้อสินค้า', rent: 'ค่าเช่าบ้าน', tax: 'ภาษี', utilities: 'ค่าน้ำไฟ', leisure: 'ค่าเที่ยว', business: 'ต้นทุนกิจการ', incidents: 'เหตุร้าย', other: 'อื่น ๆ' };
+export const SPENDING_LABELS: Record<SpendingKind, string> = { shopping: 'ซื้อสินค้า', rent: 'ค่าเช่าบ้าน', tax: 'ภาษี', utilities: 'ค่าน้ำไฟ', travel: 'ค่าเดินทางและรถ', leisure: 'ค่าเที่ยว', business: 'ต้นทุนกิจการ', incidents: 'เหตุร้าย', other: 'อื่น ๆ' };
 
 const isLeisure = (reason: string) => /^Visit [a-z ]+ #[1-9]\d*$/.test(reason);
 export const ARRIVAL_REASON = 'New household arrival savings', DEPARTURE_REASON = 'Emigration savings';
@@ -25,6 +25,8 @@ export function spendingKind(reason: string): SpendingKind {
   if (reason === 'Monthly household rent') return 'rent';
   if (/ tax$/.test(reason)) return 'tax';
   if (reason === 'Monthly household water and power bill') return 'utilities';
+  // Buying a vehicle, its fuel, and bus and taxi fares.
+  if (/^Vehicle (?:bought [a-z]+|fuel) #[1-9]\d*$/.test(reason) || reason === 'Bus fare' || reason === 'Taxi fare') return 'travel';
   if (isLeisure(reason)) return 'leisure';
   // A household running a venue pays its staff and the venue rent.
   if (isWageReason(reason) || /^Monthly [a-z ]+ rent #[1-9]\d*$/.test(reason)) return 'business';

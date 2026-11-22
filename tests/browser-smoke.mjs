@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { access, createCity, step, buildPark, bulldoze, GATEWAY, deserialize, serialize, firmWorkerCount, expandValidatedCity, adoptSavedEducation } from '../src/sim.ts';
-import { PARK, PARK_STAFF } from '../src/parks.ts';
+import { PARK, parkStaff } from '../src/parks.ts';
 import { createParkRuntime, advanceParkRuntime, serializeParkSession, deserializeParkSession } from '../src/park-runtime.ts';
 import { trafficHttpHandler, reachTrafficControl, installTrafficNetworkFence } from './traffic-server-entry-fixture.mjs';
 import { createFeedbackServerFixture } from './player-feedback-server-fixture.mjs';
@@ -310,10 +310,12 @@ try {
   await button('[data-tool="select"]'); await cell(parkCell);
   assert.match(await text('#place-metrics'), /เจ้าหน้าที่สวน/);
   assert.match(await text('#place-metrics'), /1 \/ 1 คน/);
-  assert.match(await text('#place-metrics'), /420/);
+  // The park keeper's full-month wage under the city's wage rules (757.2 baht with real wages).
+  const parkWage = (parkStaff(staffFixture).monthlyWage / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
+  assert.ok((await text('#place-metrics')).includes(parkWage), `the park shows a ${parkWage} baht month`);
   assert.match(await text('#place-metrics'), /100%/);
   await screenshot('desktop-park-workforce.png');
-  const staffOwed = Object.values(staffedPark.staffing.workDays).reduce((n, d) => n + d * PARK_STAFF.dailyWage, 0);
+  const staffOwed = Object.values(staffedPark.staffing.workDays).reduce((n, d) => n + d * parkStaff(staffFixture).dailyWage, 0);
   const staffedHead = await saveSession(); await closeInspector();
   await reloadAcknowledged(staffedHead); assert.deepEqual(await state(), staffed);
   await button('[data-camera="zoom-out"]'); await button('[data-camera="zoom-out"]');

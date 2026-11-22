@@ -1,7 +1,7 @@
 import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
-import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
+import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, farmInputs, millRunningCost, FARM_INPUTS_REASON, MILL_COSTS_REASON, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
@@ -13,7 +13,7 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicOpen, civicReach, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicOpen, civicReach, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, venueStaff, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import { validateDistricts, type DistrictState } from './districts.ts';
 import { runCommutes, liveVehicles, validateVehicles, freightRoute, canWalk, careTrip, outsideCareTrip, recordCareTrip, congestionReader, type VehicleState } from './commute.ts';
@@ -36,8 +36,8 @@ import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RE
 import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
-import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from './parks.ts';
-import { EDUCATION_COST, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
+import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkStaff, parkWorkers, type Park } from './parks.ts';
+import { EDUCATION_COST, educationWages, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
 import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, plantLevel, plantLevelSpec, plantSpec, plantUpgradeReason, type PlantLevel, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
@@ -57,6 +57,16 @@ export const ROAD_COST = 5_000;
  * These are abstract operating costs, not a simulated service-quality system. */
 export const MUNICIPAL_SERVICE_PER_RESIDENT = 3_000;
 export const WAGES = { I: 60_000, C: 42_000, F: 42_000 } as const;
+/**
+ * Real wages (cities with `wageScale: 1`): the average monthly wage of employees in 2024 by industry, Bank of Thailand
+ * table EC_RL_014_S2 from the National Statistical Office's Labour Force Survey, at the game's 18.5 real baht to one and
+ * rounded to whole satang a day: agriculture, forestry and fishing 7,919.54 baht (429 a month here), manufacturing
+ * 14,418.89 (780), wholesale and retail trade 13,761.40 (744). Cities saved before keep the old wages.
+ */
+export const REAL_WAGES = { I: 78_000, C: 74_400, F: 42_900 } as const;
+export type WageRules = { wageScale?: 1 };
+/** The monthly wage table of a city's rules. */
+export const wagesFor = (c: WageRules | undefined) => c?.wageScale === 1 ? REAL_WAGES : WAGES;
 export type Zone = 'R' | 'C' | 'I' | 'F' | null;
 export type Cell = { road: boolean; zone: Zone; building: number | null };
 export type Building = { id: number; cell: number; zone: Exclude<Zone, null>; level: number; age: number; housingType?: HousingType };
@@ -65,7 +75,7 @@ export type Owner = { householdId: number; capitalContributed: number; capitalRe
 export type OwnerLabor = { householdId: number; firmId: number; skill: 'general' | 'retail'; workers: 1 };
 export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; recipeMode?: 'auto' | 'manual'; recipeChoices?: { at: number; recipe: RecipeId }[]; cropMode?: 'auto' | 'manual'; cropChoices?: { at: number; crop: CropId }[]; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 /** `crop` names the lots moved (every kind but a write-off); a write-off carries the whole `mix`. Untyped only before `typeBaseline.tick`. */
-export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export' | 'market-deposit' | 'market-refund' | 'market-receipt'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
+export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export' | 'import' | 'market-deposit' | 'market-refund' | 'market-receipt'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
 export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
 export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string; product?: ProductId };
 /**
@@ -83,6 +93,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   industryScale?: 1;
   /** Homes hold real numbers of households (house 1, apartment 40, condo 200). Absent on cities saved before, which keep the old smaller homes. */
   housingScale?: 1;
+  /** Firms pay real average wages by industry (REAL_WAGES). Absent on cities saved before, which keep the old wages. */
+  wageScale?: 1;
   businessCapacityVersion?: 1;
   roadTopology?: RoadTopology;
   foodDemandStartTick?: number;
@@ -91,7 +103,7 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   farmLevelStartTick?: number;
   farmSoilIndependentStartTick?: number;
   version: 9; rulesVersion: 'chain-4'; typeBaseline: TypeBaseline; growthStartTick: number; migration: { arrivals: number; legacyHouseholds: number; departures?: number }; employment: EmploymentAllocation[];
-  ownerLabor: OwnerLabor[]; resources: ResourceMap | ExpandedResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number; exported?: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
+  ownerLabor: OwnerLabor[]; resources: ResourceMap | ExpandedResourceMap; crops: { harvested: number; processed: number; consumed: number; writtenOff: number; exported?: number; /** Lots real mills bought from outside town. */ imported?: number }; cropLedger: CropEntry[]; agricultureStartTick: number;
   seed: number; rng: number; tick: number; nextId: number;
   cells: Cell[]; buildings: Building[]; households: Household[]; firms: Firm[];
   accounts: Record<string, number>; ledger: Entry[]; goodsLedger: GoodsEntry[];
@@ -123,7 +135,7 @@ const neighbors = (i: number, city: Pick<City,'cells'>) => expandedCellNeighbors
 const balance = (c: City, id: string) => c.accounts[id] ?? 0;
 /** Civic sites that hire residents (cinema, restaurant, night market, concert ground), in id order. */
 export const venues = (c: Pick<City, 'civic'>): CivicSite[] => (c.civic?.sites ?? []).filter(site => civicSpec(site.kind)?.staff).sort((a, b) => a.id - b.id);
-const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p), 0) + venues(c).reduce((n, site) => n + civicPayroll(site), 0) + educationPayroll(c.education);
+const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p, c), 0) + venues(c).reduce((n, site) => n + civicPayroll(site, c), 0) + educationPayroll(c.education, educationWages(c));
 export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - treasuryPayroll(c));
 export const parkEmploymentForHousehold = (c: City, id: number) => c.parks.flatMap(p => p.staffing?.allocations ?? []).filter(a => a.householdId === id);
 const parkEmployment = (c: City) => c.parks.flatMap(p => p.staffing?.allocations ?? []);
@@ -132,9 +144,9 @@ const venueEmployment = (c: City) => venues(c).flatMap(site => site.staffing?.al
 const operatorWallet = (site: CivicSite) => site.operator ? `household:${site.operator.householdId}` : null;
 /** City-run venues are funded after parks, in id order, from what the treasury can still spend today; a leased venue hires what its operator can pay today. */
 function venueFundedSeats(c: City): Map<number, number> {
-  let budget = treasurySpendable(c) - [...parkFundedSeats(c).values()].reduce((n, seats) => n + seats * PARK_STAFF.dailyWage, 0);
+  let budget = treasurySpendable(c) - [...parkFundedSeats(c).values()].reduce((n, seats) => n + seats * parkStaff(c).dailyWage, 0);
   return new Map(venues(c).map(site => {
-    const staff = civicSpec(site.kind).staff!, wallet = operatorWallet(site);
+    const staff = venueStaff(site.kind, c)!, wallet = operatorWallet(site);
     if (wallet) return [site.id, Math.max(0, Math.min(staff.slots, Math.floor(balance(c, wallet) / staff.dailyWage)))];
     const seats = Math.max(0, Math.min(staff.slots, Math.floor(budget / staff.dailyWage)));
     budget -= seats * staff.dailyWage; return [site.id, seats];
@@ -142,7 +154,7 @@ function venueFundedSeats(c: City): Map<number, number> {
 }
 /** The household that would take on a venue now: housed, not already running one, and holding enough for ten days of wages; the richest first. */
 export function venueLeaseCandidate(c: City, site: CivicSite): Household | null {
-  const capital = civicLeaseCapital(site.kind), busy = new Set(venues(c).flatMap(s => s.operator ? [s.operator.householdId] : []));
+  const capital = civicLeaseCapital(site.kind, c), busy = new Set(venues(c).flatMap(s => s.operator ? [s.operator.householdId] : []));
   return c.households.filter(h => h.home !== null && !busy.has(h.id) && balance(c, h.wallet) >= capital)
     .sort((a, b) => balance(c, b.wallet) - balance(c, a.wallet) || a.id - b.id)[0] ?? null;
 }
@@ -152,7 +164,7 @@ export function leaseVenue(c: City, siteId: number): Result {
   if (!site) return { ok: false, message: 'ไม่พบกิจการนี้' };
   if (site.operator) return { ok: false, message: 'กิจการนี้มีผู้ดำเนินการอยู่แล้ว' };
   const h = venueLeaseCandidate(c, site), label = CIVIC[site.kind].label;
-  if (!h) return { ok: false, message: `ยังไม่มีครัวเรือนที่มีเงินพอรับ${label} (ต้องมีอย่างน้อย ${civicLeaseCapital(site.kind) / 100} ฿)` };
+  if (!h) return { ok: false, message: `ยังไม่มีครัวเรือนที่มีเงินพอรับ${label} (ต้องมีอย่างน้อย ${civicLeaseCapital(site.kind, c) / 100} ฿)` };
   payVenueWages(c, site);
   if (site.staffing) site.staffing.workDays = {};
   site.operator = { householdId: h.id, since: c.tick };
@@ -169,19 +181,19 @@ export function endVenueLease(c: City, siteId: number): Result {
 }
 /** What a venue's panel shows: staff, today's customers and this month's takings and wages. */
 export function venueStatus(c: City, site: CivicSite) {
-  const staff = civicSpec(site.kind).staff!, employed = civicWorkers(site), since = c.tick - (c.tick % MONTH || MONTH);
+  const staff = venueStaff(site.kind, c)!, employed = civicWorkers(site), since = c.tick - (c.tick % MONTH || MONTH);
   const sum = (reason: string, tick: (t: number) => boolean) => c.ledger.filter(e => e.reason === reason && tick(e.tick)).reduce((n, e) => n + e.amount, 0);
   const fee = civicFeeReason(site.kind, site.id), daily = civicDailyWageReason(site.kind, site.id), wallet = operatorWallet(site);
   const operator = wallet ? { householdId: site.operator!.householdId, since: site.operator!.since, wages: sum(daily, t => t > since), rent: sum(civicRentReason(site.kind, site.id), t => t > since - MONTH) } : null;
-  return { operator, candidate: wallet ? null : venueLeaseCandidate(c, site)?.id ?? null, leaseCapital: civicLeaseCapital(site.kind), employed, slots: staff.slots, capacity: civicDailyVisits(site), visitsToday: c.ledger.filter(e => e.reason === fee && e.tick === c.tick).length,
-    monthIncome: sum(fee, t => t > since), earnedWages: civicPayroll(site), monthlyWages: staff.slots * staff.dailyWage * MONTH, connected: civicCells(site).some(part => access(c, part)) };
+  return { operator, candidate: wallet ? null : venueLeaseCandidate(c, site)?.id ?? null, leaseCapital: civicLeaseCapital(site.kind, c), employed, slots: staff.slots, capacity: civicDailyVisits(site), visitsToday: c.ledger.filter(e => e.reason === fee && e.tick === c.tick).length,
+    monthIncome: sum(fee, t => t > since), earnedWages: civicPayroll(site, c), monthlyWages: staff.slots * staff.dailyWage * MONTH, connected: civicCells(site).some(part => access(c, part)) };
 }
 /** ID-ordered funding shares prevent several parks promising the same treasury money. */
 function parkFundedSeats(c: City): Map<number, number> {
   let budget = treasurySpendable(c);
   return new Map([...c.parks].sort((a, b) => a.id - b.id).map(p => {
-    const seats = Math.min(PARK_STAFF.slots, Math.floor(budget / PARK_STAFF.dailyWage));
-    budget -= seats * PARK_STAFF.dailyWage; return [p.id, seats];
+    const seats = Math.min(PARK_STAFF.slots, Math.floor(budget / parkStaff(c).dailyWage));
+    budget -= seats * parkStaff(c).dailyWage; return [p.id, seats];
   }));
 }
 export function parkStaffingStatus(c: City, p: Park) {
@@ -191,7 +203,7 @@ export function parkStaffingStatus(c: City, p: Park) {
   return { employed, vacancies, slots: PARK_STAFF.slots, staffedCapacity: employed / PARK_STAFF.slots,
     fundedVacancies: Math.min(vacancies, funded), unfundedVacancies: Math.max(0, vacancies - funded),
     status: employed === PARK_STAFF.slots ? 'staffed' : funded < vacancies ? 'inadequate-budget' : applicants ? 'recruiting' : 'no-applicants',
-    monthlyWages: employed * PARK_STAFF.monthlyWage, earnedWages: parkPayroll(p) };
+    monthlyWages: employed * parkStaff(c).monthlyWage, earnedWages: parkPayroll(p, c) };
 }
 /** Legacy origin tags retained for validating historical transactions, not current trading capability. */
 export const isCommercial = (f: Pick<Firm, 'zone'>): boolean => f.zone === 'C';
@@ -207,10 +219,10 @@ function workplaceCrop(b: Building, f: Firm | undefined, c: City | undefined): C
 }
 /** Crop lots a farm or factory can store, under its city's rules. */
 export const firmCropStore = (b: Building, f: Firm, c: City): number => b.zone === 'I' ? factoryCrops(b.level, c, f) : farmStock(b.level, c, workplaceCrop(b, f, c));
-export const firmWage = (f: Firm) => WAGES[f.zone];
+export const firmWage = (f: Firm, c: WageRules | undefined) => wagesFor(c)[f.zone];
 export const firmRent = (f: Firm) => 10_000;
-const payroll = (f: Firm) => Object.values(f.workDays).reduce((n, days) => n + days * firmWage(f) / MONTH, 0);
-const spendable = (c: City, f: Firm) => Math.max(0, balance(c, f.wallet) - payroll(f));
+const payroll = (c: City, f: Firm) => Object.values(f.workDays).reduce((n, days) => n + days * firmWage(f, c) / MONTH, 0);
+const spendable = (c: City, f: Firm) => Math.max(0, balance(c, f.wallet) - payroll(c, f));
 // Keep the next counter saveable after every allocation, including a two-ID establishment.
 const canAllocateIds = (c: City, count: number) => Number.isSafeInteger(c.nextId) && c.nextId >= 1 && c.nextId <= Number.MAX_SAFE_INTEGER - 2 - count;
 function random(c: City): number { c.rng = (Math.imul(c.rng, 1664525) + 1013904223) >>> 0; return c.rng / 4294967296; }
@@ -319,7 +331,7 @@ function educationView(c: City): EducationView {
     buildings: c.buildings.map(b => ({ id: b.id, zone: b.zone, level: b.level, firmId: c.firms.find(f => f.building === b.id)?.id ?? null })),
     posts: educationPosts(c),
     road: cell => neighbors(cell, c).some(n => roads.has(n)),
-    sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c),
+    sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c), wages: educationWages(c),
   };
 }
 function educationBlocked(c: City, building: { id: number; zone: 'R' | 'C' | 'I' | 'F'; level: number; firmId?: number | null }): string[] {
@@ -415,7 +427,7 @@ export function industryGrowthStatus(c: City) {
   const cropAvailable = c.firms.filter(f => (f.zone === 'F' || isCommercial(f)) && access(c, building(c, f.building).cell) && firmWorkerCount(c, f.id) > 0).reduce((n, f) => n + f.cropInventory, 0);
   const profitRate = taxRatesAt(c.taxPolicy, c.tick).profit;
   const facts = (f?: Firm) => {
-    const cash = f ? balance(c, f.wallet) : 0, payrollReserve = f ? payroll(f) : 0;
+    const cash = f ? balance(c, f.wallet) : 0, payrollReserve = f ? payroll(c, f) : 0;
     const taxReserve = f ? taxSatang(f.monthlyRevenue - f.monthlyExpense - payrollReserve, profitRate) : 0;
     const rentReserve = 10_000, workingReserve = INDUSTRY_WORKING_RESERVE;
     return { sponsorFirmId: f?.id ?? null, cash, payrollReserve, taxReserve, rentReserve, workingReserve,
@@ -437,7 +449,8 @@ export function industryGrowthStatus(c: City) {
   const residentialSite = c.cells.some((p, i) => p.zone === 'R' && p.building === null && access(c, i));
   const availableManufacturing = c.households.some(h => householdAccess(c, h) && (['general', 'manufacturing'] as const).some(skill => h.workerSkills[skill] > c.employment.filter(e => e.householdId === h.id && e.skill === skill).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length));
   if (!room && !residentialSite && !availableManufacturing) return result('growth.housing-unavailable', 'New paid jobs need an available home, a connected residential parcel, or an eligible existing unemployed worker.');
-  if (cropAvailable < 8) return result('growth.no-crop-buffer', `Industry investment needs 8 real accessible crop lots for a startup batch; have ${cropAvailable}. No input is gifted.`);
+  // Under real rules a new mill buys its crop from outside when the town has none to sell it (agriculture-runtime.ts).
+  if (!realIndustry(c) && cropAvailable < 8) return result('growth.no-crop-buffer', `Industry investment needs 8 real accessible crop lots for a startup batch; have ${cropAvailable}. No input is gifted.`);
   if (outside) return result('growth.outside-investor', `Farms exported ${idle.exported} crop lots in 30 days that no factory here could use; outside investors fund ${INDUSTRY_STARTUP_CAPITAL} satang of new factory capital.`, true);
   if (!profitable.length) return result('growth.no-profitable-sponsor', 'A connected, fully staffed factory needs positive realized operating profit and actual inputs before sponsoring an expansion.');
   if (!funded) return result('growth.saving-capital', `Factory #${finance.sponsorFirmId} can invest ${finance.availableCapital}/${INDUSTRY_STARTUP_CAPITAL} satang after earned wages, current tax, rent and working-cash reserves.`);
@@ -449,7 +462,7 @@ export function ownerFinance(c: City, firmId: number) {
   const h = owner && c.households.find(h => h.id === owner.householdId);
   if (!f || !isCommercial(f) || !owner || !h) return null;
   // Paid wages are already in monthlyExpense; only still-unpaid claims accrue here.
-  const earnedWages = payroll(f), currentProfit = BigInt(f.monthlyRevenue) - BigInt(f.monthlyExpense) - BigInt(earnedWages);
+  const earnedWages = payroll(c, f), currentProfit = BigInt(f.monthlyRevenue) - BigInt(f.monthlyExpense) - BigInt(earnedWages);
   const tax = taxAmount(currentProfit, taxRatesAt(c.taxPolicy, c.tick).profit), taxReserve = Number(tax);
   const history = ownerProfitHistory(c, f, currentProfit - tax);
   // Spending retained earnings must not make that same profit available again.
@@ -812,7 +825,7 @@ export function bulldoze(c: City, i: number): Result {
   }
   const closingFirms = b ? c.firms.filter(f => f.building === b.id) : [];
   for (const f of closingFirms) {
-    const tax = taxSatang(f.monthlyRevenue - f.monthlyExpense - payroll(f) - f.cropCost, taxRatesAt(c.taxPolicy, c.tick).profit);
+    const tax = taxSatang(f.monthlyRevenue - f.monthlyExpense - payroll(c, f) - f.cropCost, taxRatesAt(c.taxPolicy, c.tick).profit);
     if (spendable(c, f) < tax) return { ok: false, message: 'Closure needs enough cash to settle earned wages and current profit tax; no demolition was charged.' };
     if (!writeOffCrops(c, f, agricultureHooks(c))) return { ok: false, message: 'Crop disposal could not be journaled; business and city retained.' };
   }
@@ -1087,7 +1100,7 @@ export function explainCell(c: City, i: number): string[] {
     output.push(`Actual occupancy: ${used.households}/${room.households} households, ${used.persons}/${room.persons} persons. Upgrades add capacity only.`, ...explainMigration(c, b.id));
     for (const h of residents) output.push(`Household #${h.id}: ${h.members} members, ${h.workforce} workforce, ${householdWorkerCount(c, h.id)} allocated workers; wallet ${(balance(c, h.wallet) / 100).toFixed(2)} credits.${h.origin === 'legacy-v1' ? ' Composition is an explicit minimum assumption from v1.' : ''}`);
   }
-  if (f) output.push(`Firm #${f.id}: ${firmWorkerCount(c, f.id)}/${capacity(b, f, c)} workers; finished inventory ${f.inventory}; crop inventory ${f.cropInventory}; wallet ${(balance(c, f.wallet) / 100).toFixed(2)} credits; earned wages reserved ${(payroll(f) / 100).toFixed(2)}.`, `Last monthly operating profit ${(f.lastMonthProfit / 100).toFixed(2)} credits.`,
+  if (f) output.push(`Firm #${f.id}: ${firmWorkerCount(c, f.id)}/${capacity(b, f, c)} workers; finished inventory ${f.inventory}; crop inventory ${f.cropInventory}; wallet ${(balance(c, f.wallet) / 100).toFixed(2)} credits; earned wages reserved ${(payroll(c, f) / 100).toFixed(2)}.`, `Last monthly operating profit ${(f.lastMonthProfit / 100).toFixed(2)} credits.`,
     f.zone === 'F' ? `Renewable crops require actual labour, roads and water; soil does not affect future harvests (${farmYieldPerWorker(c, i)} lots per worker per day). ${capacity(b, f, c)} worker slots, crop cap ${farmStock(b.level, c)}; no manufactured goods.` :
     isCommercial(f) ? 'One commercial business stocks crops and finished goods. Crop opening stock can supply factories or household baskets; new crop purchases cannot resell this tick. Unsold stock never creates profit.' :
     f.zone === 'I' ? `Each worker can process 2 actual crop lots into 8 generic goods/day. ${f.cropInventory < 2 ? 'Input shortage: production stopped until crops arrive.' : 'Input stock available.'} Wholesale and outside export 3.50 credits.` : 'Buys goods locally at 3.50 credits or imports at 4.50; competes with crop markets for food at 8 credits per unit.',
@@ -1138,7 +1151,7 @@ const employees = (c: City, f: Firm) => employmentForFirm(c, f.id).reduce((n, e)
 function shopHiringCap(c: City, f: Firm): number {
   if (!homelessWork(c) || !isCommercial(f)) return Number.MAX_SAFE_INTEGER;
   const staff = employees(c, f);
-  return firmWorkerCount(c, f.id) === 0 ? 1 : staff + (f.lastMonthProfit >= firmWage(f) ? 1 : 0);
+  return firmWorkerCount(c, f.id) === 0 ? 1 : staff + (f.lastMonthProfit >= firmWage(f, c) ? 1 : 0);
 }
 function employ(c: City) {
   reserveOwnerLabor(c);
@@ -1150,7 +1163,7 @@ function employ(c: City) {
     return { id: h.id, workforce: Object.values(reduced).reduce((sum, count) => sum + count, 0), workerSkills: reduced, accessible: householdAccess(c, h) };
   }), c.firms.map(f => ({
     id: f.id, zone: f.zone === 'F' ? 'I' as const : f.zone as 'I' | 'C', slots: access(c, building(c, f.building).cell) && svc.ok(f.building) ? capacity(building(c, f.building), f, c) - c.ownerLabor.filter(e => e.firmId === f.id).length : 0,
-    budgetWorkers: Math.min(Math.floor(spendable(c, f) / (firmWage(f) / MONTH)), shopHiringCap(c, f)),
+    budgetWorkers: Math.min(Math.floor(spendable(c, f) / (firmWage(f, c) / MONTH)), shopHiringCap(c, f)),
   })), c.employment);
   for (const allocation of c.employment) {
     const h = c.households.find(h => h.id === allocation.householdId)!, f = c.firms.find(f => f.id === allocation.firmId)!;
@@ -1195,7 +1208,7 @@ function employVenues(c: City): void {
     if (!mine.length && !site.staffing) continue;
     site.staffing ??= { allocations: [], workDays: {} };
     site.staffing.allocations = mine;
-    const owner = operatorWallet(site), wage = civicSpec(site.kind).staff!.dailyWage;
+    const owner = operatorWallet(site), wage = venueStaff(site.kind, c)!.dailyWage;
     for (const a of mine) {
       const wallet = c.households.find(h => h.id === a.householdId)!.wallet;
       if (!owner) { site.staffing.workDays[wallet] = (site.staffing.workDays[wallet] ?? 0) + a.workers; continue; }
@@ -1213,7 +1226,7 @@ function visitVenues(c: City): void {
   const sites = venues(c).filter(site => civicWorkers(site) > 0); if (!sites.length) return;
   const homes = new Map(c.buildings.filter(b => b.zone === 'R').map(b => [b.id, b.cell])), visited = new Set<number>();
   for (const site of sites) {
-    const spec = civicSpec(site.kind), fee = spec.staff!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
+    const spec = civicSpec(site.kind), fee = venueStaff(site.kind, c)!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
     const payee = operatorWallet(site) ?? 'treasury';
     // An outing is a real trip: only a household that can get there along linked streets comes.
     const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && h.wallet !== payee && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius) && canWalk(c, [homes.get(h.home!)!], parts));
@@ -1230,7 +1243,7 @@ function agricultureHooks(c: City) {
   return { served: (buildingId: number) => svc.ok(buildingId), connected: (cell: number) => validIndex(cell, c) && neighbors(cell, c).some(n => roads.has(n)), workers: (f: Firm) => firmWorkerCount(c, f.id),
     spendable: (f: Firm) => spendable(c, f), transfer: (from: string, to: string, amount: number, reason: string, book = false) => transfer(c, from, to, amount, reason, book),
     goodsTransfer: (from: string, to: string, quantity: number, reason: string, product: ProductId) => goodsTransfer(c, from, to, quantity, reason, product),
-    reachable: freightReach(c) };
+    reachable: freightReach(c), fromOutside: (f: Firm) => freightReach(c)('gateway', f) };
 }
 export function economicSignals(c: City) {
   const hooks = agricultureHooks(c);
@@ -1248,6 +1261,7 @@ function freightReach(c: City) {
 function trade(c: City) {
   const active = c.firms.filter(f => access(c, building(c, f.building).cell));
   const hooks = agricultureHooks(c), sellable = runAgriculture(c, hooks), reach = freightReach(c);
+  payProductionCosts(c);
   // Shops stock every product the city makes, local wholesale first.
   // Under real crop rules a shop carries every product, bringing in from outside what the town does not make.
   const made = realIndustry(c) ? [...PRODUCTS] : PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
@@ -1350,6 +1364,27 @@ function trade(c: City) {
   }
 }
 /**
+ * Real rules: what today's harvests and millings cost beyond labour (industry-scale.ts). A farm pays for the seed,
+ * fertilizer, chemicals, fuel and machine hire of what it harvested; a mill pays to run for what it made. Both go out of
+ * town and count as operating costs; a firm short of cash pays what it can.
+ */
+function payProductionCosts(c: City): void {
+  if (!realIndustry(c)) return;
+  const inputs = new Map<string, number>(), running = new Map<string, number>(), firms = new Map(c.firms.map(f => [f.wallet, f]));
+  for (let i = c.cropLedger.length - 1; i >= 0 && c.cropLedger[i].tick === c.tick; i--) {
+    const e = c.cropLedger[i];
+    if (e.kind === 'harvest') {
+      const farm = firms.get(e.to), spec = farm && realCrop(farmCrop(c, farm) ?? undefined, c);
+      if (farm && spec) inputs.set(farm.wallet, (inputs.get(farm.wallet) ?? 0) + farmInputs(spec, building(c, farm.building).level, e.quantity));
+    } else if (e.kind === 'process') {
+      const mill = firms.get(e.from), spec = mill && realMillCrop(mill, c);
+      if (mill && spec) running.set(mill.wallet, (running.get(mill.wallet) ?? 0) + millRunningCost(spec, e.outputQuantity));
+    }
+  }
+  for (const [wallet, amount] of inputs) transfer(c, wallet, 'outside', amount, FARM_INPUTS_REASON, true);
+  for (const [wallet, amount] of running) transfer(c, wallet, 'outside', amount, MILL_COSTS_REASON, true);
+}
+/**
  * Real rules: what a household spends a day for each person beyond the rice, sugar and canned food it buys by the kilo,
  * its rent, water and power, and its travel. The 2023 Household Socio-Economic Survey (National Statistical Office)
  * puts a household's consumption at 21,262 baht a month (first half of 2023), of which housing is 5,295 and travel
@@ -1371,7 +1406,7 @@ function withholdWageTax(c: City, wallet: string, wage: number): void {
 function payWages(c: City, f: Firm, onlyWallet?: string) {
   for (const [wallet, days] of Object.entries(f.workDays)) {
     if (onlyWallet && wallet !== onlyWallet) continue;
-    const owed = days * firmWage(f) / MONTH;
+    const owed = days * firmWage(f, c) / MONTH;
     // Release this claim's reserve immediately before paying it; other workers remain protected.
     delete f.workDays[wallet];
     const wage = transfer(c, f.wallet, wallet, owed, 'Monthly wages', true);
@@ -1382,7 +1417,7 @@ function payWages(c: City, f: Firm, onlyWallet?: string) {
 function payParkWages(c: City, p: Park, onlyWallet?: string): void {
   for (const [wallet, days] of Object.entries(p.staffing?.workDays ?? {})) {
     if (onlyWallet && wallet !== onlyWallet) continue;
-    const owed = days * PARK_STAFF.dailyWage;
+    const owed = days * parkStaff(c).dailyWage;
     delete p.staffing!.workDays[wallet];
     // Park claims are already cash-backed. Legacy education arrears must not
     // block their reserved payment or leave park claims across a month boundary.
@@ -1391,7 +1426,7 @@ function payParkWages(c: City, p: Park, onlyWallet?: string): void {
   }
 }
 function payVenueWages(c: City, site: CivicSite, onlyWallet?: string): void {
-  const wage = civicSpec(site.kind).staff?.dailyWage;
+  const wage = venueStaff(site.kind, c)?.dailyWage;
   if (!wage) return;
   for (const [wallet, days] of Object.entries(site.staffing?.workDays ?? {})) {
     if (onlyWallet && wallet !== onlyWallet) continue;
@@ -1406,7 +1441,7 @@ export const isWageReason = (reason: string): boolean => reason === 'Monthly wag
 const isWage = isWageReason;
 function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boolean {
   if (!c.education) return true;
-  const claims = takeEducationWages(c.education, onlyWallet, campusId);
+  const claims = takeEducationWages(c.education, onlyWallet, campusId, educationWages(c));
   if (!claims.length) return true;
   // Old saves can contain unfunded earned days. Keep the entire debt until
   // cash covers payroll, rather than borrowing another worker's reservation.
@@ -1419,6 +1454,7 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
       const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
       if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
       withholdWageTax(c, claim.wallet, claim.amount);
+      teacherPaySubsidy(c, claim.amount);
     }
     return true;
   } catch (error) {
@@ -1426,6 +1462,15 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
     for (const [campus, days] of workDays) campus.workDays = days;
     throw error;
   }
+}
+/**
+ * Real wages (wageScale 1): the national government pays public teachers' salaries (in Thailand through the Office of the
+ * Basic Education Commission and the university budget), so it sends the treasury back what the town paid its school and
+ * university staff, local or contracted. A city saved before pays its teachers itself.
+ */
+export const TEACHER_PAY_SUBSIDY_REASON = 'Central government teacher pay subsidy';
+function teacherPaySubsidy(c: City, amount: number): void {
+  if (c.wageScale === 1 && amount > 0) transfer(c, 'outside', 'treasury', amount, TEACHER_PAY_SUBSIDY_REASON);
 }
 function settleMonth(c: City) {
   const svc = utilities(c);
@@ -1659,7 +1704,7 @@ function admissionFacts(c: City) {
   for (const f of c.firms) {
     const site = building(c, f.building);
     if (!access(c, site.cell) || !svc.ok(f.building)) continue;
-    const zone = f.zone === 'F' ? 'I' : f.zone, wage = firmWage(f);
+    const zone = f.zone === 'F' ? 'I' : f.zone, wage = firmWage(f, c);
     const slots = Math.min(Math.max(0, capacity(site, f, c) - firmWorkerCount(c, f.id)), Math.floor(spendable(c, f) / (wage / MONTH)), Math.max(0, shopHiringCap(c, f) - employees(c, f)));
     if (!slots) continue;
     vacanciesByZone[zone] += slots;
@@ -1882,9 +1927,9 @@ export function productionUpgradeStatus(live: City, liveFirm: Firm) {
   const svc = utilities(c), before = buildingNeed(b.zone, b.level, 0, c);
   const after = nextLevel === null ? before : buildingNeed(b.zone, nextLevel, 0, c);
   const extra = { power: after.power - before.power, water: after.water - before.water };
-  const profitThreshold = f.owner || f.zone === 'F' ? firmWage(f) : 0;
+  const profitThreshold = f.owner || f.zone === 'F' ? firmWage(f, c) : 0;
   const requiredSpendable = nextLevel === null ? 0 : f.zone === 'F' && b.level >= 3 ? 40_000
-    : f.zone === 'I' && b.level >= 3 ? 20_000 + INDUSTRY_WORKING_RESERVE + factoryJobs(nextLevel, c, f) * (firmWage(f) / MONTH + 2 * 350) : 0;
+    : f.zone === 'I' && b.level >= 3 ? 20_000 + INDUSTRY_WORKING_RESERVE + factoryJobs(nextLevel, c, f) * (firmWage(f, c) / MONTH + 2 * 350) : 0;
   if (nextLevel !== null) {
     if (b.age < MONTH) reasons.push(`อายุอาคาร ${b.age}/${MONTH} วัน`);
     if (!access(c, b.cell)) reasons.push('ต้องมีถนนเชื่อมถึงเมือง');
@@ -1934,7 +1979,7 @@ function grow(c: City) {
       transfer(c, 'outside', 'construction', c.housingScale === 1 ? residentialGrowthCost(b.level) : 20_000, 'Outside residential height investment'); b.level++; b.housingType = HOUSING_LEVELS[b.level - 1].type; spare.power -= extra.power; spare.water -= extra.water;
     } else if (f && isCommercial(f) && !commercialGrowthReasons(c, f).length) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
-    } else if (f && !isCommercial(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f) / MONTH + 2 * 350))
+    } else if (f && !isCommercial(f) && f.lastMonthProfit > (f.owner || f.zone === 'F' ? firmWage(f, c) : 0) && firmWorkerCount(c, f.id) > 0 && (f.zone === 'F' && b.level >= 3 ? spendable(c, f) >= 40_000 : balance(c, f.wallet) >= 20_000) && (b.zone !== 'I' || b.level < 3 || spendable(c, f) >= 20_000 + INDUSTRY_WORKING_RESERVE + factoryLevel(b.level + 1).jobs * (firmWage(f, c) / MONTH + 2 * 350))
       // A real mill grows only while crop waits for it: its store at least half full of what it cannot process in time.
       && (!realMillCrop(f, c) || f.cropInventory * 2 >= factoryCrops(b.level, c, f))) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
@@ -1951,7 +1996,10 @@ export function step(c: City): void {
 function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
-  if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
+  if (c.education) for (const payment of stepEducation(c.education, educationView(c))) {
+    const paid = transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
+    if (payment.kind === 'contract') teacherPaySubsidy(c, paid);
+  }
   const peopleBefore = cityPopulation(c);
   rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c); visitVenues(c); runIncidents(c);
   // Everyone goes to work by a real route and a real way; households buy vehicles and fuel and pay bus fares.
@@ -2033,7 +2081,7 @@ function stepWithRoads(c: City): void {
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
   const safeSeed = Number.isSafeInteger(seed) ? seed >>> 0 : 20261023;
-  const c: City = { housingScale: 1, industryScale: 1, farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
+  const c: City = { housingScale: 1, industryScale: 1, wageScale: 1, farmSoilIndependentStartTick: 0, goalRulesVersion: 2, commercialUnifiedStartTick: 0, commercialUnifiedBaseline: {moneyEntries:0,cropEntries:0,goodsEntries:0}, foodDemandStartTick: 0, factoryProgressionStartTick: 0, farmLevelStartTick: 0, version: 9, rulesVersion: 'chain-4', typeBaseline: { tick: 0, cropEntries: 0, goodsEntries: 0, crops: {}, products: {} }, growthStartTick: 0, migration: { arrivals: 0, legacyHouseholds: 0 }, employment: [], ownerLabor: [],
     resources: createResourceMap(safeSeed), crops: { harvested: 0, processed: 0, consumed: 0, writtenOff: 0 }, cropLedger: [], agricultureStartTick: 0,
     seed: safeSeed, rng: safeSeed, tick: 0, nextId: 1,
     cells: Array.from({ length: SIZE * SIZE }, () => ({ road: false, zone: null, building: null })),
@@ -2177,7 +2225,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
     }
     if (f.convertedAt !== undefined && (!isRetail(f) || !f.owner || !int(f.convertedAt, 1) || f.convertedAt > c.tick || premise.level < 2)) fail();
     if (f.fundedBy !== undefined && (f.zone !== 'I' || !f.fundedBy || typeof f.fundedBy !== 'object' || Array.isArray(f.fundedBy) || Object.keys(f.fundedBy).length !== 2 || !int(f.fundedBy.firmId, 1) || f.fundedBy.firmId >= f.id || f.fundedBy.capital !== INDUSTRY_STARTUP_CAPITAL || !Object.hasOwn(c.accounts, `firm:${f.fundedBy.firmId}`))) fail();
-    if (!f.workDays || typeof f.workDays !== 'object' || Array.isArray(f.workDays) || !Object.entries(f.workDays).every(([wallet, days]) => { const h = c.households.find(h => h.wallet === wallet); return h && int(days, 1) && days <= h.workforce * (c.tick % MONTH); }) || !int(payroll(f)) || payroll(f) > balance(c, f.wallet)) fail();
+    if (!f.workDays || typeof f.workDays !== 'object' || Array.isArray(f.workDays) || !Object.entries(f.workDays).every(([wallet, days]) => { const h = c.households.find(h => h.wallet === wallet); return h && int(days, 1) && days <= h.workforce * (c.tick % MONTH); }) || !int(payroll(c, f)) || payroll(c, f) > balance(c, f.wallet)) fail();
     ids.add(f.id);
   }
   for (const p of version === 9 ? c.plants : []) {
@@ -2214,25 +2262,25 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       if (!a || Object.keys(a).length !== 4 || a.parkId !== p.id || !int(a.householdId, 1) || !int(a.workers, 1) || !['general', 'manufacturing', 'retail'].includes(a.skill) || !c.households.some(h => h.id === a.householdId)) fail();
       const key = `${a.householdId}:${a.skill}`; if (pairs.has(key)) fail(); pairs.add(key);
     }
-    if (parkWorkers(p) > PARK_STAFF.slots || !int(parkPayroll(p))) fail();
+    if (parkWorkers(p) > PARK_STAFF.slots || !int(parkPayroll(p, c))) fail();
     for (const [wallet, days] of Object.entries(s.workDays)) if (!c.households.some(h => h.wallet === wallet) || !int(days, 1)) fail();
     if (Object.values(s.workDays).reduce((n, days) => n + days, 0) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH)) fail();
   }
-  if (c.parks.reduce((n, p) => n + parkPayroll(p), 0) > balance(c, 'treasury')) fail();
+  if (c.parks.reduce((n, p) => n + parkPayroll(p, c), 0) > balance(c, 'treasury')) fail();
   const parkPaid = new Map<string, number>();
   const parkPayments = new Set<string>();
   for (const e of historicalLedger) {
     const wage = /^Monthly park wages #([1-9]\d*)$/.exec(e.reason);
     if (wage) {
       const id = Number(wage[1]), built = parkBuilds.get(id), key = `${id}:${Math.ceil(e.tick / MONTH)}`;
-      if (!withStaffing || built === undefined || parkRemoved.has(id) || e.tick <= built || e.from !== 'treasury' || !/^household:[1-9]\d*$/.test(e.to) || !int(e.amount, 1) || e.amount % PARK_STAFF.dailyWage !== 0) fail();
+      if (!withStaffing || built === undefined || parkRemoved.has(id) || e.tick <= built || e.from !== 'treasury' || !/^household:[1-9]\d*$/.test(e.to) || !int(e.amount, 1) || e.amount % parkStaff(c).dailyWage !== 0) fail();
       // A claim is settled once per wallet. Mid-month settlements only occur on
       // demolition; accepting one on a live park would leave already-paid days owed.
       const payment = `${id}:${e.tick}:${e.to}`;
       if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !historicalLedger.some(row => row.tick === e.tick && (row.reason === `Demolish park #${id}` || row.reason === `Demolition refund park #${id}`))) fail();
       parkPayments.add(payment);
       const paid = (parkPaid.get(key) ?? 0) + e.amount;
-      if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * PARK_STAFF.dailyWage) fail();
+      if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * parkStaff(c).dailyWage) fail();
       parkPaid.set(key, paid);
       continue;
     }
@@ -2249,8 +2297,17 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > funded(PARK.upkeep, MAX_BUDGET_LEVEL) || parkBills.has(key)) fail(); parkBills.add(key); }
     }
   }
-  for (const p of c.parks) if (c.tick % MONTH !== 0 && (parkPaid.get(`${p.id}:${Math.ceil(c.tick / MONTH)}`) ?? 0) + parkPayroll(p) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH) * PARK_STAFF.dailyWage) fail();
+  for (const p of c.parks) if (c.tick % MONTH !== 0 && (parkPaid.get(`${p.id}:${Math.ceil(c.tick / MONTH)}`) ?? 0) + parkPayroll(p, c) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH) * parkStaff(c).dailyWage) fail();
   for (const id of parkBuilds.keys()) if (!parkRemoved.has(id) && !c.parks.some(p => p.id === id)) fail();
+  // The national teacher pay subsidy (real wages only) returns, day by day, exactly what the treasury paid its teachers.
+  const teacherPay = new Map<number, number>();
+  for (const e of c.ledger) {
+    if (e.reason === TEACHER_PAY_SUBSIDY_REASON) {
+      if (c.wageScale !== 1 || e.from !== 'outside' || e.to !== 'treasury' || !int(e.amount, 1)) fail();
+      teacherPay.set(e.tick, (teacherPay.get(e.tick) ?? 0) - e.amount);
+    } else if (c.wageScale === 1 && e.from === 'treasury' && /^(?:Monthly (?:school|university) wages|Outside contract (?:teacher|professor)) #[1-9]\d*$/.test(e.reason)) teacherPay.set(e.tick, (teacherPay.get(e.tick) ?? 0) + e.amount);
+  }
+  for (const owed of teacherPay.values()) if (owed !== 0) fail();
   const retainedAccountIds = Object.keys(c.accounts).flatMap(key => {
     const match = /^(?:household|firm):(\d+)$/.exec(key);
     if (!match) return [];
@@ -2560,6 +2617,7 @@ export function deserialize(json: string): City {
   const city = deserializeVersioned(baseJson);
   // A city saved before real building sizes keeps its smaller homes; only new cities are built to real sizes.
   if (city.housingScale !== undefined && city.housingScale !== 1) throw new Error('Invalid housing scale.');
+  if (city.wageScale !== undefined && city.wageScale !== 1) throw new Error('Invalid wage scale.');
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.

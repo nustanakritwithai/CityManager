@@ -54,7 +54,8 @@ test('vegetables go from the field to the cannery and households buy canned food
   for (const e of canned) { assert.equal(e.outputQuantity, e.batches * VEG.batchGoods); assert.ok(e.batches <= e.workers * Math.floor(millLotsPerWorker(VEG) / 2)); }
   const eaten = c.goodsLedger.filter(e => e.reason === 'Household final consumption' && e.product === 'canned-food');
   assert.ok(eaten.length > 0, 'households bought canned food');
-  for (const e of eaten) assert.ok(e.quantity <= bagsToday(VEG, c.households.find(h => h.wallet === e.to)!.members, e.tick));
+  // A household that has since left is not checked (its size is gone with it).
+  for (const e of eaten) { const h = c.households.find(h => h.wallet === e.to); if (h) assert.ok(e.quantity <= bagsToday(VEG, h.members, e.tick)); }
   assert.equal(goodsUnit(c, 'canned-food', 'retail'), VEG.prices.retail);
   assert.equal(Object.values(c.accounts).reduce((a, b) => a + b, 0), 0);
   assert.deepEqual(deserialize(serialize(c)), c, 'the save validates real vegetable harvests, canning and kilo sales');
