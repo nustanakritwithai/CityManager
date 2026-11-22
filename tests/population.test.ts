@@ -123,10 +123,14 @@ test('a funded imported family keeps two actual employers and receives their ful
 });
 
 test('disconnection clears worker allocations on the next daily tick without losing previously earned claims', () => {
-  const c = populated(185), claims = JSON.stringify(c.firms.map(f => f.workDays)), population = summary(c).population;
+  const c = populated(185), residents = new Map(c.households.map(h => [h.id, h.members])), homeless = new Set(c.households.filter(h => h.home === null).map(h => h.wallet));
+  const housedClaims = () => JSON.stringify(c.firms.map(f => Object.entries(f.workDays).filter(([wallet]) => !homeless.has(wallet))));
+  const claims = housedClaims();
   bulldoze(c, GATEWAY + 1); step(c);
-  assert.equal(c.employment.length, 0); assert.equal(summary(c).population, population);
-  assert.equal(JSON.stringify(c.firms.map(f => f.workDays)), claims);
+  // Everyone whose home was cut off stops work; someone with no home yet (real rules) may keep a post still linked to the gate.
+  assert.ok(c.employment.every(e => c.households.find(h => h.id === e.householdId)!.home === null));
+  for (const [id, members] of residents) assert.equal(c.households.find(h => h.id === id)?.members, members);
+  assert.equal(housedClaims(), claims);
   assert.equal(c.ledger.filter(e => e.tick === c.tick && e.reason.includes('purchase')).length, 0);
   assert.doesNotThrow(() => deserialize(serialize(c)));
 });
@@ -151,8 +155,9 @@ test('usable vacant capacity suppresses extra development and the household admi
   for (const f of stable.firms) { stable.accounts.outside += stable.accounts[f.wallet]; stable.accounts[f.wallet] = 0; }
   // Unfunded vacancies cannot commission endless empty housing: what is left is the steady trickle of people
   // coming to look for work, which stops once a tenth of the workforce is out of work.
-  assert.equal(summary(stable).demand.R, unemploymentRate(stable) < JOB_SEEKER_UNEMPLOYMENT_LIMIT ? JOB_SEEKERS_PER_DAY : 0);
-  assert.equal(summary(legacyIndustry(stable)).demand.R, 0, 'a city saved before keeps homes for open jobs only');
+  // Households with no home yet (real rules) need one too.
+  assert.ok(summary(stable).demand.R <= stable.households.filter(h => h.home === null).length + (unemploymentRate(stable) < JOB_SEEKER_UNEMPLOYMENT_LIMIT ? JOB_SEEKERS_PER_DAY : 0));
+  assert.equal(summary(legacyIndustry(stable)).demand.R, stable.households.filter(h => h.home === null).length, 'a city saved before keeps homes for open jobs and the homeless only');
 });
 
 test('v2 reader rejects overcapacity, duplicate worker authority, invalid composition and forged allocation totals', () => {

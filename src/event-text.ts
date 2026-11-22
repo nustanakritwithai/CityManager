@@ -27,7 +27,7 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Crop disposal could not be journaled/, () => 'บันทึกการตัดพืชผลไม่ได้ กิจการและเมืองยังคงเดิม'],
   [/^Parcel cleared\./, () => 'รื้อแล้ว อาคารที่ขาดถนนเชื่อมจะหยุดรับคน ค้าขาย และเติบโต'],
   [/^([RCIF]) building #(\d+) grew:.*?(?:Recipe: ([a-z-]+)\.|Crop: ([a-z]+)\.)?$/, m => `${m[3] ? RECIPE_LABELS[m[3] as RecipeId] ?? zone(m[1]) : m[4] ? `ฟาร์ม${CROP_LABELS[m[4] as CropId] ?? ''}` : zone(m[1])} #${m[2]} สร้างเสร็จ ผ่านเงื่อนไขถนน น้ำไฟ ความต้องการ และค่าเช่า`],
-  [/^Household #(\d+) arrived with (\d+) members and (\d+) workforce;(.*)$/, m => `ครัวเรือน #${m[1]} ย้ายเข้า ${m[2]} คน แรงงาน ${m[3]} คน${/bootstrap/.test(m[4]) ? ' (สิทธิเริ่มเมือง)' : ''}`],
+  [/^Household #(\d+) arrived with (\d+) members and (\d+) workforce;(.*)$/, m => `ครัวเรือน #${m[1]} ย้ายเข้า ${m[2]} คน แรงงาน ${m[3]} คน${/bootstrap/.test(m[4]) ? ' (สิทธิเริ่มเมือง)' : ''}${/No home free/.test(m[4]) ? ' ยังไม่มีบ้านว่าง ทำงานไปก่อนระหว่างรอบ้าน' : ''}`],
   [/^Market #(\d+) became a shop:/, m => `ตลาด #${m[1]} ยกระดับเป็นร้านค้าแล้ว เจ้าของจ่ายค่าปรับปรุงจากกำไรของแผงเองและยังยืนร้านต่อ`],
   [/^Empty map: only the outside gateway exists\./, () => 'แผนที่ว่าง มีแค่ประตูเมือง · ต่อถนนจากประตูก่อน แล้ววางโซนข้างถนน'],
   [/^Month settled:[^.]*\.?(?: (\d+) idle specialist[^.]*\.)?(?: (\d+) household\(s\) left[^.]*\.)?/, m => 'ชำระรายเดือนแล้ว ค่าจ้าง ค่าเช่า ค่าน้ำไฟ และภาษีอยู่ในบัญชีเงิน'

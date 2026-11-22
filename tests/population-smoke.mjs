@@ -49,7 +49,8 @@ for (let n = 0; n < 180; n++) {
   for (const entry of arrival) {
     assert.equal(entry.from, 'outside'); assert.equal(entry.amount, 150000);
     const h = natural.households.find(h => h.wallet === entry.to); assert.ok(h);
-    assert.ok(previous.buildings.some(b => b.id === h.home && b.zone === 'R'), 'Arrival cannot occupy a home created this tick');
+    // Under real rules a newcomer may come with no home free yet (sim.ts, homelessWork); one with a home takes an existing one.
+    assert.ok(h.home === null || previous.buildings.some(b => b.id === h.home && b.zone === 'R'), 'Arrival cannot occupy a home created this tick');
     assert.equal(natural.ledger.filter(e => e.reason === entry.reason && e.to === h.wallet).length, 1);
   }
   const upgraded = natural.buildings.filter(b => b.zone === 'R' && previous.buildings.some(old => old.id === b.id && old.level < b.level));

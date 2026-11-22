@@ -13,7 +13,8 @@ const advance=(c:City,n:number)=>{for(let i=0;i<n;i++)step(c);};
 // off: people walk either way along a linked street.)
 const cutJunctions=(c:City)=>{const blocked:number[]=[];c.cells.forEach((v,i)=>{if(!v.road)return;for(const n of [i+1,i+SIZE])if(n<c.cells.length&&c.cells[n].road&&(n===i+SIZE||Math.floor(n/SIZE)===Math.floor(i/SIZE)))blocked.push(Math.min(i,n)*c.cells.length+Math.max(i,n));});c.roadTopology={version:1,blocked:blocked.sort((a,b)=>a-b),oneWay:{}};};
 test('severe route loss causes slow, capped decline; restoring routes lets remaining households recover',()=>{
- const c=createCity(61025); advance(c,120); const initial=c.households.length;
+ // Old home sizes: newcomers need a free home, so a broken town is not refilled by people with nowhere to live yet.
+ const c=legacySizes(createCity(61025)); advance(c,120); const initial=c.households.length;
  assert.ok(initial>4); assert.equal(c.migration.departures??0,0);
  cutJunctions(c); const before=c.households.length; advance(c,29);
  assert.ok(c.households.length>=before,'no immediate unhappy departures');
@@ -24,7 +25,7 @@ test('severe route loss causes slow, capped decline; restoring routes lets remai
  assert.doesNotThrow(()=>deserialize(serialize(c)));
 });
 test('a persistent severe city can decline to its protected floor, with deterministic save replay',()=>{
- const a=createCity(61025); advance(a,120); cutJunctions(a); const b=deserialize(serialize(a));
+ const a=legacySizes(createCity(61025)); advance(a,120); cutJunctions(a); const b=deserialize(serialize(a));
  for(let i=0;i<150;i++){step(a);step(b);if(i===74){const x=deserialize(serialize(b));Object.assign(b,x);}}
  assert.equal(a.households.length,2); assert.deepEqual(b,a); assert.deepEqual(deserialize(serialize(a)),a);
 });

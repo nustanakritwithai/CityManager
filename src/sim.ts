@@ -1,7 +1,7 @@
 import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
-import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, bagsToday, millLotsPerWorker, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
+import { factoryJobs, factoryUtilities, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
@@ -264,7 +264,27 @@ export function housingUpgradeStatus(live: City, liveBuilding: Building) {
   if (next && !blocked.length && reviewGrows(live, b) === false) blocked.push(SPARE_TAKEN);
   return { current, next, blocked };
 }
-const householdAccess = (c: City, h: Household) => h.home !== null && access(c, building(c, h.home).cell);
+/**
+ * Under real rules a household without a home is still in town: people come to work before there is a house for them,
+ * sleep rough or in a rented corner, and work and shop as anyone does. They pay no rent or bills, have first claim on
+ * any home that opens, and their need for one is housing demand. A city saved before keeps needing a home to work.
+ */
+export const homelessWork = (c: City): boolean => realIndustry(c) && c.housingScale === 1;
+const householdAccess = (c: City, h: Household) => h.home !== null ? access(c, building(c, h.home).cell) : homelessWork(c) && homelessReach(c, h);
+/** A household without a home is in reach while its workplace, or (with no job yet) any street beyond the gate, is linked to the gate. */
+function homelessReach(c: City, h: Household): boolean {
+  const at = whereabouts(c, h);
+  if (at !== GATEWAY) return access(c, at);
+  const connected = roadScopes.get(c) ?? connectedRoads(c);
+  for (const r of connected) if (r !== GATEWAY) return true;
+  return false;
+}
+/** Where a household is during the day: its home, else (homeless under real rules) where it works, else the town gate. */
+function whereabouts(c: City, h: Household): number {
+  if (h.home !== null) return building(c, h.home).cell;
+  const job = c.employment.find(e => e.householdId === h.id), f = job && c.firms.find(f => f.id === job.firmId);
+  return f ? building(c, f.building).cell : GATEWAY;
+}
 /** Today's water and power along the connected roads (see utilities.ts). */
 export const utilities = (c: City): Service => utilityService(c, connectedRoads(c));
 /** A home can take one more household: it is supplied now and the network has a unit of each to spare. */
@@ -477,7 +497,7 @@ export function retailDemand(c: City): number {
 }
 /** The lowest-id connected household with 600 credits of savings and a general/retail worker that owns nothing yet. */
 function ownerCandidate(c: City): Household | undefined {
-  return [...c.households].sort((a, b) => a.id - b.id).find(h => householdAccess(c, h) && balance(c, h.wallet) >= 60_000 &&
+  return [...c.households].sort((a, b) => a.id - b.id).find(h => h.home !== null && householdAccess(c, h) && balance(c, h.wallet) >= 60_000 &&
     h.workerSkills.general + h.workerSkills.retail > 0 && h.workforce > educationOccupied(c.education, h.id) && !c.firms.some(f => f.owner?.householdId === h.id));
 }
 function reserveOwnerLabor(c: City): void {
@@ -485,7 +505,7 @@ function reserveOwnerLabor(c: City): void {
   const svc = utilities(c);
   for (const f of [...c.firms].filter(f => isCommercial(f) && f.owner).sort((a, b) => a.id - b.id)) {
     const h = c.households.find(h => h.id === f.owner!.householdId);
-    if (!h || !householdAccess(c, h) || !access(c, building(c, f.building).cell) || !svc.ok(f.building)) continue;
+    if (!h || h.home === null || !householdAccess(c, h) || !access(c, building(c, f.building).cell) || !svc.ok(f.building)) continue;
     const skill = h.workerSkills.retail > 0 ? 'retail' : 'general';
     if (h.workerSkills[skill] <= c.ownerLabor.filter(e => e.householdId === h.id && e.skill === skill).length ||
       h.workforce <= educationOccupied(c.education, h.id) + c.ownerLabor.filter(e => e.householdId === h.id).length) continue;
@@ -565,8 +585,24 @@ export const farmCropMode = (f: Pick<Firm, 'cropMode'>): 'auto' | 'manual' => f.
 export function farmCrop(c: City, f: Pick<Firm, 'building'> & Partial<Pick<Firm, 'cropChoices'>>): CropId {
   return f.cropChoices?.at(-1)?.crop ?? cropForFertility(c.resources.fertility[building(c, f.building).cell]) ?? 'rice';
 }
-/** Choose the least represented crop, ties resolved in catalog order; never mutate the city. */
+/**
+ * Real rules: lots a day each crop's mills could process with the workers they have, less what the town's farms of that
+ * crop harvest a day fully staffed (industry-scale.ts). A real mill draws on many farms: a 2 t a day rice mill takes the
+ * paddy of about 18 of the town's 100-rai fields, so farms keep coming on zoned land while the mills are short.
+ */
+export function realCropShortage(c: City, excludeFirmId?: number): Record<CropId, number> {
+  const svc = utilities(c), short = emptyCrops();
+  const working = (f: Firm) => access(c, building(c, f.building).cell) && svc.ok(f.building);
+  for (const f of c.firms) if (f.zone === 'I' && f.recipe && working(f)) { const spec = realMillCrop(f, c); if (spec) short[RECIPE[f.recipe].crop] += firmWorkerCount(c, f.id) * millLotsPerWorker(spec); }
+  for (const f of c.firms) if (f.zone === 'F' && f.id !== excludeFirmId && working(f)) { const crop = farmCrop(c, f), spec = realCrop(crop, c); if (spec) short[crop] -= realLotsPerYear(spec, building(c, f.building).level) / 365; }
+  return short;
+}
+/** Choose the crop the mills are shortest of under real rules, else the least represented crop, ties in catalog order; never mutate the city. */
 export function automaticFarmCrop(c: City, excludeFirmId?: number): CropId {
+  if (realIndustry(c)) {
+    const short = realCropShortage(c, excludeFirmId), most = [...CROPS].sort((a, b) => short[b] - short[a] || CROPS.indexOf(a) - CROPS.indexOf(b))[0];
+    if (short[most] > 0) return most;
+  }
   const counts = Object.fromEntries(CROPS.map(crop => [crop, 0])) as Record<CropId, number>;
   for (const f of c.firms) if (f.zone === 'F' && f.id !== excludeFirmId) counts[farmCrop(c, f)]++;
   return [...CROPS].sort((a, b) => counts[a] - counts[b] || CROPS.indexOf(a) - CROPS.indexOf(b))[0];
@@ -1005,9 +1041,10 @@ function summarize(c: City) {
     personCapacity: homes.reduce((n, b) => n + housingCapacity(b, c).persons, 0), treasury: balance(c, 'treasury'), net,
     demand: { R: Math.max(0, homeless + incoming - vacantSlots), C: retailDemand(c),
       I: industryGrowthStatus(c).ready ? 1 : 0,
-      F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || missingCropForBuyers ||
+      // Real rules: a new farm while any crop's mills can process more than the town's farms harvest.
+      F: (c.firms.some(f => f.zone === 'I' || isCommercial(f)) || c.households.some(h => householdAccess(c, h)) && c.cells.some((cell, i) => cell.zone === 'C' && access(c, i))) && (!farms.length || (realIndustry(c) ? Object.values(realCropShortage(c)).some(n => n > 0) : missingCropForBuyers ||
         c.households.reduce((n, h) => n + h.members, 0) + c.firms.filter(f => f.zone === 'I').reduce((n, f) => n + firmWorkerCount(c, f.id) * 2, 0) >
-        farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0)) ? 1 : 0 } };
+        farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0))) ? 1 : 0 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
 function blockers(c: City, i: number): string[] {
@@ -1092,6 +1129,17 @@ function createBuilding(c: City, i: number, shop = false) {
   const made = c.firms.find(f => f.building === id), goods = zone === 'I' && made?.recipe ? ` Recipe: ${made.recipe}.` : zone === 'F' ? ` Crop: ${farmCrop(c, { building: id })}.` : '';
   c.lastEvent = `${zone} building #${id} grew: road + utilities + demand + viable expected rent. Initial investment is recorded in the ledger.${goods}`;
 }
+const employees = (c: City, f: Firm) => employmentForFirm(c, f.id).reduce((n, e) => n + e.workers, 0);
+/**
+ * Real rules: a shop takes on staff only as its trade pays for them, one more worker after a month whose profit covered a
+ * wage; a shop with nobody yet may hire one. Without this a shop with people to hire filled every post it could fund for
+ * a month and went broke. Other workplaces and cities saved before hire to every funded post.
+ */
+function shopHiringCap(c: City, f: Firm): number {
+  if (!homelessWork(c) || !isCommercial(f)) return Number.MAX_SAFE_INTEGER;
+  const staff = employees(c, f);
+  return firmWorkerCount(c, f.id) === 0 ? 1 : staff + (f.lastMonthProfit >= firmWage(f) ? 1 : 0);
+}
 function employ(c: City) {
   reserveOwnerLabor(c);
   const svc = utilities(c);
@@ -1102,7 +1150,7 @@ function employ(c: City) {
     return { id: h.id, workforce: Object.values(reduced).reduce((sum, count) => sum + count, 0), workerSkills: reduced, accessible: householdAccess(c, h) };
   }), c.firms.map(f => ({
     id: f.id, zone: f.zone === 'F' ? 'I' as const : f.zone as 'I' | 'C', slots: access(c, building(c, f.building).cell) && svc.ok(f.building) ? capacity(building(c, f.building), f, c) - c.ownerLabor.filter(e => e.firmId === f.id).length : 0,
-    budgetWorkers: Math.floor(spendable(c, f) / (firmWage(f) / MONTH)),
+    budgetWorkers: Math.min(Math.floor(spendable(c, f) / (firmWage(f) / MONTH)), shopHiringCap(c, f)),
   })), c.employment);
   for (const allocation of c.employment) {
     const h = c.households.find(h => h.id === allocation.householdId)!, f = c.firms.find(f => f.id === allocation.firmId)!;
@@ -1235,7 +1283,7 @@ function trade(c: City) {
     const shops = active.filter(f => firmWorkerCount(c, f.id) > 0 && (isCommercial(f) && (f.inventory > 0 || f.cropInventory > 0 && (sellable.get(f.id) ?? 0) > 0)));
     // Rotate sellers without repeatedly picking an empty or unaffordable business.
     if (shops.length) { const start = Math.floor(random(c) * shops.length); shops.push(...shops.splice(0, start)); }
-    const homeCell = building(c, h.home!).cell;
+    const homeCell = whereabouts(c, h);
     // Real crops: the family buys the kilos of rice and sugar it eats today (whole bags), by the kilo, at the shops it
     // can walk to that have some; the day's other shopping follows.
     const riceKg = realIndustry(c);
@@ -1553,11 +1601,12 @@ export const HOUSING_RELOCATION_LIMIT = 4;
 export const HOUSING_RELOCATION_ATTEMPTS = 32;
 export function rebalanceHousing(c: City): number {
   // Displaced households have first claim on any usable housing and supply.
-  if (c.tick % HOUSING_RELOCATION_INTERVAL !== 0 || c.households.some(h => h.home === null)) return 0;
+  if (c.tick % HOUSING_RELOCATION_INTERVAL !== 0 || !homelessWork(c) && c.households.some(h => h.home === null)) return 0;
   const homes = vacantHomes(c), occupied = buildOccupancyIndex(c.households);
   const residents = new Map<number, Household[]>();
   for (const h of [...c.households].sort((a, b) => a.id - b.id)) {
-    const at = residents.get(h.home!) ?? []; at.push(h); residents.set(h.home!, at);
+    if (h.home === null) continue;
+    const at = residents.get(h.home) ?? []; at.push(h); residents.set(h.home, at);
   }
   const moved = new Set<number>();
   let commute: ReturnType<typeof prepareCommuteEstimates> | undefined;
@@ -1611,7 +1660,7 @@ function admissionFacts(c: City) {
     const site = building(c, f.building);
     if (!access(c, site.cell) || !svc.ok(f.building)) continue;
     const zone = f.zone === 'F' ? 'I' : f.zone, wage = firmWage(f);
-    const slots = Math.min(Math.max(0, capacity(site, f, c) - firmWorkerCount(c, f.id)), Math.floor(spendable(c, f) / (wage / MONTH)));
+    const slots = Math.min(Math.max(0, capacity(site, f, c) - firmWorkerCount(c, f.id)), Math.floor(spendable(c, f) / (wage / MONTH)), Math.max(0, shopHiringCap(c, f) - employees(c, f)));
     if (!slots) continue;
     vacanciesByZone[zone] += slots;
     offers.push({ id: f.id, zone, slots, budgetWorkers: slots, wage });
@@ -1745,7 +1794,8 @@ function admitHousehold(c: City) {
   // A severely unhappy city does not immediately replace every departure.
   const happiness = averageHouseholdHappiness(c.happiness);
   if (happiness !== null && happiness < 35) return;
-  if (c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
+  // Under real rules people come for work whether or not a home is free; elsewhere the homeless are housed first.
+  if (!homelessWork(c) && c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
   const facts = admissionFacts(c), seekers = jobSeekersComing(c, facts);
   if (!facts.bootstrap && !seekers && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
   // A new household takes the best land it fits into; ties keep the usual order.
@@ -1764,17 +1814,18 @@ function admitHousehold(c: City) {
     const svc = utilities(c), occupied = buildOccupancyIndex(c.households);
     const fitting = vacantHomes(c).filter(b => canAccommodate(housingCapacity(b, c), occupied.get(b.id) ?? { households: 0, persons: 0 }, members) && homeSupplied(c, b, svc));
     const home = fitting.reduce<Building | undefined>((best, b) => !best || worth(b.cell) > worth(best.cell) ? b : best, undefined);
-    if (!home) return;
+    // The first two households of a town still need a home to come to.
+    if (!home && (facts.bootstrap || !homelessWork(c))) return;
     const id = c.nextId, wallet = `household:${id}`;
     // Outside is an explicit source. No existing family wallet or earned claim is duplicated.
     if (transfer(c, 'outside', wallet, 150_000, 'New household arrival savings') !== 150_000) return;
     c.nextId++;
     // Proposed entry capability profile: one flexible worker plus one specialist
     // in a currently funded role. Counts are disjoint; no per-person agents exist.
-    c.households.push({ id, home: home.id, members, workforce, dependents: members - workforce, workerSkills, skillSource: 'arrival-profile', profile: members > 1 ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
+    c.households.push({ id, home: home?.id ?? null, members, workforce, dependents: members - workforce, workerSkills, skillSource: 'arrival-profile', profile: members > 1 ? 'family' : 'single-worker', origin: 'arrival', wallet, lastPurchaseTick: -1, needs: 0 });
     if (c.households.length > 128) c.populationCapacityVersion = 1;
     c.migration.arrivals++;
-    c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}`;
+    c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}${home ? '' : ' No home free yet: the household works and waits for one.'}`;
     if (facts.bootstrap) return;
     // The jobs this household will take tomorrow are no longer open to the next arrival today.
     for (const job of allocateEmployment([{ id, workforce, workerSkills, accessible: true }], facts.offers, [])) {
@@ -2217,7 +2268,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   for (const e of c.employment) {
     if (!e || !int(e.householdId, 1) || !int(e.firmId, 1) || !int(e.workers, 1) || e.rank !== 'entry' || !['general', 'manufacturing', 'retail'].includes(e.skill)) fail();
     const h = c.households.find(h => h.id === e.householdId), f = c.firms.find(f => f.id === e.firmId), pair = `${e.householdId}:${e.firmId}:${e.skill}`;
-    if (!h || h.home === null || !f || (!expandedCommercial && isMarket(f)) || e.occupation !== (f.zone === 'I' || f.zone === 'F' ? 'manufacturing' : 'retail') || (e.skill !== 'general' && e.skill !== e.occupation) || pairs.has(pair)) fail();
+    if (!h || h.home === null && !homelessWork(c) || !f || (!expandedCommercial && isMarket(f)) || e.occupation !== (f.zone === 'I' || f.zone === 'F' ? 'manufacturing' : 'retail') || (e.skill !== 'general' && e.skill !== e.occupation) || pairs.has(pair)) fail();
     pairs.add(pair);
   }
   if (venueEmployment(c).some(a => !c.households.some(h => h.id === a.householdId && h.home !== null))) fail();

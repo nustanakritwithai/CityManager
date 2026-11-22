@@ -102,7 +102,8 @@ test('all maximum levels survive education adoption and monthly review without a
     const after = city.buildings.find(b => b.id === before.id)!;
     assert.equal(after.level, before.level); assert.equal(after.cell, before.cell); assert.equal(city.cells[after.cell].building, before.id);
   }
-  assert.deepEqual(city.households.filter(h => people.some(([id]) => id === h.id)).map(h => [h.id, h.members, h.home]), people);
+  // Households keep their homes; one with no home yet (real rules) may move into a room the review left free.
+  assert.deepEqual(city.households.filter(h => people.some(([id]) => id === h.id)).map(h => [h.id, h.members, people.find(([id]) => id === h.id)![2] === null ? null : h.home]), people);
   const arrivals = city.households.filter(h => !people.some(([id]) => id === h.id));
   assert.equal(arrivals.length, city.ledger.filter(e => e.tick === city.tick && e.reason === 'New household arrival savings').length);
   for (const h of arrivals) assert.ok(city.ledger.some(e => e.tick === city.tick && e.to === h.wallet && e.reason === 'New household arrival savings' && e.amount === 150_000));
