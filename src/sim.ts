@@ -13,7 +13,7 @@ import { validateCityHistory } from './city-history-validation.ts';
 import type { CityHistory } from './city-history-types.ts';
 import { roadLinked, configureRoadPath, setRoadJunction, forgetRoadTopology, validateRoadTopology, type RoadTopology } from './road-topology.ts';
 import { taxiAt, validateTaxi, type TaxiState, type TaxiValidationView } from './taxi/buildings.ts';
-import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicOpen, civicReach, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
+import { CIVIC, CIVIC_ATTRACTIONS, CIVIC_KINDS, MAX_CIVIC_SITES, civicAt, civicCoverage, civicOpen, civicReach, civicBuildReason, civicCells, civicDailyVisits, civicDailyWageReason, civicFeeReason, civicFundedUpkeep, civicLeaseCapital, civicRentReason, venueStaff, civicFootprint, civicPayroll, civicSpec, civicUpkeepReason, civicVisitorIncome, civicVisitorsReason, civicWageReason, civicWorkers, createCivic, isCivicWageReason, validateCivic, type CivicKind, type CivicSite, type CivicState, type CivicValidationView } from './civic/sites.ts';
 import { civicCellDistance } from './civic/reach.ts';
 import { validateDistricts, type DistrictState } from './districts.ts';
 import { runCommutes, liveVehicles, validateVehicles, freightRoute, canWalk, careTrip, outsideCareTrip, recordCareTrip, congestionReader, type VehicleState } from './commute.ts';
@@ -36,8 +36,8 @@ import { createResourceMap, isCanonicalResourceMap, FERTILITY_THRESHOLD, CROP_RE
 import { CROPS, PRODUCTS, RECIPE, RECIPES, cropForFertility, emptyCrops, emptyProducts, mixTotal, productPreference, recipeForCrop, takeLargest, validMix, type CropId, type CropMix, type ProductId, type ProductMix, type RecipeId } from './goods.ts';
 import { runAgriculture, consumeMarketCrop, writeOffCrops, agricultureDiagnostic } from './agriculture-runtime.ts';
 import { validateTypes } from './goods-validation.ts';
-import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkWorkers, type Park } from './parks.ts';
-import { EDUCATION_COST, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
+import { MAX_PARKS, PARK, PARK_STAFF, parkPayroll, parkStaff, parkWorkers, type Park } from './parks.ts';
+import { EDUCATION_COST, educationWages, assertEducationInvariants, createEducation, credentialPosts, educationGate, educationOccupied, educationPayroll, educationUpkeep, forgetHouseholdEducation, initialCampusReport, stepEducation, subtractEducationReserve, takeEducationWages, withdrawCampus, type CampusKind, type EducationState, type EducationView } from './education.ts';
 import { validateAgriculture } from './agriculture-validation.ts';
 import { RETAIL_LEGACY_MAX_LEVEL, RETAIL_MAX_LEVEL, retailCapacity, staffedRetailCapacity } from './retail-capacity.ts';
 import { HOUSEHOLD_BILL, HOUSEHOLD_NEED, MAX_PLANTS, OUTSIDE_PRICE, OUTSIDE_SUPPLY, PLANTS, PLANT_NAMES, UTILITY_KINDS, buildingBill, buildingNeed, fits, householdBill, unserved, utilityFlags, utilityService, plantLevel, plantLevelSpec, plantSpec, plantUpgradeReason, type PlantLevel, type Need, type Plant, type Service, type UtilityKind } from './utilities.ts';
@@ -135,7 +135,7 @@ const neighbors = (i: number, city: Pick<City,'cells'>) => expandedCellNeighbors
 const balance = (c: City, id: string) => c.accounts[id] ?? 0;
 /** Civic sites that hire residents (cinema, restaurant, night market, concert ground), in id order. */
 export const venues = (c: Pick<City, 'civic'>): CivicSite[] => (c.civic?.sites ?? []).filter(site => civicSpec(site.kind)?.staff).sort((a, b) => a.id - b.id);
-const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p), 0) + venues(c).reduce((n, site) => n + civicPayroll(site), 0) + educationPayroll(c.education);
+const treasuryPayroll = (c: City): number => c.parks.reduce((n, p) => n + parkPayroll(p, c), 0) + venues(c).reduce((n, site) => n + civicPayroll(site, c), 0) + educationPayroll(c.education, educationWages(c));
 export const treasurySpendable = (c: City): number => Math.max(0, balance(c, 'treasury') - treasuryPayroll(c));
 export const parkEmploymentForHousehold = (c: City, id: number) => c.parks.flatMap(p => p.staffing?.allocations ?? []).filter(a => a.householdId === id);
 const parkEmployment = (c: City) => c.parks.flatMap(p => p.staffing?.allocations ?? []);
@@ -144,9 +144,9 @@ const venueEmployment = (c: City) => venues(c).flatMap(site => site.staffing?.al
 const operatorWallet = (site: CivicSite) => site.operator ? `household:${site.operator.householdId}` : null;
 /** City-run venues are funded after parks, in id order, from what the treasury can still spend today; a leased venue hires what its operator can pay today. */
 function venueFundedSeats(c: City): Map<number, number> {
-  let budget = treasurySpendable(c) - [...parkFundedSeats(c).values()].reduce((n, seats) => n + seats * PARK_STAFF.dailyWage, 0);
+  let budget = treasurySpendable(c) - [...parkFundedSeats(c).values()].reduce((n, seats) => n + seats * parkStaff(c).dailyWage, 0);
   return new Map(venues(c).map(site => {
-    const staff = civicSpec(site.kind).staff!, wallet = operatorWallet(site);
+    const staff = venueStaff(site.kind, c)!, wallet = operatorWallet(site);
     if (wallet) return [site.id, Math.max(0, Math.min(staff.slots, Math.floor(balance(c, wallet) / staff.dailyWage)))];
     const seats = Math.max(0, Math.min(staff.slots, Math.floor(budget / staff.dailyWage)));
     budget -= seats * staff.dailyWage; return [site.id, seats];
@@ -154,7 +154,7 @@ function venueFundedSeats(c: City): Map<number, number> {
 }
 /** The household that would take on a venue now: housed, not already running one, and holding enough for ten days of wages; the richest first. */
 export function venueLeaseCandidate(c: City, site: CivicSite): Household | null {
-  const capital = civicLeaseCapital(site.kind), busy = new Set(venues(c).flatMap(s => s.operator ? [s.operator.householdId] : []));
+  const capital = civicLeaseCapital(site.kind, c), busy = new Set(venues(c).flatMap(s => s.operator ? [s.operator.householdId] : []));
   return c.households.filter(h => h.home !== null && !busy.has(h.id) && balance(c, h.wallet) >= capital)
     .sort((a, b) => balance(c, b.wallet) - balance(c, a.wallet) || a.id - b.id)[0] ?? null;
 }
@@ -164,7 +164,7 @@ export function leaseVenue(c: City, siteId: number): Result {
   if (!site) return { ok: false, message: 'ไม่พบกิจการนี้' };
   if (site.operator) return { ok: false, message: 'กิจการนี้มีผู้ดำเนินการอยู่แล้ว' };
   const h = venueLeaseCandidate(c, site), label = CIVIC[site.kind].label;
-  if (!h) return { ok: false, message: `ยังไม่มีครัวเรือนที่มีเงินพอรับ${label} (ต้องมีอย่างน้อย ${civicLeaseCapital(site.kind) / 100} ฿)` };
+  if (!h) return { ok: false, message: `ยังไม่มีครัวเรือนที่มีเงินพอรับ${label} (ต้องมีอย่างน้อย ${civicLeaseCapital(site.kind, c) / 100} ฿)` };
   payVenueWages(c, site);
   if (site.staffing) site.staffing.workDays = {};
   site.operator = { householdId: h.id, since: c.tick };
@@ -181,19 +181,19 @@ export function endVenueLease(c: City, siteId: number): Result {
 }
 /** What a venue's panel shows: staff, today's customers and this month's takings and wages. */
 export function venueStatus(c: City, site: CivicSite) {
-  const staff = civicSpec(site.kind).staff!, employed = civicWorkers(site), since = c.tick - (c.tick % MONTH || MONTH);
+  const staff = venueStaff(site.kind, c)!, employed = civicWorkers(site), since = c.tick - (c.tick % MONTH || MONTH);
   const sum = (reason: string, tick: (t: number) => boolean) => c.ledger.filter(e => e.reason === reason && tick(e.tick)).reduce((n, e) => n + e.amount, 0);
   const fee = civicFeeReason(site.kind, site.id), daily = civicDailyWageReason(site.kind, site.id), wallet = operatorWallet(site);
   const operator = wallet ? { householdId: site.operator!.householdId, since: site.operator!.since, wages: sum(daily, t => t > since), rent: sum(civicRentReason(site.kind, site.id), t => t > since - MONTH) } : null;
-  return { operator, candidate: wallet ? null : venueLeaseCandidate(c, site)?.id ?? null, leaseCapital: civicLeaseCapital(site.kind), employed, slots: staff.slots, capacity: civicDailyVisits(site), visitsToday: c.ledger.filter(e => e.reason === fee && e.tick === c.tick).length,
-    monthIncome: sum(fee, t => t > since), earnedWages: civicPayroll(site), monthlyWages: staff.slots * staff.dailyWage * MONTH, connected: civicCells(site).some(part => access(c, part)) };
+  return { operator, candidate: wallet ? null : venueLeaseCandidate(c, site)?.id ?? null, leaseCapital: civicLeaseCapital(site.kind, c), employed, slots: staff.slots, capacity: civicDailyVisits(site), visitsToday: c.ledger.filter(e => e.reason === fee && e.tick === c.tick).length,
+    monthIncome: sum(fee, t => t > since), earnedWages: civicPayroll(site, c), monthlyWages: staff.slots * staff.dailyWage * MONTH, connected: civicCells(site).some(part => access(c, part)) };
 }
 /** ID-ordered funding shares prevent several parks promising the same treasury money. */
 function parkFundedSeats(c: City): Map<number, number> {
   let budget = treasurySpendable(c);
   return new Map([...c.parks].sort((a, b) => a.id - b.id).map(p => {
-    const seats = Math.min(PARK_STAFF.slots, Math.floor(budget / PARK_STAFF.dailyWage));
-    budget -= seats * PARK_STAFF.dailyWage; return [p.id, seats];
+    const seats = Math.min(PARK_STAFF.slots, Math.floor(budget / parkStaff(c).dailyWage));
+    budget -= seats * parkStaff(c).dailyWage; return [p.id, seats];
   }));
 }
 export function parkStaffingStatus(c: City, p: Park) {
@@ -203,7 +203,7 @@ export function parkStaffingStatus(c: City, p: Park) {
   return { employed, vacancies, slots: PARK_STAFF.slots, staffedCapacity: employed / PARK_STAFF.slots,
     fundedVacancies: Math.min(vacancies, funded), unfundedVacancies: Math.max(0, vacancies - funded),
     status: employed === PARK_STAFF.slots ? 'staffed' : funded < vacancies ? 'inadequate-budget' : applicants ? 'recruiting' : 'no-applicants',
-    monthlyWages: employed * PARK_STAFF.monthlyWage, earnedWages: parkPayroll(p) };
+    monthlyWages: employed * parkStaff(c).monthlyWage, earnedWages: parkPayroll(p, c) };
 }
 /** Legacy origin tags retained for validating historical transactions, not current trading capability. */
 export const isCommercial = (f: Pick<Firm, 'zone'>): boolean => f.zone === 'C';
@@ -331,7 +331,7 @@ function educationView(c: City): EducationView {
     buildings: c.buildings.map(b => ({ id: b.id, zone: b.zone, level: b.level, firmId: c.firms.find(f => f.building === b.id)?.id ?? null })),
     posts: educationPosts(c),
     road: cell => neighbors(cell, c).some(n => roads.has(n)),
-    sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c),
+    sparePower: spare.power, spareWater: spare.water, treasury: treasurySpendable(c), wages: educationWages(c),
   };
 }
 function educationBlocked(c: City, building: { id: number; zone: 'R' | 'C' | 'I' | 'F'; level: number; firmId?: number | null }): string[] {
@@ -1208,7 +1208,7 @@ function employVenues(c: City): void {
     if (!mine.length && !site.staffing) continue;
     site.staffing ??= { allocations: [], workDays: {} };
     site.staffing.allocations = mine;
-    const owner = operatorWallet(site), wage = civicSpec(site.kind).staff!.dailyWage;
+    const owner = operatorWallet(site), wage = venueStaff(site.kind, c)!.dailyWage;
     for (const a of mine) {
       const wallet = c.households.find(h => h.id === a.householdId)!.wallet;
       if (!owner) { site.staffing.workDays[wallet] = (site.staffing.workDays[wallet] ?? 0) + a.workers; continue; }
@@ -1226,7 +1226,7 @@ function visitVenues(c: City): void {
   const sites = venues(c).filter(site => civicWorkers(site) > 0); if (!sites.length) return;
   const homes = new Map(c.buildings.filter(b => b.zone === 'R').map(b => [b.id, b.cell])), visited = new Set<number>();
   for (const site of sites) {
-    const spec = civicSpec(site.kind), fee = spec.staff!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
+    const spec = civicSpec(site.kind), fee = venueStaff(site.kind, c)!.fee, parts = civicCells(site); let left = civicDailyVisits(site);
     const payee = operatorWallet(site) ?? 'treasury';
     // An outing is a real trip: only a household that can get there along linked streets comes.
     const guests = c.households.filter(h => h.home !== null && !visited.has(h.id) && h.wallet !== payee && balance(c, h.wallet) >= fee + VISIT_CUSHION && parts.some(part => civicCellDistance(homes.get(h.home!)!, part) <= spec.radius) && canWalk(c, [homes.get(h.home!)!], parts));
@@ -1417,7 +1417,7 @@ function payWages(c: City, f: Firm, onlyWallet?: string) {
 function payParkWages(c: City, p: Park, onlyWallet?: string): void {
   for (const [wallet, days] of Object.entries(p.staffing?.workDays ?? {})) {
     if (onlyWallet && wallet !== onlyWallet) continue;
-    const owed = days * PARK_STAFF.dailyWage;
+    const owed = days * parkStaff(c).dailyWage;
     delete p.staffing!.workDays[wallet];
     // Park claims are already cash-backed. Legacy education arrears must not
     // block their reserved payment or leave park claims across a month boundary.
@@ -1426,7 +1426,7 @@ function payParkWages(c: City, p: Park, onlyWallet?: string): void {
   }
 }
 function payVenueWages(c: City, site: CivicSite, onlyWallet?: string): void {
-  const wage = civicSpec(site.kind).staff?.dailyWage;
+  const wage = venueStaff(site.kind, c)?.dailyWage;
   if (!wage) return;
   for (const [wallet, days] of Object.entries(site.staffing?.workDays ?? {})) {
     if (onlyWallet && wallet !== onlyWallet) continue;
@@ -1441,7 +1441,7 @@ export const isWageReason = (reason: string): boolean => reason === 'Monthly wag
 const isWage = isWageReason;
 function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boolean {
   if (!c.education) return true;
-  const claims = takeEducationWages(c.education, onlyWallet, campusId);
+  const claims = takeEducationWages(c.education, onlyWallet, campusId, educationWages(c));
   if (!claims.length) return true;
   // Old saves can contain unfunded earned days. Keep the entire debt until
   // cash covers payroll, rather than borrowing another worker's reservation.
@@ -1454,6 +1454,7 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
       const reason = claim.campus.kind === 'school' ? `Monthly school wages #${claim.campus.id}` : `Monthly university wages #${claim.campus.id}`;
       if (transfer(c, 'treasury', claim.wallet, claim.amount, reason) !== claim.amount) throw new Error('Education payroll reserve invariant violated.');
       withholdWageTax(c, claim.wallet, claim.amount);
+      teacherPaySubsidy(c, claim.amount);
     }
     return true;
   } catch (error) {
@@ -1461,6 +1462,15 @@ function payEducationWages(c: City, campusId?: number, onlyWallet?: string): boo
     for (const [campus, days] of workDays) campus.workDays = days;
     throw error;
   }
+}
+/**
+ * Real wages (wageScale 1): the national government pays public teachers' salaries (in Thailand through the Office of the
+ * Basic Education Commission and the university budget), so it sends the treasury back what the town paid its school and
+ * university staff, local or contracted. A city saved before pays its teachers itself.
+ */
+export const TEACHER_PAY_SUBSIDY_REASON = 'Central government teacher pay subsidy';
+function teacherPaySubsidy(c: City, amount: number): void {
+  if (c.wageScale === 1 && amount > 0) transfer(c, 'outside', 'treasury', amount, TEACHER_PAY_SUBSIDY_REASON);
 }
 function settleMonth(c: City) {
   const svc = utilities(c);
@@ -1986,7 +1996,10 @@ export function step(c: City): void {
 function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
-  if (c.education) for (const payment of stepEducation(c.education, educationView(c))) transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
+  if (c.education) for (const payment of stepEducation(c.education, educationView(c))) {
+    const paid = transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
+    if (payment.kind === 'contract') teacherPaySubsidy(c, paid);
+  }
   const peopleBefore = cityPopulation(c);
   rehouse(c); rebalanceHousing(c); employ(c); admitHousehold(c); trade(c); visitVenues(c); runIncidents(c);
   // Everyone goes to work by a real route and a real way; households buy vehicles and fuel and pay bus fares.
@@ -2249,25 +2262,25 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       if (!a || Object.keys(a).length !== 4 || a.parkId !== p.id || !int(a.householdId, 1) || !int(a.workers, 1) || !['general', 'manufacturing', 'retail'].includes(a.skill) || !c.households.some(h => h.id === a.householdId)) fail();
       const key = `${a.householdId}:${a.skill}`; if (pairs.has(key)) fail(); pairs.add(key);
     }
-    if (parkWorkers(p) > PARK_STAFF.slots || !int(parkPayroll(p))) fail();
+    if (parkWorkers(p) > PARK_STAFF.slots || !int(parkPayroll(p, c))) fail();
     for (const [wallet, days] of Object.entries(s.workDays)) if (!c.households.some(h => h.wallet === wallet) || !int(days, 1)) fail();
     if (Object.values(s.workDays).reduce((n, days) => n + days, 0) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH)) fail();
   }
-  if (c.parks.reduce((n, p) => n + parkPayroll(p), 0) > balance(c, 'treasury')) fail();
+  if (c.parks.reduce((n, p) => n + parkPayroll(p, c), 0) > balance(c, 'treasury')) fail();
   const parkPaid = new Map<string, number>();
   const parkPayments = new Set<string>();
   for (const e of historicalLedger) {
     const wage = /^Monthly park wages #([1-9]\d*)$/.exec(e.reason);
     if (wage) {
       const id = Number(wage[1]), built = parkBuilds.get(id), key = `${id}:${Math.ceil(e.tick / MONTH)}`;
-      if (!withStaffing || built === undefined || parkRemoved.has(id) || e.tick <= built || e.from !== 'treasury' || !/^household:[1-9]\d*$/.test(e.to) || !int(e.amount, 1) || e.amount % PARK_STAFF.dailyWage !== 0) fail();
+      if (!withStaffing || built === undefined || parkRemoved.has(id) || e.tick <= built || e.from !== 'treasury' || !/^household:[1-9]\d*$/.test(e.to) || !int(e.amount, 1) || e.amount % parkStaff(c).dailyWage !== 0) fail();
       // A claim is settled once per wallet. Mid-month settlements only occur on
       // demolition; accepting one on a live park would leave already-paid days owed.
       const payment = `${id}:${e.tick}:${e.to}`;
       if (parkPayments.has(payment) || e.tick % MONTH !== 0 && !historicalLedger.some(row => row.tick === e.tick && (row.reason === `Demolish park #${id}` || row.reason === `Demolition refund park #${id}`))) fail();
       parkPayments.add(payment);
       const paid = (parkPaid.get(key) ?? 0) + e.amount;
-      if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * PARK_STAFF.dailyWage) fail();
+      if (paid > PARK_STAFF.slots * Math.min(MONTH, e.tick - built!, (e.tick - 1) % MONTH + 1) * parkStaff(c).dailyWage) fail();
       parkPaid.set(key, paid);
       continue;
     }
@@ -2284,8 +2297,17 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       else { const key = `${id}:${e.tick}`; if (e.to !== 'upkeep' || e.tick % MONTH !== 0 || e.tick <= parkBuilds.get(id)! || e.amount > funded(PARK.upkeep, MAX_BUDGET_LEVEL) || parkBills.has(key)) fail(); parkBills.add(key); }
     }
   }
-  for (const p of c.parks) if (c.tick % MONTH !== 0 && (parkPaid.get(`${p.id}:${Math.ceil(c.tick / MONTH)}`) ?? 0) + parkPayroll(p) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH) * PARK_STAFF.dailyWage) fail();
+  for (const p of c.parks) if (c.tick % MONTH !== 0 && (parkPaid.get(`${p.id}:${Math.ceil(c.tick / MONTH)}`) ?? 0) + parkPayroll(p, c) > PARK_STAFF.slots * Math.min(c.tick - p.tick, c.tick % MONTH) * parkStaff(c).dailyWage) fail();
   for (const id of parkBuilds.keys()) if (!parkRemoved.has(id) && !c.parks.some(p => p.id === id)) fail();
+  // The national teacher pay subsidy (real wages only) returns, day by day, exactly what the treasury paid its teachers.
+  const teacherPay = new Map<number, number>();
+  for (const e of c.ledger) {
+    if (e.reason === TEACHER_PAY_SUBSIDY_REASON) {
+      if (c.wageScale !== 1 || e.from !== 'outside' || e.to !== 'treasury' || !int(e.amount, 1)) fail();
+      teacherPay.set(e.tick, (teacherPay.get(e.tick) ?? 0) - e.amount);
+    } else if (c.wageScale === 1 && e.from === 'treasury' && /^(?:Monthly (?:school|university) wages|Outside contract (?:teacher|professor)) #[1-9]\d*$/.test(e.reason)) teacherPay.set(e.tick, (teacherPay.get(e.tick) ?? 0) + e.amount);
+  }
+  for (const owed of teacherPay.values()) if (owed !== 0) fail();
   const retainedAccountIds = Object.keys(c.accounts).flatMap(key => {
     const match = /^(?:household|firm):(\d+)$/.exec(key);
     if (!match) return [];

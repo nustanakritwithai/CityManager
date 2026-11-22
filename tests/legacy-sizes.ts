@@ -10,4 +10,8 @@ export function legacySizes<T extends City>(city: T): T { delete city.housingSca
 /** Fixture: real homes, old workplaces (factories of 4–12 people, farms one a level, no kilo-priced rice, the old wages). */
 export function legacyIndustry<T extends City>(city: T): T { delete city.industryScale; delete city.wageScale; return city; }
 /** `createCity` for a test file whose cities all keep the old smaller buildings (see legacySizes). */
+/** Fixture: the old wages for firms, venues, park keepers and teachers, and no central-government teacher pay subsidy. For
+ * tests of how payroll is reserved, paid and taxed, whose expected sums were worked out at the old rates. Real wages are
+ * tested in real-costs.test.ts and real-service-wages.test.ts. */
+export function legacyWages<T extends City>(city: T): T { delete city.wageScale; return city; }
 export function createLegacyCity(...args: Parameters<typeof createCity>): City { return legacySizes(createCity(...args)); }

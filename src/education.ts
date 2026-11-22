@@ -33,6 +33,18 @@ export const EDUCATION_COST = Object.freeze({
   maxUniversities: 4,
 });
 
+/** Daily satang paid to local teachers and professors, and to outside contract staff. */
+export type EducationWages = { teacherDaily: number; professorDaily: number; contractTeacherDaily: number; contractProfessorDaily: number };
+export const LEGACY_EDUCATION_WAGES: EducationWages = Object.freeze({ teacherDaily: EDUCATION_COST.teacherDaily, professorDaily: EDUCATION_COST.professorDaily, contractTeacherDaily: EDUCATION_COST.contractTeacherDaily, contractProfessorDaily: EDUCATION_COST.contractProfessorDaily });
+/**
+ * Real wages (cities with `wageScale: 1`), at 18.5 real baht to one: a teacher earns the 2024 average wage in education,
+ * 23,202.68 baht a month (Bank of Thailand EC_RL_014_S2, from the NSO Labour Force Survey); a university professor the
+ * average of professionals, 28,156.82 (Bank of Thailand EC_RL_018, fourth quarter of 2024, preliminary). Outside
+ * contract staff keep the premium they had over local staff (about 43% and 40%, assumed).
+ */
+export const REAL_EDUCATION_WAGES: EducationWages = Object.freeze({ teacherDaily: 4_181, professorDaily: 5_073, contractTeacherDaily: 5_973, contractProfessorDaily: 7_102 });
+export const educationWages = (rules: { wageScale?: 1 } | undefined): EducationWages => rules?.wageScale === 1 ? REAL_EDUCATION_WAGES : LEGACY_EDUCATION_WAGES;
+
 export type EducationOrigin = 'new-city' | 'migrated-absent';
 export type CampusKind = 'school' | 'university';
 /** One household row. basic includes everyone with a school diploma, including higher, teachers and university students. */
@@ -100,6 +112,8 @@ export type EducationView = {
   sparePower: number;
   spareWater: number;
   treasury: number;
+  /** The city's education wages; the old ones when absent. */
+  wages?: EducationWages;
 };
 export type EducationPayment = { amount: number; reason: string; kind: 'contract' | 'upkeep' };
 export type EducationGate = { have: number; need: number; sustainDays: number; requiredDays: number; missing: string; blocked: string[] };
@@ -142,10 +156,10 @@ export function subtractEducationReserve(skills: WorkerSkills, reserved: number)
   return next;
 }
 
-export function educationPayroll(state: EducationState | undefined): number {
+export function educationPayroll(state: EducationState | undefined, wages: EducationWages = LEGACY_EDUCATION_WAGES): number {
   if (!state) return 0;
   return state.campuses.reduce((sum, campus) => {
-    const wage = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
+    const wage = campus.kind === 'school' ? wages.teacherDaily : wages.professorDaily;
     return sum + Object.values(campus.workDays).reduce((days, value) => days + value, 0) * wage;
   }, 0);
 }
@@ -221,7 +235,7 @@ export function educationUtilityAvailability(state: Pick<EducationState, 'campus
 }
 
 export function stepEducation(state: EducationState, view: EducationView): EducationPayment[] {
-  const payments: EducationPayment[] = [];
+  const payments: EducationPayment[] = [], wages = view.wages ?? LEGACY_EDUCATION_WAGES;
   let budget = view.treasury;
   const served = educationUtilityAvailability(state, view);
   for (const campus of [...state.campuses].sort((a, b) => a.id - b.id)) {
@@ -237,7 +251,7 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       for (const person of state.people) if (person.campusId === campus.id) { person.teacher = 0; person.professor = 0; }
       campus.contract = 0;
     } else {
-      const wage = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
+      const wage = campus.kind === 'school' ? wages.teacherDaily : wages.professorDaily;
       let local = 0;
       // Existing staff also need today's wage; releasing a shift never erases earned claims.
       for (const person of state.people.filter(person => atCampus(person, campus, role)).sort((a, b) => a.householdId - b.householdId)) {
@@ -261,7 +275,7 @@ export function stepEducation(state: EducationState, view: EducationView): Educa
       }
       const cap = campus.kind === 'school' ? EDUCATION_COST.school.contractCap : EDUCATION_COST.university.contractCap;
       const used = state.campuses.filter(item => item.kind === campus.kind && item.id !== campus.id && item.contract === 1).length;
-      const contractDaily = campus.kind === 'school' ? EDUCATION_COST.contractTeacherDaily : EDUCATION_COST.contractProfessorDaily;
+      const contractDaily = campus.kind === 'school' ? wages.contractTeacherDaily : wages.contractProfessorDaily;
       campus.contract = local < level.staff && used < cap && budget >= contractDaily ? 1 : 0;
       if (campus.contract === 1) {
         budget -= contractDaily;
@@ -392,11 +406,11 @@ export function educationUpkeep(state: EducationState): EducationPayment[] {
 }
 
 /** Snapshot earned claims; only a successful payment may remove them. */
-export function takeEducationWages(state: EducationState, wallet?: string, campusId?: number): { campus: Campus; wallet: string; amount: number }[] {
+export function takeEducationWages(state: EducationState, wallet?: string, campusId?: number, wages: EducationWages = LEGACY_EDUCATION_WAGES): { campus: Campus; wallet: string; amount: number }[] {
   const claims: { campus: Campus; wallet: string; amount: number }[] = [];
   for (const campus of state.campuses) {
     if (campusId !== undefined && campus.id !== campusId) continue;
-    const wage = campus.kind === 'school' ? EDUCATION_COST.teacherDaily : EDUCATION_COST.professorDaily;
+    const wage = campus.kind === 'school' ? wages.teacherDaily : wages.professorDaily;
     for (const [claimWallet, days] of Object.entries(campus.workDays)) {
       if (wallet && claimWallet !== wallet) continue;
       claims.push({ campus, wallet: claimWallet, amount: days * wage });

@@ -53,8 +53,25 @@ export const isCivicWageReason = (reason: string) => new RegExp(`^(?:Monthly|Dai
 /** A leased venue pays its staff each day from the operator's wallet. */
 export const civicDailyWageReason = (kind: CivicKind, id: number) => `Daily ${CIVIC_REASON_NAMES[kind]} wages #${id}`;
 export const civicRentReason = (kind: CivicKind, id: number) => `Monthly ${CIVIC_REASON_NAMES[kind]} rent #${id}`;
+/**
+ * Real wages and prices (cities with `wageScale: 1`): venue staff earn the 2024 average wage of their industry (Bank of
+ * Thailand EC_RL_014_S2, from the NSO Labour Force Survey) at the game's 18.5 real baht to one: accommodation and food
+ * service 12,511.87 baht a month for a restaurant or night market, arts, entertainment and recreation 13,831.06 for a
+ * cinema or concert ground. Their prices rise with the wage: a cinema seat about 198 baht (a standard ticket is about
+ * 200), a meal out 148, a night-market evening 120 and a concert 296 (assumed).
+ */
+export const REAL_VENUE_STAFF: Readonly<Partial<Record<CivicKind, { dailyWage: number; fee: number }>>> = Object.freeze({
+  cinema: Object.freeze({ dailyWage: 2_492, fee: 1_070 }), restaurant: Object.freeze({ dailyWage: 2_254, fee: 800 }),
+  nightmarket: Object.freeze({ dailyWage: 2_254, fee: 650 }), concert: Object.freeze({ dailyWage: 2_492, fee: 1_600 }),
+});
+export type WageScaleRules = { wageScale?: 1 };
+/** A venue's posts, daily wage, visit fee and visits a worker serves, under its city's wage rules. */
+export function venueStaff(kind: CivicKind, rules: WageScaleRules | undefined): CivicSpec['staff'] {
+  const staff = civicSpec(kind).staff;
+  return staff && rules?.wageScale === 1 && REAL_VENUE_STAFF[kind] ? { ...staff, ...REAL_VENUE_STAFF[kind] } : staff;
+}
 /** A household needs this much to take on a venue: ten days of wages for every post. */
-export const civicLeaseCapital = (kind: CivicKind) => { const staff = civicSpec(kind).staff; return staff ? staff.slots * staff.dailyWage * 10 : 0; };
+export const civicLeaseCapital = (kind: CivicKind, rules: WageScaleRules | undefined) => { const staff = venueStaff(kind, rules); return staff ? staff.slots * staff.dailyWage * 10 : 0; };
 /** Kinds visitors come for; parks count too, and the caller adds them. */
 export const CIVIC_ATTRACTIONS: readonly CivicKind[] = ['library', 'temple', 'stadium', 'museum', 'amusement', 'cinema', 'restaurant', 'nightmarket', 'concert'];
 export const civicSpec = (kind: CivicKind): CivicSpec => CIVIC[kind];
@@ -63,11 +80,11 @@ export const civicFootprint = (kind: CivicKind): readonly [number, number] => ci
 export const civicCells = (site: CivicSite): readonly number[] => site.cells ?? [site.cell];
 export const civicWorkers = (site: CivicSite): number => site.staffing?.allocations.reduce((n, a) => n + a.workers, 0) ?? 0;
 /** Wages earned at a venue and not yet paid. */
-export const civicPayroll = (site: CivicSite): number => Object.values(site.staffing?.workDays ?? {}).reduce((n, days) => n + days, 0) * (civicSpec(site.kind).staff?.dailyWage ?? 0);
+export const civicPayroll = (site: CivicSite, rules: WageScaleRules | undefined): number => Object.values(site.staffing?.workDays ?? {}).reduce((n, days) => n + days, 0) * (venueStaff(site.kind, rules)?.dailyWage ?? 0);
 /** A venue is open while at least one resident works there; every other kind is always open. */
 export const civicOpen = (site: CivicSite): boolean => !civicSpec(site.kind).staff || civicWorkers(site) > 0;
 /** Households a venue can serve today. */
-export const civicDailyVisits = (site: CivicSite): number => civicWorkers(site) * (civicSpec(site.kind).staff?.visitsPerWorker ?? 0);
+export const civicDailyVisits = (site: CivicSite): number => civicWorkers(site) * (civicSpec(site.kind).staff?.visitsPerWorker ?? 0); // visits a worker serves are the same under both wage rules
 /** Monthly income of one airport given how many attractions the city has. */
 export const civicVisitorIncome = (kind: CivicKind, attractions: number) => { const v = civicSpec(kind).visitors; return v ? v.base + v.perAttraction * Math.max(0, attractions) : 0; };
 

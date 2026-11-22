@@ -1,5 +1,5 @@
 import { happinessTargets, homeAmenities, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS } from './resident-happiness.ts';
-import { CIVIC, CIVIC_KINDS, CIVIC_POINTS_CAP, civicSpec } from './civic/sites.ts';
+import { CIVIC, CIVIC_KINDS, CIVIC_POINTS_CAP, civicSpec, venueStaff } from './civic/sites.ts';
 import { POLLUTION_HAPPINESS_CAP, POLLUTION_HAPPINESS_STEP } from './environment.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { commercialPresentation } from './commercial-visuals.ts';
@@ -7,7 +7,7 @@ import { onExplicitActivation } from './explicit-activation.ts';
 import { housingLevel } from './housing.ts';
 import { buildingNeed } from './utilities.ts';
 import { factoryCropCapacity } from './factory-levels.ts';
-import { PARK_STAFF } from './parks.ts';
+import { PARK_STAFF, parkStaff } from './parks.ts';
 import './context-panels.css';
 import './building-cards.css';
 import { householdFoodToday } from './food-demand.ts';
@@ -530,8 +530,8 @@ function renderHousehold(city: City, selected: Exclude<ContextSelection, { kind:
   }
   const jobs = section('แรงงานที่แยกไปแต่ละกิจการ', `${employed} / ${household.workforce} คน · ${employers} กิจการ`), rows = el('div', 'cx-employment-list');
   jobs.classList.add('bc-employment-source');
-  rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow), ...labor.parkAllocations.map(a => { const row = el('div', 'cx-employment-row', `สวนสาธารณะ #${a.parkId} · ดูแลสวน ${a.workers} คน · ค่าจ้าง ${PARK_STAFF.monthlyWage / 100}/คน/เดือน`); Object.assign(row.dataset, { parkId: String(a.parkId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }),
-    ...labor.venueAllocations.map(a => { const row = el('div', 'cx-employment-row', `${CIVIC[a.kind].label} #${a.siteId} · พนักงานบริการ ${a.workers} คน · ค่าจ้าง ${(civicSpec(a.kind).staff?.dailyWage ?? 0) * 30 / 100}/คน/เดือน`); Object.assign(row.dataset, { venueId: String(a.siteId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }));
+  rows.append(...allocations.map(allocation => employmentRow(city, allocation)), ...labor.ownerAllocations.map(ownerLaborRow), ...labor.parkAllocations.map(a => { const row = el('div', 'cx-employment-row', `สวนสาธารณะ #${a.parkId} · ดูแลสวน ${a.workers} คน · ค่าจ้าง ${parkStaff(city).monthlyWage / 100}/คน/เดือน`); Object.assign(row.dataset, { parkId: String(a.parkId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }),
+    ...labor.venueAllocations.map(a => { const row = el('div', 'cx-employment-row', `${CIVIC[a.kind].label} #${a.siteId} · พนักงานบริการ ${a.workers} คน · ค่าจ้าง ${(venueStaff(a.kind, city)?.dailyWage ?? 0) * 30 / 100}/คน/เดือน`); Object.assign(row.dataset, { venueId: String(a.siteId), householdId: String(a.householdId), workers: String(a.workers) }); return row; }));
   if (!employed) rows.append(el('p', 'cx-detail-note', 'ยังไม่มีแรงงานได้งานที่ตรงความสามารถ เข้าถึงได้ และมีงบค่าจ้าง หรือทำกิจการของตนเอง'));
   if (departure) {
     const condition = departure.reason === 'happiness'

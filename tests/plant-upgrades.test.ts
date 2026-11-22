@@ -4,8 +4,9 @@ import { access, buildPark, buildPlant, buildRoad, bulldoze, createCity, deseria
 import { plantLevel, plantSpec, PLANTS, PLANT_LEVELS, plantUpgradeReason, type UtilityKind } from '../src/utilities.ts';
 import { auditMoney, compactCityHistory } from '../src/city-history.ts';
 import { createParkRuntime, deserializeParkSession, serializeParkSession } from '../src/park-runtime.ts';
+import { legacyWages } from './legacy-sizes.ts';
 const site = (c: City) => c.cells.findIndex((x, i) => !x.road && x.building === null && !plantAt(c, i) && access(c, i));
-const make = (kind: UtilityKind = 'power') => { const c = createCity(61025); assert.ok(buildPlant(c, site(c), kind).ok); return c; };
+const make = (kind: UtilityKind = 'power') => { const c = legacyWages(createCity(61025)); assert.ok(buildPlant(c, site(c), kind).ok); return c; };
 
 for (const kind of ['power', 'water'] as const) test(`${kind}: successive upgrades increase real capacity, charge once and preserve saves`, () => {
   const c = make(kind), p = c.plants[0], original = serialize(c), before = c.accounts.treasury, ids = c.nextId;

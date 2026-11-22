@@ -32,11 +32,13 @@ const INCOME: readonly [RegExp, string, string][] = [
   [/^Monthly (cinema|restaurant|night market|concert ground) rent #[1-9]\d*$/, 'venue-rent', 'ค่าเช่ากิจการบันเทิง'],
   [/firm profit tax$/i, 'profit-tax', 'ภาษีกำไรกิจการ'],
   [/grant/i, 'grant', 'ทุนอุดหนุน'],
+  [/^Central government teacher pay subsidy$/, 'teacher-subsidy', 'รัฐบาลกลางอุดหนุนค่าจ้างครู'],
 ];
 const EXPENSE: readonly [RegExp, string, string][] = [
   [/^Fire damage repair #[1-9]\d*$/, 'fire-damage', 'ซ่อมความเสียหายจากไฟไหม้'],
   [/^Monthly (cinema|restaurant|night market|concert ground) wages #[1-9]\d*$/, 'venue-wages', 'ค่าจ้างพนักงานกิจการบันเทิง'],
   [/^Monthly park wages #[1-9]\d*$/, 'park-wages', 'ค่าจ้างเจ้าหน้าที่สวน'],
+  [/^(?:Monthly (?:school|university) wages|Outside contract (?:teacher|professor)) #[1-9]\d*$/, 'education-wages', 'ค่าจ้างครูและอาจารย์'],
   [/^Monthly park upkeep #[1-9]\d*$/, 'park-maintenance', 'ค่าบำรุงสวน (ไม่รวมค่าจ้าง)'],
   [/^Build (?:\d+ road cells|road cell @\d+)$/, 'roads', 'สร้างถนน'],
   [/^Daily road upkeep$/, 'upkeep', 'บำรุงถนน'],

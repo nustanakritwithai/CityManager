@@ -67,6 +67,7 @@ const reasonLabels: Record<string, string> = {
   'Local wholesale goods': 'ซื้อสินค้าขายส่งในเมือง',
   'Outside goods import': 'นำเข้าสินค้าจากภายนอก',
   'Other goods bought in': 'ซื้อของใช้และบริการอื่นจากภายนอกมาขาย',
+  'Central government teacher pay subsidy': 'รัฐบาลกลางอุดหนุนค่าจ้างครูและอาจารย์',
   'Farm inputs': 'ค่าเมล็ด ปุ๋ย ยา น้ำมัน และค่าจ้างเครื่องจักรของฟาร์ม',
   'Mill running costs': 'ค่าบรรจุภัณฑ์ พลังงาน และบำรุงรักษาของโรงงาน',
   'Outside market goods export': 'รายรับจากการส่งออกสินค้า',

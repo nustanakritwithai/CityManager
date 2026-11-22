@@ -3,6 +3,7 @@ import test from 'node:test';
 import { buildCampus, buildPark, buildPlant, bulldoze, createCity, deserialize, serialize, step, toggleCampus, type City } from '../src/sim.ts';
 import { createEducation, educationPayroll, initialCampusReport, stepEducation, takeEducationWages, type CampusKind, type EducationView } from '../src/education.ts';
 import { scheduleCityTaxes } from '../src/city-tax-policy.ts';
+import { legacyWages } from './legacy-sizes.ts';
 
 function staff(kind: CampusKind) {
   const state = createEducation('new-city'), role = kind === 'school' ? 'teacher' : 'professor';
@@ -52,7 +53,7 @@ test('reading earned wage claims never deletes a liability before payment', () =
 let seedCity: City | undefined;
 function fixture(): City {
   if (!seedCity) {
-    const c = createCity(3);
+    const c = legacyWages(createCity(3));
     const site = () => c.cells.findIndex((p, i) => !p.road && !p.zone && p.building === null && !c.plants.some(x => x.cell === i) && !c.education!.campuses.some(x => x.cell === i) && [i - 1, i + 1, i - 24, i + 24].some(n => c.cells[n]?.road));
     assert.equal(buildCampus(c, site(), 'school').ok, true);
     for (let n = 0; n < 180 && !c.education!.people.some(p => p.teacher > 0); n++) {

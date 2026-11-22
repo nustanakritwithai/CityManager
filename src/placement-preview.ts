@@ -6,7 +6,7 @@
 import { GATEWAY, ROAD_COST, SIZE, treasurySpendable, access, parkAt, plantAt, roadPath, campusSiteReason, civicSiteReason, civicParcels, cityAttractions, campusAt, demolitionQuote, type City, type Zone } from './sim.ts';
 import { CIVIC, civicAt, civicSpec, civicVisitorIncome, isCivicKind, civicReach, civicFundedPoints, civicFundedUpkeep } from './civic/sites.ts';
 import { civicCellDistance as cellDistance } from './civic/reach.ts';
-import { EDUCATION_COST, educationPayroll } from './education.ts';
+import { EDUCATION_COST, educationPayroll, educationWages } from './education.ts';
 import { MAX_PLANTS, PLANTS, PLANT_LABELS } from './utilities.ts';
 import { MAX_PARKS, PARK, parkPayroll } from './parks.ts';
 import { taxiEnabled } from './taxi/buildings.ts';
@@ -85,7 +85,7 @@ export function previewPlacement(city: City, tool: string, start: number | null,
     const target = cell.building !== null || cell.road || plantAt(city, hover) || parkAt(city, hover) || campusAt(city, hover) || civicAt(city, hover);
     const source = cell.road ? 'roadworks' : 'construction';
     const campus = campusAt(city, hover);
-    const unpaidCampus = campus && Object.values(campus.workDays).some(days => days > 0) && (city.accounts.treasury ?? 0) < educationPayroll(city.education) + city.parks.reduce((sum, p) => sum + parkPayroll(p), 0);
+    const unpaidCampus = campus && Object.values(campus.workDays).some(days => days > 0) && (city.accounts.treasury ?? 0) < educationPayroll(city.education, educationWages(city)) + city.parks.reduce((sum, p) => sum + parkPayroll(p, city), 0);
     const reason = hover === GATEWAY ? 'ประตูเมืองรื้อไม่ได้' : unpaidCampus ? 'เงินคลังไม่พอสะสางค่าจ้างสถานศึกษา' : cost > treasury ? 'เงินคลังไม่พอค่ารื้อ'
       : (city.accounts[source] ?? 0) < quote.refund ? 'บัญชีคืนเงินไม่พอ รื้อไม่ได้' : null;
     const label = reason ?? (target ? `รื้อถอน · คืน ${credits(quote.refund)} ฿ (80% ของส่วนที่เมืองจ่าย) · ค่ารื้อ ${credits(cost)} ฿${quote.unknown ? ' · ประวัติเดิมไม่ครบ คืนเฉพาะที่มีหลักฐาน' : ''}` : cell.zone ? 'ล้างโซน · ไม่เสียเงิน' : 'ไม่มีอะไรให้รื้อ');

@@ -6,10 +6,11 @@ import { PARK, PARK_STAFF, parkPayroll, parkWorkers } from '../src/parks.ts';
 import { householdLabor } from '../src/context-data.ts';
 import { householdCardData } from '../src/building-card-data.ts';
 import { previewPlacement } from '../src/placement-preview.ts';
+import { legacyWages } from './legacy-sizes.ts';
 
 const run = (c: City, days: number) => { for (let i = 0; i < days; i++) step(c); };
 function isolated(): City {
-  const c = createCity(61025); run(c, 45);
+  const c = legacyWages(createCity(61025)); run(c, 45);
   for (let i = 0; i < c.cells.length; i++) if (c.cells[i].road && i !== GATEWAY) assert.equal(bulldoze(c, i).ok, true);
   assert.ok(c.households.length > 0); return c;
 }
@@ -44,7 +45,7 @@ test('real residual workers staff one-tile parks without park or home road acces
 });
 
 test('existing firm/owner jobs keep priority and no skill-count worker is hired twice', () => {
-  const c = createCity(61025); run(c, 120);
+  const c = legacyWages(createCity(61025)); run(c, 120);
   for (let i = 0; i < 6; i++) assert.equal(buildPark(c, i).ok, true);
   for (let i = 0; i < 65; i++) { step(c); unique(c); assert.doesNotThrow(() => deserialize(serialize(c))); }
   assert.ok(c.ownerLabor.length + c.employment.length > 0);
