@@ -52,6 +52,50 @@ export const HOUSEHOLD_NEED: Readonly<Need> = Object.freeze({ power: 1, water: 1
 export const HOUSEHOLD_BILL = HOUSEHOLD_NEED.power * TARIFF.power + HOUSEHOLD_NEED.water * TARIFF.water;
 export const MAX_PLANTS = 32;
 
+/**
+ * Real bills (cities with `priceScale: 1`): homes and shops pay the Provincial Electricity Authority and the Provincial
+ * Waterworks Authority directly, as people in Thailand do, so the money leaves the town; the town's plants only add
+ * supply, and it no longer buys units at the gateway. One unit is a home's month: 200 kWh (the average home bill was
+ * 905 baht in 2024, NSO energy survey) and 15 m³ (about 150 litres a person a day for three people, assumed). Prices,
+ * paid at 18.5 real baht to one:
+ * - homes, PEA residential rate from September 2026 bills (over 150 units a month): 3.00 baht a unit to 200, 4.1584 to
+ *   400, 4.3583 above, service 24.62 baht a month;
+ * - shops, PEA small general service 2.1.2 (May 2023 schedule): 3.2484 to 150 units, 4.2218 to 400, 4.4217 above,
+ *   service 33.29;
+ * - on every unit the Ft of September–December 2026, 16.23 satang, and on the whole bill VAT 7%;
+ * - water, PWA user type 1 (homes): 10.20 baht a m³ to 10, 16.00 to 20, 19.00 to 30, 21.20 to 50, at least 50 baht;
+ *   type 2 (shops, outside the concession areas): 16.00, 19.00, 20.00, 21.50 to 50, 21.60 to 80, 21.65 to 100, 21.70
+ *   to 300, at least 150 baht; VAT 7%.
+ * Mills pay their energy and water in their running costs (industry-scale.ts), and farmers take irrigation water free.
+ */
+export type BillRules = { priceScale?: 1; industryScale?: 1 };
+export const REAL_UNIT = Object.freeze({ kWh: 200, m3: 15 });
+type Band = readonly [upTo: number, baht: number];
+export const REAL_TARIFFS = Object.freeze({
+  ft: 0.1623, vat: 1.07,
+  homePower: Object.freeze({ service: 24.62, bands: [[200, 3], [400, 4.1584], [Infinity, 4.3583]] as readonly Band[] }),
+  shopPower: Object.freeze({ service: 33.29, bands: [[150, 3.2484], [400, 4.2218], [Infinity, 4.4217]] as readonly Band[] }),
+  homeWater: Object.freeze({ minimum: 50, bands: [[10, 10.2], [20, 16], [30, 19], [50, 21.2], [80, 21.6], [100, 21.65], [Infinity, 21.7]] as readonly Band[] }),
+  shopWater: Object.freeze({ minimum: 150, bands: [[10, 16], [20, 19], [30, 20], [50, 21.5], [80, 21.6], [100, 21.65], [Infinity, 21.7]] as readonly Band[] }),
+});
+const banded = (amount: number, bands: readonly Band[]) => { let sum = 0, from = 0; for (const [upTo, rate] of bands) { if (amount <= from) break; sum += (Math.min(amount, upTo) - from) * rate; from = upTo; } return sum; };
+const satang = (baht: number) => Math.round(baht / 18.5 * 100);
+/** A month's electricity bill for this many kWh, in satang: energy by band, Ft, service and VAT. */
+export const realPowerBill = (kWh: number, who: 'home' | 'shop'): number => {
+  const t = who === 'home' ? REAL_TARIFFS.homePower : REAL_TARIFFS.shopPower;
+  return kWh > 0 ? satang((banded(kWh, t.bands) + kWh * REAL_TARIFFS.ft + t.service) * REAL_TARIFFS.vat) : 0;
+};
+/** A month's water bill for this many m³, in satang: by band, at least the minimum, VAT. */
+export const realWaterBill = (m3: number, who: 'home' | 'shop'): number => {
+  const t = who === 'home' ? REAL_TARIFFS.homeWater : REAL_TARIFFS.shopWater;
+  return m3 > 0 ? satang(Math.max(t.minimum, banded(m3, t.bands)) * REAL_TARIFFS.vat) : 0;
+};
+/** A household's monthly bill with both supplied, under its city's rules. */
+export const householdMonthlyBill = (rules: BillRules | undefined): number => rules?.priceScale === 1
+  ? realPowerBill(REAL_UNIT.kWh, 'home') + realWaterBill(REAL_UNIT.m3, 'home') : HOUSEHOLD_BILL;
+/** Who a bill is paid to: the town, or under real prices the electricity and water authorities outside it. */
+export const billPayee = (rules: BillRules | undefined): 'treasury' | 'outside' => rules?.priceScale === 1 ? 'outside' : 'treasury';
+
 export const UTILITY_LABELS: Readonly<Record<UtilityKind, string>> = Object.freeze({ power: 'ไฟฟ้า', water: 'น้ำประปา' });
 export const PLANT_LABELS: Readonly<Record<UtilityKind, string>> = Object.freeze({ power: 'โรงไฟฟ้า', water: 'โรงสูบน้ำ' });
 export const PLANT_NAMES: Readonly<Record<UtilityKind, string>> = Object.freeze({ power: 'power plant', water: 'water pump' });
@@ -129,15 +173,23 @@ export function utilityService(c: City, roads: ReadonlySet<number>): Service {
   return { capacity, plants, used, spare: remaining, outside, served, need, distance, online,
     ok: id => { const s = served.get(id); return !!s && s.power && s.water; } };
 }
-/** A household's monthly bill at its home's current service, in satang. */
-export function householdBill(service: Service, homeId: number): number {
+/** A household's monthly bill at its home's current service, in satang, under its city's rules. */
+export function householdBill(service: Service, homeId: number, rules?: BillRules): number {
   const s = service.served.get(homeId);
-  return s ? UTILITY_KINDS.reduce((sum, k) => sum + (s[k] ? HOUSEHOLD_NEED[k] * TARIFF[k] : 0), 0) : 0;
+  if (!s) return 0;
+  if (rules?.priceScale === 1) return (s.power ? realPowerBill(REAL_UNIT.kWh, 'home') : 0) + (s.water ? realWaterBill(REAL_UNIT.m3, 'home') : 0);
+  return UTILITY_KINDS.reduce((sum, k) => sum + (s[k] ? HOUSEHOLD_NEED[k] * TARIFF[k] : 0), 0);
 }
-/** The building's monthly bill at the current service, in satang; zero for what is not supplied. */
-export function buildingBill(service: Service, buildingId: number): number {
+/** The building's monthly bill at the current service, in satang; zero for what is not supplied. Under real prices a shop
+ * pays the business rates, while a real mill's energy and water are in its running costs and a farm's irrigation is free. */
+export function buildingBill(service: Service, buildingId: number, zone?: Building['zone'], rules?: BillRules): number {
   const n = service.need.get(buildingId), s = service.served.get(buildingId);
-  return n && s ? UTILITY_KINDS.reduce((sum, k) => sum + (s[k] ? n[k] * TARIFF[k] : 0), 0) : 0;
+  if (!n || !s) return 0;
+  if (rules?.priceScale === 1 && zone) {
+    if (zone === 'F' || zone === 'R' || (zone === 'I' && rules.industryScale === 1)) return 0;
+    return (s.power ? realPowerBill(n.power * REAL_UNIT.kWh, 'shop') : 0) + (s.water ? realWaterBill(n.water * REAL_UNIT.m3, 'shop') : 0);
+  }
+  return UTILITY_KINDS.reduce((sum, k) => sum + (s[k] ? n[k] * TARIFF[k] : 0), 0);
 }
 
 /** Buildings on the network that go without each kind today. */

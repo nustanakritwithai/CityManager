@@ -220,6 +220,9 @@ function expandable(card: HTMLElement): HTMLElement {
   card.addEventListener('keydown', event => { if (event.target === card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggle(); } });
   return card;
 }
+/** The utilities rule: the town sells water and power, or under real prices (utilities.ts) the authorities bill homes and shops directly. */
+const UTILITY_RULE_TOWN = 'ประตูเมืองจ่ายน้ำและไฟตามสัญญาจำกัด เมืองสร้างโรงไฟฟ้าและโรงสูบน้ำริมถนนเพื่อเพิ่มกำลังผลิต น้ำไฟวิ่งไปตามถนนที่ต่อกัน ถ้าไม่พอ อาคารที่ไกลจากแหล่งจ่ายที่สุดจะหยุดงาน ผลิต และเติบโตก่อน ครัวเรือนและกิจการจ่ายค่าน้ำค่าไฟให้เมืองทุกเดือน เมืองจ่ายค่าโรงงานและค่าซื้อจากภายนอก';
+const UTILITY_RULE_REAL = 'ประตูเมืองจ่ายน้ำและไฟตามสัญญาจำกัด เมืองสร้างโรงไฟฟ้าและโรงสูบน้ำริมถนนเพื่อเพิ่มกำลังผลิต น้ำไฟวิ่งไปตามถนนที่ต่อกัน ถ้าไม่พอ อาคารที่ไกลจากแหล่งจ่ายที่สุดจะหยุดงาน ผลิต และเติบโตก่อน ครัวเรือนและร้านค้าจ่ายค่าไฟให้การไฟฟ้าและค่าน้ำให้การประปาโดยตรงทุกเดือนตามอัตราจริง เมืองจ่ายแค่ค่าบำรุงโรงไฟฟ้าและโรงสูบน้ำของตัวเอง';
 function ruleCard(icon: string, title: string, text: string, id?: string): HTMLElement {
   const card = element('article', 'sm-rule-card'), art = element('div', 'sm-rule-icon'); art.append(svg(icon)); card.append(art, element('h4', '', title), element('p', 'sm-fold', text)); if (id) card.dataset.rule = id; return expandable(card);
 }
@@ -230,7 +233,7 @@ function setupRules() {
     ruleCard('municipal-services', 'ค่าบริการพื้นฐานเมือง', `ทุกสิ้นเดือนเมืองจ่ายค่าบริการพื้นฐาน เช่น เก็บขยะและดูแลความสะอาด ${MUNICIPAL_SERVICE_PER_RESIDENT / 100} บาทต่อประชากรที่อยู่ในเมือง จ่ายเท่าที่คลังมีหลังกันค่าจ้าง ไม่มีหนี้ค้าง ระบบนี้ยังไม่จำลองคุณภาพบริการแยกต่างหาก`),
     ruleCard('taxi-economy', 'แท็กซี่และค่าโดยสาร', 'อู่แท็กซี่และการจราจรเป็นการจำลอง การรับส่งในภาพยังไม่ใช่ข้อมูลค่าโดยสารจริง จึงยังไม่เก็บค่าโดยสารเข้าคลัง การโหลดเซฟจะไม่หักยอดหรือแก้รายการค่าโดยสารเดิม'),
     ruleCard('calendar', 'วันและเงินเป็นจำนวนแน่นอน', `1 tick เท่ากับ 1 วัน มี ${MONTH} วันต่อเดือน ค่าจ้างสะสมตามวันที่ทำงานและจ่ายรายเดือน เช่นเดียวกับค่าเช่าและภาษี เงินคำนวณเป็นสตางค์จำนวนเต็ม`),
-    ruleCard('utilities', 'น้ำและไฟตามถนนและกำลังผลิต', 'ประตูเมืองจ่ายน้ำและไฟตามสัญญาจำกัด เมืองสร้างโรงไฟฟ้าและโรงสูบน้ำริมถนนเพื่อเพิ่มกำลังผลิต น้ำไฟวิ่งไปตามถนนที่ต่อกัน ถ้าไม่พอ อาคารที่ไกลจากแหล่งจ่ายที่สุดจะหยุดงาน ผลิต และเติบโตก่อน ครัวเรือนและกิจการจ่ายค่าน้ำค่าไฟให้เมืองทุกเดือน เมืองจ่ายค่าโรงงานและค่าซื้อจากภายนอก', 'utilities'),
+    ruleCard('utilities', 'น้ำและไฟตามถนนและกำลังผลิต', UTILITY_RULE_TOWN, 'utilities'),
     ruleCard('outside', 'ทุนเริ่มต้นและทุนขยายมีต้นทาง', `โรงงานแรกเปิดได้ก่อนมีคนงาน สองครัวเรือนแรกยกเว้นเงื่อนไขงาน แต่ยังต้องมีบ้าน ถนน น้ำ และไฟ บ้าน ฟาร์ม และโรงงานแรกใช้ทุนภายนอกที่มีบัญชีคู่ โรงงานเพิ่มใช้ทุนจริงจากกิจการที่ผ่านเงื่อนไขและกันค่าจ้าง ภาษี ค่าเช่า กับเงินหมุนเวียนก่อน ไม่แจกทุนเมื่อโหลดเซฟ พาณิชย์ใหม่เป็นตลาดระดับ 1 ใช้เงินครัวเรือนเจ้าของ 600 บาท จ่ายก่อสร้าง 100 บาท เหลือหมุนเวียน 500 บาท ร้านค้าเปิดเมื่อโรงงานมีคนงาน ครัวเรือนที่มีเงินออม 600 บาทเป็นเจ้าของและยืนร้านเอง ถ้าไม่มีจึงใช้ทุนภายนอก ฟาร์มขยายได้ถึงระดับ ${FARM_MAX_LEVEL} ด้วยกำไรของตัวเอง เมื่อเมืองต้องการร้านเพิ่ม ตลาดที่มีกำไรและมีเงิน 400 บาทขึ้นไปยกระดับเป็นร้านค้าได้ (จ่ายค่าปรับปรุง 200 บาทจากเงินกิจการ พืชผลที่เหลือตัดออก) ถ้ายังมีตลาดอื่นขายพืชผลสด รื้อบ้านไม่คืนสิทธิเริ่มต้น`, 'bootstrap'),
     ruleCard('goods', 'อาหารหนึ่งหน่วยต่อคนต่อวัน', 'สมาชิกแต่ละคนต้องการอาหารวันละหนึ่งหน่วย ซื้อพืชผลจากตลาดหรือสินค้าจากร้านค้า โดยจ่ายจากเงินร่วมครัวเรือนและตัดสต็อกจริง หากเงินหรือของไม่พอจะซื้อได้บางส่วน'),
     ruleCard('growth', 'พืชผลและวัตถุดิบมีต้นทาง', 'ฟาร์มเก็บเกี่ยวพืชผลหมุนเวียนตามความอุดมสมบูรณ์และแรงงาน โรงงานใช้พืชผลจริง 2 ล็อตเป็นสำเร็จรูป 8 หน่วยต่อชุด ตลาดไม่ผลิตเอง สต็อกที่เพิ่งซื้อเริ่มขายได้วันถัดไป บัญชีพืชผลแยกล็อตและต้นทุนจากสินค้าสำเร็จรูป เซฟเดิมไม่มีวัตถุดิบแจก ต้องสร้างห่วงโซ่เกษตรก่อน', 'agriculture'),
@@ -246,6 +249,7 @@ function setupRules() {
 function updateRules() {
   if (!current) return;
   const utilities = root('simulation-rules').querySelector('[data-rule=utilities]')!;
+  const ruleText = utilities.querySelector('p.sm-fold'); if (ruleText) ruleText.textContent = current.priceScale === 1 ? UTILITY_RULE_REAL : UTILITY_RULE_TOWN;
   let status = utilities.querySelector('.sm-rule-status'); if (!status) { status = element('div', 'sm-rule-status'); utilities.append(status); }
   const u = utilityStatus(current), power = u.power, water = u.water; status.replaceChildren(image(power && water ? 'status-ok' : 'status-alert'), document.createTextNode(`ขณะนี้: ไฟฟ้า ${u.used.power}/${u.capacity.power} ${power ? 'พร้อม' : 'ไม่พอ'} · น้ำ ${u.used.water}/${u.capacity.water} ${water ? 'พร้อม' : 'ไม่พอ'}`));
   const bootstrap = root('simulation-rules').querySelector('[data-rule=bootstrap]')!, grant = auditMoney(current).find(entry => entry.reason === 'Initial municipal grant');
