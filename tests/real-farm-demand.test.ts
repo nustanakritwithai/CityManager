@@ -24,12 +24,14 @@ test('a real mill short of crop wants the paddy of many 100-rai fields: its farm
   const built = lots.filter(i => c.cells[i].building !== null);
   assert.equal(built.length, lots.length, 'every zoned lot has a farm');
   assert.ok(c.firms.filter(f => f.zone === 'F').some(f => level(f) === 3));
-  const mill = c.firms.find(f => f.zone === 'I')!, farms = c.firms.filter(f => f.zone === 'F');
-  assert.equal(mill.recipe, 'rice-mill');
-  assert.ok(farms.every(f => farmCrop(c, f) === 'rice'), 'new farms grow what the mill mills');
+  // People who come for the work let the town open a second rice mill too.
+  const mills = c.firms.filter(f => f.zone === 'I'), farms = c.firms.filter(f => f.zone === 'F');
+  assert.ok(mills.every(f => f.recipe === 'rice-mill'));
+  assert.ok(farms.every(f => farmCrop(c, f) === 'rice'), 'new farms grow what the mills mill');
   // One rice-mill worker processes 200 lots a day; a 100-rai field harvests a few dozen at most.
   const short = realCropShortage(c), harvest = farms.reduce((n, f) => n + realLotsPerYear(REAL_CROPS.rice, c.buildings.find(b => b.id === f.building)!.level) / 365, 0);
-  assert.ok(Math.abs(short.rice - (firmWorkerCount(c, mill.id) * millLotsPerWorker(REAL_CROPS.rice) - harvest)) < 1e-9);
+  const milling = mills.reduce((n, f) => n + firmWorkerCount(c, f.id), 0) * millLotsPerWorker(REAL_CROPS.rice);
+  assert.ok(Math.abs(short.rice - (milling - harvest)) < 1e-9);
   assert.ok(short.rice > 0 && summary(c).demand.F === 1, 'still short, so more farms are wanted');
   assert.deepEqual(deserialize(serialize(c)), c);
 });

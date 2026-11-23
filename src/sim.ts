@@ -1466,6 +1466,9 @@ function payProductionCosts(c: City): void {
  * from outside for 3.50 of it, keeping the 3.50 a person a day the old daily basket left it (assumed).
  */
 export const OTHER_SPENDING = Object.freeze({ price: 700, boughtIn: 350 } as const);
+/** Real rules: what a person spends a day to live, the kilo foods (about 0.50) and the rest (OTHER_SPENDING): 7.50,
+ * the survey's 139 baht a day. Cities saved before count the old 8.00 basket. */
+export const REAL_DAILY_SPENDING = OTHER_SPENDING.price + 50;
 export const OTHER_GOODS_BOUGHT_IN = 'Other goods bought in';
 export const otherSpendingReason = (householdId: number) => `Household #${householdId} other spending`;
 export const OTHER_SPENDING_REASON = /^Household #([1-9]\d*) other spending$/;
@@ -1807,7 +1810,8 @@ function arrivalProfile(c: City, facts: ReturnType<typeof admissionFacts>) {
       const gross = facts.offers.find(offer => offer.id === job.firmId)!.wage * job.workers;
       return sum + gross - taxSatang(gross, rate);
     }, 0);
-    const affordable = net >= members * MONTH * 800 + 10_000 + householdMonthlyBill(c);
+    // A month of food and daily needs for each member, the usual rent, and water and power.
+    const affordable = net >= members * MONTH * (realIndustry(c) ? REAL_DAILY_SPENDING : 800) + 10_000 + householdMonthlyBill(c);
     return { members, workforce, workerSkills, affordable };
   };
   if (facts.vacancies >= 2 && facts.existingUnemployed === 0) {
@@ -1831,7 +1835,9 @@ export function explainMigration(c: City, buildingId: number): string[] {
   if (c.households.length >= MAX_CITY_HOUSEHOLDS) reasons.push('ถึงความจุสูงสุดตามจำนวนแปลงและระดับที่อยู่อาศัยของแผนที่แล้ว');
   const happiness = averageHouseholdHappiness(c.happiness);
   if (happiness !== null && happiness < 35) reasons.push('ยังไม่รับครัวเรือนใหม่เพราะความสุขเฉลี่ยต่ำกว่า 35 / 100 เมื่อเมืองดีขึ้นจึงรับได้อีก');
-  if (!facts.bootstrap && facts.vacancies > 0 && facts.existingUnemployed === 0 && !arrivalProfile(c, facts).affordable) reasons.push('รายได้หลังหักภาษีจากงานที่ว่างยังไม่พอค่าอาหาร ค่าเช่า และค่าน้ำไฟตามเกณฑ์รับคนเข้าเมือง');
+  if (!facts.bootstrap && facts.vacancies > 0 && facts.existingUnemployed === 0 && !arrivalProfile(c, facts).affordable) reasons.push(jobSeekersComing(c, facts)
+    ? 'รายได้หลังหักภาษีจากงานที่ว่างยังไม่พอค่าอาหาร ค่าเช่า และค่าน้ำไฟของคนที่จ้างมาจากนอกเมือง จึงมีแต่คนหางานที่ย้ายมาเองวันละครัวเรือนมารับงานนี้'
+    : 'รายได้หลังหักภาษีจากงานที่ว่างยังไม่พอค่าอาหาร ค่าเช่า และค่าน้ำไฟตามเกณฑ์รับคนเข้าเมือง');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
   if (realIndustry(c) && !facts.bootstrap) reasons.push(`คนนอกเมืองย้ายเข้ามาหางานวันละ ${JOB_SEEKERS_PER_DAY} ครัวเรือน แม้งานเต็มแล้ว ตราบที่คนว่างงานยังไม่ถึง ${JOB_SEEKER_UNEMPLOYMENT_LIMIT * 100}% ของแรงงาน (ตอนนี้ ${Math.round(unemploymentRate(c) * 100)}%) ${jobSeekersComing(c, facts) ? 'วันนี้ยังมีคนมา' : 'วันนี้ไม่มีคนมาเพิ่ม'}`);
@@ -1932,9 +1938,11 @@ function admitHousehold(c: City) {
   for (let n = 0; n < batch; n++) {
     if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
     if (c.households.length >= MAX_CITY_HOUSEHOLDS || (!facts.bootstrap && !seekers && facts.vacancies < 1)) return;
-    // With no job open, the newcomer is a single person come to look for work on their savings.
-    const searching = seekers && (facts.vacancies < 1 || facts.existingUnemployed > 0);
-    const { members, workforce, workerSkills, affordable } = searching ? { members: 1, workforce: 1, workerSkills: { general: 1, manufacturing: 0, retail: 0 }, affordable: true } : arrivalProfile(c, facts);
+    // With no job open, the newcomer is a single person come to look for work on their savings. Under real rules people
+    // also come looking when the open jobs pay less than a newcomer hired for them would need: they take the work there is.
+    const searching = seekers && (facts.vacancies < 1 || facts.existingUnemployed > 0), hired = searching ? null : arrivalProfile(c, facts);
+    const seeking = searching || (seekers && !hired!.affordable && n < JOB_SEEKERS_PER_DAY);
+    const { members, workforce, workerSkills, affordable } = seeking ? { members: 1, workforce: 1, workerSkills: { general: 1, manufacturing: 0, retail: 0 }, affordable: true } : hired!;
     if (!affordable) return;
     const svc = utilities(c), occupied = buildOccupancyIndex(c.households);
     const fitting = vacantHomes(c).filter(b => canAccommodate(housingCapacity(b, c), occupied.get(b.id) ?? { households: 0, persons: 0 }, members) && homeSupplied(c, b, svc));
