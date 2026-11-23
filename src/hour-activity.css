@@ -1,0 +1,51 @@
+/* What the town is doing this game hour: one read-only chip under the city summary. Never takes map input. */
+.hour-activity {
+  position: fixed;
+  z-index: 8;
+  top: 76px;
+  left: 50%;
+  translate: -50% 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, auto);
+  grid-template-areas: 'icon head' 'icon detail';
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 1px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 5px 12px 6px 7px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 10px;
+  background: var(--glass);
+  box-shadow: var(--glass-shadow);
+  line-height: 1.25;
+  pointer-events: none;
+}
+html:not([data-visual-quality=low]) .hour-activity { -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); }
+.hour-activity:not([data-hour]) { display: none; }
+.hour-activity-icon { grid-area: icon; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(243, 196, 107, .14); color: var(--c-accent); }
+.hour-activity-icon .ui-icon, .hour-activity-icon svg { display: block; width: 18px; height: 18px; }
+.hour-activity-head { grid-area: head; display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.hour-activity-clock { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--c-accent); }
+.hour-activity-title { font-size: 13px; font-weight: 600; color: var(--c-text); }
+.hour-activity-detail { grid-area: detail; overflow: hidden; font-size: 11px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+/* Night hours read as night: a cooler icon. */
+.hour-activity:is([data-hour='0'], [data-hour='1'], [data-hour='2'], [data-hour='3'], [data-hour='4'], [data-hour='22'], [data-hour='23']) .hour-activity-icon { background: rgba(140, 170, 255, .14); color: #aebfff; }
+
+/* A narrow desktop window hides the summary strip and has no room at the top: the chip sits under the time bar, right of the camera pad. */
+@media (max-width: 860px) { html:not([data-touch-ui=true]) .hour-activity { top: 106px; left: 66px; translate: none; max-width: calc(100vw - 82px); } }
+
+/* Touch: under the top row, on the left, sized by the reader unit like the row itself. */
+html[data-touch-ui=true] body .hour-activity {
+  top: calc(var(--row-top, 6px) + var(--row-h, 44px) + 6 * var(--row-u, 1px));
+  left: var(--row-left, 6px);
+  translate: none;
+  max-width: calc(100% - var(--row-left, 6px) - var(--row-right, 6px));
+  column-gap: calc(6 * var(--row-u, 1px));
+  padding: calc(4 * var(--row-u, 1px)) calc(10 * var(--row-u, 1px)) calc(5 * var(--row-u, 1px)) calc(5 * var(--row-u, 1px));
+  border-radius: calc(8 * var(--row-u, 1px));
+}
+html[data-touch-ui=true] body .hour-activity-icon { width: calc(28 * var(--row-u, 1px)); height: calc(28 * var(--row-u, 1px)); border-radius: calc(7 * var(--row-u, 1px)); }
+html[data-touch-ui=true] body .hour-activity-icon .ui-icon, html[data-touch-ui=true] body .hour-activity-icon svg { width: calc(17 * var(--row-u, 1px)); height: calc(17 * var(--row-u, 1px)); }
+html[data-touch-ui=true] body .hour-activity-clock { font-size: calc(13 * var(--row-u, 1px)); }
+html[data-touch-ui=true] body .hour-activity-title { font-size: calc(12 * var(--row-u, 1px)); }
+html[data-touch-ui=true] body .hour-activity-detail { font-size: calc(11 * var(--row-u, 1px)); }

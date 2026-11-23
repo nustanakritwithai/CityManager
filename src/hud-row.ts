@@ -41,7 +41,7 @@ export function installHudRow() {
   const speeds = [...document.querySelectorAll<HTMLButtonElement>('.time-buttons [data-speed]')];
   const cycle = document.createElement('button'); cycle.type = 'button'; cycle.id = 'speed-cycle'; cycle.className = 'hud-row-only';
   const current = () => speeds.findIndex(b => b.getAttribute('aria-pressed') === 'true');
-  const syncSpeed = () => { const b = speeds[current()]; cycle.textContent = b?.textContent ?? 'ชม'; cycle.setAttribute('aria-label', b ? `ความเร็ว ${b.textContent} · แตะเพื่อเปลี่ยน` : 'ดูชีวิตประชาชน 1 นาทีเกมต่อวินาที · แตะเพื่อกลับ 1×'); };
+  const syncSpeed = () => { const b = speeds[current()]; cycle.textContent = b?.textContent ?? 'ชม'; cycle.setAttribute('aria-label', b ? `ความเร็ว ${b.textContent}${b.title ? ` (${b.title})` : ''} · แตะเพื่อเปลี่ยน` : 'ดูชีวิตประชาชน 1 นาทีเกมต่อวินาที · แตะเพื่อกลับ 1×'); };
   cycle.addEventListener('click', () => speeds[(current() + 1) % speeds.length]?.click());
   const watch = new MutationObserver(syncSpeed); for (const b of document.querySelectorAll('[data-speed]')) watch.observe(b, { attributes: true, attributeFilter: ['aria-pressed'] });
   speeds.at(-1)?.after(cycle); syncSpeed();

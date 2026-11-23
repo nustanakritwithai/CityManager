@@ -62,6 +62,9 @@ import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
 import type { EntitySelection } from './entity-explanation-data.ts';
 import { AtmosphereController } from './atmosphere-controls.ts';
+import { daySeconds, frameMinutes, minuteASecondSpeed, paceAt, paceLabel, paceTitle, skyFollowsClock } from './game-clock.ts';
+import { HourActivityChip } from './hour-activity-chip.ts';
+import './hour-activity.css';
 import './atmosphere.css';
 import { previewPlacement, type Preview } from './placement-preview.ts';
 import { mapOverlay, buildingIssues, TOOL_OVERLAY } from './map-overlay.ts';
@@ -102,7 +105,7 @@ import { FESTIVAL_LABELS, festivalAt, type FestivalKind } from './festivals.ts';
 import { CELEBRATION_SECONDS, milestoneCrossed } from './milestones.ts';
 import { cityPopulation } from './unlocks.ts';
 import { treasuryForecast } from './treasury-forecast.ts';
-import { createOwnerDecisionSession } from './owner-decision-session.ts';
+import { createOwnerDecisionSession, type OwnerShadowLoader } from './owner-decision-session.ts';
 import { createOwnerDecisionPanel } from './owner-decision-panel.ts';
 import { installMarketPanel } from './market-panel.ts';
 import { installHudRow } from './hud-row.ts';
@@ -195,6 +198,12 @@ let selectionActions: ReturnType<typeof installSelectionActions> | null = null;
 let districtBrush: number | null = null;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
+/** Real seconds a game day lasts at 1× (six minutes; browser checks set a shorter day before the page loads). */
+const DAY_LENGTH = daySeconds();
+let hourChip: HourActivityChip | undefined;
+/** The level the last render worked out and its day: the day-end sound cues reuse it rather than summarise the city again. */
+let renderedGoals: { tick: number; level: number; won: boolean } | null = null;
+const goalsNow = () => renderedGoals?.tick === city.tick ? renderedGoals : undefined;
 let plantPanel: ReturnType<typeof installPlantPanel> | undefined;
 let educationPanel: ReturnType<typeof installEducationPanel> | undefined;
 let busController: ReturnType<typeof createBusController> | undefined;
@@ -684,7 +693,9 @@ function render() {
   syncUnlocks();
   // Before the pause button is drawn: reaching stage 5 while running pauses for the win screen.
   const goals = cityGoals(city, s); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
+  renderedGoals = { tick: city.tick, level: goals.level, won: goals.won };
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;
+  hourChip?.update(city, parkRuntime.activity.minute, parkRuntime.activity.visitors.length, true);
   $('#pause').textContent = paused ? '▶' : 'Ⅱ'; $('#pause').setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา'); $('#pause').title = paused ? 'เล่นต่อ (Space)' : 'หยุดเวลา (Space)'; $('#pause').setAttribute('aria-pressed', String(paused));
   ($('#pause') as HTMLButtonElement).disabled = ownerDecisionPanel?.isAutoPending() ?? false;
   panelTime?.update(paused, speed, ($('#pause') as HTMLButtonElement).disabled);
@@ -743,6 +754,28 @@ function updateMapInfo(placement: Preview | null) {
   }
 }
 
+/**
+ * The owner journal's shadow city, rebuilt from the sealed save bytes in a Web Worker: the validating load takes tens of
+ * milliseconds after every player command and used to pause the frame that ended the next day. Null without workers.
+ */
+const ownerShadowCounts = { requested: 0, built: 0, failed: 0 };
+function ownerShadowWorker(): OwnerShadowLoader | null {
+  if (typeof Worker === 'undefined') return null;
+  let worker: Worker;
+  try { worker = new Worker(new URL('./owner-shadow-worker.ts', import.meta.url), { type: 'module' }); } catch { return null; }
+  let latest: { id: number; built: ReturnType<OwnerShadowLoader['take']> } | null = null, broken = false;
+  worker.addEventListener('message', (event: MessageEvent<{ id: number; failed?: true; city?: City; hash?: string }>) => {
+    const { id, failed, city: built, hash } = event.data;
+    latest = { id, built: failed || !built || !hash ? 'failed' : { city: built, hash } };
+    ownerShadowCounts[latest.built === 'failed' ? 'failed' : 'built']++;
+  });
+  worker.addEventListener('error', () => { broken = true; ownerShadowCounts.failed++; });
+  return {
+    request(id, boundary) { latest = null; if (!broken) { ownerShadowCounts.requested++; worker.postMessage({ id, boundary }); } },
+    take(id) { return broken ? 'failed' : latest?.id === id ? latest.built : null; },
+  };
+}
+
 async function boot() {
   const serverEntry=await requireServerCityEntry((import.meta as ImportMeta & {env:Record<string,string|undefined>}).env.VITE_CITY_SAVE_URL);
   const serverSave=serverEntry.client;
@@ -752,7 +785,7 @@ async function boot() {
   syncEducationTools();paused=true;
   let cityGeneration=0,saveBusy=false,manualSavePending=false,resolvingConflict=false,managingSave=false;
   const previewOnly=false,recoveryOnly=false;
-  ownerDecisionSession = createOwnerDecisionSession(city);
+  ownerDecisionSession = createOwnerDecisionSession(city); ownerDecisionSession.useShadowLoader(ownerShadowWorker());
   setupSubmenus(); setupSubmenuNavigation(cancel);
   $('#signal-entry').hidden = !signalsEnabled();
   signalPanel = createSignalPanel($('#signal-content'), { getCity: () => city, connection: {
@@ -765,7 +798,7 @@ async function boot() {
   $('#city-content').insertBefore(ownerDecisionHost, $('#city-content .ledger-details'));
   const parkSection = document.createElement('section'); parkSection.id = 'park-recreation';
   const citizenSpeed = document.createElement('button'); citizenSpeed.type = 'button';
-  citizenSpeed.dataset.speed = String(1 / 1440); citizenSpeed.setAttribute('aria-pressed', 'false');
+  citizenSpeed.dataset.speed = String(minuteASecondSpeed(DAY_LENGTH)); citizenSpeed.setAttribute('aria-pressed', 'false');
   citizenSpeed.textContent = 'ดูชีวิตประชาชน · 1 นาทีเกม/วินาที';
   citizenSpeed.title = 'ชะลอทั้งเมืองเพื่อดูการเดินและพักผ่อน · 1 วันเกมใช้ 24 นาที · กลับความเร็วเดิมด้วย 1×';
   parkPanel = document.createElement('div'); parkPanel.id = 'park-recreation-data';
@@ -965,6 +998,8 @@ async function boot() {
   // Trading remains disabled. Its synchronous financial callback must never pretend to await a server save.
   marketPanel = installMarketPanel(() => city, () => render(), () => { throw Error('market-disabled-server-save-required'); }, () => serializeParkSession(city, parkRuntime,city.market));
   marketPanel.client.setRecoveryReadOnly(true);
+  // Each speed button says how long a game hour and day last at it; the touch row's speed button reads it too.
+  document.querySelectorAll<HTMLElement>('.time-buttons [data-speed]').forEach(b => { b.title = paceAt(DAY_LENGTH, Number(b.dataset.speed)); });
   installHudRow();
   const saveBadge=document.createElement('span');saveBadge.id='autosave-status';saveBadge.setAttribute('role','status');$('#save').insertAdjacentElement('afterend',saveBadge);
   let saveSuccessLabel='บันทึกบนเซิร์ฟเวอร์แล้ว';
@@ -1135,7 +1170,10 @@ async function boot() {
   });
   // The first render ran before the HUD existed; a paused city would otherwise show an empty summary.
   cityHud.update(city, paused);
-  atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / 1440, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
+  // What the town does this game hour, under the city summary; the time label says how long a game day lasts.
+  hourChip = new HourActivityChip(); hourChip.update(city, parkRuntime.activity.minute, parkRuntime.activity.visitors.length, true);
+  const pace = document.querySelector<HTMLElement>('.time-label small'); if (pace) { pace.textContent = paceLabel(DAY_LENGTH); pace.title = paceTitle(DAY_LENGTH); }
+  atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / 1440, followsClock: () => skyFollowsClock(DAY_LENGTH, speed), onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   // The first render precedes marker construction. Populate the layer now so a
   // paused city shows its issues without requiring another player interaction.
   updateMapInfo(null);
@@ -1144,7 +1182,20 @@ async function boot() {
   const adviceButton = document.createElement('button'); adviceButton.type = 'button'; adviceButton.id = 'open-city-advice'; adviceButton.textContent = 'คำแนะนำเมือง · ฟังเสียง'; adviceButton.addEventListener('click', () => { guide?.showAdvice(city); $('#atmosphere-toggle').click(); }); $('#atmosphere-menu').append(adviceButton);
   // Ambience follows what the screen shows; the city-wide levels only change once a day.
   let soundTick = -1, traffic = 0, factories = 0, tense = false, festival: FestivalKind | null = null;
+  // A day that ended on the last frame finishes on this one: its render, sounds and milestone. Stepping the city and
+  // redrawing every panel on the same frame made each day end stutter.
+  let dayEnd: { before: ReturnType<typeof cueSnapshot>; city: City } | null = null;
+  const finishDay = ({ before, city: ended }: NonNullable<typeof dayEnd>) => {
+    render();
+    if (ended !== city) return; // a city loaded in between: its own render already ran, and there is no day to compare
+    for (const cue of cueLimiter.admit(cityCues(before, city, cueSnapshot(city, goalsNow())).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
+    // A population milestone: fireworks over the city, a short note and a chime.
+    const milestone = milestoneCrossed(before.population, cityPopulation(city));
+    if (milestone) { status(`🎉 ประชากรถึง ${milestone.toLocaleString('th-TH')} คนแล้ว!`); sound('ev-unlock'); view.celebrate(CELEBRATION_SECONDS); }
+  };
   view.app.on('update', (dt: number) => {
+    const finishing = dayEnd; dayEnd = null;
+    if (finishing) finishDay(finishing);
     const quickVisible = quickSelection !== null && tool === 'select' && $('#inspector').dataset.open !== 'true'
       && !cityStatsPanel?.open && !cityNetwork?.open && !minimap?.mapOpen && !dashboard?.modalOpen
       && !document.querySelector('dialog[open], [role="dialog"]:not([hidden])') && !hasOpenSubmenu()
@@ -1189,10 +1240,11 @@ async function boot() {
       taxiView.sync(fleet ? trafficTaxiPoses(fleet.cars, fleet.groups) : []);
       taxiView.setEnabled(visual.settings.traffic && !trafficLayer.diagnostics.failure);
     } else taxiView?.sync([]);
-    if (paused || document.hidden) return;
-    const minutes = Math.min(dt, 0.25) * speed * 1440;
+    // A paused city's quiet frames still finish the owner journal's replay of the last days.
+    if (paused || document.hidden) { if (!document.hidden && !finishing) ownerDecisionSession.replayPending(); return; }
+    const minutes = frameMinutes(dt, speed, DAY_LENGTH);
     const tickBefore = city.tick;
-    const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
+    const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city, goalsNow()) : null;
     const moneyBefore = before ? moneyMark(city) : null;
     let days = 0;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
@@ -1207,16 +1259,17 @@ async function boot() {
     parkScene?.sync(parkRuntime.activity);
     railUi?.sync();
     if (monthEnded(tickBefore, city.tick)) sound('ev-month');
-    if (days && before) for (const cue of cueLimiter.admit(cityCues(before, city).filter(cue => cue !== 'ev-month'), performance.now())) sound(cue);
-    // A population milestone: fireworks over the city, a short note and a chime.
-    const milestone = days && before ? milestoneCrossed(before.population, cityPopulation(city)) : null;
-    if (milestone) { status(`🎉 ประชากรถึง ${milestone.toLocaleString('th-TH')} คนแล้ว!`); sound('ev-unlock'); view.celebrate(CELEBRATION_SECONDS); }
-    if (days) render();
-    else if (route?.page === 'city') renderParkPanel();
+    if (days) { if (before) dayEnd = { before, city }; else render(); }
+    else {
+      if (route?.page === 'city') renderParkPanel();
+      hourChip?.update(city, parkRuntime.activity.minute, parkRuntime.activity.visitors.length);
+      // A frame with nothing else to do replays one more day for the owner journal.
+      if (!finishing) ownerDecisionSession.replayPending();
+    }
     if (days && moneyBefore !== null) { mapMarkers?.showMoney(moneyPops(city, moneyBefore)); view.showIncidents(incidentMarks(city, moneyBefore)); }
   });
   // Read-only diagnostics for reproducible QA; no renderer-owned simulation state.
-  Object.defineProperty(window, 'cityManager', { value: { liveBuses: () => liveBus ? { now: liveBus.engine.now, submitted: liveBus.submitted, released: liveBus.released, buses: liveBus.engine.snapshot().length, ledger: liveBus.engine.ledger() } : null, snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });
+  Object.defineProperty(window, 'cityManager', { value: { ownerJournal: () => ({ ...ownerDecisionSession.getStats(), shadowWorker: { ...ownerShadowCounts } }), liveBuses: () => liveBus ? { now: liveBus.engine.now, submitted: liveBus.submitted, released: liveBus.released, buses: liveBus.engine.snapshot().length, ledger: liveBus.engine.ledger() } : null, snapshot: () => serialize(city), sessionSnapshot: () => serializeParkSession(city, parkRuntime), parks: () => ({ ...parkActivityDiagnostics(parkRuntime.activity), ...parkScene?.diagnostics, minuteRemainder: parkRuntime.minuteRemainder, recreation: structuredClone(parkRuntime.recreation), paused, speed, frameMs: parkFrameMs, peakFrameMs: parkFramePeakMs }), audio: () => audio.diagnostics(), cellScreen: (i: number) => view.project(i), engine: 'PlayCanvas 2.23.3', visuals: () => view.assets?.status ?? { ready: false, loaded: [], failed: [] }, ground: () => view.ground.diagnostics, agriculture: () => view.agricultureDiagnostics(), atmosphere: () => visual.diagnostics, traffic: () => trafficLayer?.diagnostics ?? null, bus: () => busView?.diagnostics ?? null, busSnapshot: () => trafficLayer?.bus?.engine.snapshot() ?? null, rail:()=>({snapshot:parkRuntime.rail?.snapshot??null,...railUi?.diagnostics()}) } });
   $('#city-canvas').addEventListener('webglcontextlost', () => { paused = true; status('Graphics context lost. Save your city, then reload.'); render(); });
 }
 boot().catch(error => { console.error(error); status('Could not start WebGL2. Enable hardware graphics and reload in a supported browser.'); });
