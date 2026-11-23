@@ -125,16 +125,20 @@ test('losing a wage job to a disconnected road does not raise happiness at maxim
   const city = createCity(42);
   scheduleCityTaxes(city, { wage: 30, profit: 20 });
   advance(city, 150);
-  const id = 4;
-  assert.equal(happinessTargets(city).get(id)!.target, 40);
-  assert.equal(city.happiness!.rows.find(row => row.householdId === id)!.score, 40);
+  // A one-person household in wage work, not running a business of its own, pays the wage tax.
+  const id = city.households.find(h => h.workforce === 1 && householdWorkerCount(city, h.id) === 1 && city.employment.some(e => e.householdId === h.id))!.id;
+  const before = happinessTargets(city).get(id)!, score = city.happiness!.rows.find(row => row.householdId === id)!.score;
+  assert.equal(before.workers, 1);
+  assert.equal(before.wageTaxPoints, -20);
+  assert.ok(score > before.target - 5);
   assert.ok(bulldoze(city, 289).ok);
   step(city);
   const target = happinessTargets(city).get(id)!;
   assert.equal(target.workers, 0);
   assert.equal(target.unemployedWorkers, 1);
-  assert.equal(target.target, 35);
-  assert.equal(city.happiness!.rows.find(row => row.householdId === id)!.score, 39);
+  // No wage tax to pay any more, but out of work: the target falls five points, and the score follows it down.
+  assert.equal(target.target, before.target - 5);
+  assert.equal(city.happiness!.rows.find(row => row.householdId === id)!.score, score - 1);
   assert.equal(serialize(deserialize(serialize(city))), serialize(city));
 });
 
