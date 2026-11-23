@@ -62,6 +62,11 @@ function rejected(city: City, code: string, proposal: OwnerProposal | null = nul
 }
 
 /** A session deliberately never restores auto mode from a save or journal. */
+/**
+ * Rebuilds a shadow city from boundary bytes away from the main thread. `request` starts range `id`; `take` returns
+ * the city with its owner state hash once built, 'failed' when it could not be, and null while it is still working.
+ */
+export type OwnerShadowLoader = { request(id: number, boundary: string): void; take(id: number): { city: City; hash: string } | 'failed' | null };
 export class OwnerDecisionSession {
   private city: City;
   private selectedMode: OwnerDecisionMode = 'proposal';
@@ -83,6 +88,10 @@ export class OwnerDecisionSession {
   private pendingTicks: { fromTick: number; toTick: number; beforeHash: string } | null = null;
   // Replay the pending range incrementally. It is never exposed to consumers or saved.
   private replayShadow: City | null = null;
+  // Each pending range gets a number, so a shadow city built elsewhere is only used for the range it was asked for.
+  private rangeId = 0;
+  private requestedRange = -1;
+  private shadowLoader: OwnerShadowLoader | null = null;
   private tickStart: { city: City; tick: number; hash: string } | null = null;
 
   constructor(city: City, options: { maxEvents?: number } = {}) {
@@ -145,6 +154,8 @@ export class OwnerDecisionSession {
     if (!range) return true;
     try {
       if (city.tick !== range.toTick || range.toTick <= range.fromTick || range.toTick - range.fromTick > MONTH) throw new Error();
+      while (this.replayPending(true)) { /* finish the replay the quiet frames have not done yet */ }
+      if (this.issue) return false;
       const shadow = this.replayShadow;
       if (!shadow || shadow.tick !== range.toTick) throw new Error();
       const actual = serialize(city);
@@ -197,21 +208,11 @@ export class OwnerDecisionSession {
     if (this.issue) return [];
     if (!before || before.city !== city || city.tick !== before.tick + 1) { this.selectedMode = 'proposal'; this.syncExternal(city, 'unpaired-tick-checkpoint'); return []; }
     try {
-      // Starting from the same validated boundary as the former batch replay,
-      // execute each replayed day immediately rather than all at month end.
-      if (!this.pendingTicks) {
-        const shadow = deserialize(this.boundaryState);
-        if (shadow.tick !== before.tick || ownerStateHash(shadow) !== before.hash) throw new Error();
-        this.replayShadow = shadow;
-      }
-      if (!this.replayShadow || this.replayShadow.tick !== before.tick) throw new Error();
-      step(this.replayShadow);
-      if (this.replayShadow.tick !== city.tick) throw new Error();
-    } catch { this.fail('tick-replay-unavailable'); return []; }
-    try {
       this.processed.clear();
+      // The independent replay of this day runs later, one piece per quiet frame (replayPending), so the
+      // frame that ends the day does not step the city twice. Sealing still waits for the whole replay.
       if (this.pendingTicks) this.pendingTicks.toTick = city.tick;
-      else this.pendingTicks = { fromTick: before.tick, toTick: city.tick, beforeHash: before.hash };
+      else { this.pendingTicks = { fromTick: before.tick, toTick: city.tick, beforeHash: before.hash }; this.replayShadow = null; this.rangeId++; }
       if (city.tick <= 0 || city.tick % MONTH || this.monthlyTick >= city.tick) return [];
       if (!this.sealTicks(city)) return [];
       if (!this.reserve(city)) return [];
@@ -232,6 +233,37 @@ export class OwnerDecisionSession {
     this.beforeTick(city);
     step(city);
     return this.afterTick(city);
+  }
+  /** Let a Web Worker rebuild shadow cities (the game does); without one, or when it fails, the session does it itself. */
+  useShadowLoader(loader: OwnerShadowLoader | null): void { this.shadowLoader = loader; this.requestedRange = -1; }
+  /**
+   * One piece of the pending replay: rebuild the shadow from the last sealed boundary, or step it one more day.
+   * True when it did some work, false when nothing is left, when a worker is still rebuilding the shadow (unless
+   * `now`), or when the replay failed, which stops recording. The game calls it on frames that end no day; sealing
+   * calls it with `now` until the replay has caught up.
+   */
+  replayPending(now = false): boolean {
+    const range = this.pendingTicks;
+    if (this.issue || !range) return false;
+    try {
+      if (!this.replayShadow) {
+        // Starting from the same validated boundary as the former batch replay: the same deserialize, here or in a worker.
+        const loader = this.shadowLoader, built = loader && this.requestedRange === this.rangeId ? loader.take(this.rangeId) : null;
+        let shadow: City, hash: string;
+        if (built && built !== 'failed') ({ city: shadow, hash } = built);
+        else if (loader && !built && !now) {
+          if (this.requestedRange !== this.rangeId) { loader.request(this.rangeId, this.boundaryState); this.requestedRange = this.rangeId; }
+          return false;
+        } else { shadow = deserialize(this.boundaryState); hash = ownerStateHash(shadow); }
+        if (shadow.tick !== range.fromTick || hash !== range.beforeHash) throw new Error();
+        this.replayShadow = shadow; return true;
+      }
+      const tick = this.replayShadow.tick;
+      if (tick >= range.toTick) return false;
+      step(this.replayShadow);
+      if (this.replayShadow.tick !== tick + 1) throw new Error();
+      return true;
+    } catch { this.fail('tick-replay-unavailable'); return false; }
   }
   private evaluateInternal(city: City, firmId: number, trigger: 'monthly' | 'manual'): OwnerProposal[] {
     if (!this.reserve(city, this.selectedMode === 'auto' ? 2 : 1)) return [];

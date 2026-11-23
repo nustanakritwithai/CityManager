@@ -15,8 +15,8 @@ export type CueName = 'ev-fire' | 'ev-alarm' | 'ev-medical' | 'ev-unlock' | 'ev-
 export type CueSnapshot = { tick: number; ledger: number; buildings: ReadonlySet<number>; shops: ReadonlySet<number>; issues: ReadonlySet<string>; level: number; won: boolean; population: number };
 
 const shopIds = (c: City) => new Set(c.firms.filter(f => f.zone === 'C').map(f => f.id));
-export function cueSnapshot(c: City): CueSnapshot {
-  const goals = cityGoals(c);
+/** What the cues compare across a day. `goals` may be passed in when the caller has just worked them out. */
+export function cueSnapshot(c: City, goals: Pick<ReturnType<typeof cityGoals>, 'level' | 'won'> = cityGoals(c)): CueSnapshot {
   return { tick: c.tick, ledger: moneyJournalLength(c), buildings: new Set(c.buildings.map(b => b.id)), shops: shopIds(c),
     issues: new Set(alertIssues(buildingIssues(c)).map(i => `${i.cell}:${i.kind}`)), level: goals.level, won: goals.won, population: cityPopulation(c) };
 }
