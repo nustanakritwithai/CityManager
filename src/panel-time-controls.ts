@@ -6,7 +6,8 @@ export function installPanelTimeControls(header: HTMLElement, pause: HTMLButtonE
   button.setAttribute('aria-describedby', state.id); button.addEventListener('click', () => pause.click());
   row.append(state, button); header.append(row);
   return { update(paused: boolean, speed: number, disabled: boolean) {
-    const rate = speed === 1 / 1440 ? '1 นาทีเกม/วินาที' : `${speed}×`;
+    // The citizen view is the only pace below 1×: one game minute each second.
+    const rate = speed < 1 ? '1 นาทีเกม/วินาที' : `${speed}×`;
     state.textContent = `${paused ? 'หยุดเวลาอยู่' : 'กำลังเดินเวลา'} · ${rate}`;
     // Short label beside the close button; the full state is in #panel-time-state for screen readers.
     button.textContent = paused ? '▶ เล่น' : 'Ⅱ หยุด'; button.setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา');

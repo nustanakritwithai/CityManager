@@ -1,6 +1,6 @@
 import {
   START_HOUR, WEATHER_PERIOD_SECONDS, TIME_MODES, QUALITIES, PHASE_LABELS, SEASON_LABELS,
-  advanceHour, resolveHour, atmosphereAt, seasonWeights, dominantSeason, isRaining, formatClock, phaseOf,
+  advanceHour, resolveHour, atmosphereAt, seasonWeights, dominantSeason, isRaining, formatClock, phaseOf, wrapHour,
   type TimeMode, type Quality, type SeasonWeights
 } from './atmosphere.ts';
 import { WeatherOverlay } from './weather-overlay.ts';
@@ -11,7 +11,7 @@ import { sessionMemory } from './session-memory.ts';
 export type VisualSettings = { timeMode: TimeMode; quality: Quality | 'auto'; rain: boolean; seasons: boolean; traffic: boolean; mapInfo: boolean };
 const STORAGE_KEY = 'citymanager.visual.v1';
 const DEFAULTS: VisualSettings = Object.freeze({ timeMode: 'auto', quality: 'auto', rain: true, seasons: true, traffic: true, mapInfo: true });
-const TIME_LABELS: Record<TimeMode, string> = { auto: 'อัตโนมัติ · รอบละ 5 นาที', morning: 'เช้า', noon: 'กลางวัน', evening: 'เย็น', night: 'กลางคืน', local: 'ตามเวลาเครื่อง' };
+const TIME_LABELS: Record<TimeMode, string> = { auto: 'อัตโนมัติ · ตามเวลาในเกม', morning: 'เช้า', noon: 'กลางวัน', evening: 'เย็น', night: 'กลางคืน', local: 'ตามเวลาเครื่อง' };
 const QUALITY_LABELS: Record<Quality | 'auto', string> = { auto: 'อัตโนมัติ', low: 'ต่ำ', medium: 'กลาง', high: 'สูง' };
 const PHASE_ICONS = { night: '☾', dawn: '◒', day: '☀', dusk: '◓' } as const;
 const NO_SEASON: SeasonWeights = { hot: 0, rainy: 0, cool: 0 };
@@ -38,7 +38,8 @@ export const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|basic render|war
 const autoQuality = (renderer: string): Quality => SOFTWARE_RENDERER.test(renderer) ? 'low'
   : matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600 ? 'medium' : 'high';
 
-type Host = { view: CityView; getCity: () => City; isPaused: () => boolean; getSpeed: () => number; tickFraction: () => number; onChange?: () => void };
+/** `followsClock`: the sky shows the game's own time of day (`tickFraction`) instead of its slow decorative cycle. */
+type Host = { view: CityView; getCity: () => City; isPaused: () => boolean; getSpeed: () => number; tickFraction: () => number; followsClock?: () => boolean; onChange?: () => void };
 
 /** Drives the visual-only sky clock, season tint, decorative rain and render quality. */
 export class AtmosphereController {
@@ -47,6 +48,7 @@ export class AtmosphereController {
   private weatherClock = 0;
   private overcast = 0;
   private applied = { hour: -1, overcast: -1, season: '', force: true };
+  private labels = '';
   private quality: Quality = 'high';
   private slowFrames: number[] = [];
   private rendered = false;
@@ -105,7 +107,7 @@ export class AtmosphereController {
     });
     this.qualityNote.className = 'atmosphere-note'; quality.append(this.qualityNote);
     const note = document.createElement('p'); note.className = 'atmosphere-note';
-    note.textContent = 'เวลาในวัน ฤดูกาล และฝนเป็นภาพบรรยากาศเท่านั้น ไม่มีผลต่อการจำลองหรือเซฟ · 1 tick ยังเท่ากับ 1 วัน';
+    note.textContent = 'อัตโนมัติ: ท้องฟ้าตามเวลาในเกม · ฤดูกาลและฝนเป็นภาพบรรยากาศเท่านั้น ไม่มีผลต่อการจำลองหรือเซฟ';
     // Photo mode is run by the page (it hides the controls), so the button only asks for it.
     const photo = document.createElement('button'); photo.type = 'button'; photo.className = 'atmosphere-photo'; photo.textContent = '📷 โหมดถ่ายรูป (C)';
     photo.addEventListener('click', () => document.dispatchEvent(new CustomEvent('city-photo')));
@@ -139,7 +141,10 @@ export class AtmosphereController {
   update(dt: number) {
     const running = !this.host.isPaused() && !document.hidden;
     this.watchFrameRate(dt);
-    if (running) { this.autoHour = advanceHour(this.autoHour, dt, this.host.getSpeed()); this.weatherClock += Math.min(dt, .25); }
+    // At a playable pace the sky is the game clock, paused or not; a day shorter than half a minute keeps the slow cycle.
+    if (this.host.followsClock?.()) this.autoHour = wrapHour(this.host.tickFraction() * 24);
+    else if (running) this.autoHour = advanceHour(this.autoHour, dt, this.host.getSpeed());
+    if (running) this.weatherClock += Math.min(dt, .25);
     const city = this.host.getCity();
     const weights = this.settings.seasons ? seasonWeights(city.tick + this.host.tickFraction()) : NO_SEASON;
     const raining = this.settings.rain && isRaining(city.seed, this.weatherClock / WEATHER_PERIOD_SECONDS, this.settings.seasons ? weights : { hot: 0, rainy: .4, cool: 0 });
@@ -147,11 +152,16 @@ export class AtmosphereController {
     const hour = resolveHour(this.settings.timeMode, this.autoHour), season = this.settings.seasons ? dominantSeason(weights) : '';
     this.weather.set(raining && this.overcast > .35 ? this.overcast : 0);
     const a = this.applied, hourDelta = Math.abs(hour - a.hour);
-    if (!a.force && Math.min(hourDelta, 24 - hourDelta) < .04 && Math.abs(this.overcast - a.overcast) < .015 && season === a.season) return;
-    const atmosphere = atmosphereAt(hour, weights, this.overcast);
-    this.host.view.setAtmosphere(atmosphere);
-    Object.assign(this.applied, { hour, overcast: this.overcast, season, force: false });
-    const phase = phaseOf(hour), clock = formatClock(hour), rainText = this.weather.raining ? ' · ฝนตก' : '';
+    const relight = a.force || Math.min(hourDelta, 24 - hourDelta) >= .04 || Math.abs(this.overcast - a.overcast) >= .015 || season !== a.season;
+    if (relight) {
+      this.host.view.setAtmosphere(atmosphereAt(hour, weights, this.overcast));
+      Object.assign(this.applied, { hour, overcast: this.overcast, season, force: false });
+    }
+    // The light changes in small steps; the labels follow every minute, so the sky clock reads the same time as the hour chip.
+    const clock = formatClock(hour), labels = `${clock}|${season}|${this.weather.raining}`;
+    if (!relight && labels === this.labels) return;
+    this.labels = labels;
+    const phase = phaseOf(hour), rainText = this.weather.raining ? ' · ฝนตก' : '';
     const seasonText = season ? `${SEASON_LABELS[season]} · ` : '';
     this.button.querySelector('.sky-icon')!.textContent = this.weather.raining ? '☂' : PHASE_ICONS[phase];
     this.button.querySelector('.sky-clock')!.textContent = clock;

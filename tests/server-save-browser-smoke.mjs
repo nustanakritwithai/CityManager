@@ -328,6 +328,7 @@ async function run(){
   const serverSeed=await readFile(new URL('./fixtures/save-smoke/bus-optional-day60.json',import.meta.url),'utf8');
   const seed=JSON.stringify({obsoleteBrowserOnly:true,tick:99999});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{if(location.origin!==${JSON.stringify(origin)})return;
+   window.__CITYMANAGER_DAY_SECONDS__=1; // many days pass in this check: a one-second game day, not the real six minutes
    if(!localStorage.getItem('__fixture_seeded')){localStorage.setItem('citymanager.save.v7',${JSON.stringify(seed)});localStorage.setItem('citymanager.checkpoint.latest',${JSON.stringify(seed)});localStorage.setItem('__fixture_seeded','1');}
    window.__contextLosses=0;document.addEventListener('webglcontextlost',()=>window.__contextLosses++,true);
    window.__cityWrites=[];window.__quota=false;const city=/^citymanager\\.(save\\.|backup\\.|checkpoint\\.|resume-choice|market\\.)/;

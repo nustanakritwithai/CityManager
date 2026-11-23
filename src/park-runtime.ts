@@ -12,8 +12,9 @@ import {RailNetworkRuntime,type RailSessionSave} from './rail/network-runtime.ts
 export const GAME_MINUTES_PER_DAY = 1440;
 export type ParkRuntime = { version: 1; activity: ParkActivityState; recreation: ParkRecreationState; minuteRemainder: number; rail?:RailNetworkRuntime };
 
-export function createParkRuntime(city: City): ParkRuntime {
-  const activity = createParkActivity(city);
+/** A new runtime at `minuteOfDay` of the city's day; midnight unless a fresh city opens in the morning. */
+export function createParkRuntime(city: City, minuteOfDay = 0): ParkRuntime {
+  const activity = createParkActivity(city, minuteOfDay);
   return { version: 1, activity, recreation: createParkRecreation(parkActivityAbsoluteMinute(activity)), minuteRemainder: 0 };
 }
 
@@ -29,7 +30,7 @@ export function reconcileParkRuntime(city: City, runtime: ParkRuntime): void {
 }
 
 /** One economic day per 1440 actual minutes. A zero advance is a true pause.
- * Normal playback still requests 1440 minutes/second; citizen view requests one.
+ * Normal playback requests four minutes a second at 1× (a six-minute day, game-clock.ts); citizen view requests one.
  * observeMinute synchronizes other minute-state owners at each processed boundary,
  * before afterDay can render/save. Fast paths may publish multiple minutes at once;
  * fractional-only advances and unprocessed frame-budget time are never published.
@@ -41,6 +42,9 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
   const total = runtime.minuteRemainder + minutes;
   let remaining = Math.floor(total), days = 0, processed = 0;
   runtime.minuteRemainder = total - remaining;
+  // Only a fraction of a minute publishes nothing. At a six-minute game day most frames are only that, so they skip
+  // the roster work below; edits made meanwhile are reconciled by the next frame that has a whole minute, or by render.
+  if (remaining === 0) return 0;
   reconcileParkRuntime(city, runtime);
   const prepare = () => {
     const activity = prepareParkActivity(city);

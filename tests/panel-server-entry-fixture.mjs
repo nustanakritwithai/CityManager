@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createServerCityService} from '../server/city-saves/service.mjs';
+/** Browser checks play through many days: a game day lasts one second here instead of the real six minutes. */
+export const TEST_DAY_SECONDS=1;
 export const PANEL_OWNER='11111111-1111-4111-8111-111111111111';
 export function createPanelServerFixture(pageUrl){
  const origin=new URL(pageUrl).origin;assert.equal(new URL(origin).hostname,'127.0.0.1');
@@ -28,7 +30,7 @@ export function createPanelServerFixture(pageUrl){
   await send('Fetch.fulfillRequest',{requestId:params.requestId,responseCode:status,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify(response)).toString('base64')});return true;
  };
  const dialog=async(params,send)=>{assert.ok(allowBeforeUnload&&params.type==='beforeunload','Only explicit fixture reseed navigation may accept a dialog');allowBeforeUnload=false;await send('Page.handleJavaScriptDialog',{accept:true});};
- const install=async send=>send('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{window.__panelCityWrites=[];const city=/^citymanager\\.(save\\.|backup\\.|checkpoint\\.|resume-choice)/;for(const method of ['setItem','removeItem','clear']){const original=Storage.prototype[method];Storage.prototype[method]=function(...args){if(method==='clear'||city.test(String(args[0])))window.__panelCityWrites.push(method+':'+args[0]);return original.apply(this,args);};}})()`});
+ const install=async send=>send('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{window.__CITYMANAGER_DAY_SECONDS__=${TEST_DAY_SECONDS};window.__panelCityWrites=[];const city=/^citymanager\\.(save\\.|backup\\.|checkpoint\\.|resume-choice)/;for(const method of ['setItem','removeItem','clear']){const original=Storage.prototype[method];Storage.prototype[method]=function(...args){if(method==='clear'||city.test(String(args[0])))window.__panelCityWrites.push(method+':'+args[0]);return original.apply(this,args);};}})()`});
  const load=async(raw,{send,evaluate,button,url})=>{
   const ack=await seed(raw);allowBeforeUnload=true;await send('Page.navigate',{url});
   const wait=async expression=>{const start=Date.now();while(Date.now()-start<30000){try{if(await evaluate(expression))return;}catch(error){let details;try{details=JSON.parse(error.message);}catch{}if(details?.code!==-32000||!['Inspected target navigated or closed','Execution context was destroyed.','Cannot find context with specified id'].includes(details.message))throw error;}await new Promise(r=>setTimeout(r,80));}throw Error('Panel authenticated entry timeout: '+expression);};

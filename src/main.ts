@@ -62,6 +62,9 @@ import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
 import type { EntitySelection } from './entity-explanation-data.ts';
 import { AtmosphereController } from './atmosphere-controls.ts';
+import { daySeconds, frameMinutes, minuteASecondSpeed, paceAt, paceLabel, paceTitle, skyFollowsClock } from './game-clock.ts';
+import { HourActivityChip } from './hour-activity-chip.ts';
+import './hour-activity.css';
 import './atmosphere.css';
 import { previewPlacement, type Preview } from './placement-preview.ts';
 import { mapOverlay, buildingIssues, TOOL_OVERLAY } from './map-overlay.ts';
@@ -195,6 +198,9 @@ let selectionActions: ReturnType<typeof installSelectionActions> | null = null;
 let districtBrush: number | null = null;
 let tool = 'select', selected: number | null = null, roadStart: number | null = null, hover: number | null = null;
 let paused = false, speed = 1;
+/** Real seconds a game day lasts at 1× (six minutes; browser checks set a shorter day before the page loads). */
+const DAY_LENGTH = daySeconds();
+let hourChip: HourActivityChip | undefined;
 let plantPanel: ReturnType<typeof installPlantPanel> | undefined;
 let educationPanel: ReturnType<typeof installEducationPanel> | undefined;
 let busController: ReturnType<typeof createBusController> | undefined;
@@ -685,6 +691,7 @@ function render() {
   // Before the pause button is drawn: reaching stage 5 while running pauses for the win screen.
   const goals = cityGoals(city, s); goalPill?.update(goals); winWatch?.check(city, goals, !paused);
   $('#day').textContent = `วันที่ ${city.tick} · เดือน ${Math.floor(city.tick / 30) + 1}`;
+  hourChip?.update(city, parkRuntime.activity.minute, parkRuntime.activity.visitors.length, true);
   $('#pause').textContent = paused ? '▶' : 'Ⅱ'; $('#pause').setAttribute('aria-label', paused ? 'เล่นต่อ' : 'หยุดเวลา'); $('#pause').title = paused ? 'เล่นต่อ (Space)' : 'หยุดเวลา (Space)'; $('#pause').setAttribute('aria-pressed', String(paused));
   ($('#pause') as HTMLButtonElement).disabled = ownerDecisionPanel?.isAutoPending() ?? false;
   panelTime?.update(paused, speed, ($('#pause') as HTMLButtonElement).disabled);
@@ -765,7 +772,7 @@ async function boot() {
   $('#city-content').insertBefore(ownerDecisionHost, $('#city-content .ledger-details'));
   const parkSection = document.createElement('section'); parkSection.id = 'park-recreation';
   const citizenSpeed = document.createElement('button'); citizenSpeed.type = 'button';
-  citizenSpeed.dataset.speed = String(1 / 1440); citizenSpeed.setAttribute('aria-pressed', 'false');
+  citizenSpeed.dataset.speed = String(minuteASecondSpeed(DAY_LENGTH)); citizenSpeed.setAttribute('aria-pressed', 'false');
   citizenSpeed.textContent = 'ดูชีวิตประชาชน · 1 นาทีเกม/วินาที';
   citizenSpeed.title = 'ชะลอทั้งเมืองเพื่อดูการเดินและพักผ่อน · 1 วันเกมใช้ 24 นาที · กลับความเร็วเดิมด้วย 1×';
   parkPanel = document.createElement('div'); parkPanel.id = 'park-recreation-data';
@@ -965,6 +972,8 @@ async function boot() {
   // Trading remains disabled. Its synchronous financial callback must never pretend to await a server save.
   marketPanel = installMarketPanel(() => city, () => render(), () => { throw Error('market-disabled-server-save-required'); }, () => serializeParkSession(city, parkRuntime,city.market));
   marketPanel.client.setRecoveryReadOnly(true);
+  // Each speed button says how long a game hour and day last at it; the touch row's speed button reads it too.
+  document.querySelectorAll<HTMLElement>('.time-buttons [data-speed]').forEach(b => { b.title = paceAt(DAY_LENGTH, Number(b.dataset.speed)); });
   installHudRow();
   const saveBadge=document.createElement('span');saveBadge.id='autosave-status';saveBadge.setAttribute('role','status');$('#save').insertAdjacentElement('afterend',saveBadge);
   let saveSuccessLabel='บันทึกบนเซิร์ฟเวอร์แล้ว';
@@ -1135,7 +1144,10 @@ async function boot() {
   });
   // The first render ran before the HUD existed; a paused city would otherwise show an empty summary.
   cityHud.update(city, paused);
-  atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / 1440, onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
+  // What the town does this game hour, under the city summary; the time label says how long a game day lasts.
+  hourChip = new HourActivityChip(); hourChip.update(city, parkRuntime.activity.minute, parkRuntime.activity.visitors.length, true);
+  const pace = document.querySelector<HTMLElement>('.time-label small'); if (pace) { pace.textContent = paceLabel(DAY_LENGTH); pace.title = paceTitle(DAY_LENGTH); }
+  atmosphere = new AtmosphereController({ view, getCity: () => city, isPaused: () => paused, getSpeed: () => speed, tickFraction: () => (parkRuntime.activity.minute + parkRuntime.minuteRemainder) / 1440, followsClock: () => skyFollowsClock(DAY_LENGTH, speed), onChange: () => { mapInfo.overlayKey = mapInfo.issueLayout = ''; render(); } });
   // The first render precedes marker construction. Populate the layer now so a
   // paused city shows its issues without requiring another player interaction.
   updateMapInfo(null);
@@ -1190,7 +1202,7 @@ async function boot() {
       taxiView.setEnabled(visual.settings.traffic && !trafficLayer.diagnostics.failure);
     } else taxiView?.sync([]);
     if (paused || document.hidden) return;
-    const minutes = Math.min(dt, 0.25) * speed * 1440;
+    const minutes = frameMinutes(dt, speed, DAY_LENGTH);
     const tickBefore = city.tick;
     const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city) : null;
     const moneyBefore = before ? moneyMark(city) : null;
@@ -1203,6 +1215,8 @@ async function boot() {
       }, () => { ownerDecisionPanel?.noteOutcomes(dayOutcomes); return !paused; }, () => performance.now() < frameDeadline);
     } catch (error) { paused = true; console.error(error); status('หยุดเวลา: ไม่สามารถประมวลผลกิจกรรมประชาชนได้'); }
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
+    // The chip's clock ticks each game minute and its activity changes as the hour turns; a day that ended this frame redraws it in render().
+    if (!days) hourChip?.update(city, parkRuntime.activity.minute, parkRuntime.activity.visitors.length);
     parkScene?.setQuality(visual.diagnostics.quality);
     parkScene?.sync(parkRuntime.activity);
     railUi?.sync();
