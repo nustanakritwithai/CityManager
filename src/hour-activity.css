@@ -31,8 +31,8 @@ html:not([data-visual-quality=low]) .hour-activity { -webkit-backdrop-filter: bl
 /* Night hours read as night: a cooler icon. */
 .hour-activity:is([data-hour='0'], [data-hour='1'], [data-hour='2'], [data-hour='3'], [data-hour='4'], [data-hour='22'], [data-hour='23']) .hour-activity-icon { background: rgba(140, 170, 255, .14); color: #aebfff; }
 
-/* A narrow desktop window hides the summary strip; the chip takes its place at the top. */
-@media (max-width: 860px) { html:not([data-touch-ui=true]) .hour-activity { top: 12px; max-width: calc(100vw - 32px); } }
+/* A narrow desktop window hides the summary strip and has no room at the top: the chip sits under the time bar, right of the camera pad. */
+@media (max-width: 860px) { html:not([data-touch-ui=true]) .hour-activity { top: 106px; left: 66px; translate: none; max-width: calc(100vw - 82px); } }
 
 /* Touch: under the top row, on the left, sized by the reader unit like the row itself. */
 html[data-touch-ui=true] body .hour-activity {
