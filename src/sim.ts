@@ -835,7 +835,7 @@ export function zoneCell(c: City, i: number, zone: Zone): Result {
   if (plantAt(c, i)) return { ok: false, message: 'A water or power plant stands here. Bulldoze it before zoning.' };
   if (cell.building !== null && cell.zone !== zone) return { ok: false, message: 'Bulldoze the existing building before rezoning.' };
   cell.zone = zone;
-  const message = !zone ? 'Zone cleared.' : access(c, i) ? `${zone} zone marked. ${dailyGrowth(c) ? 'Ready parcels are built every night.' : 'Growth is evaluated every 3 days.'}` : `${zone} zone marked, but no connected road frontage. Link a neighboring road to the west gateway.`;
+  const message = !zone ? 'Zone cleared.' : access(c, i) ? `${zone} zone marked. ${dailyGrowth(c) ? 'Ready parcels are built right away.' : 'Growth is evaluated every 3 days.'}` : `${zone} zone marked, but no connected road frontage. Link a neighboring road to the west gateway.`;
   c.lastEvent = message;
   return { ok: true, message };
 }
@@ -1132,23 +1132,30 @@ function summarize(c: City) {
         farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0))) ? 1 : 0 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
-/** City-wide facts every parcel's growth check reads; worked out once when many parcels are checked together. */
-type GrowthFacts = { s: ReturnType<typeof summary>; spare: ReturnType<typeof utilities>['spare']; market: () => number };
+/** City-wide facts every parcel's growth check reads; worked out at most once when many parcels are checked together. */
+type GrowthFacts = { s: () => ReturnType<typeof summary>; spare: ReturnType<typeof utilities>['spare']; market: () => number };
+function growthFacts(c: City): GrowthFacts {
+  let s: ReturnType<typeof summary> | undefined, market: number | undefined;
+  return { s: () => s ??= summary(c), spare: utilities(c).spare, market: () => market ??= marketDemand(c) };
+}
 function blockers(c: City, i: number, facts?: GrowthFacts): string[] {
   const cell = c.cells[i];
   if (!cell.zone) return ['No R/C/I zoning.'];
-  const reasons: string[] = [], s = facts?.s ?? summary(c);
+  const reasons: string[] = [], s = () => facts?.s() ?? summary(c);
   if (!access(c, i)) reasons.push('No connected road frontage. Connect an adjacent road to the west outside gateway.');
   // A new factory's water and power is part of its growth status below.
   const spare = facts?.spare ?? utilities(c).spare, need = cell.zone === 'R' ? HOUSEHOLD_NEED : buildingNeed(cell.zone, 1, 0, c);
   if (cell.zone !== 'I') for (const kind of UTILITY_KINDS) if (spare[kind] < need[kind]) reasons.push(`Not enough ${kind}: a new ${cell.zone === 'R' ? 'household' : 'building'} here needs ${need[kind]} unit(s); the network has ${spare[kind]} spare. Build a ${PLANT_NAMES[kind]} on road frontage.`);
   if (!canAllocateIds(c, cell.zone === 'R' ? 1 : 2)) reasons.push('Entity ID range exhausted. No new entity or investment can be created safely.');
   if (c.buildings.length >= MAX_CITY_BUILDINGS) reasons.push(`Prototype building limit (${MAX_CITY_BUILDINGS}) reached.`);
+  // A city started in the game builds a home, farm or shop as soon as its parcel has a road, water and power; people
+  // come for the work there is. A factory still waits for an investor.
+  const placed = dailyGrowth(c) && cell.zone !== 'I';
   if (cell.zone === 'R') {
-    if (s.demand.R <= 0) reasons.push('No housing demand: usable vacant capacity already covers funded job opportunities and displaced households.');
+    if (!placed && s().demand.R <= 0) reasons.push('No housing demand: usable vacant capacity already covers funded job opportunities and displaced households.');
   } else {
     if (c.firms.length >= MAX_CITY_FIRMS) reasons.push(`Firm limit (${MAX_CITY_FIRMS}) reached.`);
-    if ((cell.zone === 'C' ? facts?.market() ?? marketDemand(c) : s.demand[cell.zone]) <= 0) reasons.push(facts ? 'No demand.' : cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Commercial demand requires a staffed farm or factory and reachable households not already covered by existing shops.' : 'No retail demand: existing shops cover the household market.');
+    if (!placed && (cell.zone === 'C' ? facts?.market() ?? marketDemand(c) : s().demand[cell.zone]) <= 0) reasons.push(facts ? 'No demand.' : cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Commercial demand requires a staffed farm or factory and reachable households not already covered by existing shops.' : 'No retail demand: existing shops cover the household market.');
   }
   return reasons;
 }
@@ -1160,9 +1167,10 @@ export function explainCell(c: City, i: number): string[] {
   if (cell.road) return [i === GATEWAY ? 'Reserved outside gateway.' : 'Grid road.', connectedRoads(c).has(i) ? 'Connected to outside market.' : 'Disconnected: no route to the west outside gateway.', 'Road construction 50 credits/cell; upkeep 0.10 credits/day/cell.'];
   if (!cell.zone) return ['Unzoned land. Choose R homes, C commercial level-one markets or I industry, then tap this parcel.', 'Buildings require connected road frontage, power, water, demand and viable expected rent.'];
   if (cell.building === null) {
-    const stopped = blockers(c, i), shop = cell.zone === 'C' && retailDemand(c) > 0 && !marketToConvert(c) && shopSite(c) === i;
-    if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. A saving household or outside equity opens one here on the next shop day (${dailyGrowth(c) ? 'tonight' : `in ${(4 - c.tick % 3) % 3 || 3} day(s)`}); it buys local wholesale first and hires retail workers.`];
-    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : dailyGrowth(c) ? `Eligible; up to ${DAILY_BUILDS} ready parcels are built every night.` : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
+    // A city started in the game builds a shop on its parcel at once, so only the three-day review waits for a shop day.
+    const stopped = blockers(c, i), shop = !dailyGrowth(c) && cell.zone === 'C' && retailDemand(c) > 0 && !marketToConvert(c) && shopSite(c) === i;
+    if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. A saving household or outside equity opens one here on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)); it buys local wholesale first and hires retail workers.`];
+    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : dailyGrowth(c) ? 'Eligible; it is built with your next map command or at midnight.' : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
   }
   const b = building(c, cell.building), f = c.firms.find(v => v.building === b.id), residents = c.households.filter(v => v.home === b.id);
   const output = [`${({ R: 'Home', C: 'Commercial', I: 'Factory', F: 'Farm' } as const)[b.zone]} #${b.id} · level ${b.level} · age ${b.age} days`, access(c, i) ? 'Connected road frontage.' : 'Disconnected: employment, purchases, production and height growth are suspended.'];
@@ -1215,7 +1223,7 @@ function createBuilding(c: City, i: number, shop = false) {
     if (owner || investor) reserveOwnerLabor(c);
   }
   const made = c.firms.find(f => f.building === id), goods = zone === 'I' && made?.recipe ? ` Recipe: ${made.recipe}.` : zone === 'F' ? ` Crop: ${farmCrop(c, { building: id })}.` : '';
-  c.lastEvent = `${zone} building #${id} grew: road + utilities + demand + viable expected rent. Initial investment is recorded in the ledger.${goods}`;
+  c.lastEvent = dailyGrowth(c) ? `${zone} building #${id} built: road, water and power are ready. Initial investment is recorded in the ledger.${goods}` : `${zone} building #${id} grew: road + utilities + demand + viable expected rent. Initial investment is recorded in the ledger.${goods}`;
 }
 const employees = (c: City, f: Firm) => employmentForFirm(c, f.id).reduce((n, e) => n + e.workers, 0);
 /**
@@ -2063,8 +2071,7 @@ function redevelopmentSite(c: City, svc: Service): number | null {
 function grow(c: City) {
   // One seeded parcel per review; a city on the daily pace builds up to DAILY_BUILDS, checking demand and supply again after each.
   for (let built = 0, limit = dailyGrowth(c) ? DAILY_BUILDS : 1; built < limit; built++) {
-    let market: number | undefined;
-    const facts: GrowthFacts = { s: summary(c), spare: utilities(c).spare, market: () => market ??= marketDemand(c) };
+    const facts = growthFacts(c);
     const eligible = c.cells.map((cell, i) => cell.zone && cell.building === null && !blockers(c, i, facts).length ? i : -1).filter(i => i >= 0);
     if (!eligible.length) break;
     createBuilding(c, eligible[Math.floor(random(c) * eligible.length)]);
@@ -2099,6 +2106,37 @@ function grow(c: City) {
       transfer(c, f.wallet, 'construction', 20_000, 'Profitable firm height investment'); b.level++; spare.power -= extra.power; spare.water -= extra.water;
     }
   }
+}
+/** Most buildings one player command raises at once; the rest rise with the next command or at midnight. */
+export const INSTANT_BUILDS = 24;
+/**
+ * A city started in the game builds a parcel as soon as the player's command makes it ready (a road, water and power;
+ * a factory also needs an investor): the parcel just tapped first, then any other the command unblocked (a road, a
+ * plant), checking water and power again after each, then a shop where one is wanted. Cities saved before (the
+ * three-day review) build nothing here. Returns how many buildings rose.
+ */
+export function buildReadyParcels(c: City, first?: number): number {
+  if (!dailyGrowth(c)) return 0;
+  const before = c.buildings.length, declined = new Set<number>();
+  withRoadScope(c, () => {
+    let prefer = first;
+    while (c.buildings.length - before < INSTANT_BUILDS) {
+      const facts = growthFacts(c);
+      const ready = (i: number) => !declined.has(i) && !!c.cells[i].zone && c.cells[i].building === null && !blockers(c, i, facts).length;
+      let site = prefer !== undefined && validIndex(prefer, c) && ready(prefer) ? prefer : -1;
+      prefer = undefined;
+      if (site < 0) {
+        const eligible = c.cells.map((_, i) => ready(i) ? i : -1).filter(i => i >= 0);
+        if (!eligible.length) break;
+        site = eligible[Math.floor(random(c) * eligible.length)];
+      }
+      const count = c.buildings.length;
+      createBuilding(c, site);
+      if (c.buildings.length === count) declined.add(site);
+    }
+    if (c.buildings.length - before < INSTANT_BUILDS) openShop(c);
+  });
+  return c.buildings.length - before;
 }
 export function step(c: City): void {
   c.commercialUnifiedStartTick ??= c.tick;
@@ -2456,22 +2494,25 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   if (!Array.isArray(historicalLedger) || !Array.isArray(c.goodsLedger)) fail();
   for (const e of historicalLedger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || !Object.hasOwn(c.accounts, e.from) || !Object.hasOwn(c.accounts, e.to) || e.from === e.to) fail();
   const expansionFunding = new Map<number, Entry>(), bootstrapFunding = new Map<number, Entry>(), outsideFunding = new Map<number, Entry>(), ownerFunding = new Map<number, Entry>();
+  // Factories are funded after growth starts. A city started in the game builds what the player places at once, so its
+  // first factory can be funded on the day growth starts, and every factory it opens is checked against that funding.
+  const placed = c.unlocks !== undefined, beforeGrowth = (tick: number) => placed ? tick < c.growthStartTick : tick <= c.growthStartTick;
   for (const e of historicalLedger) {
     const expansion = /^Industry expansion capital #([1-9]\d*)$/.exec(e.reason), bootstrap = /^Outside industry bootstrap equity #([1-9]\d*)$/.exec(e.reason), outsideEquity = /^Outside industry equity #([1-9]\d*)$/.exec(e.reason), ownerEquity = OWNER_INDUSTRY_CAPITAL.exec(e.reason);
     if (ownerEquity) {
       // Under real rules a household opens a factory with its own savings, paid from its own wallet.
       const id = Number(ownerEquity[1]);
-      if (!realIndustry(c) || !int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || !/^household:[1-9]\d*$/.test(e.from) || e.amount !== INDUSTRY_STARTUP_CAPITAL || e.tick <= c.growthStartTick || ownerFunding.has(id)) fail();
+      if (!realIndustry(c) || !int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || !/^household:[1-9]\d*$/.test(e.from) || e.amount !== INDUSTRY_STARTUP_CAPITAL || beforeGrowth(e.tick) || ownerFunding.has(id)) fail();
       ownerFunding.set(id, e); continue;
     }
     if (outsideEquity) {
       const id = Number(outsideEquity[1]);
-      if (!int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || e.from !== 'outside' || e.amount !== INDUSTRY_STARTUP_CAPITAL || e.tick <= c.growthStartTick || outsideFunding.has(id)) fail();
+      if (!int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || e.from !== 'outside' || e.amount !== INDUSTRY_STARTUP_CAPITAL || beforeGrowth(e.tick) || outsideFunding.has(id)) fail();
       outsideFunding.set(id, e); continue;
     }
     if (!expansion && !bootstrap) continue;
     const id = Number((expansion ?? bootstrap)![1]);
-    if (!int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || e.amount !== INDUSTRY_STARTUP_CAPITAL || e.tick <= c.growthStartTick) fail();
+    if (!int(id, 1) || id >= c.nextId || e.to !== `firm:${id}` || e.amount !== INDUSTRY_STARTUP_CAPITAL || beforeGrowth(e.tick)) fail();
     if (expansion) {
       const parent = /^firm:([1-9]\d*)$/.exec(e.from), parentId = parent ? Number(parent[1]) : 0;
       if (!int(parentId, 1) || parentId >= id || expansionFunding.has(id)) fail();
@@ -2489,7 +2530,7 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
       if (!funding || funding.from !== `firm:${f.fundedBy.firmId}` || funding.to !== f.wallet || funding.tick !== born) fail();
     } else if (funding) fail();
     // A later factory without a sponsor was funded by outside investors on the day it opened.
-    if (f.zone === 'I' && born > c.growthStartTick && !f.fundedBy && (outsideFunding.has(f.id) ? outsideFunding.get(f.id)!.tick !== born : ownerFunding.has(f.id) ? ownerFunding.get(f.id)!.tick !== born : bootstrapFunding.get(f.id)?.tick !== born || c.firms.some(other => other.id !== f.id && other.zone === 'I' && c.tick - building(c, other.building).age < born))) fail();
+    if (f.zone === 'I' && !beforeGrowth(born) && !f.fundedBy && (outsideFunding.has(f.id) ? outsideFunding.get(f.id)!.tick !== born : ownerFunding.has(f.id) ? ownerFunding.get(f.id)!.tick !== born : bootstrapFunding.get(f.id)?.tick !== born || c.firms.some(other => other.id !== f.id && other.zone === 'I' && c.tick - building(c, other.building).age < born))) fail();
     if (outsideFunding.has(f.id) && (f.zone !== 'I' || f.fundedBy)) fail();
     // A factory has an owner exactly when a household opened it, and that household is its owner.
     if (f.zone === 'I' && (f.owner ? !ownerFunding.has(f.id) || ownerFunding.get(f.id)!.from !== `household:${f.owner.householdId}` || f.fundedBy || f.takenOverAt !== undefined : ownerFunding.has(f.id))) fail();

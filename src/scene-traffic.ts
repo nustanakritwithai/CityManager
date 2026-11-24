@@ -221,10 +221,20 @@ export class SceneTraffic {
     this.root.addChild(plume); return plume;
   }
 
-  /** Advance decorative motion; `running` is false while the game is paused or hidden. */
-  update(dt: number, running: boolean) {
+  /**
+   * Advance decorative motion; `running` is false while the game is paused or hidden. `rate` is how much faster than
+   * real time people walk and drive (the game speed, see game-clock `streetRate`), so a commute still fits its rush
+   * hour at 10×. A long frame counts as a tenth of a second, and the motion runs in steps of at most that much.
+   */
+  update(dt: number, running: boolean, rate = 1) {
     if (!this.enabled || !running || (!this.actors.size && !this.smoke.size)) return;
-    const step = Math.min(dt, .1); this.clock += step;
+    let left = Math.min(Math.max(0, dt), .1) * Math.max(0, rate);
+    do { const step = Math.min(left, .1); left -= step; this.advance(step); } while (left > 1e-9);
+    this.view.app.renderNextFrame = true;
+  }
+
+  private advance(step: number) {
+    this.clock += step;
     for (const actor of [...this.actors.values()]) {
       if (!actor.parked) continue;
       if (actor.retire) { actor.entity.destroy(); this.actors.delete(actor.key); continue; }
@@ -242,7 +252,6 @@ export class SceneTraffic {
       const phase = (this.clock * .3 + k / 3) % 1, size = .1 + .36 * Math.sin(phase * Math.PI);
       puff.setLocalPosition(phase * .35, phase * 1.5, phase * .2); puff.setLocalScale(size, size, size);
     });
-    this.view.app.renderNextFrame = true;
   }
 
   private mover(a: Actor): Mover { return { x: a.x, z: a.z, hx: a.hx, hz: a.hz, length: a.kind === 'truck' ? TRAFFIC_SPACING.lengths.truck : a.small ? .34 : TRAFFIC_SPACING.lengths.decorativeCar, width: a.kind === 'truck' ? .36 : a.small ? .12 : .3, rank: a.rank }; }

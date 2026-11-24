@@ -45,7 +45,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { GATEWAY, SIZE, access, setRoadClassAlong, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { GATEWAY, SIZE, access, setRoadClassAlong, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, buildReadyParcels, dailyGrowth, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import { INCIDENT, INCIDENT_MIN_POPULATION } from './incidents.ts';
 import { UNLOCK_POPULATION, peopleToUnlock } from './unlocks.ts';
 import { paintDistrict } from './districts.ts';
@@ -62,7 +62,7 @@ import { createSignalPanel } from './signal-panel.ts';
 import { createEntityExplanationPanel } from './entity-explanation-panel.ts';
 import type { EntitySelection } from './entity-explanation-data.ts';
 import { AtmosphereController } from './atmosphere-controls.ts';
-import { daySeconds, frameMinutes, minuteASecondSpeed, paceAt, paceLabel, paceTitle, skyFollowsClock } from './game-clock.ts';
+import { daySeconds, frameMinutes, minuteASecondSpeed, paceAt, paceLabel, paceTitle, skyFollowsClock, streetRate } from './game-clock.ts';
 import { HourActivityChip } from './hour-activity-chip.ts';
 import './hour-activity.css';
 import './atmosphere.css';
@@ -347,26 +347,47 @@ function roadCommand(a: number, b: number) {
   if (roadMode === 'collector' || roadMode === 'arterial') return setRoadClassAlong(city, a, b, roadMode);
   return buildParallelRoad(city, a, b, roadMode === 'oneway');
 }
+const BUILT_NAMES: Record<string, string> = { R: 'บ้าน', C: 'ร้านค้า', I: 'โรงงาน', F: 'ฟาร์ม' };
+/**
+ * A city started in the game builds ready parcels as soon as a player's command makes them ready (sim
+ * buildReadyParcels). Returns what to tell the player: what rose, or why the parcel just zoned still waits.
+ */
+function buildNow(index: number, zoned: boolean): string | null {
+  const before = new Set(city.buildings.map(b => b.id));
+  if (!buildReadyParcels(city, index)) {
+    if (!zoned || !dailyGrowth(city) || !city.cells[index]?.zone || city.cells[index].building !== null) return null;
+    const fail = parcelChecklist(city, index)?.checks.find(check => check.state === 'fail');
+    return fail ? `วางโซน${BUILT_NAMES[city.cells[index].zone!]}แล้ว · ยังสร้างไม่ได้: ${fail.detail ?? fail.label}` : null;
+  }
+  const rose = city.buildings.filter(b => !before.has(b.id)), first = rose.find(b => b.cell === index) ?? rose[0];
+  sound(first.zone === 'R' ? 'ev-build-home' : first.zone === 'F' ? 'ev-build-farm' : 'ev-build-business');
+  if (rose.length === 1) return thaiMessage(city.lastEvent);
+  const counts = (['R', 'C', 'I', 'F'] as const).map(z => [z, rose.filter(b => b.zone === z).length] as const).filter(([, n]) => n > 0);
+  return `สร้างอาคารบนแปลงที่พร้อมแล้ว ${rose.length} แห่ง · ${counts.map(([z, n]) => `${BUILT_NAMES[z]} ${n}`).join(' · ')}`;
+}
 async function activate(index: number) {
   if (busLock) return;
   if (tool !== 'select') ownerDecisionSession.beforeExternal(city);
   if (busController?.handles(tool)) { busController.tap(tool as 'bus-depot' | 'bus-stop' | 'bus-line', index); return; }
   selected = index;
+  // A command that changed the map lets ready parcels rise at once (not a bulldoze: that clears the parcel).
+  let grows = false;
+  const placed = (result: { ok: boolean; message: string }) => { grows = result.ok; status(resultSound(result, 'ui-place').message); };
   if (tool === 'road') {
     roadMenu?.close();
     if (roadStart === null) { roadStart = index; status(roadMode === 'split' ? 'เลือกถนนแล้ว · แตะถนนช่องที่ติดกันเพื่อแก้ทางเชื่อม' : 'เลือกจุดเริ่มแล้ว · แตะจุดจบ หรือกดกลับ'); }
-    else { const result = resultSound(roadCommand(roadStart, index), 'ui-road'); roadStart = null; status(result.message); }
-  } else if (['R', 'C', 'I', 'F'].includes(tool)) status(resultSound(zoneCell(city, index, tool as Zone), 'ui-place').message);
-  else if (tool === 'power' || tool === 'water') status(resultSound(buildPlant(city, index, tool), 'ui-place').message);
-  else if (tool === 'park') status(resultSound(buildPark(city, index), 'ui-place').message);
-  else if (isCivicKind(tool)) status(resultSound(buildCivic(city, index, tool), 'ui-place').message);
+    else { const result = resultSound(roadCommand(roadStart, index), 'ui-road'); roadStart = null; grows = result.ok; status(result.message); }
+  } else if (['R', 'C', 'I', 'F'].includes(tool)) placed(zoneCell(city, index, tool as Zone));
+  else if (tool === 'power' || tool === 'water') placed(buildPlant(city, index, tool));
+  else if (tool === 'park') placed(buildPark(city, index));
+  else if (isCivicKind(tool)) placed(buildCivic(city, index, tool));
   else if (tool === 'district') {
     // A small brush: the tapped parcel and its four neighbours.
     const brush = [index, ...expandedCellNeighbors(index)], name = districtBrush === null ? null : city.districts?.list.find(d => d.id === districtBrush)?.name;
     const changed = paintDistrict(city, districtBrush, brush); sound(changed ? 'ui-brush' : 'ui-click');
     status(changed ? (name ? `ระบายย่าน ${name} ${changed} แปลง` : `เอาออกจากย่าน ${changed} แปลง`) : 'แปลงเหล่านี้อยู่ในย่านนี้แล้ว');
   }
-  else if (tool === 'school' || tool === 'university') status(resultSound(buildCampus(city, index, tool), 'ui-place').message);
+  else if (tool === 'school' || tool === 'university') placed(buildCampus(city, index, tool));
   else if (tool === 'bulldoze') {
     busLock = true;
     try {
@@ -379,6 +400,7 @@ async function activate(index: number) {
     if (selectionUpgrade(city, index, taxiFeature ? taxiSession : null, busEnabled())) { inspector(false); setTool('select'); quickSelection = index; }
     else { quickSelection = null; openRoute({page:'place',cell:index,buildingId:city.cells[index].building}); }
   }
+  if (grows) { const note = buildNow(index, ['R', 'C', 'I', 'F'].includes(tool)); if (note) status(note); }
   if (tool !== 'select') ownerDecisionSession.syncExternal(city, 'player-map-command');
   trafficLayer?.afterMapEdit(city, paused || document.hidden);
   render();
@@ -437,7 +459,7 @@ function parcelChecklistView(parcel: ParcelChecklist): HTMLElement {
   const box = node('div', 'parcel-checklist'); box.dataset.parcelChecklist = parcel.eligible ? 'eligible' : 'blocked';
   const failed = parcel.checks.filter(c => c.state === 'fail').length;
   const head = node('p', `parcel-verdict ${parcel.eligible ? 'good' : 'bad'}`, parcel.eligible
-    ? parcel.nextReview === 0 ? 'พร้อมพัฒนา · เมืองสร้างคืนนี้ตอนเที่ยงคืน (คืนละไม่เกิน 6 แปลง)' : `พร้อมพัฒนา · ทบทวนแปลงอีก ${parcel.nextReview} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`
+    ? parcel.nextReview === 0 ? 'พร้อมพัฒนา · สร้างเมื่อคุณสั่งงานบนแผนที่ครั้งถัดไป หรือตอนเที่ยงคืน' : `พร้อมพัฒนา · ทบทวนแปลงอีก ${parcel.nextReview} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`
     : `ยังไม่โต · ติด ${failed} เงื่อนไข`);
   const list = node('ol', 'parcel-checks');
   for (const check of parcel.checks) {
@@ -844,7 +866,8 @@ async function boot() {
     const path = roadPath(a, b);
     if (taxiOccupies(path)) { status('มีอู่แท็กซี่ขวางทาง ต้องรื้อก่อนสร้างถนน'); render(); return; }
     ownerDecisionSession.beforeExternal(city);
-    selected = b; roadStart = null; status(resultSound(roadCommand(a, b), 'ui-road').message);
+    selected = b; roadStart = null; const result = resultSound(roadCommand(a, b), 'ui-road'); status(result.message);
+    if (result.ok) { const note = buildNow(b, false); if (note) status(note); }
     ownerDecisionSession.syncExternal(city, 'player-drag-road'); trafficLayer?.afterMapEdit(city, paused || document.hidden); render();
   });
   parkScene = new SceneParkActivity(view);
@@ -967,7 +990,7 @@ async function boot() {
   installHudIcons(); installKeycaps(); installBuildToolbar(); installSheetHandle($('#inspector')); guide = new Guide(next => { sound('ui-select'); setTool(next); }, () => { if (paused) $('#pause').click(); }, () => audio.settings.muted ? 0 : audio.settings.master);
   selectionActions = installSelectionActions({
     getQuote: () => quickSelection === null ? null : selectionUpgrade(city, quickSelection, taxiFeature ? taxiSession : null, busEnabled()),
-    upgrade: quote => { ownerDecisionSession.beforeExternal(city); const result = quote.run(); if (result.ok) ownerDecisionSession.syncExternal(city, 'player-map-command'); status(resultSound(result, 'ui-place').message); publishTaxi(true); render(); },
+    upgrade: quote => { ownerDecisionSession.beforeExternal(city); const result = quote.run(); status(resultSound(result, 'ui-place').message); if (result.ok) { const note = quickSelection === null ? null : buildNow(quickSelection, false); if (note) status(note); ownerDecisionSession.syncExternal(city, 'player-map-command'); } publishTaxi(true); render(); },
     information: () => { if (quickSelection !== null) openRoute({ page: 'place', cell: quickSelection, buildingId: city.cells[quickSelection].building }); },
     dismiss: () => { quickSelection = null; selected = null; render(); },
   });
@@ -1204,7 +1227,7 @@ async function boot() {
     if (quickVisible && quickSelection !== null) { const point = view.project(quickSelection); const rect = $('#city-canvas').getBoundingClientRect(); selectionActions?.position(point.x + rect.left, point.y + rect.top); }
 
     visual.update(dt);
-    view.traffic.update(dt, !paused && !document.hidden);
+    view.traffic.update(dt, !paused && !document.hidden, streetRate(speed));
     trafficLayer?.setVisible(visual.settings.traffic);
     taxiSession.bind(city);
     trafficLayer?.frame(city, parkRuntime.activity.minute, paused || document.hidden, dt, parkRuntime.activity.day);
