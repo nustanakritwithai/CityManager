@@ -3,7 +3,7 @@ import { roadNeighborsFor } from './road-topology.ts';
  * Growth checklist for a vacant zoned parcel, read from the simulator's own `explainCell`
  * blockers so it can never disagree with what growth actually checks. Presentation only.
  */
-import { GATEWAY, SIZE, MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, connectedRoads, explainCell, type City } from './sim.ts';
+import { GATEWAY, SIZE, MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, connectedRoads, dailyGrowth, explainCell, type City } from './sim.ts';
 import { roadLinked } from './road-topology.ts';
 
 export type ParcelCheck = { key: string; label: string; state: 'pass' | 'fail'; detail?: string };
@@ -29,10 +29,11 @@ export function parcelChecklist(city: City, cell: number): ParcelChecklist | nul
   const zone = city.cells[cell]?.zone;
   if (!zone || city.cells[cell].road || city.cells[cell].building !== null) return null;
   const lines = explainCell(city, cell);
-  const shop = /^Shop site:.*\(in (\d+) day/.exec(lines[1] ?? '');
+  // On the daily pace (a city started in the game) the shop opens tonight; nextReview 0 means tonight.
+  const shop = /^Shop site:.*\((?:in (\d+) day|tonight)/.exec(lines[1] ?? '');
   if (shop) return {
     checks: [{ key: 'factory', label: 'มีโรงงานที่มีคนงานกำลังผลิต', state: 'pass' }, { key: 'buyers', label: 'มีครัวเรือนเชื่อมถนนพอสำหรับร้านค้า', state: 'pass' }],
-    eligible: true, nextReview: Number(shop[1]),
+    eligible: true, nextReview: shop[1] === undefined ? 0 : Number(shop[1]),
     note: 'ร้านค้าเปิดด้วยทุนนักลงทุนภายนอก ซื้อสินค้าจากโรงงานในเมืองก่อนนำเข้า และจ้างแรงงานค้าปลีก ครัวเรือนจึงซื้อของที่เมืองผลิตเองได้',
   };
   const stopped = lines.slice(1, -2), checks: ParcelCheck[] = [];
@@ -46,7 +47,7 @@ export function parcelChecklist(city: City, cell: number): ParcelChecklist | nul
   const note = zone === 'C'
     ? 'ร้านค้าเริ่มจากครัวเรือนเจ้าของลงทุนเงินจริง 600 ฿ ค่าก่อสร้าง 100 ฿ ที่เหลือเป็นเงินกิจการ และกันสมาชิก 1 คนไว้ทำงานเอง'
     : 'โรงงานแรกเปิดได้โดยยังไม่มีคนงาน และ 2 ครัวเรือนแรกย้ายเข้าได้แม้ยังไม่มีงาน ทุนและเงินติดตัวมาจากบัญชีภายนอกที่ระบุชื่อ';
-  return { checks, eligible: stopped.length === 0, nextReview: 3 - city.tick % 3, note };
+  return { checks, eligible: stopped.length === 0, nextReview: dailyGrowth(city) ? 0 : 3 - city.tick % 3, note };
 }
 
 export type RoadFacts = { gateway: boolean; connected: boolean; stepsToGateway: number | null; frontage: number; buildings: number; network: number; connectedNetwork: number };

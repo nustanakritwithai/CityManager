@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, buildRoad, zoneCell, access, firmWorkerCount, firmCapacity, dailyGrowth, DAILY_BUILDS, DAILY_ARRIVAL_FILL_DAYS, GATEWAY, SIZE, type City, type Zone } from '../src/sim.ts';
+import { createCity, step, buildRoad, zoneCell, access, explainCell, firmWorkerCount, firmCapacity, dailyGrowth, DAILY_BUILDS, DAILY_ARRIVAL_FILL_DAYS, GATEWAY, SIZE, type City, type Zone } from '../src/sim.ts';
+import { parcelChecklist } from '../src/place-checklist.ts';
 import { thaiMessage } from '../src/event-text.ts';
 import { keepSupplied } from './plants.ts';
 
@@ -73,4 +74,25 @@ test('the game says buildings rise every night in a city started in the game', (
   assert.equal(thaiMessage(marked.message), 'วางโซนบ้านแล้ว เมืองสร้างอาคารให้ตอนเที่ยงคืนเมื่อแปลงพร้อม');
   const old = createCity(61025, { starter: false }); buildRoad(old, GATEWAY, GATEWAY + 3);
   assert.equal(zoneCell(old, i, 'R').message, 'R zone marked. Growth is evaluated every 3 days.');
+});
+
+test('the place panel says a ready parcel is built tonight, shop sites included', () => {
+  const c = town('RRRRFICC', true), old = town('RRRRFICC', false);
+  const ready = (city: City) => city.cells.map((cell, i) => cell.zone && cell.building === null ? i : -1).filter(i => i >= 0).map(i => ({ i, list: parcelChecklist(city, i)! })).filter(p => p.list.eligible);
+  assert.ok(ready(c).length > 0 && ready(c).every(p => p.list.nextReview === 0), 'tonight on the daily pace');
+  assert.ok(ready(old).length > 0 && ready(old).every(p => p.list.nextReview === 3 - old.tick % 3), 'the three-day review counts down');
+  // A shop site keeps its own checklist on the daily pace. Shops open every night there, so take a town where one is
+  // waiting for its shop day and put it on the daily pace: the panel reads the opening as tonight.
+  const shops = createCity(61025);
+  let shop = -1;
+  for (let d = 0; d < 30 && shop < 0; d++) {
+    shop = shops.cells.findIndex((cell, i) => cell.zone === 'C' && cell.building === null && explainCell(shops, i)[1]?.startsWith('Shop site:'));
+    if (shop < 0) run(shops, 1);
+  }
+  assert.ok(shop >= 0, 'a shop site waits for its shop day');
+  assert.match(explainCell(shops, shop)[1], /\(in \d day\(s\)\)/);
+  shops.unlocks = { version: 1 };
+  assert.match(explainCell(shops, shop)[1], /\(tonight\)/);
+  const list = parcelChecklist(shops, shop)!;
+  assert.equal(list.nextReview, 0); assert.equal(list.eligible, true); assert.equal(list.checks[0].key, 'factory');
 });
