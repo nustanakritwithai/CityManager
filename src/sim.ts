@@ -2,6 +2,8 @@ import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commut
 import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { factoryJobs, factoryUtilities, farmMaxLevel, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, farmInputs, millRunningCost, FARM_INPUTS_REASON, MILL_COSTS_REASON, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
+import { TILE_SCALE, tileScale } from './tile-scale.ts';
+import { HOUSEHOLDS, SummaryBook, forEachLeg, summaryHouseholds, validSummary } from './ledger-parts.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
 import { appendNorthLand, isCanonicalExpandedResourceMap, type ExpandedResourceMap } from './expanded-map-migration.ts';
 import { expandLegacyRoadTopology } from './expanded-road-topology.ts';
@@ -77,8 +79,9 @@ export type OwnerLabor = { householdId: number; firmId: number; skill: 'general'
 export type Firm = { id: number; building: number; zone: 'C' | 'I' | 'F'; recipe?: RecipeId; recipeMode?: 'auto' | 'manual'; recipeChoices?: { at: number; recipe: RecipeId }[]; cropMode?: 'auto' | 'manual'; cropChoices?: { at: number; crop: CropId }[]; crops: CropMix; products: ProductMix; commercialKind?: 'market' | 'retail'; convertedAt?: number; takenOverAt?: number; fundedBy?: { firmId: number; capital: number }; wallet: string; workDays: Record<string, number>; inventory: number; cropInventory: number; cropCost: number; productionTick: number; owner: Owner | null; profit: number; lastMonthProfit: number; monthlyRevenue: number; monthlyExpense: number };
 /** `crop` names the lots moved (every kind but a write-off); a write-off carries the whole `mix`. Untyped only before `typeBaseline.tick`. */
 export type CropEntry = { id: number; tick: number; kind: 'harvest' | 'trade' | 'process' | 'writeoff' | 'consumption' | 'export' | 'import' | 'market-deposit' | 'market-refund' | 'market-receipt'; from: string; to: string; quantity: number; fromValue: number; toValue: number; cash: number; workers: number; batches: number; outputQuantity: number; reason: string; crop?: CropId; mix?: CropMix };
-export type Entry = { tick: number; from: string; to: string; amount: number; reason: string };
-export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string; product?: ProductId };
+/** `parts`: a big town's daily household summary (ledger-parts.ts), [household id, amount, ...] with HOUSEHOLDS on one side. */
+export type Entry = { tick: number; from: string; to: string; amount: number; reason: string; parts?: number[] };
+export type GoodsEntry = { tick: number; from: string; to: string; quantity: number; reason: string; product?: ProductId; parts?: number[] };
 /**
  * Typed stock at the moment typing began, and how many crop and goods journal entries came before
  * it (those stay untyped). A fresh city starts empty; a migrated v7 city records its stock on load.
@@ -92,6 +95,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   populationCapacityVersion?: 1;
   /** Real rice (industry-scale.ts): 100-rai paddies, mills by tonnage, rice sold by the kilo; jobs filled within a month. Absent on cities saved before. */
   industryScale?: 1;
+  /** A big town (tile-scale.ts): every tile holds ten real buildings' worth. Set when a city is started in the game. */
+  tileScale?: number;
   /** Homes hold real numbers of households (house 1, apartment 40, condo 200). Absent on cities saved before, which keep the old smaller homes. */
   housingScale?: 1;
   /** Firms pay real average wages by industry (REAL_WAGES). Absent on cities saved before, which keep the old wages. */
@@ -214,7 +219,7 @@ export const isCommercial = (f: Pick<Firm, 'zone'>): boolean => f.zone === 'C';
 export const isMarket = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'market';
 export const isRetail = (f: Pick<Firm, 'zone' | 'commercialKind'>): boolean => f.zone === 'C' && f.commercialKind === 'retail';
 /** Jobs at a workplace under its city's rules (see industry-scale.ts); without a city, the old sizes. */
-export const firmCapacity = (b: Building, f?: Firm, c?: City) => b.zone === 'I' ? factoryJobs(b.level, c, f ?? c?.firms.find(x => x.building === b.id)) : b.zone === 'F' ? farmStaff(b.level, c, workplaceCrop(b, f, c)) : b.zone === 'C' ? b.level === 1 ? 1 : retailCapacity(b.level).workers : 0;
+export const firmCapacity = (b: Building, f?: Firm, c?: City) => b.zone === 'I' ? factoryJobs(b.level, c, f ?? c?.firms.find(x => x.building === b.id)) : b.zone === 'F' ? farmStaff(b.level, c, workplaceCrop(b, f, c)) : b.zone === 'C' ? (b.level === 1 ? 1 : retailCapacity(b.level).workers) * tileScale(c) : 0;
 const capacity = firmCapacity;
 /** The crop a farm grows, when its city is known (sizes depend on it under real rice rules). */
 function workplaceCrop(b: Building, f: Firm | undefined, c: City | undefined): CropId | undefined {
@@ -236,7 +241,13 @@ export const employmentForFirm = (c: City, id: number): EmploymentAllocation[] =
 export const firmWorkerCount = (c: City, id: number): number => employmentForFirm(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.firmId === id).length;
 export const householdWorkerCount = (c: City, id: number): number => employmentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + c.ownerLabor.filter(e => e.householdId === id).length + parkEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + venueEmploymentForHousehold(c, id).reduce((n, e) => n + e.workers, 0) + educationOccupied(c.education, id);
 /** Rooms in a home under its city's rules: real sizes, or the old smaller ones a city saved before them keeps. */
-export const housingCapacity = (b: Building, c: { housingScale?: 1 }): HousingCapacity => b.zone !== 'R' ? { households: 0, persons: 0 } : c.housingScale === 1 ? getHousingCapacity(b.housingType!, b.level) : legacyHousingCapacity(b.housingType!, b.level);
+export const housingCapacity = (b: Building, c: { housingScale?: 1; tileScale?: number }): HousingCapacity => {
+  if (b.zone !== 'R') return { households: 0, persons: 0 };
+  if (c.housingScale !== 1) return legacyHousingCapacity(b.housingType!, b.level);
+  // A big town's home tile holds ten real homes, blocks or towers (tile-scale.ts).
+  const real = getHousingCapacity(b.housingType!, b.level), scale = tileScale(c);
+  return scale === 1 ? real : { households: real.households * scale, persons: real.persons * scale };
+};
 export const homeOccupancy = (c: City, id: number): HousingCapacity => buildOccupancyIndex(c.households).get(id) ?? { households: 0, persons: 0 };
 /**
  * Cottage levels 1–3 keep their legacy growth. From cottage 3 upward (apartment and condo tiers) a home
@@ -265,7 +276,9 @@ export function housingShortage(c: City): boolean {
 export function housingUpgradeStatus(live: City, liveBuilding: Building) {
   if (liveBuilding.zone !== 'R') throw new Error('Not a residential building.');
   const view = reviewView(live), found = view.buildings.find(x => x.id === liveBuilding.id && x.zone === 'R'), c = found ? view : live, b = found ?? liveBuilding;
-  const current = housingLevel(b.housingType!, b.level), next = HOUSING_LEVELS[b.level] ?? null;
+  // A big town's home tile is ten homes (tile-scale.ts): the panel shows what the tile holds.
+  const scale = tileScale(c), scaled = <T extends { households: number; persons: number }>(level: T): T => scale === 1 ? level : { ...level, households: level.households * scale, persons: level.persons * scale };
+  const current = scaled(housingLevel(b.housingType!, b.level)), next = HOUSING_LEVELS[b.level] ? scaled(HOUSING_LEVELS[b.level]) : null;
   const blocked: string[] = [];
   if (next) {
     const minAge = homeGrowthAge(c, b);
@@ -543,12 +556,13 @@ export function retailDemand(c: City): number {
   const producing = c.firms.some(f => (f.zone === 'I' || f.zone === 'F') && access(c, building(c, f.building).cell) && firmWorkerCount(c, f.id) > 0);
   const buyers = c.households.filter(h => householdAccess(c, h)).length;
   if (!producing || buyers < 1) return 0;
-  const shops = c.firms.filter(isCommercial), svc = utilities(c);
+  // A shop serves 8 households (80 in a big town, tile-scale.ts), and more as it staffs up.
+  const shops = c.firms.filter(isCommercial), svc = utilities(c), scale = tileScale(c), base = 8 * scale;
   const extra = shops.reduce((n,f) => {
     const b = building(c,f.building), workers = (f.inventory > 0 || f.cropInventory > 0) && access(c,b.cell) && svc.ok(b.id) ? firmWorkerCount(c,f.id) : 0;
-    return n + Math.max(0, staffedRetailCapacity(b.level, workers).householdCoverage - 8);
+    return n + Math.max(0, staffedRetailCapacity(b.level, workers, scale).householdCoverage - base);
   },0);
-  return Math.max(0, Math.ceil((buyers - 8 * shops.length - extra) / 8));
+  return Math.max(0, Math.ceil((buyers - base * shops.length - extra) / base));
 }
 /** The lowest-id connected household with 600 credits of savings and a general/retail worker that owns nothing yet. */
 function ownerCandidate(c: City): Household | undefined {
@@ -614,13 +628,18 @@ function trimWorkAssignments(c: City): void {
 
 /** Every transfer has a debit and credit. Outside is the sole permitted negative source account. */
 function transfer(c: City, from: string, to: string, amount: number, reason: string, operating = false, reservedTreasuryClaim = 0): number {
+  const paid = pay(c, from, to, amount, operating, reservedTreasuryClaim);
+  if (paid) c.ledger.push({ tick: c.tick, from, to, amount: paid, reason });
+  return paid;
+}
+/** Moves money exactly as transfer() does, without writing its ledger entry; returns what was paid. */
+function pay(c: City, from: string, to: string, amount: number, operating = false, reservedTreasuryClaim = 0): number {
   const firm = c.firms.find(f => f.wallet === from);
   const available = from === 'outside' ? amount : from === 'treasury' ? Math.min(balance(c, from), treasurySpendable(c) + reservedTreasuryClaim) : firm ? spendable(c, firm) : balance(c, from);
   const paid = Math.max(0, Math.min(Math.round(amount), available));
   if (!Number.isSafeInteger(paid) || paid === 0) return 0;
   c.accounts[from] = balance(c, from) - paid;
   c.accounts[to] = balance(c, to) + paid;
-  c.ledger.push({ tick: c.tick, from, to, amount: paid, reason });
   if (operating) {
     const seller = c.firms.find(f => f.wallet === to), buyer = c.firms.find(f => f.wallet === from);
     if (seller) seller.monthlyRevenue += paid;
@@ -628,8 +647,61 @@ function transfer(c: City, from: string, to: string, amount: number, reason: str
   }
   return paid;
 }
+/** A big town's book of household payments being collected (ledger-parts.ts), or null to write each one. */
+const householdBook = (c: City): SummaryBook | null => tileScale(c) === TILE_SCALE ? new SummaryBook() : null;
+const householdId = (wallet: string) => Number(wallet.slice('household:'.length));
+/** A payment between a household and another account: one ledger entry, or a leg of the book's summary. */
+function householdTransfer(c: City, book: SummaryBook | null, from: string, to: string, amount: number, reason: string, operating = false): number {
+  if (!book) return transfer(c, from, to, amount, reason, operating);
+  const paid = pay(c, from, to, amount, operating), fromHousehold = from.startsWith('household:');
+  book.add(householdId(fromHousehold ? from : to), fromHousehold ? to : from, fromHousehold, reason, paid);
+  return paid;
+}
+/** Writes a book's summaries, in the order their first payment came. */
+function writeSummaries(c: City, book: SummaryBook | null) {
+  for (const line of book?.lines() ?? []) c.ledger.push(line.fromHouseholds
+    ? { tick: c.tick, from: HOUSEHOLDS, to: line.other, amount: line.total, reason: line.reason, parts: line.parts }
+    : { tick: c.tick, from: line.other, to: HOUSEHOLDS, amount: line.total, reason: line.reason, parts: line.parts });
+}
 function goodsTransfer(c: City, from: string, to: string, quantity: number, reason: string, product: ProductId) {
   if (quantity > 0) c.goodsLedger.push({ tick: c.tick, from, to, quantity, reason, product });
+}
+/** Summaries of a big town's household shopping (ledger-parts.ts): money, goods, and what shops bought in for it. */
+export const HOUSEHOLD_PURCHASES = 'Household purchases', HOUSEHOLD_OTHER_SPENDING = 'Household other spending';
+/** The money summaries a big town writes (ledger-parts.ts): reason and whether the households pay (or are paid). */
+export const SUMMARY_MONEY: ReadonlyMap<string, 'pay' | 'paid'> = new Map([[HOUSEHOLD_PURCHASES, 'pay'], [HOUSEHOLD_OTHER_SPENDING, 'pay'],
+  ['Monthly wages', 'paid'], ['Monthly household wage tax', 'pay'], ['Monthly household rent', 'pay'], ['Monthly household water and power bill', 'pay']]);
+type ShoppingDay = { money: SummaryBook; goods: SummaryBook; boughtIn: Map<string, number> };
+/** A big town (tile-scale.ts) writes a day's household shopping as summaries; any other city one entry a payment. */
+const shoppingDay = (c: City): ShoppingDay | null => tileScale(c) === TILE_SCALE ? { money: new SummaryBook(), goods: new SummaryBook(), boughtIn: new Map() } : null;
+/** A household pays a shop, as transfer() would; in a big town the payment joins the day's summary for that shop. */
+function householdPays(c: City, day: ShoppingDay | null, h: Household, shop: Firm, amount: number, reason: string, summary: string): number {
+  if (!day) return transfer(c, h.wallet, shop.wallet, amount, reason, true);
+  const paid = pay(c, h.wallet, shop.wallet, amount, true);
+  day.money.add(h.id, shop.wallet, true, summary, paid);
+  return paid;
+}
+/** A household takes goods off a shop's shelf: one goods entry, or a leg of the day's summary in a big town. */
+function householdTakes(c: City, day: ShoppingDay | null, shop: Firm, h: Household, quantity: number, product: ProductId) {
+  if (!day) { goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); return; }
+  day.goods.add(h.id, shop.wallet, false, 'Household final consumption', quantity, product);
+}
+/** A shop buys in from outside what it sells a household today: one entry each, or one a shop for the day in a big town. */
+function shopBuysIn(c: City, day: ShoppingDay | null, shop: Firm, amount: number): number {
+  if (!day) return transfer(c, shop.wallet, 'outside', amount, OTHER_GOODS_BOUGHT_IN, true);
+  const paid = pay(c, shop.wallet, 'outside', amount, true);
+  if (paid) day.boughtIn.set(shop.wallet, (day.boughtIn.get(shop.wallet) ?? 0) + paid);
+  return paid;
+}
+/**
+ * Writes the day's summaries: the households' payments, then each shop's buying in (paid from them, so a replay of the
+ * shop's cash never dips below what it held), then the goods they took.
+ */
+function closeShoppingDay(c: City, day: ShoppingDay | null) {
+  if (!day) return;
+  for (const line of day.money.lines()) c.ledger.push({ tick: c.tick, from: HOUSEHOLDS, to: line.other, amount: line.total, reason: line.reason, parts: line.parts });
+  for (const [wallet, amount] of day.boughtIn) c.ledger.push({ tick: c.tick, from: wallet, to: 'outside', amount, reason: OTHER_GOODS_BOUGHT_IN });
+  for (const line of day.goods.lines()) c.goodsLedger.push({ tick: c.tick, from: line.other, to: HOUSEHOLDS, quantity: line.total, reason: line.reason, product: line.product as ProductId, parts: line.parts });
 }
 /** Move finished goods between firm shelves, keeping each firm's product mix with its total. */
 function moveProduct(c: City, from: Firm | null, to: Firm | null, product: ProductId, quantity: number) {
@@ -1109,7 +1181,7 @@ function summarize(c: City) {
   }, 0);
   const homeless = c.households.filter(h => h.home === null).length;
   // People coming to look for work (real rules) need homes too, a household a day.
-  const incoming = Math.min(MAX_CITY_HOUSEHOLDS - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2), jobSeekersComing(c, admission) ? JOB_SEEKERS_PER_DAY : 0));
+  const incoming = Math.min(MAX_CITY_HOUSEHOLDS - c.households.length, Math.max(0, 2 - c.migration.arrivals, Math.ceil(Math.max(0, admission.vacancies - availableWorkers) / 2), jobSeekersComing(c, admission) ? JOB_SEEKERS_PER_DAY * tileScale(c) : 0));
   // Open jobs people can take now (a seat and a wage the firm can pay) vs seats a firm cannot fund.
   const seats = c.firms.filter(f => access(c, building(c, f.building).cell) && svc.ok(f.building)).reduce((n, f) => n + Math.max(0, capacity(building(c, f.building), f, c) - firmWorkerCount(c, f.id)), 0);
   const farms = c.firms.filter(f => f.zone === 'F');
@@ -1233,8 +1305,9 @@ const employees = (c: City, f: Firm) => employmentForFirm(c, f.id).reduce((n, e)
  */
 function shopHiringCap(c: City, f: Firm): number {
   if (!homelessWork(c) || !isCommercial(f)) return Number.MAX_SAFE_INTEGER;
-  const staff = employees(c, f);
-  return firmWorkerCount(c, f.id) === 0 ? 1 : staff + (f.lastMonthProfit >= firmWage(f, c) ? 1 : 0);
+  // A big town's shop (tile-scale.ts) takes on up to ten at a time, one for each wage last month's profit covered.
+  const staff = employees(c, f), scale = tileScale(c);
+  return firmWorkerCount(c, f.id) === 0 ? scale : staff + Math.min(scale, Math.max(0, Math.floor(f.lastMonthProfit / firmWage(f, c))));
 }
 function employ(c: City) {
   reserveOwnerLabor(c);
@@ -1350,7 +1423,7 @@ function trade(c: City) {
   const made = realIndustry(c) ? [...PRODUCTS] : PRODUCTS.filter(p => active.some(f => f.zone === 'I' && f.recipe && (RECIPE[f.recipe].product === p || f.products[p] > 0)));
   for (const shop of active.filter(f => isCommercial(f) && firmWorkerCount(c, f.id) > 0)) {
     const people = c.households.reduce((n, h) => n + h.members, 0);
-    const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id)).stock, Math.max(4, people * 2));
+    const target = Math.min(staffedRetailCapacity(building(c, shop.building).level, firmWorkerCount(c, shop.id), tileScale(c)).stock, Math.max(4, people * 2));
     // Products sold by the kilo (real rice, sugar and canned food) keep about a week of what the town eats, and at least a
     // bag for each household, since a food bought rarely comes due for many on one day; the shelf is shared out evenly
     // between the products sold in daily baskets.
@@ -1373,6 +1446,8 @@ function trade(c: City) {
       }
     }
   }
+  // A big town keeps the day's household shopping as summaries (ledger-parts.ts), written when the day's shopping is done.
+  const day = shoppingDay(c);
   for (const h of c.households) {
     h.needs++; const unmetDays = h.needs;
     if (h.lastPurchaseTick === c.tick || !householdAccess(c, h) || balance(c, h.wallet) < 800) continue;
@@ -1393,9 +1468,9 @@ function trade(c: City) {
         if (!shop.products[product] || !canWalk(c, [homeCell], [building(c, shop.building).cell])) continue;
         const kg = Math.min(due, shop.products[product], Math.floor(balance(c, h.wallet) / spec.prices.retail));
         if (!kg) continue;
-        transfer(c, h.wallet, shop.wallet, spec.prices.retail * kg, `Household #${h.id} purchase`, true);
+        householdPays(c, day, h, shop, spec.prices.retail * kg, `Household #${h.id} purchase`, HOUSEHOLD_PURCHASES);
         moveProduct(c, shop, null, product, kg); c.goods.consumed += kg; h.lastPurchaseTick = c.tick;
-        goodsTransfer(c, shop.wallet, h.wallet, kg, 'Household final consumption', product); due -= kg;
+        householdTakes(c, day, shop, h, kg, product); due -= kg;
       }
       kilosDue += due;
     }
@@ -1410,8 +1485,8 @@ function trade(c: City) {
       otherShop = true;
       const people = Math.min(h.members - purchased, Math.floor(balance(c, h.wallet) / OTHER_SPENDING.price), Math.floor(spendable(c, shop) / OTHER_SPENDING.boughtIn));
       if (people <= 0) continue;
-      transfer(c, shop.wallet, 'outside', people * OTHER_SPENDING.boughtIn, OTHER_GOODS_BOUGHT_IN, true);
-      transfer(c, h.wallet, shop.wallet, people * OTHER_SPENDING.price, otherSpendingReason(h.id), true);
+      shopBuysIn(c, day, shop, people * OTHER_SPENDING.boughtIn);
+      householdPays(c, day, h, shop, people * OTHER_SPENDING.price, otherSpendingReason(h.id), HOUSEHOLD_OTHER_SPENDING);
       purchased += people; h.lastPurchaseTick = c.tick;
     }
     for (const shop of shops) {
@@ -1426,15 +1501,16 @@ function trade(c: City) {
           if (purchased >= h.members || balance(c, h.wallet) < 800) break;
           const quantity = Math.min(h.members - purchased, shop.products[product], Math.floor(balance(c, h.wallet) / 800));
           if (!quantity) continue;
-          transfer(c, h.wallet, shop.wallet, 800 * quantity, `Household #${h.id} purchase`, true);
+          householdPays(c, day, h, shop, 800 * quantity, `Household #${h.id} purchase`, HOUSEHOLD_PURCHASES);
           moveProduct(c, shop, null, product, quantity); c.goods.consumed += quantity; h.lastPurchaseTick = c.tick;
-          goodsTransfer(c, shop.wallet, h.wallet, quantity, 'Household final consumption', product); purchased += quantity;
+          householdTakes(c, day, shop, h, quantity, product); purchased += quantity;
         }
         while (purchased < h.members && balance(c, h.wallet) >= 800 && consumeMarketCrop(c, h, shop, sellable, hooks, true)) purchased++;
       }
     }
     h.needs = (riceKg ? kilosDue === 0 && (purchased === h.members || !otherFood && !otherShop) : purchased === h.members) ? 0 : unmetDays;
   }
+  closeShoppingDay(c, day);
   for (const f of active.filter(f => f.zone === 'I' && firmWorkerCount(c, f.id) > 0 && reach(f, 'gateway'))) {
     // A day's output a worker: 8 goods, or a real mill's kilos (1,300 kg of milled rice, 1,338 kg of sugar).
     const millSpec = realMillCrop(f, c), perWorker = millSpec ? millSpec.batchGoods * Math.floor(millLotsPerWorker(millSpec) / 2) : 8;
@@ -1485,20 +1561,23 @@ export const OTHER_SPENDING_REASON = /^Household #([1-9]\d*) other spending$/;
 /** Satang a unit of a product: a basket of goods, or a kilo of milled rice or sugar under real crop rules (industry-scale.ts). */
 export const goodsUnit = (c: IndustryRules, product: string, kind: 'wholesale' | 'import' | 'export' | 'retail'): number =>
   realProduct(product, c)?.prices[kind] ?? ({ wholesale: 350, import: 450, export: 350, retail: 800 } as const)[kind];
-function withholdWageTax(c: City, wallet: string, wage: number): void {
+function withholdWageTax(c: City, wallet: string, wage: number, book: SummaryBook | null = null): void {
   const tax = taxSatang(wage, taxRatesAt(c.taxPolicy, c.tick).wage);
-  if (transfer(c, wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Wage tax invariant violated.');
+  if (householdTransfer(c, book, wallet, 'treasury', tax, 'Monthly household wage tax') !== tax) throw new Error('Wage tax invariant violated.');
 }
 function payWages(c: City, f: Firm, onlyWallet?: string) {
+  // A big town writes a firm's month of wages, and the tax withheld from them, as two summaries (ledger-parts.ts).
+  const book = onlyWallet ? null : householdBook(c);
   for (const [wallet, days] of Object.entries(f.workDays)) {
     if (onlyWallet && wallet !== onlyWallet) continue;
     const owed = days * firmWage(f, c) / MONTH;
     // Release this claim's reserve immediately before paying it; other workers remain protected.
     delete f.workDays[wallet];
-    const wage = transfer(c, f.wallet, wallet, owed, 'Monthly wages', true);
+    const wage = householdTransfer(c, book, f.wallet, wallet, owed, 'Monthly wages', true);
     if (wage !== owed) throw new Error('Payroll reserve invariant violated.');
-    withholdWageTax(c, wallet, wage);
+    withholdWageTax(c, wallet, wage, book);
   }
+  writeSummaries(c, book);
 }
 function payParkWages(c: City, p: Park, onlyWallet?: string): void {
   for (const [wallet, days] of Object.entries(p.staffing?.workDays ?? {})) {
@@ -1592,12 +1671,14 @@ function settleMonth(c: City) {
   for (const p of c.parks) payParkWages(c, p);
   for (const site of venues(c)) payVenueWages(c, site);
   if (c.education) { payEducationWages(c); for (const payment of educationUpkeep(c.education)) transfer(c, 'treasury', 'upkeep', payment.amount, payment.reason); }
-  const worth = landValues(c);
+  const worth = landValues(c), homes = householdBook(c);
   for (const h of c.households) if (h.home !== null) {
     // Rent follows the land: better-served, cleaner parcels cost more.
-    transfer(c, h.wallet, 'landlord', householdRent(worth(building(c, h.home).cell)), 'Monthly household rent');
-    transfer(c, h.wallet, billPayee(c), householdBill(svc, h.home, c), 'Monthly household water and power bill');
+    householdTransfer(c, homes, h.wallet, 'landlord', householdRent(worth(building(c, h.home).cell)), 'Monthly household rent');
+    householdTransfer(c, homes, h.wallet, billPayee(c), householdBill(svc, h.home, c), 'Monthly household water and power bill');
   }
+  // A big town writes the month's rent and bills as one summary each (ledger-parts.ts).
+  writeSummaries(c, homes);
   // The city buys what the gateway delivered and keeps its plants running.
   // Under real prices the authorities sell to homes and shops themselves; the town buys nothing at the gateway.
   if (c.priceScale !== 1) for (const kind of UTILITY_KINDS) transfer(c, 'treasury', 'outside', svc.outside[kind] * OUTSIDE_PRICE[kind], `Outside ${kind} supply`);
@@ -1634,7 +1715,8 @@ export function departureForecast(c: City, householdId: number): DepartureForeca
   let last = c.history?.lastIncome[h.wallet] ?? 0;
   for (let i = c.ledger.length - 1; i >= 0; i--) {
     const e = c.ledger[i];
-    if (e.to === h.wallet && (isWage(e.reason) || e.reason === 'New household arrival savings')) { last = e.tick; break; }
+    // A big town's month of wages is a summary naming each household paid (ledger-parts.ts).
+    if ((e.to === h.wallet || e.to === HOUSEHOLDS && summaryHouseholds(e).includes(h.id)) && (isWage(e.reason) || e.reason === 'New household arrival savings')) { last = e.tick; break; }
   }
   const unemploymentDay = settlement(last + DEPARTURE_MONTHS * MONTH);
   return happinessDay !== null && happinessDay <= unemploymentDay
@@ -1672,7 +1754,7 @@ function reviewLabour(c: City): { retrained: number; departed: number } {
   const since = c.tick - DEPARTURE_MONTHS * MONTH, paid = new Set<string>(), recent = new Set<string>();
   for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick > since; i--) {
     const e = c.ledger[i];
-    if (isWage(e.reason)) paid.add(e.to);
+    if (isWage(e.reason)) forEachLeg(e, (_, to) => paid.add(to));
     else if (e.reason === 'New household arrival savings') recent.add(e.to);
   }
   for (const [wallet,tick] of Object.entries(c.history?.lastIncome??{})) if(tick>since) paid.add(wallet);
@@ -1851,7 +1933,7 @@ export function explainMigration(c: City, buildingId: number): string[] {
     : 'รายได้หลังหักภาษีจากงานที่ว่างยังไม่พอค่าอาหาร ค่าเช่า และค่าน้ำไฟตามเกณฑ์รับคนเข้าเมือง');
   if (facts.bootstrap) reasons.push(`สิทธิเริ่มเมืองเหลือ ${2 - c.migration.arrivals} ครัวเรือน ยกเว้นเงื่อนไขงานเริ่มต้นเท่านั้น เงินติดตัว 1,500 ฿ต้องบันทึกจากบัญชีภายนอกหนึ่งครั้งต่อครัวเรือน`);
   else reasons.push('รับใหม่เมื่อมีตำแหน่งว่างที่จ่ายค่าจ้างได้ และรายได้สุทธิคาดหมายพอค่าของใช้กับค่าเช่า โดยให้แรงงานเดิมได้งานก่อน');
-  if (realIndustry(c) && !facts.bootstrap) reasons.push(`คนนอกเมืองย้ายเข้ามาหางานวันละ ${JOB_SEEKERS_PER_DAY} ครัวเรือน แม้งานเต็มแล้ว ตราบที่คนว่างงานยังไม่ถึง ${JOB_SEEKER_UNEMPLOYMENT_LIMIT * 100}% ของแรงงาน (ตอนนี้ ${Math.round(unemploymentRate(c) * 100)}%) ${jobSeekersComing(c, facts) ? 'วันนี้ยังมีคนมา' : 'วันนี้ไม่มีคนมาเพิ่ม'}`);
+  if (realIndustry(c) && !facts.bootstrap) reasons.push(`คนนอกเมืองย้ายเข้ามาหางานวันละ ${JOB_SEEKERS_PER_DAY * tileScale(c)} ครัวเรือน แม้งานเต็มแล้ว ตราบที่คนว่างงานยังไม่ถึง ${JOB_SEEKER_UNEMPLOYMENT_LIMIT * 100}% ของแรงงาน (ตอนนี้ ${Math.round(unemploymentRate(c) * 100)}%) ${jobSeekersComing(c, facts) ? 'วันนี้ยังมีคนมา' : 'วันนี้ไม่มีคนมาเพิ่ม'}`);
   reasons.push('บ้านที่ว่างหรือมีครัวเรือนน้อยกว่าได้รับการจัดบ้านก่อนอาคารที่มีคนมาก');
   reasons.push(`ทุก ${HOUSING_RELOCATION_INTERVAL} วัน ย้ายครัวเรือนได้ไม่เกิน ${HOUSING_RELOCATION_LIMIT} ครัวเรือน ไปบ้านที่ใกล้สวนหรือโรงเรียนที่เปิดดีกว่า หรือกระจายจากบ้านที่มีมากกว่าปลายทางอย่างน้อย 2 ครัวเรือนโดยไม่ลดความใกล้สิ่งอำนวยความสะดวก ต้องมีที่ว่าง ถนน น้ำไฟ และไม่ตัดบริการอาคารอื่น`);
   reasons.push('ความสุขค่อย ๆ ปรับตามภาษี การมีงานทำ ความใกล้สวนและโรงเรียน และเส้นทางไปทำงานที่ประมาณจากถนน');
@@ -1938,7 +2020,7 @@ export const ARRIVAL_FILL_DAYS = 30;
  * before and test cities keep one seeded parcel every three days and a month to fill jobs.
  */
 export const dailyGrowth = (c: Pick<City, 'unlocks'>) => c.unlocks !== undefined;
-export const DAILY_BUILDS = 6, DAILY_ARRIVAL_FILL_DAYS = 3;
+export const DAILY_BUILDS = 6, DAILY_ARRIVAL_FILL_DAYS = 1, DAILY_ARRIVAL_SHARE = .05;
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
   // A severely unhappy city does not immediately replace every departure.
@@ -1953,21 +2035,28 @@ function admitHousehold(c: City) {
   // people come looking for work even when every job is taken (one household a day while few are out of work);
   // a city saved before keeps its one new household a day for an open job.
   const daily = dailyGrowth(c), hiring = facts.existingUnemployed > 0 ? 0 : Math.ceil(facts.vacancies / (daily ? DAILY_ARRIVAL_FILL_DAYS : ARRIVAL_FILL_DAYS));
-  const worth = landValues(c), batch = facts.bootstrap ? (daily ? 2 - c.migration.arrivals : 1) : !realIndustry(c) ? 1 : Math.max(seekers ? JOB_SEEKERS_PER_DAY : 0, hiring);
+  const seekersToday = JOB_SEEKERS_PER_DAY * tileScale(c);
+  // On the daily pace a town takes in at most a twentieth of its households a day (at least two, twenty in a big town),
+  // and only a few come before there is a home for them: a twentieth of the town at most, two in a new one.
+  const room = daily ? Math.max(2 * tileScale(c), Math.ceil(c.households.length * DAILY_ARRIVAL_SHARE)) : Number.MAX_SAFE_INTEGER;
+  let homeless = daily ? c.households.filter(h => h.home === null).length : 0;
+  const homelessRoom = Math.max(2, Math.floor(c.households.length * DAILY_ARRIVAL_SHARE));
+  const worth = landValues(c), batch = facts.bootstrap ? (daily ? 2 - c.migration.arrivals : 1) : !realIndustry(c) ? 1 : Math.min(room, Math.max(seekers ? seekersToday : 0, hiring));
   for (let n = 0; n < batch; n++) {
     if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
     if (c.households.length >= MAX_CITY_HOUSEHOLDS || (!facts.bootstrap && !seekers && facts.vacancies < 1)) return;
     // With no job open, the newcomer is a single person come to look for work on their savings. Under real rules people
     // also come looking when the open jobs pay less than a newcomer hired for them would need: they take the work there is.
     const searching = seekers && (facts.vacancies < 1 || facts.existingUnemployed > 0), hired = searching ? null : arrivalProfile(c, facts);
-    const seeking = searching || (seekers && !hired!.affordable && n < JOB_SEEKERS_PER_DAY);
+    const seeking = searching || (seekers && !hired!.affordable && n < seekersToday);
     const { members, workforce, workerSkills, affordable } = seeking ? { members: 1, workforce: 1, workerSkills: { general: 1, manufacturing: 0, retail: 0 }, affordable: true } : hired!;
     if (!affordable) return;
     const svc = utilities(c), occupied = buildOccupancyIndex(c.households);
     const fitting = vacantHomes(c).filter(b => canAccommodate(housingCapacity(b, c), occupied.get(b.id) ?? { households: 0, persons: 0 }, members) && homeSupplied(c, b, svc));
     const home = fitting.reduce<Building | undefined>((best, b) => !best || worth(b.cell) > worth(best.cell) ? b : best, undefined);
     // The first two households of a town still need a home to come to.
-    if (!home && (facts.bootstrap || !homelessWork(c))) return;
+    if (!home && (facts.bootstrap || !homelessWork(c) || daily && homeless >= homelessRoom)) return;
+    if (!home) homeless++;
     const id = c.nextId, wallet = `household:${id}`;
     // Outside is an explicit source. No existing family wallet or earned claim is duplicated.
     if (transfer(c, 'outside', wallet, 150_000, 'New household arrival savings') !== 150_000) return;
@@ -1989,7 +2078,7 @@ function admitHousehold(c: City) {
 }
 /** The lowest-index vacant C parcel a shop could use: road frontage, utilities and the usual caps. */
 export function shopSite(c: City): number | null {
-  if (!fits(utilities(c).spare, buildingNeed('C', 1)) || !canAllocateIds(c, 2) || c.buildings.length >= MAX_CITY_BUILDINGS || c.firms.length >= MAX_CITY_FIRMS) return null;
+  if (!fits(utilities(c).spare, buildingNeed('C', 1, 0, c)) || !canAllocateIds(c, 2) || c.buildings.length >= MAX_CITY_BUILDINGS || c.firms.length >= MAX_CITY_FIRMS) return null;
   const i = c.cells.findIndex((cell, i) => cell.zone === 'C' && cell.building === null && access(c, i));
   return i < 0 ? null : i;
 }
@@ -2005,7 +2094,7 @@ export function commercialGrowthStatus(live: City, liveFirm: Firm) {
   const b=building(c,f.building), nextLevel=b.level<RETAIL_MAX_LEVEL?b.level+1:null, workers=firmWorkerCount(c,f.id);
   const reasons=nextLevel===null?[]:commercialGrowthReasons(c,f);
   if(nextLevel!==null&&!reasons.length&&reviewGrows(live,b)===false)reasons.push(SPARE_TAKEN);
-  return {level:b.level,maximum:RETAIL_MAX_LEVEL,nextLevel,cost:20_000,requiredSpendable:40_000,reasons,workers,current:retailCapacity(b.level),staffed:staffedRetailCapacity(b.level,workers)};
+  return {level:b.level,maximum:RETAIL_MAX_LEVEL,nextLevel,cost:20_000,requiredSpendable:40_000,reasons,workers,current:retailCapacity(b.level,tileScale(c)),staffed:staffedRetailCapacity(b.level,workers,tileScale(c))};
 }
 export const marketGrowthStatus = commercialGrowthStatus;
 function commercialGrowthReasons(c: City, f: Firm): string[] {
@@ -2023,7 +2112,7 @@ function commercialGrowthReasons(c: City, f: Firm): string[] {
 /** Current conditions are a preview: other buildings may use spare utilities first at review. */
 export function retailGrowthStatus(live: City, f: Firm) {
   const status=commercialGrowthStatus(live,f);
-  return {...status,next:status.nextLevel===null?null:retailCapacity(status.nextLevel)};
+  return {...status,next:status.nextLevel===null?null:retailCapacity(status.nextLevel,tileScale(live))};
 }
 /** Read-only preview of the existing monthly upgrade gates; does not allocate spare utilities. */
 export function productionUpgradeStatus(live: City, liveFirm: Firm) {
@@ -2492,7 +2581,15 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   for (const f of c.firms) if (firmWorkerCount(c, f.id) > capacity(building(c, f.building), f, c) || Object.values(f.workDays).reduce((n, days) => n + days, 0) > capacity(building(c, f.building), f, c) * (c.tick % MONTH)) fail();
   if (c.goods.produced + c.goods.imported - c.goods.consumed - c.goods.exported !== c.firms.reduce((n, f) => n + f.inventory, 0)) fail();
   if (!Array.isArray(historicalLedger) || !Array.isArray(c.goodsLedger)) fail();
-  for (const e of historicalLedger) if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || !Object.hasOwn(c.accounts, e.from) || !Object.hasOwn(c.accounts, e.to) || e.from === e.to) fail();
+  // A big town's daily household summary (ledger-parts.ts) names HOUSEHOLDS on one side and each household's wallet in its parts.
+  const bigTown = tileScale(c) === TILE_SCALE, account = (wallet: string) => Object.hasOwn(c.accounts, wallet);
+  for (const e of historicalLedger) {
+    if (!e || !int(e.tick) || e.tick > c.tick || !int(e.amount, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || e.from === e.to || !validSummary(e)) fail();
+    if (e.parts === undefined) { if (!account(e.from) || !account(e.to)) fail(); continue; }
+    const side = SUMMARY_MONEY.get(e.reason);
+    if (!bigTown || !side || (side === 'pay') !== (e.from === HOUSEHOLDS)) fail();
+    forEachLeg(e, (from, to) => { if (!account(from) || !account(to)) fail(); });
+  }
   const expansionFunding = new Map<number, Entry>(), bootstrapFunding = new Map<number, Entry>(), outsideFunding = new Map<number, Entry>(), ownerFunding = new Map<number, Entry>();
   // Factories are funded after growth starts. A city started in the game builds what the player places at once, so its
   // first factory can be funded on the day growth starts, and every factory it opens is checked against that funding.
@@ -2578,17 +2675,22 @@ function validateV7(c: City, version: 7 | 8 | 9 = 7, withParks = false, withStaf
   const goodsBalances: Record<string, number> = {...c.history?.goodsBalances};
   let {produced,imported,consumed,exported}=c.history?.goodsTotals??{produced:0,imported:0,consumed:0,exported:0};
   for (const e of c.goodsLedger) {
-    if (!e || !int(e.tick) || e.tick > c.tick || !int(e.quantity, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || e.from === e.to || !/^(production|outside|firm:\d+)$/.test(e.from) || !/^(outside|firm:\d+|household:\d+)$/.test(e.to) || (e.from !== 'production' && !(e.from in c.accounts)) || !(e.to in c.accounts)) fail();
-    goodsBalances[e.from] = (goodsBalances[e.from] ?? 0) - e.quantity;
-    goodsBalances[e.to] = (goodsBalances[e.to] ?? 0) + e.quantity;
-    if (e.from === 'production') produced += e.quantity;
-    if (e.from === 'outside') imported += e.quantity;
-    if (e.to.startsWith('household:')) consumed += e.quantity;
-    if (e.to === 'outside') exported += e.quantity;
+    if (!e || !int(e.tick) || e.tick > c.tick || !int(e.quantity, 1) || typeof e.reason !== 'string' || typeof e.from !== 'string' || typeof e.to !== 'string' || e.from === e.to || !/^(production|outside|firm:\d+)$/.test(e.from) || !/^(outside|firm:\d+|household:\d+|households)$/.test(e.to) || (e.from !== 'production' && !(e.from in c.accounts)) || !validSummary(e)) fail();
+    // A big town's summary of what households took off a shop's shelf (ledger-parts.ts).
+    if (e.parts !== undefined && (!bigTown || e.to !== HOUSEHOLDS || e.reason !== 'Household final consumption')) fail();
+    forEachLeg(e, (from, to, quantity) => {
+      if (!(to in c.accounts)) fail();
+      goodsBalances[from] = (goodsBalances[from] ?? 0) - quantity;
+      goodsBalances[to] = (goodsBalances[to] ?? 0) + quantity;
+      if (from === 'production') produced += quantity;
+      if (from === 'outside') imported += quantity;
+      if (to.startsWith('household:')) consumed += quantity;
+      if (to === 'outside') exported += quantity;
+    });
   }
   if (produced !== c.goods.produced || imported !== c.goods.imported || consumed !== c.goods.consumed || exported !== c.goods.exported || c.firms.some(f => (goodsBalances[f.wallet] ?? 0) !== f.inventory) || Object.entries(goodsBalances).some(([wallet, amount]) => wallet.startsWith('firm:') && !c.firms.some(f => f.wallet === wallet) && amount !== 0)) fail();
   const reconciled: Record<string, number> = Object.fromEntries(Object.keys(c.accounts).map(k => [k, c.history?.accounts[k]??0]));
-  for (const e of c.ledger) { reconciled[e.from] -= e.amount; reconciled[e.to] += e.amount; }
+  for (const e of c.ledger) forEachLeg(e, (from, to, amount) => { reconciled[from] -= amount; reconciled[to] += amount; });
   if (Object.entries(c.accounts).some(([key, value]) => reconciled[key] !== value)) fail();
   validateMunicipalRefunds(c);
   validateAgriculture(c, extendedFactories, withFarmLevels);
@@ -2786,6 +2888,8 @@ export function deserialize(json: string): City {
   if (city.housingScale !== undefined && city.housingScale !== 1) throw new Error('Invalid housing scale.');
   if (city.wageScale !== undefined && city.wageScale !== 1) throw new Error('Invalid wage scale.');
   if (city.priceScale !== undefined && city.priceScale !== 1) throw new Error('Invalid price scale.');
+  // A big town (tile-scale.ts) is a city started in the game on real sizes; everywhere else the field is absent.
+  if (city.tileScale !== undefined && (city.tileScale !== TILE_SCALE || city.unlocks === undefined || city.housingScale !== 1 || !realIndustry(city))) throw new Error('Invalid tile scale.');
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.

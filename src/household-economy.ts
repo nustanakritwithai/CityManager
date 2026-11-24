@@ -5,6 +5,7 @@
  */
 import { MONTH, isWageReason, type City } from './sim.ts';
 import { isIncidentReason } from './incidents.ts';
+import { ledgerRows } from './ledger-parts.ts';
 
 export const INCOME_KINDS = ['wages', 'business', 'other'] as const;
 export const SPENDING_KINDS = ['shopping', 'rent', 'tax', 'utilities', 'travel', 'leisure', 'business', 'incidents', 'other'] as const;
@@ -60,8 +61,9 @@ export function householdEconomy(city: Pick<City, 'ledger' | 'tick' | 'household
   const spending = Object.fromEntries(SPENDING_KINDS.map(k => [k, 0])) as Record<SpendingKind, number>;
   let arrived = 0, departed = 0;
   const earned = new Map<string, number>(), spent = new Map<string, number>(), bills = new Map<string, number>();
-  for (let i = city.ledger.length - 1; i >= 0; i--) {
-    const e = city.ledger[i];
+  const rows = ledgerRows(city.ledger);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const e = rows[i];
     if (e.tick < fromTick) break;
     if (e.tick > city.tick || e.amount <= 0 || e.from === e.to) continue;
     if (e.reason === ARRIVAL_REASON) { arrived += e.amount; continue; }

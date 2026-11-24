@@ -4,9 +4,10 @@ import type { CityHistory } from './city-history-types.ts';
 import { FACTORY_MAX_WORKERS } from './factory-levels.ts';
 import { factoryCrops, factoryJobs, farmMaxLevel, farmStaff, farmStock, realCrop, realIndustry, realProduct, realHarvest, millJobsFor, millLotsPerWorker, bagsToday, REAL_CROPS } from './industry-scale.ts';
 /** Read-only reconciliation for the agriculture extension, after base-city validation. */
-import { MONTH, wagesFor, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, INDUSTRY_STARTUP_CAPITAL, type City, type CropEntry, type Firm } from './sim.ts';
+import { MONTH, wagesFor, farmCrop, goodsUnit, isMarket, isRetail, OTHER_SPENDING, OTHER_GOODS_BOUGHT_IN, OTHER_SPENDING_REASON, HOUSEHOLD_PURCHASES, HOUSEHOLD_OTHER_SPENDING, INDUSTRY_STARTUP_CAPITAL, type City, type CropEntry, type Firm } from './sim.ts';
 import { CHAIN_CROP_PRICES, CROP_EXPORT, CROP_STOCK_CAPS, FARM_STOCK_BY_LEVEL, farmStockCapacity, isCanonicalResourceMap, isSafeCount, isViableFarmland, releaseCropCost, safeAdd, harvestYield } from './agriculture.ts';
 import { RECIPE } from './goods.ts';
+import { forEachLeg, HOUSEHOLDS } from './ledger-parts.ts';
 import { developmentShare, ownerProfitHistory } from './owner-profit.ts';
 import { taxAmount, taxRatesAt } from './city-tax-policy.ts';
 
@@ -110,16 +111,17 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
     // worker-days can be produced. Departed household wallets remain valid,
     // and closure/emigration may settle wages before month end.
     for (const [i,e] of c.ledger.entries()) if (e.reason === 'Monthly wages' && firms.get(e.from)?.zone === 'C' && unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i)) {
-      requireThat(isSafeCount(e.amount,1) && e.amount % (wagesFor(c).C / MONTH) === 0 && /^household:[1-9]\d*$/.test(e.to) && Object.hasOwn(c.accounts,e.to));
+      // A big town's month of a shop's wages is one summary: each household's share is checked as its own entry would be.
+      forEachLeg(e, (_, to, amount) => requireThat(isSafeCount(amount,1) && amount % (wagesFor(c).C / MONTH) === 0 && /^household:[1-9]\d*$/.test(to) && Object.hasOwn(c.accounts,to)));
     }
     const goodsSales = new Map<string, number>(), cashSales = new Map<string, number>();
     const goodsPurchases = new Map<string, number>(), cashPurchases = new Map<string, number>();
     const saleKey = (tick: number, from: string, to: string) => `${tick}:${from}:${to}`;
-    for (const [i,e] of c.goodsLedger.entries()) if (unifiedEvent(c,e.tick,'goodsEntries',(history?.goodsOffset ?? 0)+i) && firms.get(e.from)?.zone === 'C' && e.to.startsWith('household:')) {
+    for (const [i,e] of c.goodsLedger.entries()) if (unifiedEvent(c,e.tick,'goodsEntries',(history?.goodsOffset ?? 0)+i) && firms.get(e.from)?.zone === 'C' && (e.to.startsWith('household:') || e.to === HOUSEHOLDS)) {
       requireThat(e.reason === 'Household final consumption');
-      const key = saleKey(e.tick,e.from,e.to);
       // Sales are compared in satang: a basket at 800, or a kilo of milled rice at its retail price (industry-scale.ts).
-      goodsSales.set(key, safeAdd(goodsSales.get(key) ?? 0,e.quantity * goodsUnit(c, e.product ?? '', 'retail')));
+      // A big town's summary (ledger-parts.ts) counts each household's own sale.
+      forEachLeg(e, (from, to, quantity) => { const key = saleKey(e.tick,from,to); goodsSales.set(key, safeAdd(goodsSales.get(key) ?? 0,quantity * goodsUnit(c, e.product ?? '', 'retail'))); });
     }
     for (const [i,e] of c.goodsLedger.entries()) if (unifiedEvent(c,e.tick,'goodsEntries',(history?.goodsOffset ?? 0)+i) && firms.get(e.to)?.zone === 'C') {
       if (e.reason === 'Wholesale stock delivery' || e.reason === 'Imported shop stock') {
@@ -140,6 +142,16 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
       const key = saleKey(e.tick,e.from,'outside'); otherBought.set(key,safeAdd(otherBought.get(key) ?? 0,e.amount / OTHER_SPENDING.boughtIn));
     }
     for (const [i,e] of c.ledger.entries()) if (unifiedEvent(c,e.tick,'moneyEntries',(history?.moneyCount ?? 0)+i) && firms.get(e.to)?.zone === 'C') {
+      // A big town's day of household purchases or other spending at the shop, one leg a household (ledger-parts.ts).
+      if (e.parts !== undefined) {
+        const otherSpending = e.reason === HOUSEHOLD_OTHER_SPENDING;
+        requireThat(realIndustry(c) && e.from === HOUSEHOLDS && (otherSpending ? !isMarket(firms.get(e.to)!) : e.reason === HOUSEHOLD_PURCHASES));
+        forEachLeg(e, (from, to, amount) => {
+          if (otherSpending) { requireThat(amount % OTHER_SPENDING.price === 0); const key = saleKey(e.tick,to,'outside'); otherSold.set(key,safeAdd(otherSold.get(key) ?? 0,amount / OTHER_SPENDING.price)); }
+          else { const key = saleKey(e.tick,to,from); cashSales.set(key,safeAdd(cashSales.get(key) ?? 0,amount)); }
+        });
+        continue;
+      }
       const m = /^Household #([1-9]\d*) purchase$/.exec(e.reason), other = OTHER_SPENDING_REASON.exec(e.reason);
       if (other) {
         requireThat(realIndustry(c) && e.from === `household:${other[1]}` && !isMarket(firms.get(e.to)!) && e.amount % OTHER_SPENDING.price === 0);
@@ -236,17 +248,19 @@ function replayAgriculture(c: City, extendedFactories: boolean, withFarmLevels: 
   };
   // Under real crop rules rice and sugar are bought by the kilo outside the daily basket: at most the day's ration (industry-scale.ts).
   const riceKilos = new Map<string, number>();
-  for (const e of c.goodsLedger) if (e.tick > c.agricultureStartTick && (captureTick === undefined || e.tick <= captureTick) && e.to.startsWith('household:')) {
+  for (const entry of c.goodsLedger) if (entry.tick > c.agricultureStartTick && (captureTick === undefined || entry.tick <= captureTick) && (entry.to.startsWith('household:') || entry.to === HOUSEHOLDS)) forEachLeg(entry, (_, to, quantity) => {
+    // A big town's summary (ledger-parts.ts) is checked one household at a time, as separate entries are.
+    const e = { tick: entry.tick, to, quantity, product: entry.product };
     const spec = e.product !== undefined ? realProduct(e.product, c) : undefined;
     if (spec) {
       requireThat(isSafeCount(e.quantity, 1)); const key = e.tick + ':' + e.to + ':' + e.product, kg = (riceKilos.get(key) ?? 0) + e.quantity, household = households.get(Number(e.to.slice(10)));
       requireThat(!household || kg <= bagsToday(spec, household.members, e.tick)); riceKilos.set(key, kg);
       latestPurchase.set(e.to, Math.max(e.tick, latestPurchase.get(e.to) ?? -1));
     } else basket(e.tick, e.to, e.quantity);
-  }
+  });
   // Real rules: a household's other spending counts its people against the day's basket, as goods and market crops do.
-  for (const e of c.ledger) if (e.tick > c.agricultureStartTick && (captureTick === undefined || e.tick <= captureTick) && OTHER_SPENDING_REASON.test(e.reason)) {
-    requireThat(e.amount % OTHER_SPENDING.price === 0); basket(e.tick, e.from, e.amount / OTHER_SPENDING.price);
+  for (const e of c.ledger) if (e.tick > c.agricultureStartTick && (captureTick === undefined || e.tick <= captureTick) && (OTHER_SPENDING_REASON.test(e.reason) || e.parts !== undefined && e.reason === HOUSEHOLD_OTHER_SPENDING)) {
+    forEachLeg(e, (from, _, amount) => { requireThat(amount % OTHER_SPENDING.price === 0); basket(e.tick, from, amount / OTHER_SPENDING.price); });
   }
   let previousTick = history?.throughTick ?? c.agricultureStartTick, day = -1, postCrop = false;
   let sellable = new Map<string, number>();
@@ -443,7 +457,7 @@ function validateOwnerFinance(c: City, f: Firm, operating: Operating[], unified 
   c.ledger.forEach((e, i) => {
     if (e.from === f.wallet && e.reason === 'Monthly firm rent') { requireThat(e.to === 'landlord'); rows.push({ tick: e.tick, revenue: 0, expense: e.amount, moneyIndex: i }); }
     // Unified firms account for finished goods and paid employee wages as well.
-    if (unified && (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import' || e.reason === 'Outside market goods export' || /^Household #\d+ purchase$/.test(e.reason) || e.reason === 'Monthly wages' || e.reason === OTHER_GOODS_BOUGHT_IN || OTHER_SPENDING_REASON.test(e.reason))) {
+    if (unified && (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import' || e.reason === 'Outside market goods export' || /^Household #\d+ purchase$/.test(e.reason) || e.reason === 'Monthly wages' || e.reason === OTHER_GOODS_BOUGHT_IN || OTHER_SPENDING_REASON.test(e.reason) || e.parts !== undefined && (e.reason === HOUSEHOLD_PURCHASES || e.reason === HOUSEHOLD_OTHER_SPENDING))) {
       if (e.from === f.wallet) rows.push({ tick:e.tick, revenue:0, expense:e.amount, moneyIndex:i });
       else if (e.to === f.wallet) rows.push({ tick:e.tick, revenue:e.amount, expense:0, moneyIndex:i });
     }
