@@ -15,6 +15,7 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Road is outside the bounded map\.$/, () => 'ถนนอยู่นอกแผนที่'],
   [/^Zone cleared\.$/, () => 'ล้างโซนแล้ว'],
   [/^([RCIF]) zone marked\. Growth is evaluated every 3 days\.$/, m => `วางโซน${zone(m[1])}แล้ว ระบบทบทวนการเติบโตทุก 3 วัน`],
+  [/^([RCIF]) zone marked\. Ready parcels are built every night\.$/, m => `วางโซน${zone(m[1])}แล้ว เมืองสร้างอาคารให้ตอนเที่ยงคืนเมื่อแปลงพร้อม`],
   [/^([RCIF]) zone marked, but no connected road frontage\./, m => `วางโซน${zone(m[1])}แล้ว แต่ยังไม่มีถนนข้างแปลงที่เชื่อมประตูเมือง`],
   [/^Road cells cannot be zoned\.$/, () => 'ถนนวางโซนไม่ได้'],
   [/^Bulldoze the existing building before rezoning\.$/, () => 'ต้องรื้ออาคารเดิมก่อนเปลี่ยนโซน'],

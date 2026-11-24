@@ -35,7 +35,7 @@ export function hourActivity(minuteOfDay: number, counts: DayCounts, parkVisitor
   const workers = counts.farm + counts.factory + counts.shop + counts.service;
   const start = WORK_START_MINUTE / 60, end = WORK_END_MINUTE / 60;
   // A town nobody has moved into yet only keeps the time.
-  const at = (icon: string, title: string, detail: string): HourActivity => ({ hour, clock, icon, title, detail: counts.people ? detail : 'ยังไม่มีคนย้ายเข้าเมือง' });
+  const at = (icon: string, title: string, detail: string): HourActivity => ({ hour, clock, icon, title, detail: counts.people ? detail : 'ยังไม่มีคน · ครอบครัวแรกมาตอนเที่ยงคืนเมื่อมีบ้านติดถนน' });
   const park = parkVisitors ? ` · ในสวน ${n(parkVisitors)} คน` : '';
   const study = counts.students ? ` · เรียน ${n(counts.students)} คน` : '';
   if (hour < 5) return at('moon', 'นอนหลับ', `${n(counts.people)} คนนอนหลับอยู่บ้าน`);
