@@ -50,16 +50,13 @@
  */
 import { factoryLevel, FACTORY_MAX_LEVEL } from './factory-levels.ts';
 import { farmStockCapacity, FARM_MAX_LEVEL, REAL_FARM_MAX_LEVEL, REAL_FARM_STORES, MAX_REAL_FACTORY_CROPS } from './agriculture.ts';
-import { TILE_SCALE, tileScale, type TileRules } from './tile-scale.ts';
 
-export type IndustryRules = { industryScale?: 1 } & TileRules;
+export type IndustryRules = { industryScale?: 1 };
 export const realIndustry = (c: IndustryRules | undefined): boolean => c?.industryScale === 1;
 export const RAI_PER_FARM_TILE = 100;
 
 type Prices = Readonly<{ wholesale: number; retail: number; import: number; export: number }>;
 type RealCrop = Readonly<{
-  /** Rai a farm tile stands for: 100, or 1,000 in a big town (tile-scale.ts). */
-  raiPerTile: number;
   kgPerLot: number; kgPerRai: readonly number[]; cropsPerYear: readonly number[]; hands: readonly number[]; storeDays: number;
   recipe: string; product: string; millTonnesPerDay: readonly number[]; millTonnesPerWorker: number;
   /** Two lots of crop give `goods` kg of product. */ batchGoods: number; gramsPerPersonDay: number; prices: Prices;
@@ -70,7 +67,7 @@ type RealCrop = Readonly<{
 }>;
 export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
   rice: Object.freeze({
-    raiPerTile: RAI_PER_FARM_TILE, kgPerLot: 10, kgPerRai: [413, 413, 413, 500, 600, 700, 800, 900, 1000], cropsPerYear: [1, 2, 3, 3, 3, 3, 3, 3, 3], hands: [1, 2, 3, 3, 3, 3, 3, 3, 3], storeDays: 60,
+    kgPerLot: 10, kgPerRai: [413, 413, 413, 500, 600, 700, 800, 900, 1000], cropsPerYear: [1, 2, 3, 3, 3, 3, 3, 3, 3], hands: [1, 2, 3, 3, 3, 3, 3, 3, 3], storeDays: 60,
     recipe: 'rice-mill', product: 'milled-rice', millTonnesPerDay: [2, 5, 10, 20, 30, 40, 60, 80, 100], millTonnesPerWorker: 2,
     batchGoods: 13, gramsPerPersonDay: 200,
     // White rice 5%: about 12.5 baht a kilo wholesale (Thai Rice Mills Association, 1,200–1,310 baht a 100 kg in 2025),
@@ -84,7 +81,7 @@ export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
     inputsPerRai: 1500, millCostPerKg: 6,
   }),
   sugarcane: Object.freeze({
-    raiPerTile: RAI_PER_FARM_TILE, kgPerLot: 56, kgPerRai: [8000, 9000, 10000, 12000, 14000, 16000, 18000, 20000, 25000], cropsPerYear: [1, 1, 1, 1, 1, 1, 1, 1, 1], hands: [4, 4, 4, 4, 4, 4, 4, 4, 4], storeDays: 3,
+    kgPerLot: 56, kgPerRai: [8000, 9000, 10000, 12000, 14000, 16000, 18000, 20000, 25000], cropsPerYear: [1, 1, 1, 1, 1, 1, 1, 1, 1], hands: [4, 4, 4, 4, 4, 4, 4, 4, 4], storeDays: 3,
     recipe: 'sugar-mill', product: 'sugar', millTonnesPerDay: [25, 50, 100, 250, 500, 1000, 2500, 5000, 10000], millTonnesPerWorker: 25,
     batchGoods: 12, gramsPerPersonDay: 82,
     // White sugar leaves the mill at 21 baht a kilo (Office of the Cane and Sugar Board, October 2025); about 25 retail,
@@ -97,7 +94,7 @@ export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
     inputsPerRai: 5000, millCostPerKg: 23,
   }),
   vegetables: Object.freeze({
-    raiPerTile: RAI_PER_FARM_TILE, kgPerLot: 4, kgPerRai: [1200, 1200, 1200, 1500, 2000, 2500, 3000, 5000, 12000], cropsPerYear: [3, 4, 5, 5, 5, 5, 6, 8, 8], hands: [25, 33, 42, 42, 42, 42, 42, 42, 42], storeDays: 3,
+    kgPerLot: 4, kgPerRai: [1200, 1200, 1200, 1500, 2000, 2500, 3000, 5000, 12000], cropsPerYear: [3, 4, 5, 5, 5, 5, 6, 8, 8], hands: [25, 33, 42, 42, 42, 42, 42, 42, 42], storeDays: 3,
     recipe: 'cannery', product: 'canned-food', millTonnesPerDay: [2, 5, 10, 20, 50, 100, 200, 300, 500], millTonnesPerWorker: .5,
     batchGoods: 10, gramsPerPersonDay: 10,
     // A 425 g can of vegetables sells for about 25 baht: 59 a kilo retail, 45 wholesale, 48 imported and 33 for export
@@ -109,26 +106,18 @@ export const REAL_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze({
     inputsPerRai: 4800, millCostPerKg: 99,
   }),
 });
-/**
- * The same crops in a big town (tile-scale.ts): a tile is ten times the land with ten times the hands, and a mill ten
- * times the capacity, so its jobs and store follow. Yields, prices and costs a kilo are the real ones.
- */
-export const BIG_TOWN_CROPS: Readonly<Record<string, RealCrop>> = Object.freeze(Object.fromEntries(Object.entries(REAL_CROPS).map(([crop, spec]) => [crop, Object.freeze({
-  ...spec, raiPerTile: spec.raiPerTile * TILE_SCALE, hands: Object.freeze(spec.hands.map(n => n * TILE_SCALE)), millTonnesPerDay: Object.freeze(spec.millTonnesPerDay.map(t => t * TILE_SCALE)),
-})])));
-const cropsOf = (c: IndustryRules | undefined) => tileScale(c) === TILE_SCALE ? BIG_TOWN_CROPS : REAL_CROPS;
 const cropOfRecipe = new Map(Object.entries(REAL_CROPS).map(([crop, spec]) => [spec.recipe, crop]));
 const cropOfProduct = new Map(Object.entries(REAL_CROPS).map(([crop, spec]) => [spec.product, crop]));
 
 /** The highest level a farm reaches: 9 for real crops (7–9 high-tech), 6 under the old rules. */
 export const farmMaxLevel = (c: IndustryRules | undefined): number => realIndustry(c) ? REAL_FARM_MAX_LEVEL : FARM_MAX_LEVEL;
 /** The real crop a farm grows or a mill processes, under real rules; undefined for the old rules or other crops. */
-export const realCrop = (crop: string | undefined, c: IndustryRules | undefined): RealCrop | undefined => realIndustry(c) && crop !== undefined ? cropsOf(c)[crop] : undefined;
-export const realMillCrop = (f: FirmShape, c: IndustryRules | undefined): RealCrop | undefined => f.zone === 'I' && f.recipe !== undefined && realIndustry(c) ? cropsOf(c)[cropOfRecipe.get(f.recipe) ?? ''] : undefined;
-export const realProduct = (product: string, c: IndustryRules | undefined): RealCrop | undefined => realIndustry(c) ? cropsOf(c)[cropOfProduct.get(product) ?? ''] : undefined;
+export const realCrop = (crop: string | undefined, c: IndustryRules | undefined): RealCrop | undefined => realIndustry(c) && crop !== undefined ? REAL_CROPS[crop] : undefined;
+export const realMillCrop = (f: FirmShape, c: IndustryRules | undefined): RealCrop | undefined => f.zone === 'I' && f.recipe !== undefined && realIndustry(c) ? REAL_CROPS[cropOfRecipe.get(f.recipe) ?? ''] : undefined;
+export const realProduct = (product: string, c: IndustryRules | undefined): RealCrop | undefined => realIndustry(c) ? REAL_CROPS[cropOfProduct.get(product) ?? ''] : undefined;
 
 /** Lots a fully staffed farm of this level harvests in a year. */
-export const realLotsPerYear = (spec: RealCrop, level: number): number => Math.floor(spec.raiPerTile * spec.kgPerRai[level - 1] * spec.cropsPerYear[level - 1] / spec.kgPerLot);
+export const realLotsPerYear = (spec: RealCrop, level: number): number => Math.floor(RAI_PER_FARM_TILE * spec.kgPerRai[level - 1] * spec.cropsPerYear[level - 1] / spec.kgPerLot);
 /** Lots harvested on `tick`: the year spread evenly over its days in whole lots, so every year adds up exactly. */
 export function realHarvest(spec: RealCrop, level: number, tick: number, hands: number): number {
   const year = realLotsPerYear(spec, level), need = spec.hands[level - 1], working = Math.min(need, hands), per = 365 * need;
@@ -172,10 +161,10 @@ export function factoryUtilities(level: number, _c: IndustryRules | undefined): 
 export const farmStaff = (level: number, c: IndustryRules | undefined, crop?: string): number => { const spec = realCrop(crop, c); return spec ? spec.hands[level - 1] : level; };
 export const farmStock = (level: number, c: IndustryRules | undefined, crop?: string): number => { const spec = realCrop(crop, c); return spec ? realFarmStore(spec, level) : farmStockCapacity(level); };
 
-/** The most crop lots any real mill can hold, in a big town too (validation bound). */
-export const MAX_FACTORY_CROPS = Math.max(...[REAL_CROPS, BIG_TOWN_CROPS].flatMap(crops => Object.values(crops)).map(spec => millStoreFor(spec, FACTORY_MAX_LEVEL)));
+/** The most crop lots any real mill can hold (validation bound). */
+export const MAX_FACTORY_CROPS = Math.max(...Object.values(REAL_CROPS).map(spec => millStoreFor(spec, FACTORY_MAX_LEVEL)));
 // agriculture.ts validates stores without importing this module; keep its copies in step.
-const stores = [REAL_CROPS, BIG_TOWN_CROPS].flatMap(crops => Object.values(crops)).flatMap(spec => [1, 2, 3, 4, 5, 6, 7, 8, 9].map(level => realFarmStore(spec, level)));
+const stores = Object.values(REAL_CROPS).flatMap(spec => [1, 2, 3, 4, 5, 6, 7, 8, 9].map(level => realFarmStore(spec, level)));
 if (MAX_FACTORY_CROPS !== MAX_REAL_FACTORY_CROPS || stores.some(s => !REAL_FARM_STORES.includes(s)) || REAL_FARM_STORES.length !== stores.length) throw new Error('Real crop stores out of step with agriculture.ts');
 
 // Rice names kept for callers and tests written for the first real crop.

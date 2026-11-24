@@ -8,19 +8,13 @@ export const FARM_STOCK_BY_LEVEL = [0, 96, 96, 96, 120, 144, 168] as const;
 export const FARM_MAX_LEVEL = 6;
 /** Real crops (industry-scale.ts) grow on to high-tech levels 7–9, which need a worker with a university degree. */
 export const REAL_FARM_MAX_LEVEL = 9;
-/** The largest real mill's store (industry-scale.ts): two days of a big town's 100,000 t sugar mill's 56 kg lots. */
-export const MAX_REAL_FACTORY_CROPS = 3_571_428;
-/**
- * Real farm yards by level 1–9 (industry-scale.ts realFarmStore): rice, sugarcane, then vegetables, on a 100-rai tile
- * and then on a big town's 1,000-rai tile (tile-scale.ts).
- */
+/** The largest real mill's store (industry-scale.ts): two days of a 10,000 t sugar mill's 56 kg lots. */
+export const MAX_REAL_FACTORY_CROPS = 357_142;
+/** Real 100-rai farm yards by level 1–9 (industry-scale.ts realFarmStore): rice, sugarcane, then vegetables. */
 export const REAL_FARM_STORES: readonly number[] = Object.freeze([
   679, 1358, 2037, 2466, 2959, 3453, 3946, 4439, 4932,
   118, 133, 147, 177, 206, 235, 265, 294, 367,
   740, 987, 1233, 1542, 2055, 2569, 3699, 8220, 19727,
-  6790, 13579, 20368, 24658, 29590, 34521, 39453, 44384, 49316,
-  1175, 1321, 1468, 1762, 2055, 2349, 2642, 2936, 3670,
-  7398, 9864, 12329, 15411, 20548, 25685, 36987, 82192, 197261,
 ]);
 export const farmStockCapacity = (level: number): number => FARM_STOCK_BY_LEVEL[level] ?? 0;
 export const CROP_PRICES = Object.freeze({ farmToTrader: 150, traderToFactory: 300, farmToFactory: 350, householdCrop: 800 } as const);

@@ -2,7 +2,6 @@
 import { CROPS, type CropId } from './goods.ts';
 import { connectedRoads, MONTH, type City } from './sim.ts';
 import { roadLinked, roadNeighborsFor } from './road-topology.ts';
-import { ledgerRows } from './ledger-parts.ts';
 
 export type CityChallenge = {
   id: 'harvest-variety' | 'processing-variety' | 'household-buyers' | 'road-loops';
@@ -39,7 +38,7 @@ export function cityChallenges(c: City): CityChallenge[] {
   const residents = new Set(c.households.filter(h => h.home !== null).map(h => h.wallet));
   const buyers = new Set<string>();
   for (const e of c.cropLedger) if (recent(e.tick) && e.kind === 'consumption' && e.quantity > 0 && residents.has(e.to)) buyers.add(e.to);
-  for (const e of ledgerRows(c.goodsLedger)) if (recent(e.tick) && e.reason === 'Household final consumption' && e.quantity > 0 && residents.has(e.to)) buyers.add(e.to);
+  for (const e of c.goodsLedger) if (recent(e.tick) && e.reason === 'Household final consumption' && e.quantity > 0 && residents.has(e.to)) buyers.add(e.to);
   const challenges: Omit<CityChallenge, 'done'>[] = [
     { id: 'harvest-variety', name: 'เก็บเกี่ยวพืชครบทุกชนิด', hint: 'ให้ฟาร์มเก็บเกี่ยวข้าว ผัก และอ้อยจริงใน 30 วันล่าสุด', current: harvested.size, target: CROPS.length, unit: 'ชนิด' },
     { id: 'processing-variety', name: 'แปรรูปพืชครบทุกชนิด', hint: 'ให้โรงงานแปรรูปข้าว ผัก และอ้อยจริงใน 30 วันล่าสุด', current: processed.size, target: CROPS.length, unit: 'ชนิด' },

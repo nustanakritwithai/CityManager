@@ -5,7 +5,6 @@
 import { venues, type City } from './sim.ts';
 import { WORK_START_MINUTE, WORK_END_MINUTE } from './park-activity.ts';
 import { clockLabel } from './game-clock.ts';
-import { ledgerRows } from './ledger-parts.ts';
 
 export type DayCounts = { people: number; farm: number; factory: number; shop: number; service: number; students: number; shoppers: number };
 export type HourActivity = { hour: number; clock: string; icon: string; title: string; detail: string };
@@ -23,8 +22,7 @@ export function dayCounts(city: City): DayCounts {
   for (const site of venues(city)) for (const a of site.staffing?.allocations ?? []) counts.service += a.workers;
   for (const person of city.education?.people ?? []) { counts.service += person.teacher + person.professor; counts.students += person.school + person.university; }
   const shoppers = new Set<string>();
-  const rows = ledgerRows(city.ledger);
-  for (let i = rows.length - 1; i >= 0 && rows[i].tick === city.tick; i--) { const m = HOUSEHOLD_SPENDING.exec(rows[i].reason); if (m) shoppers.add(m[1]); }
+  for (let i = city.ledger.length - 1; i >= 0 && city.ledger[i].tick === city.tick; i--) { const m = HOUSEHOLD_SPENDING.exec(city.ledger[i].reason); if (m) shoppers.add(m[1]); }
   counts.shoppers = shoppers.size;
   return counts;
 }

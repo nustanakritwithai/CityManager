@@ -20,7 +20,6 @@ import { BUS_CAPACITY, BUS_FARE_SATANG } from './bus/types.ts';
 import { TAXI_DEPOT_UNITS } from './taxi/sites.ts';
 import { civicFeeReason, type CivicKind } from './civic/sites.ts';
 import { taxiFareSatang } from './taxi/mode-share.ts';
-import { ledgerRows } from './ledger-parts.ts';
 
 /** Anyone whose route is this short walks, as people do for a few minutes' trip. */
 export const WALK_MAX_M = 500;
@@ -268,9 +267,8 @@ export function householdCommutes(c: City): { householdId: number; workers: numb
 /** Satang this wallet paid out over the last 30 days, other than for vehicles: what it keeps back before buying one. */
 function monthlySpending(c: City, wallet: string): number {
   let total = 0;
-  const rows = ledgerRows(c.ledger);
-  for (let i = rows.length - 1; i >= 0 && rows[i].tick > c.tick - 30; i--) {
-    const e = rows[i]; if (e.from === wallet && !e.reason.startsWith('Vehicle bought')) total += e.amount;
+  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick > c.tick - 30; i--) {
+    const e = c.ledger[i]; if (e.from === wallet && !e.reason.startsWith('Vehicle bought')) total += e.amount;
   }
   return total;
 }
@@ -392,9 +390,8 @@ const PURCHASE = /^Household #([1-9]\d*) (?:purchase|other spending)$/;
 export function shoppingTrips(c: City): ShoppingTrip[] {
   const firmByWallet = new Map(c.firms.map(f => [f.wallet, f])), byWallet = new Map(c.households.map(h => [h.wallet, h]));
   const visits = new Set<string>();
-  const rows = ledgerRows(c.ledger);
-  for (let i = rows.length - 1; i >= 0 && rows[i].tick === c.tick; i--) {
-    const e = rows[i], m = PURCHASE.exec(e.reason), h = byWallet.get(e.from), shop = firmByWallet.get(e.to);
+  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick === c.tick; i--) {
+    const e = c.ledger[i], m = PURCHASE.exec(e.reason), h = byWallet.get(e.from), shop = firmByWallet.get(e.to);
     if (m && h && shop) visits.add(`${h.id}:${shop.id}`);
   }
   for (let i = c.cropLedger.length - 1; i >= 0 && c.cropLedger[i].tick === c.tick; i--) {

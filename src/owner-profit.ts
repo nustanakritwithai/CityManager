@@ -30,8 +30,6 @@ function profitMonths(c: City, f: Firm, throughTick = c.tick) {
     const row = month(e.tick), amount = BigInt(e.amount);
     if (e.reason === 'Local wholesale goods' || e.reason === 'Outside goods import'
       || e.reason === 'Outside market goods export' || /^Household #\d+ (?:purchase|other spending)$/.test(e.reason) || e.reason === 'Other goods bought in'
-      // A big town's day of household purchases or other spending at the shop (ledger-parts.ts).
-      || e.parts !== undefined && (e.reason === 'Household purchases' || e.reason === 'Household other spending')
       || e.reason === 'Monthly wages' || e.reason === 'Monthly firm rent' || e.reason === 'Monthly water and power bill') {
       row.profit += incoming ? amount : -amount;
     }

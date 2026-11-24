@@ -4,7 +4,6 @@
  * entries (population) and building ages (buildings standing today). Read-only.
  */
 import { type City } from './sim.ts';
-import { ledgerRows } from './ledger-parts.ts';
 
 export type BuildingKind = 'shop' | 'I' | 'R' | 'F' | 'market';
 /** Fixed entity order; chart colours follow this order so each kind keeps its colour everywhere. */
@@ -45,7 +44,7 @@ export function dailySeries(city: City, days = 30): DailySeries {
   for(const d of city.history?.daily??[]){if(!inWindow(d.tick))continue;const i=at(d.tick);s.income[i]+=d.income;s.expense[i]+=d.expense;net[i]+=d.income-d.expense;
     for(const key of ['cropsHarvested','cropsProcessed','cropsConsumed','goodsProduced','goodsConsumed','goodsExported','goodsImported'] as const)s[key][i]+=d[key];}
 
-  for (const e of ledgerRows(city.ledger)) {
+  for (const e of city.ledger) {
     if (e.reason === 'New household arrival savings' && !arrival.has(e.to)) arrival.set(e.to, e.tick);
     if (e.tick > to) continue;
     if (!inWindow(e.tick)) continue;
@@ -65,7 +64,7 @@ export function dailySeries(city: City, days = 30): DailySeries {
     else if (e.kind === 'process') s.cropsProcessed[at(e.tick)] += e.quantity;
     else if (e.kind === 'consumption') s.cropsConsumed[at(e.tick)] += e.quantity;
   }
-  for (const e of ledgerRows(city.goodsLedger)) {
+  for (const e of city.goodsLedger) {
     if (!inWindow(e.tick)) continue;
     const i = at(e.tick);
     if (e.reason === 'Daily worker production' || /^Crop recipe #\d+$/.test(e.reason)) s.goodsProduced[i] += e.quantity;

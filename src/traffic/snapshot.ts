@@ -2,7 +2,6 @@ import { GATEWAY, connectedRoads, firmCapacity, type City } from '../sim.ts';
 import { parcelTrafficZone } from './network.ts';
 import { accessCell } from '../traffic-plan.ts';
 import type { DemandInput, DemandSource } from './types.ts';
-import { ledgerRows } from '../ledger-parts.ts';
 /** Days of goods ledger averaged into daily freight units. */
 export const FREIGHT_WINDOW_DAYS = 7;
 /**
@@ -21,9 +20,8 @@ export function cityDemandInput(c: City, stableParcelZones = false): DemandInput
     else if (stableParcelZones) homes.set(1152 + h.id, (homes.get(1152 + h.id) ?? 0) + h.members);
   }
   const since = c.tick - FREIGHT_WINDOW_DAYS, moved = new Map<string, number>();
-  const rows = ledgerRows(c.goodsLedger);
-  for (let i = rows.length - 1; i >= 0 && rows[i].tick > since; i--) {
-    const e = rows[i]; for (const w of [e.from, e.to]) moved.set(w, (moved.get(w) ?? 0) + e.quantity);
+  for (let i = c.goodsLedger.length - 1; i >= 0 && c.goodsLedger[i].tick > since; i--) {
+    const e = c.goodsLedger[i]; for (const w of [e.from, e.to]) moved.set(w, (moved.get(w) ?? 0) + e.quantity);
   }
   for (const f of c.firms) {
     const b = byId.get(f.building); if (!b) continue;

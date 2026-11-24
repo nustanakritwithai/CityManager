@@ -6,7 +6,6 @@ import { MONTH, type City } from './sim.ts';
 import { costKind } from './business-sectors.ts';
 import { ARRIVAL_REASON, DEPARTURE_REASON } from './household-economy.ts';
 import { ONE_OFF_TREASURY_REASONS } from './treasury-forecast.ts';
-import { ledgerRows } from './ledger-parts.ts';
 
 export const TREND_MONTHS = 3;
 export const TREND_KEYS = ['householdIncome', 'householdSpending', 'businessTakings', 'businessProfit', 'treasuryNet', 'borderNet'] as const;
@@ -41,9 +40,8 @@ export function economyTrends(city: Pick<City, 'ledger' | 'tick'>): EconomyTrend
   }
   const totals = windows.map(() => Object.fromEntries(TREND_KEYS.map(k => [k, 0])) as Record<TrendKey, number>);
   const oldest = windows[0]?.fromTick ?? Infinity;
-  const money = ledgerRows(city.ledger);
-  for (let i = money.length - 1; i >= 0; i--) {
-    const e = money[i];
+  for (let i = city.ledger.length - 1; i >= 0; i--) {
+    const e = city.ledger[i];
     if (e.tick < oldest) break;
     const w = windows.findIndex(x => e.tick >= x.fromTick && e.tick <= x.toTick);
     if (w < 0 || e.amount <= 0 || e.from === e.to) continue;

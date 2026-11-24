@@ -7,7 +7,6 @@ import { roadNeighborsFor, roadLinked } from './road-topology.ts';
  */
 import { GATEWAY, SIZE, type Building, type City } from './sim.ts';
 import { factoryUtilities, type IndustryRules } from './industry-scale.ts';
-import { tileScale } from './tile-scale.ts';
 
 export const UTILITY_KINDS = ['power', 'water'] as const;
 export type UtilityKind = typeof UTILITY_KINDS[number];
@@ -109,11 +108,9 @@ const none = (): Need => ({ power: 0, water: 0 });
  */
 export function buildingNeed(zone: Building['zone'], level: number, households = 0, rules?: IndustryRules): Need {
   if (zone === 'R') return { power: households * HOUSEHOLD_NEED.power, water: households * HOUSEHOLD_NEED.water };
-  // A big town's workplace is ten times the size and draws ten times as much (tile-scale.ts).
-  const scale = tileScale(rules);
-  if (zone === 'C') return { power: level * scale, water: scale };
-  if (zone === 'I') { const need = factoryUtilities(level, rules); return { power: need.power * scale, water: need.water * scale }; }
-  return { power: 0, water: level * scale };
+  if (zone === 'C') return { power: level, water: 1 };
+  if (zone === 'I') return factoryUtilities(level, rules);
+  return { power: 0, water: level };
 }
 export const fits = (spare: Need, need: Need) => spare.power >= need.power && spare.water >= need.water;
 
@@ -134,9 +131,7 @@ export type Service = {
 export function utilityService(c: City, roads: ReadonlySet<number>): Service {
   const online = new Set(c.plants.filter(p => roadNeighborsFor(c,p.cell).some(n => roads.has(n))).map(p => p.id));
   const plants = none();
-  // A big town's plant is ten plants' worth (tile-scale.ts).
-  const scale = tileScale(c);
-  for (const p of c.plants) if (online.has(p.id)) plants[p.kind] += plantSpec(p).capacity * scale;
+  for (const p of c.plants) if (online.has(p.id)) plants[p.kind] += plantSpec(p).capacity;
   const capacity = { power: c.utilities.outside.power + plants.power, water: c.utilities.outside.water + plants.water };
   // A water source cannot give a building priority for power, or vice versa.
   const roadDistances = (kind: UtilityKind) => {

@@ -4,13 +4,12 @@
  */
 import { RECIPE, RECIPES, type CropId, type ProductId, type RecipeId } from './goods.ts';
 import { MONTH, farmCrop, type City } from './sim.ts';
-import { ledgerRows } from './ledger-parts.ts';
 
 export type TreasuryPoint = { tick: number; balance: number };
 /** End-of-day treasury balances for the last `days` days, rebuilt backwards from today. */
 export function treasuryHistory(city: City, days = MONTH): TreasuryPoint[] {
   const net = new Map<number, number>();
-  for (const e of ledgerRows(city.ledger)) {
+  for (const e of city.ledger) {
     if (e.tick <= city.tick - days) continue;
     const delta = (e.to === 'treasury' ? e.amount : 0) - (e.from === 'treasury' ? e.amount : 0);
     if (delta) net.set(e.tick, (net.get(e.tick) ?? 0) + delta);
@@ -53,7 +52,7 @@ export function treasuryBudget(city: City, days = MONTH): { income: BudgetLine[]
     const rule = rules.find(([pattern]) => pattern.test(reason)), key = rule?.[1] ?? 'other', label = rule?.[2] ?? 'อื่นๆ';
     const line = map.get(key) ?? { key, label, amount: 0 }; line.amount += amount; map.set(key, line);
   };
-  for (const e of ledgerRows(city.ledger)) {
+  for (const e of city.ledger) {
     if (e.tick < fromTick || e.tick > city.tick) continue;
     if (e.to === 'treasury') add(income, INCOME, e.reason, e.amount);
     if (e.from === 'treasury') add(expense, EXPENSE, e.reason, e.amount);
@@ -94,7 +93,7 @@ export function supplyChain(city: City, days = MONTH): SupplyChain {
     else if (e.kind === 'process') { processed += e.quantity; produced += e.outputQuantity; }
     else if (e.kind === 'trade' || e.kind === 'consumption') bump(kindOf(e.from, 'crops'), kindOf(e.to, 'crops'), 'crops', e.quantity);
   }
-  for (const e of ledgerRows(city.goodsLedger)) {
+  for (const e of city.goodsLedger) {
     if (!inWindow(e.tick)) continue;
     if (e.reason === 'Wholesale stock delivery' || e.reason === 'Imported shop stock' || e.reason === 'Household final consumption' || e.reason === 'Exported goods') bump(kindOf(e.from, 'goods'), kindOf(e.to, 'goods'), 'goods', e.quantity);
   }
@@ -112,9 +111,8 @@ export function goodsLines(city: City, days = MONTH): GoodsLine[] {
       const e = city.cropLedger[i]; if (e.crop !== crop) continue;
       if (e.kind === 'harvest') line.harvested += e.quantity; else if (e.kind === 'consumption') line.freshSold += e.quantity; else if (e.kind === 'export') line.exportedCrops += e.quantity;
     }
-    const goodsRows = ledgerRows(city.goodsLedger);
-    for (let i = goodsRows.length - 1; i >= 0 && goodsRows[i].tick > since; i--) {
-      const e = goodsRows[i]; if (e.product !== product) continue;
+    for (let i = city.goodsLedger.length - 1; i >= 0 && city.goodsLedger[i].tick > since; i--) {
+      const e = city.goodsLedger[i]; if (e.product !== product) continue;
       if (e.from === 'production') line.produced += e.quantity; else if (e.reason === 'Household final consumption') line.sold += e.quantity; else if (e.reason === 'Imported shop stock') line.imported += e.quantity;
     }
     return line;

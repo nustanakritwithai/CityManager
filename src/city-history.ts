@@ -4,7 +4,6 @@ import type { CityHistory, HistoryDay } from './city-history-types.ts';
 import { captureAgricultureHistory } from './agriculture-validation.ts';
 import { captureTypedHistory } from './goods-validation.ts';
 import { captureOwnerProfit } from './owner-profit.ts';
-import { forEachLeg, legs } from './ledger-parts.ts';
 
 export const HISTORY_DAYS = 90;
 export const cropJournalLength = (c: City) => (c.history?.cropOffset ?? 0) + c.cropLedger.length;
@@ -34,26 +33,25 @@ export function compactCityHistory(c: City): boolean {
  const daily=new Map((prior?.daily??[]).map(d=>[d.tick,copy(d)]));
  const day=(tick:number)=>{let d=daily.get(tick);if(!d)daily.set(tick,d=blankDay(tick));return d;};
  for(const e of money){
-  // A big town's daily household summary moves each household's own amount (ledger-parts.ts).
-  forEachLeg(e,(from,to,amount)=>{accounts[from]=add(accounts[from]??0,-amount);accounts[to]=add(accounts[to]??0,amount);});
+  accounts[e.from]=add(accounts[e.from]??0,-e.amount);accounts[e.to]=add(accounts[e.to]??0,e.amount);
   totals.moneyCount=add(totals.moneyCount,1);totals.moneyAmount=add(totals.moneyAmount,e.amount);
   const d=day(e.tick);d.moneyCount++;d.moneyAmount=add(d.moneyAmount,e.amount);
   if(e.to==='treasury')d.income=add(d.income,e.amount);if(e.from==='treasury')d.expense=add(d.expense,e.amount);
   if(e.reason==='New household arrival savings'){arrivalCount++;lastIncome[e.to]=e.tick;}
-  if(/wages/i.test(e.reason))forEachLeg(e,(_,to)=>{lastIncome[to]=e.tick;});
+  if(/wages/i.test(e.reason))lastIncome[e.to]=e.tick;
   if(e.to==='treasury'&&/tax/i.test(e.reason))taxTotal=add(taxTotal,e.amount);
  }
  for(const e of goods){
-  forEachLeg(e,(from,to,quantity)=>{goodsBalances[from]=add(goodsBalances[from]??0,-quantity);goodsBalances[to]=add(goodsBalances[to]??0,quantity);});
+  goodsBalances[e.from]=add(goodsBalances[e.from]??0,-e.quantity);goodsBalances[e.to]=add(goodsBalances[e.to]??0,e.quantity);
   totals.goodsCount++;totals.goodsQuantity=add(totals.goodsQuantity,e.quantity);const d=day(e.tick);d.goodsCount++;
   if(e.from==='production'){goodsTotals.produced=add(goodsTotals.produced,e.quantity);if(e.reason==='Daily worker production'||/^Crop recipe #\d+$/.test(e.reason))d.goodsProduced=add(d.goodsProduced,e.quantity);firstProduction[e.to]??=e.tick;}
   if(e.from==='outside'){goodsTotals.imported=add(goodsTotals.imported,e.quantity);if(e.reason==='Imported shop stock')d.goodsImported=add(d.goodsImported,e.quantity);}
   if(e.to==='outside'){goodsTotals.exported=add(goodsTotals.exported,e.quantity);if(e.reason==='Exported goods')d.goodsExported=add(d.goodsExported,e.quantity);}
-  if(e.to.startsWith('household:')||e.to==='households'){goodsTotals.consumed=add(goodsTotals.consumed,e.quantity);if(e.reason==='Household final consumption')d.goodsConsumed=add(d.goodsConsumed,e.quantity);}
+  if(e.to.startsWith('household:')){goodsTotals.consumed=add(goodsTotals.consumed,e.quantity);if(e.reason==='Household final consumption')d.goodsConsumed=add(d.goodsConsumed,e.quantity);}
  }
  for(const e of crops){totals.cropCount++;totals.cropQuantity=add(totals.cropQuantity,e.quantity);const d=day(e.tick);d.cropCount++;const k=({harvest:'cropsHarvested',process:'cropsProcessed',consumption:'cropsConsumed',writeoff:'cropsWrittenOff',export:'cropsExported'} as const)[e.kind as 'harvest'];if(k)d[k]=add(d[k],e.quantity);}
  // Keep exact sparse structural evidence only while its asset/account is relevant.
- const wallets=new Set([...c.firms.map(f=>f.wallet),...c.households.map(h=>h.wallet),...tailMoney.flatMap(e=>legs(e).flatMap(l=>[l.from,l.to])),...tailGoods.flatMap(e=>legs(e).flatMap(l=>[l.from,l.to])),...tailCrops.flatMap(e=>[e.from,e.to]),...Object.entries(c.accounts).filter(([,v])=>v!==0).map(([w])=>w)]);
+ const wallets=new Set([...c.firms.map(f=>f.wallet),...c.households.map(h=>h.wallet),...tailMoney.flatMap(e=>[e.from,e.to]),...tailGoods.flatMap(e=>[e.from,e.to]),...tailCrops.flatMap(e=>[e.from,e.to]),...Object.entries(c.accounts).filter(([,v])=>v!==0).map(([w])=>w)]);
  const ids=new Set([...c.firms.map(f=>f.id),...c.plants.map(p=>p.id),...c.parks.map(p=>p.id),...(c.education?.campuses.map(p=>p.id)??[]),...tailMoney.flatMap(e=>[...e.reason.matchAll(/#(\d+)/g)].map(m=>Number(m[1])))]);
  const structural=(e:Entry)=> e.reason==='Initial municipal grant'||e.reason==='New household arrival savings'&&wallets.has(e.to)||
   /^(?:Build |Upgrade (?:power plant|water pump|school|university) |Demolition refund |Demolish park|Self-employed |Market to shop conversion|Business takeover refit|Industry expansion capital|Outside industry (?:bootstrap equity|equity)|Owner industry capital|Funded industry |Industry expansion residual return)/.test(e.reason)&&
@@ -91,7 +89,7 @@ export function compactCityHistory(c: City): boolean {
  for(const wallet of Object.keys(firstProduction))if(!wallets.has(wallet)&&!structuralProofs.some(e=>e.from===wallet))delete firstProduction[wallet];
  const ownerProfit=Object.fromEntries(c.firms.filter(f=>f.owner).map(f=>[f.wallet,captureOwnerProfit(c,f,throughTick)]));
  const latestBasket=copy(prior?.latestBasket??{});
- for(const e of goods)if(e.reason==='Household final consumption')forEachLeg(e,(_,to,quantity)=>{if(!latestBasket[to]||e.tick>latestBasket[to].tick)latestBasket[to]={commodity:'goods',tick:e.tick,quantity};});
+ for(const e of goods)if(e.reason==='Household final consumption'&&(!latestBasket[e.to]||e.tick>latestBasket[e.to].tick))latestBasket[e.to]={commodity:'goods',tick:e.tick,quantity:e.quantity};
  for(const e of crops)if(e.kind==='consumption'&&(!latestBasket[e.to]||e.tick>latestBasket[e.to].tick))latestBasket[e.to]={commodity:'crops',tick:e.tick,quantity:e.quantity};
  const households=new Set(c.households.map(h=>h.wallet));
  for(const key of Object.keys(latestBasket))if(!households.has(key))delete latestBasket[key];

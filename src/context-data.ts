@@ -3,7 +3,6 @@ import type { Building, City, Firm, Household } from './sim.ts';
 import type { EmploymentAllocation, WorkerSkill } from './labor.ts';
 import { flowRows } from './inspector-data.ts';
 import type { FlowKind, FlowRow } from './inspector-data.ts';
-import { ledgerRows } from './ledger-parts.ts';
 
 export type ResolvedPlace = {
   cell: number;
@@ -97,7 +96,7 @@ const formatGrowthCash = (amount: number) => (amount / 100).toLocaleString('th-T
 export function householdConsumption(city: City, id: number): { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null {
   const household = city.households.find(value => value.id === id); if (!household) return null;
   let latest: { commodity: 'goods' | 'crops'; tick: number; quantity: number } | null = city.history?.latestBasket[household.wallet]??null;
-  for (const entry of ledgerRows(city.goodsLedger)) if (entry.to === household.wallet && entry.reason === 'Household final consumption' && (!latest || entry.tick > latest.tick)) latest = { commodity: 'goods', tick: entry.tick, quantity: entry.quantity };
+  for (const entry of city.goodsLedger) if (entry.to === household.wallet && entry.reason === 'Household final consumption' && (!latest || entry.tick > latest.tick)) latest = { commodity: 'goods', tick: entry.tick, quantity: entry.quantity };
   for (const entry of city.cropLedger) if (entry.to === household.wallet && entry.kind === 'consumption' && (!latest || entry.tick > latest.tick)) latest = { commodity: 'crops', tick: entry.tick, quantity: entry.quantity };
   return latest;
 }
@@ -168,12 +167,12 @@ export function cityOverview(city: City, current = summary(city)): CityOverview 
   const fromTick = Math.max(0, city.tick - MONTH + 1), toTick = city.tick;
   const inPeriod = (tick: number) => tick >= fromTick && tick <= toTick;
   let income = 0, expense = 0, produced = 0, imported = 0, consumed = 0, exported = 0;
-  for (const entry of ledgerRows(city.ledger)) {
+  for (const entry of city.ledger) {
     if (!inPeriod(entry.tick)) continue;
     if (entry.to === 'treasury') income += entry.amount;
     if (entry.from === 'treasury') expense += entry.amount;
   }
-  for (const entry of ledgerRows(city.goodsLedger)) {
+  for (const entry of city.goodsLedger) {
     if (!inPeriod(entry.tick)) continue;
     switch (entry.reason) {
       case 'Daily worker production': produced += entry.quantity; break;
@@ -209,7 +208,7 @@ export function cityOverview(city: City, current = summary(city)): CityOverview 
   if (current.unemployed) warnings.push(`มีแรงงาน ${current.unemployed} คนที่ยังไม่ได้รับการจัดสรรงาน`);
   if (displaced.length) warnings.push(`มี ${displaced.length} ครัวเรือน รวม ${homelessPersons} คนที่ยังไม่มีบ้านพัก`);
   const foodByHousehold = new Map<string, number>();
-  for (const e of ledgerRows(city.goodsLedger)) if (e.tick === city.tick && e.reason === 'Household final consumption') foodByHousehold.set(e.to, (foodByHousehold.get(e.to) ?? 0) + e.quantity);
+  for (const e of city.goodsLedger) if (e.tick === city.tick && e.reason === 'Household final consumption') foodByHousehold.set(e.to, (foodByHousehold.get(e.to) ?? 0) + e.quantity);
   for (const e of city.cropLedger) if (e.tick === city.tick && e.kind === 'consumption') foodByHousehold.set(e.to, (foodByHousehold.get(e.to) ?? 0) + e.quantity);
   const missingFood = city.households.reduce((sum, h) => sum + Math.max(0, h.members - (foodByHousehold.get(h.wallet) ?? 0)), 0);
   if (city.tick > 0 && missingFood) warnings.push(`วันนี้ยังขาดอาหาร ${missingFood} หน่วยสำหรับสมาชิกครัวเรือน`);
