@@ -437,7 +437,7 @@ function parcelChecklistView(parcel: ParcelChecklist): HTMLElement {
   const box = node('div', 'parcel-checklist'); box.dataset.parcelChecklist = parcel.eligible ? 'eligible' : 'blocked';
   const failed = parcel.checks.filter(c => c.state === 'fail').length;
   const head = node('p', `parcel-verdict ${parcel.eligible ? 'good' : 'bad'}`, parcel.eligible
-    ? `พร้อมพัฒนา · ทบทวนแปลงอีก ${parcel.nextReview} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`
+    ? parcel.nextReview === 0 ? 'พร้อมพัฒนา · เมืองสร้างคืนนี้ตอนเที่ยงคืน (คืนละไม่เกิน 6 แปลง)' : `พร้อมพัฒนา · ทบทวนแปลงอีก ${parcel.nextReview} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`
     : `ยังไม่โต · ติด ${failed} เงื่อนไข`);
   const list = node('ol', 'parcel-checks');
   for (const check of parcel.checks) {

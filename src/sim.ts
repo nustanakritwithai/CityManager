@@ -835,7 +835,7 @@ export function zoneCell(c: City, i: number, zone: Zone): Result {
   if (plantAt(c, i)) return { ok: false, message: 'A water or power plant stands here. Bulldoze it before zoning.' };
   if (cell.building !== null && cell.zone !== zone) return { ok: false, message: 'Bulldoze the existing building before rezoning.' };
   cell.zone = zone;
-  const message = !zone ? 'Zone cleared.' : access(c, i) ? `${zone} zone marked. Growth is evaluated every 3 days.` : `${zone} zone marked, but no connected road frontage. Link a neighboring road to the west gateway.`;
+  const message = !zone ? 'Zone cleared.' : access(c, i) ? `${zone} zone marked. ${dailyGrowth(c) ? 'Ready parcels are built every night.' : 'Growth is evaluated every 3 days.'}` : `${zone} zone marked, but no connected road frontage. Link a neighboring road to the west gateway.`;
   c.lastEvent = message;
   return { ok: true, message };
 }
@@ -1132,13 +1132,15 @@ function summarize(c: City) {
         farms.reduce((n, f) => n + farmYieldPerWorker(c, building(c, f.building).cell) * (building(c, f.building).level > 3 ? (access(c, building(c, f.building).cell) && svc.ok(f.building) ? firmWorkerCount(c, f.id) : 0) : 1), 0))) ? 1 : 0 } };
 }
 function building(c: City, id: number): Building { return c.buildings.find(b => b.id === id)!; }
-function blockers(c: City, i: number): string[] {
+/** City-wide facts every parcel's growth check reads; worked out once when many parcels are checked together. */
+type GrowthFacts = { s: ReturnType<typeof summary>; spare: ReturnType<typeof utilities>['spare']; market: () => number };
+function blockers(c: City, i: number, facts?: GrowthFacts): string[] {
   const cell = c.cells[i];
   if (!cell.zone) return ['No R/C/I zoning.'];
-  const reasons: string[] = [], s = summary(c);
+  const reasons: string[] = [], s = facts?.s ?? summary(c);
   if (!access(c, i)) reasons.push('No connected road frontage. Connect an adjacent road to the west outside gateway.');
   // A new factory's water and power is part of its growth status below.
-  const spare = utilities(c).spare, need = cell.zone === 'R' ? HOUSEHOLD_NEED : buildingNeed(cell.zone, 1, 0, c);
+  const spare = facts?.spare ?? utilities(c).spare, need = cell.zone === 'R' ? HOUSEHOLD_NEED : buildingNeed(cell.zone, 1, 0, c);
   if (cell.zone !== 'I') for (const kind of UTILITY_KINDS) if (spare[kind] < need[kind]) reasons.push(`Not enough ${kind}: a new ${cell.zone === 'R' ? 'household' : 'building'} here needs ${need[kind]} unit(s); the network has ${spare[kind]} spare. Build a ${PLANT_NAMES[kind]} on road frontage.`);
   if (!canAllocateIds(c, cell.zone === 'R' ? 1 : 2)) reasons.push('Entity ID range exhausted. No new entity or investment can be created safely.');
   if (c.buildings.length >= MAX_CITY_BUILDINGS) reasons.push(`Prototype building limit (${MAX_CITY_BUILDINGS}) reached.`);
@@ -1146,7 +1148,7 @@ function blockers(c: City, i: number): string[] {
     if (s.demand.R <= 0) reasons.push('No housing demand: usable vacant capacity already covers funded job opportunities and displaced households.');
   } else {
     if (c.firms.length >= MAX_CITY_FIRMS) reasons.push(`Firm limit (${MAX_CITY_FIRMS}) reached.`);
-    if ((cell.zone === 'C' ? marketDemand(c) : s.demand[cell.zone]) <= 0) reasons.push(cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Commercial demand requires a staffed farm or factory and reachable households not already covered by existing shops.' : 'No retail demand: existing shops cover the household market.');
+    if ((cell.zone === 'C' ? facts?.market() ?? marketDemand(c) : s.demand[cell.zone]) <= 0) reasons.push(facts ? 'No demand.' : cell.zone === 'I' ? industryGrowthStatus(c).reason : cell.zone === 'F' ? 'No additional crop demand: current farm capacity covers potential factory and household buyers.' : cell.zone === 'C' ? 'Commercial demand requires a staffed farm or factory and reachable households not already covered by existing shops.' : 'No retail demand: existing shops cover the household market.');
   }
   return reasons;
 }
@@ -1159,8 +1161,8 @@ export function explainCell(c: City, i: number): string[] {
   if (!cell.zone) return ['Unzoned land. Choose R homes, C commercial level-one markets or I industry, then tap this parcel.', 'Buildings require connected road frontage, power, water, demand and viable expected rent.'];
   if (cell.building === null) {
     const stopped = blockers(c, i), shop = cell.zone === 'C' && retailDemand(c) > 0 && !marketToConvert(c) && shopSite(c) === i;
-    if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. A saving household or outside equity opens one here on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)); it buys local wholesale first and hires retail workers.`];
-    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
+    if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. A saving household or outside equity opens one here on the next shop day (${dailyGrowth(c) ? 'tonight' : `in ${(4 - c.tick % 3) % 3 || 3} day(s)`}); it buys local wholesale first and hires retail workers.`];
+    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : dailyGrowth(c) ? `Eligible; up to ${DAILY_BUILDS} ready parcels are built every night.` : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
   }
   const b = building(c, cell.building), f = c.firms.find(v => v.building === b.id), residents = c.households.filter(v => v.home === b.id);
   const output = [`${({ R: 'Home', C: 'Commercial', I: 'Factory', F: 'Farm' } as const)[b.zone]} #${b.id} · level ${b.level} · age ${b.age} days`, access(c, i) ? 'Connected road frontage.' : 'Disconnected: employment, purchases, production and height growth are suspended.'];
@@ -1712,7 +1714,8 @@ function vacantHomes(c: City): Building[] {
   const occupied = buildOccupancyIndex(c.households);
   // Fill empty / less populated homes first instead of repeatedly filling the
   // first parcel that grew taller. Stable ties keep replay/save reload identical.
-  return c.buildings.filter(b => b.zone === 'R' && b.age >= 1 && access(c, b.cell)).sort((a, b) =>
+  // A home takes people from the day after it is built; on the daily pace, from the night it is built.
+  return c.buildings.filter(b => b.zone === 'R' && b.age >= (dailyGrowth(c) ? 0 : 1) && access(c, b.cell)).sort((a, b) =>
     (occupied.get(a.id)?.households ?? 0) - (occupied.get(b.id)?.households ?? 0) ||
     (occupied.get(a.id)?.persons ?? 0) - (occupied.get(b.id)?.persons ?? 0) || a.cell - b.cell || a.id - b.id);
 }
@@ -1920,6 +1923,14 @@ export function unemploymentRate(c: City): number {
 const jobSeekersComing = (c: City, facts: { bootstrap: boolean }) => realIndustry(c) && !facts.bootstrap && unemploymentRate(c) < JOB_SEEKER_UNEMPLOYMENT_LIMIT;
 /** Days in which a city's employers fill their open jobs with people from outside (real workplace sizes). */
 export const ARRIVAL_FILL_DAYS = 30;
+/**
+ * A city started in the game (progression on: the `unlocks` section) lives on the six-minute day, so it grows at that
+ * pace: every night up to DAILY_BUILDS ready parcels are built, a house built tonight takes its family tonight, the
+ * first two households can come together, and open jobs fill from outside in DAILY_ARRIVAL_FILL_DAYS days. Cities saved
+ * before and test cities keep one seeded parcel every three days and a month to fill jobs.
+ */
+export const dailyGrowth = (c: Pick<City, 'unlocks'>) => c.unlocks !== undefined;
+export const DAILY_BUILDS = 6, DAILY_ARRIVAL_FILL_DAYS = 3;
 function admitHousehold(c: City) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
   // A severely unhappy city does not immediately replace every departure.
@@ -1933,8 +1944,8 @@ function admitHousehold(c: City) {
   // Under real rules employers fill their open jobs from outside over about a month, as real hiring takes, and
   // people come looking for work even when every job is taken (one household a day while few are out of work);
   // a city saved before keeps its one new household a day for an open job.
-  const hiring = facts.existingUnemployed > 0 ? 0 : Math.ceil(facts.vacancies / ARRIVAL_FILL_DAYS);
-  const worth = landValues(c), batch = facts.bootstrap || !realIndustry(c) ? 1 : Math.max(seekers ? JOB_SEEKERS_PER_DAY : 0, hiring);
+  const daily = dailyGrowth(c), hiring = facts.existingUnemployed > 0 ? 0 : Math.ceil(facts.vacancies / (daily ? DAILY_ARRIVAL_FILL_DAYS : ARRIVAL_FILL_DAYS));
+  const worth = landValues(c), batch = facts.bootstrap ? (daily ? 2 - c.migration.arrivals : 1) : !realIndustry(c) ? 1 : Math.max(seekers ? JOB_SEEKERS_PER_DAY : 0, hiring);
   for (let n = 0; n < batch; n++) {
     if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
     if (c.households.length >= MAX_CITY_HOUSEHOLDS || (!facts.bootstrap && !seekers && facts.vacancies < 1)) return;
@@ -1959,7 +1970,7 @@ function admitHousehold(c: City) {
     if (c.households.length > 128) c.populationCapacityVersion = 1;
     c.migration.arrivals++;
     c.lastEvent = `Household #${id} arrived with ${members} members and ${workforce} workforce; outside arrival savings recorded once.${facts.bootstrap ? ' Explicit first-two-household job bootstrap.' : ''}${home ? '' : ' No home free yet: the household works and waits for one.'}`;
-    if (facts.bootstrap) return;
+    if (facts.bootstrap) continue;
     // The jobs this household will take tomorrow are no longer open to the next arrival today.
     for (const job of allocateEmployment([{ id, workforce, workerSkills, accessible: true }], facts.offers, [])) {
       const offer = facts.offers.find(o => o.id === job.firmId)!;
@@ -2050,8 +2061,14 @@ function redevelopmentSite(c: City, svc: Service): number | null {
   return ready[0]?.id ?? null;
 }
 function grow(c: City) {
-  const eligible = c.cells.map((cell, i) => cell.zone && cell.building === null && !blockers(c, i).length ? i : -1).filter(i => i >= 0);
-  if (eligible.length) createBuilding(c, eligible[Math.floor(random(c) * eligible.length)]);
+  // One seeded parcel per review; a city on the daily pace builds up to DAILY_BUILDS, checking demand and supply again after each.
+  for (let built = 0, limit = dailyGrowth(c) ? DAILY_BUILDS : 1; built < limit; built++) {
+    let market: number | undefined;
+    const facts: GrowthFacts = { s: summary(c), spare: utilities(c).spare, market: () => market ??= marketDemand(c) };
+    const eligible = c.cells.map((cell, i) => cell.zone && cell.building === null && !blockers(c, i, facts).length ? i : -1).filter(i => i >= 0);
+    if (!eligible.length) break;
+    createBuilding(c, eligible[Math.floor(random(c) * eligible.length)]);
+  }
   if (c.tick % MONTH !== 0) return;
   // A taller building draws more water and power; it grows only while the network can supply it.
   const svc = utilities(c), spare = { ...svc.spare };
@@ -2172,7 +2189,11 @@ const SPARE_TAKEN = 'น้ำหรือไฟสำรองจะถูก�
 export const reviewIsTomorrow = (c: City) => (c.tick + 1) % MONTH === 0;
 function stepWithRoads(c: City): void {
   advanceToReview(c);
-  if (c.tick % 3 === 0) grow(c);
+  if (dailyGrowth(c)) {
+    grow(c); openShop(c);
+    // A house built tonight takes its family tonight, when nobody came earlier today.
+    admitHousehold(c);
+  } else if (c.tick % 3 === 0) grow(c);
   else if (c.tick % 3 === 1) openShop(c);
 }
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */

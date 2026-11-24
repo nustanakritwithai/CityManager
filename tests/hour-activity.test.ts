@@ -39,7 +39,7 @@ test('the hour says how many people do it, from the town as it stands', () => {
   assert.equal(hourActivity(7 * 60, jobless).detail, 'ยังไม่มีงานให้ไป');
   assert.equal(hourActivity(19 * 60, jobless).detail, 'ร้านยังไม่มีคนซื้อ');
   // A town nobody has moved into only keeps the time.
-  for (let h = 0; h < 24; h++) assert.equal(hourActivity(h * 60, { ...jobless, people: 0 }).detail, 'ยังไม่มีคนย้ายเข้าเมือง');
+  for (let h = 0; h < 24; h++) assert.equal(hourActivity(h * 60, { ...jobless, people: 0 }).detail, 'ยังไม่มีคน · ครอบครัวแรกมาตอนเที่ยงคืนเมื่อมีบ้านติดถนน');
 });
 
 const sum = (c: City, zone: string) => [...c.employment, ...c.ownerLabor].filter(e => c.firms.find(f => f.id === e.firmId)?.zone === zone).reduce((n, e) => n + e.workers, 0);
