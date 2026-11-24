@@ -15,6 +15,8 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Road is outside the bounded map\.$/, () => 'ถนนอยู่นอกแผนที่'],
   [/^Zone cleared\.$/, () => 'ล้างโซนแล้ว'],
   [/^([RCIF]) zone marked\. Growth is evaluated every 3 days\.$/, m => `วางโซน${zone(m[1])}แล้ว ระบบทบทวนการเติบโตทุก 3 วัน`],
+  [/^([RCIF]) zone marked\. Ready parcels are built right away\.$/, m => `วางโซน${zone(m[1])}แล้ว เมืองสร้างอาคารทันทีเมื่อแปลงพร้อม`],
+  // Kept for the last event of cities saved while ready parcels waited for midnight.
   [/^([RCIF]) zone marked\. Ready parcels are built every night\.$/, m => `วางโซน${zone(m[1])}แล้ว เมืองสร้างอาคารให้ตอนเที่ยงคืนเมื่อแปลงพร้อม`],
   [/^([RCIF]) zone marked, but no connected road frontage\./, m => `วางโซน${zone(m[1])}แล้ว แต่ยังไม่มีถนนข้างแปลงที่เชื่อมประตูเมือง`],
   [/^Road cells cannot be zoned\.$/, () => 'ถนนวางโซนไม่ได้'],
@@ -28,6 +30,7 @@ const RULES: readonly [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^Crop disposal could not be journaled/, () => 'บันทึกการตัดพืชผลไม่ได้ กิจการและเมืองยังคงเดิม'],
   [/^Parcel cleared\./, () => 'รื้อแล้ว อาคารที่ขาดถนนเชื่อมจะหยุดรับคน ค้าขาย และเติบโต'],
   [/^([RCIF]) building #(\d+) grew:.*?(?:Recipe: ([a-z-]+)\.|Crop: ([a-z]+)\.)?$/, m => `${m[3] ? RECIPE_LABELS[m[3] as RecipeId] ?? zone(m[1]) : m[4] ? `ฟาร์ม${CROP_LABELS[m[4] as CropId] ?? ''}` : zone(m[1])} #${m[2]} สร้างเสร็จ ผ่านเงื่อนไขถนน น้ำไฟ ความต้องการ และค่าเช่า`],
+  [/^([RCIF]) building #(\d+) built:.*?(?:Recipe: ([a-z-]+)\.|Crop: ([a-z]+)\.)?$/, m => `${m[3] ? RECIPE_LABELS[m[3] as RecipeId] ?? zone(m[1]) : m[4] ? `ฟาร์ม${CROP_LABELS[m[4] as CropId] ?? ''}` : zone(m[1])} #${m[2]} สร้างเสร็จแล้ว ถนน น้ำ และไฟพร้อม`],
   [/^Household #(\d+) arrived with (\d+) members and (\d+) workforce;(.*)$/, m => `ครัวเรือน #${m[1]} ย้ายเข้า ${m[2]} คน แรงงาน ${m[3]} คน${/bootstrap/.test(m[4]) ? ' (สิทธิเริ่มเมือง)' : ''}${/No home free/.test(m[4]) ? ' ยังไม่มีบ้านว่าง ทำงานไปก่อนระหว่างรอบ้าน' : ''}`],
   [/^Market #(\d+) became a shop:/, m => `ตลาด #${m[1]} ยกระดับเป็นร้านค้าแล้ว เจ้าของจ่ายค่าปรับปรุงจากกำไรของแผงเองและยังยืนร้านต่อ`],
   [/^Empty map: only the outside gateway exists\./, () => 'แผนที่ว่าง มีแค่ประตูเมือง · ต่อถนนจากประตูก่อน แล้ววางโซนข้างถนน'],

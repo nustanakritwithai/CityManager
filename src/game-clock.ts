@@ -17,6 +17,11 @@ export function daySeconds(scope: ClockScope = globalThis as ClockScope): number
 }
 /** Game minutes one frame moves the clock. A frame longer than a quarter second counts as a quarter, so a tab coming back does not jump. */
 export const frameMinutes = (dt: number, speed: number, seconds: number) => Math.min(Math.max(0, dt), .25) * speed * MINUTES_PER_DAY / seconds;
+/**
+ * How much faster than real time the people walking and the cars on the street move: with the game at 3× and 10×,
+ * so a commute still fits its rush hour. At 1× and the slower watch-the-citizens pace they keep their real pace.
+ */
+export const streetRate = (speed: number) => Math.max(1, speed);
 /** The speed at which one game minute passes each real second: the "watch the citizens" pace. */
 export const minuteASecondSpeed = (seconds: number) => seconds / MINUTES_PER_DAY;
 /** "08:00" for a minute of the day. */

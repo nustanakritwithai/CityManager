@@ -7,7 +7,8 @@ import { GATEWAY, SIZE, MAX_CITY_BUILDINGS, MAX_CITY_FIRMS, connectedRoads, dail
 import { roadLinked } from './road-topology.ts';
 
 export type ParcelCheck = { key: string; label: string; state: 'pass' | 'fail'; detail?: string };
-type Rule = { key: string; label: string; zones: string; match: RegExp; detail: (reason: string) => string };
+/** `market`: a demand check, which a city started in the game does not wait for (it builds on placement). */
+type Rule = { key: string; label: string; zones: string; match: RegExp; detail: (reason: string) => string; market?: true };
 
 const RULES: readonly Rule[] = [
   { key: 'road', label: 'ถนนข้างแปลงเชื่อมประตูเมือง', zones: 'RCIF', match: /^No connected road frontage/, detail: () => 'ยังไม่มีถนนข้างแปลงที่เชื่อมถึงประตูภายนอก' },
@@ -16,11 +17,11 @@ const RULES: readonly Rule[] = [
   { key: 'ids', label: 'รหัสข้อมูลยังเหลือ', zones: '', match: /^Entity ID range exhausted/, detail: () => 'รหัสข้อมูลเต็ม ระบบไม่สร้างอาคารใหม่' },
   { key: 'building-limit', label: `จำนวนอาคารไม่เกิน ${MAX_CITY_BUILDINGS}`, zones: '', match: /^Prototype building limit/, detail: () => 'ถึงจำนวนอาคารสูงสุดที่ต้นแบบรองรับแล้ว' },
   { key: 'firm-limit', label: `จำนวนกิจการไม่เกิน ${MAX_CITY_FIRMS}`, zones: '', match: /^Firm limit/, detail: () => `กิจการใช้แปลงอาคารร่วมกับบ้าน รวมอาคารได้ไม่เกิน ${MAX_CITY_BUILDINGS} แห่ง` },
-  { key: 'housing-demand', label: 'มีความต้องการบ้านเพิ่ม', zones: 'R', match: /^No housing demand/, detail: () => 'บ้านว่างที่มีอยู่รองรับผู้ย้ายเข้าและครัวเรือนไร้บ้านได้แล้ว' },
-  { key: 'income', label: 'รายได้คาดหมายพอซื้อของและจ่ายค่าเช่า', zones: 'R', match: /^Expected income/, detail: () => 'รายได้คาดหมายยังไม่พอซื้อสินค้าและจ่ายค่าเช่า' },
-  { key: 'crop-demand', label: 'มีผู้ซื้อพืชผลเพิ่ม', zones: 'F', match: /^No additional crop demand/, detail: () => 'ฟาร์มเดิมผลิตพอสำหรับโรงงานและครัวเรือนแล้ว' },
-  { key: 'owner', label: 'มีครัวเรือนเจ้าของที่มีทุน 600 ฿ และแรงงานค้าปลีก', zones: 'C', match: /^Raw market needs a connected household owner/, detail: () => 'ยังไม่มีครัวเรือนที่เชื่อมถนน มีเงินทุนจริง 600 ฿ และสมาชิกทักษะทั่วไปหรือค้าปลีกว่าง' },
-  { key: 'market-demand', label: 'มีฟาร์มและผู้ซื้อที่เข้าถึงได้', zones: 'C', match: /^Raw market needs an actual farm|^No retail demand/, detail: r => /^No retail/.test(r) ? 'ร้านค้าที่มีอยู่รองรับความต้องการแล้ว' : 'ร้านค้าแรกต้องมีฟาร์มจริง ผู้ซื้อที่เข้าถึงได้ และเจ้าของที่มีทุน' },
+  { key: 'housing-demand', label: 'มีความต้องการบ้านเพิ่ม', zones: 'R', match: /^No housing demand/, detail: () => 'บ้านว่างที่มีอยู่รองรับผู้ย้ายเข้าและครัวเรือนไร้บ้านได้แล้ว', market: true },
+  { key: 'income', label: 'รายได้คาดหมายพอซื้อของและจ่ายค่าเช่า', zones: 'R', match: /^Expected income/, detail: () => 'รายได้คาดหมายยังไม่พอซื้อสินค้าและจ่ายค่าเช่า', market: true },
+  { key: 'crop-demand', label: 'มีผู้ซื้อพืชผลเพิ่ม', zones: 'F', match: /^No additional crop demand/, detail: () => 'ฟาร์มเดิมผลิตพอสำหรับโรงงานและครัวเรือนแล้ว', market: true },
+  { key: 'owner', label: 'มีครัวเรือนเจ้าของที่มีทุน 600 ฿ และแรงงานค้าปลีก', zones: 'C', match: /^Raw market needs a connected household owner/, detail: () => 'ยังไม่มีครัวเรือนที่เชื่อมถนน มีเงินทุนจริง 600 ฿ และสมาชิกทักษะทั่วไปหรือค้าปลีกว่าง', market: true },
+  { key: 'market-demand', label: 'มีฟาร์มและผู้ซื้อที่เข้าถึงได้', zones: 'C', match: /^Raw market needs an actual farm|^No retail demand/, detail: r => /^No retail/.test(r) ? 'ร้านค้าที่มีอยู่รองรับความต้องการแล้ว' : 'ร้านค้าแรกต้องมีฟาร์มจริง ผู้ซื้อที่เข้าถึงได้ และเจ้าของที่มีทุน', market: true },
   { key: 'industry', label: 'โอกาสลงทุนโรงงาน', zones: 'I', match: /^(?!No |Farm |Raw |Firm |Prototype |Entity |Expected )/, detail: r => /^A new factory needs /.test(r) ? 'เครือข่ายน้ำหรือไฟไม่พอสำหรับโรงงานใหม่ สร้างโรงไฟฟ้าหรือโรงสูบน้ำริมถนน' : 'ดูรายการตรวจทุนขยายโรงงานในภาพรวมเมือง' },
 ];
 
@@ -29,17 +30,18 @@ export function parcelChecklist(city: City, cell: number): ParcelChecklist | nul
   const zone = city.cells[cell]?.zone;
   if (!zone || city.cells[cell].road || city.cells[cell].building !== null) return null;
   const lines = explainCell(city, cell);
-  // On the daily pace (a city started in the game) the shop opens tonight; nextReview 0 means tonight.
-  const shop = /^Shop site:.*\((?:in (\d+) day|tonight)/.exec(lines[1] ?? '');
+  // Only the three-day review waits for a shop day; a city started in the game builds its shops on placement.
+  const shop = /^Shop site:.*\(in (\d+) day/.exec(lines[1] ?? '');
   if (shop) return {
     checks: [{ key: 'factory', label: 'มีโรงงานที่มีคนงานกำลังผลิต', state: 'pass' }, { key: 'buyers', label: 'มีครัวเรือนเชื่อมถนนพอสำหรับร้านค้า', state: 'pass' }],
-    eligible: true, nextReview: shop[1] === undefined ? 0 : Number(shop[1]),
+    eligible: true, nextReview: Number(shop[1]),
     note: 'ร้านค้าเปิดด้วยทุนนักลงทุนภายนอก ซื้อสินค้าจากโรงงานในเมืองก่อนนำเข้า และจ้างแรงงานค้าปลีก ครัวเรือนจึงซื้อของที่เมืองผลิตเองได้',
   };
   const stopped = lines.slice(1, -2), checks: ParcelCheck[] = [];
-  const used = new Set<string>();
+  const used = new Set<string>(), placed = dailyGrowth(city);
   for (const rule of RULES) {
     if (rule.zones && !rule.zones.includes(zone)) continue;
+    if (rule.market && placed) continue;
     const reason = stopped.find(r => !used.has(r) && rule.match.test(r));
     if (reason) { used.add(reason); checks.push({ key: rule.key, label: rule.label, state: 'fail', detail: rule.detail(reason) }); }
     else if (rule.zones) checks.push({ key: rule.key, label: rule.label, state: 'pass' });
