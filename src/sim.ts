@@ -1,5 +1,5 @@
 import { prepareCommuteEstimates, type CommuteEstimate } from './resident-commute.ts';
-import { advanceHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
+import { advanceHappiness, admitHappiness, averageHouseholdHappiness, validateHappiness, homeAmenities, happinessTarget, HAPPINESS_DEPARTURE_DAYS, HAPPINESS_DISTRESS, type HappinessState } from './resident-happiness.ts';
 import { farmYieldPerWorker } from './farm-production.ts';
 import { factoryJobs, factoryUtilities, farmMaxLevel, farmStaff, farmStock, factoryCrops, realIndustry, realMillCrop, realProduct, realCrop, realLotsPerYear, bagsToday, millLotsPerWorker, farmInputs, millRunningCost, FARM_INPUTS_REASON, MILL_COSTS_REASON, REAL_CROPS, type IndustryRules } from './industry-scale.ts';
 import { expandedCellAt, expandedCellCoordinate, expandedCellNeighbors, expandedCellPath, EXPANDED_MAP_CELLS, LEGACY_MAP_CELLS } from './expanded-map-grid.ts';
@@ -2229,8 +2229,11 @@ function stepWithRoads(c: City): void {
   advanceToReview(c);
   if (dailyGrowth(c)) {
     grow(c); openShop(c);
-    // A house built tonight takes its family tonight, when nobody came earlier today.
+    // A house built tonight takes its family tonight, when nobody came earlier today. The day's happiness was worked out
+    // before, so the family gets its first day's row now, as an earlier arrival does, and the city stays a valid save.
+    const before = c.households.length;
     admitHousehold(c);
+    if (c.households.length !== before) c.happiness = admitHappiness(c, c.happiness);
   } else if (c.tick % 3 === 0) grow(c);
   else if (c.tick % 3 === 1) openShop(c);
 }

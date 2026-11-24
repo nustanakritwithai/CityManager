@@ -119,6 +119,21 @@ export function advanceHappiness(city:City, previous?:HappinessState):HappinessS
    return {householdId:h.id,score,distressDays:score<HAPPINESS_DISTRESS?Math.min(HAPPINESS_DEPARTURE_DAYS,(prior?.distressDays??0)+1):0};
  })};
 }
+/**
+ * Households that moved in after the day's update (a city started in the game takes families into homes built that
+ * night) get the first day's row an earlier arrival gets: one step from the base score towards their target.
+ */
+export function admitHappiness(city:City, state:HappinessState|undefined):HappinessState|undefined {
+ if(!state||state.day!==city.tick)return state;
+ const have=new Set(state.rows.map(r=>r.householdId)), fresh=city.households.filter(h=>!have.has(h.id));
+ if(!fresh.length)return state;
+ const targets=happinessTargets(city);
+ const rows=fresh.map(h=>{
+   const target=targets.get(h.id)!.target, score=HAPPINESS_BASE>target?Math.max(target,HAPPINESS_BASE-1):Math.min(target,HAPPINESS_BASE+2);
+   return {householdId:h.id,score,distressDays:score<HAPPINESS_DISTRESS?1:0};
+ });
+ return {...state,rows:[...state.rows,...rows].sort((a,b)=>a.householdId-b.householdId)};
+}
 export function validateHappiness(city:City, value:unknown):asserts value is HappinessState {
  const v=value as HappinessState;
  const valid=(n:unknown,max:number)=>Number.isSafeInteger(n) && Number(n)>=0 && Number(n)<=max;
