@@ -8,7 +8,8 @@ import { useMarketStorage } from '../src/market-client.ts';
 const guest = '00000000-0000-4000-8000-000000000003', other = '00000000-0000-4000-8000-000000000004', code = 'c'.repeat(43), token = 't'.repeat(43);
 class Host extends EventTarget {
   location = { origin: PAGES_ORIGIN }; messages: Array<{data: unknown; origin: string}> = []; popup = { closed: false, close() { this.closed = true; }, postMessage: (data: unknown, origin: string) => this.messages.push({data, origin}) }; blocked = false; url = '';
-  open(url: string) { this.url = url; return this.blocked ? null : this.popup; }
+  target = ''; features: string | undefined;
+  open(url: string, target: string, features?: string) { this.url = url; this.target = target; this.features = features; return this.blocked ? null : this.popup; }
   message(origin: string, source: unknown, data: unknown) { const event = new Event('message'); Object.defineProperties(event, { origin: { value: origin }, source: { value: source }, data: { value: data } }); this.dispatchEvent(event); }
 }
 async function harness(run: (host: Host, store: Map<string,string>) => Promise<void>) {
@@ -39,6 +40,22 @@ test('popup opens synchronously and accepts only matching origin, source, state 
   send(host, state, host.popup, 'https://evil.example'); send(host, state, {}); send(host, 'wrong'); assert.equal(calls, 0); send(host, state); send(host, state); assert.equal(await pending, guest); assert.equal(calls, 1); assert.equal(session.guestId, guest); const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))); const expected = btoa(String.fromCharCode(...digest)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/, ''); assert.equal(challenge, expected);
 }));
 
+test('a mobile-style login tab can deliver its final message during closure', async t => harness(async host => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'], now: Date.now() });
+  const session = new PagesSession(); await session.prepare();
+  globalThis.fetch = async () => new Response(JSON.stringify({ access_token: token, token_type: 'Bearer', expires_in: 900, guest_id: guest }));
+  const pending = session.connect(guest), state = new URL(host.url).searchParams.get('state')!;
+  assert.equal(host.target, '_blank');
+  assert.equal(host.features, undefined, 'open a browser tab without forced popup geometry');
+  host.popup.closed = true;
+  Object.assign(document, { hidden: true });
+  t.mock.timers.tick(500);
+  t.mock.timers.tick(3000);
+  Object.assign(document, { hidden: false });
+  t.mock.timers.tick(1000);
+  send(host, state);
+  assert.equal(await pending, guest);
+}));
 test('blocked or cancelled popup and wrong Guest fail closed without keeping a token', async () => harness(async host => {
   const session = new PagesSession(); await session.prepare(); host.blocked = true; assert.throws(() => session.connect(guest), /pages-popup-blocked/); assert.equal(session.bearer(), null); host.blocked = false;
   await session.prepare(); const cancelled = session.connect(guest); host.popup.closed = true; await assert.rejects(cancelled, /pages-popup-closed/); assert.equal(session.bearer(), null); host.popup.closed = false;

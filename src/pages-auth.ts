@@ -37,7 +37,7 @@ export class PagesSession {
     if (this.connecting) throw new Error('pages-login-busy');
     const prepared = this.prepared; if (!prepared) throw new Error('pages-login-not-ready'); this.prepared = null;
     const login = new URL('/citymanager-api/v1/pages/login', MARKET_ORIGIN); login.searchParams.set('challenge', prepared.challenge); login.searchParams.set('state', prepared.state); login.searchParams.set('auto', '1');
-    const popup = window.open(login.href, 'citymanager-market-login', 'popup=yes,width=480,height=720'); if (!popup) throw new Error('pages-popup-blocked'); this.connecting = true;
+    const popup = window.open(login.href, '_blank'); if (!popup) throw new Error('pages-popup-blocked'); this.connecting = true;
     return new Promise<string>((resolve, reject) => {
       let settled = false; const finish = () => { if (settled) return false; settled = true; clearTimeout(timeout); clearInterval(poll); window.removeEventListener('message', listener); return true; };
       const listener = (event: MessageEvent) => {
@@ -63,7 +63,16 @@ export class PagesSession {
         })();
       };
       const timeout = setTimeout(() => { if (finish()) { this.connecting = false; reject(new Error('pages-login-timeout')); } }, 65_000);
-      const poll = setInterval(() => { if (popup.closed && finish()) { this.connecting = false; reject(new Error('pages-popup-closed')); } }, 500);
+      // Mobile browsers can report a closing tab before delivering its final message.
+      let closedSince: number | null = null;
+      const poll = setInterval(() => {
+        if (document.hidden || !popup.closed) { closedSince = null; return; }
+        const now = Date.now();
+        closedSince ??= now;
+        if (now - closedSince < 1500 || !finish()) return;
+        this.connecting = false;
+        reject(new Error('pages-popup-closed'));
+      }, 500);
       window.addEventListener('message', listener);
     });
   }
