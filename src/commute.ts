@@ -20,6 +20,7 @@ import { BUS_CAPACITY, BUS_FARE_SATANG } from './bus/types.ts';
 import { TAXI_DEPOT_UNITS } from './taxi/sites.ts';
 import { civicFeeReason, type CivicKind } from './civic/sites.ts';
 import { taxiFareSatang } from './taxi/mode-share.ts';
+import { forEachLeg, ledgerRows } from './ledger-parts.ts';
 
 /** Anyone whose route is this short walks, as people do for a few minutes' trip. */
 export const WALK_MAX_M = 500;
@@ -264,19 +265,28 @@ export function householdCommutes(c: City): { householdId: number; workers: numb
   });
 }
 
-/** Satang this wallet paid out over the last 30 days, other than for vehicles: what it keeps back before buying one. */
-function monthlySpending(c: City, wallet: string): number {
-  let total = 0;
-  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick > c.tick - 30; i--) {
-    const e = c.ledger[i]; if (e.from === wallet && !e.reason.startsWith('Vehicle bought')) total += e.amount;
+/**
+ * Satang each wallet paid out over the last 30 days, other than for vehicles: what it keeps back before buying one.
+ * One pass over the month's ledger for every wallet; a big town's summaries count once for each household they name.
+ */
+function monthlySpending(c: City): Map<string, number> {
+  const out = new Map<string, number>(), rows = c.ledger;
+  for (let i = rows.length - 1; i >= 0 && rows[i].tick > c.tick - 30; i--) {
+    const e = rows[i]; if (e.reason.startsWith('Vehicle bought')) continue;
+    forEachLeg(e, (from, _, amount) => { out.set(from, (out.get(from) ?? 0) + amount); });
   }
-  return total;
+  return out;
 }
 export const vehiclePurchaseReason = (kind: VehicleKind, id: number) => `Vehicle bought ${kind} #${id}`;
 export const fuelReason = (id: number) => `Vehicle fuel #${id}`;
 export const BUS_FARE_REASON = 'Bus fare';
 export const TAXI_FARE_REASON = 'Taxi fare';
-const spaceUsed = (fleet: readonly Vehicle[], householdId: number) => fleet.filter(v => v.householdId === householdId).reduce((n, v) => n + VEHICLE[v.kind].space, 0);
+/** The garage space each household's vehicles take, added in fleet order. */
+function spaceUsed(fleet: readonly Vehicle[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const v of fleet) out.set(v.householdId, (out.get(v.householdId) ?? 0) + VEHICLE[v.kind].space);
+  return out;
+}
 
 /** Start the vehicle section, keeping the key order a reload gives (household wellbeing and tax policy stay last). */
 function openVehicles(c: City): VehicleState {
@@ -320,10 +330,13 @@ export function runCommutes(c: City, pay: Pay): CommuteDay {
     if (balance(t.householdId) < fare || pay(wallet.get(t.householdId)!, 'treasury', fare, BUS_FARE_REASON) !== fare) { delete t.bus; strand(t); }
   }
   const needing = [...new Set(trips.filter(t => t.mode === 'walk-long' || t.mode === 'bus' || t.mode === 'taxi').map(t => t.householdId))].sort((a, b) => a - b);
+  // Each household comes once and pays only for its own vehicle, which the month's spending leaves out, so both counts
+  // hold for the whole round.
+  const spent = needing.length ? monthlySpending(c) : new Map<string, number>(), garages = spaceUsed(c.vehicles?.fleet ?? []);
   for (const householdId of needing) {
-    const fleet = c.vehicles?.fleet ?? [], room = 1 - spaceUsed(fleet, householdId), h = households.get(householdId)!;
-    const spare = balance(householdId) - monthlySpending(c, h.wallet);
-    const kind = fleet.every(v => v.householdId !== householdId) && room >= VEHICLE.car.space && spare >= vehiclePrice('car', c) ? 'car'
+    const room = 1 - (garages.get(householdId) ?? 0), h = households.get(householdId)!;
+    const spare = balance(householdId) - (spent.get(h.wallet) ?? 0);
+    const kind = !garages.has(householdId) && room >= VEHICLE.car.space && spare >= vehiclePrice('car', c) ? 'car'
       : room >= VEHICLE.motorcycle.space && spare >= vehiclePrice('motorcycle', c) ? 'motorcycle' : null;
     if (!kind) continue;
     const id = c.vehicles?.nextId ?? 1;
@@ -390,8 +403,9 @@ const PURCHASE = /^Household #([1-9]\d*) (?:purchase|other spending)$/;
 export function shoppingTrips(c: City): ShoppingTrip[] {
   const firmByWallet = new Map(c.firms.map(f => [f.wallet, f])), byWallet = new Map(c.households.map(h => [h.wallet, h]));
   const visits = new Set<string>();
-  for (let i = c.ledger.length - 1; i >= 0 && c.ledger[i].tick === c.tick; i--) {
-    const e = c.ledger[i], m = PURCHASE.exec(e.reason), h = byWallet.get(e.from), shop = firmByWallet.get(e.to);
+  const rows = ledgerRows(c.ledger);
+  for (let i = rows.length - 1; i >= 0 && rows[i].tick === c.tick; i--) {
+    const e = rows[i], m = PURCHASE.exec(e.reason), h = byWallet.get(e.from), shop = firmByWallet.get(e.to);
     if (m && h && shop) visits.add(`${h.id}:${shop.id}`);
   }
   for (let i = c.cropLedger.length - 1; i >= 0 && c.cropLedger[i].tick === c.tick; i--) {

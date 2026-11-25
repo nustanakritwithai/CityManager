@@ -3,6 +3,7 @@
  * ledger belongs to one sector, so the flows between sectors and each sector's net always add up to zero.
  */
 import { MONTH, type City } from './sim.ts';
+import { ledgerRows } from './ledger-parts.ts';
 
 export const ECONOMY_SECTORS = ['household', 'firm', 'treasury', 'landlord', 'works', 'outside'] as const;
 export type EconomySector = typeof ECONOMY_SECTORS[number];
@@ -36,8 +37,9 @@ export type MoneyFlows = {
 export function moneyFlows(city: Pick<City, 'ledger' | 'tick'>, days = MONTH): MoneyFlows {
   const fromTick = Math.max(0, city.tick - days + 1), byPair = new Map<string, SectorFlow>(), within: MoneyFlows['within'] = {};
   const inflow = new Map<EconomySector, number>(), outflow = new Map<EconomySector, number>();
-  for (let i = city.ledger.length - 1; i >= 0; i--) {
-    const e = city.ledger[i];
+  const rows = ledgerRows(city.ledger);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const e = rows[i];
     if (e.tick < fromTick) break;
     if (e.tick > city.tick || e.amount <= 0) continue;
     const from = sectorOf(e.from), to = sectorOf(e.to);

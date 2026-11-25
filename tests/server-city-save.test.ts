@@ -141,3 +141,43 @@ test('verification rejects pending writes and simultaneous work rather than drop
  await assert.rejects(h.client.verifyConfirmed(),/server-save-pending/);await assert.rejects(h.client.saveOrVerify(raw,meta),/server-save-pending/);assert.equal(h.calls.length,count);assert.equal(h.client.pending,true);
  await h.client.retry();assert.equal(h.client.pending,false);assert.equal((await h.client.verifyConfirmed()).revision,2);
 });
+
+// A big town's save passes the server's 8 MiB limit; it travels packed (save-envelope.ts) and comes back exactly.
+const bigRaw=(cityId=crypto.randomUUID(),extra='')=>JSON.stringify({version:29,tick:179,market:{version:10,rulesVersion:'chain-5',guestId:owner,cityId,operations:[],escrow:[],receipts:{},seq:'0'},households:Array.from({length:120_000},(_,i)=>({id:i+1,home:i%97,wallet:`household:${i+1}`,lastPurchaseTick:179,needs:0})),extra});
+test('a save over the server limit travels packed and every read gives the save itself',async()=>{
+ const {SERVER_CITY_MAX_BYTES,serverCityBytes}=await import('../src/server-save-size.ts');const {isPackedSave}=await import('../src/save-envelope.ts');
+ const h=harness();await h.client.load();const plain=bigRaw();assert.ok(serverCityBytes(plain)>SERVER_CITY_MAX_BYTES);
+ const created=await h.client.create(plain,meta);assert.equal(created.raw,plain);assert.equal(h.client.confirmed?.raw,plain);
+ const stored=await h.service.read(owner);assert.ok(isPackedSave(stored.raw));assert.ok(serverCityBytes(stored.raw)<SERVER_CITY_MAX_BYTES/4);
+ assert.deepEqual(JSON.parse(stored.raw).market,JSON.parse(plain).market,'the server sees the market journal as it is');
+ assert.equal(stored.rawHash,created.rawHash,'hashes stay the server\'s');
+ assert.equal((await h.client.load())?.raw,plain);assert.equal((await h.client.verifyConfirmed()).raw,plain);assert.equal(h.client.matchesConfirmed(plain,meta),true);
+ const next=bigRaw(JSON.parse(plain).market.cityId,'day 180');const saved=await h.client.save(next,meta);assert.equal(saved.raw,next);assert.equal(saved.revision,2);
+ // A save that fits still travels exactly as it always has.
+ const small=JSON.stringify({version:29,tick:181,market:JSON.parse(plain).market});await h.client.save(small,meta);assert.equal((await h.service.read(owner)).raw,small);
+});
+test('a lost ACK for a packed save retries the same packed bytes under the same key',async()=>{
+ const h=harness();await h.client.load();const plain=bigRaw();h.lose();
+ await assert.rejects(h.client.create(plain,meta),/lost-response/);assert.equal(h.client.pending,true);
+ assert.equal((await h.client.retry()).raw,plain);
+ const posts=h.calls.filter(c=>c.init?.method==='POST');assert.equal(posts.length,2);assert.deepEqual(posts[0],posts[1]);
+});
+test('archives of a packed save verify and read back the save itself',async()=>{
+ const h=harness();const plain=bigRaw();const a=await h.client.archive({raw:plain,source:'local:big-town'});
+ const read=await h.client.readArchive(a.hash);assert.equal(read.raw,plain);assert.deepEqual(read.sources,['local:big-town']);
+});
+test('a big town\'s save always travels packed; any other save that fits travels as it is',async()=>{
+ const {packSave,unpackSave,isPackedSave}=await import('../src/save-envelope.ts');const {freshServerCityRaw}=await import('../src/fresh-server-city.ts');
+ const big=freshServerCityRaw(owner),packed=await packSave(big);assert.ok(isPackedSave(packed));assert.ok(packed.length*3<big.length);assert.equal(await unpackSave(packed),big);
+ const h=harness();await h.client.load();const created=await h.client.create(big,{...meta,tick:0});assert.equal(created.raw,big);assert.ok(isPackedSave((await h.service.read(owner)).raw));
+ // Only the save's own top level makes it a big town.
+ const mention=JSON.stringify({version:29,tick:1,lastEvent:'"tileScale":10'});assert.equal(await packSave(mention),mention);
+});
+test('a damaged packed save is refused, never half read',async()=>{
+ const {packSave,unpackSave}=await import('../src/save-envelope.ts');const plain=bigRaw(),packed=JSON.parse(await packSave(plain));
+ assert.equal(await unpackSave(JSON.stringify(packed)),plain);
+ const damaged=[{...packed,bytes:packed.bytes+1},{...packed,data:packed.data.slice(0,-40)},{...packed,data:'@@'},{...packed,market:{...packed.market,seq:'1'}},{...packed,extra:1},{...packed,bytes:1000},{...packed,bytes:0}];
+ for(const value of damaged)await assert.rejects(unpackSave(JSON.stringify(value)),/invalid-packed-save/);
+ const {market:_,...unmarked}=packed;await assert.rejects(unpackSave(JSON.stringify(unmarked)),/invalid-packed-save/,'a journal left out does not match the save\'s');
+ const small=JSON.stringify({version:29,tick:1});assert.equal(await packSave(small),small);assert.equal(await unpackSave(small),small);
+});

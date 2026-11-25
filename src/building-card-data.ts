@@ -1,5 +1,6 @@
 /** Read-only card projections. Wallet flows are cash movements, never a profit-and-loss claim. */
 import { MONTH, parkEmploymentForHousehold, venueEmploymentForHousehold, housingCapacity, type City, type Building, type Household, type Firm } from './sim.ts';
+import { ledgerRows } from './ledger-parts.ts';
 
 export type BuildingCardKind = 'house' | 'shop' | 'market' | 'factory' | 'farm';
 export type CardKind = BuildingCardKind | 'household';
@@ -37,12 +38,12 @@ type Projection = { city: City; window: CardWindow; priceEvents: PriceEvent[] };
 function projection(city: City): Projection | null {
   const window = cardWindow(city.tick); if (!window) return null;
   const cashRows = new Map<string, City['ledger']>();
-  for (const entry of city.ledger) {
+  for (const entry of ledgerRows(city.ledger)) {
     const k = key(entry.tick, entry.from, entry.to, entry.reason), rows = cashRows.get(k) ?? [];
     rows.push(entry); cashRows.set(k, rows);
   }
   const goodsCounts = new Map<string, number>(), cropCounts = new Map<string, number>();
-  for (const e of city.goodsLedger) { const k = key(e.tick, e.from, e.to, e.reason); goodsCounts.set(k, (goodsCounts.get(k) ?? 0) + 1); }
+  for (const e of ledgerRows(city.goodsLedger)) { const k = key(e.tick, e.from, e.to, e.reason); goodsCounts.set(k, (goodsCounts.get(k) ?? 0) + 1); }
   for (const e of city.cropLedger) { const k = key(e.tick, e.from, e.to, e.reason); cropCounts.set(k, (cropCounts.get(k) ?? 0) + 1); }
   const priceEvents: PriceEvent[] = [];
   const pair = (commodity: PriceEvent['commodity'], e: { tick: number; from: string; to: string; quantity: number; reason: string }, moneyReason: string | null, physicalCount: number, expectedCash?: number) => {
@@ -53,7 +54,7 @@ function projection(city: City): Projection | null {
     const unambiguous = !unsafe && physicalCount === 1 && matches.length === 1 && (expectedCash === undefined || expectedCash === cash);
     priceEvents.push({ commodity, from: e.from, to: e.to, tick: e.tick, quantity, cash, status: unsafe ? 'unsafe' : unambiguous ? 'observed' : 'ambiguous' });
   };
-  for (const e of city.goodsLedger) {
+  for (const e of ledgerRows(city.goodsLedger)) {
     if (e.from === 'production' || e.reason === 'Demolition stock write-off to outside') continue;
     let reason: string | null = null;
     if (e.reason === 'Wholesale stock delivery') reason = 'Local wholesale goods';
@@ -95,19 +96,19 @@ function common(context: Projection, kind: CardKind, identity: CardIdentity, wal
   const { city, window } = context, selected = new Set(wallets ?? []), missing: string[] = [];
   const boundary = (from: string, to: string) => selected.has(from) !== selected.has(to);
   const sum = <T>(entries: T[], predicate: (entry: T) => boolean, value: (entry: T) => unknown) => total(entries.filter(predicate).map(value));
-  const cashRows = city.ledger.filter(e => inWindow(window, e.tick) && boundary(e.from, e.to));
+  const cashRows = ledgerRows(city.ledger).filter(e => inWindow(window, e.tick) && boundary(e.from, e.to));
   const current = wallets === null ? null : total(wallets.map(wallet => city.accounts[wallet]));
   const inflow = wallets === null ? null : sum(cashRows, e => selected.has(e.to), e => positive(e.amount) ? e.amount : null);
   const outflow = wallets === null ? null : sum(cashRows, e => selected.has(e.from), e => positive(e.amount) ? e.amount : null);
   const cash: CardCash = { current, inflow, outflow, net: inflow === null || outflow === null ? null : inflow - outflow, wallets: [...(wallets ?? [])], basis: 'wallet-boundary' };
-  const goods = city.goodsLedger.filter(e => inWindow(window, e.tick) && boundary(e.from, e.to)), crops = city.cropLedger.filter(e => inWindow(window, e.tick) && boundary(e.from, e.to));
+  const goods = ledgerRows(city.goodsLedger).filter(e => inWindow(window, e.tick) && boundary(e.from, e.to)), crops = city.cropLedger.filter(e => inWindow(window, e.tick) && boundary(e.from, e.to));
   const quantities: CardQuantities = {
     goodsIn: wallets === null ? null : sum(goods, e => selected.has(e.to), e => positive(e.quantity) ? e.quantity : null),
     goodsOut: wallets === null ? null : sum(goods, e => selected.has(e.from), e => positive(e.quantity) ? e.quantity : null),
     cropsIn: wallets === null ? null : sum(crops, e => selected.has(e.to), e => positive(e.quantity) ? e.quantity : null),
     cropsOut: wallets === null ? null : sum(crops, e => selected.has(e.from), e => positive(e.quantity) ? e.quantity : null),
   };
-  const todayGoods = city.goodsLedger.filter(e => !window.empty && e.tick === city.tick), todayCrops = city.cropLedger.filter(e => !window.empty && e.tick === city.tick);
+  const todayGoods = ledgerRows(city.goodsLedger).filter(e => !window.empty && e.tick === city.tick), todayCrops = city.cropLedger.filter(e => !window.empty && e.tick === city.tick);
   const today: CardToday = {
     cropHarvested: wallets === null ? null : sum(todayCrops, e => e.kind === 'harvest' && selected.has(e.to), e => positive(e.quantity) ? e.quantity : null),
     cropProcessed: wallets === null ? null : sum(todayCrops, e => e.kind === 'process' && selected.has(e.from), e => positive(e.quantity) ? e.quantity : null),
