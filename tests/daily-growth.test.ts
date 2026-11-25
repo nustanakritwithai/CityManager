@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, buildRoad, zoneCell, access, explainCell, firmWorkerCount, firmCapacity, dailyGrowth, buildReadyParcels, DAILY_BUILDS, DAILY_ARRIVAL_FILL_DAYS, GATEWAY, SIZE, type City, type Zone } from '../src/sim.ts';
+import { createCity, step, buildRoad, zoneCell, access, explainCell, firmWorkerCount, firmCapacity, dailyGrowth, buildReadyParcels, serialize, deserialize, DAILY_BUILDS, DAILY_ARRIVAL_FILL_DAYS, GATEWAY, SIZE, type City, type Zone } from '../src/sim.ts';
+import { HAPPINESS_BASE } from '../src/resident-happiness.ts';
 import { parcelChecklist } from '../src/place-checklist.ts';
 import { thaiMessage } from '../src/event-text.ts';
 import { keepSupplied } from './plants.ts';
@@ -46,6 +47,20 @@ test('parcels still waiting in a city started in the game rise at midnight, up t
   assert.equal(c.buildings.length, DAILY_BUILDS, 'the first night builds as many as a night allows');
   run(c, 1);
   assert.equal(c.buildings.length, 8, 'the next night builds the rest');
+});
+
+test('a city started in the game saves on the night its first families move into homes built that night', () => {
+  // Zoned without the build a player's command makes: the night builds the homes, and the families come after the
+  // day's happiness was worked out.
+  const c = town('RRRRFICC', true);
+  run(c, 1);
+  assert.equal(c.households.length, 2, 'the first two families came in the night');
+  assert.deepEqual(c.happiness?.rows.map(r => r.householdId), c.households.map(h => h.id).sort((a, b) => a - b), 'each has its first day of happiness');
+  for (const row of c.happiness!.rows) assert.ok(row.score >= HAPPINESS_BASE - 1 && row.score <= HAPPINESS_BASE + 2, `one day's step from the base: ${row.score}`);
+  const saved = serialize(c);
+  assert.equal(serialize(deserialize(saved)), saved, 'a valid save that loads back the same');
+  run(c, 2);
+  assert.equal(c.happiness?.rows.length, c.households.length);
 });
 
 test('a town with only homes gets its first people the first night', () => {

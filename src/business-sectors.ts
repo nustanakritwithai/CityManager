@@ -5,6 +5,7 @@
  */
 import { MONTH, isWageReason, type City, type Firm } from './sim.ts';
 import { sectorOf } from './economy-flows.ts';
+import { ledgerRows } from './ledger-parts.ts';
 
 export const BUSINESS_SECTORS = ['F', 'I', 'C'] as const;
 export type BusinessSector = typeof BUSINESS_SECTORS[number];
@@ -47,8 +48,9 @@ export function businessSectors(city: Pick<City, 'ledger' | 'tick' | 'firms' | '
   const fromTick = Math.max(0, city.tick - days + 1), byWallet = new Map(city.firms.map(f => [f.wallet, f]));
   const sectors = new Map<BusinessSector, SectorResult>(BUSINESS_SECTORS.map(sector => [sector, { sector, firms: 0, workers: 0, revenue: 0, costs: 0, profit: 0, buyers: zero(BUYERS), costKinds: zero(COST_KINDS), payouts: 0, investment: 0 }]));
   const firms = new Map<string, FirmResult>(city.firms.map(f => [f.wallet, { id: f.id, sector: f.zone, label: firmLabel(f, recipeLabels), revenue: 0, costs: 0, profit: 0, cash: city.accounts[f.wallet] ?? 0, workers: Object.keys(f.workDays ?? {}).length }]));
-  for (let i = city.ledger.length - 1; i >= 0; i--) {
-    const e = city.ledger[i];
+  const rows = ledgerRows(city.ledger);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const e = rows[i];
     if (e.tick < fromTick) break;
     if (e.tick > city.tick || e.amount <= 0 || e.from === e.to) continue;
     const seller = byWallet.get(e.to);

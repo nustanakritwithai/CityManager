@@ -5,6 +5,7 @@
 import { CROPS, PRODUCTS, RECIPES } from './goods.ts';
 import { MONTH, farmCrop, summary, type City } from './sim.ts';
 import { mainGoalNetwork, GOAL_SERVED_ROADS, GOAL_SERVED_ROADS_PER_AXIS, GOAL_LARGE_CITY_POPULATION, GOAL_LARGE_CITY_SALES } from './main-goal-network.ts';
+import { ledgerRows } from './ledger-parts.ts';
 
 export type GoalCheck = { label: string; done: boolean; value?: string };
 export type GoalStage = { level: number; id: string; name: string; hint: string; checks: GoalCheck[]; done: boolean };
@@ -24,7 +25,7 @@ export function treasuryAtMonthEnds(c: City, months: number): number[] | null {
   if (last < months * MONTH) return null;
   const ends = Array.from({ length: months + 1 }, (_, i) => last - (months - i) * MONTH), out = ends.map(() => 0);
   if(c.history){for(let i=0;i<ends.length;i++){const end=ends[i];if(end<c.history.throughTick){const point=c.history.treasuryMonthEnds.find(p=>p.tick===end);if(!point)return null;out[i]=point.balance;}else out[i]=c.history.accounts.treasury??0;}}
-  for (const e of c.ledger) {
+  for (const e of ledgerRows(c.ledger)) {
     const delta = e.to === 'treasury' ? e.amount : e.from === 'treasury' ? -e.amount : 0;
     if (delta) ends.forEach((end, i) => { if (e.tick <= end) out[i] += delta; });
   }
@@ -35,8 +36,9 @@ export function cityGoals(c: City, s = summary(c)): CityGoals {
   const since = c.tick - MONTH;
   const recentCrops = c.cropLedger.filter(e => e.tick > since);
   let wholesale = 0, sold = 0, imported = 0;
-  for (let i = c.goodsLedger.length - 1; i >= 0 && c.goodsLedger[i].tick > since; i--) {
-    const e = c.goodsLedger[i];
+  const goodsRows = ledgerRows(c.goodsLedger);
+  for (let i = goodsRows.length - 1; i >= 0 && goodsRows[i].tick > since; i--) {
+    const e = goodsRows[i];
     if (e.reason === 'Wholesale stock delivery') wholesale += e.quantity;
     else if (e.reason === 'Household final consumption') sold += e.quantity;
     else if (e.reason === 'Imported shop stock') imported += e.quantity;
@@ -105,8 +107,9 @@ export function citySideMissions(c: City): SideMission[] {
   const recipes = new Set(c.firms.filter(f => f.zone === 'I' && f.recipe !== undefined).map(f => f.recipe)).size;
   const bought = new Set<string>();
   const since = c.tick - MONTH;
-  for (let i = c.goodsLedger.length - 1; i >= 0 && c.goodsLedger[i].tick > since; i--) {
-    const e = c.goodsLedger[i];
+  const goodsRows = ledgerRows(c.goodsLedger);
+  for (let i = goodsRows.length - 1; i >= 0 && goodsRows[i].tick > since; i--) {
+    const e = goodsRows[i];
     if (e.tick <= c.tick && e.reason === 'Household final consumption' && e.product && e.quantity > 0) bought.add(e.product);
   }
   const missions: Omit<SideMission, 'done'>[] = [

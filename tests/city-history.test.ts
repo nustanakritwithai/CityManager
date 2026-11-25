@@ -42,7 +42,9 @@ test('8 MiB means UTF-8 bytes and oversize preflight never truncates content',()
 test('oversize client request fails before pending intent or any mutation request',async()=>{
  const {ServerCitySaveClient}=await import('../src/server-city-save.ts');let requests=0;
  const client=new ServerCitySaveClient(async()=>{requests++;return null;},'00000000-0000-4000-8000-000000000001');await client.load();
- const raw=oversizedLegacyCity();await assert.rejects(client.create(raw,{name:'fixture',population:0,tick:120}),/8 MiB/);
+ // A save over the limit travels packed (save-envelope.ts); one still over the limit packed fails before any request.
+ const {createHash}=await import('node:crypto');const noise=Buffer.concat(Array.from({length:300_000},(_,i)=>createHash('sha256').update(String(i)).digest())).toString('base64');
+ const raw=JSON.stringify({version:23,tick:120,noise});await assert.rejects(client.create(raw,{name:'fixture',population:0,tick:120}),/8 MiB/);
  assert.equal(client.pending,false);assert.equal(requests,1);await assert.rejects(client.archive({source:'fixture',raw}),/8 MiB/);assert.equal(requests,1);
 });
 

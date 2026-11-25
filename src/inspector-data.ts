@@ -1,5 +1,6 @@
 import type { City } from './sim.ts';
 import { CIVIC, CIVIC_KINDS, CIVIC_REASON_NAMES, civicSpec } from './civic/sites.ts';
+import { ledgerRows } from './ledger-parts.ts';
 
 export type FlowKind = 'money' | 'goods';
 export type FlowRow = {
@@ -177,7 +178,7 @@ export function cropFlowRows(city: City): CropFlowRow[] {
 
 /** Presentation only: no filtering, truncation, journal sorting or simulation mutation. */
 export function flowRows(city: City, kind: FlowKind): FlowRow[] {
-  const entries = kind === 'money' ? city.ledger : city.goodsLedger;
+  const entries = kind === 'money' ? ledgerRows(city.ledger) : ledgerRows(city.goodsLedger);
   return entries.map((entry, index): FlowRow => ({
     index,
     kind,
