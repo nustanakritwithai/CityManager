@@ -115,7 +115,7 @@ test('the place panel of a city started in the game checks only what building ne
     assert.equal(p.list.nextReview, 0, 'built with the next command or at midnight');
     assert.deepEqual(p.list.checks.filter(check => ['housing-demand', 'income', 'crop-demand', 'owner', 'market-demand'].includes(check.key)), [], 'no demand check: the game builds on placement');
   }
-  assert.match(explainCell(c, ready(c)[0].i).at(-2)!, /^Eligible; it is built with your next map command or at midnight\.$/);
+  assert.match(explainCell(c, ready(c)[0].i).at(-2)!, /^Eligible; it is built with your next map command or in the next growth round \(every four game hours\)\.$/);
   assert.ok(ready(old).length > 0 && ready(old).every(p => p.list.nextReview === 3 - old.tick % 3), 'the three-day review counts down');
   // Only the three-day review waits for a shop day; on the daily pace the same parcel is simply ready and the next
   // command builds it.

@@ -1,7 +1,7 @@
 /** Application clock and atomic local save for the reviewed park components.
  * The economic engine remains the only owner of jobs, payroll and daily steps.
  */
-import { deserialize, serialize, expandValidatedCity, type City } from './sim.ts';
+import { deserialize, serialize, expandValidatedCity, growthRoundsDue, type City } from './sim.ts';
 import { parkWorkers, PARK_STAFF } from './parks.ts';
 import { createParkActivity, advanceParkActivity, reconcileParkActivity, startParkActivityDay,
   parkActivityAbsoluteMinute, prepareParkActivity, restoreParkActivity, type ParkActivityState } from './park-activity.ts';
@@ -100,6 +100,8 @@ function restoreRuntime(city: City, value: unknown, cityRaw?:string): ParkRuntim
   const activity = restoreParkActivity(city, JSON.stringify(raw.activity));
   // Production saves always complete the economic boundary before becoming observable.
   if (activity.minute === 1440) throw new Error('Incomplete park day boundary');
+  // A growth round runs when the clock reaches it (sim.ts), never before.
+  if ((city.growthRound ?? 0) > growthRoundsDue(activity.minute)) throw new Error('Growth round ahead of the clock');
   const runtime: ParkRuntime = { version: 1, activity, minuteRemainder: raw.minuteRemainder,
     recreation: restoreParkRecreation(raw.recreation, parkActivityAbsoluteMinute(activity)) };
   if(Object.hasOwn(raw,'rail')){

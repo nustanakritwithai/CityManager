@@ -1,6 +1,7 @@
 /**
  * The game clock: how fast a game day passes on screen. At 1× a game day lasts six real minutes, so a game hour is
- * 15 seconds; 3× makes an hour 5 seconds and 10× 1.5 seconds. The city's economy still settles once a day, at midnight.
+ * 15 seconds; 3× makes an hour 5 seconds and 10× 1.5 seconds. The city's economy still settles once a day, at midnight;
+ * a city started in the game also grows every four game hours (growthRound in sim.ts).
  */
 export const DAY_SECONDS = 360;
 export const MINUTES_PER_DAY = 1440;
