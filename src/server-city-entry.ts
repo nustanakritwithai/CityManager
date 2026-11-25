@@ -17,7 +17,7 @@ export async function requireServerCityEntry(configured?:string,dependencies:Par
  const card=document.createElement('div');card.className='guest-entry-card';
  const title=document.createElement('h1');title.textContent='CityManager';
  const note=document.createElement('p');note.textContent='เมืองของคุณเก็บไว้บนเซิร์ฟเวอร์ · เข้าเล่นด้วยบัญชีแขก (Guest)';
- const hint=document.createElement('p');hint.className='guest-entry-note';hint.textContent='เล่นครั้งแรก: ในหน้าต่างเข้าสู่ระบบ ให้สร้าง Guest ใหม่ แล้วกดปุ่ม Continue';
+ const hint=document.createElement('p');hint.className='guest-entry-note';hint.textContent='แท็บเข้าสู่ระบบจะเปิดขึ้นเมื่อกดเล่นต่อ หากมีบัญชีอยู่แล้วให้ใช้ Guest เดิม เล่นครั้งแรกให้สร้าง Guest แล้วกดเข้าสู่บัญชีเดิม';
  const button=document.createElement('button');button.textContent='เล่นต่อ';button.disabled=true;
  const status=document.createElement('p');status.setAttribute('role','status');status.className='guest-entry-status';card.append(title,note,button,status,hint);overlay.append(card);document.body.append(overlay);
  let busy=false,client:ServerCitySaveClient|null=null,expectedOwner:string|null=null;
@@ -106,7 +106,12 @@ export async function requireServerCityEntry(configured?:string,dependencies:Par
     }
     const raw=freshServerCityRaw(owner);await client.create(raw,citySaveMetadata(raw));
     const confirmed=await client.load();if(!confirmed||'deleted' in confirmed)throw Error('เมืองใหม่ยังไม่ใช่เมืองหลัก กรุณาตรวจสถานะอีกครั้ง');finish(confirmed.raw);
-   }catch(error){status.textContent=`ยังเข้าเมืองไม่ได้: ${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · กดเล่นต่อเพื่อลองใหม่`;}
+   }catch(error){
+    const message=error instanceof Error?error.message:'เชื่อมต่อไม่ได้';
+    if(message==='pages-popup-blocked')status.textContent='เบราว์เซอร์ไม่อนุญาตให้เปิดแท็บเข้าสู่ระบบ โปรดอนุญาตให้เปิดแท็บ แล้วกดเล่นต่ออีกครั้ง';
+    else if(message==='pages-popup-closed')status.textContent='แท็บเข้าสู่ระบบปิดก่อนเชื่อมต่อเสร็จ กดเล่นต่ออีกครั้งและเปิดแท็บเข้าสู่ระบบไว้จนกว่าจะเข้าบัญชี Guest ได้';
+    else status.textContent=`ยังเข้าเมืองไม่ได้: ${message} · กดเล่นต่อเพื่อลองใหม่`;
+   }
    finally{busy=false;button.disabled=false;if(slotMode==='numbered')renderSlots();void auth.prepare();}
   };
  });
