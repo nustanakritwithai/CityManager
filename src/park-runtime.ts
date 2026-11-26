@@ -1,7 +1,7 @@
 /** Application clock and atomic local save for the reviewed park components.
  * The economic engine remains the only owner of jobs, payroll and daily steps.
  */
-import { deserialize, serialize, expandValidatedCity, type City } from './sim.ts';
+import { deserialize, serialize, expandValidatedCity, dailyGrowth, growthRoundsDue, GROWTH_ROUND_MINUTES, type City } from './sim.ts';
 import { parkWorkers, PARK_STAFF } from './parks.ts';
 import { createParkActivity, advanceParkActivity, reconcileParkActivity, startParkActivityDay,
   parkActivityAbsoluteMinute, prepareParkActivity, restoreParkActivity, type ParkActivityState } from './park-activity.ts';
@@ -34,8 +34,9 @@ export function reconcileParkRuntime(city: City, runtime: ParkRuntime): void {
  * observeMinute synchronizes other minute-state owners at each processed boundary,
  * before afterDay can render/save. Fast paths may publish multiple minutes at once;
  * fractional-only advances and unprocessed frame-budget time are never published.
+ * When supplied, advanceGrowth runs each growth round the clock crosses.
  */
-export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean, observeMinute?: (absoluteMinute: number) => void): number {
+export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: number, advanceDay: () => void, afterDay?: () => boolean | void, continueFrame?: () => boolean, observeMinute?: (absoluteMinute: number) => void, advanceGrowth?: (round: number) => void): number {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440 * 120) throw new RangeError('Invalid park clock advance');
   if (minutes === 0) return 0;
   if (runtime.activity.day !== city.tick || runtime.recreation.minute !== parkActivityAbsoluteMinute(runtime.activity)) throw new Error('Park clocks differ');
@@ -54,14 +55,17 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
       }])) };
   };
   let context = prepare();
+  const runGrowth = dailyGrowth(city) ? advanceGrowth : undefined;
   while (remaining > 0) {
     // Application-only pacing budget: stop at an observed minute, never jump the
     // game clock or accumulate catch-up debt. Heavy frames slow playback.
     if (processed > 0 && continueFrame?.() === false) { runtime.minuteRemainder = 0; break; }
-    // With neither parks nor any earned benefit there are no observations to miss.
-    // Preserve the no-park economy's cost and byte-for-byte behavior.
+    const nextGrowthMinute = runGrowth
+      ? (growthRoundsDue(runtime.activity.minute) + 1) * GROWTH_ROUND_MINUTES
+      : GAME_MINUTES_PER_DAY;
+    // Without parks or earned benefits, advance directly to the next growth round or midnight.
     if (!city.parks.length && !runtime.activity.visitors.length && !Object.keys(runtime.recreation.citizens).length) {
-      const count = Math.min(remaining, GAME_MINUTES_PER_DAY - runtime.activity.minute);
+      const count = Math.min(remaining, nextGrowthMinute - runtime.activity.minute);
       runtime.activity.minute += count; remaining -= count;
       processed += count;
       runtime.recreation = createParkRecreation(parkActivityAbsoluteMinute(runtime.activity), runtime.recreation.tuning);
@@ -87,7 +91,19 @@ export function advanceParkRuntime(city: City, runtime: ParkRuntime, minutes: nu
       observeMinute?.(parkActivityAbsoluteMinute(runtime.activity));
       if (afterDay?.() === false) { runtime.minuteRemainder = 0; break; }
       context = prepare();
-    } else {runtime.rail?.advanceTo(parkActivityAbsoluteMinute(runtime.activity));observeMinute?.(parkActivityAbsoluteMinute(runtime.activity));}
+    } else {
+      const absoluteMinute = parkActivityAbsoluteMinute(runtime.activity);
+      runtime.rail?.advanceTo(absoluteMinute);
+      if (runGrowth && runtime.activity.minute === nextGrowthMinute) {
+        const round = growthRoundsDue(nextGrowthMinute);
+        if (round > (city.growthRound ?? 0)) {
+          runGrowth(round);
+          reconcileParkRuntime(city, runtime);
+          if (remaining > 0) context = prepare();
+        }
+      }
+      observeMinute?.(absoluteMinute);
+    }
   }
   return days;
 }
@@ -100,6 +116,8 @@ function restoreRuntime(city: City, value: unknown, cityRaw?:string): ParkRuntim
   const activity = restoreParkActivity(city, JSON.stringify(raw.activity));
   // Production saves always complete the economic boundary before becoming observable.
   if (activity.minute === 1440) throw new Error('Incomplete park day boundary');
+  // A growth round runs when the clock reaches it (sim.ts), never before.
+  if ((city.growthRound ?? 0) > growthRoundsDue(activity.minute)) throw new Error('Growth round ahead of the clock');
   const runtime: ParkRuntime = { version: 1, activity, minuteRemainder: raw.minuteRemainder,
     recreation: restoreParkRecreation(raw.recreation, parkActivityAbsoluteMinute(activity)) };
   if(Object.hasOwn(raw,'rail')){

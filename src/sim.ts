@@ -97,6 +97,8 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   populationCapacityVersion?: 1;
   /** Real rice (industry-scale.ts): 100-rai paddies, mills by tonnage, rice sold by the kilo; jobs filled within a month. Absent on cities saved before. */
   industryScale?: 1;
+  /** Index of the last growth round run today. Absent at midnight. */
+  growthRound?: number;
   /** A big town (tile-scale.ts): every tile holds ten real buildings' worth. Set when a city is started in the game. */
   tileScale?: number;
   /** Homes hold real numbers of households (house 1, apartment 40, condo 200). Absent on cities saved before, which keep the old smaller homes. */
@@ -1280,7 +1282,7 @@ export function explainCell(c: City, i: number): string[] {
     // A city started in the game builds a shop on its parcel at once, so only the three-day review waits for a shop day.
     const stopped = blockers(c, i), shop = !dailyGrowth(c) && cell.zone === 'C' && retailDemand(c) > 0 && !marketToConvert(c) && shopSite(c) === i;
     if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. A saving household or outside equity opens one here on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)); it buys local wholesale first and hires retail workers.`];
-    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : dailyGrowth(c) ? 'Eligible; it is built with your next map command or at midnight.' : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
+    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : dailyGrowth(c) ? 'Eligible; it is built with your next map command or in the next growth round (every three game hours).' : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
   }
   const b = building(c, cell.building), f = c.firms.find(v => v.building === b.id), residents = c.households.filter(v => v.home === b.id);
   const output = [`${({ R: 'Home', C: 'Commercial', I: 'Factory', F: 'Farm' } as const)[b.zone]} #${b.id} · level ${b.level} · age ${b.age} days`, access(c, i) ? 'Connected road frontage.' : 'Disconnected: employment, purchases, production and height growth are suspended.'];
@@ -1348,6 +1350,20 @@ function shopHiringCap(c: City, f: Firm): number {
   return firmWorkerCount(c, f.id) === 0 ? scale : staff + Math.min(scale, Math.max(0, Math.floor(f.lastMonthProfit / firmWage(f, c))));
 }
 function employ(c: City) {
+  assignFirmJobs(c);
+  const households = firstById(c.households), firms = firstById(c.firms);
+  for (const allocation of c.employment) {
+    const h = households.get(allocation.householdId)!, f = firms.get(allocation.firmId)!;
+    f.workDays[h.wallet] = (f.workDays[h.wallet] ?? 0) + allocation.workers;
+  }
+  employParks(c);
+  employVenues(c);
+}
+/**
+ * Who works where at the firms: owners first, then everyone else by the allocator, keeping jobs people have. A day's
+ * shift is counted by employ() at midnight; a growth round only gives newcomers their jobs, to start the next day.
+ */
+function assignFirmJobs(c: City) {
   reserveOwnerLabor(c);
   const svc = utilities(c), owned = byHousehold(c.ownerLabor), seats = educationSeats(c);
   c.employment = allocateEmployment(c.households.map(h => {
@@ -1359,13 +1375,6 @@ function employ(c: City) {
     id: f.id, zone: f.zone === 'F' ? 'I' as const : f.zone as 'I' | 'C', slots: access(c, building(c, f.building).cell) && svc.ok(f.building) ? capacity(building(c, f.building), f, c) - c.ownerLabor.filter(e => e.firmId === f.id).length : 0,
     budgetWorkers: Math.min(Math.floor(spendable(c, f) / (firmWage(f, c) / MONTH)), shopHiringCap(c, f)),
   })), c.employment);
-  const households = firstById(c.households), firms = firstById(c.firms);
-  for (const allocation of c.employment) {
-    const h = households.get(allocation.householdId)!, f = firms.get(allocation.firmId)!;
-    f.workDays[h.wallet] = (f.workDays[h.wallet] ?? 0) + allocation.workers;
-  }
-  employParks(c);
-  employVenues(c);
 }
 /** Rows by id, the first of each id, as find() would give them. */
 function firstById<T extends { id: number }>(rows: readonly T[]): Map<number, T> {
@@ -2075,13 +2084,14 @@ export const ARRIVAL_FILL_DAYS = 30;
  */
 export const dailyGrowth = (c: Pick<City, 'unlocks'>) => c.unlocks !== undefined;
 export const DAILY_BUILDS = 6, DAILY_ARRIVAL_FILL_DAYS = 3;
-function admitHousehold(c: City) {
+function admitHousehold(c: City, round = false) {
   if (!canAllocateIds(c, 1)) { c.lastEvent = 'Entity ID range exhausted; no household or arrival funding was created.'; return; }
   // A severely unhappy city does not immediately replace every departure.
   const happiness = averageHouseholdHappiness(c.happiness);
   if (happiness !== null && happiness < 35) return;
   // Under real rules people come for work whether or not a home is free; elsewhere the homeless are housed first.
-  if (!homelessWork(c) && c.households.some(h => h.home === null) || c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
+  // People come once a day, or once a growth round, which is its own gate.
+  if (!homelessWork(c) && c.households.some(h => h.home === null) || !round && c.ledger.some(e => e.tick === c.tick && e.reason === 'New household arrival savings')) return;
   const facts = admissionFacts(c), seekers = jobSeekersComing(c, facts);
   if (!facts.bootstrap && !seekers && (facts.vacancies < 1 || facts.existingUnemployed > 0)) return;
   // A new household takes the best land it fits into; ties keep the usual order.
@@ -2243,7 +2253,7 @@ function growthReview(c: City) {
     grew: () => { view = undefined; },
   };
 }
-function grow(c: City) {
+function grow(c: City, round = false) {
   // One seeded parcel per review; a city on the daily pace builds up to DAILY_BUILDS, checking demand and supply again after each.
   for (let built = 0, limit = dailyGrowth(c) ? DAILY_BUILDS : 1; built < limit; built++) {
     const facts = growthFacts(c);
@@ -2251,8 +2261,9 @@ function grow(c: City) {
     if (!eligible.length) break;
     createBuilding(c, eligible[Math.floor(random(c) * eligible.length)]);
   }
-  // A big town (tile-scale.ts) also reviews its homes every night: its people wait for homes in their hundreds.
-  const monthEnd = c.tick % MONTH === 0, homesNightly = tileScale(c) === TILE_SCALE;
+  // A big town (tile-scale.ts) also reviews its homes every night: its people wait for homes in their hundreds. A growth
+  // round reviews the homes of every city started in the game; businesses grow at the month's end only.
+  const monthEnd = !round && c.tick % MONTH === 0, homesNightly = round || tileScale(c) === TILE_SCALE;
   if (!monthEnd && !homesNightly) return;
   // A taller building draws more water and power; it grows only while the network can supply it.
   const svc = utilities(c), spare = { ...svc.spare }, review = growthReview(c);
@@ -2287,7 +2298,7 @@ function grow(c: City) {
     if (b.level !== level) review.grew();
   }
 }
-/** Most buildings one player command raises at once; the rest rise with the next command or at midnight. */
+/** Most buildings one player command raises at once; the rest rise with the next command or growth round. */
 export const INSTANT_BUILDS = 24;
 /**
  * A city started in the game builds a parcel as soon as the player's command makes it ready (a road, water and power;
@@ -2328,6 +2339,8 @@ export function step(c: City): void {
 function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
+  // A new day's growth rounds start at 03:00.
+  delete c.growthRound;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) {
     const paid = transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
     if (payment.kind === 'contract') teacherPaySubsidy(c, paid);
@@ -2416,6 +2429,29 @@ function stepWithRoads(c: City): void {
     if (c.households.length !== before) c.happiness = admitHappiness(c, c.happiness);
   } else if (c.tick % 3 === 0) grow(c);
   else if (c.tick % 3 === 1) openShop(c);
+}
+/** Growth rounds occur every three game hours. The daily step handles midnight. */
+export const GROWTH_ROUND_MINUTES = 180, GROWTH_ROUNDS = 7;
+/** Index of the latest daytime growth round scheduled by this minute. */
+export const growthRoundsDue = (minute: number): number => Math.max(0, Math.min(GROWTH_ROUNDS, Math.floor(minute / GROWTH_ROUND_MINUTES)));
+/**
+ * One growth round of a city started in the game: waiting parcels are built and homes grow (growth review), shops open,
+ * the homeless move into free homes, people come for the open jobs, and newcomers get their jobs, to start the next
+ * day. Money, shopping, wages and production stay on the daily step at midnight. A round already processed is ignored.
+ */
+export function growthRound(c: City, round: number): boolean {
+  if (!dailyGrowth(c) || !Number.isInteger(round) || round <= (c.growthRound ?? 0) || round > GROWTH_ROUNDS) return false;
+  c.growthRound = round;
+  withRoadScope(c, () => {
+    grow(c, true); openShop(c);
+    rehouse(c);
+    const before = c.households.length;
+    admitHousehold(c, true);
+    // A newcomer's first happiness row is the one an arrival earlier today got (as at midnight's second pass).
+    if (c.households.length !== before) c.happiness = admitHappiness(c, c.happiness);
+    assignFirmJobs(c);
+  });
+  return true;
 }
 /** `starter: false` gives an empty map with only the outside gateway, for the guided first game. */
 export function createCity(seed = 20261023, options: { starter?: boolean } = {}): City {
@@ -3000,6 +3036,7 @@ export function deserialize(json: string): City {
   if (city.priceScale !== undefined && city.priceScale !== 1) throw new Error('Invalid price scale.');
   // A big town (tile-scale.ts) is a city started in the game on real sizes; everywhere else the field is absent.
   if (city.tileScale !== undefined && (city.tileScale !== TILE_SCALE || city.unlocks === undefined || city.housingScale !== 1 || !realIndustry(city))) throw new Error('Invalid tile scale.');
+  if (city.growthRound !== undefined && (!Number.isSafeInteger(city.growthRound) || city.growthRound < 1 || city.growthRound > GROWTH_ROUNDS || city.unlocks === undefined)) throw new Error('Invalid growth round.');
   // New cities opt into revised goals; absent on old saves, whose reversible goals remain unchanged.
   if (city.goalRulesVersion !== undefined && city.goalRulesVersion !== 2) throw new Error('Invalid city goal rules version.');
   // Older builds pass unknown top-level keys through unvalidated; the taxi section is checked here.

@@ -93,7 +93,7 @@ test(`one command raises at most ${INSTANT_BUILDS}, the parcel just zoned among 
   assert.notEqual(c.cells[last].building, null, 'the parcel just zoned rose first');
   const left = parcels.slice(0, 31).filter(i => c.cells[i].building === null);
   assert.equal(left.length, 31 - INSTANT_BUILDS);
-  for (const i of left) assert.equal(explainCell(c, i).at(-2), 'Eligible; it is built with your next map command or at midnight.');
+  for (const i of left) assert.equal(explainCell(c, i).at(-2), 'Eligible; it is built with your next map command or in the next growth round (every three game hours).');
   assert.equal(buildReadyParcels(c), left.length);
 });
 
