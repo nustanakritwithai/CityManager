@@ -24,17 +24,58 @@ function town(game: boolean, parcels = 40, big = false): City {
   }
   return c;
 }
-/** A day as the game plays it: the five growth rounds through the day, then midnight. */
+/** A day as the game plays it: the growth rounds through the day, then midnight. */
 function day(c: City, rounds = true) {
-  if (rounds) while (growthRound(c)) keepSupplied(c, 60);
+  if (rounds) for (let round = 1; round <= GROWTH_ROUNDS; round++) {
+    if (growthRound(c, round)) keepSupplied(c, 60);
+  }
   step(c); keepSupplied(c, 60);
 }
 const people = (c: City) => c.households.reduce((n, h) => n + h.members, 0);
 const workDays = (c: City) => c.firms.reduce((n, f) => n + Object.values(f.workDays).reduce((m, d) => m + d, 0), 0);
 
-test('a growth round is due every four game hours from 04:00 to 20:00', () => {
-  assert.equal(GROWTH_ROUND_MINUTES, 240); assert.equal(GROWTH_ROUNDS, 5);
-  assert.deepEqual([0, 239, 240, 479, 480, 720, 960, 1199, 1200, 1439].map(growthRoundsDue), [0, 0, 1, 1, 2, 3, 4, 4, 5, 5]);
+test('a growth round is due every three game hours from 03:00 to 21:00', () => {
+  assert.equal(GROWTH_ROUND_MINUTES, 180);
+  assert.equal(GROWTH_ROUNDS, 7);
+  assert.deepEqual([0, 179, 180, 359, 360, 420, 539, 540, 720, 900, 1080, 1259, 1260, 1439].map(growthRoundsDue),
+    [0, 0, 1, 1, 2, 2, 2, 3, 4, 5, 6, 6, 7, 7]);
+});
+
+test('a fresh server city with a supplied home welcomes its first households at 09:00 and saves on day zero', () => {
+  const { city, runtime } = deserializeParkSession(freshServerCityRaw('11111111-1111-4111-8111-111111111111'));
+  assert.equal(runtime.activity.minute, 420);
+  assert.equal(buildRoad(city, GATEWAY, GATEWAY + 4).ok, true);
+  const site = city.cells.findIndex((cell, i) => !cell.road && !cell.zone && access(city, i));
+  assert.equal(zoneCell(city, site, 'R').ok, true);
+  assert.equal(buildReadyParcels(city, site), 1);
+  const advance = (minutes: number) => advanceParkRuntime(city, runtime, minutes, () => step(city),
+    undefined, undefined, undefined, round => growthRound(city, round));
+
+  advance(119);
+  assert.equal(city.households.length, 0);
+  assert.equal(city.growthRound, undefined, 'do not run 03:00 or 06:00 after starting at 07:00');
+  advance(1);
+  assert.equal(city.tick, 0);
+  assert.ok(city.households.length > 0, 'a supplied home is enough for the first arrivals');
+  assert.equal(city.growthRound, 3);
+  const saved = serializeParkSession(city, runtime, city.market);
+  const reloaded = deserializeParkSession(saved);
+  assert.equal(serializeParkSession(reloaded.city, reloaded.runtime, reloaded.city.market), saved);
+  const observed: number[] = [];
+  advanceParkRuntime(reloaded.city, reloaded.runtime, 181, () => step(reloaded.city),
+    undefined, undefined, undefined, round => { observed.push(round); growthRound(reloaded.city, round); });
+  assert.deepEqual(observed, [4], 'reopening at 09:00 processes 12:00 next');
+});
+
+test('a fast clock advance runs growth before midnight and resumes on the next day', () => {
+  const { city, runtime } = deserializeParkSession(freshServerCityRaw('11111111-1111-4111-8111-111111111111'));
+  const rounds: Array<[number, number, number]> = [];
+  advanceParkRuntime(city, runtime, 1200, () => step(city), undefined, undefined, undefined, round => {
+    rounds.push([city.tick, runtime.activity.minute, round]);
+    growthRound(city, round);
+  });
+  assert.deepEqual(rounds, [[0, 540, 3], [0, 720, 4], [0, 900, 5], [0, 1080, 6], [0, 1260, 7], [1, 180, 1]]);
+  assert.equal(city.growthRound, 1);
 });
 
 test('a round builds a waiting parcel and gives the open jobs to people without work, but counts no shift', () => {
@@ -46,51 +87,60 @@ test('a round builds a waiting parcel and gives the open jobs to people without 
   // Midnight's newcomers arrive after the day's hiring, so some are still without work.
   const shifts = workDays(c), waiting = summary(c);
   assert.ok(waiting.unemployed > 0 && waiting.openJobs > 0, `${waiting.unemployed} without work, ${waiting.openJobs} open jobs`);
-  assert.equal(growthRound(c), true); assert.equal(c.growthRound, 1);
+  assert.equal(growthRound(c, 1), true); assert.equal(c.growthRound, 1);
   assert.ok(c.firms.some(f => f.building === c.cells[site].building), 'the round built the waiting farm');
   assert.ok(summary(c).unemployed < waiting.unemployed, 'people without work take the open jobs in the round');
   assert.equal(workDays(c), shifts, 'a round counts no shift: wages stay on the daily step');
-  // Five rounds a day at most; midnight starts the next day's rounds.
-  while (growthRound(c)) { /* the rest of the day's rounds */ }
-  assert.equal(c.growthRound, GROWTH_ROUNDS); assert.equal(growthRound(c), false);
+  // Each time slot runs once; midnight starts the next day's rounds.
+  assert.equal(growthRound(c, 1), false);
+  for (let round = 2; round <= GROWTH_ROUNDS; round++) assert.equal(growthRound(c, round), true);
+  assert.equal(c.growthRound, GROWTH_ROUNDS);
+  assert.equal(growthRound(c, GROWTH_ROUNDS + 1), false);
   step(c); assert.equal(c.growthRound, undefined);
   assert.ok(workDays(c) > shifts, 'midnight counts the new workers\' first shift');
-  assert.equal(growthRound(c), true); assert.equal(c.growthRound, 1);
+  assert.equal(growthRound(c, 1), true); assert.equal(c.growthRound, 1);
 });
 
 test('a city saved before the game kept its pace has no rounds, and an old save is unchanged', () => {
   const c = town(false), json = serialize(c);
-  assert.equal(growthRound(c), false); assert.equal(serialize(c), json);
+  assert.equal(growthRound(c, 1), false); assert.equal(serialize(c), json);
   for (let d = 0; d < 5; d++) day(c);
   assert.equal(c.growthRound, undefined);
 });
 
 test('a save keeps the day\'s rounds; a bad count or a round ahead of the clock is refused', () => {
   const c = town(true); for (let d = 0; d < 2; d++) day(c, false);
-  growthRound(c); growthRound(c);
+  growthRound(c, 1); growthRound(c, 2);
   const json = serialize(c), back = deserialize(json);
   assert.equal(back.growthRound, 2); assert.equal(serialize(back), json);
   // The reloaded city plays the rest of the day the same way.
-  while (growthRound(c)) { /* */ } while (growthRound(back)) { /* */ }
+  for (let round = 3; round <= GROWTH_ROUNDS; round++) {
+    growthRound(c, round);
+    growthRound(back, round);
+  }
   step(c); step(back); assert.equal(serialize(back), serialize(c));
-  for (const bad of [0, 6, 1.5, -1]) assert.throws(() => deserialize(json.replace('"growthRound":2', `"growthRound":${bad}`)), /growth round/i, String(bad));
+  for (const bad of [0, GROWTH_ROUNDS + 1, 1.5, -1]) assert.throws(() => deserialize(json.replace('"growthRound":2', `"growthRound":${bad}`)), /growth round/i, String(bad));
   const old = town(false), raw = JSON.parse(serialize(old)); raw.growthRound = 1;
   assert.throws(() => deserialize(JSON.stringify(raw)), /growth round/i, 'only a city started in the game has rounds');
   // A session save: the clock must have reached every round the city ran.
   const { city, runtime } = deserializeParkSession(freshServerCityRaw('11111111-1111-4111-8111-111111111111'));
-  advanceParkRuntime(city, runtime, 1440 - runtime.activity.minute + 4 * 60 + 1, () => step(city));
+  advanceParkRuntime(city, runtime, 1440 - runtime.activity.minute + GROWTH_ROUND_MINUTES + 1, () => step(city));
   assert.equal(growthRoundsDue(runtime.activity.minute), 1);
-  growthRound(city);
+  growthRound(city, 1);
   const session = serializeParkSession(city, runtime);
   assert.equal(deserializeParkSession(session).city.growthRound, 1);
-  growthRound(city);
+  growthRound(city, 2);
   assert.throws(() => serializeParkSession(city, runtime), /ahead of the clock/);
 });
 
 test('rounds recorded as outside changes replay exactly in the owner journal', () => {
   const c = town(true, 24), session = createOwnerDecisionSession(c);
   for (let d = 0; d < 4; d++) {
-    while (true) { session.beforeExternal(c); const ran = growthRound(c); session.syncExternal(c, 'growth-round'); if (!ran) break; }
+    for (let round = 1; round <= GROWTH_ROUNDS; round++) {
+      session.beforeExternal(c);
+      assert.equal(growthRound(c, round), true);
+      session.syncExternal(c, 'growth-round');
+    }
     session.advance(c); keepSupplied(c, 60); session.syncExternal(c, 'test-supply');
   }
   assert.equal(session.getStats().recording, true, `journal issue: ${session.getStats().issue}`);
@@ -106,7 +156,7 @@ test('with rounds a town grows faster than with midnight alone', { timeout: 300_
   const json = serialize(fast); assert.equal(serialize(deserialize(json)), json);
 });
 
-test('a big town takes in a round\'s share of newcomers every four hours', { timeout: 300_000 }, () => {
+test('a big town takes in a round\'s share of newcomers every three hours', { timeout: 300_000 }, () => {
   const fast = town(true, 60, true), slow = structuredClone(fast);
   for (let d = 0; d < 15; d++) { day(fast); day(slow, false); }
   assert.ok(fast.households.length > slow.households.length, `${fast.households.length} households with rounds, ${slow.households.length} without`);

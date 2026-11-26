@@ -45,7 +45,7 @@ import './submenu-layout.css';
 import './context-layout.css';
 import { renderContext, renderCityOverview, showOwnerFinanceResult } from './context-panels.ts';
 import { CityView } from './renderer.ts';
-import { growthRound, growthRoundsDue, GATEWAY, SIZE, access, setRoadClassAlong, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, buildReadyParcels, dailyGrowth, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
+import { growthRound, GATEWAY, SIZE, access, setRoadClassAlong, utilityAt, utilities, utilityStatus, treasurySpendable, parkStaffingStatus, venueStatus, leaseVenue, endVenueLease, parkAt, buildCivic, cityAttractions, campusAt, buildCampus, buildPark, toggleCampus, upgradeCampus, adoptSavedEducation, plantAt, buildPlant, upgradePlant, createCity, buildRoad, zoneCell, buildReadyParcels, dailyGrowth, bulldoze, summary, serialize, roadPath, buildParallelRoad, editRoadJunction, contributeOwnerCapital, withdrawOwnerProfit, selectFarmCrop, selectFactoryRecipe, type City, type Zone } from './sim.ts';
 import { INCIDENT, INCIDENT_MIN_POPULATION } from './incidents.ts';
 import { UNLOCK_POPULATION, peopleToUnlock } from './unlocks.ts';
 import { paintDistrict } from './districts.ts';
@@ -459,7 +459,7 @@ function parcelChecklistView(parcel: ParcelChecklist): HTMLElement {
   const box = node('div', 'parcel-checklist'); box.dataset.parcelChecklist = parcel.eligible ? 'eligible' : 'blocked';
   const failed = parcel.checks.filter(c => c.state === 'fail').length;
   const head = node('p', `parcel-verdict ${parcel.eligible ? 'good' : 'bad'}`, parcel.eligible
-    ? parcel.nextReview === 0 ? 'พร้อมพัฒนา · สร้างเมื่อคุณสั่งงานบนแผนที่ครั้งถัดไป หรือในรอบเติบโตถัดไป (ทุก 4 ชั่วโมงในเกม)' : `พร้อมพัฒนา · ทบทวนแปลงอีก ${parcel.nextReview} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`
+    ? parcel.nextReview === 0 ? 'พร้อมพัฒนา · สร้างเมื่อคุณสั่งงานบนแผนที่ครั้งถัดไป หรือในรอบเติบโตถัดไป (ทุก 3 ชั่วโมงในเกม)' : `พร้อมพัฒนา · ทบทวนแปลงอีก ${parcel.nextReview} วัน แล้วสุ่มเลือกจากแปลงที่ผ่านเงื่อนไข`
     : `ยังไม่โต · ติด ${failed} เงื่อนไข`);
   const list = node('ol', 'parcel-checks');
   for (const check of parcel.checks) {
@@ -1270,21 +1270,21 @@ async function boot() {
     const before = dayBoundaryReached(parkRuntime.activity.minute, parkRuntime.minuteRemainder, minutes) ? cueSnapshot(city, goalsNow()) : null;
     const moneyBefore = before ? moneyMark(city) : null;
     let days = 0;
+    let grew = false;
     let dayOutcomes: ReturnType<typeof ownerDecisionSession.advance> = [];
     const frameStarted = performance.now(), frameDeadline = frameStarted + 8;
     try {
       days = advanceParkRuntime(city, parkRuntime, minutes, () => {
         dayOutcomes = ownerDecisionSession.advance(city);
-      }, () => { ownerDecisionPanel?.noteOutcomes(dayOutcomes); return !paused; }, () => performance.now() < frameDeadline);
-    } catch (error) { paused = true; console.error(error); status('หยุดเวลา: ไม่สามารถประมวลผลกิจกรรมประชาชนได้'); }
-    // Every four game hours a city started in the game grows: people come, homes grow and waiting parcels are built.
-    // Each round is recorded like a player's command, so the owner journal and saves follow it.
-    let grew = false;
-    try {
-      while (!paused && dailyGrowth(city) && (city.growthRound ?? 0) < growthRoundsDue(parkRuntime.activity.minute)) {
-        ownerDecisionSession.beforeExternal(city); growthRound(city); ownerDecisionSession.syncExternal(city, 'growth-round'); grew = true;
-      }
-    } catch (error) { paused = true; console.error(error); status('หยุดเวลา: คำนวณรอบเติบโตของเมืองไม่สำเร็จ'); }
+      }, () => { ownerDecisionPanel?.noteOutcomes(dayOutcomes); return !paused; }, () => performance.now() < frameDeadline, undefined, round => {
+        // Record each growth round like a map command so owner journal replay follows the clock.
+        ownerDecisionSession.beforeExternal(city);
+        if (growthRound(city, round)) {
+          ownerDecisionSession.syncExternal(city, 'growth-round');
+          grew = true;
+        }
+      });
+    } catch (error) { paused = true; console.error(error); status('หยุดเวลา: ไม่สามารถคำนวณกิจกรรมประชาชนหรือรอบเติบโตของเมืองได้'); }
     if (grew) trafficLayer?.afterMapEdit(city, paused || document.hidden);
     parkFrameMs = performance.now() - frameStarted; parkFramePeakMs = Math.max(parkFramePeakMs, parkFrameMs);
     parkScene?.setQuality(visual.diagnostics.quality);

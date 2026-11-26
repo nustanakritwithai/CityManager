@@ -97,7 +97,7 @@ export type City = { goalRulesVersion?: 2; commercialUnifiedStartTick?: number; 
   populationCapacityVersion?: 1;
   /** Real rice (industry-scale.ts): 100-rai paddies, mills by tonnage, rice sold by the kilo; jobs filled within a month. Absent on cities saved before. */
   industryScale?: 1;
-  /** Growth rounds already run today (growthRound): a city started in the game grows every four game hours. Absent at midnight. */
+  /** Index of the last growth round run today. Absent at midnight. */
   growthRound?: number;
   /** A big town (tile-scale.ts): every tile holds ten real buildings' worth. Set when a city is started in the game. */
   tileScale?: number;
@@ -1282,7 +1282,7 @@ export function explainCell(c: City, i: number): string[] {
     // A city started in the game builds a shop on its parcel at once, so only the three-day review waits for a shop day.
     const stopped = blockers(c, i), shop = !dailyGrowth(c) && cell.zone === 'C' && retailDemand(c) > 0 && !marketToConvert(c) && shopSite(c) === i;
     if (shop) return [`${cell.zone} zone · vacant`, `Shop site: a factory with workers and connected households want a shop. A saving household or outside equity opens one here on the next shop day (in ${(4 - c.tick % 3) % 3 || 3} day(s)); it buys local wholesale first and hires retail workers.`];
-    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : dailyGrowth(c) ? 'Eligible; it is built with your next map command or in the next growth round (every four game hours).' : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
+    return [`${cell.zone} zone · vacant`, ...stopped, stopped.length ? 'Growth is blocked until these conditions change.' : dailyGrowth(c) ? 'Eligible; it is built with your next map command or in the next growth round (every three game hours).' : `Eligible; a seeded parcel is chosen every 3 days. Next review in ${3 - c.tick % 3} day(s).`, cell.zone === 'C' ? 'Self-employed startup: owner contributes 600 real household credits; construction costs 100 and remaining business cash stays separate. One owner worker is reserved from the same household skill pool.' : 'Bootstrap: first industry may open without workers; first 2 households may arrive without jobs. Private firm equity and arrival savings use the named outside account.'];
   }
   const b = building(c, cell.building), f = c.firms.find(v => v.building === b.id), residents = c.households.filter(v => v.home === b.id);
   const output = [`${({ R: 'Home', C: 'Commercial', I: 'Factory', F: 'Farm' } as const)[b.zone]} #${b.id} · level ${b.level} · age ${b.age} days`, access(c, i) ? 'Connected road frontage.' : 'Disconnected: employment, purchases, production and height growth are suspended.'];
@@ -2339,7 +2339,7 @@ export function step(c: City): void {
 function advanceToReview(c: City): void {
   if (c.foodDemandStartTick === undefined) c.foodDemandStartTick = c.tick;
   c.tick++; for (const b of c.buildings) b.age++;
-  // A new day's growth rounds start at 04:00.
+  // A new day's growth rounds start at 03:00.
   delete c.growthRound;
   if (c.education) for (const payment of stepEducation(c.education, educationView(c))) {
     const paid = transfer(c, 'treasury', 'outside', payment.amount, payment.reason);
@@ -2430,18 +2430,18 @@ function stepWithRoads(c: City): void {
   } else if (c.tick % 3 === 0) grow(c);
   else if (c.tick % 3 === 1) openShop(c);
 }
-/** A city started in the game grows every four game hours (04:00, 08:00, 12:00, 16:00 and 20:00), as well as at midnight. */
-export const GROWTH_ROUND_MINUTES = 240, GROWTH_ROUNDS = 5;
-/** The growth rounds due by this minute of the day. */
+/** Growth rounds occur every three game hours. The daily step handles midnight. */
+export const GROWTH_ROUND_MINUTES = 180, GROWTH_ROUNDS = 7;
+/** Index of the latest daytime growth round scheduled by this minute. */
 export const growthRoundsDue = (minute: number): number => Math.max(0, Math.min(GROWTH_ROUNDS, Math.floor(minute / GROWTH_ROUND_MINUTES)));
 /**
  * One growth round of a city started in the game: waiting parcels are built and homes grow (growth review), shops open,
  * the homeless move into free homes, people come for the open jobs, and newcomers get their jobs, to start the next
- * day. Money, shopping, wages and production stay on the daily step at midnight. False when the city has no round due.
+ * day. Money, shopping, wages and production stay on the daily step at midnight. A round already processed is ignored.
  */
-export function growthRound(c: City): boolean {
-  if (!dailyGrowth(c) || (c.growthRound ?? 0) >= GROWTH_ROUNDS) return false;
-  c.growthRound = (c.growthRound ?? 0) + 1;
+export function growthRound(c: City, round: number): boolean {
+  if (!dailyGrowth(c) || !Number.isInteger(round) || round <= (c.growthRound ?? 0) || round > GROWTH_ROUNDS) return false;
+  c.growthRound = round;
   withRoadScope(c, () => {
     grow(c, true); openShop(c);
     rehouse(c);
