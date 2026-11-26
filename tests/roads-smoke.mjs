@@ -93,7 +93,7 @@ async function saveAndReload(){
 async function failedSaveThenRetry(){
  const before=storage.active,raw=await evaluate('window.cityManager.sessionSnapshot()'),writeStart=storage.writes.length;server.setSaveFailure(true);await button('#save');
  await until("!!document.querySelector('#save-failure-banner:not([hidden])')");assert.ok(server.rejected.length);assert.deepEqual(storage.active,before);
- assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await storage.assertNoCityWrites(evaluate);
+ assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์/);await storage.assertNoCityWrites(evaluate);
  server.setSaveFailure(false);await button('#save-failure-retry');await waitHead(before.revision);
  await until("document.querySelector('#autosave-status')?.textContent.startsWith('บันทึกบนเซิร์ฟเวอร์แล้ว')");
  const ack=storage.active,events=storage.writes.slice(writeStart),failed=server.rejected.at(-1);assert.equal(ack.revision,before.revision+2);assert.equal(ack.raw,raw);assert.equal(events.length,2);
