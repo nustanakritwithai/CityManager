@@ -437,7 +437,7 @@ async function run(){
   for(const [name,width,height,mobile] of [['desktop',1280,800,false],['mobile',390,844,true]]){
    await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});await send('Emulation.setTouchEmulationEnabled',{enabled:mobile});
    await recordRenderer('retry viewport '+name);
-   f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure '+name);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await clean();
+   f.mode='disconnect';const start=f.posts.length;await click('#save');await until(failed,'truthful network failure '+name);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์/);await clean();
    if(process.env.CITYMANAGER_PR182_CHECKS==='1')await capture('pr182-banner-'+name);
    const pendingCommand=f.posts[start];f.mode='ok';rev=f.state.active.revision;await pressRetry(mobile);await until(async()=>{diagnostics.retryBanner={name,initialRevision:rev,headRevision:f.state.active.revision,fixtureAudit:structuredClone(f.postAudit),clicks:await evaluate('window.__saveClickTrace')};return f.state.active.revision>rev;},'banner retry acknowledgement '+name);await settled();assert.deepEqual(f.posts[start+1],pendingCommand,'exact uncertain command retry');await clean();
   }

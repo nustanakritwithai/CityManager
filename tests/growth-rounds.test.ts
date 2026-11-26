@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCity, step, buildRoad, zoneCell, access, buildReadyParcels, serialize, deserialize, summary, growthRound, growthRoundsDue, GROWTH_ROUNDS, GROWTH_ROUND_MINUTES, GATEWAY, SIZE, type City, type Zone } from '../src/sim.ts';
+import { createCity, step, buildRoad, buildPark, zoneCell, access, buildReadyParcels, serialize, deserialize, summary, growthRound, growthRoundsDue, GROWTH_ROUNDS, GROWTH_ROUND_MINUTES, GATEWAY, SIZE, type City, type Zone } from '../src/sim.ts';
 import { freshServerCityRaw } from '../src/fresh-server-city.ts';
+import { citySaveMetadata } from '../src/server-city-entry.ts';
 import { deserializeParkSession, serializeParkSession, advanceParkRuntime } from '../src/park-runtime.ts';
 import { createOwnerDecisionSession, replayOwnerJournal } from '../src/owner-decision-session.ts';
 import { TILE_SCALE } from '../src/tile-scale.ts';
@@ -76,6 +77,34 @@ test('a fast clock advance runs growth before midnight and resumes on the next d
   });
   assert.deepEqual(rounds, [[0, 540, 3], [0, 720, 4], [0, 900, 5], [0, 1080, 6], [0, 1260, 7], [1, 180, 1]]);
   assert.equal(city.growthRound, 1);
+});
+
+test('a daytime round fills new farm jobs without double-booking park workers in the server save', () => {
+  const { city, runtime } = deserializeParkSession(freshServerCityRaw('11111111-1111-4111-8111-111111111111'));
+  const site = (x: number) => GATEWAY + SIZE + x;
+  const advance = (minutes: number) => advanceParkRuntime(city, runtime, minutes, () => step(city),
+    undefined, undefined, undefined, round => growthRound(city, round));
+  assert.ok(buildRoad(city, GATEWAY, GATEWAY + 10).ok);
+  for (const x of [2, 3]) {
+    assert.ok(zoneCell(city, site(x), 'R').ok);
+    assert.equal(buildReadyParcels(city, site(x)), 1);
+  }
+  assert.ok(buildPark(city, site(4)).ok);
+  advance(1440 - runtime.activity.minute);
+  const staffing = structuredClone(city.parks[0].staffing!);
+  assert.equal(staffing.allocations.length, 1);
+  const parkWorker = staffing.allocations[0].householdId;
+  assert.ok(zoneCell(city, site(5), 'F').ok);
+  assert.equal(buildReadyParcels(city, site(5)), 1);
+
+  advance(GROWTH_ROUND_MINUTES);
+
+  const raw = serializeParkSession(city, runtime, city.market);
+  assert.equal(citySaveMetadata(raw).tick, city.tick);
+  assert.deepEqual(deserializeParkSession(raw).city.parks[0].staffing, staffing);
+  assert.ok(city.employment.some(job => job.householdId !== parkWorker), 'the farm hires an available worker');
+  assert.ok(city.employment.every(job => job.householdId !== parkWorker));
+  assert.equal(workDays(city), 0, 'the round adds no firm shift');
 });
 
 test('a round builds a waiting parcel and gives the open jobs to people without work, but counts no shift', () => {

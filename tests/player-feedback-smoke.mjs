@@ -170,7 +170,7 @@ try {
   await failServerWrites();
   await button('#save');
   await until("!document.querySelector('#save-failure-banner').hidden");
-  assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/,'Warning explains the authoritative server-only boundary');
+  assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์/,'Warning explains the authoritative server-only boundary');
   assert.deepEqual(fixtureServer.active,faultContext.before,'Failed server save preserves the acknowledged head');await fixtureServer.core.assertNoCityWrites(evaluate);
   await shot('12-manual-save-failure-after');
   await button('#close-inspector'); await button('#hud-more');

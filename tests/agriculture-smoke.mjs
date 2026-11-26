@@ -185,7 +185,7 @@ async function loadRaw(raw){
 async function load(city){await loadRaw(serialize(city));}
 async function saveReload({failOnce=false}={}){
  await page('game');const before=storage.active,raw=await evaluate('window.cityManager.sessionSnapshot()'),cursor=storage.writes.length;
- if(failOnce){server.setSaveFailure(true);await button('#save');await until("!!document.querySelector('#save-failure-banner:not([hidden])')");assert.ok(server.rejected.length);assert.deepEqual(storage.active,before);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);server.setSaveFailure(false);await button('#save-failure-retry');}else await button('#save');
+ if(failOnce){server.setSaveFailure(true);await button('#save');await until("!!document.querySelector('#save-failure-banner:not([hidden])')");assert.ok(server.rejected.length);assert.deepEqual(storage.active,before);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์/);server.setSaveFailure(false);await button('#save-failure-retry');}else await button('#save');
  const expectedRevision=before.revision+(failOnce?2:1),deadline=Date.now()+30000;
  while(storage.active.revision<expectedRevision&&Date.now()<deadline)await sleep(80);
  await storage.settle();assert.equal(storage.active.revision,expectedRevision,'Wait for each observed durable ACK, not a stale status label');

@@ -213,7 +213,7 @@ async function saveAndReload({failOnce=false}={}){
  const before=storage.active,raw=await evaluate('window.cityManager.sessionSnapshot()'),writeStart=storage.writes.length;
  if(failOnce){
   server.setSaveFailure(true);await button('#save');await until("!!document.querySelector('#save-failure-banner:not([hidden])')");
-  assert.ok(server.rejected.length);assert.deepEqual(storage.active,before);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/ไม่มีสำเนาในเบราว์เซอร์/);await storage.assertNoCityWrites(evaluate);
+  assert.ok(server.rejected.length);assert.deepEqual(storage.active,before);assert.match(await evaluate("document.querySelector('#save-failure-banner').textContent"),/การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์/);await storage.assertNoCityWrites(evaluate);
   server.setSaveFailure(false);await button('#save-failure-retry');
  }else await button('#save');
  const start=Date.now();while(storage.active.revision===before.revision&&Date.now()-start<30000)await sleep(75);

@@ -1047,7 +1047,7 @@ async function boot() {
         const feedback=describeServerAcknowledgement(operation,acknowledged.raw,serializeParkSession(city,parkRuntime,city.market));saveSuccessLabel=feedback.label;
         if(explicit)autosave.markSaved(acknowledged.metadata.tick,acknowledged.raw);
         saveFeedback.succeeded(attempt);return {revision:acknowledged.raw,current:feedback.current};
-      }catch(error){paused=true;saveFeedback.failed(`${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์ ไม่มีสำเนาในเบราว์เซอร์ กรุณาอย่าปิดหน้านี้`,attempt);throw error;}
+      }catch(error){paused=true;saveFeedback.failed(`${error instanceof Error?error.message:'เชื่อมต่อไม่ได้'} · การเปลี่ยนแปลงยังไม่ยืนยันบนเซิร์ฟเวอร์ กรุณาอย่าปิดหน้านี้`,attempt);throw error;}
       finally{saveBusy=false;}
     });
   };

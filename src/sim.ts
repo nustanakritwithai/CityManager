@@ -1363,13 +1363,16 @@ function employ(c: City) {
  * Who works where at the firms: owners first, then everyone else by the allocator, keeping jobs people have. A day's
  * shift is counted by employ() at midnight; a growth round only gives newcomers their jobs, to start the next day.
  */
-function assignFirmJobs(c: City) {
+function assignFirmJobs(c: City, preserveCivicJobs = false) {
   reserveOwnerLabor(c);
   const svc = utilities(c), owned = byHousehold(c.ownerLabor), seats = educationSeats(c);
+  const civicJobs = preserveCivicJobs ? byHousehold([...parkEmployment(c), ...venueEmployment(c)]) : undefined;
   c.employment = allocateEmployment(c.households.map(h => {
     const workerSkills = { ...h.workerSkills };
     for (const e of owned(h.id)) workerSkills[e.skill] = Math.max(0, workerSkills[e.skill] - 1);
     const reduced = subtractEducationReserve(workerSkills, Math.min(seats(h.id), Object.values(workerSkills).reduce((sum, count) => sum + count, 0)));
+    // Parks and venues keep their current assignments until the daily hiring pass.
+    for (const allocation of civicJobs?.(h.id) ?? []) reduced[allocation.skill] -= allocation.workers;
     return { id: h.id, workforce: Object.values(reduced).reduce((sum, count) => sum + count, 0), workerSkills: reduced, accessible: householdAccess(c, h) };
   }), c.firms.map(f => ({
     id: f.id, zone: f.zone === 'F' ? 'I' as const : f.zone as 'I' | 'C', slots: access(c, building(c, f.building).cell) && svc.ok(f.building) ? capacity(building(c, f.building), f, c) - c.ownerLabor.filter(e => e.firmId === f.id).length : 0,
@@ -2449,7 +2452,7 @@ export function growthRound(c: City, round: number): boolean {
     admitHousehold(c, true);
     // A newcomer's first happiness row is the one an arrival earlier today got (as at midnight's second pass).
     if (c.households.length !== before) c.happiness = admitHappiness(c, c.happiness);
-    assignFirmJobs(c);
+    assignFirmJobs(c, true);
   });
   return true;
 }
